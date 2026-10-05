@@ -1,0 +1,19 @@
+state:
+  route: "bugfix"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "None; change landed and verified"
+
+contract:
+  three-gates: "machine passed make q.check"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed four watched failing: recognizes_gone_tmux_server_errors, terminal_resize_failure_from_missing_tmux_socket_transitions_session_to_lost_without_error_banner, deleting_session_with_missing_tmux_socket_removes_session_record, and closing_completed_terminal_with_missing_tmux_socket_removes_session_record"
+  lesson-recorded: "human passed entry 062 in docs/sdlc/lessons.md, guard column filled"

@@ -1510,7 +1510,18 @@ impl OperonApp {
                                 .iter()
                                 .find(|session| session.id == session_id)
                                 .is_some_and(|session| session.status == SessionStatus::Cancelled);
-                            if already_cancelled {
+                            let gone = tmux_error_state(&error) == TmuxState::Gone;
+                            if already_cancelled
+                                || (self.remove_after_close.contains(&session_id) && gone)
+                            {
+                                if let Some(session) = self
+                                    .store
+                                    .sessions
+                                    .iter_mut()
+                                    .find(|session| session.id == session_id)
+                                {
+                                    session.status = SessionStatus::Cancelled;
+                                }
                                 self.store
                                     .pending_cancellations
                                     .retain(|pending| *pending != session_id);
@@ -1645,10 +1656,25 @@ impl OperonApp {
                             if self.terminal_resize_requested.get(&session_id) == Some(&size) {
                                 self.terminal_resize_requested.remove(&session_id);
                             }
-                            self.notice = Some(tf!(
-                                "ターミナルのサイズを変更できませんでした: {error}",
-                                error = error
-                            ));
+                            if tmux_error_state(&error) == TmuxState::Gone {
+                                if let Some(session) =
+                                    self.store.sessions.iter_mut().find(|session| {
+                                        session.id == session_id
+                                            && matches!(
+                                                session.status,
+                                                SessionStatus::Active | SessionStatus::Starting
+                                            )
+                                    })
+                                {
+                                    session.status = SessionStatus::Lost;
+                                    self.persist();
+                                }
+                            } else {
+                                self.notice = Some(tf!(
+                                    "ターミナルのサイズを変更できませんでした: {error}",
+                                    error = error
+                                ));
+                            }
                         }
                     }
                     self.flush_terminal_resize(session_id);
@@ -1677,10 +1703,16 @@ impl OperonApp {
                                 Some(tr("ターミナルを閉じました。記録は残しています。").into());
                         }
                         Err(error) => {
-                            self.notice = Some(tf!(
-                                "ターミナルを閉じられませんでした: {error}",
-                                error = error
-                            ));
+                            if self.remove_after_close.contains(&session_id)
+                                && tmux_error_state(&error) == TmuxState::Gone
+                            {
+                                self.remove_session_record(session_id);
+                            } else {
+                                self.notice = Some(tf!(
+                                    "ターミナルを閉じられませんでした: {error}",
+                                    error = error
+                                ));
+                            }
                         }
                     }
                 }

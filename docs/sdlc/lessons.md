@@ -1749,3 +1749,18 @@ fixture that produces it.
 `a_landing_that_cannot_be_undone_says_so`, and
 `a_landing_that_left_the_tree_changed_is_not_called_unchanged`. Watched failing
 under change 115's mutations 1, 2, and 10.
+
+---
+
+## 062 — Missing tmux socket connection error was treated as Unknown instead of Gone
+
+**What happened.** When a tmux server process terminated, exited, or was never started on macOS, running any tmux client command (`list-panes`, `resize-window`, `kill-session`) failed with `error connecting to /private/tmp/tmux-<UID>/default (No such file or directory)` or `(Connection refused)`. `tmux_error_state` checked only for `"can't find session"`, `"can't find window"`, `"no server running"`, and `"no such session"`. Because it did not match `"error connecting to"`, `"failed to connect to"`, or `"connection refused"`, it returned `TmuxState::Unknown`. An active session was never reconciled as `Lost`, remaining stuck as `Active`. Every render and window resize triggered `tmux_resize`, which repeatedly failed with the user-visible banner `ターミナルのサイズを変更できませんでした: error connecting to /private/tmp/tmux-<UID>/default (No such file or directory)`. Deleting the session failed because `stop_session` and `close_completed_terminal` treated `Unknown` as an incomplete stop, and `SessionStopped` did not transition `session.status` before calling `remove_session_record`, which refused removal on an `Active` session.
+
+**Why it was invisible.** Tests had verified `tmux_error_state` with `"no server running on /tmp/tmux-1/default"` (the Linux string), but on macOS when the socket does not exist tmux prints `error connecting to ... (No such file or directory)`.
+
+**Cure.** Change 123 matches `"error connecting to"`, `"failed to connect to"`, and `"connection refused"` in `tmux_error_state` to classify them as `TmuxState::Gone`. `TerminalResized` suppresses the error banner when the tmux server is gone and marks the session as `Lost`. `SessionStopped` and `TerminalClosed` allow session record removal when tmux is confirmed `Gone`.
+
+**The rule.** A socket connection refusal or missing socket file is the definition of a gone daemon server; error classifiers must recognize the platform's socket connect error message, not just the server's own banner.
+
+**Guard.** `recognizes_gone_tmux_server_errors`, `terminal_resize_failure_from_missing_tmux_socket_transitions_session_to_lost_without_error_banner`, `deleting_session_with_missing_tmux_socket_removes_session_record`, and `closing_completed_terminal_with_missing_tmux_socket_removes_session_record`. Watched failing on the unedited tree.
+

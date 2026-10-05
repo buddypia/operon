@@ -11048,7 +11048,119 @@ pub(crate) fn recognizes_gone_tmux_server_errors() {
         tmux_error_state("can't find window: operon-123"),
         TmuxState::Gone
     );
+    assert_eq!(
+        tmux_error_state(
+            "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+        ),
+        TmuxState::Gone
+    );
+    assert_eq!(
+        tmux_error_state("error connecting to /tmp/tmux-501/default (Connection refused)"),
+        TmuxState::Gone
+    );
+    assert_eq!(
+        tmux_error_state("failed to connect to /tmp/tmux-501/default"),
+        TmuxState::Gone
+    );
     assert_eq!(tmux_error_state("permission denied"), TmuxState::Unknown);
+}
+#[test]
+pub(crate) fn terminal_resize_failure_from_missing_tmux_socket_transitions_session_to_lost_without_error_banner(
+) {
+    let root = std::env::temp_dir().join(format!("operon-resize-gone-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id,
+            size: (80, 24),
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert_eq!(app.notice, None);
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Lost);
+    assert_eq!(
+        load_store(&app.data_file).unwrap().sessions[0].status,
+        SessionStatus::Lost
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+pub(crate) fn deleting_session_with_missing_tmux_socket_removes_session_record() {
+    let root = std::env::temp_dir().join(format!("operon-delete-gone-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.remove_after_close.insert(session_id);
+    app.background_sender
+        .send(BackgroundResult::SessionStopped {
+            session_id,
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert!(app.store.sessions.is_empty());
+    assert!(load_store(&app.data_file).unwrap().sessions.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+pub(crate) fn closing_completed_terminal_with_missing_tmux_socket_removes_session_record() {
+    let root = std::env::temp_dir().join(format!("operon-close-gone-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Lost)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.remove_after_close.insert(session_id);
+    app.background_sender
+        .send(BackgroundResult::TerminalClosed {
+            session_id,
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert!(app.store.sessions.is_empty());
+    assert!(load_store(&app.data_file).unwrap().sessions.is_empty());
+    fs::remove_dir_all(root).unwrap();
 }
 #[test]
 pub(crate) fn retry_state_matrix_refuses_unsafe_terminals_and_cleans_only_dead_ones() {
