@@ -102,6 +102,9 @@ pub(crate) fn tmux_error_state(stderr: &str) -> TmuxState {
         "can't find window",
         "no server running",
         "no such session",
+        "error connecting to",
+        "failed to connect to",
+        "connection refused",
     ]
     .iter()
     .any(|needle| error.contains(needle))

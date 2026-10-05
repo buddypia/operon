@@ -1,0 +1,7 @@
+digest: "be20f70a99825051"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+
+nits: []
