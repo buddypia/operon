@@ -1,0 +1,24 @@
+# Review record for 099. Shape: docs/sdlc/templates/review.yaml.
+#
+# durability traced the rollback inode bookkeeping for an expired pause and
+# found the production path untouched without OPERON_TEST_* set. rust took
+# three test nits in round 1 (poll budget, stderr assertions, marker check)
+# and approved the result in round 2. subprocess-safety found no leftover
+# process, including the forked sleep.
+
+digest: "88a3dac7fb72169c"
+
+rounds: 2
+
+carried:
+  - durability-reviewer/1 · src/tests.rs the first-swap pause reaches its deadline in no test; it shares pause_for_test with the second-swap pause that does
+    person: "途中の 1 か所だけ、時間切れの動きをテストで直接は確かめていません。同じ仕組みを使う別の箇所で確かめており、対応は要りません。"
+  - subprocess-safety-reviewer/1 · scripts/replace-macos-bundle.sh the expiry message is written twice rather than once inside pause_for_test
+    person: "同じ文言が 2 か所に書かれているだけで、動作は変わりません。対応は要りません。"
+  - subprocess-safety-reviewer/1 · src/tests.rs the expiry is tested only with a retained previous bundle; the first-install rollback branch is not driven to it
+    person: "初回インストール時の巻き戻しだけ、時間切れの場合をテストしていません。テスト用の仕組みに限った話で、実際のインストールには影響せず、対応は要りません。"
+
+verdicts:
+  durability-reviewer: "approve 0 1"
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

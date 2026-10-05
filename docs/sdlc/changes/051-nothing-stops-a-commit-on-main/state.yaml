@@ -1,0 +1,44 @@
+# The state of change 051. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Landed at 4649e267; the three cargo gates did not run on it and the reason is below"
+
+# `paused` and `high` come from the gate-configuration row in
+# docs/sdlc/risk.yaml: .claude/settings.json decides what every other gate
+# permits. Both questions the tier requires were put to the user and answered —
+# the quality-gate command for a repository with no package.json, and what to do
+# about the five bundles that arrived alongside the guards and did not belong
+# here. The second answer is why plan.md says "departed from".
+contract:
+  three-gates: "machine waived bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  guards-verified-by-mutation: "human passed commit on main, reset --hard and checkout -b each watched refused, restore --staged watched permitted"
+
+# `three-gates` is waived, not passed, and the distinction is the point.
+# gate-commit.sh is a Claude Code PreToolUse hook and fires only for a session
+# whose project directory is this repository; the commit was made from a session
+# rooted in another, so git's own .githooks/reference-transaction judged it — it
+# returned SHIP at digest 3540a52d4313a8d5 — and the three cargo gates did not
+# run at all. That is change 040's intent restated from the other side: outside
+# a Claude Code session rooted here, the review gate is the only gate there is.
+#
+# They were run by hand immediately after, and both findings belong to another
+# session's uncommitted work in this shared tree, not to this commit, which
+# carries no Rust at all:
+#   cargo fmt --check  — one diff, src/tests.rs:22269, the TX env-var debugging
+#                        change 050 is blocked on.
+#   cargo test --locked — 495 passed, 1 failed:
+#                        harness_documents_only_name_paths_that_exist, on three
+#                        backticked mentions of a check script in change 049's
+#                        untracked plan.md that nothing has written yet.

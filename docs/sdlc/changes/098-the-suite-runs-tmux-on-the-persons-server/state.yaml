@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. Cleaning up leftover processes found five operon-test-* tmux sessions on
+#    the person's default tmux server, two created by that day's packaging run,
+#    and that the server itself (PID 85865, 186 real sessions on it) had been
+#    started by a test on 2026-09-17.
+# 2. Cause: tests call the production tmux functions, and tmux_command ran on
+#    the default server or the one $TMUX names. Three spawns bypassed
+#    tmux_command altogether: the session stop in src/app.rs, the screen capture
+#    in src/tmux.rs, and seven sites in src/tests.rs, one of them giving a
+#    production-shaped name.
+# 3. Considered: TMUX_TMPDIR set for the test process (a process-wide set_var
+#    racing other threads' getenv, and it misses $TMUX); a per-test socket
+#    (every call site would carry it). Taken: `-L operon_suite` in tmux_command
+#    under cfg(test), with every spawn routed through it and a guard holding
+#    that.
+# 4. Not taken here: scripts/replace-macos-bundle.sh's test hooks loop forever
+#    (`while :; sleep 1`) and outlive a test killed mid-run — two such had run
+#    nine days. That script is the bundle-swap surface, which a person decides.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Next, a person's call: replace-macos-bundle.sh's test hooks should end when the test that started them is gone (item 4 above)."
+
+contract:
+  failing-test-first: "machine passed a_session_a_test_starts_is_not_on_the_persons_tmux_server failed on the unedited tree (the session was on the default server); every_tmux_the_crate_runs_goes_through_tmux_command failed listing the bypassing sites, and again on the multi-line command_output the first per-line version missed"
+  three-gates: "machine passed fmt silent, cargo test --locked 667 passed 0 failed 6 ignored, clippy -D warnings silent; after the full run the default tmux server held no operon-test session"

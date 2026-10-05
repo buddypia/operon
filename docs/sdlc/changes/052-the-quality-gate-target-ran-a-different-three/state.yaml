@@ -1,0 +1,65 @@
+# The state of change 052. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Owed: the lesson in ./lesson.md belongs in docs/sdlc/lessons.md, once the entries another session is holding uncommitted there settle its number"
+
+# `bugfix`, so there is no intent.md and no spec.md: the route says the bug
+# report is the intent. The bug report is rust-reviewer's Important finding on
+# change 051, which arrived after that change had landed:
+#
+#   Makefile:22-23  `q.check` runs `cargo clippy --all-targets --all-features
+#   -- -D warnings` / `cargo test --all-features` without `--locked`, unlike
+#   every other gate in this repo; a stale Cargo.lock lets it silently update
+#   the lockfile and reach the network, breaking the "Local-first means
+#   local-first" guarantee.
+#
+# There is no review.yaml because the gate does not ask for one: neither
+# Makefile nor src/tests.rs is on a surface in docs/sdlc/risk.yaml, and
+# scripts/check-review.sh reports this route as requiring the deterministic
+# checks alone. The reviewer's finding is the input to this change, not a
+# verdict on it.
+contract:
+  three-gates: "machine waived bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived bash scripts/check-bands.sh"
+  guards-verified-by-mutation: "human passed every_document_that_names_the_gates_names_the_same_three watched failing on Makefile"
+
+# `bands` is waived, not passed: check-bands.sh exits 1 on three metrics, and
+# this change moves none of them. always_loaded_bytes 11648 against a warn tier
+# of 11000 is change 051's AGENTS.md edit, already recorded there.
+# steering_bytes 182526 against a propose tier of 150000 was over its threshold
+# at HEAD before 051 touched anything. unsafe_blocks 3 against a propose tier of
+# 3 is another session's uncommitted Rust in this shared tree. The staged diff
+# here is thirty lines over two files and adds no prose to the harness, no
+# skill, and no `unsafe`.
+
+# `three-gates` is waived for the same reason as change 051, and the reason has
+# not moved: gate-commit.sh is a Claude Code PreToolUse hook and fires only for
+# a session whose project directory is this repository. This commit was made
+# from a session rooted in another, so git's own .githooks/reference-transaction
+# is the gate that judged it.
+#
+# Run by hand immediately before staging. Both failures are in another session's
+# uncommitted work in this shared tree and neither is in the staged diff, which
+# is 30 lines over two files:
+#   cargo fmt --check           — one diff, src/tests.rs:22278, the TX env-var
+#                                 debugging change 050 is blocked on. The staged
+#                                 hunks are at 11352 and 11380 and are formatted.
+#   cargo test --locked         — 495 passed, 1 failed:
+#                                 harness_documents_only_name_paths_that_exist,
+#                                 on three backticked mentions of a check script
+#                                 in change 049's untracked plan.md.
+#   cargo clippy --locked -- -D warnings — clean.
+#
+# The guard this change extends was run on its own and passes:
+#   cargo test --locked every_document_that_names_the_gates — ok, 1 passed.

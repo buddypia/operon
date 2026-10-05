@@ -1,0 +1,9 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# This change edits the approval rule itself, which the rule sends to a person,
+# so nothing here is approved automatically. Spec and plan await the owner: the
+# question was put on 2026-09-25 and went unanswered, and silence is not
+# approval. The change is numbered 082 and so is not held to its own checker.
+2026-09-25T12:00:00Z person intent intent.md a1a2250c260b859c approve the owner's request and their four answers, quoted in Open questions
+2026-09-26T00:00:00Z person spec spec.md a039aacfec60fced approve owner: 承認してmerge, after the summary of the built change and its carried nits
+2026-09-26T00:00:00Z person plan plan.md 4d4dffacc7f2508a approve owner: 承認してmerge, the same answer

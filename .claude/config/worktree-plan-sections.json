@@ -1,0 +1,111 @@
+{
+  "version": "1.1.0",
+  "updated_at": "2026-07-14",
+  "description": "PLAN.md section template — defines standard worktree planning sections.",
+  "sections": [
+    {
+      "heading": "# PLAN — {{branch}}",
+      "blocks": []
+    },
+    {
+      "heading": "## Goal",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Single sentence describing the objective achieved in this worktree)"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Why",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": ["(Required — Why is this change necessary now? Existing gaps/issues)"]
+        }
+      ]
+    },
+    {
+      "heading": "## Acceptance (Frozen at kickoff — record rationale in Decisions if modified)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Verifiable acceptance criteria for this worktree to be considered \"done\". Pre-Ship verdict cross-checks this criteria. Using `- [ ]` checkboxes includes them in ship completion checks)"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Scope (Surgical — internal-rule)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": ["(Required — Target files/modules to modify)"]
+        }
+      ]
+    },
+    {
+      "heading": "## Out of scope",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": ["(Required — Areas explicitly left untouched)"]
+        }
+      ]
+    },
+    {
+      "heading": "## Verify",
+      "blocks": [
+        {
+          "type": "checklist_group",
+          "subheading": "### Automated (Run within this turn)",
+          "items": [
+            "(Required — Commands like `npm test` / `npx vitest run <paths>`)",
+            "(Required — Automated checks like lint / audit / smoke tests)"
+          ]
+        },
+        {
+          "type": "checklist_group",
+          "subheading": "### Manual",
+          "items": [
+            "(Remove section or mark (dropped) if inapplicable. For UI changes, note verification steps like \"Check X in browser\")"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Status (append-only — accompanied by fresh evidence)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "- {{createdAt}}: Worktree initialized + PLAN drafted.",
+            "<!-- Format: - YYYY-MM-DD done: <completed item> / evidence: <file:line · test output · commit sha> / next: <next action> / blocker: <if any> -->",
+            "<!-- An \"in progress\" line without fresh evidence is not a progress report (heartbeat ≠ progress). Do not modify existing entries; append only. -->"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Outstanding",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": ["- None (initial state)"]
+        }
+      ]
+    },
+    {
+      "heading": "## Decisions",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": ["- (Required — Distinguish AI default decisions from explicit user decisions)"]
+        }
+      ]
+    }
+  ]
+}

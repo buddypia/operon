@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "5 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Make a test fail in a session, click the path in the panic line, and confirm the editor lands on it; then have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session"
+  guards-verified-by-mutation: "human passed four watched failing: the trailing colon kept, an all-digit extension accepted, a URL keeping its punctuation, and a path allowed to escape the session folder"
+  screen-agreed: "human passed opening directly was chosen over a popover"
+  real-trace-check: "human pending click a real panic path in the running app"

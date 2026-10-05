@@ -1,0 +1,23 @@
+# Backfilled by change 008, which introduced this file, and recorded as the change
+# actually ended. The readiness verdict is the one scripts/check-readiness.sh
+# returns today, not one invented for the record: the gate postdates the change,
+# and `conditional` here is the missing state.yaml warning it would have raised.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "feature"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Closed. TRANSCRIPT_VOCABULARY is the single place another CLI's record kinds are judged; scripts/check-transcript-vocabulary.sh sweeps for kinds it has not met."
+
+contract:
+  three-gates: "machine passed the gates, plus scripts/check-transcript-vocabulary.sh over the local stores"
+  lesson-recorded: "human passed entry 007 in docs/sdlc/lessons.md"

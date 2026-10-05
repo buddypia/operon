@@ -1,0 +1,17 @@
+# Review record for change 077.
+#
+# Round 1:
+# - rust-reviewer: Verified that session card density is streamlined by removing
+#   static instruction text and moving inline restore dropdown into card more-menu
+#   and context-menu. Active listening ports are consolidated into a compact
+#   popover button with URL scheme validation and vertical ScrollArea. All tests,
+#   clippy warnings, and formatting pass cleanly.
+#
+# Verdict: approved across all required reviewers.
+
+digest: "fd8afae9383ccfb2"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

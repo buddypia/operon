@@ -1,0 +1,118 @@
+# The state of change 067. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 067 because 066 is the highest on this branch and 058 the highest
+# committed on any other — checked with `git ls-tree` against main and the other
+# worktree branches rather than through their working directories, because the
+# Session Owner Guard refuses a read into another worktree and an uncommitted
+# change directory there would be invisible from here.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: the two nits carried out of 061, and
+  scripts/check-readiness.sh returning No-Go for every bugfix route — the fifth
+  failure of this change's shape, left alone because it is the gate this change's
+  own route ran through."
+
+# AUTHORISATION, because two `high paused` surfaces are edited.
+#
+# docs/sdlc/risk.yaml puts `.claude/hooks` on `gate-configuration` and
+# `scripts/package-macos.sh` on `bundle-swap`, both `high paused`: a session
+# stops and asks before editing either. The repository's owner was asked which
+# recurring failures to fix permanently, with the four named and their surfaces
+# stated, and chose all four on 2026-09-22. That is the one question this change
+# has spent.
+#
+# What the authorisation does NOT extend to, recorded so a later reader does not
+# read it wider than it was given: nothing here changes what a gate permits. The
+# Stop gate gains an explanatory line and one new report; it refuses nothing it
+# did not refuse before, and the spec's rejected alternatives say why making it
+# refuse on a mismatched tree would be worse than the defect.
+
+# READINESS IS `go`, and it is worth one line why this change gets a verdict when
+# the six bugfixes before it all recorded `pending`. scripts/check-readiness.sh
+# returns on a missing intent.md before it judges anything else and never reads
+# routes.yaml, so no route that skips stage 1 can reach Go. `modify` does not
+# skip stage 1, so the gate could run:
+#
+#   readiness: Go — 1 change(s), 0 blocking, 0 warning
+#
+# The bugfix No-Go is a fifth failure of the same shape as this change's four and
+# is deliberately not fixed here — check-readiness.sh is the gate this change's
+# own route runs through. Recorded in change 061's state.yaml and in this
+# change's intent.md under "Not in scope".
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent; cargo test --locked
+    501 passed 0 failed 6 ignored (499 before this change's last two guards, 497
+    at 061); cargo clippy --locked -- -D warnings silent"
+  bands: "machine passed 2 of 20 breached, both recorded and neither acted on.
+    steering_bytes diagnose: 278112 against a 264000 tier and a 192427 baseline.
+    Measured file by file against HEAD rather than inferred: HEAD already read
+    268119, this change adds +9993, of which +7713 is docs/sdlc/lessons.md
+    (entry 042 plus the paragraph added to 041), +1726 REVIEW.md, +554
+    .claude/skills/sdlc/SKILL.md. That is the read-only investigation the tier
+    asks for: what moved is the ledger, which docs/sdlc/bands.yaml says to
+    answer with a format change and never by trimming the entry or re-basing
+    the baseline. propose is 316000 and is a change of its own when reached.
+    always_loaded_bytes warn: 11648 against 11000 — CLAUDE.md and AGENTS.md
+    only, and `git diff HEAD` shows this change touches neither, so the reading
+    is inherited rather than caused"
+  release-binary: "machine passed git diff --stat against src/ Cargo.toml
+    Cargo.lock shows only src/tests.rs, which is behind `#[cfg(test)] mod tests;`
+    at src/main.rs:19 and is not compiled into the release binary. So this change
+    does NOT make /Applications/Operon.app stale and needs no repackaging.
+    Answered on the first day rather than from a diff after the commit, which is
+    requirement 10 applied to the change that introduces it"
+  the-mutation-rule-is-where-a-session-will-meet-it: "machine passed
+    the_review_policy_names_every_policy_the_repo_enforces carries two new rows
+    and was watched failing on both before the prose was written. The skill half
+    needed a guard the plan did not have: the row above reads REVIEW.md only, so
+    the_pipeline_documents_ask_their_questions_before_review_does was added over
+    .claude/skills/sdlc/SKILL.md and docs/sdlc/templates/state.yaml"
+  the-eval-exists-and-is-well-formed: "machine passed
+    every_eval_states_a_prompt_and_a_check accepts evals/007, and
+    scripts/pipeline-indicators.sh with --lessons reports 42 of 42.
+    NOT RUN against a model: scripts/run-evals.sh needs an API key this machine
+    does not have, and that is stated rather than reported as a pass. Its Check
+    block was verified by hand in both directions instead — seeded, then run
+    against a counters-only sweep (exit 1, naming the missing claim guard) and
+    against a sweep carrying a claim mutation plus a guard over the sentence
+    (exit 0). The first two attempts at that verification were worthless and are
+    written up in plan.md: a red baseline, then a perl replacement that broke
+    the script rather than its claim. The check now asserts both"
+  the-stop-gate-says-where-it-is: "machine passed
+    the_stop_gate_says_when_it_is_reading_another_checkout, three arrangements:
+    the hook named absolutely, named relatively — where `$0` resolves against
+    the process's working directory, which is the tree under suspicion — and the
+    control where hook and tree agree and the line must not appear. It asserts
+    the two roots AND their order, because a line naming them the other way
+    round is true in every particular and sends the reader to the wrong
+    checkout. The hook refuses nothing it did not refuse before"
+  a-stale-installed-build-is-visible: "machine passed
+    the_installed_build_check_reads_its_stamp_key_out_of_the_packager renames the
+    key in a copy of the packager and requires the checker to follow it, and
+    pins unstamped as UNKNOWN rather than STALE.
+    the_stop_gate_reports_an_installed_build_that_is_behind asks behaviourally,
+    which the planned guard did not: every_gate_script_is_wired_or_declares_why_not
+    sees only that the hook NAMES the script, and the mutation that kept the
+    name and dropped the call passed against it. On this machine
+    bash scripts/check-installed-build.sh exits 0 and reports
+    /Applications/Operon.app as carrying no OperonSourceCommit"
+  guards-verified-by-mutation: "human passed 14 of 14 caught, mutations.py
+    beside this file. One per requirement plus three: the diagnostic that fires
+    on every stop, the packager that stops stamping, and `roots-swapped` — the
+    claim mutation this change's own rule demands, which prints the hook's
+    location and the judged tree the other way round and moves no counter. It
+    was NOT caught on the first run, and the guard gained an order assertion
+    because of it. Two other mutations were rewritten after passing for the
+    wrong reason; plan.md says which"

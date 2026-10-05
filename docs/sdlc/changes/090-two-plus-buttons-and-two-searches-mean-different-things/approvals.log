@@ -1,0 +1,7 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+2026-09-27T05:30:00Z person intent intent.md c037db3d0bacf218 approve owner answered 全項目 OK、進めて to the Before/After common rules 1-3 and 進めて again after 088 landed
+2026-09-27T05:30:00Z person screen screen.md d855b0318f189b67 approve owner approved the rendered common rules 1-3 and toolbar row G; screen.md is their subset
+2026-09-27T06:20:00Z auto spec spec.md 2f50fd30d7082fb2 approve evaluator round 3: round-1 dispatch, test-identity, translation and toolbar-coordinate findings fixed; Home follows the mock
+2026-09-27T06:20:00Z auto plan plan.md 60478c585c022f87 approve evaluator round 3: every requirement maps to a file and step, each risk has a named check
+2026-09-27T06:20:00Z auto screen screen.md 71ed0194ff2e77df approve evaluator round 3: order and tiles now match the owner-approved mock; secondary folder button is a style change inside existing roles; supersedes the owner line at d855b0318f189b67
+2026-09-27T07:30:00Z person plan plan.md 60478c585c022f87 approve owner answered 状況をみて自律で良い。進めて to the question whether the unused SessionStatus::label may be deleted from src/models.rs (store surface, person-demoted); no persisted shape changes

@@ -1,0 +1,161 @@
+# The state of change 068. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 068 because 067 is this branch's own and 060 the highest committed on
+# any other — read with `git ls-tree` across every ref rather than through the
+# other worktrees' working directories, because the Session Owner Guard refuses
+# a read into another worktree and an uncommitted change directory there would
+# be invisible from here. 062 and 063 are reserved by name in change 060's
+# committed state.yaml and are not free.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed at approve 0 0 in round 2 of 2, no nits carried. What outlived
+  it: scripts/check-installed-build.sh still matches no surface in
+  docs/sdlc/risk.yaml; change 061's 91 untranslated message ids; changes 041 and
+  049's contract items, which pass today and need a commit of their own because
+  this gate refuses two change directories in one diff."
+
+# THE ROUTE IS `bugfix` AND THE BUG REPORTS ARE THE REVIEWERS'.
+#
+# docs/sdlc/routes.yaml gives bugfix `build,test` and says why it skips intent
+# and spec: "the bug report is the intent, and inventing a spec for it is the
+# ceremony that gets pipelines abandoned." Here the bug reports are literally
+# written down already — four entries under `carried:` in two committed
+# review.yaml files, each naming a file, a line, and what is wrong with it:
+#
+#   061 rust/1         src/history.rs settle_deferred_kinds, the Operational arm
+#   067 subprocess/1   scripts/check-installed-build.sh, `cd` without `--`
+#   067 subprocess/2   scripts/check-installed-build.sh, `$1` with a leading `-`
+#   067 subprocess/3   mutations.py, subprocess.run with no timeout=
+#   067 durability/1   scripts/check-installed-build.sh, a damaged Info.plist
+#
+# subprocess/1 and subprocess/2 are one requirement here, not two: both are the
+# same mistake — a path that begins with a hyphen read as an option — and a fix
+# for either alone leaves the script inconsistent with itself in the way the
+# reviewer objected to.
+#
+# `.claude/skills/root-cause/SKILL.md` is what the route requires, and its Iron
+# Law is honoured per requirement rather than for the change as a whole: each
+# cause below was reproduced at a terminal before anything was edited, and
+# plan.md records the observation that proves it.
+
+# WHAT IS NOT IN SCOPE, because a carried nit is allowed to stay carried.
+#
+# 061 rust/2 — the notice's two new message ids have no row in
+# src/i18n_tables.rs — is NOT taken here, and this is the same decision 061 made
+# for the same reason. There are 91 untranslated ids in that file; two of them
+# are 061's and 89 predate it. Taking the two would leave 89, which is the
+# backlog and not this change, and taking all 91 is a change of its own with its
+# own review. The nit exists to tell whoever does that change the count moved
+# from 89 to 91, and it keeps doing that from 061's review.yaml.
+
+# READINESS IS `pending` AND STAYS `pending`, which is a statement about the
+# gate, not about this change. `bash scripts/check-readiness.sh
+# docs/sdlc/changes/068-the-nits-two-reviews-carried-are-still-defects` returns:
+#
+#   blocking  …: intent.md がありません
+#   readiness: No-Go — 1 blocking, 0 warning
+#
+# The `bugfix` route skips stage 1 by design, and the script never reads
+# routes.yaml — its first phase returns on a missing intent.md before anything
+# else is judged — so no route that skips stage 1 can reach Go. Every bugfix on
+# this branch records `pending` for this reason (055, 059, 060, 061, 064, 065,
+# 066), which makes it a pattern and not an exception. Change 067's state.yaml
+# calls it the fifth failure of that change's own shape and deliberately left it
+# alone; it is still nobody's, and it is still not this change's, because this
+# change's own route runs through it.
+
+# RISK IS `low` AND AUTONOMY `full`, and the reason is worth one line because it
+# is unusual for a change that edits a gate's helper.
+#
+# docs/sdlc/risk.yaml classifies by path, and none of this change's paths match
+# a surface: `scripts/check-installed-build.sh` is on no surface at all,
+# `src/tests.rs` is on none, and `docs/sdlc/changes/*/mutations.py` is on none.
+# `bundle-swap` names scripts/package-macos.sh and
+# scripts/replace-macos-bundle.sh and stops there; `harness` names
+# harness-metrics.sh, check-bands.sh and bands.yaml and stops there.
+#
+# That gap is real and it is NOT fixed here. check-installed-build.sh arrived in
+# change 067 and reads a bundle outside the repository on the Stop gate's path,
+# which is `harness`'s description — "the pipeline's own instruments. Silent when
+# wrong" — almost word for word. Adding the row is a policy edit that changes
+# what every later change must do on that path, so it gets its own decision
+# rather than riding in on a nit-clearing bugfix. Recorded in resume.
+#
+# scripts/check-review.sh still requires a reviewer here, from the other half of
+# its rule: this diff adds a `Command::new` line, which pulls
+# subprocess-safety-reviewer in whatever file it lands in. That is the right
+# reviewer for shell argument handling, and it is the one this change asks.
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent; cargo test --locked
+    503 passed 0 failed 6 ignored (501 before this change's two new tests);
+    cargo clippy --locked -- -D warnings silent"
+  bands: "machine passed 2 of 20 breached, both inherited and neither acted on.
+    steering_bytes diagnose 278533 against a 264000 tier and a 192427 baseline —
+    HEAD already read 278112, and this change adds +421, all of it the one new
+    bullet in .claude/skills/sdlc/SKILL.md. docs/sdlc/templates/mutations.py adds
+    nothing to the metric: it counts docs/sdlc/templates/*.md and this is .py.
+    always_loaded_bytes warn 11648 against 11000 — CLAUDE.md and AGENTS.md only,
+    and `git diff HEAD` shows this change touches neither"
+  release-binary: "machine passed answered on the first day and confirmed
+    against the final diff: `git diff --cached HEAD -- src Cargo.toml Cargo.lock
+    ':(exclude)src/tests.rs'` is empty. The only file touched under src/ is
+    src/tests.rs, behind `#[cfg(test)] mod tests;` at src/main.rs:19 and never
+    compiled into the shipped binary. So this change does NOT make
+    /Applications/Operon.app stale; bash scripts/check-installed-build.sh still
+    reports CURRENT on this machine"
+  the-operational-arm-is-tested: "machine passed
+    an_unknown_flag_or_role_is_counted_against_what_the_record_did carries a
+    fifth case — a Claude record with a known operational flag AND an unknown
+    one, which is the only way to reach RecordOutcome::Operational inside
+    settle_deferred_kinds. Watched failing under the mutation that moves that arm
+    to Carried, and the failure named the new case rather than the other four.
+    No production code changed for this item; the defect was that nothing would
+    have noticed"
+  a-hyphen-path-is-a-path: "machine passed
+    the_installed_build_check_reads_a_path_that_begins_with_a_hyphen, three
+    arrangements — both names absolute as the control, `$0` hyphen-leading, `$1`
+    hyphen-leading — each asserting the verdict rather than the wording. Watched
+    failing, and the first version of it failed for the WRONG reason: run as an
+    executable, `#!/usr/bin/env bash` hands the path to bash as an option and the
+    script never starts. plan.md has the account"
+  a-damaged-plist-says-so: "machine passed
+    the_installed_build_check_reads_its_stamp_key_out_of_the_packager carries a
+    fourth bundle state, an Info.plist that does not parse. The assertion reads
+    the unstamped sentence out of the unstamped run's own output rather than
+    retyping it, so a rewording cannot blind it. Exit contract unmoved: UNKNOWN,
+    never STALE. Verified against both plist encodings that
+    `plutil -convert xml1 -o /dev/null` leaves the input byte-identical"
+  every-sweep-is-bounded: "machine passed and NOT in the shape the plan named.
+    The planned guard read every docs/sdlc/changes/*/mutations.py for a
+    `timeout=`; it cannot exist, because fixing the five closed sweeps needs a
+    diff touching five change directories and scripts/check-review.sh refuses
+    more than one. The bound went into docs/sdlc/templates/mutations.py — which
+    did not exist, and is why the defect spread by copying — and
+    the_mutation_sweep_template_ends_a_run_that_will_not_finish is behavioural
+    over it: three arrangements, a hanging check, a green baseline, and a check
+    with a grandchild under it. That third one is round 1's Important: bounding
+    the WAIT is not bounding the WORK, and `cargo test` runs the test binary as a
+    grandchild that `subprocess.run(timeout=)` does not reach"
+  guards-verified-by-mutation: "human passed 9 of 9 caught, mutations.py beside
+    this file, itself the first copy of the new template. One per requirement
+    plus two claim mutations REVIEW.md requires, one over the skill bullet, and
+    one added by round 1. Each lands on a different assertion except the two
+    halves of the damaged-plist claim, which meet at the same line from opposite
+    directions. `start_new_session=True` deliberately has NO mutation and the
+    reason is recorded where it would have been: removed while the killpg stays,
+    killpg would SIGKILL an unrelated process group on this machine"
+
+# The closed sets are read from docs/sdlc/templates/state.yaml, not restated
+# here.

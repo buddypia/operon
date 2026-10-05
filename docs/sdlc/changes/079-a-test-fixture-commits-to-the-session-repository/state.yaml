@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): with GIT_DIR and GIT_WORK_TREE
+# exported — Claude Code's EnterWorktree exports both — `cargo test --locked`
+# rewrote the shared .git/config (core.worktree, the fixture's user and the
+# gpgsign key) and once committed a staged change onto the branch as "before
+# the gate". Seen three times during change 078; gate-commit.sh's own comment
+# records the same shape twice before.
+#
+# Named cause: `ReviewGateFixture::command` builds `Command::new(program)` and
+# never calls `forget_inherited_repository`, so every git and bash it starts
+# inherits the session's repository pointers; the raw-git count from change 058
+# cannot see a spawn whose program is a variable.
+#
+# The person asked for this ("make it a mechanism you can run autonomously"),
+# which is the answer the paused gate-configuration surface
+# (.claude/hooks/gate-commit.sh) asks for. Lesson 048.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: five carried nits in review.yaml, of which the unguarded hook unset and the hand-written variable list in the guard are the ones worth a follow-up change."
+
+contract:
+  three-gates: "machine passed fmt silent, 591 passed 0 failed 6 ignored, clippy silent"
+  reviewed: "human passed rust-reviewer approve-with-nits 0 1 and subprocess-safety-reviewer approve-with-nits 0 3 at digest 81a859ed03f2af37"
+  failing-test-first: "machine passed the_review_gate_fixture_cannot_reach_the_session_repository failed with the forget_inherited_repository call removed (fixture の git が GIT_DIR を引き継ぎます) and passes with it"
+  end-to-end-leak: "machine passed the full suite run with GIT_DIR and GIT_WORK_TREE exported at a scratch repository left it byte-identical (shasum of every file unchanged, 591 passed); with the call removed, the review_gate tests wrote user.name fixture and user.email fixture@operon into that scratch config"
+  bands: "machine waived unchanged by this change: unsafe_blocks at propose, steering_bytes at diagnose, always_loaded_bytes at warn, all as on main before it"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], and nothing else under src/ or Cargo changes"
+  lesson-recorded: "machine passed entry 048 in docs/sdlc/lessons.md with its Guard"

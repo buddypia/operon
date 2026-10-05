@@ -1,0 +1,31 @@
+# The state of change 115. Fields and closed sets: docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Nothing to do; landed as 41cf886 with lesson 061, and the open review findings in review.yaml are the follow-ups that outlived it."
+
+# Decisions taken without the owner (AGENTS.md: a choice a revert undoes is
+# decided and recorded, not asked):
+# - This branch was opened as change 110 for a landing feature; change 110
+#   (bcb1dfc) shipped that feature from another branch first, taking the
+#   number. The remaining work is the safety that intent promised, renumbered
+#   115 and routed `modify`.
+# - A merge stopped for any reason after it started is aborted, not only a
+#   conflict; the notice claims a restore only when HEAD is verified.
+# - Push now waits for an in-flight commit-message draft too, because it reads
+#   the one busy predicate instead of its own key.
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt clean, clippy clean, cargo test 698 passed 0 failed 6 ignored"
+  bands: "machine passed bash scripts/check-bands.sh — exit 0; three warn-tier docs-size readings predate this change"
+  release-binary: "machine passed bash scripts/package-macos.sh at c3a895d (698 passed, 6 ignored), swapped into /Applications; check-installed-build.sh reads CURRENT and the app launched"
+  guards-verified-by-mutation: "human passed mutations.py in this directory — 10 of 10 caught, each by the test plan.md names"

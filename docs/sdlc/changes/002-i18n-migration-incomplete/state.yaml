@@ -1,0 +1,23 @@
+# Backfilled by change 008, which introduced this file, and recorded as the change
+# actually ended. The readiness verdict is the one scripts/check-readiness.sh
+# returns today, not one invented for the record: the gate postdates the change,
+# and `conditional` here is the missing state.yaml warning it would have raised.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "archived"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "low"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Archived: the crate this said could not compile builds and passes its three gates (665 tests at 3292870), and the tr/tf! migration it described is finished and guarded by the i18n table tests. Nothing to resume."
+
+contract:
+  intent-approved: "human waived superseded — the migration was finished by later changes without this intent"
+  spec-written: "human waived superseded — nothing left to specify"

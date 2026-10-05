@@ -1,0 +1,4 @@
+2026-10-02T11:06:27Z auto intent intent.md 616366d42316efd1 approve evaluator round 2: restates the quoted request; round 1 asked for the recheck and capability outcomes the spec relied on
+2026-10-02T11:06:27Z auto spec spec.md a1dc4451cc9b8e16 approve evaluator round 3: hidden form strips guards and seeded-by, every requirement 1-10 has a runner test, exit codes settled
+2026-10-02T11:06:27Z auto plan plan.md e0af59db0bf8e4b8 approve evaluator round 3: carries the seed, EVAL_AGENT and EVAL_TIMEOUT, the scratch-repo copy, argv stubs and mutations.py; no paused surface
+2026-10-02T12:05:00Z auto spec spec.md d44b749fcf819944 approve evaluator round 4: requirement 1 rewritten so the path check reads only the script path; meaning unchanged

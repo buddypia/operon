@@ -1,0 +1,20 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Tick two of three files in the running app, draft a message, commit, push; then have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session; largest_module_lines came back inside its band in change 021 and stayed there"
+  guards-verified-by-mutation: "human passed six watched failing: the index reset removed, ahead and behind swapped, the message cleaner made a no-op, a force fed to the scan, an agent given a non-read-only draft form, the push refusal removed"
+  screen-agreed: "human passed per-file checkboxes were chosen over committing everything tracked, and the drafting CLI is auto-chosen rather than configured"
+  no-force-push: "machine passed no_source_file_can_force_a_push, watched failing with --force-with-lease added to the push"
+  real-repository-check: "human pending tick two of three files in the running app, draft, edit, commit, push"

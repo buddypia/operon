@@ -1,0 +1,136 @@
+# Review record for change 069. Read by scripts/check-review.sh — and by
+# `refs/heads/main:scripts/check-review.sh`, which is the copy that actually
+# judges the commit.
+#
+# SHAPE HAZARD: any two-space-indented `  name: "value"` line anywhere in this
+# file is parsed as a verdict. Prose belongs in `#` comments and list items in
+# `  - `. The only verdict values are approve | approve-with-nits |
+# do-not-approve; there is no `pending` spelling, so a round in flight is an
+# absent line rather than a placeholder one.
+#
+# ONE REVIEWER, AND FOR THE SAME REASON AS 068. This diff matches no surface in
+# docs/sdlc/risk.yaml — scripts/check-installed-build.sh is on none, src/tests.rs
+# is on none, docs/sdlc/templates/ is on none — and the `bugfix` route's
+# reviewer set is `none`. subprocess-safety-reviewer is required by the other
+# half of the gate's rule: the diff adds `Command::new` lines. It is the right
+# reviewer, and state.yaml records, for the second change running, the risk gap
+# that classification exposes.
+#
+# ROUND 1 — digest 352a46b15597b385.
+#
+#   subprocess-069  approve-with-nits 0 4
+#
+# The three script findings — A's object-name check, C's packager guard, E's
+# three-way on `merge-base` — were checked against what scripts/package-macos.sh
+# actually writes (`git rev-parse HEAD`, key `OperonSourceCommit`) and found
+# neither too strict for a real bundle nor open to a value git resolves
+# elsewhere. `ancestry=$?` after `||` was confirmed correct under
+# `set -e -o pipefail`, because the left side of `||` is not `set -e`'s business.
+#
+# ALL FOUR NITS WERE TAKEN, NOT CARRIED, which is a departure from REVIEW.md's
+# default and is the reason this change exists: 068 is titled "the nits two
+# reviews carried are still defects". Round 1 was not at the ceiling, so taking
+# them cost a round rather than an approval.
+#
+#   1. `on_signal` could run inside itself. It blocks for up to
+#      KILL_GRACE_SECONDS in `kill_running_check`, and a Python-level handler
+#      runs in the eval loop, so a second interrupt re-entered it; the inner
+#      call's `os._exit` then abandoned the outer call's temporary. It now
+#      installs SIG_IGN for all three signals as its first statement.
+#   2. The same re-entry called `communicate()` twice on one Popen. Closed by 1.
+#   1b. `os._exit` runs no `except` and no `finally`, so `write_atomically`'s
+#      own cleanup genuinely could not run on that path — plan.md's risk table
+#      claimed it could, and that row is corrected rather than quietly restated.
+#      A module-level `temporaries` set is now unlinked by the handler.
+#   3. `the_mutation_sweep_template_puts_the_tree_back_when_it_is_killed`
+#      asserted its way out while the sweep it spawned was still running, and a
+#      `Child` does not kill on drop. Both panic paths now SIGTERM, wait,
+#      `kill()`, `wait()` and remove the fixture before panicking, and the
+#      `.status().unwrap()` on /bin/kill is gone.
+#
+# NIT 4 WAS THE FINDING OF THIS CHANGE, AND IT WAS REPORTED AS THE SMALLEST ITEM
+# ON THE LIST. The reviewer saw `100755 => 100644` on
+# scripts/check-installed-build.sh in the diff header and asked why. The honest
+# answer was not the one either of us assumed: it was not a stray `cp` from the
+# rebuild. `chmod 755`, run the sweep, `600` again — reproduced twice. The cause
+# is the `write_atomically` this change added for F. `tempfile.mkstemp` creates
+# at 0600 and `os.replace` swaps the whole inode, so the restore carried the
+# temporary's permissions onto every file the sweep touched. The
+# `path.write_text` it replaced wrote through the existing inode and could not.
+#
+# The hardening that made the restore all-or-nothing made it lossy along the one
+# axis nothing here compares. The bytes were identical, so `git diff` was empty
+# and `restore_all`'s read-back — which compares contents — called it complete.
+# The sweep printed 7 of 7. The three gates were green. The only trace in the
+# whole repository was one line in `git diff --cached --summary`.
+#
+# A sweep's subject is whatever the change touched, and changes here touch
+# .claude/hooks/*.sh and scripts/*.sh. One sweep away was a hook restored without
+# its executable bit: a gate that silently stops running, in a tree whose
+# `git status` is clean. Taken as an Important rather than as the nit it was
+# filed as, and written up as lesson 043.
+#
+# ROUND 2 — digest f15dc64affd0f36f, below. The reviewer was re-asked BY NAME
+# rather than replaced, which is the rule change 067 wrote into REVIEW.md. It
+# had gone idle between rounds and the re-ask resumed it with its round-1
+# reading intact. The first re-ask returned its round-1 summary as an idle
+# notice rather than a round-2 verdict, which is exactly the "finished without
+# reporting" state lesson 042 names; the remedy it prescribes — ask the same
+# agent again, by name — produced the verdict.
+#
+#   subprocess-069  approve-with-nits 0 1
+#
+# On the four questions it was asked by name:
+#   - `stat.S_IMODE(os.stat(path).st_mode)` is the right thing to carry: S_IMODE
+#     is exactly the twelve bits `os.chmod` takes. It named what should NOT be
+#     carried, which is the more useful half — owner and group (chown needs
+#     privilege and git does not track an owner), mtime and atime (carrying
+#     those is rule 2's `shutil.copy2` mistake, which makes cargo reuse a stale
+#     binary), xattrs, ACLs, the macOS quarantine and provenance attributes, and
+#     hardlink count. None is tracked by git or present on the plain text a
+#     sweep mutates.
+#   - `os.chmod` before `os.replace` is the correct order, because mode belongs
+#     to the inode rather than to the path: by the time `path` names the new
+#     inode the mode is already right, so no concurrent reader can observe 0600
+#     at the target.
+#   - SIG_IGN inside a Python-level handler does close the window described in
+#     round 1, shrinking it from "up to ten seconds of `communicate`" to three
+#     iterations of a loop. It does not reach zero — `signal.signal` changes the
+#     disposition and does not retract a tripped flag CPython has already
+#     recorded — and the `handling` flag is therefore NOT dead code; it is what
+#     catches that last case. Closing it entirely needs `pthread_sigmask`, which
+#     it judged not worth the opt-in for a window of a few instructions whose
+#     worst outcome is one identifiable leftover file.
+#   - It agreed no deterministic mutation exists for the re-entry guard: forcing
+#     the race needs a test-only wait hook inside the signal handler, which buys
+#     coverage by putting a test-only branch into the code least able to carry
+#     one.
+#
+# THE ONE NIT ROUND 2 CARRIES IS A COUNTEREXAMPLE TO SOMETHING THIS SESSION
+# ASSERTED, which is why it is recorded at length rather than summarized. Asked
+# whether `except OSError: mode = None` in `write_atomically` is reachable, this
+# session said no — a sweep only rewrites files it read first. That is true of
+# the mutating write and false of the restore: between them `run_checks` blocks
+# for up to RUN_SECONDS running an external command, and if the subject file
+# disappears in that window, `restore_all` swallows the read failure at its own
+# `except OSError: pass`, calls `write_atomically`, fails the stat too, and
+# writes the file back as a new one at 0600 — with no diagnostic, unlike every
+# other failure path in the file, which reports through `still_wrong`.
+#
+# CARRIED RATHER THAN TAKEN, AND THE RULE IS THE REASON. Round 2 is the ceiling
+# `docs/sdlc/review-rounds.yaml` sets for `bugfix`. Taking a nit edits a file,
+# which moves the digest, which voids the approval that came with the nit and
+# buys another round — change 060 spent nineteen rounds there. That is lesson
+# 038, and `a_review_past_its_round_ceiling_lands_by_carrying_its_nits` is the
+# guard this repository holds for it. So it lands carried, and it is recorded in
+# state.yaml as named work rather than as a note in a file nobody reopens.
+
+digest: "f15dc64affd0f36f"
+
+rounds: 2
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 1"
+
+carried:
+  - "docs/sdlc/templates/mutations.py — write_atomically's `except OSError: mode = None` is reachable from restore_all, not only from a first write: the subject can be deleted while run_checks blocks, and the file is then written back at mkstemp's 0600 with no diagnostic, unlike every other failure path here. Record the mode beside the contents in `originals` up front and restore from that, and say so out loud when the target had to be recreated."

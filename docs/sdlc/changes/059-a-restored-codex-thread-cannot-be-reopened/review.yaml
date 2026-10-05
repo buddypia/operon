@@ -1,0 +1,53 @@
+digest: "383a9ba42421352b"
+
+# One reviewer, from the route rather than the surface: `foreign-store` has no
+# reviewer in scripts/check-review.sh's table and the `bugfix` row asks for
+# none, so nothing in the repository required this review. It was asked for
+# because REVIEW.md says the session that wrote a change does not approve it,
+# and because the last four changes each had a real defect found by review and
+# not by the guards.
+#
+# Two passes, and no third: the reviewer's account hit its spend limit mid-pass
+# and stopped, which is recorded here rather than resolved by writing a verdict
+# nobody reached.
+#
+#   Pass 1 (b5c6678583166cc2) — `request-changes 2 5`. The code was approved in
+#   the body of the report — "`.claude/rules/rust.md` の軸に抵触しません" — and
+#   both Importants were on the record. First: this change's
+#   `codex-resumes-what-operon-restored` item carried the verdict `waived` under
+#   prose saying "recorded as failing rather than waived", so a session reading
+#   the token before the prose, as AGENTS.md instructs, would walk past the
+#   judgement. Second: `steering_bytes` recorded `propose` for the third
+#   consecutive change while docs/sdlc/bands.yaml prescribes an intent.md — a
+#   band firing into nothing. Five nits, all taken, the load-bearing one being
+#   that an unreadable trailing line left the previous record's number standing
+#   as the file's last and the file passed verification.
+#
+#   Pass 2 (1afe067530795924) — `request-changes 2 3`. Verified the claim that
+#   src/history.rs changed by four lines using an interdiff against the previous
+#   staged blob rather than by reading, and re-measured every gate. It also
+#   watched this change's newest guard fail by accident: a stale build gave it
+#   the new tests against the old logic, which is the N1 mutant, and
+#   src/tests.rs:1196 went red. Both Importants were the same class as pass 1,
+#   one level up: the records now cited changes 060, 061 and 063 in the
+#   completed tense when none existed in any worktree, and 060 was assigned to
+#   two different subjects across this directory's own intent.md and state.yaml
+#   — in a file whose header describes the collision check that would have
+#   caught it. Its nit named the guard that would have caught both rounds
+#   mechanically: `harness_documents` in src/tests.rs keeps only `*.md`, so
+#   state.yaml is the only committed artifact whose paths nothing checks.
+#
+#   Pass 3 (this digest) — not run. Every number was removed and successors are
+#   named by subject, the failing branch of scripts/check-codex-rollout-shape.sh
+#   was reworded, and the two stale measurements were corrected; the reviewer
+#   was asked to confirm that the only change outside docs/sdlc/changes is one
+#   line of output text. It answered with an account spend-limit failure
+#   instead. The digest above is therefore one `echo` line away from the digest
+#   pass 2 read, and no verdict is claimed for it.
+#
+# What this means for the commit: nothing in the repository gates it — no
+# reviewer is required for this surface — and the record says plainly what was
+# reviewed, what was fixed afterwards, and what nobody has read. A `verdicts`
+# entry is deliberately absent rather than filled with an `approve` nobody
+# reached.
+verdicts: {}

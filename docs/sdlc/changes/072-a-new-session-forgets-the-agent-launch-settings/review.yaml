@@ -1,0 +1,13 @@
+digest: "028547aab3e8d837"
+
+rounds: 2
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+
+# Review pass 2 for change 072 (harden recent agent settings):
+# - rust-reviewer: flag deduplication via seen_flags prevents duplicate CLI flags; single-allocation serialization via to_writer_pretty; dirty-checking in persist_recent_agent_settings eliminates redundant sync_all/fsync calls on UI thread; state.yaml contract format fixed.
+# - subprocess-safety-reviewer: custom_command is strictly isolated to custom agent to prevent secret leakage into Claude/Codex blocks; custom_command length is clamped to MAX_CUSTOM_COMMAND_LEN.
+
+nits: []

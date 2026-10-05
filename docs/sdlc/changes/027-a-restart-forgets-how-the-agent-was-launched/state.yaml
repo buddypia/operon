@@ -1,0 +1,19 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Launch Claude with a model and permission-skip, let it exit, and confirm the reopened terminal runs with both."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session"
+  guards-verified-by-mutation: "human passed nine watched failing: the resume flag carried into its own resume, codex options in front of its subcommand, the recogniser left at three tokens, a bare word travelling with the switches, codex's id read from a fixed position, an unreadable command refusing instead of degrading, a renamed flag the shape table did not follow, the hint keeping quiet, and an acknowledged option coming back as an ordinary press"
+  screen-agreed: "human passed the hover hint was chosen over chips beside the button; a dangerous option carries forward and says so"
+  real-machine-check: "human pending launch Claude with a model and with permission-skip, let it exit, and confirm the reopened terminal runs with both"

@@ -1,0 +1,21 @@
+# Round 2, digest 2dadc64c16aed701, both reviewers asked 2026-09-30.
+#
+# rust-reviewer: approve-with-nits 0 1. Round 1 found the guard blind to the
+# shape rustfmt gives a long call (`tr(\n "…"`), raw strings and escaped
+# quotes; round 2 re-probed each with a scratch file and all are caught.
+# subprocess-safety-reviewer: approve-with-nits 0 1. The child lifecycle in
+# exec.rs is unchanged. One run of the guard failed while the other reviewer's
+# scratch probe file sat in src/ (the scan reads every .rs there); seven runs
+# after it passed on an unchanged tree.
+
+digest: "2dadc64c16aed701"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/2 · src/tests.rs no_tr_call_carries_a_placeholder skips a tr( whose line has // anywhere before it, so a URL in an earlier string on the same line hides the call; rustfmt puts one statement per line
+    person: "同じ行の前のほうに「//」を含む文字列（URL など）があると、その行の翻訳呼び出しは検査されません。整形で 1 行 1 文になるため起きにくく、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve-with-nits 0 1"

@@ -1,0 +1,20 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "3 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Shipped. Three nits are follow-up work, the strongest being codex --dangerously-bypass-hook-trust, which the CLI itself calls DANGEROUS and which no table names."
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent, cargo test --locked 455 passed 0 failed 6 ignored, cargo clippy --locked --all-targets -- -D warnings silent"
+  bands: "machine waived steering_bytes was at propose before this change began and change 030 owns its reduction; this change added 2378 bytes to it in lessons.md entry 017, which is recorded in report.md rather than waived quietly. The other 19 metrics are inside their bands"
+  guards-verified-by-mutation: "human passed sixteen watched failing: the account row folded away, the header not naming the model, the section not calling the controls, the effort picker dropped, a ticked dangerous switch not gated, a typed dangerous switch not gated, group exclusivity dropped, the card dropping the carried options, the copy button losing its display, the joined --flag=value form escaping the gate, a mode leaving a switch it invalidates, a mode clearing every switch rather than the conflicting one, the header no longer counting what it left out, the single-hyphen spelling escaping the gate, codex --yolo escaping the gate, and the acknowledgement term deleted from launch_environment_ready — which the suite passed until this round"
+  screen-agreed: "human passed the account row under the agent cards, the folded header carrying a summary of what is set inside it, a mode combo and one checkbox per switch with dangerous ones marked, and the card showing the command the restart will run. The reasoning-effort combo was added beyond that screen and is named as a departure in report.md"
+  review: "machine passed both reviewers returned approve-with-nits on diff 53e1dc8774d2f492 — rust-reviewer 0 Important 1 nit, subprocess-safety-reviewer 0 Important 3 nits. subprocess-safety-reviewer had returned do-not-approve on the previous digest with two Important it confirmed against the real binaries: agy takes a long flag with one hyphen, and codex --yolo is a hidden clap alias for the bypass switch. Both fixed and mutation-verified"
+  real-machine-check: "human pending tick 権限確認をすべてスキップする and see the warning and the checkbox; type the same switch into 別のコマンドを使う and see them again; register a second account and see the アカウント row without opening 詳しい設定; restart a session launched with options and read the card line against the button's hover"

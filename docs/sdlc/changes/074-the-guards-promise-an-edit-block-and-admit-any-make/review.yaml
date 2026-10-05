@@ -1,0 +1,28 @@
+# Review record for change 074.
+#
+# Round 1 (digest 738d236821f512d5): rust-reviewer returned approve-with-nits
+# 0 3. It confirmed the three files are byte-identical to the intended configuration
+# with matching receipt hashes, and that the four new deny cases are
+# admitted by the 073 pattern, so the test is a real mutation guard. All three
+# nits were taken:
+#   1. The end anchor refused `make q.check 2>&1` and `>/dev/null`, which 073
+#      admitted. The grammar now ends with fd and /dev/null redirects.
+#   2. The spec's env-prefix limit understated it: `MAKEFILES=` and
+#      `env MAKEFLAGS=` pass too. The spec now names MAKEFLAGS, MFLAGS,
+#      GNUMAKEFLAGS and MAKEFILES.
+#   3. The allowed -C case used the temp fixture path, which the pattern's
+#      [\w./-]+ rejects under an unusual TMPDIR. It now uses /tmp/operon.
+#
+# Round 2 (digest below): rust-reviewer approved with nothing new. `&>`, `>>`
+# and `>|` into /dev/null are still refused; that is fail-safe and unused here.
+#
+# Still open, outside this change: the env-prefix limit (worktree-policy-guard.mjs
+# LOCATION_ENV_RE), and 073's carried nits 3 to 5, plus the ops.mjs half of nit 2,
+# remain as recorded in 073's review.yaml.
+
+digest: "33120321933c567e"
+
+rounds: 2
+
+verdicts:
+  rust-reviewer: "approve 0 0"

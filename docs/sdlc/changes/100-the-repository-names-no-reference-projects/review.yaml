@@ -1,0 +1,28 @@
+# Review record for 100.
+#
+# Round 1: subprocess-safety-reviewer, at digest a7b3756db9992071.
+# approve-with-nits 0 2. The four Rust files it covers (src/git.rs,
+# src/git/comments.rs, src/git/setup.rs, src/tmux/hooks.rs) change doc comments
+# only; no Command::new, .spawn(, .output( or unsafe was added or removed. Every
+# non-comment line changed under .cli/ and .claude/ was listed (eight message or
+# description strings) and nothing matches or parses any of them. The receipt
+# hashes of the edited managed files were recomputed and match.
+#
+# Nit 1 carried: .claude/.bundle-receipt.json also changed `$comment`,
+# `source.repo` (to "origin") and `reapply_command`, which the change description
+# does not say. Nothing reads them.
+# Nit 2 carried: one rewrapped comment line each in src/git/comments.rs and
+# .cli/lib/approval-vocabulary.mjs runs long.
+
+digest: "a7b3756db9992071"
+
+rounds: 1
+
+carried:
+  - subprocess-safety-reviewer/1 · .claude/.bundle-receipt.json source.repo reads "origin", which names no repository; nothing reads the field
+    person: "構成記録ファイルの出どころ欄が「origin」という値になっています。このファイルを読むコードはなく、動作に影響しません。対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/git/comments.rs:113 and .cli/lib/approval-vocabulary.mjs:11 each have one over-long rewrapped comment line
+    person: "コメントが1行ずつ少し長いだけで、動作には影響しません。対応は不要です。"
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

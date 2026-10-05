@@ -1,0 +1,28 @@
+# Round 1, digest 2af9b5b6ffaf20ef, both reviewers asked 2026-09-25.
+#
+# rust-reviewer: approve-with-nits 0 2. No -e under pipefail, so a failed
+# merge-base only skips the committed half; bash 3.2-safe; diffing against the
+# fork point counts only this branch's work; the test asserts both directions.
+#
+# subprocess-safety-reviewer: approve-with-nits 0 3. Detached HEAD, a branch
+# forked from another feature branch, and worktrees all resolve; the inner
+# fork is in a subshell and does not clobber the later one; the grep reads its
+# pipe to the end. Could not run check-review.sh from its session (trunk
+# allowlist) and reviewed git diff --cached HEAD, which is unchanged since.
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "2af9b5b6ffaf20ef"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · .claude/hooks/gate-stop.sh:149-150 a staged rename of a change dir is read under its old name until committed; add --no-renames or read git diff --name-only HEAD
+  - rust-reviewer/2 · src/tests.rs the new stop-gate test leaks its temp repository when spawn panics before discard_worktree_fixture
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-stop.sh:149-150 porcelain v1 without -z misses a staged rename's new name and a quoted path (a file with a space); use git diff --name-only HEAD plus git ls-files --others like lines 127-128
+  - subprocess-safety-reviewer/2 · .claude/hooks/gate-stop.sh:151 a missing refs/heads/main drops the committed half silently (fails open); fall back to every open change or say so in the comment
+  - subprocess-safety-reviewer/3 · src/tests.rs the new test does not exercise an untracked change dir, nor a staged rename
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

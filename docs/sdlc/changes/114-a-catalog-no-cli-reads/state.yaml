@@ -1,0 +1,19 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. Landed as 3294539; cleanup-worktree removed its worktree and branch. Four nits carried in review.yaml."
+
+contract:
+  three-gates: "machine passed make q.check 691 passed; gate-commit before the commit"
+  measured-under-both-clis: "human passed agy --print and codex exec in this repository, 2026-10-04 (agy 1.2.16, codex-cli 0.159.2)"

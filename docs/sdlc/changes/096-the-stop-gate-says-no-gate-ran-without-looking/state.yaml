@@ -1,0 +1,56 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. .claude/hooks/gate-stop.sh refused a Stop with "N uncommitted Rust or
+#    manifest file(s) with no gate run behind them" whenever a .rs file was
+#    uncommitted. It never looked for a gate run. In the session that landed
+#    095 it said so four times, each time after cargo fmt --check, cargo test
+#    --locked and clippy had all just passed on that exact tree, and each stop
+#    was spent restating their output.
+# 2. Cause: the check (change 007) was built on "a session that edits Rust, says
+#    done, and never commits passes through no gate". In this repository code
+#    reaches main only through a commit, gate-commit.sh runs the three gates on
+#    every one, and worktree-shipping-guard already names uncommitted worktree
+#    work at Stop. So the check could not be made true, only noisy.
+# 3. Considered: record a gate-run stamp and compare it (a new PostToolUse hook
+#    and a file to keep in step — machinery to keep a check the commit gate
+#    already makes); reword the message (still a refusal with nothing behind
+#    it). Taken: remove the half. The contract, approvals, branch audit, and
+#    installed-build report stay.
+# 4. Review round 1 (subprocess-safety) found the one path the removed half
+#    had stood on: scripts/package-macos.sh built the tree with cargo build
+#    alone, so uncommitted, ungated code could reach /Applications/Operon.app.
+#    The packager now runs the three gates first. It also found the position
+#    hash had lost the tree, so a pending item refused once per change; the
+#    code is back in the hash. rust-reviewer's report that the installed-build
+#    line now shows less often is not taken: it showed on a clean tree after a
+#    merge no more before 096 than after, and mid-change a stale bundle is
+#    expected.
+# 5. Review round 2 (durability) found the suite inheriting the packaging lock
+#    (fd 9): a tmux server it starts would hold the lock after the packager
+#    exits and refuse every later one. Each cargo call now closes fd 9; the
+#    packager test records any call that still holds it. The lock-refusal test
+#    got a failing fake cargo, so a lock regression goes red instead of running
+#    the suite recursively.
+# 6. Review round 3 (subprocess-safety) found untracked .rs names with a space,
+#    a quote, or non-ASCII dropping out of the position hash through xargs; the
+#    hook reads them NUL-separated now and the test's file is "un proven's.rs".
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Next: correct AGENTS.md and the ship skill, which say package-macos.sh replaces /Applications/Operon.app when it replaces dist/Operon.app."
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent, cargo test --locked 664 passed 0 failed 6 ignored, clippy -D warnings silent"
+  failing-test-first: "machine passed the_stop_gate_reports_an_installed_build_that_is_behind refused on the unedited hook with only an uncommitted .rs file in the tree; the_packager_runs_the_three_gates_before_it_builds failed on the unedited packager"
+  guards-verified-by-mutation: "machine passed the tree taken out of the position hash again made the edit-after-refusal assertion red; 9>&- taken off cargo test made the packager test red (holds the packaging lock); xargs -r cat restored made the edit-after-refusal assertion red with an untracked file named un proven's.rs"

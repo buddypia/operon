@@ -1,0 +1,19 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. Landed as 2975f6a; cleanup-worktree removed its worktree and branch without --force, and make wt.new based the closing worktree on local main, 11 commits ahead of origin."
+
+contract:
+  three-gates: "machine passed make q.check 691 passed; gate-commit before the commit"
+  red-before-green: "human passed both tests red on the unfixed scripts; three mutations caught (every tip landed, a worktree on main landed, local main as base when it trails)"

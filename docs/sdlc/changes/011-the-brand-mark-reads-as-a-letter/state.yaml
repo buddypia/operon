@@ -1,0 +1,29 @@
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+# low/full because every file this touches is the drawing surface in
+# docs/sdlc/risk.yaml — src/app.rs, src/ui/, src/glyphs.rs. screen: pending for
+# the same reason: that surface says the screen is agreed before the code.
+# src/agents.rs is on the medium/supervised subprocess surface and is touched
+# only to hand its texture cache a name that is not agent-specific; no launch
+# path, no Command::new, no validation gate moves.
+
+resume: "Shipped to /Applications and running; the one thing left is a person looking at the corner on all three themes, because I could not raise the window to see it myself."
+
+contract:
+  three-gates: "machine passed fmt clean, 322 passed 0 failed 6 ignored, clippy clean"
+  bands: "machine waived steering_bytes was at diagnose before this change and reads 141780 on both sides — change 009 owns it; largest_module_lines 8760 to 8768 against a warn of 8800"
+  guards-verified-by-mutation: "machine passed four mutations run, all three guards watched failing, table in plan.md"
+  screen-agreed: "human passed option B — the ring with the plate keyed out — approved on the first round"
+  installed-build-verified: "machine passed packaged, signature verified, /Applications swapped atomically, launched at pid check, obsolete backup trashed"
+  corner-looked-at: "human pending the window would not come forward past another terminal window after three attempts; the mark was checked as an asset at 18px and 48px on all five surface colours instead"

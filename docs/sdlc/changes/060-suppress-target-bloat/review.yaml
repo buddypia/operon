@@ -1,0 +1,7 @@
+digest: "db367e4c121ff912"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+
+nits: []

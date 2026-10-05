@@ -1,0 +1,26 @@
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "feature"
+  stage: "deploy"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+# paused/high because the change edits .claude/hooks/ and .claude/settings.json —
+# the gate-configuration surface in docs/sdlc/risk.yaml, the row that can switch
+# off every other row. REVIEW.md wants a person on this diff.
+
+resume: "Built and verified, including the enforcement layer that the first pass omitted; a person has to read the diff, because gate-configuration is a paused surface and the agent that wrote a change does not approve it."
+
+contract:
+  three-gates: "machine passed fmt clean, 310 passed 0 failed 6 ignored, clippy clean"
+  bands: "machine waived steering_bytes at diagnose — diagnosed in plan.md, and the instrument defect is change 009"
+  readiness-over-every-change: "machine passed check-readiness.sh --all, 0 blocking 1 warning"
+  mechanisms-wired-not-merely-guarded: "machine passed every_gate_script_is_wired_or_declares_why_not, added after lesson 012"
+  guards-verified-by-mutation: "machine passed ten mutations run; two found guards that checked nothing, lessons 011 and 012"
+  human-on-the-diff: "human pending gate-configuration is a paused surface in docs/sdlc/risk.yaml"

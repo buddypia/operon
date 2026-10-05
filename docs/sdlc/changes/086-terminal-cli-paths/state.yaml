@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# Clicking `Read(~/dev/buddypia/example-webshop/.tmp/test-output.txt)` or other CLI tool outputs
+# with Command (⌘) + click did not open the file.
+# Root cause:
+# 1. Tilde paths (`~/...`) were not expanded to HOME directory, causing worktree.join("~/...")
+#    which failed canonicalization and returned None.
+# 2. Paths formatted inside CLI tool calls (`Read(...)`, `Edit(...)`, `Write(...)`, `View(...)`)
+#    did not treat the tool-call badge as an openable target span.
+# 3. `file:///` URLs were not recognized as openable path targets.
+# 4. External opening was constrained by project root checks in `open_terminal_target_external`.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. Terminal paths with tilde expansion, CLI tool call spans, and file:// URLs open reliably."
+
+contract:
+  reviewed: "human passed reviewed by developer"
+  three-gates: "machine passed cargo fmt, cargo test, and clippy pass"
+  failing-test-first: "machine passed test_terminal_resolves_tilde_paths_and_cli_tool_calls failed before fix, passed after"
+  bands: "machine passed control bands within budget"
+  release-binary: "machine passed release package built via scripts/package-macos.sh"
+  guards-verified-by-mutation: "machine passed mutations verified via unit and regression suites"
+  lesson-recorded: "machine waived not needed for single bugfix change"

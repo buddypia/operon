@@ -1,0 +1,57 @@
+# The state of change 065. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 065 and not 062, because 062 and 063 are reserved by name in change
+# 060's committed state.yaml: four of the seven nits carried out of that change
+# go to 062 and one to 063. Those directories do not exist yet, and taking the
+# next free number would have made a committed record false. A gap in the
+# numbering is cheaper than a pointer that lands somewhere else.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "DONE. Both defects fixed in one commit; change 055 held the parse half
+  and is closed by the commit after it. What outlived this change is a third
+  defect in the same file, found while verifying the second: the contract scan's
+  awk prints only the first line of a wrapped `machine pending` item, so
+  061's items arrive truncated at `vocabulary-complete: bash`. Same paused
+  surface, not folded in — plan.md's Departures section says why."
+
+# `.claude/hooks` is the gate-configuration surface, `high paused` in
+# docs/sdlc/risk.yaml — stop and ask before editing. Asked and answered: this
+# session surfaced both defects to the repository's owner as outstanding items
+# on 2026-09-21 and was told to proceed with them. Recorded here because the
+# autonomy field says paused and a paused surface that was edited anyway needs
+# to say who lifted it.
+#
+# The bash 3.2 defect was also deliberately deferred once before, in
+# `KNOWN_UNPARSED_UNDER_BASH_3_2` in src/tests.rs, whose entry says in as many
+# words: "It is not applied here because `.claude/hooks` is the
+# gate-configuration surface that docs/sdlc/risk.yaml marks paused — a person
+# decides it, and this entry is what keeps it from being forgotten." That entry
+# did its job. This change is what it was keeping the defect for.
+
+contract:
+  three-gates: "machine passed fmt silent, 491 passed 0 failed 6 ignored,
+    clippy silent"
+  bands: "machine passed 2 of 20 at warn — always_loaded_bytes 11648 and
+    steering_bytes 259333, both the same tier they were in before this change,
+    recorded no action"
+  parses-on-a-stock-macos: "machine passed /bin/bash -n exits 0 and
+    KNOWN_UNPARSED_UNDER_BASH_3_2 is empty; the guard below also runs the hook
+    under /bin/bash, so the parse is measured behaviourally and not only by -n"
+  reads-the-tree-the-session-is-in: "machine passed
+    the_stop_gate_reads_the_tree_the_session_is_working_in over five
+    arrangements, plus the hook run by hand from this worktree: it names 035,
+    040, 041, 054, 055, 061 and 065, and no longer names 039 or 049"
+  guards-verified-by-mutation: "human passed five mutations, each run and each
+    red — ./mutations.py, which restores the hook in a finally block and exits
+    non-zero on any mutation the guard let through"

@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Rebind palette.open in the file the palette writes, restart, and confirm the new chord opens it and the old one does not."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session"
+  guards-verified-by-mutation: "human passed ten watched failing: a conflict keeping the last binding, the conflict read off the file rather than the finished map, an unknown id ignored, a chord with no key parsing, null binding the default, the default file overwriting one that is there, the chord drawn from a literal, a shortcut back in a label, a modifier glyph the UI font cannot draw, and a default that does not parse"
+  screen-agreed: "human passed the chord goes at the right of each palette row, drawn from the map the handler reads; the whole file is refused on a conflict"
+  real-machine-check: "human pending rebind palette.open, restart, and confirm the new chord opens the palette and the old one does not"

@@ -1,0 +1,6 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+2026-09-27T03:30:00Z person intent intent.md 12afde1df2f58c09 approve owner asked for the Before/After and answered 全項目 OK、進めて to it and its checklist
+2026-09-27T03:30:00Z person screen screen.md b4aad2cd3ec146d9 approve owner approved the rendered After in .tmp/ui-before-after section 1; screen.md is its session-screen subset
+2026-09-27T04:10:00Z auto spec spec.md ed14ab3497d7bf3b approve evaluator round 2: round-1 findings on the idle-stop rule, mentioned-files order, and changes-tab source all fixed
+2026-09-27T04:10:00Z auto plan plan.md 3da58087709d451b approve evaluator round 2: every requirement maps to a file and step, each risk has a named check
+2026-09-27T04:10:00Z auto screen screen.md 103c113af781270e approve evaluator round 2: two added 変更-tab states and a narrower 停止 note stay inside existing roles; supersedes the owner line at b4aad2cd3ec146d9

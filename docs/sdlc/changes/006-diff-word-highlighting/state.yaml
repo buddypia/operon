@@ -1,0 +1,24 @@
+# Backfilled by change 008, which introduced this file, and recorded as the change
+# actually ended. The readiness verdict is the one scripts/check-readiness.sh
+# returns today, not one invented for the record: the gate postdates the change,
+# and `conditional` here is the missing state.yaml warning it would have raised.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Closed. Its five guards were each watched failing before being trusted, and doing so exposed a real conflict in its own spec.md."
+
+contract:
+  three-gates: "machine passed the gates on the tree that shipped"
+  guards-verified-by-mutation: "machine passed five guards watched failing"
+  lesson-recorded: "human passed entry 009 in docs/sdlc/lessons.md"

@@ -1,0 +1,27 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. The first measured run showed the worktree-policy hook refuses edits in detached eval worktrees; change 104 owns that."
+
+contract:
+  three-gates: "machine passed cargo fmt --check clean, cargo clippy -D warnings
+    clean, cargo test --locked 678 passed 0 failed 6 ignored after review round 1"
+  bands: "machine waived unsafe_blocks propose and steering_bytes warn read the
+    same on main before this change (3 and 239928); this change adds no unsafe
+    and 224 steering bytes, so neither reading is this change's to answer"
+  release-binary: "machine passed no: the change touches scripts/run-evals.sh,
+    evals/, src/tests.rs and documents; src/tests.rs is behind cfg(test), so the
+    installed application does not go stale"
+  guards-verified-by-mutation: "human passed mutations.py beside this file, 20 of
+    20 caught after review round 1 (18 of 18 twice before it)"

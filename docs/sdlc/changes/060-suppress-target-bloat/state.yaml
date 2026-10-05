@@ -1,0 +1,26 @@
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Commit 060 change to feature/060-suppress-target-bloat and merge into main"
+
+contract:
+  three-gates: "machine passed cargo fmt --check && cargo test --locked && cargo clippy --locked -- -D warnings"
+  readiness: "machine passed bash scripts/check-readiness.sh docs/sdlc/changes/060-suppress-target-bloat"
+  review: "machine passed bash scripts/check-review.sh docs/sdlc/changes/060-suppress-target-bloat"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

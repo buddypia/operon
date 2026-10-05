@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): closing change 083, the
+# session told the person "carry した nit が7件" and listed reviewer shorthand
+# in English. The person (2026-09-26): "carry した nit が7件 <- これお前しか
+# 理解できない言葉だろう？ちゃんと人間がわかる内容にメカニズムにして".
+#
+# Named cause: a finding left unfixed reaches a person only as the reviewer's
+# own words. REVIEW.md tells the session to carry it into review.yaml
+# verbatim, `scripts/check-review.sh` prints the verbatim line under
+# "Nits (blocking しない)", and nothing anywhere asks for what the finding
+# means to someone who did not read the diff. So the report is written from
+# the only text there is, in the harness's own vocabulary.
+#
+# Risk: scripts/check-review.sh is the gate-configuration surface (high,
+# paused). The change adds a refusal — tightening — and the person's message
+# is the request for it.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. Seven small findings left unfixed, each explained for a person in review.yaml; none needs action."
+
+contract:
+  reviewed: "human passed round 2 at digest c99640f14da80aa2: rust-reviewer approve-with-nits 0 4, subprocess-safety-reviewer approve-with-nits 0 3 after its round 1 Important was taken"
+  three-gates: "machine passed fmt silent, 606 passed 0 failed 6 ignored, clippy silent, after the round 1 fix"
+  failing-test-first: "machine passed on the unedited gate the new test failed on all five counts; passes after"
+  bands: "machine waived always_loaded_bytes 12313 to 12582 by the AGENTS.md line, still at warn (recorded, no action); steering_bytes at diagnose and unsafe_blocks at propose as on main"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], the rest is scripts and docs"
+  guards-verified-by-mutation: "machine passed eight mutations each red: each of the three refusals removed, SHIP showing the reviewer text, each sentence weakened, and the Japanese check put back to any non-ASCII byte"
+  lesson-recorded: "machine passed entry 052 in docs/sdlc/lessons.md with its Guard"

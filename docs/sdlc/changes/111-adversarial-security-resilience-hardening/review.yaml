@@ -1,0 +1,24 @@
+# Round 1, digest a9027b761b679db5
+#
+# rust-reviewer: approve. All refactored code maintains 100% backward compatibility.
+# Zero unsafe code added. Prompt template loading moved out of the per-frame draw path.
+# Error handling via anyhow and tf! strictly matches repo standards.
+#
+# subprocess-safety-reviewer: approve. All Git subprocess calls use git_command(path)
+# and git_output, stripping all inherited Git repository pointers. Double-dash (--)
+# option terminators protect against CLI option injection. Subprocess output is strictly
+# bounded to 1MB. TOCTOU cryptographic re-verification prevents arbitrary script execution.
+#
+# durability-reviewer: approve. Checkpoints capture working tree modifications using
+# isolated temporary index files (.git/index_checkpoint_* with RAII Drop guard),
+# leaving the user's active index completely untouched. Mainline checkout check
+# prevents accidental merging into feature branches.
+
+digest: "a9027b761b679db5"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"

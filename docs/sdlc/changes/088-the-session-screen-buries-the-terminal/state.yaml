@@ -1,0 +1,22 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The owner checked the session screen on the installed build against screen.md on 2026-09-27 and answered OK."
+
+contract:
+  three-gates: "machine passed fmt clean, cargo test --locked 631 passed 0 failed 6 ignored, clippy -D warnings clean"
+  bands: "machine waived always_loaded_bytes, steering_bytes, and unsafe_blocks are out of band identically on main; this diff adds no instruction bytes and no unsafe"
+  release-binary: "machine passed packaged from 6261621 and swapped into /Applications/Operon.app (OperonSourceCommit 62616218); old bundle and dist moved to Trash"
+  guards-verified-by-mutation: "human passed idle-stop, notice_is_brief, session_list_title, hidden partition, touched_files cap, filter case and cap, filter-before-scan each inverted and watched red, then restored"
+  screen-matches: "human passed the owner opened the session screen on the installed build and answered OK, 2026-09-27"

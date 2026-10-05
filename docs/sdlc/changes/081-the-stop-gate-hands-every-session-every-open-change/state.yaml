@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): every Stop in every session
+# lists the pending machine contract items of every open change in the tree —
+# 035, 038, 039, 040, 041, 049, 077 — whichever change the session is working
+# on, including none. The session cannot settle them (most are blocked on 035,
+# or have no diff yet), so it answers the same refusal by hand each time, and
+# the stamp that keeps a position from being refused twice is per tree, so a
+# new worktree, or the main checkout after a landing, hears it again. The
+# person: "都度これをやっていくのは面倒臭いから恒久対応して" (2026-09-25).
+#
+# Named cause: .claude/hooks/gate-stop.sh builds `open_contract` from a glob
+# over docs/sdlc/changes/*/state.yaml, filtered only by status. Nothing asks
+# whether this tree is working on the change.
+#
+# Risk: .claude/hooks is the gate-configuration surface (high, paused). The
+# person's request above is the answer the paused tier asks for, as in 079.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: five carried nits in review.yaml; reading the uncommitted half with git diff --name-only HEAD plus ls-files --others, and saying what happens with no main ref, are the ones worth a follow-up."
+
+contract:
+  reviewed: "human passed rust-reviewer approve-with-nits 0 2 and subprocess-safety-reviewer approve-with-nits 0 3 at digest 2af9b5b6ffaf20ef"
+  three-gates: "machine passed fmt silent, 596 passed 0 failed 6 ignored, clippy silent"
+  failing-test-first: "machine passed on the unedited hook the branch run named item-901, a change the branch does not touch; passes after"
+  bands: "machine waived unchanged by this change: unsafe_blocks at propose, steering_bytes at diagnose, always_loaded_bytes at warn, as on main"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], and the rest is .claude/hooks and docs"
+  guards-verified-by-mutation: "human passed uncommitted half, branch half, and the filter removed: each red"
+  lesson-recorded: "machine passed entry 050 in docs/sdlc/lessons.md with its Guard"

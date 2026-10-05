@@ -1,0 +1,44 @@
+# Round 4, digest fc3d61ad961dc12e, rust-reviewer and
+# subprocess-safety-reviewer asked 2026-09-27.
+#
+# Round 1: both request-changes. rust-reviewer: git_branch per frame in the
+# 作業場所 row (fixed: worktree_cache, guard test) and a project switch in the
+# sheet that wiped the request and the page behind (fixed:
+# switch_launch_project, test watched red). subprocess-safety-reviewer: the
+# same git_branch finding. Round 2: subprocess-safety-reviewer approve;
+# rust-reviewer request-changes, ⌘2 / ⌘K over the sheet cleared the request
+# (fixed: handle_app_shortcuts gated on the sheet) and a per-frame
+# has_git_metadata stat (fixed: launch_sheet_is_git). Round 3: both
+# request-changes on one finding, ⌘O still live over the sheet (fixed, test
+# row watched red). Past the route's ceiling of 2 only because each round
+# fixed an Important; every nit below is carried, not taken.
+
+digest: "fc3d61ad961dc12e"
+
+rounds: 4
+
+carried:
+  - rust-reviewer/1 · src/app.rs ⌘F and Esc reach the terminal find bar behind the sheet; the find field can take focus from the request field
+    person: "セッション画面の上で新しいセッションのシートを開いたまま ⌘F を押すと、シートの裏で検索欄が開き、入力がそちらへ行くことがあります。シートの依頼欄を一度クリックすれば戻ります。"
+  - rust-reviewer/2 · src/app/screens.rs the command palette is an egui::Window and may draw under the sheet's Foreground area
+    person: "対応は要りません。シートを開いている間は ⌘K が効かなくなったので、検索パレットがシートの下に隠れることはありません。"
+  - rust-reviewer/3 · src/app/screens.rs ui_overview clones up to 8 Session records every frame for home_session_row
+    person: "プロジェクトの概要タブは、表示のたびにセッション最大 8 件分の小さな複製を作ります。体感できる遅さにはならず、対応は要りません。"
+  - rust-reviewer/4 · src/app.rs a folder dropped from Finder while the sheet is open still adds and selects it, clearing the request
+    person: "新しいセッションのシートを開いたまま Finder からフォルダをウィンドウへドラッグすると、入力中の依頼が消え、そのフォルダのプロジェクトに切り替わります。ドラッグする前にシートを閉じてください。"
+  - rust-reviewer/5 · src/app/screens.rs the project list Vec is rebuilt every frame while the sheet or 履歴's CLI section is open
+    person: "シートや履歴の CLI セッション欄を開いている間、プロジェクト名の一覧を毎回作り直しています。プロジェクト数が少ない限り影響はなく、対応は要りません。"
+  - rust-reviewer/6 · src/app/screens.rs the footer repeats any notice in the warning colour, including ones unrelated to the launch
+    person: "シートの下部には、起動と関係のないお知らせも注意の色で表示されることがあります。内容はそのまま読めるので、対応は要りません。"
+  - rust-reviewer/7 · src/app/screens.rs the sheet does not show durability_warning
+    person: "保存に問題があったときの警告はシートの中には出ず、シートを閉じた画面に出ます。対応は要りません。"
+  - rust-reviewer/8 · src/app/screens.rs the footer has no maximum height
+    person: "警告がいくつも重なると、シートの下部が縦に長くなります。表示だけの問題で、対応は要りません。"
+  - subprocess-safety-reviewer/1 · src/tests.rs the no-process guard reads only the three sheet functions' text, not the helpers they call
+    person: "対応は要りません。シートの表示中に外部のプログラムを起動していないかを確かめるテストは、シート本体しか見ていません。"
+  - subprocess-safety-reviewer/2 · src/tests.rs no test for keys ignored while a progress window shows, for ターミナルだけ開く from the sheet, or for the recheck after the form draws
+    person: "対応は要りません。進み具合の画面が出ている間のキー操作と、シートの「ターミナルだけ開く」には、専用の自動テストがまだありません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 8"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

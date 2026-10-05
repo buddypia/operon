@@ -1,0 +1,32 @@
+# Round 1, digest 81a859ed03f2af37, both reviewers asked 2026-09-25.
+#
+# rust-reviewer (rr-079): approve-with-nits 0 1. get_envs reports an
+# env_remove as a None entry and no later .env re-adds these names, so the
+# guard proves the removal on the built command; constructing the fixture
+# directly skips nothing command() needs; every fixture spawn (git, commit,
+# run_in, gate_in_env) goes through self.command.
+#
+# subprocess-safety-reviewer (ssr-079): approve-with-nits 0 3. With GIT_DIR and
+# GIT_WORK_TREE exported as a matched pair — the observed case — the hook's own
+# git calls read the same repository before and after the unset, so it only
+# stops the pointer reaching the cargo children. A divergent export was
+# already broken before this diff and is carried as a nit rather than taken.
+# No other variable-program spawn in src/tests.rs can write under an exported
+# GIT_DIR.
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "81a859ed03f2af37"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tests.rs guard lists its expected variables by hand and omits GIT_OBJECT_DIRECTORY and GIT_PREFIX; derive the set from forget_inherited_repository's own removals so there is one list
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-commit.sh: fail closed when the repository resolved with the environment differs from the one found by cwd after the unset, and when GIT_INDEX_FILE was set
+  - subprocess-safety-reviewer/2 · the hook's unset line has no test; deleting it turns nothing red — lesson 048's Guard covers the fixture, not this second layer
+  - subprocess-safety-reviewer/3 · the guard's variable list is a second copy of git.rs:37-40; move all six into one const both read
+  - rust-reviewer/scope · scripts/check-trust-prompts.sh:310 runs `git init` without dropping repository pointers; unreachable from today's test, reachable by hand under an exported GIT_DIR
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

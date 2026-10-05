@@ -1,0 +1,45 @@
+# The state of change 066. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 066 because 065 is this branch's own and 062-063 are reserved by name
+# in change 060's committed state.yaml for the nits it carried.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "DONE. The review-round ceiling moved out of routes.yaml's sixth column
+  into docs/sdlc/review-rounds.yaml, because the gate that judges a commit is
+  refs/heads/main:scripts/check-review.sh and it reads a route row as exactly
+  five values. Nothing outstanding here; lesson 039 is the account."
+
+# Found by being blocked, not by looking. Change 065's commit was refused with
+# `route bugfix is not in docs/sdlc/routes.yaml on either side of this diff` —
+# for a route the table has, in a file the whole suite reads without complaint.
+#
+# Risk recorded as high/paused because this edits scripts/check-review.sh and
+# docs/sdlc/routes.yaml. This branch's docs/sdlc/risk.yaml does not list either
+# — its gate-configuration surface is .claude/settings.json and .claude/hooks —
+# but main's does, and main's table is the one that will judge this after the
+# merge. Taking the stricter of the two tables is the same rule the gate itself
+# applies to a route's reviewer set.
+#
+# Authorised by the repository's owner in the same breath as change 065; this
+# work is what that change turned out to require in order to land at all.
+
+contract:
+  three-gates: "machine passed fmt silent, 490 passed 0 failed 6 ignored,
+    clippy silent"
+  bands: "machine passed 2 of 20 at warn, both in the tier they were already in"
+  the-route-table-loads-under-the-judge: "machine passed the same commit that
+    was refused is accepted once routes.yaml is five values again — measured, in
+    the commit that carries this file"
+  guards-verified-by-mutation: "human passed four mutations, each run and each
+    red at a different assertion — ./mutations.py"

@@ -1,0 +1,18 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "docs"
+  stage: "test"
+  status: "done"
+  attempts: "0 2"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Landed with local merge on main; packaging with scripts/package-macos.sh."
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 698 passed 0 failed 6 ignored, clippy silent"

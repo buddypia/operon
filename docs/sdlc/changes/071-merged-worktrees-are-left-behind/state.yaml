@@ -1,0 +1,28 @@
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. Seven carried nits in review.yaml outlive it; R2-1 (an unregistered leftover under .worktrees/ cannot be reaped) is the first to take"
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 555 passed 0 failed 6 ignored, clippy silent; the commit gate reran them"
+  cleanup-works-without-a-remote: "machine passed
+    cleanup_removes_a_merged_worktree_in_a_repository_with_no_remote"
+  stop-names-a-merged-worktree: "machine passed
+    the_stop_guard_names_a_merged_worktree_the_session_still_owns"
+  landing-ends-with-removal: "machine passed
+    the_landing_procedure_ends_by_removing_the_worktree"
+  # always_loaded_bytes 11648 -> 11866, the one AGENTS.md sentence this change
+  # is about; already at warn on main. The other two breaches are main's.
+  bands: "machine waived bash scripts/check-bands.sh"
+  guards-verified-by-mutation: "human passed ten mutations over ops.mjs, the
+    Stop guard and src/git.rs, each caught (two were missed at first and the
+    tests tightened until they were not); the landing test watched failing on
+    the unedited AGENTS.md; all three watched failing before any fix"

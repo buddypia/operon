@@ -1,0 +1,64 @@
+{
+  "version": "1.1.0",
+  "updated_at": "2026-07-01",
+  "description": "Worktree policy configuration for Operon — defines protected branches, tier 1 editable patterns on trunk (such as git-ignored runtime/build artifacts), and the trunk bash command allowlist.",
+  "protected_branches": ["main", "master"],
+  "trunk_ref_guard": false,
+  "tiers": {
+    "tier1_main_allowed": {
+      "description": "Direct Edit/Write permitted on main branch — limited to git-ignored runtime/build artifacts and settings.json (for hook registration codegen). Project owners can customize output paths.",
+      "patterns": [
+        ".tmp/**",
+        ".cache/**",
+        "tmp/**",
+        "node_modules/**",
+        "dist/**",
+        "build/**",
+        "out/**",
+        "coverage/**",
+        "target/**",
+        ".next/**",
+        ".nuxt/**",
+        ".svelte-kit/**",
+        ".turbo/**",
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        ".agents/**"
+      ]
+    }
+  },
+  "escape_hatch": {
+    "branch_patterns": ["hotfix/*", "hotfix-*"],
+    "description": "Emergency bypass for urgent hotfixes or when hook/worktree infrastructure itself is broken"
+  },
+  "session_owner_scope": "all_bash",
+  "trunk_bash_allowlist": {
+    "enabled": true,
+    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, and the gates and release scripts that follow it. Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
+    "patterns": [
+      "make\\s+(?:-C\\s+[\\w./-]+\\s+)?(?:wt\\.new(?:\\s+(?:BR|BASE|DRY)=[\\w./-]+)*|q\\.check)(?:\\s+\\d*>\\s*(?:&\\d+|/dev/null))*\\s*$",
+      "node\\s+(?:-v|(?:\\S*/)?\\.claude/scripts/(?:worktree-new|create-pr/ops)\\.mjs)",
+      "git\\s+worktree(?!\\s+remove)",
+      "git\\s+(?:status|log|diff|show|rev-parse)(?![\\s\\S]*\\s(?:--out|--ext))",
+      "git\\s+grep(?![\\s\\S]*\\s(?:-O|--op))",
+      "git\\s+branch(?:\\s+-(?:a|r|v|vv|-list|-all|-remotes|-verbose|-show-current|-merged|-no-merged))*\\s*$",
+      "git\\s+remote(?:\\s+(?:-v|--verbose))?\\s*$",
+      "git\\s+(?:stash\\s+(?:list|show)|config\\s+--(?:get|list)|--version)",
+      "git\\s+merge\\s+(?:--no-ff|--ff-only)",
+      "git\\s+merge\\s+--abort\\s*$",
+      "git\\s+branch\\s+(?:-d|--delete)(?:\\s+(?!-)[\\w./-]+)+\\s*$",
+      "(?:pwd|ls|cat|head|tail|grep|pgrep|which|wc|shasum|echo|true|test|trash)",
+      "(?:jq|cut|diff|stat|printf)",
+      "sed[ \\t]+-n[ \\t]+(?:[\\d$]+(?:,[\\d$]+)?p;?)+(?:[ \\t]+(?!-)[^\\s]+)*[ \\t]*$",
+      "sort(?![\\s\\S]*\\s(?:-[a-zA-Z]*o|--o|--co))",
+      "uniq(?:[ \\t]+-[a-zA-Z]+)*(?:[ \\t]+(?!-)[^\\s]+)?[ \\t]*$",
+      "date(?![\\s\\S]*\\s(?:-s|--se))",
+      "for\\s+[A-Za-z_]\\w*\\s+in",
+      "git\\s+branch\\s+--list(?:[ \\t]+(?!-)[\\w./*-]+)+[ \\t]*$",
+      "git\\s+(?:for-each-ref|merge-base|ls-files|ls-tree|cat-file|rev-list|show-ref|blame)(?![\\s\\S]*\\s--(?:te|fi|out))",
+      "find(?![\\s\\S]*\\s-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)(?:\\s|$))",
+      "cargo\\s+(?:fmt\\s+--check|test\\s+--locked|clippy\\s+--locked)(?![\\s\\S]*\\s--fix)",
+      "bash\\s+scripts/(?:package-macos|replace-macos-bundle|check-installed-build|check-readiness|check-bands|harness-metrics|run-evals|check-review|pipeline-indicators)\\.sh"
+    ]
+  }
+}

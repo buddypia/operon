@@ -1,0 +1,111 @@
+# Review record for change 068. Read by scripts/check-review.sh — and by
+# `refs/heads/main:scripts/check-review.sh`, which is the copy that actually
+# judges the commit.
+#
+# SHAPE HAZARD: any two-space-indented `  name: "value"` line anywhere in this
+# file is parsed as a verdict. Prose belongs in `#` comments and list items in
+# `  - `. The only verdict values are approve | approve-with-nits |
+# do-not-approve; there is no `pending` spelling, so a round in flight is an
+# absent line rather than a placeholder one. Change 035 wrote a placeholder here
+# and its contract has been open ever since.
+#
+# ONE REVIEWER, AND NOT BECAUSE THE CHANGE IS SMALL. This diff matches no
+# surface in docs/sdlc/risk.yaml — scripts/check-installed-build.sh is on none,
+# src/tests.rs is on none, docs/sdlc/templates/ is on none — and the `bugfix`
+# route's reviewer set is `none`. subprocess-safety-reviewer is required by the
+# other half of the gate's rule: the diff adds `Command::new` lines, which pulls
+# that reviewer in whatever file they land in. It was the right reviewer, and
+# state.yaml records the risk gap the classification exposes.
+#
+# ROUND 1 — digest a060fbbfaa362bc8.
+#
+#   subprocess-068  do-not-approve 1 0
+#
+# THE IMPORTANT, AND IT IS THE ONE FINDING THIS CHANGE WOULD NOT HAVE MADE ON
+# ITS OWN. Requirement 4 bounds a mutation sweep so a mutation that hangs a test
+# cannot hang the sweep. The fix was `subprocess.run(..., timeout=RUN_SECONDS)`,
+# and the reviewer's point was that this bounds the WAIT and not the WORK:
+# `timeout=` kills the process Python forked and nothing under it, and the check
+# a sweep actually runs is `cargo test`, which runs the test binary as a
+# grandchild. So the sweep finished on time, reported, exited — and the hanging
+# test binary stayed on the machine until somebody noticed. The failure mode
+# requirement 4 exists for, surviving the fix for it.
+#
+# The reviewer reproduced it with a real `cargo test` over a deliberately
+# looping test and showed the orphan in `ps`. It was reproduced again here,
+# independently and without cargo, so the subject was the mechanism rather than
+# the toolchain: `(sleep 2 && touch marker) & sleep 30` under a one-second bound
+# left the marker behind and an orphaned `sleep 30` with it. Both readings
+# agreed, which is what made it safe to act on a report rather than on a
+# measurement of our own.
+#
+# WHY NO GUARD SAW IT, which is the part worth carrying forward. The new test
+# had two fixtures, `sleep 30` and `true`. Both are childless. A test whose
+# fixture is structurally simpler than the thing it stands for measures the
+# fixture — and the assertion it made, "the sweep finished", was true under both
+# the broken and the fixed implementation.
+#
+# Taken rather than carried, which is what REVIEW.md reserves for an Important,
+# and in three parts:
+#   - `run_checks` in docs/sdlc/templates/mutations.py and in this change's own
+#     sweep is now `Popen(..., start_new_session=True)`, with the bound calling
+#     `os.killpg(child.pid, SIGKILL)` and then `communicate()` to reap and drain
+#     the pipes a killed group releases;
+#   - the guard gained a third arrangement whose check is
+#     `/bin/sh -c "sleep 2 && touch <marker> & sleep 30"` — something under the
+#     child — and asserts the marker never appears. Watched failing against the
+#     old implementation before the new one was written;
+#   - the test is renamed from `…_reports_a_run_that_will_not_finish` to
+#     `…_ends_a_run_that_will_not_finish`. "The sweep stopped waiting" and "the
+#     work stopped" are two claims, and the old name promised the second while
+#     checking only the first.
+#
+# ONE LINE HAS NO MUTATION, ON PURPOSE. `start_new_session=True` is not mutated
+# by the sweep: removed while the killpg stays, `child.pid` is no longer a group
+# id, and killpg would name whatever process group on this machine happens to
+# hold that number — a SIGKILL at a stranger, once per sweep, from an unattended
+# script. The flag is covered from the other side instead, by
+# `bound-reaches-only-the-direct-child`, which shrinks the kill to `child.kill()`
+# and fails the grandchild assertion. The reviewer was asked about this decision
+# by name in round 2 and agreed it leaves no hole. The reasoning is written where
+# the mutation would have been.
+#
+# The sweep went from 8 to 9: `sweep-bound-removed` was retargeted to the new
+# call, and `bound-reaches-only-the-direct-child` is new. They are caught by
+# different assertions in the same test, which is what says they test different
+# things rather than the same thing twice.
+#
+# ROUND 2 — digest 3a0b6f025ce8d83b, below. The reviewer was re-asked BY NAME
+# rather than replaced, which is the rule change 067 wrote into REVIEW.md: a
+# replacement reviews the same digest and produces a second verdict to reconcile
+# by hand. It had also gone idle between rounds, and the re-ask by name resumed
+# it with its round-1 reading intact — which is what made "R1, R2 and R3 are
+# unchanged since you approved them" a sentence it could check rather than take
+# on trust.
+#
+# subprocess-068 re-ran the group kill itself, separately from both earlier
+# reproductions, and reported `marker exists: False` with no surviving `sleep`.
+# It traced both new mutations to the assertion each lands on and confirmed the
+# two are distinct paths. On the three questions it was asked:
+#   - the group kill reaches `cargo test`'s grandchild AND a non-interactive
+#     shell's backgrounded job, because such a shell does not put a background
+#     job in a group of its own;
+#   - `communicate()` after the killpg can block only for a process in
+#     uninterruptible D state, or one that left the group by calling `setsid`.
+#     No check a sweep names does the latter, and the code says so at the call
+#     site rather than leaving it to be rediscovered;
+#   - the third fixture leaks nothing into $TMPDIR: `fs::remove_dir_all` runs
+#     before every assertion that can panic, so the cleanup survives a future
+#     failure.
+#
+# Nothing new in round 2, and the change lands at the ceiling for `bugfix`
+# rather than past it. No nits in either round, so there is no `carried:` block —
+# an absent one and an empty one mean the same thing and only the absent one
+# cannot be mistaken for a nit whose text was lost.
+
+digest: "3a0b6f025ce8d83b"
+
+rounds: 2
+
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

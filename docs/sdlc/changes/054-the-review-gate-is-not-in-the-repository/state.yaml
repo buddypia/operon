@@ -1,0 +1,27 @@
+# The state of change 054. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Three files adopted into version control; the path check reads .gitignore instead of a hand-kept list, and three new guards hold the exemption narrow, keep the not-wired: declaration honest, and refuse a lesson cited by a number nothing answers"
+
+# Opened from the side, while landing 050: the suite was red at HEAD for reasons
+# that had nothing to do with either change, and nothing could be committed from
+# a worktree until it was green. Supervised rather than full because two of the
+# three adopted files are gates — scripts/check-review.sh decides whether a
+# commit is allowed — and this session did not write them and has not reviewed
+# them.
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 561 passed 0 failed 6 ignored, clippy silent"
+  bands: "machine waived steering_bytes is at its propose tier and was already there before this change: HEAD stood at 167146 against a 150000 threshold. The propose response is its own change and cannot be this one, which had to write two lessons to be finished at all."
+  guards-verified-by-mutation: "human passed all four watched failing: harness_documents_only_name_paths_that_exist on scripts/check-review.sh moved out of the tree; the_gitignore_exemption_covers_runtime_state_and_nothing_tracked on src/app.rs with src/ appended to .gitignore; every_lesson_cited_by_number_is_a_lesson_that_exists on entry 018 with its heading renumbered; the_review_gate_is_still_not_installed_by_anything_committed on a line appended to .claude/hooks/gate-stop.sh naming both halves it matches on, the .githooks source and a git-dir hooks destination — an earlier mutation named only the source and is no longer sufficient, which the reviewer caught"
+  review: "machine passed bash scripts/check-review.sh --index"

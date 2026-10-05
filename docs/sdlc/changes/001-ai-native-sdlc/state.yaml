@@ -1,0 +1,23 @@
+# Backfilled by change 008, which introduced this file, and recorded as the change
+# actually ended. The readiness verdict is the one scripts/check-readiness.sh
+# returns today, not one invented for the record: the gate postdates the change,
+# and `conditional` here is the missing state.yaml warning it would have raised.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "feature"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Closed. It built the pipeline that every later change runs through; changes 007 and 008 extended it with routes, risk tiers, state, and the readiness and stage gates."
+
+contract:
+  three-gates: "machine passed the gates it introduced"
+  lesson-recorded: "human passed entries 001-002 in docs/sdlc/lessons.md"

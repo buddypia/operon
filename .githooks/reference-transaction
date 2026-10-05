@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# reference-transaction: the review gate, run by git itself when a commit is
+# about to become reachable from a branch.
+#
+# Six rounds of review showed that reading a shell command to work out what
+# `git commit` will record is a contest nobody wins, and a seventh showed that
+# `prepare-commit-msg` is told a commit is an amend only for some spellings —
+# `--amend --no-edit` arrives as `commit HEAD`, `--amend -m` arrives as
+# `message`. This hook is not told anything about the command. It is handed the
+# ref update git is about to make, in its `prepared` state, and judges the
+# commit objects that update makes reachable: each one's record against the
+# diff it records, which is `sha^..sha` whether the commit was plain, amended,
+# `-a`, a pathspec, `-C` from another directory, or `--no-verify` — none of
+# which reach here as anything but a commit. A refusal aborts the ref update,
+# so the branch does not move and the index is left as it was.
+#
+# What is judged: every update to a branch (`refs/heads/*`) or to a detached
+# HEAD, from whichever worktree, whether or not that branch is the one checked
+# out — and within it, every commit the update makes reachable that no direct
+# branch reaches yet: `git rev-list new ^old ^<every non-symbolic branch>`. A
+# branch made symbolic to a tag resolves to the tag's commit and would have
+# vouched for it under `--not --branches`; round 12 laundered a refused commit
+# that way, so a symbolic branch vouches for nothing and is judged at its
+# target when it is written. That is a plain
+# commit, an amend, a merge commit, each commit a rebase or a cherry-pick
+# replays, a root commit, a branch created at a commit nothing holds, and a
+# fast-forward to a stash, a tag, or a detached commit. Rounds eight and nine
+# found that any narrower rule is an entrance: judging only the checked-out ref
+# let `git branch tmp <sha>` and a fast-forward launder a refused commit, and
+# treating "under some other ref" as vouched-for let `git stash` do the same.
+# A ref that is not a branch vouches for nothing.
+#
+# What is not judged: a commit this branch's own reflog remembers — it was on
+# this branch before, through this hook or before it existed — so a reset back
+# and forward, `ORIG_HEAD`, a checkout of an earlier tip are not refused, and
+# the gate is not a ratchet. Everything else is judged on its own record
+# against its own diff — so returning to a commit that passed passes again,
+# and returning to one the reflog no longer remembers (`gc.reflogExpireUnreachable`,
+# thirty days) is judged as the new commit it then is: a refusal only for one
+# that would not pass today, which pre-gate history, carrying no record, would
+# not. Moving a branch back before the gate and forward across it again a
+# month later is made by hand, with the hook off. An exemption for "history
+# from before the gate" was tried and is vacuous: such a commit is fresh only
+# when no branch reaches it, and then nothing can find the commit that added
+# the gate to anchor the exemption on. REVIEW.md says all of this.
+#
+# This file is tracked, and a checkout at a branch from before it existed has
+# no copy of it. So .claude/hooks/gate-commit.sh installs the trampoline in
+# .githooks/installed/ into the repository's own hooks directory —
+# `$(git rev-parse --git-path hooks)`, which every linked worktree shares and no
+# checkout removes — and that trampoline runs this file from the main checkout,
+# from the committing one when main has none, or from the main branch's own
+# tree when no checkout carries it, and with none of the three lets a checkout
+# move to a branch name but no branch move to a commit. A fresh clone gets the
+# trampoline at its first commit through Claude Code, or by hand:
+# cp .githooks/installed/reference-transaction "$(git rev-parse --git-path hooks)/"
+set -uo pipefail
+# `git replace` rewrites what every later `git` call sees: a replacement object
+# can give a commit a different tree, so the diff this gate judges is not the
+# diff the repository keeps. The refs live in `refs/replace/*` and a clone
+# fetches them on request, so they are not local-only. Judge the real objects.
+export GIT_NO_REPLACE_OBJECTS=1
+# And the graft file, which does the same thing by another mechanism and is
+# not stopped by the variable above: `$GIT_DIR/info/grafts` — or GIT_GRAFT_FILE
+# — rewrites a commit's parents, so `sha^` names a commit the author chose. A
+# twin with the same tree makes the diff empty and the gate finds nothing to
+# judge. Measured: `-c core.graftFile=/dev/null` does not close it; this does.
+export GIT_GRAFT_FILE=/dev/null
+
+[ "${1:-}" = prepared ] || exit 0
+
+zero=0000000000000000000000000000000000000000
+top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "review gate: the repository top could not be resolved, so the update is refused" >&2
+  exit 1
+}
+# The script is the main branch's own committed copy, or, before that copy
+# exists, the main checkout's working one — never the judged branch's: round
+# 15 stubbed `scripts/check-review.sh` on a side branch, with the marker line,
+# and the branch judged itself; and never a working copy while a committed one
+# exists, since an edit interrupted mid-way can exit 0 early with its last line
+# untouched. The committed copy judges the change that lands its successor.
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+main=""
+[ -n "$common" ] && main=$(dirname "$common")
+# Whole means the script's last line is the marker: `-s` is one byte deep, and
+# a prefix cut at a statement boundary still parses and exits 0 on everything.
+whole() { [ -s "$1" ] && [ "$(tail -n 1 "$1")" = '# operon: end of scripts/check-review.sh' ]; }
+gate=""
+if git cat-file -e refs/heads/main:scripts/check-review.sh 2>/dev/null; then
+  # Whole or not at all: a full TMPDIR leaves a truncated script, and a
+  # truncated script that still parses is a gate that decides at random.
+  blob=refs/heads/main:scripts/check-review.sh
+  gate=$(mktemp "${TMPDIR:-/tmp}/operon-check-review.XXXXXX") || exit 1
+  trap 'rm -f "$gate"' EXIT
+  if ! git cat-file blob "$blob" > "$gate" 2>/dev/null \
+    || [ "$(wc -c < "$gate" | tr -d ' ')" -ne "$(git cat-file -s "$blob" 2>/dev/null || echo -1)" ] \
+    || ! whole "$gate"; then
+    echo "review gate: the main branch's scripts/check-review.sh could not be written whole, so the update is refused" >&2
+    exit 1
+  fi
+fi
+[ -n "$gate" ] || gate="$main/scripts/check-review.sh"
+judge() {
+  # Whole, not merely present: an empty or cut-short script exits 0 and would
+  # pass everything.
+  whole "$gate" || {
+    echo "review gate: scripts/check-review.sh is missing, empty, or cut short in the main checkout and on the main branch, so the update is refused. Land it there whole." >&2
+    exit 1
+  }
+  if output=$(bash "$gate" --commit "$1" 2>&1 </dev/null); then
+    [ -n "$output" ] && printf '%s\n' "$output" >&2
+  else
+    printf 'Commit refused by the review gate (%s):\n%s\n' "$(git rev-parse --short "$1" 2>/dev/null)" "$output" >&2
+    exit 1
+  fi
+}
+
+# What vouches: the commits under a direct branch. A symbolic branch (three
+# fields from for-each-ref) is left out.
+vouched=$(git for-each-ref --format='%(refname) %(objectname) %(symref)' refs/heads 2>/dev/null | awk 'NF == 2 { print "^" $2 }')
+
+while read -r old new ref; do
+  case "$ref" in refs/heads/*|HEAD) ;; *) continue ;; esac
+  [ "$new" = "$zero" ] && continue
+  [ "$old" = "$new" ] && continue
+  # A symbolic write — `git symbolic-ref refs/heads/x refs/tags/t`, a checkout
+  # moving HEAD to a branch name — is judged at what it resolves to.
+  case "$new" in
+    ref:*) target=$(git rev-parse --verify --quiet "${new#ref:}^{commit}" 2>/dev/null) || continue ;;
+    *) target=$new ;;
+  esac
+  [ "$(git cat-file -t "$target" 2>/dev/null)" = commit ] || continue
+
+  # The commits this update makes reachable that no direct branch reaches yet,
+  # oldest first, so a refusal names the first one that fails.
+  # The status is read, not just the output. `$vouched` names every object
+  # under refs/heads, and one ref whose object does not resolve makes
+  # `git rev-list` exit 128 with nothing on stdout — which an emptiness test
+  # alone reads as "no commits to judge", so a single dangling branch ref
+  # anywhere in the repository turned the gate off for every commit. Measured:
+  # rc=128, empty output. A gate that cannot work out what is landing refuses.
+  if [ "$old" = "$zero" ]; then
+    fresh=$(git rev-list --reverse "$target" $vouched 2>/dev/null)
+  else
+    fresh=$(git rev-list --reverse "$target" "^$old" $vouched 2>/dev/null)
+  fi
+  rev_list_status=$?
+  if [ "$rev_list_status" -ne 0 ]; then
+    echo "review gate: the commits $ref would make reachable could not be listed (git rev-list exited $rev_list_status; a branch ref whose object is missing will do this), so the update is refused" >&2
+    exit 1
+  fi
+  [ -n "$fresh" ] || continue
+
+  # Captured whole before it is searched: under `pipefail`, a `grep -q` that
+  # closes the pipe on its first match hands the pipeline git's SIGPIPE status,
+  # and a match reads as a miss. Entry 018 in docs/sdlc/lessons.md.
+  remembered=$(git reflog show --format=%H "$ref" 2>/dev/null)
+  for sha in $fresh; do
+    printf '%s\n' "$remembered" | grep -xF "$sha" >/dev/null && continue
+    judge "$sha"
+  done
+done
+exit 0
+# operon: end of .githooks/reference-transaction

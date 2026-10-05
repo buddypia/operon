@@ -1,0 +1,49 @@
+# The state of change 055. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "DONE. The one open question — may a session edit .claude/hooks/gate-stop.sh — was answered yes by the repository's owner on 2026-09-21, and the fix landed in commit 2c238dc alongside change 065, which found a second defect in the same file. Nothing outstanding"
+
+# Opened by change 050, which found this and did not fix it. `.claude/hooks` is
+# the gate-configuration surface docs/sdlc/risk.yaml marks paused, so the edit
+# is a person's to authorise. This directory exists so the finding has an owner:
+# without it the only record would be a const in src/tests.rs and two paragraphs
+# in docs/sdlc/lessons.md, and nothing in the pipeline would raise it again.
+#
+# It did its job. The defect sat here from 2026-09-10 to 2026-09-21 with its
+# cause, its fix and the reason it was not applied all written down, and was
+# picked up from the record rather than rediscovered — which is the difference
+# lesson 040 draws between a deferral that is a decision and one that is a
+# defect somebody agreed to.
+#
+# HOW IT WAS FOUND AGAIN, which is the part worth keeping. Not by reading this
+# directory. Change 065 fixed the other defect in the same file — the hook
+# resolving the wrong checkout — and the first thing the corrected hook did was
+# print this change's own open contract items, because it was finally reading
+# the tree they are in. The gate surfaced its own backlog on the first run after
+# being pointed at the right tree.
+#
+# ALREADY FIXED ON MAIN, BY A DIFFERENT EDIT. Measured on 2026-09-21:
+# `refs/heads/main:.claude/hooks/gate-stop.sh` is 291 lines to this branch's
+# 127, parses under /bin/bash 3.2, and avoids the `$( )` nesting with
+# `if [ "$status" = done ] || [ "$status" = archived ]; then continue; fi`
+# rather than with a parenthesised pattern. So the merge should take main's file
+# and NOT carry this change's `(done|archived)` across. What main still needs
+# from here is change 065's tree resolution: main's line 47 is
+# `cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0`, and that is the copy every session
+# on this machine actually runs.
+
+contract:
+  three-gates: "machine passed fmt silent, 491 passed 0 failed 6 ignored, clippy silent, measured on the tree committed as 2c238dc"
+  the-excuse-is-removed: "machine passed KNOWN_UNPARSED_UNDER_BASH_3_2 is `[(&str, &str); 0] = []`, and every_shell_script_parses_under_the_oldest_shell_its_shebang_finds is green with it empty — the reader that fails on a listed script which has started parsing is what forced the removal, exactly as this line predicted"
+  the-hook-still-does-its-job: "human passed the_stop_gate_reads_the_tree_the_session_is_working_in runs the hook under /bin/bash against a fixture holding an open `machine pending` item and asserts the refusal names that item — reporting a contract, not merely parsing. Also watched by hand from this worktree: exit 2, naming changes 035, 040, 041, 054, 055, 061 and 065"

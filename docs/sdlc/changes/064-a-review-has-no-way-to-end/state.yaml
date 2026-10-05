@@ -1,0 +1,61 @@
+# The state of change 064. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 064 rather than 062 or 063 because both of those numbers are already
+# spoken for in change 060's record — 062 holds four carried items and 063 the
+# user-visible notice — and a number that means two things in the same record is
+# how a carried item gets lost.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. The review loop has a ceiling, a printed counter, and one exit
+  that is not another round. What is NOT closed, and is the next thing to open:
+  scripts/check-review.sh names three guards that exist nowhere in src/ —
+  the_review_gate_has_no_bypass at :45, the one about risk.yaml surfaces at
+  :229, and the one about REVIEW.md's reviewer table at :230. So the gate's own
+  no-bypass claim is unheld and the three-way agreement between risk.yaml, the
+  script's reviewer_for_surface and REVIEW.md's table is unguarded. That is
+  lesson 037's shape inside the review gate itself and it needs a change of its
+  own. Also still open from 060: changes 062 and 063, and mutations.py's own
+  checkout with the CARGO_TARGET_DIR question decided in its spec."
+
+# `machine` items only where a command decides it. The mutation item is `human`
+# because watching a guard fail is an observation, not a command's exit code.
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 488 passed 0
+    failed 6 ignored, clippy exit 0 and silent past the compile lines"
+  bands: "machine passed bash scripts/check-bands.sh exit 0, the same two at
+    warn and the same tiers. steering_bytes moved 242312 to 250882 and that is
+    this change's — REVIEW.md gained the nit rule and the reviewer-liveness
+    rule, lessons.md gained 038, and the sdlc skill gained a paragraph. Still
+    inside the warn tier, which tops out at 264000. Recorded rather than
+    trimmed: cutting the rule that stops the loop in order to pass the band
+    that measures rules would be correcting a gate to pass it"
+  ceiling-refuses: "machine passed
+    a_review_past_its_round_ceiling_lands_by_carrying_its_nits drives
+    scripts/check-review.sh over a fixture repository with its own routes.yaml.
+    rounds 5 against a ceiling of 2 with no carried: block exits 1 and names
+    both numbers; the same record with carried: exits 0 and prints
+    `round 5 of 2`"
+  routes-parse-six: "machine passed
+    every_route_the_pipeline_offers_names_stages_that_exist now requires six
+    values and parses the ceiling as an integer >= 1, for the reason the
+    attempts ceiling beside it is already checked: the numbers read as
+    decoration and a number is the only thing that ever stops a loop"
+  guards-verified-by-mutation: "human passed four mutations run against
+    scripts/check-review.sh, each watched failing: the ceiling never refusing
+    (`if false`), the ceiling refusing even when the nits are carried (the exit
+    removed), the count never printed, and the route's ceiling replaced by a
+    permanently generous one. All four red. The fixture itself needed a finding
+    first — with GIT_DIR and GIT_WORK_TREE inherited by the bash child, every
+    git call inside the gate read the real checkout and the guard reported on
+    change 061; INHERITED_REPOSITORY_POINTERS is dropped now"

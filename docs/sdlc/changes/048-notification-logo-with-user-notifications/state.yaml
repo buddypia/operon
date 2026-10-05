@@ -1,0 +1,12 @@
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 3"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Done. Native UserNotifications dispatch implemented, gated, tested, packaged, and installed into /Applications/Operon.app."

@@ -1,0 +1,9 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The plan tightens the Stop gate (it reports more, and fails closed with no
+# main), and gate-configuration starts demoted to a person. The evaluator, a
+# fresh subagent, judged it tightening and within the plan; the person's own
+# words — the follow-up to 081 they told the session to take, and the landing
+# they asked for — are the reason on the person line.
+2026-09-26T04:00:00Z auto plan plan.md 4e207dcb1f57c9f6 approve evaluator: fixes both defects in the bug report; every hook change makes the gate report more or fail closed; the diff does no more than the plan
+2026-09-26T04:00:00Z person gate-configuration plan.md 4e207dcb1f57c9f6 approve owner: 進めて (081 follow-up); 残りworktreeも…mainに必要ならマージ…してからクリーンアップして

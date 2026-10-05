@@ -1,0 +1,41 @@
+# Round 1, digest c9e6cfe57e7eb364, both reviewers asked 2026-09-26.
+#
+# rust-reviewer: approve-with-nits 0 5.
+# subprocess-safety-reviewer: do-not-approve 1 3. Important: the Japanese
+# check tested for any non-ASCII byte, so the ` · ` in every carried id, or an
+# em dash, let a pasted English reviewer line pass as the person's. Taken:
+# JAPANESE_LEAD_BYTES (kana and kanji lead bytes), and that case in the test,
+# watched red on the old check.
+#
+# Round 2, digest c99640f14da80aa2, both asked again 2026-09-26.
+#
+# rust-reviewer: approve-with-nits 0 4 (its nit 2, the same defect, resolved).
+# subprocess-safety-reviewer: approve-with-nits 0 3, Important resolved,
+# checked with the system BSD grep under LC_ALL=C.
+#
+# All remaining nits carried, not taken, per REVIEW.md, each with its line
+# for a person.
+
+digest: "c99640f14da80aa2"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · scripts/check-review.sh cut -c counts bytes when the hook runs without a UTF-8 locale; 200 bytes is about 66 Japanese characters, and the end of the person line (whether to act) is what gets cut
+    person: "長い説明は画面で終わりの方が切れることがあり、「対応が要るか」が読めなくなる場合があります。今は急ぎの対応は要りません。"
+  - rust-reviewer/3 · scripts/check-review.sh awk recognises only a double-quoted person line; an unquoted or single-quoted one is reported missing
+    person: "説明を書いたのに「説明がありません」と言われることがあり、引用符で囲めば通ります。対応は要りません。"
+  - rust-reviewer/4 · scripts/check-review.sh the ${person:-$raw} fallback cannot run, since the refusal fires first under the same condition; a record from before this rule would be refused if judged again, not shown
+    person: "昔の変更の記録が万一もう一度検査されると、説明が無いという理由で止められます。通常の作業では起きないので、対応は要りません。"
+  - rust-reviewer/5 · src/tests.rs the new test copies about 70 lines of fixture from the round-ceiling test; one helper would keep them from drifting
+    person: "同じ準備の手順が2つのテストに複写されていて、片方だけ直すともう片方が無関係に失敗しうる状態です。対応は要りません。"
+  - subprocess-safety-reviewer/1 · scripts/check-review.sh:652 an item written "  -  · text" has an empty id and is skipped; check raw instead of id
+    person: "箇条書きの書き方が少しずれると、説明の無い指摘が止められずに通ることがあります。普段どおりに書けば起きず、対応は要りません。"
+  - subprocess-safety-reviewer/2 · scripts/check-review.sh:71 the word list refuses ordinary English such as round-trip and lets katakana spellings through
+    person: "普通の英語の言葉が入っているだけで説明がはじかれることがありますが、言い換えれば通ります。対応は要りません。"
+  - subprocess-safety-reviewer/3 · src/tests.rs the new test clears only two repository variables (forget_inherited_repository clears six) and its children have no timeout
+    person: "git の処理の途中からテストを動かすと、練習用ではなく本物の作業場を見たり、止まったままになったりしえます。今の使い方では起きず、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

@@ -1,0 +1,19 @@
+# Round 4, digest b13b358f9c17682f, rust-reviewer asked 2026-09-29.
+#
+# rust-reviewer: approve-with-nits 0 1. Rounds 1-3 each found a way past a
+# fence (sed's own w command, abbreviated long options, a newline kept inside
+# quotes, rg's other program-running routes) and each was fixed; rg left the
+# list. The Rust is unchanged across rounds and correct. An adversarial
+# subprocess-safety pass was started and stopped by a usage limit; its bypass
+# list was run by hand instead (.tmp/bypass.mjs, 57 refused, 5 allowed).
+
+digest: "b13b358f9c17682f"
+
+rounds: 4
+
+carried:
+  - rust-reviewer/4 · .claude/config/worktree-policy.json git cat-file --t is still an unambiguous abbreviation of --textconv and is allowed; the driver it runs comes from git config, the same exposure git show and git diff already have
+    person: "main で git cat-file に省略形のオプションを付けると、このリポジトリの git 設定に書かれた変換プログラムが動くことがあります。git show や git diff でも同じことが起き、設定は自分で書いたものなので、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"

@@ -1,0 +1,27 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Landed on main, verified with cargo test and check-review, packaged to dist/Operon.app, and installed to /Applications/Operon.app."
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 561 passed 0 failed 6 ignored, clippy silent"
+  bands: "machine waived bash scripts/check-bands.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human waived no mutation guards touched by this change"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -1,0 +1,7 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+2026-09-27T10:54:46Z person intent intent.md c63dd3a2e58ecf55 approve owner answered 全項目 OK、進めて to the Before/After section ③ row 2, and 続けて after 091 and 092
+2026-09-27T10:54:46Z person screen screen.md a2a0e04eb745a8e6 approve owner approved the rendered view-projects-after.html; screen.md is its tab row
+2026-09-27T10:54:58Z auto screen screen.md a2a0e04eb745a8e6 approve evaluator round 2: accent only on a nonzero count, req 8 matched to the tables, project-B and emphasis and orphaned-sentence tests added
+2026-09-27T10:54:58Z auto spec spec.md d6c3454b5a62732d approve evaluator round 2: accent only on a nonzero count, req 8 matched to the tables, project-B and emphasis and orphaned-sentence tests added
+2026-09-27T10:54:58Z auto plan plan.md 16caaedbd6288d9b approve evaluator round 2: accent only on a nonzero count, req 8 matched to the tables, project-B and emphasis and orphaned-sentence tests added
+2026-09-27T10:56:04Z auto spec spec.md 3ede87fa02de9404 approve evaluator round 2, re-recorded: req 4 signature spelled out across lines so the readiness check stops reading it as a placeholder; content unchanged

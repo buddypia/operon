@@ -1,0 +1,23 @@
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Change completed and verified; installed to /Applications/Operon.app"
+
+machine:
+  - "bash scripts/check-readiness.sh docs/sdlc/changes/042-cli-launch-progress-modal"
+  - "cargo fmt --check"
+  - "cargo test --locked"
+  - "cargo clippy --locked -- -D warnings"
+
+human:
+  - "Launch an agent session from a project folder and observe the progress modal with folder path, agent, and elapsed time"
+  - "Verify modal dismissal allows background launch and seamless terminal switch upon completion"
+  - "Trigger a launch failure (e.g. missing tool) and verify clear error presentation with actions"

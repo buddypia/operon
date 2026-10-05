@@ -1,0 +1,150 @@
+# Control bands for the harness metrics. Stage 6 of the pipeline in
+# docs/sdlc/README.md.
+#
+# `scripts/check-bands.sh` reads this file, runs `scripts/harness-metrics.sh`,
+# and names the tier of any breach. `the_control_bands_only_name_metrics_the_
+# metrics_script_emits` in src/tests.rs fails if a key here has no metric behind
+# it — a band watching a number nobody prints is a band that never fires.
+#
+# Each value is a positional tuple, not a mapping, because the checker parses
+# this file with awk rather than a YAML library and a flat file is a file that
+# cannot drift from its parser:
+#
+#   <direction> <baseline> <warn> <diagnose> <propose>
+#
+#   direction  max = breach when the value rises to a threshold
+#              min = breach when the value falls to a threshold
+#   baseline   the reading when this band was set; documentation, not a threshold
+#   warn       recorded, no action
+#   diagnose   read-only investigation: what moved, and when
+#   propose    write an intent.md and re-enter the pipeline at stage 1
+#
+# The highest tier whose threshold is met wins, so equal thresholds mean a single
+# boundary: `max 2 3 3 3` sends the first new occurrence straight to propose.
+#
+# These are deterministic counters, not a noisy production signal, so the tiers
+# are explicit thresholds rather than standard deviations. `unwrapped_spawns` has
+# no distribution; it has a value, and 2 → 3 means something specific happened.
+
+metrics:
+  # What an agent pays before it reads a line of code. CLAUDE.md and AGENTS.md
+  # load on every turn, so this is a tax on every task in the repository.
+  always_loaded_bytes: "max 9716 11000 13000 16000"
+  #
+  # steering_bytes was re-based on 2026-09-19 by change 030, and the order of
+  # operations is the whole argument for it. This file's own rule is that
+  # correcting a gate in order to pass it is the wrong way round, so the cut
+  # came first and the reading came after: eighteen lessons were compressed to
+  # their rule and their guard, the number fell from 208450 to 192427, and only
+  # then was the baseline read off the tree. 91262 was taken before the pipeline
+  # had five skills, four subagent briefs, six routes and their templates, and
+  # twenty-four lessons — it was a measurement of a smaller machine, and holding
+  # it meant the band fired on the machine existing rather than on it growing.
+  #
+  # The tiers keep the ratios the band was designed with rather than being
+  # chosen: warn is baseline x1.15, diagnose x1.37, propose x1.64, the same
+  # spacing 105000/125000/150000 had against 91262. So the band moved once, and
+  # its shape did not move at all.
+  #
+  # Every figure below is measured at a commit and says which, because this
+  # paragraph has been wrong twice and both times for the same reason: numbers
+  # quoted without the convention or the moment that produced them. The first
+  # draft argued from three different per-entry rates — 6.4 KB in one sentence,
+  # then 4300 (a rounding of the whole reading's move) and 5.5 KB ((79452 -
+  # 35770) / 8, the average over eight entries rather than the six newest) in
+  # the arithmetic. The second fixed the rate and then went stale, because it
+  # quoted the reading "now" for a file this same change was still editing. A
+  # reader who re-derives has to land on these numbers or the paragraph is
+  # decoration, so: `git show <commit>:<path> | wc -c`, and spans between `## NNN`
+  # headings measured heading-to-heading, separator included.
+  #
+  # What the cut does NOT excuse: it did not bring the old tier within reach and
+  # this file does not pretend it did. At 192427 — the reading this baseline was
+  # taken from — docs/sdlc/lessons.md was 63429 of it, and at commit 1587900
+  # entries 019-024 are 38703 across six, 6450 bytes an entry against about 1700
+  # under the table format they replaced. At that rate the new propose tier is
+  # (316000 - 196703) / 6450, about eighteen entries away. If it is reached by
+  # lessons alone the answer is not another re-base: it is that the format is
+  # the cost, which is change 030's finding and is written down there.
+  #
+  # Demonstrated within the same change, which is why it is recorded rather than
+  # argued. At commit 1587900, writing this change's own lesson entry took the
+  # reading from 192427 to 196703: that 4276 is 3866 in docs/sdlc/lessons.md and
+  # 410 in docs/sdlc/templates/intent.md, which steering_bytes also counts
+  # (scripts/harness-metrics.sh:55-57) — the cost of the change, not the cost of
+  # an entry. The 3866 is entry 025 with the `---` separating it from 024, the
+  # same convention as the 38703; quoting the entry's own 3860 instead is where
+  # the second draft lost six bytes and stopped adding up.
+  #
+  # And it kept moving after that, which is the part worth stating rather than
+  # hiding: three rounds of review added to entry 025, and the commit carrying
+  # this paragraph takes the entry to 7454, docs/sdlc/lessons.md to 70889, and
+  # the reading to 200297 — 7870 above the baseline, which is 7460 for the entry
+  # with its separator and 410 for templates/intent.md, so the entry is all but
+  # a twentieth of it. An entry about the cost of entries is now the most
+  # expensive in the file, and that is not an irony to note and move past.
+  # The format costs about 6450 bytes to say a thing once, so the next re-base
+  # is bought by changing the format, not the number. The baseline stays at
+  # 192427 regardless: it documents the reading when the band was set, and a
+  # baseline edited to match today is not a baseline.
+  steering_bytes: "max 192427 221000 264000 316000"
+
+  # What an agent pays only when it opens a file the rule governs. A separate
+  # number from steering_bytes on purpose: it is a different kind of cost, and
+  # folding the two together would collapse the distinction .claude/rules/
+  # exists to create. The ceiling is generous but real — an unbounded rules
+  # directory does not reduce bloat, it relocates it.
+  conditional_steering_bytes: "max 10235 20000 30000 45000"
+
+  # A third tier: read only if a skill reaches for it. Cheapest place for detail,
+  # which is exactly why it needs a ceiling — an unbounded references/ directory
+  # is where prose goes to escape being measured.
+  reference_bytes: "max 11637 22000 33000 50000"
+
+  # What the gates cover. Falling is the interesting direction: a test removed or
+  # ignored shrinks CI coverage without shrinking the file.
+  tests_in_ci: "min 271 270 264 255"
+  invariant_tests: "min 15 14 12 10"
+  tests_ignored: "max 6 7 8 10"
+
+  # How large a thing has to be held in mind at once. src/app.rs is the module
+  # that keeps growing; past ~10 000 lines it stops fitting in a review.
+  largest_module_lines: "max 8162 8800 9400 10000"
+  modules: "max 19 24 28 34"
+
+  # The surfaces where a mistake is unrecoverable rather than merely wrong. A
+  # fourth unsafe block goes straight to propose. The reading is three: the three
+  # with a `// SAFETY:` argument (src/main.rs, src/store.rs, and src/sys.rs).
+  # Re-based to baseline 3.
+  unsafe_blocks: "max 3 4 5 6"
+  unwrapped_spawns: "max 2 3 4 6"
+  subprocess_sites: "max 29 36 44 56"
+
+  # How often an automatic approval let a defect through (sdlc 082). Each one
+  # already demotes its kind of approval back to a person; the band is what says
+  # the evaluator, rather than one artifact, is the problem. `auto_approvals` is
+  # the denominator and has no band; `demoted_categories` starts at the paused
+  # surfaces by design, so its level says nothing a threshold could.
+  approval_escapes: "max 0 1 2 3"
+
+  # The pipeline's own machinery, watched in the falling direction. A hook, a
+  # gated command, or an eval disappearing is the failure nothing else notices:
+  # the repository keeps describing a mechanism that is no longer wired.
+  hooks: "min 5 4 3 2"
+  gated_commands: "min 6 5 4 3"
+  evals: "min 6 5 4 3"
+  skills: "min 4 3 2 1"
+  subagents: "min 3 2 1 1"
+  # A rule disappearing is a policy that stopped arriving when the file it
+  # governs is opened, and a route disappearing is a kind of request that lost
+  # the stages that were mandatory for it. Both read, from the file listing,
+  # exactly like nothing.
+  rules: "min 4 3 2 1"
+  routes: "min 6 5 4 3"
+  # Surfaces that decide autonomy. Falling means a surface stopped classifying
+  # anything, and a change touching it would silently take full autonomy.
+  risk_surfaces: "min 10 9 7 5"
+
+  # What the pipeline costs in wall-clock. gate_seconds is only measured with
+  # `scripts/harness-metrics.sh --gates`; it is skipped otherwise.
+  gate_seconds: "max 0 150 240 420"

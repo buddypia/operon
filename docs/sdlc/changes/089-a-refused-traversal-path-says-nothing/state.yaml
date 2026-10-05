@@ -1,0 +1,33 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. On main, test_open_terminal_target_out_of_boundary_sets_notice and
+#    test_open_terminal_target_external_error_handling fail: a terminal path
+#    that climbs out of the root ("../x") is refused by the early return in
+#    resolve_session_terminal_file with no notice, so a click on it does
+#    nothing visible. Found while running the gates for change 088; watched
+#    failing on an export of main (git archive main) before any fix.
+# 2. Cause: df0cd72 added the traversal early return ahead of the lookup and
+#    gave it no notice; R1.4 (tests.rs) requires 「…はこのプロジェクトの外にあります。」.
+# 3. test_terminal_session_file_resolution_separation (c546a25) resolved a
+#    traversal and then asserted no notice was left, which only held because of
+#    the bug; it now asserts the notice and clears it.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. The textual .. check that can misname a file like ..env.bak is carried in review.yaml."
+
+contract:
+  three-gates: "machine passed cargo fmt --check, cargo test --locked (630 passed, 6 ignored), clippy clean on the tree carrying 088 and 089"
+  failing-test-first: "machine passed both tests watched failing on git archive main before the fix"
+  release-binary: "machine passed shipped in the 6261621 package installed at /Applications/Operon.app"

@@ -1,0 +1,35 @@
+# Review record for 102.
+#
+# Round 1: subprocess-safety-reviewer, at digest e4b11a6a553b6b7b. It found every
+# renamed identifier, path, environment variable and file name changed together
+# at its producer and its consumer, no collision with the new names, the ignore
+# entries still covering the runtime state directory, and no change to a
+# Command::new, unsafe or exit value. One Important: the bundle receipt kept the
+# old sha256 for about 33 managed files the scrub edited. Two of its nits were
+# fixed (a comment in layout-resolver.mjs, the receipt note wording); two were
+# not and are carried.
+#
+# Round 2, at digest dd1d2a6ca51656af: the receipt's hashes were refreshed for the
+# entries that matched their HEAD content, and every managed entry now matches the
+# tree except the seven that already mismatched at HEAD and were left alone. The
+# JSON is valid, no field was added or dropped, and the rest of the diff is
+# renames and comments. No new finding.
+#
+# Nit 1 carried: the closed records of changes 051 and 073 say a staleness tool
+# "reports current". That tool is not in this tree, under either name.
+# Nit 2 carried: environment variables set outside the repository under the old
+# names stop taking effect, and an old state directory left in another checkout
+# shows as untracked there.
+
+digest: "dd1d2a6ca51656af"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1 · docs/sdlc/changes/051 and 073 records say a bundle-staleness tool "reports current", but that tool is not in this tree under either name
+    person: "過去の変更記録に、この repository にないチェック用ツールの結果が書かれています。記録の説明だけの問題で、動作に影響しません。対応は不要です。"
+  - subprocess-safety-reviewer/2 · environment variables set outside the repository under the old names stop taking effect under their new HARNESS_ names, and an old state directory left in another checkout shows as untracked there
+    person: "この repository の外で古い名前の環境変数を設定していた場合、新しい名前に付け替えるまで効きません。この repository の中では使っていないので、対応は不要です。"
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

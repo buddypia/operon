@@ -1,0 +1,20 @@
+# Round 1, digest c828aa08c0aaac1d, rust-reviewer asked 2026-09-26.
+#
+# rust-reviewer: approve-with-nits 0 2. The branch pattern admits nothing
+# destructive: case-sensitive, nothing appended to -d, (?!-) refuses a flag in
+# any later position, the trailing \s*$ refuses a redirect, no ReDoS. The
+# REVIEW.md sentence does not get round the ceiling for the change's own
+# content. Could not run check-review.sh from its session (trunk allowlist).
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "c828aa08c0aaac1d"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · .claude/config/worktree-policy.json:47 git merge --abort may not restore uncommitted changes that were in the trunk checkout before the merge; allow it only on a tree that was clean, or say so in the test comment
+  - rust-reviewer/2 · REVIEW.md:73-75 "and what it forces" is open-ended and applied only by the session; narrow it to renames and renumbering, or tie it to a mechanical check such as an unchanged range-diff of the change's own commits
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

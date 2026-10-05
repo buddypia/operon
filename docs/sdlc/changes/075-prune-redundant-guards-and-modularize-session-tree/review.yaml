@@ -1,0 +1,19 @@
+# Review record for change 075.
+#
+# Round 1: implementer_r1 implemented R1 (worktree policy allowlist, deleted
+# redundant hooks) and R2 (session tree modularization).
+#
+# Round 2: reviewer_r1 added .agents/** to tier1_main_allowed.patterns and added
+# unit tests for trash vs unlisted commands, and adversarial layout boundaries.
+#
+# Round 3: reviewer_r2 and reviewer_r3 cleaned dead hook references in .codex/hooks.json,
+# validated hook-registry.mjs, and added IEEE-754 non-finite float boundary tests.
+# All 580 tests passed, cargo clippy passed with 0 warnings, cargo fmt passed with 0 diffs.
+
+digest: "4ba58761d6a31d96"
+
+rounds: 2
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

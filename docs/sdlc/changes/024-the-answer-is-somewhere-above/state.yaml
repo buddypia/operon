@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "3 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Search a long scrollback in the running app and confirm nothing reaches the agent; then have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session"
+  guards-verified-by-mutation: "human passed five watched failing: a CJK character counted as one column, only the first occurrence on a line, case-sensitive matching, an empty query matching everything, the match ceiling removed"
+  screen-agreed: "human passed a find bar under the pane was chosen over searching from the palette"
+  real-session-check: "human pending search a long scrollback in the running app, step through matches, and confirm nothing reaches the agent"

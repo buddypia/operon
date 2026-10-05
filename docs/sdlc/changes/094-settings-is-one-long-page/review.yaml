@@ -1,0 +1,19 @@
+# Round 2, digest 133aaec201de86dd, rust-reviewer asked 2026-09-27.
+#
+# Round 1 (digest da8b328d3fdb09a4): rust-reviewer approve-with-nits, no
+# Important, three nits. Nit 1 — the hook state was cloned per frame for the
+# three agent rows — was taken: the row now borrows it. Nits 2 and 3 are
+# recorded in plan.md Departures and carried. Round 2: approve.
+
+digest: "133aaec201de86dd"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/2 · src/app/screens.rs the hook word is not in one column across the three agent rows
+    person: "エージェントの行で「フック …」の位置が行ごとに少しずれます。アカウント数を出すのが Codex と Claude だけだからです。見た目だけの違いで、対応は要りません。"
+  - rust-reviewer/3 · src/ui/widgets.rs a not-installed hook's reason is shown only on hover
+    person: "フックが「未導入」のとき、その理由はマウスを重ねたときだけ表示されます。導入に失敗したときは今までどおり通知が出ます。対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"

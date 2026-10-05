@@ -1,0 +1,67 @@
+# Change 064 — the review record. Shape: docs/sdlc/templates/review.yaml, which
+# this change wrote, because until now the shape lived only inside the parser.
+#
+# WHY A REVIEWER AT ALL on a change that touches no risk surface: the new guard
+# builds a fixture repository and drives `scripts/check-review.sh` through
+# `Command::new("bash")` with `.output()`. The gate's `spawns_or_unsafe` trigger
+# reads added lines rather than paths, so it pulled subprocess-safety-reviewer
+# in from `src/tests.rs`. That is the trigger working — the seven `Command::new`
+# call sites outside the `subprocess` surface are why it reads the diff and not
+# only the file list.
+#
+# ONE ROUND, by construction and not by luck. The reviewer was told in the
+# prompt: this is the only round, Important findings alone are actionable, a nit
+# is reported as a carry candidate and will not be fixed here, and do not write
+# to the working tree. That is this change's own rule applied to this change,
+# which is the least it could do.
+#
+# WHAT WAS ASKED, because a reviewer given four named questions answers better
+# than one given a diff:
+#
+#   1. Is dropping INHERITED_REPOSITORY_POINTERS from the bash child enough?
+#   2. Can `.output()` hang here?
+#   3. Is there a path that writes into the real repository?
+#   4. Is the shell correct under `set -uo pipefail` — specifically the
+#      initialisation of `rounds`/`carried`/`round_ceiling` and the range
+#      expression that extracts `carried:`?
+#
+# WHAT CAME BACK. All four clear, and two of the answers are worth keeping:
+#
+#   - The fixture is guarded twice over, not once. The bash child drops the two
+#     pointers explicitly, and `run_git` goes through `git_command()`, which
+#     drops the same two from the same constant. So the case where one is fixed
+#     and the other is not cannot sit there green.
+#   - `.output()` cannot hang: the gate reads nothing from fd 0, its stdout is
+#     captured so git starts no pager, and Rust's `Command::output()` gives the
+#     child an immediately-EOF stdin. The reviewer's first measurement of this
+#     APPEARED to hang, under a `timeout` wrapper; they re-ran it as a
+#     background job without the wrapper and it returned at once, and reported
+#     the artefact rather than the first reading. That is the correct handling
+#     of a measurement that disagrees with the code.
+#   - Raw `.output()` in tests is this repository's standing policy, not an
+#     oversight: `scripts/harness-metrics.sh:106-111` excludes `tests.rs` from
+#     `unwrapped_spawns` with the reason in its own comment — the suite drives
+#     its own children on purpose. Recorded so the next reviewer does not raise
+#     it as a finding.
+#
+# THE FINDING THIS CHANGE FOUND IN ITSELF, before review: the guard was red on
+# its first run and reported on change 061 — a directory that exists only in the
+# checkout this session runs from. This session exports GIT_DIR and
+# GIT_WORK_TREE, the bash child inherited them, and every `git` call inside the
+# gate read the real repository straight past the fixture. Change 057 is the
+# same defect one layer up.
+#
+# Measured at 2811af30dbdfc268:
+#   cargo fmt --check                     silent
+#   cargo test --locked                   488 passed; 0 failed; 6 ignored
+#   cargo clippy --locked -- -D warnings  exit 0, silent past the compile lines
+#   bash scripts/check-bands.sh           exit 0, the same 2 of 20 at warn
+#   pipeline-indicators.sh --lessons      38 of 38
+#   four mutations on the ceiling         all four watched failing
+digest: "2811af30dbdfc268"
+
+# The first change to carry this field. One round, which is the point.
+rounds: 1
+
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

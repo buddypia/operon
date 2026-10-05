@@ -1,0 +1,20 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Shipped. Five nits are recorded in review.yaml; the two behavioural ones — a worktree made inside the project directory is treated as project-rooted, and invalidate_open_editor_diff not reading project_rooted — are follow-up work, not this change."
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent, cargo test --locked 455 passed 0 failed 6 ignored, cargo clippy --locked --all-targets -- -D warnings silent"
+  bands: "machine waived steering_bytes was at propose before this change began and this change added none of it; the other 19 metrics are inside their bands. Change 030 owns the reduction"
+  guards-verified-by-mutation: "human passed fourteen watched failing: seven from the build, and seven more from the review fixes — the diff view offered again, the view staying where it cannot draw, every document counting as the project's, the badge decided from the wrong root, the project path compared unnormalised, a split chain joining root to path, and the same join on one line"
+  screen-agreed: "human passed a branch badge on the tab, drawn only for a document that is not rooted at the project"
+  real-machine-check: "human pending click a path in a worktree session, edit, save, and confirm the project's copy is untouched"
+  review: "machine passed rust-reviewer returned approve-with-nits on diff c833b921b754dc71 — 0 Important, 5 nits, recorded in review.yaml"

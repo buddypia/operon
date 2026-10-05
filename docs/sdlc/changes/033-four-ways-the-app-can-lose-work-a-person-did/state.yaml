@@ -1,0 +1,18 @@
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Stage a hunk with git add -p in a terminal pane, then press コミット, and confirm it refuses by name instead of flattening the selection."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — cargo fmt --check silent, cargo test --locked 431 passed 0 failed 6 ignored, cargo clippy --locked -- -D warnings silent. The earlier waiver is superseded: session operon-ef wired scripts/check-release-preconditions.sh, the shared tree went green, and the hook let the commit through on its own"
+  bands: "machine waived steering_bytes was at propose before this change began and this change added none of it; the other 19 metrics are inside their bands. Change 030 owns the reduction"
+  guards-verified-by-mutation: "human passed nine watched failing: the reset status back on the floor, a hunk selection overwritten, the partial check widened to any staged file, the unreadable notes file left in place, an empty file rescued as if it held notes, the busy question forgetting the draft key, the busy question ignoring the project, the draft button gated on one key again, and a README bullet written twice"
+  review-answered: "human pending the four work-losing findings closed; the other twelve recorded in ./remaining.md"

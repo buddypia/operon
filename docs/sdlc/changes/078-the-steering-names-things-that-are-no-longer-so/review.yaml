@@ -1,0 +1,49 @@
+# Round 1: subprocess-safety-reviewer (ssr-078), asked 2026-09-25 at digest
+# 3cc01b4271156fa7. do-not-approve, 2 Important, 5 nits.
+#
+# Important 1 — .claude/settings.json: `Skill(create-pr)` is an exact match, so
+# an invocation with arguments (`/create-pr ship-worktree`, the form the
+# commit and destructive-git guards' refusal text recommends) may not be
+# denied. Taken after the person approved it ("進めて", answering the
+# recommended option): the deny now lists `Skill(create-pr)` and
+# `Skill(create-pr *)`.
+#
+# Important 2 — docs/sdlc/bands.yaml still said "there are two, both
+# explained" while this change points rust.md and risk.yaml at the band, and
+# the reading (3) already sits at propose, so "growth past its band" was
+# false. Taken: the band comment now names the three blocks and that
+# src/sys.rs has no SAFETY argument; rust.md and risk.yaml say the band sits at
+# propose rather than that growth sends it there. No baseline moved: re-basing
+# a band is the person's call (change 030).
+#
+# Nit 1 was taken in the same round, against REVIEW.md's default, because it is
+# the exception REVIEW.md names: the new sys.rs paragraph would have told a
+# reviewer to free the Box::leak'ed completion block before the pool pop, which
+# is a use-after-free — prose that misleads into a wrong code edit. The
+# paragraph now states the invariant as "no autoreleased reference used after
+# the pop", names the leaked block as the deliberate exception, and says the
+# sys.rs call has no SAFETY argument yet.
+#
+# Nit 4 is partly absorbed: risk.yaml:39-42 was rewrapped because the
+# Important 2 edit rewrote those lines.
+
+#
+# Round 2: same reviewer by SendMessage, digest 16ff6651779c27a4.
+# approve-with-nits 0 5 — both Importants and nit 1 confirmed resolved. One
+# new nit (the sys.rs `unsafe` call is not "at the end of the file"; name the
+# function instead) is carried, not taken, per REVIEW.md.
+
+digest: "16ff6651779c27a4"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/2 · commit-guard.mjs:367,394 and destructive-git-guard.mjs:128,729 still recommend the create-pr skill this change denies — a dead-end instruction
+  - subprocess-safety-reviewer/3 · .github/workflows/claude-review.yml:76 "and which changes a human must look at" is the same stale reference the change fixed elsewhere
+  - subprocess-safety-reviewer/4 · docs/sdlc/risk.yaml:4 rewritten comment runs past 80 columns
+  - subprocess-safety-reviewer/5 · docs/sdlc/README.md:282 counts worktree-owner-tracker.mjs among "six guards" though it records rather than guards
+
+  - subprocess-safety-reviewer/6 · .claude/agents/subprocess-safety-reviewer.md:70 says the sys.rs `unsafe` call is "at the end of the file"; it is at 269 of 350 — name `dispatch_macos_notification_native` instead
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 5"

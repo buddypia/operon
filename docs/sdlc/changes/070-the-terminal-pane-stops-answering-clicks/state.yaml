@@ -1,0 +1,22 @@
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed as a97aaa2. Nothing outstanding in this change"
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh passed on
+    a97aaa2: fmt silent, 547 passed 0 failed 6 ignored, clippy silent"
+  guards-verified-by-mutation: "human passed a_full_terminal_pane_still_answers_a_click
+    watched failing on main's two files (a click on a terminal that has filled
+    up left the keyboard nowhere) and passing with the id_salt lines and the
+    named terminal_id"
+  release-binary: "machine pending src/ui/terminal.rs and src/app/screens.rs
+    change, so /Applications/Operon.app is stale until repackaged"

@@ -1,0 +1,43 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): three times in one session a
+# step that is undone by construction was handed to the person as a command to
+# type — `git branch -d feature/prompt-audit` (a merged branch), and
+# `git merge --abort` (a stalled merge on main) — because the trunk allowlist
+# does not list them; and a re-verdict made necessary only by main moving
+# under a reviewed branch was escalated as "past the round ceiling". The
+# person (2026-09-26): "判断基準は判断が覆った時に致命的なリスクが高いかが基準
+# になる。gitコマンドとか俺に指示しないようにどこかのメカニズムを直して".
+#
+# Named cause: `.claude/config/worktree-policy.json#trunk_bash_allowlist`
+# admits the landing merge but not its own undo, and admits no branch
+# deletion, though `git branch -d` refuses an unmerged branch; and REVIEW.md's
+# round ceiling counts every return to a reviewer, including one no finding
+# caused. Nothing in AGENTS.md says when a person is the one to ask.
+#
+# Risk: the allowlist is what the gates permit on trunk (treated as the
+# gate-configuration tier, high). The person's message is the answer that tier
+# asks for, and each addition is itself undoable.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed once main is free of the stalled merge. What outlived it: two carried nits; narrowing the re-verdict exemption to something mechanical is the one worth a follow-up."
+
+contract:
+  reviewed: "human passed rust-reviewer approve-with-nits 0 2 at digest c828aa08c0aaac1d"
+  three-gates: "machine passed fmt silent, 604 passed 0 failed 6 ignored, clippy silent"
+  failing-test-first: "machine passed on the unedited policy the test failed at git merge --abort, denied; passes after"
+  bands: "machine waived always_loaded_bytes moves 11999 to 12313 by the AGENTS.md line, still at warn (recorded, no action); steering_bytes at diagnose and unsafe_blocks at propose as on main"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], and the rest is .claude/config and docs"
+  guards-verified-by-mutation: "machine passed six mutations each red: each pattern removed, the branch pattern widened to -D and to flags, each sentence weakened"
+  lesson-recorded: "machine passed entry 051 in docs/sdlc/lessons.md with its Guard"

@@ -1,0 +1,5 @@
+2026-10-04T11:36:48Z auto intent intent.md fd2d60372562be82 approve evaluator: hazards verified against code and grounded in quoted 110 promises; recoverable, strengthens protections
+2026-10-04T11:36:48Z auto spec spec.md a0e75d6fe2782b77 approve evaluator: every failed-merge path verified before any restored claim; each of six requirements has a named failing test
+2026-10-04T11:36:48Z auto screen screen.md 33eb7f8ef958dbea approve evaluator: wording-only inside the existing notice bar; all seven spec notices shown; push gating matches ui_push_row
+2026-10-04T11:36:48Z auto plan plan.md 6ceee0f69e58fa54 approve evaluator: nine mutations each map to a failable test; screens.rs and six tests in scope; timeout and hooksPath risks accounted for
+2026-10-04T11:53:14Z auto intent intent.md 7a15ec5d4c9d8c7b approve evaluator: paraphrase of the earlier request keeps meaning and scope; first owner quote and 110 citations intact

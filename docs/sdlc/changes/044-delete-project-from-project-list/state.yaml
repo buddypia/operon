@@ -1,0 +1,17 @@
+state:
+  route: "feature"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Project deletion from projects list view implemented, verified, packaged, and installed."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  guards-verified-by-mutation: "human passed each new guard watched failing"

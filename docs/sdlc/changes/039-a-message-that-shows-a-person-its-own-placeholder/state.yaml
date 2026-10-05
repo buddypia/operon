@@ -1,0 +1,23 @@
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 2"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+# Open questions in intent.md, decided here (no spec.md on the bugfix route):
+# the message names the budget the caller gave (`{timeout:?}` of the Duration,
+# "75ms", "30s"), because that is what the caller chose and what a person can
+# compare against; and a `tf!` with no hole is left alone — it renders
+# correctly, so refusing it would be a rule with no failure behind it.
+resume: "Done. A hole reached through a const table (tr(flag.label)) is outside the source scan; a check from the table side would cover it."
+
+contract:
+  does-not-disturb-035: "machine waived 035's review gate landed through 054 and 042; nothing is mid-review on a fixed digest any more"
+  guard-before-fix: "machine passed no_tr_call_carries_a_placeholder named src/exec.rs and 「コマンドが {timeout:?} でタイムアウトしました」 before the call site was corrected"
+  every-table-gets-the-row: "machine passed the id has a row in EN_TABLE and KO_TABLE; every_message_id_has_a_row_in_every_table and every_translation_keeps_the_placeholder_names_of_its_message_id green"
+  three-gates: "machine passed cargo fmt --check silent, cargo test --locked 664 passed 0 failed 6 ignored, clippy -D warnings silent"

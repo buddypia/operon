@@ -1,0 +1,18 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Create a worktree in the running app from a project sitting on a feature branch, then have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived steering_bytes was already at diagnose; largest_module_lines stays in warn but fell from 8862 to 8837 because this change moved logic out of src/app.rs"
+  guards-verified-by-mutation: "human passed all eight watched failing: symref branch removed, fallback list truncated, HEAD invented, candidate arithmetic off by one, branch check dropped, qualification stripped, base never recorded, push.autoSetupRemote overwritten"
+  real-repository-check: "human pending create a worktree from a project sitting on a feature branch and confirm it starts at origin/main"

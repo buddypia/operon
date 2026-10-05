@@ -1,0 +1,485 @@
+# The state of change 060. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 060 because 059 is the highest committed on any branch in this
+# repository — checked against main and the three other worktree branches
+# through `git ls-tree`, not through their working directories: the Session
+# Owner Guard refuses a read into another worktree, so a change directory that
+# exists there and is not yet committed is invisible from here. Change 059's
+# header names this collision check; this is the first measurement of the hole
+# in it, and the hole is that the only complete answer lives in trees this
+# session is not allowed to look at.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "DONE at round 20, digest 3f5d8372d0bf5448. Both verdicts were re-taken
+  at the landing digest by two reviewers who had not seen this change before:
+  subprocess-safety-reviewer `approve 0 2`, rust-reviewer
+  `approve-with-nits 0 5`. Zero Important. Seven nits, ALL CARRIED and none
+  taken — the list is under `carried:` in review.yaml.
+  WHAT OUTLIVED THIS CHANGE, and it is not the Codex fix. Nineteen rounds, of
+  which the last behaviour change was round 17. Rounds 18 and 19 moved comment
+  prose and one assertion, and each move voided both approvals, because
+  check-review.sh ties every verdict to one digest over every tracked path
+  outside docs/sdlc/changes. So a taken nit destroys the approval it came with
+  and buys another round. Nothing bounded that and nothing forbade it. Change
+  064 is the permanent answer: a nit is never taken in the round it is raised,
+  routes.yaml gains a review-round ceiling beside the attempt ceiling, and
+  check-review.sh prints `round N of M` every run and refuses past the ceiling
+  with exactly one exit that is not another round — carry the nits and land.
+  The other half of the same loop: this session waited days on two reviewer
+  agents that ListAgents no longer knew about, one of which had left a mutation
+  in src/tmux/hooks.rs that was never restored. 064 makes a review request
+  non-blocking and records who is waited on.
+  CARRIED ELSEWHERE: table_header_shape's quote-unaware bracket search, the
+  script's trust_blocks grep, literal/escapes as one bit at five seams, and the
+  key-escaping writer/reader seam all go to 062. The user-visible notice for a
+  document Operon declines to repair goes to 063. mutations.py's own checkout
+  gets a change of its own with the CARGO_TARGET_DIR question decided in its
+  spec. And scripts/check-review.sh names three guards that exist nowhere in
+  src/ — the_review_gate_has_no_bypass, …_names_surfaces_that_risk_yaml_still_has,
+  …_requires_the_reviewers_review_md_names — which is lesson 037's shape in the
+  gate itself and needs its own change.
+  [superseded] Round 19 was staged at digest 3f5d8372d0bf5448, tree
+  left standing there. One nit, one line: the claim round 18 corrected was
+  asserted in two comments and held by nothing, so the discarded return of
+  `install_codex_hooks(…, true)` is bound and asserted empty. Taken rather
+  than carried because the previous version of that claim was false and
+  survived three rounds — shipping it unguarded, out of the round that
+  wrote lesson 037, would be shipping the lesson's counter-example.
+  The verification is the part that matters: a reviewer warned that the
+  new assertion sits above an existing one, so a red could belong to
+  either. Removing the assertion and re-running the same mutation gives
+  `1 passed`, so the guard is the only thing that catches it. 80 of 80
+  mutations, 487 tests, three gates green.
+  BOTH VERDICTS GO STALE ON THIS DIGEST — second firing in two rounds of
+  the thing check-review.sh cannot see. Do not commit on the gate's word.
+  [superseded] Round 18 was staged at a141302e47fc7d74, tree
+  left standing there. Both reviewers approved round 17 with nits and every
+  nit was the same paragraph: the reason for gating the drop loop is stated
+  in three places and each stated it slightly wrong. Two were imprecise (a
+  rule written with no exception for the removal path; the enabling path's
+  reason borrowed for removal) and the third was false — the blocks left
+  behind are NOT cleaned up when the document becomes readable, because
+  `remove_only` returns no keys and the caller stores an empty
+  `codex_trust_keys`, so the call that kept the blocks forgets their names.
+  Verified in the code here before accepting. They stay until hooks are
+  turned back on, and that is acceptable because what remains is inert.
+  The fourth nit was that the decision had no guard: the caveat a reader
+  reaches for first passed the whole suite, because round 17's sequence is
+  enable-only. A remove_only row now pins it, watched failing at
+  `left: 0, right: 2`. No behaviour change in this round. 79 of 79
+  mutations, 487 tests, three gates green.
+  BOTH VERDICTS ARE APPROVALS GIVEN AT THE PREVIOUS DIGEST, which is the
+  case check-review.sh cannot see. Do not commit on the gate's word alone.
+  [superseded] Round 17 was staged at f6cace06375f32bc, tree
+  left standing there. Round 16's Important was the THIRD reader of the
+  predicate round 16 had just written, and the doc comment on that predicate
+  is what hid it: it said it had two readers, listed the two,
+  and was wrong when it was written. The third is the DROP LOOP, which
+  removes Operon's own trust blocks so the append can put them back — and
+  the append is what `can_hold_hook_state` refuses. On a machine where the
+  hooks already WORKED, the launch after Codex appends
+  `[projects.<a path with a bracket in it>]` measured 2, 0, 0, 0 blocks across
+  four launches. It deletes what it cannot re-add and it does not heal.
+  Fixed by gating the loop on the same predicate at document grain; the
+  removal path stands still too, which is the right side to err on. The
+  fixture the reviewer asked for did not exist: every fixture in this change
+  started from a config WITHOUT our blocks, so the worst any could report
+  was a block failing to arrive. Four launches now, watched failing at
+  `left: 0, right: 2`. Lesson 037 written, about the comment rather than the
+  code. 78 of 78 mutations, 487 tests, three gates green.
+  [superseded] Round 16 was staged at d0f532005b21c366, tree
+  left standing there. Round 15's Important was the SAME `]` this change had
+  just closed, on the other three paths: the refusal went into
+  `can_hold_hook_state`, the last of four things `apply_codex_config` does,
+  so the top-level scan still ran past a header it could not read and
+  deleted the person's key underneath. Valid TOML in and out, a typed line
+  simply gone, and the dotted twin of that config had been pinned in this
+  suite for nine rounds. BOTH reviewers found it independently and proposed
+  DIFFERENT fixes; what shipped is neither, because measuring one against the
+  other showed the simpler one (make the document not-understood and take the
+  early return) silently declines to REPAIR a machine an older Operon broke —
+  the defect this whole change exists for. The question is asked once, in
+  `opens_unreadable_table`, and two readers answer it for their own reasons:
+  `first_table` stops, `can_hold_hook_state` refuses. Narrowed by the suite
+  within one run: treating EVERY unreadable `[` line that way also catches
+  `[a`, which is a header to nobody, and round 5 decided the repair must still
+  happen there. The discriminator is whether the line closes. And the fix turned a mutation from red to green
+  — `[[…]]` recognition broken now yields a refusal rather than a
+  duplicate, and the fixture only asserted a parse — which the mutation run
+  reported and neither reviewer saw. Two nits also taken: a boundedness
+  comment that claimed `--read-only` on three fixtures when one cannot have
+  it, and a measurement line that said `backup 0` without naming which of
+  the two backups. Lesson 036 written.
+  Round 15 before it was the leaf's own regression.
+  [superseded] Round 15 was staged at 2b067ab445c39ef6, tree
+  left standing there. Both round-14 verdicts came in at 7fbeaf0ba5075a69 —
+  subprocess `approve-with-nits 0 2`, rust `do-not-approve 1 2` — so nothing
+  was committed there. Round 14's Important is THIS CHANGE'S OWN REGRESSION:
+  replacing the drop loop's raw-text header match with a key-path one closed
+  the class it was aimed at and lost a case the raw text had handled, a key
+  containing `]`, which `table_header_shape` cannot segment because its
+  bracket search is not quote-aware. Operon's own block became invisible to
+  every reader, and since the account folder is one a person picks in a
+  dialog, the first launch writes a correct block and every launch after it
+  appends a duplicate — Codex loads nothing under that root, and the backup
+  taken before each write replaces the good copy with the broken one. The
+  quote-unaware search was a KNOWN nit carried to 062; generalising the
+  caller changed what it costs and nobody re-read the deferral. Closed by
+  refusing a structural `[` line the walk cannot read as a header, which is
+  the rule the branch above it already states. The guard that was missing is
+  one idea — apply the writer to its OWN OUTPUT — and all forty call sites
+  in the suite handed it a config somebody typed. Six more items closed with
+  it: `paths_collide` named a function that does not exist,
+  `unquote_segment` trimmed inside the quotes so the DELETING reader took a
+  table TOML says is not ours, two stale `might_assign`/`might_define_table`
+  mentions, the cross-check table's missing disagreement row, the odd `bash`
+  call site, and a Guard column naming the wrong test with every automated
+  reading of it green. Lesson 035 written for the first of those.
+  Round 14 before it was the leaf of the path.
+  [superseded] Round 14 was staged at 7fbeaf0ba5075a69, tree
+  left standing there. Round 13 found the LEAF of the path — `hooks.state.<key>`,
+  the thing the write actually declares — which no reader had ever asked about.
+  The veto knew the proper prefixes; the drop loop was supposed to cover the leaf
+  and compared the header as RAW TEXT, so Operon's OWN block written back with
+  different whitespace or quoting was recognised by nobody and the append
+  declared the table twice. Those three spellings are `set_features_hooks`'s
+  first three findings arriving at the only header reader that never had a
+  review round: the part with no review history is where the defect was. Fixed
+  in the reviewer's split — the drop loop matches by key path, the veto takes
+  the entries and asks about the whole path per key — and one thing the report
+  did not contain came out of fixturing the ALLOWED side: the two directions of
+  the prefix rule are not symmetric, because a dotted key that reaches past our
+  leaf creates it implicitly and a table header that reaches past it may still
+  be redefined. The first draft refused `[hooks.state.\"K\".sub]` for that and
+  would have cost the blocks silently. Three nits also taken: the key is refused
+  rather than escaped when it cannot round-trip (escaping would open a
+  writer/reader seam, which is 062's work), a false sentence about the veto's
+  cost being unobservable is replaced with the measured one, and every
+  deliberate `exit 2` in the shape script now prints an `UNKNOWN:` line so it
+  can be told from bash failing to parse the script.
+  Round 13 before it was the same rule at a second call site. Round 12 split: subprocess returned `approve 0 0` — this
+  change's first unqualified approve in twelve rounds — and rust returned
+  `do-not-approve 1 0` on an Important that is the round-11/12 rule at the ONE
+  call site nobody revisited. `set_features_hooks` has two vetoes asking the
+  same question (does this line bind `hooks`?), and the `[features]`-body one
+  kept its own whole-key `might_assign`. Two lines of ordinary TOML —
+  `[features]` and `hooks.state.inner = true` — bind `hooks` as a table, the
+  veto misses it, the flag goes in beside it, and Codex answers `dotted key
+  hooks attempted to extend non-table type (boolean)`. The shape script said
+  `features.hooks: not set` about the same file, so both implementations agreed
+  while one was wrong. Fixed by DELETION: `might_assign` is gone and
+  `might_define_table` is renamed `might_bind`, because a corrected duplicate
+  is still a duplicate. Lesson 034 gained the rule — a correction is applied to
+  the reader you were looking at, and a duplicate reader survives it; searching
+  for callers of the function you fixed finds nothing, because the broken one
+  is a different function. The reviewer found it by fuzzing with a SEMANTIC
+  oracle (did the block land at the root?) rather than a parse: 149 failures in
+  2,500 configs, all one cause, of which a parse-only oracle would have seen
+  89. Round 12 itself was lesson 034's first half and lesson 026 wearing the
+  opposite costume: the name was recognised perfectly and the QUESTION was
+  scoped to one segment of a path. `[hooks.state.\"K\"]` creates TWO tables, so binding `hooks.state`
+  breaks the append while leaving `hooks` a perfectly good table. `[[hooks]]` is
+  the spelling nobody reported — it parses, and files Operon's trust state
+  inside somebody's array element — so its fixture asserts a shape rather than a
+  parse. Carried: change 062 still holds two items (`table_header_shape`'s
+  quote-unaware bracket search and the script's `trust_blocks` grep; the third,
+  `literal`/`escapes` as one bit negated at five seams, is also still there),
+  and change 063 holds the user-visible notice — when the veto fires the hooks
+  are registered, untrusted and silent, and nothing tells the person.
+  Next: the verdicts, then commit, then `git merge main`, the three gates
+  again, and re-judging 035/038/040. Round 10's finding stays worth knowing and
+  is the one before it: `\\\"\"\"` is TOML's only way to write a literal `\"\"\"`
+  inside a `\"\"\"` string, the multi-line fence search did not know about
+  escapes while the one-line search beside it did, and `closing_offset` is now
+  the single walk for all four quoted things TOML has — a MOVE rather than a
+  copy, because four rounds of this change failed at the seam between two
+  expressions of one rule."
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 487 passed 0
+    failed 6 ignored, clippy silent past the compile lines"
+  bands: "machine passed bash scripts/check-bands.sh exit 0, TWO of 20 breached,
+    both at warn — recorded, no action — and the second one IS this change's.
+    This line said `1 of 20 … not this change's` for two rounds and review
+    measured it false: steering_bytes reads 233450 against a warn tier of
+    221000, and lessons.md went from 70889 to 102994 in this change (entries
+    026-037 and a correction to 030). Subtract that and the reading is inside
+    the band, so the bytes over are ours and nobody else's. Writing `not
+    breached` while breaching is precisely the failure a band exists to prevent,
+    and it survived two rounds of my own reporting because I re-read a number I
+    had already written instead of re-running the check. One genuinely redundant
+    paragraph came out — 030's correction was retelling 031 — and the trimming
+    STOPPED there: cutting further to get under the tier is correcting a gate in
+    order to pass it, which is the order bands.yaml's own header argues against.
+    always_loaded_bytes at 11648 is the pre-existing one and is not this
+    change's. tests_ignored stayed at 6 because the live check became a
+    not-wired script rather than a seventh #[ignore]"
+  config-parses-as-toml: "machine passed
+    codex_hook_install_writes_a_config_codex_can_load parses the output with the
+    toml crate, in both shapes — with the trust blocks appended and with the
+    feature flag alone — and the test beside it now asserts against a parse
+    instead of asserting the document starts with the defect"
+  codex-loads-what-operon-writes: "machine passed bash
+    scripts/check-codex-config-shape.sh, exit 0 against this machine's config and
+    exit 1 against the backup taken before repairing it, where it printed both
+    the top-level scalar and `codex cannot load it: … cannot extend value of type
+    boolean with a dotted key`. All four exit paths measured after review round 3
+    split them apart: 0 real, 1 backup, 1 backup at
+    OPERON_CODEX_PATIENCE=0.05 — a finding read from the file survives a
+    timeout — and 2 only when the file is clean and codex cannot be reached. Not
+    wired to anything on purpose, for the reason in its header and in
+    scripts/check-codex-rollout-shape.sh's: it needs a real Codex and a real
+    config, so an automated caller could only ever pass"
+  writer-and-checker-agree: "machine passed
+    the_config_check_and_the_writer_read_one_file_the_same_way runs bash
+    scripts/check-codex-config-shape.sh --read-only over thirty-eight config
+    spellings and compares its answer to apply_codex_config's. It exists because the two
+    are one rule with two implementations and drifted apart in BOTH directions
+    inside two review rounds — the checker refusing an inline table the writer
+    had learned to keep, then demanding an exact header the writer had learned to
+    match — with only a paragraph holding them together, which is lesson 001.
+    The script grew the --read-only half so the test needs no live Codex. Its
+    limit is recorded rather than glossed: a quoted table name is missed by BOTH
+    implementations, so this test stays green over it. It proves they agree, not
+    that either is right — the safety on that case comes from the writer
+    declining to touch what it does not recognise. Round 9 added a row where
+    they deliberately DISAGREE, which the table can express and a paragraph
+    could not: an inline features = { hooks = … } is the flag and the script
+    reports it not set. That direction only under-claims, and the writer's veto
+    reads the line either way, so they never disagree about an EDIT"
+  each-boundary-errs-the-cheap-way: "machine passed the two scans that stop at a
+    table header take OPPOSITE readers, because their mistakes cost opposite
+    amounts: first_table reaching too far DELETES a key inside somebody's table,
+    end reaching too far only declines to write. So first_table takes the
+    generous reader and end the strict one, in both the Rust and the awk. Round
+    4 unified them and called that the end of the drift; round 5 showed the
+    unification was itself the defect. Four mutations swap them in both
+    directions and both implementations, each watched failing. Lesson 030.
+    Round 7 MOVED this item's evidence without changing the item: once the
+    readers learned about multi-line values, the four mutations went green,
+    because every fixture that told the readers apart used a bracket-shaped row
+    inside an array. is_key_path accepts every name TOML accepts, so the two
+    can differ only over input TOML refuses — and a_config_toml_would_refuse_
+    is_still_not_a_config_to_delete_from is the test that reaches there, by
+    reading lines rather than parsing. Re-watched failing, all four"
+  the-reader-never-edits-what-it-could-not-read-to-the-end: "machine passed this
+    is the veto the REMOVAL side did not have for six rounds while
+    set_features_hooks had two — and when review reproduced three losses through
+    one hole in the state machine, two of the three landed on the side that
+    deletes. A document that never closes what it opened was misread somewhere,
+    and a misreading is not a licence to take a line out of somebody's file, nor
+    to append one: the append is gated too, because an appended [features] would
+    otherwise land inside whatever is still open. Round 9 made it ONE early
+    return at the top of apply_codex_config rather than a test at three of the
+    four edit paths, which is both reviewers' nit and the honest reading of the
+    comment above it — review found the entry-append path outside the gate while
+    the comment claimed the whole function. It is the same walk that answers
+    which lines are structural, returned from it, so `did the document close?`
+    is a fact from one walk instead of a second walk that has to agree. The
+    script carries the same veto in its END rule, and both halves are fixtured in
+    a_config_toml_would_refuse_is_still_not_a_config_to_delete_from, which is
+    where they have to live — the input does not parse, so a fixture that parses
+    its output cannot hold it"
+  every-way-toml-defines-a-table-is-a-table: "machine passed might_bind closes
+    the veto's third costume for one mistake. A root table can be defined
+    by a header, by a dotted key (features.hooks = true), or by an inline table
+    (features = { … }), and appending [features] beside either of the last two is
+    `Cannot declare features twice` — Codex then loads NO configuration at all.
+    The first of those is the spelling this change's own explanation teaches, so
+    a person who wrote it by hand lost everything to Operon for it. Closed by
+    SHAPE this time rather than by spelling: only the first segment of the key
+    path is compared, quote-aware, so every dotted descendant answers from one
+    test instead of from another list of spellings. The tradeoff is chosen
+    rather than inherited and is written down at the call site — the veto reads
+    EVERY line, so a features.hooks sitting under [other] is a different table
+    that [features] could legally join, and it loses its flag. Cheap direction,
+    same as the other two vetoes, and a mutation that stops the veto at the
+    first table pins it so narrowing it later is a decision and not an edit.
+    The checker's half was the worse one: it said `features.hooks: not set` and
+    exited 0 about a file whose first line sets it. The awk now tracks a rooted
+    region before the first structural header. The inline spelling stays
+    unreported and the script says so — that direction only under-claims, and
+    the writer vetoes on the line either way, so the two never disagree about an
+    EDIT. Round 13 found this rule right here and never asked in the other
+    veto fifty lines down: the [features]-body scan kept its own whole-key
+    might_assign, so `[features]` plus `hooks.state.inner = true` binds hooks
+    as a TABLE, the veto misses it, and the flag inserted beside it is `dotted
+    key hooks attempted to extend non-table type (boolean)`. All four dotted
+    spellings break and hooks_enabled correctly does not veto. Fixed by
+    deleting might_assign and renaming the correct reader might_bind — one
+    question, one expression — and the four spellings plus the neighbour are
+    fixtured, with three of them in the agreement table too. Lesson 034"
+  a-line-means-what-the-lines-before-it-allow: "machine passed structural_lines
+    is run once over the file and the scans that decide WHERE a table begins and
+    ends consult it, so `  [1]` inside matrix = [ … ] is a row and not a table,
+    [features] inside a multi-line string is prose and not a header, and a
+    hooks = true inside somebody's note is not the line an older Operon wrote.
+    Round 8 fixed the half of this that was still wrong: the two open values
+    NEST, and the first version could not say so, so a \"\"\" opened inside an
+    array was invisible and the brackets in somebody's prose were counted as
+    structure. Three more losses came through that gap and every one produced
+    valid TOML. The fix was not a third state — it was deleting the PAIR of
+    functions that had to agree about one walk, since the gap sat exactly where
+    they met. opens_multiline_value was the last piece still reading its own
+    way, calling hooks = [[], a value that ends on its line.
+    The two VETOES deliberately do NOT consult it: reading prose as code only
+    declines to write, while skipping prose misses a real key and writes a
+    duplicate, which is the failure that costs a machine its whole Codex
+    configuration. Both directions are fixtures — a file whose only [features]
+    is inside a string gets no flag, and the note's contents are asserted by
+    VALUE because the document parses either way. Sixteen mutations, two of them
+    putting the state machine INTO a veto and four taking the nesting back out.
+    The same single walk is in the script's awk. Round 9 closed the last scan
+    that never consulted it: the block-dropping loop at the head of
+    apply_codex_config still tested trimmed.starts_with('['), so against valid
+    TOML holding a [hooks.state.\"K\"] inside somebody's note it took the prose
+    for its own block, deleted to the next bracket, and lost both the person's
+    words and the closing fence. Two paths in that function delete a line and
+    only one had six rounds of care. Round 10 found the same loop again by a
+    SECOND route and the answer was the other way round: gating it on `outside`
+    was right, and `outside` was wrong. The fence search was not escape-aware
+    while the one-line search beside it was, and `\\\"\"\"` is TOML's only way to
+    write a literal `\"\"\"` inside a `\"\"\"` string — so the gap sits in a note
+    explaining Operon's own config format. `closing_offset` is now the one walk
+    for all four quoted things TOML has, in both implementations. Lesson 031"
+  a-fix-can-turn-a-red-mutation-green: "machine passed round 7's fix turned six
+    red mutations green in one run and nothing but re-running the whole set
+    would have reported it — the gates run the tests, they do not ask whether a
+    test can still fail. Two were genuinely subsumed and went; four were
+    restored through a new test. mutations.py reports a substitution that
+    matches nothing as its own failure, which is what turned `the code moved`
+    into a visible [SCRIPT BUG] line rather than a silent pass — and round 8
+    said it again in the loud direction, EIGHT [SCRIPT BUG] lines from one
+    round's fixes. 44 of 44 after the repair, from 25 of 36 in the run that
+    found it and 28 of 36 in the round after. Round 9 said it a third time in
+    BOTH directions at once: 45 of 50, four [SCRIPT BUG] from code that moved
+    and one [NOT CAUGHT] — the silent kind — where unquoting a key in the
+    removal made assignment_of's own .trim() unreachable. 50 of 50 after.
+    Round 10 took three runs to settle — 47 of 55, then 53 of 55, then 54 of
+    56, then 57 of 57 — and the four [NOT CAUGHT] in the first were all NEW
+    mutations that no fixture could fail, for two reasons this very test had
+    already written down and that were walked into anyway. A fixture carrying
+    hooks = true cannot tell a correct read from a refusal, because a misread
+    that leaves a value open hits the early return and the flag is already
+    there; a fixture WITHOUT it cannot fail for the script, because a swallowed
+    table and an empty one both print `not set`. Each call site needs the PAIR.
+    That is a property of the fixture's shape rather than of any defect, and it
+    is stated at the rows now instead of being rediscovered a third time.
+    Lesson 032"
+  what-is-kept-and-what-is-added-are-one-call: "machine passed the trust blocks
+    are appended only when nothing survives that they cannot extend. `[hooks.state.\"…\"]` is a dotted key and TOML refuses to extend a
+    non-table, so the shapes this function DECIDED to preserve — a hand-written
+    inline table, a multi-line array, a multi-line string — were exactly the
+    shapes the append then broke, each protection producing the failure it was
+    added to prevent and round 1's own finding returning through the other half
+    of the function. Ten rounds missed it because nineteen of twenty-eight
+    fixture call sites pass empty entries while install_codex_hooks never does,
+    so the two branches had never run in one call. Mutation testing could not
+    have found it either: a mutation is written against a branch somebody
+    thought of, and this was the gap BETWEEN two. Not appending is the cheap
+    direction, the same one `understood` takes. The boundary is fixtured as
+    well as the veto — a dotted hooks.enabled = true is a real table, the
+    blocks extend it, and refusing there would cost them for nothing. Lesson
+    033. Round 12 widened the question from the first path segment to the PATH,
+    which is where it should have been asked from: `[hooks.state.\"K\"]` creates
+    two tables, so `hooks.state = \"x\"`, `\"hooks\".state = \"x\"` and a `state`
+    key inside `[hooks]` each break the append while leaving `hooks` a perfectly
+    good table — and the scan could not even reach the third, because it stopped
+    at the first table header. `can_hold_hook_state` asks every proper prefix,
+    so `hooks.state.inner = true` and `[hooks.state]` stay allowed without a
+    fixture apiece. `[[hooks]]` was not reported and is the one that parses:
+    TOML hangs the block off the last element of the array, so Operon files its
+    trust state inside somebody else's data and nothing complains. Its fixture
+    asserts the SHAPE, because a parse guard is blind to it — lesson 009 once
+    more. Round 14 closed the LEAF, which neither reader had asked about: the
+    drop loop covered it by comparing the header as raw text, so Operon's own
+    block reformatted was dropped by nobody and vetoed by nobody, and five more
+    shapes bind the leaf without being ours. The drop loop matches by key path
+    now and the veto takes the entries. Measuring the ALLOWED side is what
+    found the part nobody reported — a dotted key reaching past the leaf
+    creates it and a table header reaching past it does not, so the rule is not
+    symmetric and treating it as symmetric refuses `[hooks.state.\"K\".sub]`
+    for nothing. A key the writer cannot round-trip is refused rather than
+    escaped, because escaping would be the only encoder in a file with five
+    decoders; 062 holds it. Round 11's rust nit closed by deletion in the same edit: `extendable`
+    restated a fact by comparing two lists, and a restatement has no place to
+    put the question it stands in for. Lesson 034"
+  a-well-formed-wrong-answer-is-still-wrong: "machine passed the fixtures assert
+    the person's key survives BY NAME — parsed[profiles][gpt-5.6][hooks] and the
+    [hooks.state.\"…\"] shape Operon writes itself — and not only that the
+    document parses. Round 5's defect deleted a line and left valid TOML behind,
+    so every parse-based guard this change had built was blind to it. A
+    well-formedness guard cannot see a well-formed wrong answer"
+  a-header-name-must-look-like-one: "machine passed table_header_name requires a
+    TOML key path, so `  [1, 2]` is not a table called `1, 2`. This is the one
+    place the change gets STRICTER rather than more generous, and it has to:
+    the write-nothing rule protects against recognition FAILING, and here
+    recognition succeeded at the wrong answer"
+  guards-verified-by-mutation: "human passed 80 of 80 in mutations.py beside this
+    file, each watched failing, including the defect itself put back. Mutations
+    reach BOTH implementations: the Rust line editor and the script's awk, added
+    in round 3 because the half that had been wrong twice had no mutation on it
+    at all. TWICE now a mutation was removed rather than weakened — key_of's
+    `starts_with('#')` branch, which cannot change an outcome because a
+    commented line yields the key `# hooks`, and in round 4 the narrow strict
+    scan in set_features_hooks, which the generous reader beside it fully
+    subsumes. Both branches went with their mutations: a guard whose mutation
+    cannot fail is not a guard. Round 7 is the third and fourth time, and it
+    arrived the other way round — the mutations were not removed, the FIX
+    silently made six of them unable to fail, and only re-running the set said
+    so. That is its own contract item above. Round 8 removed a THIRD branch for
+    the same reason, this one named by review: might_assign's `starts_with('#')`
+    and `starts_with('[')` tests cannot change an answer, because the identity
+    test already refuses `# hooks` and `[features] # hooks`. The comment there
+    says so, because the branch reads like a guard. Round 9 is the FIFTH, and it
+    arrived from a fix again rather than from reading: unquoting the removal's
+    key put a second .trim() over one assignment_of already does, and the
+    mutation that takes the first one out came back green. The redundancy came
+    out of the CALL SITE rather than out of assignment_of, because the remaining
+    difference is real — `\" hooks \"` is a key TOML names ` hooks `, a veto may
+    be generous about it and a branch that deletes may not. Round 12 said the
+    LOUD thing again and only the loud thing: 58 of 63 on the first run, five
+    [SCRIPT BUG] lines and zero [NOT CAUGHT], because collapsing `removable`
+    back into the removal filter and giving `table_header_shape` a second return
+    value moved four mutations out from under their find-strings. Re-pointed
+    before the run rather than by it for the second round running, and the four
+    new ones landed red first time. Round 13 is the first round of this change
+    with a CLEAN first run — 64 of 64, no [SCRIPT BUG] and no [NOT CAUGHT] —
+    because the rename it made was carried into the mutation set in the same
+    edit instead of after a run reported it. Round 14 went back to 68 of 70 on
+    the first run with two [SCRIPT BUG] and no [NOT CAUGHT] — the drop loop and
+    the array branch both moved — which is the honest reading: carrying a
+    rename is easy to do deliberately, and noticing that a rewritten loop moved
+    two find-strings is not"
+  unrecognised-input-is-survivable: "machine passed
+    codex_hook_install_writes_a_config_codex_can_load carries the spellings this
+    line editor does NOT recognise and asserts only that the result still
+    parses, never that the flag got set. That is the point: review spent three
+    rounds on one reported spelling at a time, and the fourth named the
+    direction instead. Writing nothing costs a flag that is not set; writing
+    anyway costs a machine on which Codex loads no configuration at all. The
+    membership of that set MOVED in round 7 and the item did not: a [features]
+    whose body opens with a multi-line array is now recognised, because the
+    state machine reads past the array; a quoted table name is still not, and a
+    file whose only [features] is inside a multi-line string joined the set by
+    the veto's decision rather than by the reader's. The fixtures name which is
+    which"
+  dependency-authorized: "human passed the repository's owner was asked before
+    Cargo.toml was touched, per the paused tier on the dependencies surface, and
+    chose a toml dev-dependency over a hand-written structural check"
+  developer-config-repaired: "human passed asked and approved before editing a
+    file outside the repository; ~/.codex/config.toml backed up to
+    config.toml.operon-backup-20260920-120441, one line removed, diff confirmed
+    to be that line alone, and codex app-server reaches thread/start against the
+    real ~/.codex afterwards"

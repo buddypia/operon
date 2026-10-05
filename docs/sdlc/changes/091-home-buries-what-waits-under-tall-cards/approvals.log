@@ -1,0 +1,5 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+2026-09-27T08:00:00Z person intent intent.md de5a92ec4ccd6603 approve owner answered 全項目 OK、進めて to the Before/After section ② and 状況をみて自律で良い。進めて after 090 landed
+2026-09-27T08:00:00Z person screen screen.md 95f1ac80988cce37 approve owner approved the rendered view-home-after.html; screen.md is its subset built here
+2026-09-27T08:30:00Z auto spec spec.md 6415edcc9341a151 approve evaluator round 2: waiting test now uses an unread session; home_session_row takes a list salt so a session drawn twice keeps distinct ids
+2026-09-27T08:30:00Z auto plan plan.md 26a4d3fb92251a55 approve evaluator round 2: every requirement maps to a file and step, each risk has a named check

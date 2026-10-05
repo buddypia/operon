@@ -1,0 +1,24 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  # The launch entry moves (src/agents.rs is not edited; launch_session is
+  # reused), so the subprocess surface is read, not changed.
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The owner checked the launch sheet, 概要, and 履歴 on the installed build against screen.md on 2026-09-27 and answered OK."
+
+contract:
+  three-gates: "machine passed fmt clean, cargo test --locked 649 passed 0 failed 6 ignored, clippy -D warnings clean"
+  bands: "machine waived always_loaded_bytes, steering_bytes, unsafe_blocks are out of band as they were when 091 landed; this diff touches none of the files they count"
+  release-binary: "machine passed bash scripts/package-macos.sh built 6329b46; /Applications/Operon.app replaced by scripts/replace-macos-bundle.sh, codesign --verify clean, launched to Home"
+  guards-verified-by-mutation: "human passed eight mutations, one per new test, each red (sheet not opened, Esc not closing, cmd-enter without launch_ready, no focus request, worktree button back to the tab, button on the left, change count blanked, history section removed), and four more from review, each red (the request not kept across a project switch, the page behind not kept, ⌘2/⌘K/⌘O guards dropped, has_git_metadata back in the footer)"
+  screen-matches: "human passed the owner opened the launch sheet, 概要, and 履歴 on the installed build and answered OK, 2026-09-27"

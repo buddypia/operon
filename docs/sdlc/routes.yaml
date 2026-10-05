@@ -1,0 +1,85 @@
+# Work-type routes. Stage 0 of the pipeline in docs/sdlc/README.md — the table
+# that decides which of the six stages a request must pass through before it is
+# allowed to be done.
+#
+# The kind of request decides the mandatory stages,
+# the ceiling on attempts, and whether a person has to sign it off.
+#
+# `.claude/skills/sdlc/SKILL.md` reads this file and must name every route in it.
+# `every_route_the_pipeline_offers_names_stages_that_exist` in src/tests.rs fails
+# when a route names a stage the pipeline does not have, loses its ceiling, or
+# points at a document that is not there — a route into nothing reads, from the
+# file listing, exactly like a route.
+#
+# Each value is a positional tuple, not a mapping, for the same reason as
+# docs/sdlc/bands.yaml: the checker parses this file without a YAML library, and
+# a flat file is a file that cannot drift from its parser.
+#
+#   <stages> <attempts> <gate> <requires> <review>
+#
+#   stages    comma-separated, in order, from: plan design build test deploy maintain
+#   attempts  how many times the closing gate may be failed before the session
+#             stops and writes handoff.md from docs/sdlc/templates/handoff.md
+#   gate      the check that closes the route
+#   requires  a document that must be satisfied on top of the gate, or `-`
+#   review    which reviewers must return a verdict on the diff before it merges:
+#             full  = all three definitions in .claude/agents/
+#             craft = rust-reviewer
+#             none  = the deterministic checks alone
+#             scripts/check-review.sh widens this by the surfaces the diff
+#             actually touches; a route may ask for more, never for less.
+#
+# This column used to say `yes`/`no` for whether a person read the diff, and
+# change 035 replaced that with the reviewer set, because a change nobody got to
+# and a change that was approved left the repository in the same state.
+#
+# The ceilings are deliberately small. An agent that has failed the same gate
+# three times is not one attempt away; it is missing something, and the handoff
+# is worth more than the fourth try. The ceiling is a number
+# with an artifact behind it.
+#
+# **Exactly five values, and this is not a style rule.** The gate that judges a
+# commit is not this tree's `scripts/check-review.sh`;
+# `.githooks/reference-transaction` runs `refs/heads/main:scripts/check-review.sh`,
+# because a commit is the one place that can edit its own judge. That copy reads
+# a route row as five positional values and passes over anything else, so a
+# sixth value does not extend this table, it empties it — and a route readable
+# on neither side of a diff is exit 2 for every commit carrying code. Change 064
+# added a sixth column and change 066 took it back out; lesson 039 is the
+# account. `every_route_row_is_the_width_the_gate_that_judges_commits_reads`
+# says so before the commit is attempted rather than after.
+#
+# The review-round ceiling that column was carrying lives in
+# `docs/sdlc/review-rounds.yaml`, keyed by the same route names. A file the
+# judge does not read can be added freely; a column in a file it does read
+# cannot.
+
+routes:
+  # Adds behaviour a user can see. The full pipeline, and all three reviewers.
+  feature: "plan,design,build,test,deploy 3 .claude/hooks/gate-commit.sh - full"
+
+  # Changes behaviour that already exists. No deploy stage of its own: it ships
+  # with the next release rather than justifying one.
+  modify: "plan,design,build,test 3 .claude/hooks/gate-commit.sh - craft"
+
+  # The failing test comes first and is watched failing for the stated reason.
+  # No intent or spec: the bug report is the intent, and inventing a spec for it
+  # is the ceremony that gets pipelines abandoned.
+  bugfix: "build,test 3 .claude/hooks/gate-commit.sh .claude/skills/root-cause/SKILL.md craft"
+
+  # Behaviour must be provably unchanged, which is what the reviewer is for: a
+  # refactor whose tests changed is not a refactor.
+  refactor: "build,test 2 .claude/hooks/gate-commit.sh .claude/agents/rust-reviewer.md craft"
+
+  # A shorter ceiling on purpose. Two failed attempts at a security fix is a
+  # signal about the fix, and the surface is the one where a wrong answer is
+  # unrecoverable rather than merely wrong.
+  security: "plan,design,build,test,deploy 2 .claude/hooks/gate-commit.sh .claude/agents/subprocess-safety-reviewer.md full"
+
+  # Documents, translations, and comments. Still gated: a document that names a
+  # path which does not exist fails the suite like any other change.
+  docs: "build 2 .claude/hooks/gate-commit.sh - none"
+
+  # Very small internal changes (<=2 files, <=20 LOC), typo fixes, or single-test
+  # adjustments. Gated by deterministic tests; review subagents waived.
+  trivial: "build,test 1 .claude/hooks/gate-commit.sh - none"

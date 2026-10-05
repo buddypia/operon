@@ -1,0 +1,23 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  # Labels, one merged tab, and counts read from caches: no process, store,
+  # or launch surface is touched.
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The owner checked the project tab row on the installed build against screen.md on 2026-09-27 and answered OK."
+
+contract:
+  three-gates: "machine passed fmt clean, cargo test --locked 656 passed 0 failed 6 ignored, clippy -D warnings clean"
+  release-binary: "machine passed bash scripts/package-macos.sh built 8f485bc; /Applications/Operon.app replaced by scripts/replace-macos-bundle.sh, codesign --verify clean, launched"
+  guards-verified-by-mutation: "human passed eight mutations, one per new test plus the font fix, each red (tab counted at the Body size, Git label back, count keyed off any project, row without counts, rules dropped from the merged tab, accent on zero, old sentence back, a request in project_tab_count)"
+  screen-matches: "human passed the owner opened the project tab row on the installed build and answered OK, 2026-09-27"

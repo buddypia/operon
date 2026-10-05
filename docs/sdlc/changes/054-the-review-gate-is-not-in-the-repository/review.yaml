@@ -1,0 +1,22 @@
+digest: "f0ce8bfd8ec2dcc1"
+
+# One verdict, and it comes from the surface rather than the route: the `bugfix`
+# row in docs/sdlc/routes.yaml asks for no reviewer, and docs/sdlc/risk.yaml hands
+# anything touching the gates to subprocess-safety-reviewer.
+#
+# It took five passes, and the first four were refusals worth having. In order:
+# adding `.githooks` to the wiring test's caller list asserted wiring a fresh
+# clone does not have, and would have passed on a *mention* — the hook runs the
+# gate as `bash "$gate"` through a variable, so the only literal
+# `scripts/check-review.sh` in it is path resolution and a refusal message.
+# Then: the bands waiver was arithmetic over a lessons.md entry that was not in
+# the commit. Then: this change's own lesson took the number 018, which
+# `.githooks/reference-transaction:157` had already spent on a lesson about
+# `grep -q` under `pipefail` that was never written down — a fourth instance of
+# the defect this change is about, found by the reviewer and not by me. Then
+# five nits, of which four were defects in guards I had just added, including a
+# citation checker built in exactly the hand-listed shape it was replacing. Then
+# three more, one of which was that my own pairing fix had silently invalidated a
+# mutation this file's state.yaml cited as evidence.
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

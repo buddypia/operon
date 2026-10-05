@@ -1,0 +1,15 @@
+digest: "14648938c001d794"
+
+rounds: 2
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+
+# Round 1 was approve-with-nits 0 2, both in the guard and both fixed rather than
+# carried (change 068): the test asserted that something held focus rather than
+# the pane, so a click stolen by the search field in the same pane would have
+# passed it; and the temporary directory was removed after the assert, so a
+# failing run left it behind. The assert now names the pane's own id, and was
+# watched failing again with the two id_salt lines removed.
+
+nits: []

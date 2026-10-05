@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. Two bash processes running scripts/replace-macos-bundle.sh had been alive
+#    nine days; one ignored TERM. Change 098 left this for a person, since the
+#    script is the bundle-swap surface; the person approved the fix on
+#    2026-10-01.
+# 2. Cause: the three test pauses (after each swap, inside the rollback) loop
+#    until the test signals or releases them. A test that dies first — a failed
+#    assert between spawn and signal, since dropping a Child does not kill it —
+#    leaves them looping for good.
+# 3. Considered: a kill-on-drop guard in the tests (misses a test runner that is
+#    itself killed); polling the parent pid (a reused pid keeps it alive, and it
+#    is harder to test). Taken: a deadline on every pause, 60 seconds unless
+#    OPERON_TEST_PAUSE_SECONDS says otherwise; an expired swap pause exits
+#    non-zero so the existing rollback restores the previous generation.
+# 4. Production is unchanged: without the OPERON_TEST_* variables no pause runs.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Test pauses in the bundle swap now end on their own; nothing further."
+
+contract:
+  failing-test-first: "machine passed a_bundle_test_pause_nobody_releases_ends_and_rolls_back failed on the unedited script (still running after 15 s, then killed by the test)"
+  three-gates: "machine passed fmt silent, cargo test --locked 668 passed 0 failed 6 ignored, clippy -D warnings silent; no replace-macos-bundle.sh process left after the run"

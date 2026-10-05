@@ -1,0 +1,41 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): two nits carried by both
+# reviewers of change 081. (1) A change directory renamed with `git mv` and
+# not yet committed is read under its old name, and a change whose only
+# uncommitted file has a space in its name is not read at all — both drop
+# out of the Stop gate's scope, so their pending contract items go unreported.
+# (2) In a repository with no `main` ref the committed half of the scope is
+# dropped without a word, where the gate before 081 failed closed.
+#
+# Named cause: `in_play` in .claude/hooks/gate-stop.sh parses
+# `git status --porcelain` v1 lines with a `^...docs/sdlc/changes/` pattern,
+# which sees only the first path of a rename and misses a line git quotes;
+# and `git merge-base refs/heads/main HEAD` failing is treated as "nothing
+# committed" rather than "no way to tell".
+#
+# Risk: .claude/hooks is the gate-configuration surface (high, paused); the
+# person said "進めて" to the follow-up named at the close of 081.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: seven carried nits; the one worth a follow-up is the approval check not widening with every_change when there is no main (both reviewers, born of the merge with 082)."
+
+contract:
+  reviewed: "human passed round 2 re-confirmed at digest 7b1464d180e4a44b after main moved: rust-reviewer approve-with-nits 0 3, subprocess-safety-reviewer approve-with-nits 0 1 (its round 1 Important was taken)"
+  three-gates: "machine passed fmt silent, 604 passed 0 failed 6 ignored, clippy silent, on the branch with main merged"
+  failing-test-first: "machine passed on 081's hook the rename, quoted-path, and no-main runs exited 0 without naming their change; the untracked run passed, as predicted; all pass after"
+  bands: "machine waived unchanged by this change: unsafe_blocks at propose, steering_bytes at diagnose, always_loaded_bytes at warn, as on main"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], and the rest is .claude/hooks and docs"
+  guards-verified-by-mutation: "human passed recorded by the session, not a person: nine mutations each red — diff HEAD, ls-files, branch diff, the fallback, the fallback always on, -z from each of the two, and --no-renames from the uncommitted diff"
+  lesson-recorded: "machine passed follow-up paragraph under lesson 050"

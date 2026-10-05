@@ -1,0 +1,41 @@
+# Review record for 103.
+#
+# Round 1, at digest a303d4cb48a87b6d.
+# rust-reviewer: approve-with-nits, three nits on the new tests.
+# subprocess-safety-reviewer: approve-with-nits with two Important findings.
+#   1. The hide subshell's exit status was discarded, so a failed hide let the
+#      agent run with the check in view and the run counted as a verdict.
+#   2. The eval worktrees sat inside the repository, so the main checkout's
+#      evals were one ../ away and its CLAUDE.md loaded as an ancestor.
+# Both were fixed: a failed hide or restore is now infra and the agent does not
+# start (test the_eval_runner_does_not_run_the_agent_when_the_check_cannot_be_hidden),
+# and worktrees live in a mktemp directory under TMPDIR (asserted in the hiding
+# test). mutations.py gained one mutation for each; 20 of 20 caught. Its nit 3,
+# that infra can hide a steering-caused timeout, is answered in evals/README.md.
+#
+# Round 2, at digest eaaea34b86fe9916: both reviewers re-read the changes;
+# no Important finding. The rest are carried below.
+
+digest: "eaaea34b86fe9916"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/tests.rs no_eval_prompt_is_pasted_into_the_steering drops unreadable steering documents silently; only steering.len() > 3 backstops it
+    person: "読めない指示ファイルがあると、その分だけ貼り付けの検査が黙って甘くなります。今は全部読めているので影響はなく、対応は不要です。"
+  - rust-reviewer/2 · the paste check compares one prompt line at a time, so a re-wrapped paste is missed and a short fragment could match by accident
+    person: "評価のお題を改行を変えて指示文に貼ると、この検査は気づきません。逆に短い一文が偶然一致して誤って赤になることもあります。今は起きておらず、対応は不要です。"
+  - rust-reviewer/3 · read_dir(...).unwrap() on .claude/rules and .claude/skills panics without naming the directory
+    person: "指示フォルダの名前を変えると、どのフォルダが無いのか書かれないままテストが失敗します。原因はすぐ分かる種類で、対応は不要です。"
+  - subprocess-safety-reviewer/1 · the always-fails warning fires at --runs 1, where one failure is one sample
+    person: "評価を一回だけ走らせて一件失敗すると「評価の方を疑え」と警告が出ますが、一回では判断できません。複数回走らせたときだけ信じてください。対応は不要です。"
+  - subprocess-safety-reviewer/2 · the timeout, is_error, setup-failed and worktree-add-failed branches have no test or mutation
+    person: "時間切れやエラー終了の場合の扱いは、手で確かめただけで自動テストがありません。壊れても気づくのが遅れる可能性があります。今すぐの対応は不要です。"
+  - subprocess-safety-reviewer/4 · prompt and check are read from the working tree's evals while the hidden form comes from the ref, so --from with uncommitted eval edits mixes the two
+    person: "評価ファイルを書きかけのまま、別の版を指定して評価を走らせると、お題と判定が新旧混ざります。書きかけの評価は保存してから走らせてください。"
+  - subprocess-safety-reviewer/5 · no trap on the mktemp worktree directory, so Ctrl-C leaves it and its registered worktrees behind
+    person: "評価の途中で中断すると、一時フォルダと作業用のコピーが残ります。気になるときは一時フォルダの operon-evals から始まるものを消してください。普段の対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"

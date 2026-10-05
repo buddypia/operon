@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# The file .claude/hooks/gate-commit.sh installs into the repository's own hooks
+# directory, $(git rev-parse --git-path hooks), before every commit made through
+# Claude Code. It carries no judgement of its own: it runs the tracked
+# .githooks/reference-transaction — the main checkout's, so every linked
+# worktree runs the same gate whatever branch it is at; this checkout's when the
+# main one has none; and the one committed on the main branch when no checkout
+# carries it, so a checkout at a branch from before the gate is judged by the
+# gate main has. With none of the three, a checkout may still move to a branch
+# name, but no branch and no detached HEAD may move to a commit.
+#
+# A copy of the tracked hook itself was the round-8 design, and the durability
+# reviewer showed it is last-writer-wins across worktrees: a commit from a
+# worktree at a branch carrying a different tracked hook replaced the gate every
+# other worktree ran, and nothing said so. A trampoline cannot be downgraded by
+# the branch that installs it, because it decides nothing.
+set -uo pipefail
+# `git replace` rewrites what every later `git` call sees: a replacement object
+# can give a commit a different tree, so the diff this gate judges is not the
+# diff the repository keeps. The refs live in `refs/replace/*` and a clone
+# fetches them on request, so they are not local-only. Judge the real objects.
+export GIT_NO_REPLACE_OBJECTS=1
+# And the graft file, which does the same thing by another mechanism and is
+# not stopped by the variable above: `$GIT_DIR/info/grafts` — or GIT_GRAFT_FILE
+# — rewrites a commit's parents, so `sha^` names a commit the author chose. A
+# twin with the same tree makes the diff empty and the gate finds nothing to
+# judge. Measured: `-c core.graftFile=/dev/null` does not close it; this does.
+export GIT_GRAFT_FILE=/dev/null
+common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+main=""
+[ -n "$common" ] && main=$(dirname "$common")
+here=$(git rev-parse --show-toplevel 2>/dev/null)
+# Whole, not merely present: a zero-byte hook exits 0 and would pass
+# everything, and so would a prefix cut at a statement boundary — so the hook's
+# last line has to be there.
+whole() { [ -s "$1" ] && [ "$(tail -n 1 "$1")" = '# operon: end of .githooks/reference-transaction' ]; }
+# The main branch's committed hook first, and only then a checkout's working
+# copy — the order round 16 settled on for scripts/check-review.sh, for the
+# same reason. The main checkout's working tree is whatever branch it happens
+# to sit at: `git checkout old-branch` there put that branch's hook in charge
+# of every worktree, which is the downgrade the trampoline exists to prevent.
+# The committed hook judges the change that lands its successor.
+if committed=$(git show refs/heads/main:.githooks/reference-transaction 2>/dev/null) \
+  && [ "$(printf '%s\n' "$committed" | tail -n 1)" = '# operon: end of .githooks/reference-transaction' ]; then
+  exec bash -c "$committed" reference-transaction "$@"
+fi
+for tracked in "$main/.githooks/reference-transaction" "$here/.githooks/reference-transaction"; do
+  whole "$tracked" && exec bash "$tracked" "$@"
+done
+
+[ "${1:-}" = prepared ] || exit 0
+zero=0000000000000000000000000000000000000000
+while read -r old new ref; do
+  case "$ref" in refs/heads/*|HEAD) ;; *) continue ;; esac
+  [ "$new" = "$zero" ] && continue
+  [ "$old" = "$new" ] && continue
+  case "$new" in
+    ref:*) target=$(git rev-parse --verify --quiet "${new#ref:}^{commit}" 2>/dev/null) || continue ;;
+    *) target=$new ;;
+  esac
+  [ "$(git cat-file -t "$target" 2>/dev/null)" = commit ] || continue
+  echo "review gate: .githooks/reference-transaction is in neither the main checkout, this one, nor the main branch, so the update is refused. Commit from a checkout that carries it." >&2
+  exit 1
+done
+exit 0
+# operon: end of .githooks/installed/reference-transaction

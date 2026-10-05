@@ -1,0 +1,23 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  # Settings' layout and wording; every persisted setting keeps its own
+  # persist-or-revert code, moved unchanged. No store, process, or launch path.
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The owner checked the settings page on the installed build against screen.md on 2026-09-27 and answered OK."
+
+contract:
+  three-gates: "machine passed fmt clean, cargo test --locked 663 passed 0 failed 6 ignored, clippy -D warnings clean"
+  release-binary: "machine passed package-macos.sh built from b663d4d, /Applications/Operon.app replaced, codesign --verify clean, relaunched and the window captured"
+  guards-verified-by-mutation: "human passed seven mutations, one per new test, each red (a label renamed, 通知 section emptied, an entry point back to Page::Settings, badge on tmux alone, NOT FOUND back, hook cell ignoring the switch, one action dropped from the keys list)"
+  screen-matches: "human passed the owner opened the settings page on the installed build and answered OK, 2026-09-27"

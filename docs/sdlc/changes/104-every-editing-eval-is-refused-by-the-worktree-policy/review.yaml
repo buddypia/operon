@@ -1,0 +1,23 @@
+# Review record for 104.
+#
+# Round 1, at digest 104eb8490d32c4cd. Both reviewers read the runner change,
+# the new test, and the policy file. Neither found an Important: the named
+# eval/ branch is outside protected_branches, removal runs worktree remove,
+# prune, then branch -D on every path that is not --keep, and the test reads
+# the policy instead of restating it. The rest are carried below.
+
+digest: "104eb8490d32c4cd"
+
+rounds: 1
+
+carried:
+  - subprocess-safety-reviewer/1 · the eval/ branch name has one-second resolution, so two invocations in the same second collide and the second reports infra
+    person: "評価を同じ秒に二つ同時に始めると、後の方が作業用の準備に失敗したと表示されます。一つずつ走らせていれば起きず、対応は不要です。"
+  - subprocess-safety-reviewer/2 · still no trap: an interrupted run now leaves eval/ branches in the real repository as well as the temp worktree
+    person: "評価を途中で止めると、eval/ で始まる作業用の branch がこの repository に残ります。気になるときは git branch --list 'eval/*' で確かめて消してください。"
+  - rust-reviewer/2 · the git worktree prune after each removal is redundant on the normal path; it only matters for the rm -rf fallback
+    person: "後片付けで同じ整理処理を二度呼んでいる箇所があります。動作には影響せず、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

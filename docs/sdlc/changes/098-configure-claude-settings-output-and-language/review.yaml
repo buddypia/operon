@@ -1,0 +1,12 @@
+# Review record for 098.
+#
+# Round 1: subprocess-safety-reviewer.
+# .claude/settings.json was updated with outputStyle: "Concise" and language: "japanese".
+# No hooks, permissions, or security boundaries were modified or weakened.
+
+digest: "9f4963f6448872e8"
+
+rounds: 1
+
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

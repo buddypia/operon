@@ -1,0 +1,65 @@
+# How many times a change may go back to its reviewers before it must land or
+# hand off. Read by scripts/check-review.sh against `rounds:` in the change's
+# review.yaml, and printed as `round N of M` on every run.
+#
+# This is change 064's review-round ceiling. It is in a file of its own, and the
+# reason is the whole of lesson 039: for one commit it was a sixth positional
+# value in docs/sdlc/routes.yaml, and that made every route in that table
+# unreadable to the gate which actually judges a commit.
+#
+# `.githooks/reference-transaction` does not run this branch's
+# scripts/check-review.sh. It runs `refs/heads/main:scripts/check-review.sh`,
+# deliberately: a commit is the one place that can edit its own judge, so the
+# judge is read from main and never from the tree being judged. main's copy
+# parses a route row as **exactly five** positional values and passes over
+# anything else — so a sixth value did not extend the table, it emptied it, and
+# no commit carrying a code diff could land on the branch that added the column.
+# `every_route_row_is_the_width_the_gate_that_judges_commits_reads` in
+# src/tests.rs is what now says so before the commit is attempted.
+#
+# The rule that generalises: **a branch may narrow what its own gate allows and
+# may never widen what the gate expects to read.** Adding a column to a table the
+# judge parses is widening. Adding a file the judge does not read is not.
+#
+#   <route>: "<rounds>"
+#
+#   route   one of the routes in docs/sdlc/routes.yaml. Every route has a row
+#           here and no row here names a route that is gone —
+#           `every_route_has_a_review_round_ceiling` checks both directions,
+#           because a ceiling for a route nobody takes bounds nothing and a
+#           route with no ceiling silently falls back to the default.
+#   rounds  an integer of 1 or more.
+#
+# Why the number exists at all. scripts/check-review.sh binds every verdict to
+# one digest taken over every tracked path outside docs/sdlc/changes/, so an
+# edit made to satisfy a nit voids the approval the nit arrived with and buys
+# another round — which produces another nit. Change 060 spent nineteen rounds
+# inside that, and its last behaviour change was round 17. Two rules end it
+# together: REVIEW.md forbids taking a nit in the round it is raised, and this
+# number bounds the rounds an Important finding can legitimately buy. Neither
+# alone is enough — the first leaves a reviewer free to raise an Important every
+# round, and the second would otherwise be spent on prose.
+#
+# A route with no row here defaults to 2, because a table that refuses to load
+# must not be able to block every commit in the repository.
+
+rounds:
+  # The full pipeline with a person at the end. More rounds, because more of the
+  # change is a judgement rather than a fix.
+  feature: "3"
+
+  modify: "2"
+  bugfix: "2"
+  refactor: "2"
+
+  # The surface where a wrong answer is unrecoverable rather than merely wrong,
+  # which is worth a third round in a way a refactor is not.
+  security: "3"
+
+  # One. A second round on a document is the case lesson 038 is about: prose is
+  # a nit, and a nit is carried rather than taken.
+  docs: "1"
+
+  # One, for the same reason as docs: a trivial change waives its reviewers, so
+  # a second round would be spent on something no reviewer was asked to judge.
+  trivial: "1"

@@ -1,0 +1,5 @@
+digest: "e7fdd1ed6ecfea1e"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

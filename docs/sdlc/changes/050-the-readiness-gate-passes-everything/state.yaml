@@ -1,0 +1,30 @@
+# The state of change 050. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "conditional"
+  screen: "n/a"
+
+# The readiness verdict is conditional: 0 blocking, 1 warning, and the warning is
+# the missing spec.md that the bugfix route skips by design. Worth saying once —
+# this is the first verdict this gate has given that was arithmetically capable
+# of being No-Go.
+resume: "Landed, and it left one thing behind that a person has to decide: the sweep it added found .claude/hooks/gate-stop.sh does not parse under bash 3.2 at all, so on a stock macOS the Stop gate exits 2 before reading a contract. That is change 055, awaiting-user on a paused surface. What else outlives this change is the rule in lesson 020 — a guard over a shell script names the oldest interpreter its shebang can resolve to, which on macOS is /bin/bash 3.2."
+
+# The earlier block is lifted. It was never this change's fault: another session
+# was debugging src/app/screens.rs in the shared working tree and `cargo test`
+# would not compile. That work has since moved to its own worktree, and this
+# change moved to one too — `.claude/config/worktree-policy.json` now refuses a
+# direct edit of a tracked file on main, so the work is done on
+# fix/trust-prompt-and-readiness-gate rather than in the tree everyone shares.
+contract:
+  three-gates: "machine passed fmt silent, 466 passed 0 failed 6 ignored, clippy silent"
+  bands: "machine waived steering_bytes is at its propose tier, and this change moves it by the size of lesson 020 alone. It was already over before change 054 and is over by more after it; the propose response is a change of its own."
+  guards-verified-by-mutation: "human passed four mutations watched: the_readiness_gate_refuses_a_spec_that_is_not_filled_in printed the blocking finding and asserted left: 0, right: 1 under /bin/bash with the nameref still in place, then passed after the fix; the sweep went red on scripts/check-bands.sh given the same case-inside-a-command-substitution shape; it went red again on an entry naming a script that parses; and it went red on .githooks/installed/reference-transaction broken the same way, which is the file a one-level walk had been missing. The shebang escape was watched not working: rewriting gate-stop.sh to #!/bin/sh keeps it in the swept set and /bin/sh -n still reports the same syntax error. A fifth: a_shebang_carrying_flags_still_names_its_interpreter went red on `#!/bin/bash -euo pipefail` with the reader taking the line's last token instead of parsing it, which is how two earlier cuts of that matcher would have dropped a script out of the sweep in silence."

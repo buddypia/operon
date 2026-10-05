@@ -1,0 +1,7 @@
+digest: "c790d24184cabbf4"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+
+nits: []

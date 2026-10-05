@@ -1,0 +1,34 @@
+# Review record for 101.
+#
+# Five rounds of subprocess-safety-reviewer on scripts/check-review.sh and its
+# fixture test, each at the digest then current. Round 1 request-changes 4 4
+# (leak scan failed open on directory names and on diff attributes, the
+# exemption did not require scrub-names to be added by the diff or a name to be
+# lost, the pass-case test was vacuous). Round 2 request-changes 2 3 (non-UTF-8
+# lines dropped under a UTF-8 awk; merge commits regressed to a block). Round 3
+# request-changes 2 1 (the pipe-end guard test failed on the owner count; a
+# record moved into the owner's directory was never judged). Round 4
+# request-changes 1 1 (a named record moved into the owner's directory passed).
+# Round 5, at digest 9943e69dfdd74aa7: approve-with-nits 0 2. The reviewer tried
+# moves, renames, copies and prefix-sharing directory names and found none that
+# leaves a closed directory without a refusal, except the quoted-path nit.
+#
+# Nit 1 carried: `touched` is read from `--name-only` output, which does not
+# unquote a filename holding a quote, backslash or tab, so such a file in a
+# closed directory is never judged. The same sed predates this change and no such
+# filename exists under docs/sdlc/changes.
+# Nit 2 carried: a record whose old path carried a listed name can move between
+# two closed directories and pass. The content survives; only its owner changes.
+
+digest: "9943e69dfdd74aa7"
+
+rounds: 5
+
+carried:
+  - subprocess-safety-reviewer/1 · scripts/check-review.sh `touched` is read without -z, so a closed record whose filename contains a quote, backslash or tab is not judged under a scrub; predates this change, no such file exists
+    person: "ファイル名に引用符やタブを含む記録は、名前の置換の確認から外れます。今そのような記録はなく、動作に影響しません。対応は不要です。"
+  - subprocess-safety-reviewer/2 · a record whose old path carried a listed name can move between two closed directories and pass a scrub; the content is kept, only the directory it belongs to changes
+    person: "名前の置換のとき、記録を別の過去の変更ディレクトリへ移せてしまいます。記録の内容は消えません。置換の差分を読む人が見るので、対応は不要です。"
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

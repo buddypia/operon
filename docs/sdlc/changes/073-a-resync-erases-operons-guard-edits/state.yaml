@@ -1,0 +1,25 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+# gate-configuration is a paused surface; the user approved this whole task,
+# the landing merge on main included, before it began.
+resume: "Landed. Five carried nits in review.yaml outlive it; nit 1 (make patterns admit --eval and SHELL=) is the first to take"
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 562 passed 0 failed 6 ignored, clippy silent; #[test] 567 to 568, #[ignore] 6 to 6"
+  # Same three breaches as main (always_loaded_bytes warn, steering_bytes
+  # diagnose, unsafe_blocks propose); steering_bytes moves 299034 -> 299852
+  # with updated skill text.
+  bands: "machine waived bash scripts/check-bands.sh"
+  release-binary: "machine passed no: only src/tests.rs changes under src/, so the installed bundle does not go stale"
+  staleness-current: "machine passed bundle-staleness.mjs reports the worktree current, bundle 1.2, locally_modified empty"
+  opt-ins-guarded: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here"
+  guards-verified-by-mutation: "human passed the new test watched failing with trunk_bash_allowlist.enabled false, with session_owner_scope commit, and with wt-run restored to the node pattern"

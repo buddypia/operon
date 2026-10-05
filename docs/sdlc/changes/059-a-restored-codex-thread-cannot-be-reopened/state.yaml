@@ -1,0 +1,56 @@
+# The state of change 059. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 059 because 058 was taken: `.worktrees/feature/enforce-worktree-
+# session-ownership` holds `058-enforce-worktree-and-session-ownership`. Found by
+# listing every worktree's changes rather than this one's, which is the only
+# place the collision is visible — the same check change 056's state file says
+# nothing enforces.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "This change's own commit was refused by a hook this branch had already
+  fixed, and that is the finding to carry forward. `.claude/settings.json`
+  registers the gate as `${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-commit.sh`, and
+  CLAUDE_PROJECT_DIR for a session working in a worktree is the SHARED checkout —
+  so the file that runs is never the one the worktree is editing, and a fix to any
+  hook is dormant until it reaches main. Change 057 fixed this exact defect and
+  was itself unable to take effect. Measured rather than inferred: the refused run
+  reported `452 passed; 9 failed; 6 ignored`, which is 467 tests, and `grep -c`
+  over `#[test]` counts 467 in the shared checkout against 489 here — it gated
+  another tree's sources, and the nine failures are git-worktree tests that are
+  not in the diff being committed. This tree is green either way: 483 passed with
+  the session's inherited GIT_DIR/GIT_WORK_TREE in place and 483 with them
+  stripped, so the pointers are not the cause. No damage this time — the reflog's
+  two `initial` commits are the ones 057 recorded, and HEAD, the branch and the
+  staged tree stayed intact. Unblocked by copying this branch's gate-commit.sh
+  over the shared checkout's, with the user's approval, because a worktree-isolated
+  session must not reach into another tree on its own. That copy is a stopgap and
+  will be undone by any `git checkout` there; the durable fix is a change of its
+  own, named by subject: a hook fix must reach the file the harness runs, which
+  means either merging to main as part of landing or a registration that resolves
+  the landing tree's own copy. Nothing in the repository notices when the two
+  copies differ, which is what let 057 look landed for a week.
+
+  What this change itself left behind: a restored Codex thread now resumes — Codex
+  continued Operon's numbering with its own record at ordinal 15 — but it opens on
+  an empty conversation, A restored Codex thread now resumes — Codex continued Operon's numbering with its own record at ordinal 15 — but it opens on an empty conversation, because a resumed thread hands the TUI a list of turns and this one has none. Measured: 0 turns against 4 for a thread Codex wrote itself, and reachable — a hand-written `task_started`/`turn_context`/`item_completed`/`task_complete` sequence projected into 1 turn with its user items. That is the next change on this path — its subject, not its number, because a number written before the directory exists is a reference that can only be wrong, which is what review found in the first draft of this file. lessons.md entry 024 closes with what this change does not guard."
+
+contract:
+  three-gates: "machine passed fmt silent, 483 passed 0 failed 6 ignored, clippy silent under both -- -D warnings and --all-targets"
+  codex-resumes-what-operon-restored: "machine waived the named command — cargo test --locked -- --ignored codex_app_server — still FAILS, and this item is the decision not to hold the change for it, with the reason. What the fix did confirm, from Codex's own side: after it, `codex resume` opened the restored thread and Codex appended its own `thread_settings_applied` record at ordinal 15, continuing the numbering Operon wrote, and the whole run holds no `Pane is dead`, no `missing an ordinal` and no unanswered trust prompt where before it held all three. What still fails is the second cause in plan.md's departures — the resumed thread returns 0 turns where a Codex-written thread returns 4, so the terminal opens empty — which has its own change, named in `resume` above. Waived rather than pending because pending means nobody has judged it, and this was judged: the format half is shipped and the rendering half is the next change on this path. The verdict vocabulary has no word for `failed, and a successor owns it` — the gap review found here, and a change of its own, unnumbered here for the reason in `resume`"
+  rollout-shape-still-matches: "machine passed bash scripts/check-codex-rollout-shape.sh — `645 Codex-written session files, envelope fields ordinal timestamp type— all written by codex_replay_event`. The file count is not the evidence and rises whenever anyone uses Codex; the envelope comparison is, and it is what the second half of that line reports. Watched failing: with the writer's ordinal insert removed it printed `1 field(s) Codex writes on every record that codex_replay_event does not: ordinal`, which is the drift this change exists for, reported by a script that reads Operon's side out of the function rather than restating it"
+  reviewed: "human passed rust-reviewer, one pass over digest b5c6678583166cc2, `request-changes 2 5`, and it approved the code outright — both Importants were on the record side. One: this file's `codex-resumes-what-operon-restored` item carried the verdict `waived` under prose that said `recorded as failing rather than waived`, which AGENTS.md's own instruction to read state.yaml before the prose turns into a next session scanning the token and walking past the judgement. Fixed here; the vocabulary gap behind it is a change of its own. Two: `steering_bytes` recording `propose` for the third consecutive change while bands.yaml prescribes an intent.md — the `bands` item now says plainly that it is not discharged and that the intent.md is the change that must follow, rather than claiming it was done. A second confirmation pass caught the first attempt at both: it cited changes 060, 061 and 063 in the completed tense, none of which existed in any worktree, and assigned 060 to two different subjects across this directory's own state.yaml and intent.md — while this file's header describes the collision check that would have caught it. Forward references are gone; successors are named by subject. The guard that would have caught both rounds mechanically does not exist yet and is named in that successor's scope: `harness_documents` in src/tests.rs recurses docs/sdlc but keeps only `*.md`, and `repository_paths_named_in` reads only backticked spans, so state.yaml — the one file AGENTS.md tells an arriving session to read first — is the only committed artifact whose paths nothing checks. All five nits taken: an unreadable trailing line left the previous record's number standing as the file's last (now refused, with its own arrangement), the shape script reddens on a deleted insert line and not on a disabled branch, the union across versions is what makes `ordinal` visible and is now said out loud in both the script and entry 024, the non-monotonic arrangement is labelled inferred rather than measured, and the i18n follow-up must carry a guard because `catalog_keys()` is the union of the two tables it checks"
+  guards-verified-by-mutation: "human passed five mutations watched, plus the shape script's own, plus one arrangement review found. Writing the appended records unnumbered, numbering an unnumbered rollout from zero anyway, taking the next number from the last record instead of the highest, dropping the verification block, and dropping only its non-maximal arm — each reddened the guard that claims it. Two of the five had nothing to redden when they were first run: the last-versus-highest swap stayed green because every fixture was monotonic, and the non-maximal arm is unreachable through the writer. Both got an arrangement written for them and were then watched failing. The legacy test is the guard that matters most and the easiest to mistake for a restatement: it passes before and after the fix, and it is what would have caught `always write an ordinal`, which is the fix that would have passed the failing test and broken every pre-numbering session file. Six mutations in the script at ~/.operon-hook-backups/mutate-059.py, which reports a substitution matching nothing as its own failure rather than as a green guard"
+  bands: "machine waived steering_bytes at propose (208450, tier 150000) and always_loaded_bytes at warn (11648, warn 11000). Both were over before this change — 201096 at 057 — and every byte this change adds to the metric is lessons.md entry 024: scripts/harness-metrics.sh:55 counts CLAUDE.md, AGENTS.md, DESIGN.md, CONTRIBUTING.md, REVIEW.md, the agents, the SKILL.md files and docs/sdlc/*.md, so this directory's own prose is outside it and 207231 to 208450 is the entry. Writing the entry shorter would move the number and not the problem. Waived for this change; NOT discharged as a class, and this line does not claim otherwise, because review caught the first draft claiming a successor that did not exist. The count is the finding — three consecutive changes have recorded `propose` and taken no action, so the band is firing into nothing — and docs/sdlc/bands.yaml's prescribed response, one intent.md re-entering at stage 1, is the change that must follow this one before a fourth waiver is written"
+  measurement-before-fix: "human passed both directions and both boundaries measured before the fix was written, through the same `thread/resume` the TUI calls rather than through a pane that has to draw in time: the rollout as Operon wrote it is refused, the same file with its four ordinals filled in resumes, a 2026-09-05 session with no ordinal anywhere resumes, and a 2026-09-10 session numbered throughout resumes. That last pair is why the fix continues the file's convention instead of always writing an ordinal. Probes kept at ~/.operon-hook-backups/probe-codex-ordinal.py and probe-codex-resume-only.py"
+  i18n-gap-recorded: "human passed the two new messages have no rows in EN_TABLE or KO_TABLE, and neither do the other 89 message ids in src/history.rs — measured with ~/.operon-hook-backups/count-untranslated.py, 89 of 89 absent. Adding rows for these two alone would imply the rest were covered. Recorded in plan.md's departures as a change of its own on the `text` surface"

@@ -1,0 +1,28 @@
+# Round 2, digest 6fed93404b99a1bf, rust-reviewer and
+# subprocess-safety-reviewer asked 2026-09-27.
+#
+# Round 1: subprocess-safety-reviewer approve-with-nits; rust-reviewer
+# request-changes, one Important — a tab with a count was laid out at the
+# Body size (14) while the others were at the Button size (13.5), so the row
+# mixed sizes and a tab grew when its count arrived. Fixed by naming
+# TextStyle::Button in both append_to calls; the emphasis test now applies
+# the app's metrics and checks every section's size, watched red with the fix
+# reverted. Round 2: both approve-with-nits. Every nit is carried, not taken.
+
+digest: "6fed93404b99a1bf"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/app.rs worktree count includes the main checkout, so every repository reads worktree 1
+    person: "worktree タブの数は、プロジェクト本体の作業場所も 1 つとして数えます。追加の worktree がなくても「worktree 1」と表示されます。対応は要りません。"
+  - rust-reviewer/2 · src/ui/widgets.rs the tab row builds up to three small strings per frame
+    person: "対応は要りません。タブの数字の表示は画面を描くたびに小さな文字列を作りますが、体感できる負荷ではありません。"
+  - subprocess-safety-reviewer/1 · src/app/screens.rs opening エージェント設定 starts the skills scan and the rules scan in the same frame
+    person: "エージェント設定タブを開くと、スキルと指示ファイルの検索が同時に始まります。どちらも裏で動き、件数に上限があるので、対応は要りません。"
+  - subprocess-safety-reviewer/2 · src/tests.rs tab_counts_do_no_work ends the function body at the first 4-space closing brace
+    person: "対応は要りません。数字の計算が余計な処理をしていないかを確かめるテストの、確認範囲の区切り方が単純です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

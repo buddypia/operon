@@ -1,0 +1,12 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 2"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Transcript resume readiness validation, trailing line sanitization, and clean-start fallback implemented and verified."

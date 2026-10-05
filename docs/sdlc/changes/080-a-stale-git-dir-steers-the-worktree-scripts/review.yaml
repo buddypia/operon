@@ -1,0 +1,29 @@
+# Round 1, digest 82ece22bb670ad9a, both reviewers asked 2026-09-25.
+#
+# rust-reviewer: approve-with-nits 0 3. The scrub sits where the named cause
+# says: safeExec behind safeGit and queryBranch, execOnce behind every git()
+# in ops.mjs, defaultGitFn behind every gitFn in worktree-new.mjs. No
+# per-frame work, no SQL, new unwrap/expect only in src/tests.rs.
+#
+# subprocess-safety-reviewer: approve-with-nits 0 2. No caller relies on an
+# inherited pointer (every safeExec caller passes a cwd; .githooks/ starts no
+# node); safeExec is the right layer; node_steered_at is sound because
+# --env-file does not override set variables, so only node's children see the
+# pointers, which is the real-world case.
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "82ece22bb670ad9a"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · .cli/lib/layout-resolver.mjs:129 runs git rev-parse --git-common-dir unscrubbed and caches it; ops.mjs reaches it through ship-quality-ledger (readLedger via worktreeTrace); ship-scale.mjs:24 has the same unscrubbed defaultGit
+  - rust-reviewer/2 · src/tests.rs node_steered_at needs node >= 20.6 for --env-file; on an older node both tests fail with bad option, which reads as a script regression
+  - rust-reviewer/3 · src/tests.rs a_git_dir_that_no_longer_exists test reads a missing guard verdict as allow; a deny in another output shape would pass unnoticed
+  - subprocess-safety-reviewer/1 · ops.mjs:594, :624 (make -n, make q.ci-mirror) and :1393 (node staleness script) still inherit, though the comment at ops.mjs:199 says every git here is covered
+  - subprocess-safety-reviewer/2 · the JS list pins to the two-name Rust constant, but forget_inherited_repository in src/git.rs also clears GIT_INDEX_FILE, GIT_OBJECT_DIRECTORY, GIT_PREFIX, GIT_COMMON_DIR; an exported GIT_INDEX_FILE would still half-steer cleanup's git status
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

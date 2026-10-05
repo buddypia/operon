@@ -1,0 +1,12 @@
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 2"
+  autonomy: "full"
+  risk: "low"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Antigravity CLI to Codex CLI conversation restore drift resolved and verified."

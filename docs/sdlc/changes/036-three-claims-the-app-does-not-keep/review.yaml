@@ -1,0 +1,10 @@
+digest: "53e1dc8774d2f492"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"
+
+nits:
+  - src/agents.rs  codex --dangerously-bypass-hook-trust は CLI 自身が DANGEROUS と書いているのに表にない。表を広げるかは人の判断
+  - src/agents.rs  mode の腕だけ launch_argument_tokens を通らない。今日の 2 値は正規化不変なので無害だが doc は「両側」と読める
+  - src/agents.rs  ダッシュを落とすので裸の値トークンにも一致する。aider --preset=yolo が同意を求める。安全側だが読まずにチェックを押す癖につながる

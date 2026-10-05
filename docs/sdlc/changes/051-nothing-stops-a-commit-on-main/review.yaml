@@ -1,0 +1,27 @@
+digest: "3540a52d4313a8d5"
+
+# One verdict, because one is what this diff requires. The `modify` route in the
+# landed docs/sdlc/routes.yaml still carries the pre-035 `no` column, which reads
+# as reviewer set `none`, so the whole requirement here comes from the surface:
+# docs/sdlc/risk.yaml classifies .claude/settings.json as gate-configuration and
+# hands it to subprocess-safety-reviewer.
+#
+# It earned the line. Its first pass returned do-not-approve on a finding neither
+# the suite nor check-bands.sh nor check-readiness.sh could see: the sync's
+# settings merge had raised gate-stop.sh's Stop timeout from 30 to 120 without
+# being asked and without recording it. A longer budget is not a weaker gate — a
+# hook that times out is a hook that did not run — which is exactly why nothing
+# failed and nothing would have. It is restored to 30, the verdict below is the
+# re-review at the digest that restoration produced, and plan.md carries the
+# account of it.
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 5"
+
+# All five are in managed files, so they are noted for direct harness updates.
+# The first two are the ones worth the trip.
+nits:
+  - .cli/lib/utils.mjs:158  execSync keeps Node's 1MB maxBuffer, so a >1MB `git status --porcelain` returns null and countUncommittedChanges reports 0 — Stop passes a dirty worktree
+  - .codex/hooks.json:9  $(git rev-parse --show-toplevel) resolves to the linked worktree inside one, so a branch runs — and can stub — its own .cli/ guards; same in .claude/hooks.json
+  - .claude/scripts/wt-run.mjs:35  --worktree is resolve()d against REPO_ROOT with no containment check, so `-w ../../other` runs the command outside the repository
+  - .claude/scripts/wt-run.mjs:98  cmdArgs.join(' ') with shell:true re-tokenizes an already-split CMD: make wt.run CMD="cargo test 'a b'" runs `cargo test a b`
+  - .cli/hooks/worktree-shipping-guard.mjs:132  merge-base output is interpolated unvalidated into an execSync shell string; the other six interpolations are literals

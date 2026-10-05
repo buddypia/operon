@@ -1,0 +1,24 @@
+# Backfilled by change 008, which introduced this file. Recorded as it actually
+# ended rather than as it would look if it had gone smoothly — the steering_bytes
+# breach below is the interesting part of this change's history.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "feature"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. One thing outlives it: steering_bytes sits at diagnose and the flagged concern in spec.md names a defect in the metric's own formula, deferred to its own change rather than fixed inside the change that breached it."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived steering_bytes at diagnose, investigated and recorded in plan.md"
+  guards-verified-by-mutation: "machine passed four mutations watched failing, listed in plan.md"
+  lesson-recorded: "human passed entry 010 in docs/sdlc/lessons.md, with its guard column filled"

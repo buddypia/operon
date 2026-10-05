@@ -1,0 +1,24 @@
+# Review record for change 076.
+#
+# Round 1:
+# - rust-reviewer: Verified that image texture GPU allocation in document_image_texture
+#   is cached in egui context memory per document ID and not re-uploaded per frame.
+#   All image decoding via image::load_from_memory is fallible and gracefully handles
+#   corrupted bytes without panic. Cargo fmt, clippy (-D warnings), and 584 tests pass cleanly.
+# - subprocess-safety-reviewer: Verified no new Command::new, spawn, or unsafe blocks are
+#   introduced. Terminal click dynamic fallback uses resolve_terminal_path which restricts
+#   resolved targets to valid project/worktree paths.
+# - durability-reviewer: Verified no store schema or persistence invariants are altered.
+#   Image editing state is purely in-memory. Added explicit 10 MiB ceiling (EDITOR_IMAGE_MAX_BYTES)
+#   to prevent memory exhaustion.
+#
+# Verdict: approved across all required reviewers.
+
+digest: "2be236a05762ead6"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"

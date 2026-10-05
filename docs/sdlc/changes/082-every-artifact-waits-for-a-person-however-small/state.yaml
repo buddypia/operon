@@ -1,0 +1,31 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Risk: touches docs/sdlc/risk.yaml and the pipeline's approval rules, which
+# is the gate-configuration surface (high, paused). The owner asked for the
+# change and answered the four questions that decide its shape (2026-09-25);
+# that answer is the authorization the paused tier asks for.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "4 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: ten carried nits in review.yaml; a paused surface promoted after clean_run (bundle-swap should stay a person's) and a branch with no plan escaping the paused hold are the ones worth a follow-up change."
+
+# Review ran three rounds against modify's ceiling of two: each round past the
+# first was an Important in this change's own fix, never a nit taken.
+
+contract:
+  three-gates: "machine passed fmt silent, 603 passed 0 failed 6 ignored, clippy silent"
+  reviewed: "human passed rust-reviewer approve-with-nits 0 4 and subprocess-safety-reviewer approve-with-nits 0 3 at digest 60057d19007ea4be"
+  bands: "machine waived unchanged by this change: always_loaded_bytes warn, steering_bytes diagnose, unsafe_blocks propose, as on main; reference_bytes 21988 under its 22000 warn; approval_escapes 0"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], and the rest is scripts, hooks, and docs"
+  guards-verified-by-mutation: "human passed 18 of 18 caught by mutations.py, two of them mutating the rule's own sentences"
+  owner-approved-spec: "human passed the owner answered 承認してmerge on 2026-09-26; recorded as person lines in approvals.log"

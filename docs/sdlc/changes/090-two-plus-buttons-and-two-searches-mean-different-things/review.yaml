@@ -1,0 +1,29 @@
+# Round 1, digest 78f6661f354fabf2, both reviewers asked 2026-09-27.
+#
+# rust-reviewer: approve-with-nits 0 3.
+# durability-reviewer (required: src/models.rs is the store surface):
+# approve-with-nits 0 2; no persisted field, serde attribute, schema version,
+# or write path changed; status_filter is in-memory; the keymap file is never
+# overwritten.
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "78f6661f354fabf2"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app/keymap.rs a keymap file that already binds Mod+N to another action now conflicts with the new session.new default and is refused whole until session.new is set to null
+    person: "自分でキー割り当てを変えていて、どこかに ⌘N を使っていた場合だけ、更新後に割り当てファイル全体が読み込まれず標準のキーに戻ります。画面に理由が出るので、そのファイルに一行足せば直ります。多くの人は対応不要です。"
+  - rust-reviewer/2 · src/app/screens.rs the dependency picker builds every label with status_view each frame even while the combo is closed
+    person: "セッション起動フォームを開いている間、少し余分な計算をしています。体感できる差はなく、対応は要りません。"
+  - rust-reviewer/3 · src/app/screens.rs the dependency picker and the ⌘K detail line show the group word only, so a queued and a running session both read 実行中 without a hover sentence
+    person: "「ほかのセッションの後に開始」の一覧と ⌘K の候補では、順番待ちと実行中がどちらも「実行中」と表示され、見分けられません。サイドバーではマウスを乗せると詳しい状態が出ます。急ぎの対応は要りません。"
+  - durability-reviewer/1 · src/tests.rs no test pins the upgrade case where an existing file binds Mod+N and falls back to the defaults with a message
+    person: "⌘N を使っていた古い割り当てファイルが標準のキーに戻る動きは、自動テストでは確かめていません。動き自体は確認済みで、対応は要りません。"
+  - durability-reviewer/2 · .claude/skills/durability-invariants/SKILL.md says STORE_SCHEMA_VERSION is currently 4; src/config.rs says 5 (predates this change)
+    person: "開発用の説明書きに保存形式の版数が古いまま書かれています。アプリの動きには影響せず、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  durability-reviewer: "approve-with-nits 0 2"

@@ -1,0 +1,24 @@
+digest: "9fad0b0b4caab369"
+
+# One verdict, from the surface rather than the route: docs/sdlc/risk.yaml hands
+# anything touching the gates to subprocess-safety-reviewer.
+#
+# Five passes. The first refusal is the one that mattered — asked what the other
+# eight `Command::new("bash")` call sites in src/tests.rs do, rather than the one
+# this change fixed, and the sweep that answers it found
+# .claude/hooks/gate-stop.sh does not parse under bash 3.2 at all. A Stop hook
+# that exits 2 blocks every stop, so on a stock macOS the gate that refuses an
+# unverified finish has been dying before reading a single contract. That is now
+# change 055, awaiting a person on a paused surface.
+#
+# The next three refusals were all the same defect inside the guard written to
+# close it, each one quieter than the last: a comment handing the `#!/bin/sh`
+# exclusion to a test that does not exist; the exclusion itself, when /bin/sh on
+# macOS *is* bash 3.2, which left the cheapest way out of the exception list;
+# a one-level walk that missed .githooks/installed/reference-transaction, the
+# installed copy of the hook lessons 018 and 019 are both about; and a shebang
+# matcher that took the line's last token, so `#!/bin/bash -euo pipefail` would
+# have left the sweep without a word. A script that is never asked is not a
+# script that passed.
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

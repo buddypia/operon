@@ -1,0 +1,34 @@
+# Round 1, digest b7cc1614ef477ca5, rust-reviewer asked 2026-09-27.
+#
+# rust-reviewer: request-changes 1 3. Important: the file filter cached an
+# empty answer while the scan was loading and nothing cleared it when the scan
+# arrived. Taken: cache only with a scan, clear on both scan-arrival handlers,
+# a test watched red on the old code. Nit 2 (the no-project fallback
+# overwrote the chosen tab) taken in the same round.
+#
+# Round 2, digest 43460d84be621c98, same reviewer 2026-09-27.
+#
+# rust-reviewer: approve-with-nits 0 1. Remaining nits carried per REVIEW.md.
+# subprocess-safety-reviewer (required: src/agents.rs is in the subprocess
+# surface) asked at the same digest: approve-with-nits 0 2, both carried.
+
+digest: "43460d84be621c98"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/3 · src/ui/session_tree.rs filter_scanned_paths lowercases every path on each query change; near FILE_SCAN_VISIT_LIMIT that is about 200k allocations in one frame per keystroke
+    person: "とても大きなプロジェクトで絞り込み欄に文字を打つと、一瞬引っかかることがあります。普段の規模では気づかない程度で、対応は要りません。"
+  - rust-reviewer/4 · src/app/screens.rs the session row builds its own separator instead of meta_separator
+    person: "一覧の区切り記号が見出しとは別の書き方になっていて、見た目を変えるときに片方だけ変わる可能性があります。今の見た目は同じで、対応は要りません。"
+  - rust-reviewer/5 · src/ui/session_tree.rs:341 while a scan loads, the list shows saved filter results without checking their root and query, so another session's matches can show and open against this root
+    person: "絞り込みをしたまま別のセッションに切り替えると、読み込みが終わるまでの一瞬、前のセッションの候補が表示され、それを押すと違うファイルが開くことがあります。読み込み後は正しく戻ります。急ぎの対応は要りません。"
+
+  - subprocess-safety-reviewer/1 · src/app.rs begin_session_rename still seeds the editor with session_title, so an unnamed session shown by its first prompt opens rename with the workspace · agent name
+    person: "名前のないセッションで名前変更を始めると、一覧に出ている依頼文ではなく「フォルダ名 · エージェント名」が入力欄に入ります。書き換えれば問題なく、対応は要りません。"
+  - subprocess-safety-reviewer/2 · src/app/screens.rs session_list_title allocates a String per row per frame
+    person: "セッション一覧を描くたびに少し余分な処理をしています。数百件でも体感できない程度で、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

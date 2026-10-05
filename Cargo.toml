@@ -1,0 +1,48 @@
+[package]
+name = "operon"
+version = "0.1.0"
+edition = "2021"
+description = "A local-first macOS cockpit for AI coding agents"
+license = "MIT"
+repository = "https://github.com/buddypia/operon"
+homepage = "https://github.com/buddypia/operon"
+readme = "README.md"
+keywords = ["macos", "ai", "coding-agent", "tmux", "gui"]
+categories = ["development-tools", "command-line-utilities", "gui"]
+
+[dependencies]
+anyhow = "1.0"
+directories = "6.0"
+eframe = { version = "0.31", default-features = true }
+egui-phosphor = "0.9"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+libc = "0.2"
+rfd = "0.15"
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
+uuid = { version = "1.16", features = ["v4", "serde"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+debug = 1
+
+[profile.test]
+debug = 1
+
+[dev-dependencies]
+ab_glyph = "0.2"
+# Tests only, and deliberately not a dependency: src/tmux/hooks.rs edits
+# ~/.codex/config.toml line by line on purpose, because it is a hand-edited file
+# whose comments and ordering belong to the person, and a round trip through a
+# serializer would rewrite all of it. That argument is about the input. Nothing
+# checked the OUTPUT, and change 060 is what that cost — a top-level `hooks`
+# scalar written against a key Codex declares as a table, so every Codex session
+# on the machine failed to load its configuration. The parser is here to read
+# back what the line editor wrote; the shipped binary still never parses TOML.
+toml = "0.8"

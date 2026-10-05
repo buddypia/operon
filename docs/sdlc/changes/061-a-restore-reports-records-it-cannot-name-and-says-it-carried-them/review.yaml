@@ -1,0 +1,120 @@
+# The review record for change 061. Shape and its hazards: see
+# docs/sdlc/templates/review.yaml.
+#
+# Three rounds, and both Importants are the same finding reached by different
+# routes: a claim in the notice that is not true of every site it covers. That
+# is the defect this change was opened for, and it was written twice more by
+# the fix for it. The rounds are the record of that, and they are the reason
+# this file is long.
+#
+# ROUND 1 — rust-reviewer, `do-not-approve 1 1`, digest db16077837fb0456.
+#
+#   The new carried sentence read 「内容は [Unclassified] の見出しを付けて復元先へ
+#   渡しています」. Four sites record `Carried`, and only two attach that heading:
+#   the six record and payload sites behind `unclassified_record`, and the
+#   content-block site. `record_is_excluded_by_flag` (an unknown `is…` flag) and
+#   `codex_transcript_record`'s role handling do not — both cross under their
+#   own label. So the notice sent a person looking for a heading that was never
+#   written, and `unclassified_label`'s own doc comment says the heading exists
+#   so the reader "can be told what it is".
+#
+#   Taken in round 2. The sentence claims delivery and nothing more, which was
+#   true at all four sites. Routing flag and role through `unclassified_label`
+#   was the reviewer's other option and was not taken: an unknown role is not a
+#   reason to relabel a person's whole message, and an unknown flag has no
+#   fragment to label. Round 2's reviewer agreed that choice was unrelated to
+#   its own finding.
+#
+#   The reviewer also noted this change's own new test proved it —
+#   `an_unknown_role_is_reported_as_carried_because_its_turn_crosses` asserts
+#   `turns == vec![("assistant", "watching")]`, no marker — and that none of the
+#   ten mutations caught it, because every one asked whether a *count* moved and
+#   none asked whether the sentence was true of the restored text.
+#
+# ROUND 2 — rust-reviewer, `do-not-approve 1 0`, digest 4727292cae0e294a.
+#
+#   Round 1's Important was gone. Its replacement claim — 内容は復元先へ渡して
+#   います — was still false at the same two sites, by a different route.
+#
+#   Both count on sight, before the record they sit on has been read, and the
+#   record can still return `Empty` a few lines later. Two reproductions, traced
+#   through the readers rather than guessed:
+#     - `{"type":"user","isNewFlag":true,"message":{"content":[]}}` — the flag is
+#       counted, then `classified_content_text` on `[]` yields nothing and the
+#       record is `Empty`.
+#     - `{"type":"response_item","payload":{"type":"message","role":"observer"}}`
+#       — the role is counted, then `payload.get("content")` is absent and the
+#       record is `Empty`.
+#
+#   It hid from the arithmetic guard by design rather than by luck: both records
+#   land correctly in `empty`, so `records == restored + operational +
+#   unclassified + empty` still closes. Only the per-kind breakdown the carried
+#   sentence is built from disagreed with it.
+#
+#   Taken in round 3. Both sites now `defer_unclassified_kind`, and
+#   `settle_deferred_kinds` counts them against the record's own outcome from
+#   `transcript_value_record` — the single funnel all three readers return
+#   through, so a site that defers cannot forget to settle and a reader written
+#   later inherits it.
+#
+# ROUND 1'S NIT WAS TAKEN, in round 3 and not in round 1 — REVIEW.md's rule is
+# about the round a nit is raised in, and by round 3 its verdict was twice
+# superseded. It was not taken on purpose: the deferral needed a variant of
+# `count_unclassified_kind` that takes an already-qualified name, and
+# `count_named_kind` came out as `iter().position(...)` and an index, which is
+# the shape the nit asked for. There is now no `expect(` anywhere in
+# src/history.rs, so the crate is back to five unwrap/expect calls in production
+# code and .claude/rules/rust.md's budget is not spent.
+#
+# ROUND 3 — rust-reviewer, `approve-with-nits 0 2`, digest 92b8b4db0bd422df.
+#
+#   No Important. What it traced, recorded because it is the part that was
+#   actually at risk and because a reader should not have to re-derive it:
+#
+#   - `deferred_kinds` cannot leak. It is pushed to from exactly two places,
+#     both inside reader functions that are called only from
+#     `transcript_value_record`, which settles unconditionally after computing
+#     the outcome — a `return` inside a reader returns to that match, not past
+#     the settle. `transcript_conversation_turn` and `transcript_value_turn`
+#     build a throwaway summary and still route through the same funnel;
+#     `read_transcript_conversation` reuses one summary across a file but calls
+#     the funnel per line, so nothing survives into the next record.
+#   - The outcome-to-arm mapping is exhaustive over all four `RecordOutcome`
+#     variants, and the one case worth constructing by hand holds: an unknown
+#     flag on the same record as a known-operational one. The loop in
+#     `record_is_excluded_by_flag` does not break on the first excluding flag,
+#     so the unknown one is still deferred, and settles `Dropped` when the
+#     record returns `Operational`. Correct — nothing crossed for either.
+#   - The two sites that still count `Carried` directly both guarantee `Turn` on
+#     every path that reaches them. The block arm always pushes a chunk — the
+#     bare label when there is no text — so `nonempty_transcript_text` cannot
+#     return `None` for it. 内容は復元先へ渡しています is therefore true at all
+#     four `Carried` sites, deferred or direct, which is the claim rounds 1 and
+#     2 each found false by a different route.
+#   - Ordering does change: a direct count from later in one record can land in
+#     `unclassified_kinds` before an earlier-encountered deferred count settles
+#     at that record's end. Traced and dismissed — it moves display order in the
+#     notice's kind list and no count, no claim, and nothing asserts encounter
+#     order. Recorded here so the next reader does not rediscover it as a bug.
+#
+# ROUND 3 IS PAST THE CEILING OF 2, and that is worth a line rather than a
+# silent number. check-review.sh refuses `rounds > ceiling` only when `carried:`
+# is empty, and the rationale it carries (its own lines 601-620) is about the
+# loop a *nit* buys: taking a nit moves the digest, the digest voids the
+# approvals, the next round produces another nit — change 060 spent nineteen
+# rounds there. Neither extra round here was bought by a nit. Both were forced
+# by an Important, which the gate's own refusal text says to fix rather than
+# carry. The ceiling did its job as a mirror: it is the reason each round was
+# counted out loud instead of drifting.
+
+digest: "92b8b4db0bd422df"
+
+rounds: 3
+
+carried:
+  - rust/1 · src/history.rs の settle_deferred_kinds、RecordOutcome::Operational の腕を通すテストも変異も無い。到達には既知の operational フラグ（isMeta など）と未知フラグが同じ記録に同居している必要があり、`{"type":"user","isMeta":true,"isNewFlag":true,"message":{"content":"x"}}` のような fixture はどこにも無い。レビュアーは手でトレースして写像が正しいことを確認しているが、Operational を Carried 側へ動かす回帰は現行のテストと 15 個の変異すべてを通過する。(rust-061-r3)
+  - rust/2 · src/history.rs の新しい通知文 2 つが src/i18n_tables.rs に行を持たない。このファイルに元からある未翻訳 89 件と同じ扱いで、plan.md の「Departures from the plan」が「bugfix にその別件のバックログを吸収させない」と明示的に選択している。ラウンド 1・2 も指摘しなかったので Important ではない。記録の目的は 1 つだけ: 89 件をいつか片付ける人に向けて、件数が 91 になったことを伝えるため。(rust-061-r3)
+  - rust/3 · 取り込み済み、持ち越しではない。src/history.rs の count_unclassified_kind にあった .expect("a vector pushed to on the line above is not empty") はラウンド 3 で消えた。deferral のために名前を受け取る変種 count_named_kind が要り、その実装が iter().position(...) と索引になったため。レビュアーの判定は「六つ目の expect として正当だが、ただで避けられるなら避ける価値がある」だった。src/history.rs に expect( は 1 つも残っていない。(rust-061, round 1)
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

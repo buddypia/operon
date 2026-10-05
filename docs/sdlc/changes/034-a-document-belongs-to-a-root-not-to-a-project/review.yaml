@@ -1,0 +1,11 @@
+digest: "c833b921b754dc71"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"
+
+nits:
+  - src/app.rs:1905  document_index の doc comment が tree_highlighted_document に載っている
+  - src/app.rs:5261  absolute_display の「the only other one」が git.rs:750 の join を数えていない
+  - src/app.rs:1807  invalidate_open_editor_diff だけ project_rooted を見ず、遮断の1フレーム手前で余計な git diff を1回走らせる
+  - src/app.rs:5230  project 配下に作られた worktree は project が先にマッチし project-rooted になる。バッジが出ず Diff が提供される
+  - src/app.rs:5198  named() が人の読む文字列を format! で組んでいる。tf!("{p0} · {p1}") なら i18n_tables に行が立つ

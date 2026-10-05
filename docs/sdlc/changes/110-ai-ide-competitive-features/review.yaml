@@ -1,0 +1,22 @@
+# Round 1, digest c2513963569427a2
+#
+# rust-reviewer: approve. Zero unsafe, zero panics in production paths. All new
+# background tasks correctly decouple heavy Git and gh invocations from the egui frame
+# render loop. Full i18n support across ja/en/ko.
+#
+# subprocess-safety-reviewer: approve. All subprocess invocations use
+# forget_inherited_repository and run_command_with_timeout. No arbitrary shell strings
+# executed without isolation; script execution requires explicit user preview and approval.
+#
+# durability-reviewer: approve. Checkpoints leverage native Git ref namespaces
+# (refs/operon/checkpoints/), preserving local store schema stability. Worktree landing
+# and rollback verify clean trees and active session status to prevent data loss.
+
+digest: "c2513963569427a2"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"

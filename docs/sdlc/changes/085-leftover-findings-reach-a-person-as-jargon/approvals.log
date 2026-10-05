@@ -1,0 +1,12 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The plan tightens the review gate (a new refusal), and gate-configuration
+# starts demoted to a person. The evaluator, a fresh subagent, judged it
+# tightening and safe against the line-shape parsers; the person line is the
+# person's own request for this mechanism.
+2026-09-26T05:00:00Z auto plan plan.md 96c53ad574f67148 approve evaluator: fixes the named cause as a mechanism; only adds a refusal; a 4-space person line matches no existing reader
+2026-09-26T05:00:00Z person gate-configuration plan.md 96c53ad574f67148 approve owner: ちゃんと人間がわかる内容にメカニズムにして
+# Re-judged after the plan stopped citing a lesson number that does not exist
+# yet (a test refuses one); the evaluator confirmed nothing else moved.
+2026-09-26T05:20:00Z auto plan plan.md bacfd99781ae0197 approve evaluator: only the lessons.md row lost its number; mechanism, tightening, and parser safety unchanged
+2026-09-26T05:20:00Z person gate-configuration plan.md bacfd99781ae0197 approve owner: ちゃんと人間がわかる内容にメカニズムにして

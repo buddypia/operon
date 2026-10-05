@@ -1,0 +1,20 @@
+state:
+  route: "feature"
+  stage: "build"
+  status: "awaiting-user"
+  attempts: "0 3"
+  questions: "2 4"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Stage 1's intent.md is written, and the part of the work that needs neither an answer nor a file 035 holds is built: scripts/pipeline-indicators.sh computes the playbook's leading indicators for stages 1, 2, 3 and 5 and its lagging indicator for stage 6, all from git history and the change directories. It found the thing the intent said could not be known — the steering_bytes propose band was crossed on 2026-09-06 by 30a879f, change 029, not 030 as 035's state.yaml says — which settles one of the four open questions by measurement. It also showed 22 changes sitting in `reviewing` against 11 `done`, which no existing check reports. What is left needs one of two things this change does not have: the gate decision log and the band-breach record both edit .claude/hooks and scripts/check-bands.sh, which 035 holds, and the decision log additionally needs the owner's answer on whether it may record what it blocked. Two of the playbook's lagging indicators — first-pass CI success and defects-caught-before-merge — need PR metadata and an incident tracker; this repository is local-first with neither, and that is a limit of applying this playbook here rather than an unfinished task. Say so in spec.md rather than pretending otherwise."
+
+contract:
+  intent-committed: "machine passed committed as 51a3244; the review gate read it as paper trail only — no code diff, so no judgement was owed"
+  owner-answered-the-two-questions: "human pending what a gate decision log may record on a tool with no telemetry, and — now that measurement has attributed the breach to 029 — whether this change or 029 settles steering_bytes"
+  does-not-start-under-035: "machine passed scripts/pipeline-indicators.sh is a new file; .claude/hooks and scripts/check-bands.sh are untouched by this change and stay untouched until 035 lands or fails"
+  indicators-are-not-gates: "machine passed pipeline-indicators.sh reports and exits 0 on everything except a usage error and a lesson with no guard; nothing in the commit or stop path calls it"
+  contract-vocabulary-cannot-say-failed: "machine pending verdict is the closed set pending/passed/waived in docs/sdlc/templates/state.yaml, so an item that ran and came back red has to be written as pending. Adding a failed verdict alone makes it worse: gate-stop.sh reports open items with an awk that matches only the pending spelling, so a failed item would stop being named at all. Two files have to move together — the template for the vocabulary and gate-stop.sh for the reader — and gate-stop.sh is on the gate-configuration surface 035 holds, so this is blocked on 035 rather than on an answer. (This line was itself garbled in the stop gate output when it quoted the awk pattern literally, which is the same defect demonstrating itself.)"
+  says-what-it-cannot-measure: "human pending spec.md names the two lagging indicators that need a PR history and an incident tracker, and states plainly that a local-first tool cannot have them, rather than leaving them looking unfinished"

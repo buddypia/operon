@@ -1,0 +1,27 @@
+# Round 2, digest 5e822a555c25d577, rust-reviewer asked 2026-09-27.
+#
+# Round 1: request-changes, one Important (a long title pushed the row's
+# labels over the time and the action). Fixed with capped_label and a test
+# watched red; the same fix found and fixed a project card that grew to the
+# column's height. Round 2: approve-with-nits 0 4. The reviewer's own hash of
+# the staged diff differs because the checker's digest excludes
+# docs/sdlc/changes; the diff it read is the one staged.
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "5e822a555c25d577"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/app/screens.rs a running session that is both waiting and recent shows its delete confirmation in both rows
+    person: "実行中のセッションを削除しようとしたとき、そのセッションが要対応と最近の一覧の両方に出ていると、確認の文が 2 か所に出ます。どちらで押しても同じように動き、対応は要りません。"
+  - rust-reviewer/2 · src/app/screens.rs a row whose action is a start or resume verb has no 開く button; the terminal opens only by clicking the row
+    person: "「再開」や「今すぐ開始」が出ている行には「開く」ボタンがありません。行のほかの場所を押せばターミナルが開きます。対応は要りません。"
+  - rust-reviewer/3 · src/app/screens.rs 停止 moved from the row into the ··· menu, a deliberate change from the old card
+    person: "ホームでは「停止」が行の「···」メニューの中に移りました。承認された画面案どおり、行のボタンを 1 つにするためです。セッション画面には今までどおり停止があります。"
+  - rust-reviewer/4 · src/app/screens.rs the 60 px reserve fits an agent icon; an agent drawn as text can push a long branch about 10 px over the time
+    person: "独自コマンドのエージェントで、タイトル・プロジェクト名・ブランチ名がすべて長いときだけ、ブランチ名の端が時刻に少し重なることがあります。表示だけの問題で、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"

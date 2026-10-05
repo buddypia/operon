@@ -1,0 +1,30 @@
+# The state of one change. Copy into a change directory beside intent.md.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Batch 1 landed (102 rows per table). Batches 2+ and the call-site coverage guard follow under the same spec."
+
+contract:
+  three-gates: "machine passed fmt clean, test 315/0/6, clippy -D warnings clean"
+  bands: "machine passed check-bands ran; only pre-existing steering_bytes diagnose breach"
+  native-read-through: "human pending batch-1 EN/KO read by a reader of each language"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

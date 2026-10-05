@@ -1,0 +1,76 @@
+digest: "db44441ac8745b98"
+
+# One reviewer, from the surface rather than the route: the `bugfix` row in
+# docs/sdlc/routes.yaml asks for none, and docs/sdlc/risk.yaml hands
+# `.claude/settings.json,.claude/hooks` — the `gate-configuration` surface — to
+# subprocess-safety-reviewer at `high paused`.
+#
+# Six passes over six digests, and the history is the point: an approval that
+# confirmed a diff on the first read and one that survived three rounds of
+# `request-changes` are indistinguishable once reduced to `approve`. Every
+# finding below was real, and every one was found by the reviewer rather than by
+# the guard the change adds.
+#
+#   Pass 1 (ea8436748af5c908) — `request-changes 2 3`. Two Importants, both
+#   outside the four questions this session had asked, which is the argument for
+#   an open read over a checklist. First: the redirection refusal had no guard —
+#   deleting the block left the suite at 480 passed, so `git -C <other checkout>
+#   commit` would have been followed. Second: git's precedence was stated
+#   backwards in the hook, in plan.md and in lessons.md entry 023.
+#   `GIT_DIR`/`GIT_WORK_TREE` override the directory search rather than yielding
+#   to it, `.claude/scripts/worktree-init.mjs:278` writes both into every
+#   worktree, and so the fixture — which removed exactly those two variables —
+#   covered only the route production does not take. Entry 022 had written the
+#   precedence correctly one change earlier; restating it from memory inverted
+#   it.
+#
+#   Pass 2 (ba797ed3e9ab99e4) — `request-changes 1 2`. The reviewer withdrew its
+#   own proposed remedy for pass 1's second finding, after measuring it: with
+#   the pointers dropped before resolving, the gate looks at the wrong tree and
+#   passes a commit bound for the right one. The finding was the rationale and
+#   the coverage; the remedy would have been the defect respelled. Recorded
+#   because the disagreement was settled by a mutation rather than by either
+#   side restating itself. Its new Important: the fourth case did not exercise
+#   the fallback it was named after — with no reported `cwd` the hook's own
+#   working directory was still a repository, so `CLAUDE_PROJECT_DIR` was never
+#   consulted, and deleting both fallbacks kept the suite green while the case's
+#   label, the Guard line and the contract all claimed that route.
+#
+#   Pass 3 (0250c87752c24ed9) — `request-changes 1 3`. A sixth input the
+#   decision reads with no case varying it: whether the reported `cwd` exists.
+#   Deleting the check left the suite green, and it fails in the dangerous
+#   direction — a stale reported `cwd` sends the gates to `CLAUDE_PROJECT_DIR`,
+#   the checkout the commit is not landing in. The reviewer wrote the missing
+#   case and measured both states before reporting.
+#
+#   Pass 4 (c4afaccd7ac6102f) — `approve 0 4`. Asked again whether a seventh
+#   input existed and did not answer no: two conditions were still constant
+#   across every case, both failing benignly and both on lines that predate this
+#   change. All four nits were taken anyway, because two of them were the gap
+#   between lessons.md entry 023's own rule and the guard beside it. This pass
+#   also confirmed the session's correction of `attempts` from `2 3` to `0 3` —
+#   routes.yaml:46 makes the closing gate `gate-commit.sh`, which has not failed
+#   once here, so a review round is not a failed attempt at a gate.
+#
+#   Pass 5 (4ac7714fc0c42ab8) — `approve 0 3`. Verified that pass 4's nit 1
+#   case, which the reviewer had designed, **does not discriminate**: it
+#   reproduced its own field values against the mutation and watched it stay
+#   green. Its words: "I handed over a case that cannot fail while reviewing a
+#   change about cases that cannot fail." The three nits were all sentences
+#   claiming slightly more than the cases covered.
+#
+#   Pass 6 (this digest) — `approve 0 3`. A confirmation, not an open read: the
+#   claim under test was that the diff since pass 5 is text-only. Checked
+#   mechanically rather than accepted — fifteen changed lines in src/tests.rs,
+#   every one a `//` comment, and no `arrangement` string literal moved, which
+#   is what the mutation script matches on. One mutation re-measured anyway. The
+#   ten stand on that byte-identity argument.
+#
+# Three nits remain, accepted with the reviewer's own reasons, recorded in
+# state.yaml's `reviewed` item rather than opened as a seventh round on prose.
+# All three are in the under-claim or wrong-tense class: a hedge that calls a
+# quiet failure quiet when only one of its two sub-cases is, a counterfactual
+# about this line's own history where the indicative was due, and a mutation
+# count of ten in a paragraph that then describes a measured eleventh.
+verdicts:
+  subprocess-safety-reviewer: "approve 0 3"

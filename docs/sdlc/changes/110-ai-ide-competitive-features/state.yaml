@@ -1,0 +1,18 @@
+state:
+  route: "feature"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Implementing AI IDE workflow features (worktree land, run scripts, checkpoints, PR creation, external editors, issue import) in feature/ide-enhancements worktree."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human pending each new guard watched failing"

@@ -1,0 +1,44 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# A prompt audit (`/claude-api prompt-audit`) of the steering surface found no
+# dated prompting idiom and fourteen places where the steering names something
+# the repository no longer is: a REVIEW.md section that does not exist, panic and
+# unsafe counts that drifted, a colour rule that does not load for
+# src/app/screens.rs, a create-pr skill the model can invoke and that cannot run
+# here. Every edit is to a document, a rule, an agent definition, or one
+# permission line; no source file is touched.
+#
+# The person approved the whole proposed diff in-session, including the
+# `paused` gate-configuration surfaces (.claude/settings.json, .claude/agents,
+# docs/sdlc/risk.yaml). That approval is the answer the paused tier asks for.
+#
+# Stopped at awaiting-user, not at a gate failure. The first `cargo test --locked`
+# ran with GIT_DIR and GIT_WORK_TREE exported into the session by Claude Code's
+# EnterWorktree, the ReviewGateFixture and the worktree tests inherited them, and
+# their `git init` / `git config` wrote into the shared .git/config: core.worktree
+# pointed at this worktree, plus user.name, user.email and the gpgsign key set to
+# the fixture's values. Three fixture tests failed on the same cause. A second
+# run, started by gate-commit.sh misreading a `git config --remove-section`
+# command as a commit, did it again. destructive-git-guard refuses to unset
+# core.worktree without the person, which is correct.
+
+state:
+  route: "docs"
+  stage: "build"
+  status: "done"
+  attempts: "0 2"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: six carried nits in review.yaml. The fixture leak that rewrote .git/config three times during this change is fixed by sdlc 079."
+
+contract:
+  three-gates: "machine passed with GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE unset in the shell: fmt silent, 590 passed 0 failed 6 ignored, clippy silent. The earlier 3 failures were the ReviewGateFixture inheriting the exported GIT_DIR, and do not reproduce without it"
+  bands: "machine waived 3 of 20 breached, none moved by this change: unsafe_blocks at propose (3, from src/sys.rs, already on main), steering_bytes at diagnose and always_loaded_bytes at warn, both already over before this diff, which is net four lines shorter"
+  release-binary: "machine passed no: nothing under src/, Cargo.toml or Cargo.lock changes, so /Applications/Operon.app does not go stale"
+  reviewed: "human passed subprocess-safety-reviewer, approve-with-nits 0 5 at digest 16ff6651779c27a4 in round 2; round 1 was do-not-approve 2 5 and both Importants were fixed (the second deny pattern with the person's approval)"
+  fixture-environment-follow-up: "human pending a bugfix change: ReviewGateFixture::command and the worktree tests must env_remove GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE, so a suite run from an EnterWorktree session cannot write into the real repository"

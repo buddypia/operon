@@ -1,0 +1,21 @@
+state:
+  route: "security"
+  stage: "plan"
+  status: "awaiting-user"
+  attempts: "0 2"
+  questions: "4 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Hold until change 035 lands or fails, because every file this change would edit is on the gate-configuration surface 035 holds. Then write spec.md, and open it with the measurement that settles question 1 in intent.md — whether `cargo build --release --locked` run a second time on an unchanged tree is cheap enough for one script to serve both the Stop boundary and the git boundary, which is what reconciles the owner's two answers."
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 473 passed 0 failed 6 ignored in 308.81s, clippy exit 0 with nothing past the compile lines. The tree read includes 035's uncommitted src/tests.rs and src/tmux/hooks.rs, because this change has no code of its own to read — the verdict is about that tree and will be taken again against the diff that lands."
+  bands: "machine waived steering_bytes reads 168588 against a 150000 propose tier and is the only breach of 20. The metric's input set in scripts/harness-metrics.sh is CLAUDE.md, AGENTS.md, DESIGN.md, CONTRIBUTING.md, REVIEW.md, .claude/agents, .claude/skills, docs/sdlc and docs/sdlc/templates — docs/sdlc/changes is not in it, so this change's two files add nothing to the number. The breach is change 029's, attributed by measurement in 038, and the working tree this reading includes carries 035's edits to REVIEW.md and docs/sdlc. Taken again when this change edits a file the metric counts, which spec.md will if it touches AGENTS.md or CLAUDE.md."
+  release-build-refuses: "human pending the build gate is watched failing on a tree that compiles under cargo test and not under --release, before it is trusted — a gate nobody has seen fail is a guess about what it gates"
+  docs-only-pays-nothing: "machine pending a commit touching only markdown, i18n tables, or comments runs no build, measured as elapsed time and not asserted from reading the classifier. Cannot start: the classifier lives in .claude/hooks/gate-commit.sh and the build gate would be added to .claude/hooks/gate-stop.sh, both on the gate-configuration surface 035 holds. Blocked on 035 landing or failing, not on an answer."
+  codex-is-actually-gated: "human pending a real Codex CLI session edits a .rs file, commits, and is refused with a message a person can read — observed at the machine, because whether Codex surfaces a git hook's stderr is not deducible from this repository"
+  does-not-disturb-035: "machine passed nothing outside this directory has been edited, and docs/sdlc/changes is excluded from the review gate's digest"
+  the-three-gates-sentence: "machine pending every_document_that_names_the_gates_names_the_same_three still passes, whether by leaving the sentence alone or by moving the guard with it. It passes today and was read passing on 2026-09-10, but it can only be settled against the diff that lands, and that diff edits AGENTS.md and CLAUDE.md alongside the hooks 035 holds. Blocked on 035 landing or failing, not on an answer."

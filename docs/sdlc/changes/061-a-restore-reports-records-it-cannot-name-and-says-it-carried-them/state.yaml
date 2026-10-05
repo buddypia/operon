@@ -1,0 +1,154 @@
+# The state of change 061. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 061 because 060 is this branch's own and 058 is the highest committed
+# on any other branch — checked with `git ls-tree` against main and the three
+# other worktree branches rather than through their working directories, for the
+# reason change 060's header records: the Session Owner Guard refuses a read into
+# another worktree, so an uncommitted change directory there is invisible here.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "DONE. All three defects are fixed, the contract is settled, 15 of 15
+  mutations were caught, and review closed at approve-with-nits 0 2 in round 3.
+  Two nits outlive this change and are in review.yaml's carried: the
+  RecordOutcome::Operational arm of settle_deferred_kinds has no test or
+  mutation through it, and the notice's two new message ids are untranslated,
+  which takes src/history.rs's standing backlog from 89 ids to 91. Also
+  outliving it: steering_bytes is now in the diagnose band, and the three
+  --ignored end-to-end failures that predate this change. The ordering recorded
+  below is superseded — the merge it was waiting on happens on main, not here."
+
+# READINESS IS `pending` AND STAYS `pending`, which is a statement about the
+# gate rather than about this change. `scripts/check-readiness.sh` returns
+# No-Go here on `intent.md がありません`, and the `bugfix` route skips stage 1
+# by design: docs/sdlc/routes.yaml gives it `build,test`, and
+# .claude/skills/sdlc/SKILL.md says "the bug report is the intent". The script
+# does not read routes.yaml at all — its first phase returns on a missing
+# intent.md before anything else is judged — so no bugfix can reach Go. Every
+# bugfix on this branch records `pending` for the same reason (055, 059, 060,
+# 064, 065, 066), which makes it a pattern and not an exception.
+#
+# Not fixed here, deliberately: check-readiness.sh is change 050's surface and
+# fixing a gate while using it is how a gate stops being evidence. Recorded so
+# the next reader knows `pending` is measured and not skipped.
+#
+# The measurement, 2026-09-21 on this tree:
+#   readiness: No-Go — 1 blocking, 0 warning
+#   blocking  …/061-…: intent.md がありません
+
+# SUPERSEDED, kept because it is the record of a decision that was reversed.
+#
+# The order below was agreed on 2026-09-20 and its step 3 was `git merge main`
+# from this side. On 2026-09-21 the repository's owner chose the other
+# direction: main takes this branch with `git merge --no-ff`, and this branch
+# never merges main. So steps 3, 4 and 5 cannot happen from here at all, and
+# step 5's items — the contract items of 035, 038, 040, and of 039 and 049 whose
+# directories do not exist in this worktree — are the merger's to judge, not
+# this session's. The handover for whoever does it is /tmp/operon-merge-handoff.md.
+#
+# The original, unedited:
+#
+#   1. wait for review-060's verdict at digest 2ab606270cb8e583
+#   2. commit 060
+#   3. git merge main — 18 commits, and the reason for the whole sequence:
+#      gate-commit.sh +490, gate-stop.sh +181, REVIEW.md +236,
+#      check-review.sh +18, plus 035's handoff.md, plan.md and spec.md, none of
+#      which exist in this worktree
+#   4. re-run the three gates and scripts/check-bands.sh on the merged tree
+#   5. re-judge the contract items of 035, 038 and 040, which are unreachable
+#      from here until then — and 039 and 049, whose directories do not exist
+#      in this worktree at all
+#   6. implement this change
+#
+# Steps 1 and 2 were done: 060 landed as a00463c at round 20.
+#
+# STEERING_BYTES CROSSED INTO `diagnose`, and this is the read-only
+# investigation that tier asks for: what moved, and when.
+#
+# What moved: all of it, and it is this change's own lesson. docs/sdlc/
+# lessons.md went 126296 -> 131272 bytes, a delta of 4976, of which 4975 is
+# entry 041 measured heading-to-heading with its separator — the convention
+# docs/sdlc/bands.yaml fixes for this figure. Nothing else steering_bytes counts
+# was touched: CLAUDE.md, AGENTS.md, DESIGN.md, CONTRIBUTING.md, REVIEW.md,
+# .claude/agents/*.md, .claude/skills/*/SKILL.md, docs/sdlc/*.md and
+# docs/sdlc/templates/*.md are all unchanged by this change.
+#
+# When: at this commit. 259333 -> 264309 against a diagnose threshold of 264000,
+# so the crossing is 309 bytes wide and one entry caused it.
+#
+# What it means, which bands.yaml already wrote down before it happened: "If it
+# is reached by lessons alone the answer is not another re-base: it is that the
+# format is the cost." It was reached by lessons alone. The rate has improved —
+# entries 036-041 are 27229 bytes across six, 4538 an entry, against the 6450
+# recorded for 019-024 — but 41 entries at 4538 is 130031 bytes, which is 99 %
+# of lessons.md and about half of steering_bytes.
+#
+# Not done here, deliberately, and both for the reason bands.yaml gives about
+# itself: the baseline is not re-based (a baseline edited to match today is not
+# a baseline), and entry 041 is not trimmed to fit under 264000 (correcting a
+# gate in order to pass it is the wrong way round). `propose` is at 316000,
+# which at 4538 an entry is about eleven entries away. The answer at that point
+# is a format change, and it belongs in its own change with its own intent.md,
+# not in a bugfix about a restore notice.
+
+contract:
+  three-gates: "machine passed fmt silent, 497 passed 0 failed 6 ignored, clippy
+    silent. 491 before this change and six tests added"
+  bands: "machine passed 2 of 20 breached. always_loaded_bytes 11648 at warn,
+    the tier it was already in. steering_bytes moved 259333 -> 264309 and
+    crossed into diagnose, whose threshold is 264000 — by 309 bytes, and this
+    change is what crossed it. The investigation that tier asks for is the next
+    block"
+  vocabulary-complete: "machine passed bash
+    scripts/check-transcript-vocabulary.sh, `67 kinds observed locally, all
+    classified`, exit 0. It exited 1 before this change naming
+    `codex Record token_usage_record`, and that transition is the one
+    measurement here taken against real local data rather than a fixture"
+  notice-tells-the-truth-about-what-crossed: "machine passed
+    a_kind_that_crossed_and_a_kind_that_was_dropped_are_reported_as_different_things,
+    watched failing first: it printed the defect verbatim — one sentence naming
+    both kinds and saying 内容は復元先へ渡していますが. Its load-bearing
+    assertion names no copy: the notice for a carried kind alone and for a
+    dropped kind alone, with the kind names swapped out, must still differ.
+    Two more guards belong to this item and both came from review, because the
+    first cut of the fix wrote this same defect twice more at the two sites
+    `unclassified_record` could not absorb:
+    the_notice_promises_no_marker_the_restored_text_does_not_carry (round 1 —
+    the sentence promised the [Unclassified] heading, which an unknown flag and
+    an unknown role never attach) and
+    an_unknown_flag_or_role_is_counted_against_what_the_record_did (round 2 —
+    both counted Carried on sight, before the record was read and could still
+    return Empty). Round 3 returned approve-with-nits 0 2. See review.yaml"
+  the-printed-arithmetic-closes: "machine passed
+    the_notices_printed_counts_account_for_every_record_read over a ten-record
+    fixture giving all six counters distinct values (10 4 3 2 1 5). It asserts
+    each is printed, and then bumps each in turn and requires the notice to
+    change — a counter that does not reach the sentence cannot change it"
+  restore-e2e: "machine passed in the only sense available: 3 passed, 3 failed,
+    and the same three fail on the tree as it was before this change, measured
+    rather than assumed. a_saved_antigravity_conversation_restores_into_a_
+    resumable_{claude,codex}_terminal assert imported_records == 4 and get 5;
+    codex_app_server_restores_a_short_transcript_into_a_resumable_terminal gets
+    a resumed thread that renders nothing. Identical messages on both sides, so
+    this change neither causes nor fixes them. They stay open"
+  guards-verified-by-mutation: "human passed 15 of 15, each run and each red —
+    mutations.py beside this file. Two were NOT CAUGHT on the first sweep and
+    are why the guard set grew: carried-role-called-dropped had no fixture with
+    an unknown role anywhere in the suite, and met-forgets-the-dropped had no
+    kind on the dropped arm to count. The honest note is that mutation testing
+    did not catch either Important — rounds 1 and 2 both found a notice claim
+    untrue of a site it covered, and every mutation asked whether a count moved
+    while neither defect was in a count. Five mutations exist now for what
+    review found: the heading claim restored, each of the two sites counted on
+    sight again, everything settled as carried, everything settled as dropped,
+    and nothing settled at all"

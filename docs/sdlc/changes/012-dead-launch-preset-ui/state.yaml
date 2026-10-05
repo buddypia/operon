@@ -1,0 +1,30 @@
+# The state of one change. Copy into a change directory beside intent.md.
+#
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "refactor"
+  stage: "deploy"
+  status: "reviewing"
+  attempts: "0 2"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Implemented and green. Needs a review pass by someone other than the writing session."
+
+contract:
+  three-gates: "machine passed cargo fmt, cargo test (315 passed, 6 ignored), cargo clippy -D warnings"
+  bands: "machine passed check-bands ran; only pre-existing steering_bytes diagnose breach, unchanged"
+  no-new-guard: "human waived removal only, no new mechanism so no new guard"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

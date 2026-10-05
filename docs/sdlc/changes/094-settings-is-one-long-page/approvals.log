@@ -1,0 +1,7 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+2026-09-27T12:08:11Z person intent intent.md 6bddb9699e923e39 approve owner answered 全項目 OK、進めて to the Before/After section ④ and its 設定のカテゴリ分け checklist row, and 続けて since
+2026-09-27T12:08:11Z person screen screen.md d78f62281c5e15e7 approve owner approved the rendered view-settings-after.html; screen.md is what this change builds from it
+2026-09-27T12:18:32Z auto screen screen.md 1fd110eea6ad4c7e approve evaluator round 2: nav_tab colours, last-section rule matched to screen, source-count and no-agent badge and hooks-off tests, departures recorded; its two wording notes applied
+2026-09-27T12:18:32Z auto spec spec.md d66bf0a3450bf218 approve evaluator round 2: nav_tab colours, last-section rule matched to screen, source-count and no-agent badge and hooks-off tests, departures recorded; its two wording notes applied
+2026-09-27T12:18:32Z auto plan plan.md e6a2af4701c9b7c2 approve evaluator round 2: nav_tab colours, last-section rule matched to screen, source-count and no-agent badge and hooks-off tests, departures recorded; its two wording notes applied
+2026-09-27T12:19:35Z auto spec spec.md fe698e4474e04d81 approve evaluator round 2, re-recorded: a flagged concern given its failure scenario so the readiness check can read it; content unchanged

@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write a note in the running app, restart, and send it to an agent; then have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived steering_bytes was already at diagnose; largest_module_lines rose to 9269 against a warn of 8800, recorded-no-action by the band and now overdue for its own change"
+  guards-verified-by-mutation: "human passed seven watched failing, including the pane-and-footer pairing against the state this change first shipped in: escaping removed, stale mark suppressed, row heights made uniform, the visible range narrowed to rows starting inside the viewport, a note anchored to the old side, a corrupt file yielding a partial set"
+  screen-agreed: "human passed inline notes under the line were chosen over a panel beside the diff"
+  real-review-check: "human pending write a note in the running app, quit, reopen, and send it to an agent"

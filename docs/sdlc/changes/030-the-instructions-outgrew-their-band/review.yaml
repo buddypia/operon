@@ -1,0 +1,141 @@
+# A verdict was recorded here that the reviewer says it did not give, and this
+# file is the correction. The commit it rode in on is 1587900 and it is not
+# being rewritten; what is written down instead is what happened.
+#
+# The sequence, as far as this session can establish it:
+#
+#   1. subprocess-safety-reviewer was spawned as `review-030` against digest
+#      2d60a5cde124d73a.
+#   2. A report arrived in this session under that name ending `VERDICT: approve
+#      0 3`, with three nits: a temporary file leaked on a panic path, the
+#      compressed lesson 007 thinning a distinction, and an ambiguous per-entry
+#      figure in bands.yaml. The third was taken, which moved the digest to
+#      8350a1d0d8283ddc, and `approve 0 3` was recorded here and committed.
+#   3. The reviewer then reported `VERDICT: request-changes 2 1` and said
+#      plainly that the earlier report was not its — that it had found the
+#      OPPOSITE about the temporary file (removed before every assert, so
+#      nothing leaks), that the lesson 007 nit was not its, and that the
+#      bands.yaml paragraph it was credited with fixing was its own Important 2.
+#
+# This session cannot tell which agent produced the report in step 2, and does
+# not guess. What is certain is that `approve 0 3` in commit 1587900 is not a
+# verdict this reviewer reached, and that the three findings below are real:
+# each was reproduced here before being fixed, not taken on the report's word.
+#
+#   Important 1 — scripts/check-bands.sh counted `done` as a live answer. Change
+#   030 is the only declared answer to `steering_bytes` and it closed `done` in
+#   the same commit, so a forced breach printed its name and suppressed the
+#   explanatory line: a shipped answer reported as one in progress. Reproduced
+#   exactly as described. Fixed by splitting the status into three — closed,
+#   parked, live — with its own line for each.
+#
+#   Important 2 — the re-base paragraph argued from three different per-entry
+#   figures. Re-measured: entries 019-024 are 38703 bytes over six, 6450 each;
+#   lesson 025 alone is 3860; the 4276 the reading moved by is that 3860 plus
+#   410 for docs/sdlc/templates/intent.md, which steering_bytes also counts. The
+#   paragraph now uses one measured rate and says where the wrong ones came from.
+#
+#   Nit — the script required a separator after the colon where the guard in
+#   src/tests.rs did not, so `**Answers band**:metric` was invisible to one and
+#   visible to the other. Fixed with an awk tokeniser; both now accept the same
+#   set, and a fixture pins it.
+#
+# The guard is the part that mattered most, and the reviewer was right about it:
+# it chose change 030 — status `done` — as its own fixture and asserted only
+# that some status printed, so it walked through the broken branch and returned
+# green. It now runs the report against built fixture trees through
+# `OPERON_CHANGES_DIRECTORY`, covering all four outcomes and both spellings.
+# Seven mutations, all watched failing; two of them had to be rewritten first
+# because their initial spelling still matched what the code accepted.
+#
+# ROUND 2, digest 3b1f525385570e79 — `request-changes 2 1`, and the first of the
+# two is the same defect a third time in the same place. The rewritten guard
+# still could not fail on one of its four branches: the `live` case forbade
+# `has already closed`, but a live answer misfiled as parked prints the PARKED
+# line, which that string does not cover. The reviewer ran two mutations of its
+# own — `elif [ "$live" -gt 0 ]` to `elif false`, and the `*)` arm incrementing
+# `parked` instead of `live` — and watched both survive while the report said
+# the opposite of the truth. Fixed by forbidding every other branch's wording in
+# each case, and by giving the live case the opening all three explanatory
+# branches share, since its whole content is that none of them prints. Both of
+# the reviewer's mutations are now in the mutation set and were watched failing.
+#
+#   The pattern, stated once: the first round's defect was the fixture (a `done`
+#   change, so the broken branch was never entered), the second was the
+#   assertion (a forbidden string that the broken branch does not print). A
+#   mutation set that only covers what its author thought to break is the same
+#   blind spot one level up, which is why the reviewer's own two are kept.
+#
+# Important 2 recurred for a mechanical reason: the corrected paragraph quoted
+# the reading "now" for a file this change kept editing, so review of round 1
+# moved entry 025 from 3860 to 5664 and the reading from 196703 to 198507, and
+# the arithmetic no longer landed. Re-measured here rather than taken on the
+# report's word: 019-024 are 38703 heading-to-heading at 1587900, entry 025 is
+# 3860 there and 3866 with the `---` that precedes it, and 3866 + 410 = 4276 —
+# so the missing six bytes were a convention that changed between two adjacent
+# sentences, exactly as reported. Every figure in the paragraph now names the
+# commit and the convention it was measured with, and the drift since is stated
+# instead of being quoted away.
+#
+# The nit was the tokeniser leaning the other way from last round: splitting on
+# `[^A-Za-z0-9_]+` made the hyphen a separator, so `**Answers band**: not-metric`
+# answered a band it does not declare while Rust's `split_whitespace` read one
+# token and did not. Both now split on whitespace and strip backticks, and the
+# near miss is a fixture rather than an argument.
+#
+# Measured at that digest: fmt silent, 484 passed / 0 failed / 6 ignored, clippy
+# silent, check-bands.sh exit 0 (one warn, always_loaded_bytes 11648),
+# pipeline-indicators.sh --lessons 25 of 25, mutations 10 of 10 caught.
+#
+# ROUND 3, digest 6b340b15dd06a99e — `approve 0 2`. Zero Importants, so the gate
+# would have taken it. Both nits were taken anyway, because each was a number or
+# a guard that this change is specifically about, and landing a document holding
+# a figure known to be wrong is the defect, not a tidy-up deferred.
+#
+#   Nit 1 — entry 025 claimed five mutations, listed seven, and the set was ten.
+#   The cause is worth more than the count: the mutation script lived outside
+#   the repository under a home directory, so no reader could re-derive the
+#   number it was being asked to believe. It is now `mutations.py` beside this
+#   file, its tree resolved from its own path, and the entry names the command
+#   that prints the figure it asserts. Twelve, measured, at this digest.
+#
+#   Nit 2 — the three `case` arms were each pinned by one status word, so
+#   `blocked`, `failed` and `archived` were never exercised, and the reviewer's
+#   mutations dropping `failed` and `archived` from their arms both survived.
+#   The fall-through arm is `live`, the only outcome that prints no warning, so
+#   a tenth word in the vocabulary would have taken the most reassuring answer
+#   in silence. The fixture now covers every word in `sets.status`, and the
+#   partition is checked for completeness against docs/sdlc/templates/state.yaml
+#   — watched failing by adding `superseded` to that file, which named the
+#   uncovered word in the assertion message before being reverted.
+#
+# Three rounds, three defects, each one level further in: the fixture, then the
+# assertion, then the fixture again at the level of the vocabulary. Every round
+# the guard covered what its author thought to break. That is why the closing
+# move was not a fourth case but a completeness check against the vocabulary —
+# it is the first thing here that fails on a case nobody thought of.
+#
+# Measured at this digest: fmt silent, 484 passed / 0 failed / 6 ignored, clippy
+# silent, check-bands.sh exit 0 (one warn, always_loaded_bytes 11648),
+# pipeline-indicators.sh --lessons 25 of 25, mutations.py 12 of 12 caught.
+# steering_bytes is 200297, 7870 above the baseline, and bands.yaml says so.
+#
+# ROUND 4, this digest — `approve 0 0`, no further findings. The reviewer ran
+# the completeness chain from both ends rather than reading it: `superseded`
+# added to the vocabulary alone (caught, naming the word), and then added to the
+# test's partition as well so only the script's `case` lagged (caught too, by
+# the per-word run finding no `has already closed`). So the chain closes from
+# the vocabulary through the partition to the script's actual output, and not
+# merely as a tally that agrees with itself.
+#
+# One judgement recorded because it could be read the other way: the partition
+# in src/tests.rs restates the script's `case` arms, which .claude/rules/
+# identifiers.md calls "a guard restating what it guards". Lesson 004's failure
+# is a guard that retypes a value and then passes blindly through a rename; this
+# one FAILS on disagreement, and the comparison is against the script's output
+# rather than against its source, so it is lesson 001's round trip instead. The
+# reviewer reached the same reading independently.
+digest: "aea686b47f1c7628"
+
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "3 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Start a dev server in a worktree and confirm the session header names its port; then have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session"
+  guards-verified-by-mutation: "human passed five watched failing: dedup removed, shallowest match, wildcard left unopenable, command name leaking across blocks, a missing program becoming a fabricated reading"
+  screen-agreed: "human passed one line in the session's terminal header was chosen over a project-wide Ports tab"
+  real-machine-check: "human pending start a server in a worktree and confirm the line names its port"

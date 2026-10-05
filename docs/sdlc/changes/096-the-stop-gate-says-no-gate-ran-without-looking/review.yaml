@@ -1,0 +1,38 @@
+# Review record for 096. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1 (subprocess-safety): the packager built ungated code into the bundle,
+# and the position hash had lost the tree. Both fixed.
+# Round 2 (durability): the suite inherited the packaging lock through fd 9,
+# and the lock-refusal test could recurse into the real suite. Both fixed.
+# Round 3 (subprocess-safety, read-only): untracked .rs names with a space, a
+# quote, or non-ASCII fell out of the position hash through xargs. Fixed with
+# ls-files -z and xargs -0; the stop-gate test's untracked file is now named
+# "un proven's.rs" and was watched red on the old hook, green on the new.
+#
+# Three earlier subprocess-safety attempts ran 45 minutes to two hours without
+# reporting. Told to read the diff and run nothing, the same reviewer answered
+# in a minute; the three at this digest took under thirty seconds each.
+#
+# The first branch forked before 039 landed, so the diff main takes differed
+# from it (5ab433376fc914b3) in context lines only: -U0 content without hunk
+# headers is byte-identical. All three confirmed their verdicts against the
+# tree main takes (7ea45fa), whose diff is the digest below. The change was
+# re-applied on a branch from main, because a verdict may not land apart from
+# the code it judges and main takes no edit of its own.
+
+digest: "33b12d8fce03f5e3"
+
+rounds: 3
+
+carried:
+  - subprocess-safety-reviewer/3 · src/tests.rs several unwrap() calls sit between spawning the lockf holder and holder.kill(); a failure there leaves lockf and its sleep 120 running for two minutes
+    person: "テストが途中で失敗したときだけ、裏で待機しているプロセスが最長 2 分残ります。自然に消えるので、対応は要りません。"
+  - subprocess-safety-reviewer/3 · src/tests.rs the packager tests keep the real cargo out through PATH alone; a packager that reset PATH or named cargo by absolute path would run the whole suite inside the suite and hang instead of failing
+    person: "今は起きません。将来パッケージ用スクリプトが cargo の呼び方を変えた場合に、テストが失敗せず止まったままになる可能性があります。今の対応は要りません。"
+  - rust-reviewer/3 · src/tests.rs the two fake-cargo fixtures are built two different ways (set_mode by full path vs a use import); a shared fake_cargo(dir, body) helper would keep them from drifting
+    person: "テスト内部の書き方がそろっていないだけで、アプリの動きには影響しません。対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  durability-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

@@ -1,0 +1,74 @@
+name: Bug report
+description: Report a problem with Operon
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Please fill in the details below.
+        Any language (English / 한국어 / 日本語) is fine.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Also tell us what you expected to happen instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Agent session launch
+        - Session supervision / inspector
+        - Git / diff / editor
+        - Conversation restore
+        - Local history search
+        - Themes / UI
+        - Packaging / build
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: e.g. macOS 26.0 (Apple Silicon)
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: How do you run Operon?
+      placeholder: e.g. cargo run --release, or a packaged .app
+    validations:
+      required: true
+  - type: input
+    id: agents
+    attributes:
+      label: Agent CLIs involved
+      placeholder: e.g. codex 0.x, claude 2.x, agy, none
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: |
+        Terminal output of the failing agent command is especially helpful.
+        Redact anything sensitive before pasting.
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked existing issues for duplicates.
+          required: true

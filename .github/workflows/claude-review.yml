@@ -1,0 +1,128 @@
+name: Claude review
+
+# NOT RUNNING. This repository has no git remote, so GitHub never receives a
+# push, a pull request, or a schedule tick, and this workflow has never run. It
+# is kept because it is correct for a repository that has a remote, and deleting
+# it would throw away work that a `git remote add` would make live. Until then
+# the gates that actually run are local: `.claude/hooks/gate-commit.sh` on every
+# commit and `.claude/hooks/gate-stop.sh` at the end of a session.
+#
+# `bash scripts/pipeline-indicators.sh --workflows` reports this and exits 1.
+# Whether these should stay, go, or get a remote is the open question in
+# docs/sdlc/changes/038-the-harness-is-built-but-not-measured/intent.md.
+
+# Stage 5 Play 1 of docs/sdlc/README.md. Review runs in both directions: Claude
+# reviews incoming pull requests against REVIEW.md, and addresses comments
+# addressed to it on its own.
+#
+# REVIEW.md is the single copy of the policy. Nothing about the passes, the
+# Important/Nit boundary, or the exclusions is restated here — a second copy is a
+# second thing to keep in sync, and the prompt below points at the first.
+#
+# The agent that wrote a change does not approve it. This workflow comments; the
+# approval that merges a change comes from a person, enforced by branch
+# protection rather than by this file.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: review against REVIEW.md
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Is an agent available
+        id: agent
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'Skipped: ANTHROPIC_API_KEY is not configured. Review this pull request by hand against REVIEW.md, or run the code-review skill locally.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.agent.outputs.present == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          claude_args: '--max-turns 40'
+          prompt: |
+            Review this pull request.
+
+            REVIEW.md at the repository root is the policy: read it first and
+            follow it exactly. It defines the passes to run, what counts as
+            Important versus a Nit, the nit cap, what is excluded from review,
+            and which changes a human must look at. Do not invent passes it does
+            not list, and do not report findings in the paths it excludes.
+
+            Three surfaces have dedicated reviewers rather than summaries —
+            read them before judging those surfaces:
+            .claude/agents/durability-reviewer.md for persistence, cancellation,
+            migration, byte budgets, and the bundle swap;
+            .claude/agents/subprocess-safety-reviewer.md for Command::new call
+            sites, child lifecycle, PATH resolution, and unsafe; and
+            .claude/agents/rust-reviewer.md for per-frame draw-path work, panic
+            sites, and pinned-crate APIs.
+
+            Rank findings most severe first. Anchor every one at file:line and
+            state the failure as inputs or state → wrong outcome. If a check in
+            src/tests.rs already catches something deterministically, the test is
+            the review — say so in one line instead of restating it.
+
+            Close by naming which `paused` surfaces in docs/sdlc/risk.yaml and
+            which rows of REVIEW.md's "What the gate requires" table this change
+            touches, or that it touches none.
+
+  respond:
+    name: respond to @claude
+    if: |
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      && ((github.event_name == 'issue_comment' && github.event.issue.pull_request != null
+        && contains(github.event.comment.body, '@claude'))
+      || (github.event_name == 'pull_request_review_comment'
+        && contains(github.event.comment.body, '@claude')))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Is an agent available
+        id: agent
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: anthropics/claude-code-action@v1
+        if: steps.agent.outputs.present == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          trigger_phrase: '@claude'
+          claude_args: '--max-turns 40'

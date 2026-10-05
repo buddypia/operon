@@ -1,0 +1,28 @@
+# Review record for change 073.
+#
+# Round 1 (digest 93e688ef87148c59): rust-reviewer returned do-not-approve 1 5.
+# Important I-1: the allowlist admitted `make wt.run` and `wt-run.mjs`, which
+# run an arbitrary command in the main checkout, or in the first active
+# worktree even when another session owns it, where neither guard sees the
+# command. Fixed: the make pattern admits only wt.new and q.check, the node
+# pattern drops wt-run, and the test asserts both are refused (watched failing
+# with wt-run restored). The reviewer also confirmed the ten-file classification
+# by three-way comparison, and that the new test fails with either switch off.
+#
+# Round 2 (digest below): rust-reviewer approved with the round-1 nits, I-1
+# closed, and no documented main-branch procedure refused. The five nits are
+# carried, not taken, per REVIEW.md.
+
+digest: "30675078c78902a6"
+
+rounds: 2
+
+carried:
+  - "rust-reviewer/1 · .claude/config/worktree-policy.json:37 — the make pattern excludes only -f/--file/--makefile; `make wt.new --eval=...`, `SHELL=...` and `make -C /tmp/elsewhere wt.new` are still allowed (the spec says make's file-writing options are excluded, but only -f is)."
+  - "rust-reviewer/2 · src/tests.rs Change 073 test — the allow-side asserts do not cover `ops.mjs cleanup-worktree --worktree <path>` or `make -C <dir> wt.new`, so those two patterns can break with the test still green."
+  - "rust-reviewer/3 · src/tests.rs Change 073 test — the settings wiring check only uses `contains(hook)`, so an inert command such as `echo worktree-policy-guard.mjs` passes."
+  - "rust-reviewer/4 · src/tests.rs Change 073 test — `foreign_text` is a duplicate named argument with the same value as `foreign`."
+  - "rust-reviewer/5 · spec.md Design — the `_adapt.opt_in_wiring` key is not in the policy file; that sentence lives in the notes of .claude/.bundle-receipt.json (prose)."
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"

@@ -1,0 +1,40 @@
+# Three rounds, both reviewers each round, 2026-09-25 to 26.
+#
+# Round 1 (2d3cdeba2048cc7c): rust-reviewer do-not-approve 1 4 — a
+# commented-out approval still backed a claim. subprocess-safety-reviewer
+# do-not-approve 2 5 — a person's later revise did not outrank an auto approve,
+# and the ledger category was the writer's word, so a plan editing a paused
+# surface could be logged as `plan`. All three fixed, each with a guard watched
+# failing.
+#
+# Round 2 (f5600f46af3fbb5e): rust-reviewer approve-with-nits 0 4.
+# subprocess-safety-reviewer do-not-approve 1 3 — rename detection hid a file
+# moved off a paused surface. Fixed with --no-renames and a moved_off_the_surface
+# case; 18 of 18 mutations caught.
+#
+# Round 3 (60057d19007ea4be): both approve-with-nits. Nits carried, not taken,
+# per REVIEW.md.
+#
+# The diff's approval is not the owner's. The paused-tier wording is a
+# relaxation by approval.md's own table, so nothing merges to main before the
+# owner approves spec.md — state.yaml carries that as a pending human item.
+
+digest: "60057d19007ea4be"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/1 · scripts/check-approvals.sh a paused surface can be promoted after clean_run pairs, so bundle-swap stops always going to a person; the spec says always
+  - rust-reviewer/2 · scripts/check-approvals.sh unbacked_claims takes the last verdict by file order, judge() by timestamp; the two can disagree
+  - rust-reviewer/3 · src/tests.rs demoted_in matches the substring "plan"; a category named like planner would blind it
+  - rust-reviewer/4 · src/tests.rs the gate-configuration row lookup unwraps with no message
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-stop.sh a checker exit other than 0 or 1 is treated as clean — fails open
+  - subprocess-safety-reviewer/2 · .claude/hooks/gate-stop.sh runs the tree's own check-approvals.sh, which a branch could stub
+  - subprocess-safety-reviewer/3 · .claude/hooks/gate-stop.sh the refusal path prints the summary without writing its mark, so the next clean stop repeats it
+  - subprocess-safety-reviewer/4 · scripts/check-approvals.sh touched_paused reports nothing touched when refs/heads/main is missing (fail-open), unstated in the comment
+  - subprocess-safety-reviewer/5 · scripts/check-approvals.sh the paused hold fires only when plan.md claims approval; a branch with a draft or no plan is not held
+  - subprocess-safety-reviewer/6 · docs/sdlc/risk.yaml the legend still says paused means stop and ask before editing, contradicting SKILL.md and approval.md
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

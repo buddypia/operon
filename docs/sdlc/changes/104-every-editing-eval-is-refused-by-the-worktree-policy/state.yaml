@@ -1,0 +1,37 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. Eval 004's prompt asks for an uncalled function the repository's own policy forbids; that is a separate eval change, not this one."
+
+# The bug report is change 103's measured run: eval 004 0/2 against 1a3d234,
+# both transcripts refused by the worktree-policy hook. The cause, in one
+# sentence: scripts/run-evals.sh adds each eval worktree with --detach, so the
+# branch the guard reads is empty, and shouldEvaluateTiers('') in
+# .cli/hooks/worktree-policy-guard.mjs fails closed and denies every edit and
+# every command off the trunk allowlist.
+contract:
+  three-gates: "machine passed cargo fmt --check clean, cargo clippy -D warnings
+    clean, cargo test --locked 679 passed 0 failed 6 ignored"
+  bands: "machine waived unsafe_blocks propose, always_loaded_bytes and
+    steering_bytes warn read the same on main (3, 12837, 239928); this change
+    adds no unsafe and does not touch CLAUDE.md or AGENTS.md"
+  release-binary: "machine passed no: scripts/run-evals.sh and src/tests.rs only"
+  guards-verified-by-mutation: "human passed mutations.py beside this file, 4 of
+    4 caught, each on its own assertion after the fixture branch was named"
+  measured-run: "human passed --only 004 --runs 2 against cf50f6b: 1/2 passed
+    (95% CI 9.5-90.5%), infra 0, cost $0.92, no worktree-policy refusal in
+    either transcript. The failing run declined on its own reading of lesson
+    005: an uncalled empty function trips dead_code under -D warnings, and
+    notifications already live in src/sys.rs. That is eval 004's prompt
+    disagreeing with the repository's policy, not a harness fault"

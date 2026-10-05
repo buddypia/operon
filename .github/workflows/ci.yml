@@ -1,0 +1,32 @@
+name: CI
+
+# NOT RUNNING. This repository has no git remote, so GitHub never receives a
+# push, a pull request, or a schedule tick, and this workflow has never run. It
+# is kept because it is correct for a repository that has a remote, and deleting
+# it would throw away work that a `git remote add` would make live. Until then
+# the gates that actually run are local: `.claude/hooks/gate-commit.sh` on every
+# commit and `.claude/hooks/gate-stop.sh` at the end of a session.
+#
+# `bash scripts/pipeline-indicators.sh --workflows` reports this and exits 1.
+# Whether these should stay, go, or get a remote is the open question in
+# docs/sdlc/changes/038-the-harness-is-built-but-not-measured/intent.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: fmt / clippy / test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --locked -- -D warnings
+      - run: cargo test --locked

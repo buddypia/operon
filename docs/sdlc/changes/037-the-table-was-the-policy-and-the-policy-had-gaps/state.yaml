@@ -1,0 +1,20 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Shipped. One nit is open and disclosed rather than closed: any_table_names still collects a Vec per flag, which needs an iterator-returning sister of launch_argument_tokens and is reached only after a dashed token has matched the heuristic."
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent, cargo test --locked 470 passed 0 failed 6 ignored, cargo clippy --locked --all-targets -- -D warnings silent. Two earlier runs were red under a load average of 250-290 with wall-clock budget tests that pass in isolation; the recorded run is one the machine was not saturated during"
+  bands: "machine waived steering_bytes is at propose and this change adds none of it — the growth in this reading is another session's uncommitted REVIEW.md, docs/sdlc/README.md, docs/sdlc/lessons.md and .claude/skills/sdlc/SKILL.md. Change 030 owns the reduction. The other 19 metrics are inside their bands"
+  guards-verified-by-mutation: "human passed eighteen watched failing: an escape no table names not asked about, the net overruling a table that called a flag safe, a bare value matching a flag again, pre-approving a reader asking too, the shallowest root winning again, the refresh no longer asking whether a diff is allowed, the notice going back to a format!, the joined value list escaping the gate, codex -sdanger-full-access escaping it, BashOutput treated as a shell, the restart chip reverting to the flag table, and three guards that passed their own first mutation and were rewritten until they did not — one of them a tautology both reviewers caught"
+  screen-agreed: "human passed nothing new is drawn. Every visible consequence is a screen already agreed for 034 or 036 appearing in a case that screen already claimed to cover — the branch badge on a document not rooted at the project, and the danger warning on a switch that runs the agent without asking. Recorded rather than assumed: if that reading is wrong, this row is where to say so"
+  review: "machine passed both returned approve on diff e7fdd1ed6ecfea1e — 0 Important, 0 nits each, after do-not-approve from both on the first read (three Important between them, two found by running the CLIs) and approve-with-nits on the second"
+  real-machine-check: "human pending type codex --dangerously-bypass-hook-trust into 別のコマンドを使う and see the warning; make a worktree under the project folder and confirm the tab carries its branch"

@@ -1,0 +1,66 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-07-14",
+  "description": "handoff.md section template — defines standard RETURN contract sections.",
+  "sections": [
+    {
+      "heading": "# HANDOFF — {{branch}}",
+      "blocks": []
+    },
+    {
+      "heading": "## Observation (Observed Facts)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Verified facts only. Backed by file:line, command output, or commit sha evidence. Keep inferences separate in Logic section)"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Logic (Inference)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Rationale leading from observations to conclusions. Explicitly state uncertainties)"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Caveat (Cautions & Limitations)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Unverified items, known risks, and potential pitfalls for successors)"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Conclusion (Verdict & Artifact Index)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Final status in a single sentence + list of deliverable paths. Categorize remaining tasks as checkpoint / done / incomplete)"
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "## Verification (Re-verification Method)",
+      "blocks": [
+        {
+          "type": "static",
+          "lines": [
+            "(Required — Commands and procedures for successors to independently reproduce this conclusion)"
+          ]
+        }
+      ]
+    }
+  ]
+}

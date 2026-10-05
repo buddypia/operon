@@ -1,0 +1,8 @@
+digest: "f8376afcec4cf321"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+
+nits: []

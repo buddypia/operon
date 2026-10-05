@@ -1,0 +1,52 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. 058 says the trunk admits "worktree management, read-only inspection, and
+#    landing/release gates". The allowlist in .claude/config/worktree-policy.json
+#    held cat/grep/head/tail for reading and nothing else, so .claude/state/
+#    governance-events.jsonl records 188 trunk refusals from 2026-09-15 to
+#    2026-09-28, most of them reads: sed -n 57, awk 25, a `for` header 9, rg 4,
+#    jq, sort, stat, date; and git reads such as for-each-ref, merge-base,
+#    cat-file, `branch --list <name>`. Each one cost a session a retry or a
+#    detour through a worktree to read a file.
+# 2. Cause: the list, not the guard. The guard judges each simple command
+#    against the list as 058 designed; the list never named the reads 058
+#    promised. Watched failing: the extended test refused `sed -n 1,5p` on the
+#    unedited policy.
+# 3. Kept out on purpose: awk (an interpreter — system(), print >); rg
+#    (--pre, --hostname-bin, and a config file named by RIPGREP_CONFIG_PATH
+#    each run a program, and grep already reads); and every
+#    spelling of a listed tool that writes or runs another program: sed beyond
+#    a line-range print (its script can write with w), rg --pre, sort -o /
+#    --compress-program, uniq with an output file, date -s, git cat-file
+#    --textconv / --filters; abbreviated long options included.
+#
+# Found in the same session, in guard files (.cli/); logged for future hardening:
+# - commit-guard.mjs isGitBranchCreate strips `git branch` from the whole
+#   command and calls whatever is left an argument, so
+#   `git worktree list; git branch` is refused as a branch creation.
+# - bash-segments.mjs shellWords drops quoting before pathArgs looks for `$`, so
+#   a single-quoted `$` (awk '{print $1}') reads as an expansion and a command
+#   inside a worktree loses its exemption.
+# - worktree-policy-guard.mjs trunk allowlist also judges commands aimed at
+#   another repository entirely (git -C /other/repo …) as trunk commands.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Next: address the remaining guard edge cases in a future change."
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent, cargo test --locked 663 passed 0 failed 6 ignored, clippy -D warnings silent"
+  failing-test-first: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refused sed -n 1,5p on the unedited policy"
+  guards-verified-by-mutation: "machine passed fifteen mutations each red: sed widened to any script, split on any whitespace, and removed; every lookahead stopped at a newline again; rg let in; sort (twice), uniq, date, git cat-file fences widened (twice); for, jq, git branch --list, git read patterns removed"
+  bypass-attempts: "machine passed 57 writing or program-running spellings each refused by the guard: sed w, -i, -f; any rg; sort -uo, --outp, --com; uniq to a file; date --se; a for list holding $( ); cat-file --te, --fi; redirects, tee, pipes to sh; and a newline inside a quoted word ahead of a fenced option, for the new patterns and the older git, find, and cargo ones"

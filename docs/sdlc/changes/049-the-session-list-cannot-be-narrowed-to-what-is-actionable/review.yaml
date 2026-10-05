@@ -1,0 +1,27 @@
+digest: "623196b36752f3c5"
+
+rounds: 3
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  durability-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"
+
+# Round 1 was at digest 4c4f874dea84b845 on the old base: three Important
+# findings from rust-reviewer and one from subprocess-safety-reviewer, all fixed
+# before approval. Round 2 is the same change re-applied onto main 27f72f0 with
+# the i18n_tables.rs conflict resolved; all three reviewers approved it again.
+# Two of round 2's nits were about state.yaml and the {chord} row going
+# unmentioned. Both are answered in state.yaml, which is outside the digest.
+# The two below touch src/ and would move the digest, so they are carried
+# rather than taken, per the review-round ceiling.
+#
+# Round 3 is the same commit cherry-picked onto main 27f72f0, after change 070
+# landed beneath it: the +/- lines are byte-identical and only context moved.
+# All three reviewers re-read it against 070 and kept their verdicts.
+
+nits: []
+
+carried:
+  - "src/app/screens.rs:4215 — the hidden-session count, sessions.len() minus shown, has no test, and it would count a session whose project_id matches no project as hidden by the filter. Nothing in the tree creates such a session today. Lift the arithmetic out of the drawing closure into a helper and test it."
+  - "src/tests.rs (the_status_filter_shows_everything_when_nothing_is_selected) — `let mut idle = app.store.sessions[1].clone(); idle.status = SessionStatus::Active;` is never read. The test relies on the fixture already making that session Active. Set app.store.sessions[1].status directly, or delete the line."

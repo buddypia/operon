@@ -1,0 +1,56 @@
+# The review record for change 065. Shape and its hazards: see
+# docs/sdlc/templates/review.yaml.
+#
+# One round, which is what lesson 038 asked for and the first change to get it
+# without argument. Zero Important from either reviewer.
+#
+# TWO reviewers of the same role judged this digest, independently and without
+# seeing each other. The route required one. The second was spawned because the
+# first finished and its report did not arrive — twice — and lesson 038 says a
+# reviewer that does not come back is replaced rather than awaited. It then
+# arrived after all, so both are on the record:
+#
+#   review-065    approve-with-nits 0 1
+#   subproc-065   approve            0 1
+#
+# The single line under `verdicts:` is their union with the stricter verdict, so
+# that its nit count and `carried:` agree. Recording two lines under one key
+# would be read by the parser as one reviewer changing its mind.
+#
+# What both of them checked and neither faulted, recorded because it is the part
+# that was actually at risk:
+#
+# - The tree resolution mirrors gate-commit.sh's, which change 057
+#   already had reviewed: `cd --` against an option-shaped directory name, the
+#   `-d` existence check, `git rev-parse --show-toplevel` from the reported
+#   directory, `CLAUDE_PROJECT_DIR` last.
+# - Honouring GIT_DIR/GIT_WORK_TREE rather than dropping them is right *for this
+#   hook*, both said so independently, and for the same reason: the hook must
+#   answer with the tree the session's own git calls see. INHERITED_REPOSITORY_
+#   POINTERS exists for children this crate spawns, which is the other case.
+# - The child's lifecycle in the new test. `child.stdin.take()` is a temporary,
+#   dropped at the end of the statement, so the hook's `payload=$(cat)` gets its
+#   EOF; the payload is far under a pipe buffer; `wait_with_output` is reached on
+#   every path with no early return between it and `spawn`; and the assertions
+#   are outside the loop, so a red does not leave two git repositories in
+#   $TMPDIR. That last one is the suite's standing complaint and it was looked
+#   for rather than assumed.
+# - The fixture's own git calls go through `git_command()`, which drops the
+#   repository pointers, so this worktree's ambient GIT_DIR cannot contaminate
+#   the fixture — the defect that made change 064's guard report on change 061.
+# - `(done|archived)` genuinely fixes the bash 3.2 parse, run under the real
+#   /bin/bash rather than reasoned about.
+
+digest: "06b6e4e96d86c03e"
+
+rounds: 1
+
+# Carried, not taken. An edit made to satisfy any of these would move the digest
+# and void the two approvals above — which is the whole of lesson 038.
+carried:
+  - subprocess/1 · src/tests.rs, the_stop_gate_reads_the_tree_the_session_is_working_in の attempt クロージャ。tree.join(&stamp) は gate-stop.sh から読んだ stamp= の値を検証せずに join している。今は target/.operon-stop-gate という相対パスなので実害はないが、stamp= が絶対パスに書き換えられると join は丸ごと置き換わり、フィクスチャ外の任意パスに fs::remove_file が及ぶ。その場で stamp が相対パスであることを assert すれば安全側に倒せる。(review-065)
+  - subprocess/2 · src/tests.rs、同じクロージャの child.stdin.take().unwrap().write_all(...) を let _ = で握りつぶしている。書き込みに失敗した理由が残らず、wait_with_output の結果だけで assert が落ちるのでデバッグに一手間かかる。(subproc-065)
+  - docs/1 · docs/sdlc/templates/review.yaml がラウンド上限の置き場所を docs/sdlc/routes.yaml と書いたままになっている。変更 066 で docs/sdlc/review-rounds.yaml へ移ったので、テンプレートが読者を存在しない列へ送る。066 の作業のうち拾い漏れた 1 箇所で、レビュー中に直すと digest が動くのでここへ回した。(this session)
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

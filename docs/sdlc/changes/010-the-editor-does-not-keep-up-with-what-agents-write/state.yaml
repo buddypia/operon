@@ -1,0 +1,30 @@
+# See docs/sdlc/templates/state.yaml for what each field means and its closed set.
+
+state:
+  route: "feature"
+  stage: "deploy"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+# medium/supervised because the change adds a reader to src/git.rs, which is on
+# the subprocess surface in docs/sdlc/risk.yaml — the file itself, not the kind
+# of work being added, which is a bounded fs::read beside the one already there.
+# screen: pending because src/app.rs and src/ui/ are the drawing surface.
+# src/models.rs is deliberately untouched: it is a high/paused surface, and this
+# change does not need FileOpenOutcome to change shape.
+
+resume: "Shipped to /Applications and committed as 3ee7004; the one thing left is a person reading the diff, because the agent that wrote a change does not approve it."
+
+contract:
+  three-gates: "machine passed fmt clean, 319 passed 0 failed 6 ignored, clippy clean"
+  bands: "machine waived steering_bytes at diagnose before this change and still at diagnose — change 009 owns it; largest_module_lines 8539 to 8760 against a warn of 8800, 40 lines of headroom"
+  guards-verified-by-mutation: "machine passed eleven mutations run, eleven guards watched failing, table in plan.md"
+  screen-agreed: "human passed the frames in spec.md approved at 900px, first round, no revisions"
+  rust-craft-review: "machine passed rust-reviewer returned do-not-approve on two Important findings; both fixed and guarded, write-up in plan.md"
+  installed-build-verified: "machine passed packaged, signature verified, /Applications swapped atomically, launched at pid check"
+  human-on-the-diff: "human pending the feature route says a person signs it off, and REVIEW.md says the session that wrote a change does not approve it"

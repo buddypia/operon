@@ -1,0 +1,27 @@
+# Review record for 098. Shape: docs/sdlc/templates/review.yaml.
+#
+# Both reviewers read the staged diff and ran nothing. subprocess-safety
+# confirmed -L takes precedence over $TMUX, that the rerouted stop and capture
+# keep their timeouts and error paths (gaining only -u and the LANG default),
+# and that no other tmux spawn exists outside tmux_command: the osascript
+# `tmux attach` is production-only and correctly reaches the default server.
+# Its second nit is not a fix to take as proposed: a kill-server at suite start
+# would end another checkout's concurrent run on the same socket.
+
+digest: "d971c04a9bfc3678"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tests.rs the display-message and show-environment reads use a bare .output() with no timeout or status check; a hung tmux hangs the test and a failure reads as an empty-string mismatch
+    person: "tmux が固まったときだけ、一部のテストが止まったままになったり、失敗の理由が分かりにくくなったりします。普段の動作には影響せず、対応は要りません。"
+  - rust-reviewer/1 · src/tests.rs the spawn guard matches literal spellings only; a tmux started through a const, a variable, an absolute path or sh -c passes it
+    person: "将来だれかが別の書き方で tmux を起動すると、この検査では見つかりません。その場合でも、実際のセッションを使う方のテストが気づきます。対応は要りません。"
+  - rust-reviewer/1 · src/tmux.rs tmux_capture_screen inlines the deleted command_output body; one helper taking a Command would remove this and the test duplicates
+    person: "コードの書き方の重複だけで、動作は変わりません。対応は要りません。"
+  - subprocess-safety-reviewer/1 · src/tests.rs a test interrupted mid-run leaves its session on the operon_suite server, and nothing ever cleans that server up
+    person: "テストが途中で止まったときの残りは、テスト専用の tmux サーバーに溜まります。Operon の画面にも普段の tmux にも出ず、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

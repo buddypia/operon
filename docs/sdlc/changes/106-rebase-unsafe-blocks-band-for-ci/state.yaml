@@ -1,0 +1,20 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "docs"
+  stage: "build"
+  status: "done"
+  attempts: "0 2"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. Merge feature/ci-fix into main with --no-ff, then cleanup worktree."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh ran cargo fmt --check, cargo test --locked and cargo clippy and let it land"
+  approved: "human passed user asked to fix tests and CI before public release"
+  reviewed: "human passed subprocess-safety-reviewer approve 0 0"

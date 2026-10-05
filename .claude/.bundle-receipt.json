@@ -1,0 +1,483 @@
+{
+  "schema_version": "1.0",
+  "$comment": "Inventory SSOT for worktree isolation harness files.",
+  "generated_by": "worktree-init.mjs",
+  "bundles": {
+    "git-worktree-isolation": {
+      "title": "Git/Worktree Isolation + AI Safety Git Guards + Worktree Creation Tools (Multi-CLI)",
+      "bundle_version": "1.3",
+      "source": {
+        "repo": "local",
+        "commit": "f0a2387a4b8ddc471a1871b71185019eb4d67547"
+      },
+      "synced_at": "2026-10-01T06:19:02.820Z",
+      "reapply_command": "node .claude/scripts/worktree-init.mjs --target <this-project-root> --json",
+      "files": [
+        {
+          "path": ".agents/hooks.json",
+          "role": "managed",
+          "sha256": "1c355107dae779585a4ebfc7d1a3c6842fde6156d20481c2097518597e92f23c"
+        },
+        {
+          "path": ".agents/skills/git-worktree-isolation-skills.md",
+          "role": "managed",
+          "sha256": "417a1b3fd2d2b54d0ac23b724af1860e7ad80b096f85225c1a25244ece9c5b7a"
+        },
+        {
+          "path": ".claude/config/pre-ship-review-panel-sections.json",
+          "role": "customizable"
+        },
+        {
+          "path": ".claude/config/worktree-handoff-sections.json",
+          "role": "customizable"
+        },
+        {
+          "path": ".claude/config/worktree-plan-sections.json",
+          "role": "customizable"
+        },
+        {
+          "path": ".claude/config/worktree-policy.json",
+          "role": "customizable"
+        },
+        {
+          "path": ".claude/scripts/create-pr/ops.mjs",
+          "role": "managed",
+          "sha256": "6fc861ab1b61033eb75a08d4d41f3b433d2f91b90b565f2ac733acc155ddf0f6"
+        },
+        {
+          "path": ".claude/scripts/followup-debt-tracker.mjs",
+          "role": "managed",
+          "sha256": "ad601b59060563a2fba2d1f325c1072e9c7e3d7d250f286b17ba4e4142ea52b1"
+        },
+        {
+          "path": ".claude/scripts/lib/approval-policy.mjs",
+          "role": "managed",
+          "sha256": "641186416159945a7e085498aaad43067a7bc212adecdb8484ec8c2314c05f7a"
+        },
+        {
+          "path": ".claude/scripts/lib/approval-trust.mjs",
+          "role": "managed",
+          "sha256": "97772d973a2026e89980710cd7d676da6a4cd363409b1fb3425c6b500fd68839"
+        },
+        {
+          "path": ".claude/scripts/lib/atomic-fs.mjs",
+          "role": "managed",
+          "sha256": "055b7676593ef4b533cbcdd8373148da7b30d7c07929e79730f111a9593eaeb9"
+        },
+        {
+          "path": ".claude/scripts/lib/change-reach.mjs",
+          "role": "managed",
+          "sha256": "5757381f8d82c49160d1ba6bad285f71f777f3d3ec07aa852227e0483390a4c6"
+        },
+        {
+          "path": ".claude/scripts/lib/change-risk.mjs",
+          "role": "managed",
+          "sha256": "4e2dfdae9001e616cf1f06ff8caf1428f26fcd8062fc1096e0f9872d469163c7"
+        },
+        {
+          "path": ".claude/scripts/lib/change-taxonomy.mjs",
+          "role": "managed",
+          "sha256": "ff3c849eafc4b281ab35d3ea3a343996c98c1657c5f013a37b950378cb481c50"
+        },
+        {
+          "path": ".claude/scripts/lib/cli-flag-guard.mjs",
+          "role": "managed",
+          "sha256": "5bb33d96cb7bbccfa948cb0cc77c5710cfbf5f5f8a53b86c5f63d61103de607f"
+        },
+        {
+          "path": ".claude/scripts/lib/code-ownership-index.mjs",
+          "role": "managed",
+          "sha256": "bd193ea65baf57d50a63e414888750923c8008c87d53c8fb57df541bda8980ab"
+        },
+        {
+          "path": ".claude/scripts/lib/debt-resolution.mjs",
+          "role": "managed",
+          "sha256": "5a74a15a4559e00dd2cda5a0e34231c59f36e1a3559c21a666f2053126e7264c"
+        },
+        {
+          "path": ".claude/scripts/lib/deck-impact.mjs",
+          "role": "managed",
+          "sha256": "a3f713a25dbb068a446fc77a6343c15e1e1454b0fccfc113dac4ef548ffe833f"
+        },
+        {
+          "path": ".claude/scripts/lib/deck-signals.mjs",
+          "role": "managed",
+          "sha256": "de8434ddee2729dbcf17df15d49ed0503c93bd8b13122260539f538003bee82b"
+        },
+        {
+          "path": ".claude/scripts/lib/deck-visuals.mjs",
+          "role": "managed",
+          "sha256": "ad653fd59457a6d887a1c1faccf1afe4f7e1e193ed2c85f95a788ca804dbba08"
+        },
+        {
+          "path": ".claude/scripts/lib/doc-outline.mjs",
+          "role": "managed",
+          "sha256": "6c8caec37f02669a41a8e007bbaae1bf7d6f638bc34a6699980804cf4eb0d46b"
+        },
+        {
+          "path": ".claude/scripts/lib/doc-section-render.mjs",
+          "role": "managed",
+          "sha256": "6e1e8976eef6303396d652a060ee1e5a16e0d87fd7006a47cab32bb551bb56f8"
+        },
+        {
+          "path": ".claude/scripts/lib/governance-writer.mjs",
+          "role": "managed",
+          "sha256": "77014bdeee2e057dceb8a94e7e885b8dd9e8f12b57591f561c492e0e0151826c"
+        },
+        {
+          "path": ".claude/scripts/lib/harness-text.mjs",
+          "role": "managed",
+          "sha256": "77d16b2354eea74199d36be2f8330085549a63b88ec87f6dbd76353a5902eb4a"
+        },
+        {
+          "path": ".claude/scripts/lib/narrative-quality.mjs",
+          "role": "managed",
+          "sha256": "96e90c0ec99d13548a6ac864e3a96dee648eae6fe00d011f9c7795c7cf134fa6"
+        },
+        {
+          "path": ".claude/scripts/lib/plain-language.mjs",
+          "role": "managed",
+          "sha256": "50e4ebdd707349bda8b04e8d75f87e5bf92b72056a39fecf3889fe3337714af4"
+        },
+        {
+          "path": ".claude/scripts/lib/pre-ship-steps.mjs",
+          "role": "managed",
+          "sha256": "503c54656664b9e216fe2d401ab5cabda6612f8346f170958b446ffb273417b9"
+        },
+        {
+          "path": ".claude/scripts/lib/review-deck-core.mjs",
+          "role": "managed",
+          "sha256": "9b87b57fbd905db32f74e49198370cffc9af4a3a556eaffb613e157c9e857782"
+        },
+        {
+          "path": ".claude/scripts/lib/review-deck-render.mjs",
+          "role": "managed",
+          "sha256": "f9b7c27682cc8f24d370ae423cdc9357dd965e348e8be4f7d6502e64e018591e"
+        },
+        {
+          "path": ".claude/scripts/lib/review-narrative.mjs",
+          "role": "managed",
+          "sha256": "2473b993d92109eb078fc85d686a7b7823fadbc5a486c262a8c0747b988b9f4e"
+        },
+        {
+          "path": ".claude/scripts/lib/review-origin.mjs",
+          "role": "managed",
+          "sha256": "b06321cebb35e35affd48c626ee3614cb1b443868a27e2f197861d96b7b6a437"
+        },
+        {
+          "path": ".claude/scripts/lib/ship-deck-core.mjs",
+          "role": "managed",
+          "sha256": "5d1c45271eebfc76018e2823dfb5bfdd1b52c019f37cbed83e0f5822dc06463d"
+        },
+        {
+          "path": ".claude/scripts/lib/ship-deck-render.mjs",
+          "role": "managed",
+          "sha256": "1e35d97ed1a045673398a23cc5c889056a5468cd4be30026c283e61572f9e17f"
+        },
+        {
+          "path": ".claude/scripts/lib/task-acceptance.mjs",
+          "role": "managed",
+          "sha256": "af29f855c0be3b95862f4d59faf53bcd77017e7ed8404d0f68c11dfb1e398e5a"
+        },
+        {
+          "path": ".claude/scripts/lib/task-passport.mjs",
+          "role": "managed",
+          "sha256": "eff327d8795103d0867e8eebe1f3f9c9377284e4a1b74649a7ae4f176e26f000"
+        },
+        {
+          "path": ".claude/scripts/lib/worktree-plan-template.mjs",
+          "role": "managed",
+          "sha256": "7d5c65aa02daabe5f4e2a33b54e6e16753098f22641e9da132836f98d872e1e5"
+        },
+        {
+          "path": ".claude/scripts/lib/worktree-quality-gate.mjs",
+          "role": "managed",
+          "sha256": "e8e6f4c97e2c490c5d498965c2041fb40cf00ce143cac0db234b25c410c64c18"
+        },
+        {
+          "path": ".claude/scripts/mark-pre-ship-confirmed.mjs",
+          "role": "managed",
+          "sha256": "b7bb54d4ade585949ba85eb57c9443e0c9dea35e9b35c9d0be9d05ea00c1c065"
+        },
+        {
+          "path": ".claude/scripts/record-quality-gate.mjs",
+          "role": "managed",
+          "sha256": "595f49f63c1afaa888d9f28258ca8fe420d671091296bf13d5be4e6b2c5d777e"
+        },
+        {
+          "path": ".claude/scripts/regression-test-lock.mjs",
+          "role": "managed",
+          "sha256": "2f2ff58a6e94b5bc041b97dcc6cad3eb99d8ffa0bd422172c9806e2b378cebb6"
+        },
+        {
+          "path": ".claude/scripts/review-deck.mjs",
+          "role": "managed",
+          "sha256": "8c0fdda0d9910e6e16521cf9f1fe1f0c1fcb9e070f733e4b93f656f8a5b368f6"
+        },
+        {
+          "path": ".claude/scripts/ship-deck-bridge.mjs",
+          "role": "managed",
+          "sha256": "5bc51b45250afd546fe2967d4f16631bc8e65dc96cffe5242c6c71bd8e2aad13"
+        },
+        {
+          "path": ".claude/scripts/ship-deck.mjs",
+          "role": "managed",
+          "sha256": "008b29a864479020390003e943afa6fcaaaa07fa52b53ce95793ca4e9382b37d"
+        },
+        {
+          "path": ".claude/scripts/task-interpretation.mjs",
+          "role": "managed",
+          "sha256": "80b5287686cfc8c5563387906d7dc27292a4abe80195eb962705cac9a1586c36"
+        },
+        {
+          "path": ".claude/scripts/trunk-ref-guard.mjs",
+          "role": "managed",
+          "sha256": "faa9322f472cb245177793ceffbfb3c00327be86bca399350a6bd6e2816f5f51"
+        },
+        {
+          "path": ".claude/scripts/worktree-init.mjs",
+          "role": "managed",
+          "sha256": "aa7182bb973870ab6b442f0bd2e512dfd3edbc7345bfc866c8a32cde980ceeac"
+        },
+        {
+          "path": ".claude/scripts/worktree-new.mjs",
+          "role": "managed",
+          "sha256": "8fa1dd6a69675fec3e75596af14d23f1118a5f4e4b0a7cbc50557e150f633bb9"
+        },
+        {
+          "path": ".claude/scripts/wt-run.mjs",
+          "role": "managed",
+          "sha256": "8b3d20bed928ec16c7501f61cb3525086a326ce8690a78690a2ff72b30d2116d"
+        },
+        {
+          "path": ".claude/skills/create-pr/config.json",
+          "role": "customizable"
+        },
+        {
+          "path": ".claude/skills/create-pr/MANIFEST.json",
+          "role": "managed",
+          "sha256": "4086d5df5c7f383312387faa598041a9def4297071a96c7e109ea9f10c33a920"
+        },
+        {
+          "path": ".claude/skills/create-pr/references/merge-conflict-resolution.md",
+          "role": "managed",
+          "sha256": "6533a15675bc44523ca32745851ef304d602ce3dfc9a96cf0682cac4028ca823"
+        },
+        {
+          "path": ".claude/skills/create-pr/references/branch-completion-options.md",
+          "role": "managed",
+          "sha256": "e8b99171fed183c4f30dcc6e12a8e9f39aca182f4f09aae00da0831c589e0259"
+        },
+        {
+          "path": ".claude/skills/create-pr/SKILL.md",
+          "role": "managed",
+          "sha256": "415795b29aaff33425dc645340fff77d4475227c46a384454ea4be6861edced7"
+        },
+        {
+          "path": ".cli/_cli-dispatch.mjs",
+          "role": "managed",
+          "sha256": "844c7399807bc9568ef61ee60df8d795e5ccecf26a096821f405a7e3e7f1fc6f"
+        },
+        {
+          "path": ".cli/hooks/commit-guard.mjs",
+          "role": "managed",
+          "sha256": "5dc9935ce7da60c144f988a158a71845fa823e1ae200639f4580a1c22fd7ce2a"
+        },
+        {
+          "path": ".cli/hooks/destructive-git-guard.mjs",
+          "role": "managed",
+          "sha256": "467620f4137edf959a4e5a550c652606d8dd2121cf52dde1e64cf9d64d4cfcf2"
+        },
+        {
+          "path": ".cli/hooks/milestone-deck-warning.mjs",
+          "role": "managed",
+          "sha256": "366a0d7e49e4008bcf996c22976d7d2c82dba1fb15ce7e3b3a6d6b7fa9dd6ea5"
+        },
+        {
+          "path": ".cli/hooks/pre-ship-review-guard.mjs",
+          "role": "managed",
+          "sha256": "67abd18fa0f531a2a18ac2399272275632c503ec21b2b9ff225297aefa7315c8"
+        },
+        {
+          "path": ".cli/hooks/trunk-start-warning.mjs",
+          "role": "managed",
+          "sha256": "a1a066c1a93da6515de26054a293fedb9a2abcdec52a4c2e4228c0b4a6e74aec"
+        },
+        {
+          "path": ".cli/hooks/worktree-owner-tracker.mjs",
+          "role": "managed",
+          "sha256": "cc89c1a2386f86197564cc7da0c01ba0e5ba31bdb2df542fbc3b2d17332426f7"
+        },
+        {
+          "path": ".cli/hooks/worktree-policy-guard.mjs",
+          "role": "managed",
+          "sha256": "5b9edf49a7d1867581d102a0e77aaf5318cd1b0d5680e31d41444f4f894ef663"
+        },
+        {
+          "path": ".cli/hooks/worktree-session-owner-guard.mjs",
+          "role": "managed",
+          "sha256": "f025d6ede7f1a916fde64dcdd6ba3cc2d7a8ebef34c4daaeb413d732c7fde411"
+        },
+        {
+          "path": ".cli/hooks/worktree-shipping-guard.mjs",
+          "role": "managed",
+          "sha256": "7ac4015de3c78b15dcff1eeabbc8a8f91dc2ce7f626af92211e5b2f833e6c5d0"
+        },
+        {
+          "path": ".cli/lib/apply-patch-paths.mjs",
+          "role": "managed",
+          "sha256": "ffdf41564e782be848c9d6039da3ca9ffa40b330e52365a782eded2adc5fe377"
+        },
+        {
+          "path": ".cli/lib/approval-vocabulary.mjs",
+          "role": "managed",
+          "sha256": "237c7c2a4eae31608a52ffd19333463010bff94010c38cbeab4df362c0f91013"
+        },
+        {
+          "path": ".cli/lib/bash-segments.mjs",
+          "role": "managed",
+          "sha256": "ee02913e69083b971801c73b594b245ed0e0d522891e4585af72aa0bc162244c"
+        },
+        {
+          "path": ".cli/lib/cli-adapter-utils.mjs",
+          "role": "managed",
+          "sha256": "8a1cfbfdd14e562df0ad2917f242005c902621c68499ce098aabeb878478baf4"
+        },
+        {
+          "path": ".cli/lib/create-pr-lease.mjs",
+          "role": "managed",
+          "sha256": "ff0b35324e9c53bfe9679a4c5ab8c3fc255a3196b213c20d43591f974ee3b400"
+        },
+        {
+          "path": ".cli/lib/git-commit-target.mjs",
+          "role": "managed",
+          "sha256": "99c2b099eb75514479f0c0755552c688d1dfbcd0073961686cf7fa033e07deb1"
+        },
+        {
+          "path": ".cli/lib/heredoc-strip.mjs",
+          "role": "managed",
+          "sha256": "46abf2c456d18d7ad9c1a673ea18d423b9fc6266d8407b28e132ec7a42cc9270"
+        },
+        {
+          "path": ".cli/lib/hook-anchors.mjs",
+          "role": "managed",
+          "sha256": "4df43bc8e368c11c9836eb802b361fb196da713d2da6da30f4616ab8beba89f7"
+        },
+        {
+          "path": ".cli/lib/hook-flags.mjs",
+          "role": "managed",
+          "sha256": "b7cf3cde56b07238a92f1abb123b4c8fa4417ea8fe3d229ce375e206b6fc8b68"
+        },
+        {
+          "path": ".cli/lib/hook-output.mjs",
+          "role": "managed",
+          "sha256": "0ff3b13a50f58985c6d8a079fc9facb23cd7c08d9f7b75af2b92b714a763b71d"
+        },
+        {
+          "path": ".cli/lib/hook-registry-overlay.mjs",
+          "role": "managed",
+          "sha256": "1f137584b730950104be702c11fce4c31101514837a6428cd99c38252c057ccc"
+        },
+        {
+          "path": ".cli/lib/hook-registry.mjs",
+          "role": "managed",
+          "sha256": "103c695ab1a5ee2649e8b43c78330117b84ded83d07bbb6c5acc0927696f96cb"
+        },
+        {
+          "path": ".cli/lib/layout-resolver.mjs",
+          "role": "managed",
+          "sha256": "d82095a27376ef0ac9f34e4f725e8f5889de54c609c377daa9ddfdda49840e34"
+        },
+        {
+          "path": ".cli/lib/plan-obligation.mjs",
+          "role": "managed",
+          "sha256": "5a5a0426a36ee3203306df359c2cc087a27209027f30d61169eb4951dded4b41"
+        },
+        {
+          "path": ".cli/lib/quality-gate-labels.mjs",
+          "role": "managed",
+          "sha256": "0625101ae53c8ff0524f0e542a84ddcc0ab815419a0cf2907430815479c908f9"
+        },
+        {
+          "path": ".cli/lib/section-template-renderer.mjs",
+          "role": "managed",
+          "sha256": "e161dc0fb8f43d3f6860855df1c37b66cd957bbe8a61d9e1d3a3325663beb0e8"
+        },
+        {
+          "path": ".cli/lib/self-improving-loop.mjs",
+          "role": "managed",
+          "sha256": "8b823f15e78bf87fa0b7dd5697679408840a81c5f9bc335d8a5c2c15c50c4954"
+        },
+        {
+          "path": ".cli/lib/ship-base-branch.mjs",
+          "role": "managed",
+          "sha256": "bdc689e61d275ec9d5c8309bfc006bc3e62ae71c09d5fadd9da63323c4292fbd"
+        },
+        {
+          "path": ".cli/lib/ship-quality-ledger.mjs",
+          "role": "managed",
+          "sha256": "141d77b9672063b1910ed041385cd0fb037afad70091cceaab2d09c64a8b6d21"
+        },
+        {
+          "path": ".cli/lib/ship-scale.mjs",
+          "role": "managed",
+          "sha256": "7e9b15ce71f96b78db4aec50342acf82ee09a8a4a6aca219bc08267708169e41"
+        },
+        {
+          "path": ".cli/lib/test-lock.mjs",
+          "role": "managed",
+          "sha256": "ea1b62acad3a837a7c2df93134aad4cfc627adc214ab59a8b36d30cc6feba284"
+        },
+        {
+          "path": ".cli/lib/trunk-branch.mjs",
+          "role": "managed",
+          "sha256": "beb545ef46c9f12907c999717836033a0b267dd4c36adec6165f007fb005112b"
+        },
+        {
+          "path": ".cli/lib/trunk-ref-guard.mjs",
+          "role": "managed",
+          "sha256": "f00d874d3237c6f810e2cbea342e062c7f1b15fe784bbfa11930bb06951dd1e6"
+        },
+        {
+          "path": ".cli/lib/utils.mjs",
+          "role": "managed",
+          "sha256": "6324bae5eccaa0f4d30c5764552bbdab9ff8a1c2b5a993fd02a07d390fd0af11"
+        },
+        {
+          "path": ".cli/lib/worktree-owner-lease.mjs",
+          "role": "managed",
+          "sha256": "f19b5805b7ae7a49a26577533d703af6985b9924e120a850bb70f7a5094c77b0"
+        },
+        {
+          "path": ".cli/lib/worktree-path.mjs",
+          "role": "managed",
+          "sha256": "7b813e69d00812267bb9871f54b48ee5c0085ce2f587f4adb49ac6cdd723b71a"
+        },
+        {
+          "path": ".cli/lib/worktree-plan-path.mjs",
+          "role": "managed",
+          "sha256": "a0649089e362ccd19e4ee0c0a5267c6ac218244a20accc31a7168992db36f551"
+        },
+        {
+          "path": ".cli/lib/worktree-plan-status.mjs",
+          "role": "managed",
+          "sha256": "2d42875267f3ca94d3a83c24fe764e394cc372c5727b79b022bb01eec80cce82"
+        },
+        {
+          "path": ".cli/lib/worktree-ship-report.mjs",
+          "role": "managed",
+          "sha256": "a770d0838736103dd8e45203d840f74aa485257911b164eb5655a619da114857"
+        },
+        {
+          "path": ".codex/hooks.json",
+          "role": "managed",
+          "sha256": "e8544a281303baf4b58315cb8f58337ad66de4a95670e9c20b8985b15b248b67"
+        }
+      ],
+      "target_notes": []
+    }
+  },
+  "target_owned": [
+    ".claude/config/hook-registry.local.json"
+  ]
+}

@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest an idea for Operon
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the suggestion. Any language (English / 한국어 / 日本語) is fine.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: fit
+    attributes:
+      label: Scope check
+      description: Operon is local-first by design — no telemetry, accounts, or cloud services.
+      options:
+        - label: This idea fits a local-first app and does not require a cloud service.
+          required: true

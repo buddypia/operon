@@ -1,0 +1,24 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+# gate-configuration is a paused surface; the user approved this whole task,
+# the landing merge on main included, before it began.
+resume: "Landed. The MAKEFLAGS/MAKEFILES env-prefix limit is recorded for future hardening; 073 nits 3 to 5 remain carried"
+
+contract:
+  three-gates: "machine passed fmt silent, cargo test --locked 562 passed 0 failed 6 ignored, clippy silent; #[test] 568 to 568, #[ignore] 6 to 6"
+  # Same three breaches and values as main and 073 (always_loaded_bytes warn,
+  # steering_bytes diagnose 299852, unsafe_blocks propose); nothing here moves them.
+  bands: "machine waived bash scripts/check-bands.sh"
+  release-binary: "machine passed no: only src/tests.rs changes under src/, so the installed bundle does not go stale"
+  staleness-current: "machine passed bundle-staleness.mjs reports the worktree current, bundle 1.2 at 41bb180f, locally_modified empty"
+  make-pattern-guarded: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refuses --eval= and SHELL= on both targets"
+  guards-verified-by-mutation: "human passed the extended test watched failing with the 073 make pattern restored"

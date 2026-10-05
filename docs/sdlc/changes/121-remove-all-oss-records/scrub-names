@@ -1,0 +1,52 @@
+# Scrubbed external OSS references, provenance notes, and sync lineages
+cmux
+移植の記録ファイル
+modelled on
+ported mechanism
+copy it
+what was not ported
+declined to port
+ported rows
+faithful port
+provenance notes
+reference-project names were left
+carried external project names
+lineage notes
+Adopt the full orchestrator as a skill
+Copy the larger harness wholesale
+Adopted from a fuller orchestrator
+fuller orchestrator
+The sync was six bundles before it was one
+worktree-isolation bundle
+re-sync the worktree guards
+covered upstream
+fixed upstream
+defects above upstream
+fix at the upstream source
+upstream commit-guard
+fix at the bundle source
+the upstream reading of 058
+Take the whole upstream harness
+A copied document names a path that exists upstream
+belongs upstream in the bundle
+honest fix is upstream, in the bundle
+can be corrected upstream once
+they go upstream
+synced tooling
+synced create-pr skill
+synced five further bundles
+re-sync #1305
+Three synced files
+re-sync of the worktree guards erases Operon's own edits
+re-sync overwrites it
+Remove external OSS reference and lineage records
+external OSS reference
+lineage records
+Clean all external reference records and lineage documentation
+lineage documentation
+external reference records
+external project lineages
+external orchestrators
+sync origins
+Harden external project check
+ported-ecosystem

@@ -1,0 +1,82 @@
+# The state of one change. Copy into a change directory beside intent.md.
+#
+# This is the file a session arriving cold reads first. Before it existed, a
+# session opened three prose documents and inferred where the work stood, which
+# is why change 007 was written in one sitting: there was no way to hand it over.
+#
+# This is flat and positional for the same reason docs/sdlc/bands.yaml and
+# docs/sdlc/routes.yaml are: a file that cannot drift from its parser needs no
+# repair tool.
+#
+# `every_state_file_names_a_route_and_a_stage_that_exist` in src/tests.rs reads
+# the closed sets below out of THIS file and checks every change's state against
+# them, so widening a set is a one-line diff here and nowhere else.
+#
+#   status  — where the change is. The four that are not progress matter most:
+#             a session that stops without recording one is indistinguishable
+#             from a session that finished.
+#
+#             planning      stages 1-2, artifacts being written
+#             ready         readiness gate returned Go; stage 3 may begin
+#             in-progress   stage 3-4, code and tests being written
+#             reviewing     stage 5, awaiting the review passes
+#             done          closed, guards in place, lesson recorded if needed
+#             awaiting-user the question ceiling was reached, or the risk tier is
+#                           paused. Assumptions adopted are listed in resume.
+#             blocked       a question nothing in the repository can answer
+#             failed        the route's attempt ceiling was spent; handoff.md written
+#             archived      abandoned or superseded; not resumable, start a new one
+#
+#   stage   — one of the six in docs/sdlc/README.md: plan design build test deploy maintain
+#   route   — one of the routes in docs/sdlc/routes.yaml
+#   attempts / questions — "<spent> <ceiling>". The attempt ceiling comes from the
+#             route; the question ceiling is seven: at seven, stop
+#             asking, adopt the recommended default, and record it in resume.
+#   autonomy — full | supervised | paused, from the risk tier in docs/sdlc/risk.yaml
+#   risk     — high | medium | low, from docs/sdlc/risk.yaml
+#   readiness — go | conditional | no-go | pending, from scripts/check-readiness.sh
+#   screen   — approved | pending | n/a. Not n/a when the change touches a
+#              `screen yes` surface in docs/sdlc/risk.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+# One sentence, for a session that has just arrived and read nothing else. What
+# to do next — not what happened. If it needs a semicolon it is too long.
+resume: "Open the palette in the running app, type part of a request, and confirm Enter lands in that session, then have a person read the diff."
+
+# What "done" means for this change, and what decides it. A `machine` item names
+# a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
+# A `human` item names an observation a person makes.
+#
+#   <kind> <verdict> <what decides it>
+#
+#   kind     machine | human
+#   verdict  pending | passed | waived
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived steering_bytes was already at diagnose before this change; largest_module_lines crossed into warn at 8862 against 8800, which the band calls recorded-no-action and which is src/app.rs continuing to grow"
+  guards-verified-by-mutation: "human passed the ranking, clamping, project-in-haystack and empty-query guards each watched failing; the measurement guard is a budget on the whole pass and is documented as such rather than claimed for one line"
+
+# The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
+# exist` reads them out of this block rather than restating them, so widening a
+# set is a one-line diff here and the guard follows — lesson 004, which is about a
+# guard that retyped the value it guarded and went blind on the rename it existed
+# to survive. `stage` and `route` are not here: they belong to
+# docs/sdlc/README.md and docs/sdlc/routes.yaml, and the guard reads them there.
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

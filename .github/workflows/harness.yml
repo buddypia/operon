@@ -1,0 +1,134 @@
+name: Harness
+
+# NOT RUNNING. This repository has no git remote, so GitHub never receives a
+# push, a pull request, or a schedule tick, and this workflow has never run. It
+# is kept because it is correct for a repository that has a remote, and deleting
+# it would throw away work that a `git remote add` would make live. Until then
+# the gates that actually run are local: `.claude/hooks/gate-commit.sh` on every
+# commit and `.claude/hooks/gate-stop.sh` at the end of a session.
+#
+# `bash scripts/pipeline-indicators.sh --workflows` reports this and exits 1.
+# Whether these should stay, go, or get a remote is the open question in
+# docs/sdlc/changes/038-the-harness-is-built-but-not-measured/intent.md.
+
+# Stage 4 Play 2 of docs/sdlc/README.md: when the thing being changed is the
+# steering, the checks that judge steering are what should run.
+#
+# The band check and the invariant tests need no credentials and always run. The
+# eval suite needs an agent, so it runs only where ANTHROPIC_API_KEY is
+# configured and is skipped — visibly, with a reason — everywhere else.
+
+# The two path lists below are deliberately duplicated: GitHub Actions does not
+# support YAML anchors, so an alias here would silently match nothing.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'REVIEW.md'
+      - 'DESIGN.md'
+      - 'CONTRIBUTING.md'
+      - '.claude/**'
+      - 'docs/sdlc/**'
+      - 'evals/**'
+      - 'scripts/harness-metrics.sh'
+      - 'scripts/check-bands.sh'
+      - 'scripts/run-evals.sh'
+      - '.github/workflows/harness.yml'
+  pull_request:
+    paths:
+      - 'CLAUDE.md'
+      - 'AGENTS.md'
+      - 'REVIEW.md'
+      - 'DESIGN.md'
+      - 'CONTRIBUTING.md'
+      - '.claude/**'
+      - 'docs/sdlc/**'
+      - 'evals/**'
+      - 'scripts/harness-metrics.sh'
+      - 'scripts/check-bands.sh'
+      - 'scripts/run-evals.sh'
+      - '.github/workflows/harness.yml'
+  workflow_dispatch:
+
+jobs:
+  harness:
+    name: invariants / metrics / bands
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+
+      - name: Hook scripts are executable
+        run: |
+          missing=0
+          for hook in .claude/hooks/*.sh; do
+            if [ ! -x "$hook" ]; then
+              echo "not executable: $hook"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Shell syntax
+        run: |
+          for script in scripts/*.sh .claude/hooks/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Invariant tests
+        run: cargo test --locked
+
+      - name: Harness metrics
+        run: |
+          bash scripts/harness-metrics.sh | tee metrics.json
+          {
+            echo '### Harness metrics'
+            echo '```json'
+            cat metrics.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Control bands
+        run: bash scripts/check-bands.sh --metrics metrics.json
+
+  evals:
+    name: eval suite
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Is an agent available
+        id: agent
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'Skipped: ANTHROPIC_API_KEY is not configured, so the eval suite did not run. The evals are the only check that judges whether the steering works on a real prompt — see evals/README.md.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: List the evals
+        run: bash scripts/run-evals.sh --list
+
+      - name: Install Claude Code
+        if: steps.agent.outputs.present == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run the evals
+        if: steps.agent.outputs.present == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bash scripts/run-evals.sh --from "$GITHUB_SHA"

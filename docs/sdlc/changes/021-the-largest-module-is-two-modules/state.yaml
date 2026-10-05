@@ -1,0 +1,18 @@
+state:
+  route: "refactor"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 2"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "The reviewer's findings are answered; have a person read the diff."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed largest_module_lines is inside its band again at 5425 and 3865 against a warn of 8800; steering_bytes stays at diagnose, which it was before this session"
+  unchanged-behaviour: "human passed 371 passed and 6 ignored before and after; the move was done by line range rather than by retyping"
+  reviewer: "machine passed rust-reviewer approved the move as provably pure and found two overclaims and a weakened guard, all three fixed and the weakened guard re-verified by mutation"

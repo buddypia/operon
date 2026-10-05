@@ -1,0 +1,21 @@
+# Round 1, rust-reviewer asked 2026-10-04: approve-with-nits 0 4. No
+# Important finding; the four nits are carried, none moves the digest.
+# The CLI versions it asked for are recorded in state.yaml's contract
+# (outside the digest).
+
+digest: "6f9a3c84ac6c85e6"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tests.rs description check reads only a single-line value; `>`/`|` scalars pass at any length, quotes are counted
+    person: "将来 skill の description を `>` で複数行に書くと、1024 文字を超えていてもテストが通ってしまいます。今の 6 つの skill は全て 1 行なので、今すぐ困ることはなく、対応は不要です。"
+  - rust-reviewer/2 · agy named 3 of 6 skills; create-pr, durability-invariants, ship unmeasured; 1024 is the skill format's limit, not measured from either CLI
+    person: "Antigravity が skill を読み込むことを確認できたのは 6 つ中 3 つだけです。残り 3 つが実際に読まれるかは未確認ですが、当面の作業は止まりません。"
+  - rust-reviewer/3 · lesson 060 Guard has no mutation for the `.agents -> .claude` link or a SKILL.md without leading `---`
+    person: "`.agents` のリンクが壊れたときにテストが赤くなるかは、まだ確かめられていません。リンクが壊れると Codex と Antigravity が skill を見失うので、次の変更で確認してください。"
+  - rust-reviewer/4 · 112 spec.md:16 and intent.md:31 still name the removed test; the bundle-sync flat stub git-worktree-isolation-skills.md still claims a flat-only scan
+    person: "変更 112 の spec にはもう存在しないテスト名が残っています。読んだ人が混乱するだけで、動作には影響しません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"

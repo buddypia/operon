@@ -1,0 +1,132 @@
+# The state of change 069. The template and the closed sets it is checked
+# against live in docs/sdlc/templates/state.yaml.
+#
+# Numbered 069 because 068 is this branch's own and 060 the highest committed on
+# any other — read with `git ls-tree` across every ref rather than through the
+# other worktrees' working directories, because the Session Owner Guard refuses
+# a read into another worktree. 062 and 063 are reserved by name in change 060's
+# committed state.yaml and are not free.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. Two things outlive it. One is named work, carried out of review
+  round 2 and written in review.yaml's carried: block: write_atomically's
+  `mode = None` path is reachable from restore_all when the subject is deleted
+  while run_checks blocks, and it recreates the file at 0600 with no diagnostic.
+  The other is the risk surface for scripts/check-installed-build.sh, now
+  recorded by two changes running and still nobody's — finding A is what the gap
+  costs."
+
+# THE BUG REPORTS ARE MEASUREMENTS, NOT OPINIONS. `bugfix` skips intent and spec
+# because the bug report is the intent; here each report is a terminal session
+# recorded in plan.md, and none of the four is a judgement call.
+#
+#   A  a stamp of `HEAD` reported CURRENT      scripts/check-installed-build.sh
+#   C  a missing packager exited 1, not 0      scripts/check-installed-build.sh
+#   E  merge-base exit 128 read as "not an ancestor"   same file
+#   F  SIGTERM left the mutated file in the tree  docs/sdlc/templates/mutations.py
+#
+# A fifth was claimed and WITHDRAWN: `sed … | head -1` was predicted to abort
+# under `pipefail` when the packager declares the key twice. It does not — the
+# probe ran and the script answered correctly. It is recorded here because a
+# withdrawn finding is evidence about the method, and because the next reader
+# should not re-derive it.
+
+# WHY THIS IS NOT PART OF CHANGE 068. 068 landed at 3f5c2ae with these defects
+# in it; they were found afterwards by reading its own output adversarially. The
+# gate settles the question of where the fix goes: scripts/check-review.sh
+# refuses a diff touching more than one change directory, so a fix cannot be
+# appended to a closed change's paper trail even when it is a fix TO that
+# change.
+#
+# One consequence is recorded rather than worked around. Change 068's
+# mutations.py now reports SETUP FAILED for `bound-reaches-only-the-direct-child`,
+# because the text that mutation replaces was refactored here. That is the sweep
+# refusing to report on code it did not sweep, which is the behaviour wanted: its
+# record — 9 of 9 — stands for the code at 3f5c2ae and says so. Editing it would
+# need 068's directory in this diff, which the gate refuses, and would make a
+# closed change's record describe a script that no longer exists.
+
+# READINESS IS `pending` AND STAYS `pending`. `bash scripts/check-readiness.sh
+# docs/sdlc/changes/069-a-stamp-from-outside-the-repository-is-trusted-as-a-revision`
+# returns No-Go on `intent.md がありません`, and the `bugfix` route skips stage 1
+# by design. The script never reads routes.yaml, so no route that skips stage 1
+# can reach Go. Every bugfix on this branch records `pending` for this reason
+# (055, 059, 060, 061, 064, 065, 066, 068). It is change 050's surface and is
+# still nobody's.
+
+# RISK IS `low` AND AUTONOMY `full`, for the same reason change 068 recorded and
+# with the same reservation: no path in this diff matches a surface in
+# docs/sdlc/risk.yaml. scripts/check-installed-build.sh is on none, src/tests.rs
+# is on none, docs/sdlc/templates/ is on none.
+#
+# That is now twice in a row that a change edited a script the Stop gate runs
+# under `low full`, and finding A is what the gap costs: a file nothing
+# classifies got a security-relevant defect and no surface asked for a reviewer.
+# The row is STILL not added here — it is a policy edit that changes what every
+# later change must do on that path — but this is the second change to record
+# it, which by this repository's own convention is when it stops being a note
+# and becomes work.
+
+contract:
+  three-gates: "machine passed cargo fmt --check silent; cargo test --locked
+    ok with 6 ignored; cargo clippy --locked -- -D warnings silent"
+  bands: "machine passed bash scripts/check-bands.sh. The same two breaches as
+    HEAD and no third, at the same tiers. always_loaded_bytes is untouched at
+    11648: nothing here edits CLAUDE.md or a file it counts. steering_bytes
+    moves 278533 to 281044, +2511, and every byte is lesson 043 in
+    docs/sdlc/lessons.md, added in review round 1 — that is the whole of the
+    read-only investigation the diagnose tier asks for. The plan's original
+    claim that this change touched nothing either metric measures was true when
+    it was written and stopped being true when the lesson was; recorded rather
+    than quietly restated. docs/sdlc/templates/*.py is in neither list"
+  release-binary: "machine passed answered on the first day: the only file this
+    change touches under src/ is src/tests.rs, behind `#[cfg(test)] mod tests;`
+    at src/main.rs:19, and Cargo.toml and Cargo.lock are untouched. So it does
+    NOT make /Applications/Operon.app stale. Confirmed against the final diff
+    before this flips to passed"
+  a-stamp-is-not-a-revision: "machine passed the stamp is read from a plist
+    under /Applications, which anyone who can write there chooses, and is spent
+    as a git revision. Measured before the fix: a bundle stamped with the four
+    characters HEAD reported CURRENT — the check answering yes to its own
+    question for any bundle at all. The guard must run the script against a
+    bundle stamped `HEAD` and a bundle stamped `main` and require UNKNOWN COMMIT"
+  a-question-that-cannot-be-asked-exits-zero: "machine passed with the packager
+    missing, `sed` printed its own error and `set -e` ended the script at exit 1
+    — which this file's header defines as `the bundle is behind`. The guard must
+    require exit 0 and the existing `does not stamp a source commit` sentence,
+    and must require that nothing from sed reaches the output"
+  git-that-cannot-answer-is-not-a-verdict: "machine passed
+    `merge-base --is-ancestor` returns 0, 1, or 128-on-error, and one `if`
+    collapsed three answers into two, so a transient git failure printed STALE
+    and exited 1 — a positive false claim rather than a refusal to answer. The
+    guard must put a `git` on PATH that fails only that subcommand, and require
+    UNKNOWN and exit 0"
+  a-killed-sweep-puts-the-tree-back: "machine passed a `finally` runs on a
+    normal exit and on SIGINT, not on SIGTERM. Measured: SIGTERM mid-sweep and
+    the subject file still read BROKEN, with the check still running. The guard
+    must send a real SIGTERM to a running sweep and require the file restored
+    and no child left behind"
+  a-restore-gives-back-the-mode-it-took: "machine passed added in review round
+    1, for a defect this change introduced rather than found. write_atomically
+    renames a mkstemp sibling over the target; mkstemp creates at 0600 and
+    os.replace swaps the inode, so the atomic restore returned the bytes exactly
+    and the permissions not at all. Reproduced twice on
+    scripts/check-installed-build.sh, 755 to 600, visible nowhere but
+    `git diff --cached --summary`. The guard must sweep a 755 fixture and
+    require 755 afterwards, and no stray temporary left in the directory"
+  guards-verified-by-mutation: "human passed each new guard watched failing,
+    mutations.py beside this file, copied from the template this change edits.
+    One per requirement plus a claim mutation per REVIEW.md"
+
+# The closed sets are read from docs/sdlc/templates/state.yaml, not restated
+# here.

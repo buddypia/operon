@@ -1,0 +1,23 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "docs"
+  stage: "build"
+  status: "done"
+  attempts: "0 2"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  # The docs route runs no readiness gate; `pending` for the reason change 030
+  # gives in its own state.yaml.
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. steering_bytes fell from 317278 to 242693, back under its propose tier; if lessons carry it there again, move the compressed line forward once more rather than re-basing."
+
+contract:
+  bands: "machine passed bash scripts/check-bands.sh reports steering_bytes at warn (242693 against 221000), no longer at propose (316000)"
+  guards-stayed-green-through-the-cut: "machine passed 54 of 54 `**Guard.**` paragraphs byte-identical to HEAD, 54 headings unchanged, bash scripts/pipeline-indicators.sh --lessons 54 of 54 name a guard this repository holds"
+  compression-faithful: "human passed an adversarial reader compared 019-041 against HEAD and found five cuts that lost substance — two guard tests named only after 020's Guard paragraph, 030's note that its guard moved, 025's in-progress state, 019's way out of a broken gate, 041's eval link; all five restored"
+  intent-approved: "human passed evaluator approve at digest c05d32e808d338f5, round 2, recorded in approvals.log"

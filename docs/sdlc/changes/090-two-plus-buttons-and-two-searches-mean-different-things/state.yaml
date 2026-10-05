@@ -1,0 +1,24 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  # src/models.rs is the store surface; this edit deletes an unused display
+  # method and touches no persisted shape.
+  risk: "high"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The toolbar, sidebar header, Home tiles, and status words were compared with screen.md on the installed build."
+
+contract:
+  three-gates: "machine passed fmt clean, cargo test --locked 634 passed 0 failed 6 ignored, clippy -D warnings clean"
+  bands: "machine waived always_loaded_bytes, steering_bytes, unsafe_blocks are out of band as they were when 088 landed; this diff touches none of the files they count"
+  release-binary: "machine passed packaged from e925821 and swapped into /Applications/Operon.app; the installed binary carries 検索・操作 and 新しいセッション and no longer クイック操作 or AI セッションを始める; old bundle and dist moved to Trash"
+  guards-verified-by-mutation: "human passed seven mutations (both new palette arms removed, ⌘N default moved, an English label, 空き restored, tile wired to the wrong group, tile count off by one) each watched red, then restored"
+  screen-matches: "human passed screenshots of the installed build (e925821, then e810703): toolbar 検索・操作 ⌘K and 新しいセッション ⌘N, Home tiles 要対応/実行中/待機中/終了, sidebar header with 履歴 and no + or magnifier, chips in the mock order, 待機中 on rows and header"

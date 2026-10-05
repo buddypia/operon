@@ -1,0 +1,41 @@
+# Round 1, digest cbff405d88d02bd9, both reviewers asked 2026-09-26.
+#
+# rust-reviewer: approve-with-nits 0 2.
+# subprocess-safety-reviewer: do-not-approve 1 4. Important: `git diff`
+# detects renames and --name-only prints only the new path, so a file moved
+# from one open change into another dropped the change it left — a
+# regression from 081, whose porcelain reading kept the old side. Taken:
+# --no-renames on both diffs, and a run moving a file from 901 into 906.
+#
+# Round 2, digest 9554480c0f5e4131, both asked again 2026-09-26.
+#
+# rust-reviewer: approve-with-nits 0 2, no new findings.
+# subprocess-safety-reviewer: approve-with-nits 0 1. Important resolved; one
+# new nit, the branch diff's --no-renames has no run of its own.
+#
+# Round 2 re-confirmed, digest 7b1464d180e4a44b, both asked 2026-09-26. Only
+# main moved (082's ledger, 084) and the change was renumbered; per REVIEW.md
+# this is recorded under round 2, not counted as a third.
+#
+# rust-reviewer: approve-with-nits 0 3; subprocess-safety-reviewer:
+# approve-with-nits 0 1. Both raised the same new nit, born of the merge with
+# 082: with no main, the approval check does not widen with every_change.
+#
+# All nits carried, not taken, per REVIEW.md.
+
+digest: "7b1464d180e4a44b"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · .claude/hooks/gate-stop.sh git merge-base runs twice, and with no main the branch diff is run with an empty revision that git rejects; compute fork once and skip the diff when empty
+  - rust-reviewer/2 · state.yaml guards-verified-by-mutation is a human item the session marked passed; a person should confirm it or it should be a machine item
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-stop.sh the in_play pipeline runs sed and sort in the session locale; a non-UTF-8 path under docs/sdlc/changes could stop them with illegal byte sequence; prefix LC_ALL=C
+  - subprocess-safety-reviewer/2 · src/tests.rs the core.quotePath pin through GIT_CONFIG_COUNT needs git 2.31 or later; on older git the quoted runs pass whatever the hook does
+  - subprocess-safety-reviewer/3 · src/tests.rs no run covers a committed rename on the branch diff, nor main present with no merge-base
+  - subprocess-safety-reviewer/4 · .claude/hooks/gate-stop.sh:158 the branch diff's --no-renames has no run: every run in the first fixture is on main, where that diff is empty; add a branch that commits a move between two open changes
+  - both/5 · .claude/hooks/gate-stop.sh:194-203 with no main, every_change widens the contract check but approval_dirs still reads only in_play, so a committed change with an unbacked approval claim is not reported; widen it or correct 082's "for the same reason" comment
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 1"

@@ -1,0 +1,92 @@
+name: Scheduled scan
+
+# NOT RUNNING. This repository has no git remote, so GitHub never receives a
+# push, a pull request, or a schedule tick, and this workflow has never run. It
+# is kept because it is correct for a repository that has a remote, and deleting
+# it would throw away work that a `git remote add` would make live. Until then
+# the gates that actually run are local: `.claude/hooks/gate-commit.sh` on every
+# commit and `.claude/hooks/gate-stop.sh` at the end of a session.
+#
+# `bash scripts/pipeline-indicators.sh --workflows` reports this and exits 1.
+# Whether these should stay, go, or get a remote is the open question in
+# docs/sdlc/changes/038-the-harness-is-built-but-not-measured/intent.md.
+
+# Stage 6 of docs/sdlc/README.md: a breach that no commit caused is still a
+# breach. A deterministic script watches the repository, and what it finds
+# re-enters the pipeline at stage 1 as an intent.md — it does not fix anything on
+# its own.
+
+on:
+  schedule:
+    # Mondays, 03:00 UTC. Weekly is the default the playbook recommends and the
+    # rate at which a finding is still actionable when it is read.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bands:
+    name: control bands
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Metrics, with the gate run timed
+        run: bash scripts/harness-metrics.sh --gates | tee metrics.json
+
+      - name: Control bands
+        id: check
+        continue-on-error: true
+        run: bash scripts/check-bands.sh --metrics metrics.json | tee bands.txt
+
+      - name: Summarize
+        run: |
+          {
+            echo '### Control bands'
+            echo '```'
+            cat bands.txt
+            echo '```'
+            echo '### Harness metrics'
+            echo '```json'
+            cat metrics.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ '${{ steps.check.outcome }}' = 'failure' ]; then
+            echo 'A metric reached its propose threshold. Stage 6 says: write an intent.md under docs/sdlc/changes/ and re-enter the pipeline at stage 1.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+  audit:
+    name: dependency audit
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Installed from source rather than through a third-party action, so the
+      # only supply chain this job adds is the one it is auditing.
+      - name: Install cargo-audit
+        run: cargo install --locked cargo-audit
+
+      - name: Audit
+        run: |
+          cargo audit --json > audit.json || true
+          cargo audit | tee audit.txt || true
+          {
+            echo '### cargo audit'
+            echo '```'
+            cat audit.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Operon is a local-first desktop app with no network surface of its
+          # own, so an advisory is a finding to triage rather than an outage. The
+          # job fails so it is seen; the response tier is a person's call.
+          cargo audit

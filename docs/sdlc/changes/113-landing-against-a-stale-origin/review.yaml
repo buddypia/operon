@@ -1,0 +1,20 @@
+# Round 1, rust-reviewer asked 2026-10-04: do-not-approve 1 5. Important: a
+# worktree with `main` itself checked out has a tip trivially on local `main`,
+# so cleanup accepted it and ran `branch -D main` with its unpushed commits.
+# Taken: the local-base check excludes the base branch, and the cleanup test
+# adds that worktree. Nits taken: the wt.new warning, `refs/heads/<base>` and
+# only when strictly ahead, the ops.mjs doc comment and refusal text, the
+# commit-guard messages, the test doc comment, the lesson's cure sentence.
+#
+# Round 2, at this digest: approve-with-nits 0 1.
+
+digest: "81ef05b2876af80d"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · docs/sdlc/lessons.md 059 Guard says two mutations and lists three
+    person: "教訓の記述で「2つの変異」と書きながら3つ挙げています。動作には影響せず、対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"

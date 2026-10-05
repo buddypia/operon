@@ -1,0 +1,71 @@
+digest: "689b611806abe4e9"
+
+# One reviewer, and it comes from the surface rather than the route: the `bugfix`
+# row in docs/sdlc/routes.yaml asks for none, and docs/sdlc/risk.yaml hands
+# anything on the `subprocess` surface to subprocess-safety-reviewer. The diff
+# also adds children and keystrokes sent to them, which pulls the same reviewer
+# in by scripts/check-review.sh's Command::new/unsafe trigger.
+#
+# Six passes over four digests. Stating what each was is the point of this
+# block, because an approval that confirmed five thorough passes and one that
+# did the work itself are indistinguishable once reduced to `approve 0 0`:
+#
+#   Pass 1 (Opus) — nine findings. The most serious: the answer was computed
+#   from `tmux_capture`, 5 000 lines of scrollback, on a path that includes
+#   `claude --resume` replaying a prior conversation. A restored message that
+#   merely quoted a trust prompt would have put a marker, a yes line and a
+#   cursor into history, and the keys would have landed in a live agent's
+#   composer. Fixed by adding tmux_capture_visible_screen.
+#
+#   Pass 2 (Opus) — four findings. The most serious: taking
+#   `yes, i trust this folder` out of TRUST_PROMPT_MARKERS left Claude Code
+#   recognised by one 66-character phrase, which wraps at 60 columns; the probe
+#   was then pointed at a 60-column pane and reported Claude Code showing no
+#   trust prompt at all. Fixed by collapsing whitespace in
+#   holds_a_trust_question, with a real 60-column capture added as a fixture.
+#
+#   Pass 3 — attempted twice and abandoned twice, on API budget rather than on
+#   the diff: Opus hit a seven-day limit and Sonnet an individual spend limit,
+#   both before reaching a finding. Recorded because a pass that produced
+#   nothing is not a pass that found nothing.
+#
+#   Pass 4 (Haiku) — three named questions, answered correctly, nothing found.
+#   Whether strip_terminal_escapes can produce a non-char-boundary index, panic
+#   or loop; whether the wrap-flattening asymmetry between
+#   holds_a_trust_question and workspace_trust_answer_keys can return keys that
+#   land on the wrong option; and whether anything screen-derived reaches tmux
+#   as a command word. One factual slip, checked and wrong: it reported the
+#   probe script as capturing without `-e` throughout. Line 345 does; line 362,
+#   the `--save` path that writes fixtures, uses `-e`. The distinction is
+#   deliberate and is written down under "What the probe script does not check"
+#   in plan.md.
+#
+#   Pass 5 (Haiku) — the repository-pointer half, which did not exist at pass 4.
+#   One Important: CodexAppServer::start spawns `codex app-server --stdio`
+#   outside the src/exec.rs choke point and so still inherited. It reached that
+#   independently of the session, which had found it by grepping for `.spawn()`
+#   after putting the same question to the reviewer; by the time the verdict
+#   arrived it was fixed, which is why the count here is zero rather than one.
+#
+#   Pass 6 (Haiku) — the nit from pass 5, fixed rather than recorded, plus two
+#   questions the session could not answer for itself. The nit: the guard's
+#   `//` filter left `/* … in INHERITED_REPOSITORY_POINTERS … */` able to
+#   satisfy the spawn check, which is the mention hole through the other comment
+#   syntax and in the unsafe direction. The reviewer's suggested fix — strip
+#   block comments first — would have been wrong: the only three `/*` in this
+#   crate are inside string literals in the syntax-highlighting fixtures, and
+#   pairing one fixture's `/*` with another's `*/` would have deleted the code
+#   between them, silently lowering the raw-git count. Closed by an invariant
+#   instead: no `/*` in a production file. The reviewer confirmed both the
+#   invariant, including that it forbids `/*!` and `/** */` in a crate that uses
+#   `///` throughout, and the reasoning against the stripper.
+#
+# What the record cannot carry, said here instead: passes 4 to 6 ran on a
+# smaller model than passes 1 and 2, because the budget for the other two does
+# not return until 2026-09-22. They were narrower by design — named questions
+# rather than an open reading — and two of pass 4's three answers were checked
+# independently in the session that wrote the change. That does not make them
+# reviewed; REVIEW.md is explicit that the author does not approve. It means the
+# approval was read rather than taken.
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"

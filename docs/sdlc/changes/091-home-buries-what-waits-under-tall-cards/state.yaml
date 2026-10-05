@@ -1,0 +1,22 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The owner checked Home on the installed build against screen.md on 2026-09-27 and answered OK."
+
+contract:
+  three-gates: "machine passed fmt clean, cargo test --locked 638 passed 0 failed 6 ignored, clippy -D warnings clean"
+  bands: "machine waived always_loaded_bytes, steering_bytes, unsafe_blocks are out of band as they were when 090 landed; this diff touches none of the files they count"
+  release-binary: "machine passed packaged from e810703 and swapped into /Applications/Operon.app; the app was quit and relaunched on the new build; old bundle and dist moved to Trash"
+  guards-verified-by-mutation: "human passed seven of eight mutations red (review fixes: label cap removed, project row unwrapped from horizontal; build: (waiting rows removed, nothing-waits line reworded, project start sent to the toolbar default, tmux on the row face, 開く unwired); the list-salt mutation stays green because egui already scopes the two rows apart, recorded in plan.md departures"
+  screen-matches: "human passed the owner opened Home on the installed build and answered OK, 2026-09-27"

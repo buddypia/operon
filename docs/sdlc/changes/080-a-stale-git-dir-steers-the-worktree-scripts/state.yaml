@@ -1,0 +1,44 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): during change 078 the session
+# carried GIT_DIR and GIT_WORK_TREE exported by Claude Code's EnterWorktree.
+# (1) `ops.mjs cleanup-worktree` read the target worktree's branch as `main`,
+# because its git ran against the session's repository, not the target's.
+# (2) After the worktree was removed, GIT_DIR named a directory that no longer
+# existed (.git/worktrees/prompt-audit): the trunk-allowlist hook could not
+# read the branch and failed closed on every command, and `make wt.new` said
+# `main` did not exist. The session could run no git-backed step at all.
+#
+# Named cause: the three Node entry points spawn git with the parent's
+# environment — `execOnce` and `resolveProjectRoot` in ops.mjs,
+# `defaultGitFn`/`defaultNodeFn` in worktree-new.mjs, and `safeExec` in
+# .cli/lib/utils.mjs behind worktree-policy-guard's `queryBranch` — and git
+# resolves GIT_DIR/GIT_WORK_TREE before the working directory it was given.
+#
+# Risk: none of the touched paths is a surface in docs/sdlc/risk.yaml
+# (.cli/ and .claude/scripts are not .claude/hooks), but .cli/lib/utils.mjs is
+# behind every hook, so taken as medium/supervised. The person asked for this
+# change by name at the end of change 079's session.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Landed. What outlived it: five carried nits in review.yaml; the unscrubbed git in layout-resolver.mjs and the two-versus-six pointer list are the ones worth a follow-up change."
+
+contract:
+  reviewed: "human passed rust-reviewer approve-with-nits 0 3 and subprocess-safety-reviewer approve-with-nits 0 2 at digest 82ece22bb670ad9a"
+  three-gates: "machine passed fmt silent, 595 passed 0 failed 6 ignored, clippy silent"
+  failing-test-first: "machine passed on the unedited scripts cleanup left feature/merged and reported ok, the guard answered deny, and worktree-new said local branch main does not exist; all pass after"
+  bands: "machine waived unchanged by this change: unsafe_blocks at propose, steering_bytes at diagnose, always_loaded_bytes at warn, as on main"
+  release-binary: "machine passed no: src/tests.rs is #[cfg(test)], and the rest is .cli/ and .claude/scripts"
+  guards-verified-by-mutation: "human passed scrub removed from execOnce, defaultGitFn, safeExec, and GIT_WORK_TREE dropped from the list: each turned one test red"
+  lesson-recorded: "machine passed entry 049 in docs/sdlc/lessons.md with its Guard"

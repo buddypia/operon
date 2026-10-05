@@ -1,0 +1,32 @@
+# Build cache (6.4 GB as of writing)
+/target/
+
+# Packaging output. dist/ is owned by scripts/replace-macos-bundle.sh's atomic
+# swap transaction, including its advisory lock file.
+/dist/
+
+# Scratch space for agent-generated drafts
+/.tmp/
+
+.DS_Store
+
+# NOTE: assets/fonts/*.ttf are NOT ignored. They are build inputs, embedded via
+# include_bytes! in src/main.rs (~122 MB total). Removing them breaks the build.
+
+# --- worktree-isolation (auto-managed block) ---
+.worktrees/
+.tmp/
+.cache/
+.harness/
+.claude/.bundle-backup/
+# --- end worktree-isolation ---
+
+# Hook runtime state written by the worktree guards.
+.claude/state/
+
+# CLI local configuration files (injected env for worktrees)
+.claude/config.json
+.claude/settings.local.json
+.codex/config.toml
+.agents/config.json
+

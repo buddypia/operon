@@ -1,0 +1,15 @@
+# Round 1, digest 63e2419552872fef, rust-reviewer asked 2026-09-27.
+#
+# rust-reviewer: approve-with-nits 0 1. The message id is already in both
+# tables; the function runs only on a click, not per frame; no new panic site.
+
+digest: "63e2419552872fef"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app.rs the traversal check is textual, so a relative name that merely starts with two dots (..env.bak) is now refused with the out-of-project notice; the check predates this diff
+    person: "「..」で始まる名前のファイル（例: ..env.bak）をクリックすると、実際はプロジェクト内でも「プロジェクトの外にあります」と表示されます。以前は何も起きませんでした。まれなので対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"

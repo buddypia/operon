@@ -1,0 +1,65 @@
+# The review record for one change. Copy into a change directory.
+#
+# `scripts/check-review.sh` is the only parser, and until this template existed
+# the shape lived nowhere else — which is how `rounds:` and `carried:` would
+# have been forgotten by the next change that needed them.
+#
+# The file is free prose ABOVE the fields: the argument for each verdict, what
+# was measured, what was reproduced. That part is for people and is not parsed.
+# Four things are parsed, and each one is parsed by a line-shape rather than by
+# a YAML library, so the shape matters:
+#
+#   digest: "<16 hex>"        which diff was judged
+#   rounds: <integer>         how many times this has gone back to its reviewers
+#   carried:                  open nits, one per `  - ` line
+#   verdicts:                 one `  <reviewer>: "<v> <important> <nits>"` line each
+#
+# CAUTION, because it is the shape that bites: ANY two-space-indented line of
+# the form `  name: "value"` anywhere in this file is read as a verdict, not
+# only the ones under `verdicts:`. Write prose as `#` comments and list items
+# as `  - `, never as `  key: "value"`.
+
+# Which diff these verdicts are about. First 16 characters of
+#   git diff --cached HEAD -- . ':(exclude)docs/sdlc/changes' | shasum -a 256
+# or just run `bash scripts/check-review.sh --index` and read it off.
+#
+# A verdict that does not match the current diff is not a weaker verdict, it is
+# no verdict — so this field moving is what sends a change back for another
+# round. Which is also why taking a nit is forbidden: see REVIEW.md.
+digest: "0000000000000000"
+
+# How many times this change has gone back to its reviewers. Self-reported, like
+# `attempts` in state.yaml: every round happens before any commit, so no script
+# can derive it. `scripts/check-review.sh` prints `round N of M` on every run
+# and refuses past the ceiling in docs/sdlc/routes.yaml.
+rounds: 1
+
+# Open nits, carried rather than taken. Verbatim, with the reviewer who raised
+# them, because the point is that a later change can act on them without
+# re-deriving the finding. Delete the block when there are none.
+#
+# Beneath each, indented four spaces, a `person:` line in plain Japanese: what
+# goes wrong, in what situation, and whether the person has to do anything.
+# The reviewer's line is written for whoever fixes it; this one is for the
+# person, and it is the only one they are shown. `scripts/check-review.sh`
+# refuses a carried finding without it, or with no Japanese in it, or with
+# the review's own words (nit, digest, carried, round, Important) in it —
+# those are the words a person cannot act on (sdlc 085).
+#
+# Present-and-non-empty is also the escape from the round ceiling: a change that
+# has been round the loop too many times lands by moving its open nits here.
+carried:
+  - <reviewer>/<n> · <the finding, as they wrote it>
+    person: "<何が・どんな時に起きるか。対応が要るか>"
+
+# One line per reviewer. Three tokens, no more and no fewer:
+#
+#   <verdict> <important-count> <nit-count>
+#
+#   verdict   approve | approve-with-nits | do-not-approve
+#
+# There is no `pending` spelling. A change with no fresh verdict is not
+# approved, and the absence says that more accurately than a placeholder would.
+# `approve-with-nits` means approve.
+verdicts:
+  rust-reviewer: "approve 0 0"

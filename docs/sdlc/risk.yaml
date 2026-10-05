@@ -1,0 +1,72 @@
+# Which surfaces decide how much a session may do on its own.
+#
+# The surfaces where a person must look, plus the dedicated reviewers in
+# REVIEW.md's "What the gate requires" table, made machine-readable so that autonomy is decided
+# by what a change touches rather than by how the session feels about it.
+#
+# The high-risk surfaces here are not auth, payments, or PII, which Operon does
+# not have. It has a persisted store on real
+# machines, `unsafe` FFI, a PATH setup that decides which binaries the app
+# can find at all, a bundle swap that replaces a running application, and the
+# configuration that decides what the gates permit. Those are the places where a
+# mistake is unrecoverable rather than merely wrong, which is the same question
+# their table was asking.
+#
+# `every_risk_surface_names_paths_that_exist` in src/tests.rs fails when a path
+# here is gone — a surface pointing at nothing classifies nothing, and reads from
+# the file listing exactly like a surface.
+#
+#   <tier> <autonomy> <screen> <paths>
+#
+#   tier      high   a mistake is unrecoverable; REVIEW.md hands the diff to a reviewer
+#             medium recoverable, but the failure is silent or delayed
+#             low    recoverable and visible
+#   autonomy  paused     stop and ask before editing; record awaiting-user
+#             supervised proceed, and surface the decisions that were made
+#             full       proceed
+#   screen    yes  the change paints, so its screen is agreed before its code
+#             no
+#   paths     comma-separated, no spaces. A prefix match: `src/ui` covers the
+#             whole directory.
+#
+# A change matching several surfaces takes the highest tier among them, and needs
+# a screen if any of them says yes.
+
+surfaces:
+  # The store is on real machines and holds work nobody else has a copy of.
+  store: "high paused no src/store.rs,src/models.rs"
+
+  # `unsafe_blocks` in scripts/harness-metrics.sh is the count, and bands.yaml
+  # bands it at propose. src/main.rs also holds the PATH setup: get it wrong
+  # and the app finds no agent CLI at all, on a machine where it worked
+  # yesterday.
+  unsafe-and-path: "high paused no src/main.rs,src/sys.rs"
+
+  # Replaces an application that may be running, in place.
+  bundle-swap: "high paused no scripts/package-macos.sh,scripts/replace-macos-bundle.sh"
+
+  # What the gates permit. A change here can switch off every other row. The
+  # approval rule and its checker are here because they decide which artifacts a
+  # person sees at all (sdlc 082): loosening them is loosening every gate.
+  gate-configuration: "high paused no .claude/settings.json,.claude/hooks,.claude/agents,.githooks,scripts/check-review.sh,scripts/check-release-preconditions.sh,docs/sdlc/routes.yaml,docs/sdlc/risk.yaml,scripts/check-approvals.sh,.claude/skills/sdlc/references/approval.md"
+
+  # Local-first is a promise a dependency can break on its own.
+  dependencies: "high paused no Cargo.toml,Cargo.lock"
+
+  # Children that outlive their parent, and launch paths that reach a shell.
+  subprocess: "medium supervised no src/exec.rs,src/agents.rs,src/tmux.rs,src/git.rs"
+
+  # Formats Operon does not own, read out of another product's store. The failure
+  # is a restore that looks complete and is not — lesson 007.
+  foreign-store: "medium supervised no src/history.rs,src/transcript.rs,src/cli.rs"
+
+  # Budgets and the pipeline's own instruments. Silent when wrong.
+  harness: "medium supervised no scripts/harness-metrics.sh,scripts/check-bands.sh,docs/sdlc/bands.yaml"
+
+  # Drawing is low risk and high rework: recoverable, visible, and expensive to
+  # get wrong twice. Lesson 005 was found on screen, not in review, which is why
+  # this is the row that asks for a screen before the code.
+  drawing: "low full yes src/app.rs,src/ui,src/theme.rs,src/glyphs.rs"
+
+  # Every string a person reads. Wrong is obvious and cheap to fix.
+  text: "low full no src/i18n.rs,src/i18n_tables.rs"
