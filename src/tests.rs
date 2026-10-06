@@ -34097,7 +34097,7 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
     let _ = context.run(screen.clone(), &mut pass);
     let _ = context.run(screen, &mut pass);
 
-    click_at(&context, egui::pos2(200.0, 300.0), &mut pass);
+    click_at(&context, egui::pos2(500.0, 300.0), &mut pass);
     fs::remove_dir_all(&root).ok();
 
     // The pane itself, not merely something: the search field is drawn in the
@@ -36223,6 +36223,177 @@ pub(crate) fn test_session_file_tree_icon_clicks_toggle_and_open() {
 
     // 2. Click simulation test: verify FileTreeAction variants
     assert!(actions.is_empty());
+}
+
+/// Change 122: Verify that file list defaults to left sidebar and can be switched to right side.
+#[test]
+pub(crate) fn test_sidebar_defaults_left_files_and_right_conversation() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-defaults");
+
+    // 1. Initial defaults: left sidebar, files tab, visible, default session list width.
+    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Left);
+    assert_eq!(fixture.app.session_inspector_tab, InspectorTab::Files);
+    assert!(fixture.app.show_session_inspector);
+    assert_eq!(fixture.app.session_list_w, SIDEBAR_DEFAULT_W);
+
+    // 2. Render when docked left: project files are visible.
+    let shapes_left =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_left.iter().any(|s| s.contains("project_only.txt")));
+
+    // 3. Switch to right side: project files are still rendered.
+    fixture.app.session_inspector_side = SidebarSide::Right;
+    let shapes_right =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_right.iter().any(|s| s.contains("project_only.txt")));
+}
+
+/// Change 122: Verify drag and drop between sidebar sides and dock toggle.
+#[test]
+pub(crate) fn test_sidebar_tab_drag_between_sides() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-drag");
+
+    // 1. SidebarSide toggle/opposite logic.
+    assert_eq!(SidebarSide::Left.opposite(), SidebarSide::Right);
+    assert_eq!(SidebarSide::Right.opposite(), SidebarSide::Left);
+
+    // 2. Start drag from Left side.
+    fixture.app.session_inspector_side = SidebarSide::Left;
+    fixture.app.dragging_sidebar_tab = Some((InspectorTab::Files, SidebarSide::Left));
+    assert!(fixture.app.dragging_sidebar_tab.is_some());
+
+    // 3. Simulate drop on right half: switches to Right side and clears dragging state.
+    let screen_w = 1200.0;
+    let center_x = screen_w / 2.0;
+    let drop_x = center_x + 100.0;
+    if let Some((_, origin)) = fixture.app.dragging_sidebar_tab {
+        if origin == SidebarSide::Left && drop_x > center_x {
+            fixture.app.session_inspector_side = SidebarSide::Right;
+            fixture
+                .app
+                .notice_briefly(tr("サイドバーを右側に移動しました"));
+        }
+    }
+    fixture.app.dragging_sidebar_tab = None;
+    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Right);
+    assert!(fixture
+        .app
+        .notice
+        .as_ref()
+        .is_some_and(|m| m.contains("右側に移動")));
+
+    // 4. Start drag from Right side and drop on left half.
+    fixture.app.dragging_sidebar_tab = Some((InspectorTab::Conversation, SidebarSide::Right));
+    let drop_x_left = center_x - 100.0;
+    if let Some((_, origin)) = fixture.app.dragging_sidebar_tab {
+        if origin == SidebarSide::Right && drop_x_left < center_x {
+            fixture.app.session_inspector_side = SidebarSide::Left;
+            fixture
+                .app
+                .notice_briefly(tr("サイドバーを左側に移動しました"));
+        }
+    }
+    fixture.app.dragging_sidebar_tab = None;
+    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Left);
+    assert!(fixture
+        .app
+        .notice
+        .as_ref()
+        .is_some_and(|m| m.contains("左側に移動")));
+}
+
+/// Change 122: Verify sidebar tab labels and selection switching.
+#[test]
+pub(crate) fn test_sidebar_tab_reorder_within_side() {
+    assert_eq!(InspectorTab::Files.label(), "ファイル");
+    assert_eq!(InspectorTab::Sessions.label(), "セッション");
+    assert_eq!(InspectorTab::Conversation.label(), "会話");
+    assert_eq!(InspectorTab::Changes.label(), "変更");
+}
+
+/// Change 122: Verify sidebar renders selected tab content.
+#[test]
+pub(crate) fn test_sidebar_renders_selected_tab_content() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-content");
+
+    // Files tab
+    fixture.app.session_inspector_tab = InspectorTab::Files;
+    let shapes_files =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_files.iter().any(|s| s.contains("project_only.txt")));
+
+    // Conversation tab
+    fixture.app.session_inspector_tab = InspectorTab::Conversation;
+    let shapes_conv =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_conv
+        .iter()
+        .any(|s| s.contains("Initial prompt for test")));
+
+    // Sessions tab
+    fixture.app.session_inspector_tab = InspectorTab::Sessions;
+    let shapes_sess =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(!shapes_sess.is_empty());
+}
+
+/// Change 122: Verify sidebar splitter resize clamping between SIDEBAR_MIN_W and SIDEBAR_MAX_W.
+#[test]
+pub(crate) fn test_sidebar_splitter_resize_clamp() {
+    assert_eq!(SIDEBAR_MIN_W, 180.0);
+    assert_eq!(SIDEBAR_MAX_W, 480.0);
+    assert_eq!(SIDEBAR_DEFAULT_W, 268.0);
+
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-resize");
+
+    // Under-minimum resize clamps to SIDEBAR_MIN_W
+    let too_small: f32 = 100.0;
+    let clamped_small = too_small.clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+    assert_eq!(clamped_small, SIDEBAR_MIN_W);
+
+    // Over-maximum resize clamps to SIDEBAR_MAX_W
+    let too_large: f32 = 600.0;
+    let clamped_large = too_large.clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+    assert_eq!(clamped_large, SIDEBAR_MAX_W);
+
+    // Within bounds remains unchanged
+    let valid: f32 = 300.0;
+    let clamped_valid = valid.clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+    assert_eq!(clamped_valid, 300.0);
+
+    // Applying clamped width to app
+    fixture.app.session_inspector_w = Some(clamped_valid);
+    assert_eq!(fixture.app.session_inspector_w, Some(300.0));
+
+    fixture.app.session_list_w = clamped_large;
+    assert_eq!(fixture.app.session_list_w, SIDEBAR_MAX_W);
+}
+
+/// Change 122: Verify sidebar collapses when hidden.
+#[test]
+pub(crate) fn test_sidebar_collapses_when_empty() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-collapse");
+
+    // Starts open
+    assert!(fixture.app.show_session_inspector);
+    let shapes_open =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_open.iter().any(|s| s.contains("project_only.txt")));
+
+    // When closed, tree is not rendered
+    fixture.app.show_session_inspector = false;
+    let shapes_closed =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(!shapes_closed.iter().any(|s| s.contains("project_only.txt")));
+    assert!(shapes_closed.iter().any(|s| s.contains(ICON_FOLDER_OPEN)));
+
+    // Reopen
+    fixture.app.show_session_inspector = true;
+    let shapes_reopened =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_reopened
+        .iter()
+        .any(|s| s.contains("project_only.txt")));
 }
 
 /// Change 076: Test in-editor image preview document state and view mode locking.

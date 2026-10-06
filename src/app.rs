@@ -569,6 +569,14 @@ pub(crate) struct OperonApp {
     pub(crate) show_session_inspector: bool,
     /// Which tab of that panel is showing.
     pub(crate) session_inspector_tab: InspectorTab,
+    /// Which side of the terminal the inspector panel is docked to.
+    pub(crate) session_inspector_side: SidebarSide,
+    /// Custom width for the session inspector when resized by dragging.
+    pub(crate) session_inspector_w: Option<f32>,
+    /// Active drag of a sidebar tab, if any.
+    pub(crate) dragging_sidebar_tab: Option<(InspectorTab, SidebarSide)>,
+    /// Custom width for the workspace session list sidebar.
+    pub(crate) session_list_w: f32,
     /// What the files tab is narrowed to. Empty draws the tree.
     pub(crate) session_file_filter: String,
     /// The paths that filter matched, as `(root, query, matches)`, so a scan of
@@ -905,6 +913,10 @@ impl OperonApp {
             session_prompt_turns: HashMap::new(),
             show_session_inspector: true,
             session_inspector_tab: InspectorTab::Files,
+            session_inspector_side: SidebarSide::Left,
+            session_inspector_w: None,
+            dragging_sidebar_tab: None,
+            session_list_w: SIDEBAR_DEFAULT_W,
             session_file_filter: String::new(),
             session_filter_results: None,
             session_hidden_expanded: false,

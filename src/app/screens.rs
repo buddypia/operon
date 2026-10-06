@@ -5396,10 +5396,57 @@ impl OperonApp {
         let layout =
             SessionColumnsLayout::compute(ui.available_width(), self.show_session_inspector);
         let show_inspector = layout.show_inspector;
-        let inspector_w = layout.inspector_w;
-        let terminal_w = layout.terminal_w;
+        let inspector_w = self
+            .session_inspector_w
+            .unwrap_or(layout.inspector_w)
+            .clamp(
+                SIDEBAR_MIN_W,
+                (ui.available_width() - 320.0).max(SIDEBAR_MIN_W),
+            );
+        let terminal_w = if show_inspector {
+            (ui.available_width() - inspector_w - 6.0).max(300.0)
+        } else {
+            ui.available_width()
+        };
 
         ui.horizontal_top(|ui| {
+            if self.session_inspector_side == SidebarSide::Left && show_inspector {
+                let height = ui.available_height();
+                ui.allocate_ui_with_layout(
+                    egui::vec2(inspector_w, height),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        self.ui_session_inspector(
+                            ui,
+                            session,
+                            project.as_ref(),
+                            palette,
+                            inspector_w,
+                            height,
+                        );
+                    },
+                );
+                let splitter =
+                    ui.allocate_response(egui::vec2(6.0, height), egui::Sense::click_and_drag());
+                if splitter.hovered() || splitter.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                if splitter.dragged() {
+                    let delta = splitter.drag_delta().x;
+                    self.session_inspector_w = Some((inspector_w + delta).clamp(
+                        SIDEBAR_MIN_W,
+                        (ui.available_width() - 320.0).max(SIDEBAR_MIN_W),
+                    ));
+                }
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(splitter.rect.center().x, splitter.rect.top()),
+                        egui::pos2(splitter.rect.center().x, splitter.rect.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, palette.border_subtle),
+                );
+            }
+
             ui.allocate_ui_with_layout(
                 egui::vec2(terminal_w, ui.available_height()),
                 egui::Layout::top_down(egui::Align::LEFT),
@@ -5605,8 +5652,27 @@ impl OperonApp {
                 },
             );
 
-            if show_inspector {
+            if self.session_inspector_side == SidebarSide::Right && show_inspector {
                 let height = ui.available_height();
+                let splitter =
+                    ui.allocate_response(egui::vec2(6.0, height), egui::Sense::click_and_drag());
+                if splitter.hovered() || splitter.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                if splitter.dragged() {
+                    let delta = splitter.drag_delta().x;
+                    self.session_inspector_w = Some((inspector_w - delta).clamp(
+                        SIDEBAR_MIN_W,
+                        (ui.available_width() - 320.0).max(SIDEBAR_MIN_W),
+                    ));
+                }
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(splitter.rect.center().x, splitter.rect.top()),
+                        egui::pos2(splitter.rect.center().x, splitter.rect.bottom()),
+                    ],
+                    egui::Stroke::new(1.0, palette.border_subtle),
+                );
                 ui.allocate_ui_with_layout(
                     egui::vec2(inspector_w, height),
                     egui::Layout::top_down(egui::Align::LEFT),
@@ -5621,6 +5687,46 @@ impl OperonApp {
                         );
                     },
                 );
+            }
+
+            if let Some((tab, origin_side)) = self.dragging_sidebar_tab {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                let target_side = origin_side.opposite();
+                let hint = match target_side {
+                    SidebarSide::Left => {
+                        format!("{} · {}", tab.label(), tr("サイドバーを左側に移動"))
+                    }
+                    SidebarSide::Right => {
+                        format!("{} · {}", tab.label(), tr("サイドバーを右側に移動"))
+                    }
+                };
+                egui::show_tooltip(
+                    ui.ctx(),
+                    ui.layer_id(),
+                    egui::Id::new("sidebar_tab_drag_tooltip"),
+                    |ui| {
+                        ui.label(RichText::new(hint).color(palette.text_strong));
+                    },
+                );
+
+                if ui.input(|i| i.pointer.any_released()) {
+                    if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                        let screen_center_x = ui.max_rect().center().x;
+                        let should_switch = match origin_side {
+                            SidebarSide::Left => pos.x > screen_center_x,
+                            SidebarSide::Right => pos.x < screen_center_x,
+                        };
+                        if should_switch {
+                            self.session_inspector_side = target_side;
+                            let notice = match target_side {
+                                SidebarSide::Left => tr("サイドバーを左側に移動しました"),
+                                SidebarSide::Right => tr("サイドバーを右側に移動しました"),
+                            };
+                            self.notice_briefly(notice);
+                        }
+                    }
+                    self.dragging_sidebar_tab = None;
+                }
             }
         });
     }
@@ -5672,10 +5778,22 @@ impl OperonApp {
             |ui| {
                 ui.set_min_size(workspace_size);
                 ui.vertical(|ui| {
-                    ui.set_width(268.0);
+                    ui.set_width(self.session_list_w);
                     ui.set_min_height(workspace_size.y);
                     self.ui_terminal_session_tabs(ui);
                 });
+                let sep_res = ui.allocate_response(
+                    egui::vec2(6.0, workspace_size.y),
+                    egui::Sense::click_and_drag(),
+                );
+                if sep_res.hovered() || sep_res.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                if sep_res.dragged() {
+                    let delta = sep_res.drag_delta().x;
+                    self.session_list_w =
+                        (self.session_list_w + delta).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+                }
                 ui.separator();
                 ui.vertical(|ui| {
                     ui.set_min_width(ui.available_width());

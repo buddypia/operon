@@ -59,6 +59,12 @@ pub(crate) const NOTICE_TOAST_SECONDS: u64 = 4;
 pub(crate) const FILE_FILTER_RESULT_LIMIT: usize = 200;
 /// The most files 「ターミナルに出たファイル」 lists above the tree.
 pub(crate) const TOUCHED_FILES_LIMIT: usize = 8;
+/// Minimum width for resizable workspace sidebars.
+pub(crate) const SIDEBAR_MIN_W: f32 = 180.0;
+/// Maximum width for resizable workspace sidebars.
+pub(crate) const SIDEBAR_MAX_W: f32 = 480.0;
+/// Default width for workspace sidebars.
+pub(crate) const SIDEBAR_DEFAULT_W: f32 = 268.0;
 pub(crate) const FILE_SCAN_VISIT_LIMIT: usize = 100_000;
 pub(crate) const DIRECTORY_ENTRY_BUFFER_LIMIT: usize = 10_000;
 pub(crate) const COMMAND_OUTPUT_MAX_BYTES: usize = 8 * 1024 * 1024;

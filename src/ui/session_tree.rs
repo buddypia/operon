@@ -7,11 +7,40 @@ use crate::*;
 use std::collections::BTreeSet;
 
 /// Which view the side panel beside the terminal is showing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum InspectorTab {
     Files,
+    Sessions,
     Conversation,
     Changes,
+}
+
+impl InspectorTab {
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            Self::Files => tr("ファイル"),
+            Self::Sessions => tr("セッション"),
+            Self::Conversation => tr("会話"),
+            Self::Changes => tr("変更"),
+        }
+    }
+}
+
+/// Which side of the terminal the inspector panel is docked to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub(crate) enum SidebarSide {
+    #[default]
+    Left,
+    Right,
+}
+
+impl SidebarSide {
+    pub(crate) fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
 }
 
 /// Layout of the session view: the terminal, and one side panel beside it.
@@ -154,8 +183,18 @@ impl OperonApp {
                         } else {
                             palette.text_muted
                         });
-                        if ui.selectable_label(selected, text).clicked() {
+                        let response = ui
+                            .add(
+                                egui::Button::new(text)
+                                    .selected(selected)
+                                    .sense(egui::Sense::click_and_drag()),
+                            )
+                            .on_hover_text(tr("ドラッグして移動"));
+                        if response.clicked() {
                             self.session_inspector_tab = which;
+                        }
+                        if response.drag_started() {
+                            self.dragging_sidebar_tab = Some((which, self.session_inspector_side));
                         }
                     };
                     if project.is_some() {
@@ -187,6 +226,18 @@ impl OperonApp {
                         {
                             self.show_session_inspector = false;
                         }
+                        let (dock_icon, dock_hint) = match self.session_inspector_side {
+                            SidebarSide::Left => (ICON_RESTORE, tr("サイドバーを右側に移動")),
+                            SidebarSide::Right => (ICON_RESTORE, tr("サイドバーを左側に移動")),
+                        };
+                        if icon_button(ui, dock_icon, dock_hint).clicked() {
+                            self.session_inspector_side = self.session_inspector_side.opposite();
+                            let notice = match self.session_inspector_side {
+                                SidebarSide::Left => tr("サイドバーを左側に移動しました"),
+                                SidebarSide::Right => tr("サイドバーを右側に移動しました"),
+                            };
+                            self.notice_briefly(notice);
+                        }
                     });
                 });
                 ui.add_space(SPACE_XS);
@@ -196,6 +247,9 @@ impl OperonApp {
                 match (shown, project) {
                     (InspectorTab::Files, Some(project)) => {
                         self.ui_session_files_tab(ui, session, project, palette, body_height)
+                    }
+                    (InspectorTab::Sessions, _) => {
+                        self.ui_terminal_session_tabs(ui);
                     }
                     (InspectorTab::Changes, Some(project)) => self.ui_session_changes_tab(
                         ui,
