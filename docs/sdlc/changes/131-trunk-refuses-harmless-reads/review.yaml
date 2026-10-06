@@ -1,0 +1,21 @@
+# Review record for change 131.
+#
+# Round 1: rust-reviewer and an adversarial subprocess-safety pass both
+# requested changes. Found: a sed regex address with an escaped slash smuggled
+# a `w`; `git -c core.sshCommand=` in front of fetch ran a program; the
+# redirect filter dropped quoted lookalikes (`uniq a '>&1'` wrote a file);
+# `>&1x` read as an fd dup. All fixed with denied cases, each watched red.
+# Round 2: both approve-with-nits; the shared nit (raw-token count fooled by a
+# quoted carrier and an env prefix) was fixed by dropping nothing from a
+# segment that quotes or escapes; rust-reviewer re-read it and approved.
+
+digest: "9cc904c55db55147"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/2 · the ps lookahead also refuses bare format names holding an e (ps -o etime)
+    person: "main で `ps -o etime` のように e を含む表示項目だけを単独で指定すると拒否されます。`ps -o pid,etime` のように並べれば通ります。"
+
+verdicts:
+  rust-reviewer: "approve 0 1"

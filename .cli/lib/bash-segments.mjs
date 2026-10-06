@@ -114,13 +114,14 @@ function closeBacktick(text, open) {
 
 /**
  * Does the `>` at `i` write to a file? `2>&1` / `>&2` (fd duplication) and `/dev/null` do not.
- * `>(…)` is process substitution, handled by the caller.
+ * `>(…)` is process substitution, handled by the caller. The fd has to end the word: bash reads
+ * `>&1x` as a write to the file `1x` (change 131).
  */
 function redirectWritesFile(text, i) {
   let j = i + 1;
   if (text[j] === '>' || text[j] === '|') j++;
   while (text[j] === ' ' || text[j] === '\t') j++;
-  if (text[j] === '&' && /[0-9-]/.test(text[j + 1] || '')) return false;
+  if (/^&(?:\d+|-)(?=[\s;&|()]|$)/.test(text.slice(j))) return false;
   const target = /^[^\s;&|()]*/.exec(text.slice(j))[0].replace(/^["']|["']$/g, '');
   return target !== '/dev/null';
 }

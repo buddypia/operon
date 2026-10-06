@@ -35352,6 +35352,22 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "git show-ref --heads",
         "git blame -L 1,5 src/main.rs",
         "git -C /tmp/elsewhere cat-file -t HEAD",
+        // Change 131: reads refused on the trunk since 095 — process and
+        // machine state, a fetch into remote-tracking refs, a signature check,
+        // and a stderr-only redirect behind an allowlisted command.
+        "ps -o pid,ppid,command -p 473",
+        "uptime",
+        "sysctl -n hw.ncpu",
+        "tmux ls",
+        "tmux list-sessions",
+        "codesign --verify --deep --strict /Applications/Operon.app",
+        "git fetch -q origin",
+        "git fetch --prune origin",
+        "git push origin main 2>&1",
+        "git push origin main 2>&1 | tail -2",
+        "gh run watch 1 --exit-status >/dev/null 2>&1",
+        "sed -n '/^contract:/,$p' docs/sdlc/changes/096-x/state.yaml",
+        "sed -n '/## Acceptance/,/## Rejected/p' $W/spec.md",
     ];
     let writes_denied = [
         "sed -n 1w src/main.rs README.md",
@@ -35377,6 +35393,45 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "git cat-file --filters HEAD:src/main.rs",
         "git cat-file --te HEAD:src/main.rs",
         "git blame --fi x",
+        "sysctl -w kern.x=1",
+        "sysctl kern.x=1",
+        "sysctl -n kern.x=1",
+        "tmux kill-server",
+        "tmux -f /tmp/conf ls",
+        "codesign -s - /Applications/Operon.app",
+        "codesign --verify -s - /Applications/Operon.app",
+        "git fetch origin main:main",
+        "git fetch --upload-pack=./x origin",
+        "git fetch /tmp/other",
+        "git push origin main 2>&1 --force",
+        "git push origin main 2>out",
+        "sed -n '/a/w out' x",
+        "sed -n '/a/,/b/p;w out' x",
+        // An escaped slash keeps sed inside the regex, where `p;/w out/p`
+        // is not an address but a `w` into `out/p`; a bracket does the same.
+        "sed -n '/a\\/p;/w out/p' x",
+        "sed -n '/[/]/w out/p' x",
+        "awk '{print $1}' x",
+        // `e`, `-e` and `-E` print every process's environment, secrets included.
+        "ps eww",
+        "ps auxeww",
+        "ps -e -o pid",
+        "ps -Aww -E",
+        // A quoted word that reads like a redirect is a filename: uniq's
+        // second argument is its output file.
+        "uniq README.md '>&1'",
+        "uniq README.md \\>\\&1",
+        "git -C '>&1' push status",
+        "uniq ' >&1 ' '>&1'",
+        "X='a >&1 b' uniq README.md '>&1'",
+        // `>&1x` writes the file `1x`.
+        "ps >&1x",
+        "uptime 2>&-file",
+        "codesign --verify /A.app >&2x",
+        // Git's own options in front of fetch start a program or move the repository.
+        "git -c core.sshCommand=./x fetch origin",
+        "git -C /tmp/elsewhere fetch origin",
+        "git --git-dir=/tmp/x fetch origin",
         // A newline kept inside quotes must not hide what follows it.
         "sed -n '1p\nw src/main.rs' README.md",
         "sort 'a\nb' -o out x",

@@ -1,0 +1,63 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. Since 095, .claude/state/governance-events.jsonl records the trunk
+#    allowlist refusing reads that change nothing: `ps` (4), `git push origin
+#    main 2>&1` and `gh run … 2>&1` (refused only for the stderr redirect),
+#    `git fetch -q origin` / `--prune origin`, `sed -n '/re/,$p'`, `codesign
+#    --verify`, `uptime`, `sysctl -n hw.ncpu`, `tmux ls`. Each cost a session a
+#    retry or a detour through a worktree. The person approved letting them in
+#    on 2026-10-07 (「対応して」, answering change 130's proposal).
+# 2. Cause: the list and one spot in the guard. The patterns judged the text
+#    with fd-only redirects still in it, so a pattern anchored at its end
+#    missed `2>&1`; and the list never named the process/machine reads, a
+#    remote-tracking fetch, or sed's regex addresses. Watched failing: the
+#    extended test refused `ps -o … -p 473` on the unedited policy.
+# 3. Kept out on purpose: awk (an interpreter); `git -C` aimed at another
+#    repository and `$VAR` paths (095's logged edge cases, unchanged); a fetch
+#    with a refspec or another remote (`origin main:main` moves local main);
+#    sysctl with `=` or `-w`; tmux beyond its list commands; codesign beyond
+#    --verify; sed beyond a print with line or regex addresses, and a regex
+#    address holding `\` or `[` (review: `/a\/p;/w out/p` wrote `out/p`).
+# 4. Review round 1 found three more ways past, each fixed with a denied case:
+#    the redirect filter dropped quoted words (`uniq a '>&1'` wrote `>&1`), so
+#    drops nothing from a segment holding a quote or a backslash (round 2:
+#    counting bare tokens was fooled by `' >&1 '` and an env prefix); `>&1x` read
+#    as an fd dup though bash writes `1x` (bash-segments.mjs now needs the fd
+#    to end the word); git's own options in front of fetch (`-c
+#    core.sshCommand=`, `-C`, `--git-dir`) are refused. The same `-c` route in
+#    front of the already listed `git push`/`git log` is recorded in the guard
+#    header, not changed here.
+#    `ps` with `e`, `-e` or `-E` prints every process's environment, secrets
+#    included, so those spellings stay out (review nit, taken). Its lookahead
+#    also refuses bare format names holding an e (`ps -o etime`): false-closed,
+#    kept; `-o pid,etime` passes.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Reviewed (approve). Next: push, CI, merge, package, install."
+
+contract:
+  three-gates: "machine passed cargo test --locked 731 passed 0 failed 6 ignored (before the round 2 judgedWords tightening; CI re-runs it on the branch), fmt and clippy at commit"
+  failing-test-first: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refused ps -o pid,ppid,command -p 473 on the unedited policy"
+  guards-verified-by-mutation: "machine passed nine mutations each red: quote check removed from judgedWords (uniq README.md >&1), sed address class without \\ and [ (sed -n /a\\/p;/w out/p), redirect filter on quoted words (uniq README.md >&1), fd dup without a word end (ps >&1x), fetch options check off (git -c core.sshCommand=./x fetch origin), redirect filter removed (git push origin main 2>&1), sysctl names widened (sysctl -n kern.x=1), fetch tail opened (git fetch origin main:main), codesign path lookahead dropped (codesign --verify -s -)"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
