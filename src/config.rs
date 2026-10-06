@@ -222,9 +222,14 @@ pub(crate) const HOOK_LAST_MESSAGE_MAX_CHARS: usize = 200;
 /// How much of another CLI's settings file the installer will read. Every one
 /// seen is a few kilobytes; a file past this is left alone with a notice.
 pub(crate) const HOOK_SETTINGS_MAX_BYTES: u64 = 1024 * 1024;
-/// The timeout written into each CLI's hook entry, in seconds. The script posts
-/// under 1.5 s, so this only ever matters when `curl` itself hangs.
-pub(crate) const HOOK_ENTRY_TIMEOUT_SECONDS: u64 = 10;
+/// The timeout written into each CLI's hook entry, in seconds. The script's own
+/// post is capped at 1.5 s, so a healthy run never comes near this; what it
+/// covers is the machine. At load average 100 with 25 sessions running,
+/// starting `/bin/sh` alone took 11 s on the path that posts nothing, and 10 s
+/// had Claude report `timed out after 10s` on every `UserPromptSubmit`. Codex
+/// hashes this value into its trust entries, so changing it re-trusts ours on
+/// the next install — the keys stay, the hashes are rewritten.
+pub(crate) const HOOK_ENTRY_TIMEOUT_SECONDS: u64 = 60;
 /// How many rows the quick-action palette draws. A palette is read by scanning
 /// it, and a list longer than a glance is a list nobody scans — the query is
 /// the way to narrow it, not the scrollbar.
