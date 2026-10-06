@@ -51,7 +51,7 @@
       "git\\s+branch\\s+(?:-d|--delete)(?:\\s+(?!-)[\\w./-]+)+\\s*$",
       "(?:pwd|ls|cat|head|tail|grep|pgrep|which|wc|shasum|echo|true|test|trash)",
       "(?:jq|cut|diff|stat|printf)",
-      "sed[ \\t]+-n[ \\t]+(?:[\\d$]+(?:,[\\d$]+)?p;?)+(?:[ \\t]+(?!-)[^\\s]+)*[ \\t]*$",
+      "sed[ \\t]+-n[ \\t]+(?:(?:[\\d$]+|/[^/;\\n\\\\\\[]*/)(?:,(?:[\\d$]+|/[^/;\\n\\\\\\[]*/))?p;?)+(?:[ \\t]+(?!-)[^\\s]+)*[ \\t]*$",
       "sort(?![\\s\\S]*\\s(?:-[a-zA-Z]*o|--o|--co))",
       "uniq(?:[ \\t]+-[a-zA-Z]+)*(?:[ \\t]+(?!-)[^\\s]+)?[ \\t]*$",
       "date(?![\\s\\S]*\\s(?:-s|--se))",
@@ -60,6 +60,12 @@
       "git\\s+(?:for-each-ref|merge-base|ls-files|ls-tree|cat-file|rev-list|show-ref|blame)(?![\\s\\S]*\\s--(?:te|fi|out))",
       "find(?![\\s\\S]*\\s-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)(?:\\s|$))",
       "cargo\\s+(?:fmt\\s+--check|test\\s+--locked|clippy\\s+--locked)(?![\\s\\S]*\\s--fix)",
+      "uptime",
+      "ps(?!(?:[ \\t]+\\S+)*?[ \\t]+-?[A-Za-z]*[eE][A-Za-z]*(?=[ \\t]|$))",
+      "sysctl[ \\t]+-n(?:[ \\t]+[\\w.]+)+[ \\t]*$",
+      "tmux[ \\t]+(?:ls|list-(?:sessions|windows|panes))(?:[ \\t]+-a)?[ \\t]*$",
+      "codesign[ \\t]+(?:--verify|-v)(?:[ \\t]+(?:--deep|--strict|-v+|--verbose(?:=\\d)?))*(?:[ \\t]+(?!-)[^\\s]+)+[ \\t]*$",
+      "git\\s+fetch(?:\\s+(?:-q|--quiet|-p|--prune))*(?:\\s+origin)?\\s*$",
       "bash\\s+scripts/(?:package-macos|replace-macos-bundle|check-installed-build|check-readiness|check-bands|harness-metrics|run-evals|check-review|pipeline-indicators|ci-verified)\\.sh"
     ]
   }

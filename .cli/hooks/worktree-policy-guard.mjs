@@ -149,6 +149,7 @@ function buildDenyMessage(relPath, branch = 'main') {
 //   - `env -C <dir>` counts as a cd for that one command. Directories and path arguments are
 //     compared after realpath, so a symlink inside a worktree that points at the trunk does not
 //     exempt. A path word with `..` plus brace/glob characters is unresolvable (not exempt).
+// A redirect that writes no file (`2>&1`, `>/dev/null`) is dropped before the patterns judge.
 // Denied regardless of patterns: an output redirect into a file (anything but /dev/null or an fd),
 // `time -o <file>`, any `GIT_*=` / `CDPATH=` assignment (they move what git / cd act on), and
 // `env -S '<cmd>'`.
@@ -163,7 +164,8 @@ function buildDenyMessage(relPath, branch = 'main') {
 // payloads and scripts (`bash -c`, `node -e`, `python -c`, a script path) are opaque; so are write-by-
 // argument tools (`dd of=`); allowlisted tools that execute project config (make targets, cargo
 // build scripts) run whatever that config says; an inherited `CDPATH` (set outside the command)
-// changes `cd`. Keep such commands off the allowlist rather than relying on the guard to see
+// changes `cd`; git global options are stripped before matching, so `git -c core.sshCommand=…`
+// in front of a listed `git push` or `git log` runs the program it names (refused for `fetch`). Keep such commands off the allowlist rather than relying on the guard to see
 // inside them.
 
 /**
@@ -236,6 +238,33 @@ export function isWorktreeSegment(seg, projectDir, linked = hasGitEntry) {
 const LOCATION_ENV_RE = /^(?:GIT_[A-Z_]+|CDPATH)$/;
 
 /**
+ * A redirect that writes no file: an fd duplicated or closed (`2>&1`, `>&2`, `2>&-`) or output
+ * discarded (`>/dev/null`, `2>>/dev/null`, `&>/dev/null`). Change 131: these sat in the text the
+ * patterns judge, so `git push origin main 2>&1` missed a pattern anchored at its end. A redirect
+ * into a file is still refused above, through `seg.redirect`.
+ */
+const HARMLESS_REDIRECT_RE = /^(?:\d*>&(?:\d+|-)|(?:\d*|&)>>?\/dev\/null)$/;
+
+/**
+ * The words the patterns judge. `seg.words` are already unquoted, so `uniq a '>&1'` carries a
+ * filename that reads like a redirect. Counting bare tokens in the raw text was fooled by a quoted
+ * carrier (`' >&1 '`) and by an env prefix, so nothing is dropped from a segment that quotes or
+ * escapes anything: it is then judged with the redirect still in it, which refuses more, not less.
+ */
+function judgedWords(seg) {
+  if (/['"\\]/.test(seg.raw)) return seg.words;
+  return seg.words.filter((w) => !HARMLESS_REDIRECT_RE.test(w));
+}
+
+/**
+ * `git fetch` reached through git's own options (`-c core.sshCommand=…`, `-C`, `--git-dir`): the
+ * patterns never see those, and fetch is the listed command that starts a transport program.
+ */
+function isFetchWithGitOptions(words, text) {
+  return /^git\s+fetch(?:\s|$)/.test(text) && !/^(?:\S*\/)?git\s+fetch(?:\s|$)/.test(words.join(' '));
+}
+
+/**
  * Returns the first simple command of `cmd` that is not allowed on trunk, or null if all are.
  * No git calls — the branch decision is made by the caller. Throws ShellParseError.
  */
@@ -247,7 +276,9 @@ export function findDisallowedTrunkSegment(cmd, cwd, projectDir, allowlist, link
     if (seg.isCd || seg.words.length === 0) continue;
     if (isWorktreeSegment(seg, projectDir, linked)) continue;
     if (seg.redirect) return seg.raw;
-    const text = commandText(seg.words);
+    const words = judgedWords(seg);
+    const text = commandText(words);
+    if (isFetchWithGitOptions(words, text)) return seg.raw;
     if (!allowlist.some((re) => re.test(text))) return seg.raw;
   }
   return null;
