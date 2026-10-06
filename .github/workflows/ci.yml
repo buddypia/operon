@@ -1,14 +1,24 @@
 name: CI
 
 # Stage 4 of docs/sdlc/README.md — CI gates for Operon.
-# Remote is active (`origin`), so this workflow runs on pushes to `main` and on pull requests.
-# Heavy verification suites (full test suite, package build, and bands) are offloaded to
-# parallel jobs on macos-latest runners.
+# This is where `cargo test --locked` runs for a change (change 128): the commit
+# gate runs `cargo fmt --check` and `cargo clippy --locked -- -D warnings`
+# locally, the branch is pushed, and .claude/hooks/gate-merge.sh refuses the
+# merge into main until scripts/ci-verified.sh finds this workflow's `success`
+# on the branch head. So it runs on the branches changes are made on, not only
+# on main. The workflow file name is what ci-verified.sh asks for.
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'feature/**', 'fix/**']
   pull_request:
+
+# A newer push of the same branch supersedes the run in flight: the merge gate
+# asks about the head, and a run on an older commit is minutes spent on an answer
+# nobody will read.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   checks:
@@ -62,7 +72,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Package macOS app
-        run: bash scripts/package-macos.sh --fast
+        run: bash scripts/package-macos.sh
 
   bands:
     name: control bands and metrics

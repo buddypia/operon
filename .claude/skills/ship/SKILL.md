@@ -18,8 +18,10 @@ step fails.
 bash scripts/package-macos.sh
 ```
 
-It runs the three gates over the tree — `cargo fmt --check`, `cargo test --locked`,
-`cargo clippy --locked -- -D warnings` — and stops on the first failure, then
+Of the three gates — `cargo fmt --check`, `cargo test --locked`,
+`cargo clippy --locked -- -D warnings` — it runs fmt and clippy over the tree
+(`--full` adds the suite, which CI ran before the merge) and stops on the first
+failure, then
 compiles `target/release/operon`, signs the bundle, and swaps it into
 `dist/Operon.app`, keeping the prior one at `dist/Operon.previous.app`. It never
 touches `/Applications`.

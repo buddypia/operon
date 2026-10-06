@@ -23,9 +23,8 @@ typo — running it on those is how a pipeline gets abandoned.
   Either way it gets an entry in `docs/sdlc/lessons.md`, and the entry is not
   finished until its **Guard** column names what now catches it — watched
   failing, not assumed.
-- **`git commit` runs the gates.** `.claude/hooks/gate-commit.sh` runs the three
-  gates when a Rust or manifest file changed, and refuses a commit that lost a
-  test or gained an `#[ignore]`. A failing test is evidence; do not quiet it.
+- **`git commit` runs fmt and clippy; CI runs the suite**, and the merge into
+  `main` waits for it. A failing test is evidence; do not quiet it.
 - `REVIEW.md` is the review policy. `.claude/skills/ship/SKILL.md` is the release.
 
 ## Shape of this codebase

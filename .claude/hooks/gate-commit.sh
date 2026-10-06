@@ -491,18 +491,21 @@ else
   needs_cargo=0
 fi
 
-# --- the three gates ----------------------------------------------------------
+# --- the gates ----------------------------------------------------------------
 #
-# Same three, in the same order, as AGENTS.md, CONTRIBUTING.md, the ship skill,
-# CI, and the pull-request template. every_document_that_names_the_gates_names_
-# the_same_three keeps this copy honest.
+# The three are `cargo fmt --check`, `cargo test --locked`, and
+# `cargo clippy --locked -- -D warnings`, as AGENTS.md, CONTRIBUTING.md, the ship
+# skill, CI, and the pull-request template name them;
+# every_document_that_names_the_gates_names_the_same_three keeps this copy honest.
+# Two run here. The suite runs in CI on the pushed branch, and
+# .claude/hooks/gate-merge.sh refuses the merge into main until it has passed
+# there (change 128): it took over a minute at every commit on the local machine,
+# and its answer does not change between a commit and the push that follows.
+# `the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` holds the split.
 
 if [ "$needs_cargo" -eq 1 ]; then
   if ! output=$(cargo fmt --check 2>&1); then
     block "cargo fmt --check" "$output"
-  fi
-  if ! output=$(cargo test --locked 2>&1); then
-    block "cargo test --locked" "$(printf '%s' "$output" | tail -60)"
   fi
   if ! output=$(cargo clippy --locked -- -D warnings 2>&1); then
     block "cargo clippy --locked -- -D warnings" "$(printf '%s' "$output" | tail -60)"
@@ -540,6 +543,6 @@ seventh needs the same justification, plus OPERON_ALLOW_TEST_REMOVAL=1."
 fi
 
 if [ "$needs_cargo" -eq 1 ]; then
-  note "Commit gate passed: cargo fmt --check, cargo test --locked, cargo clippy --locked -- -D warnings, no test erosion. The review gate runs inside git next.${unsynced:-}"
+  note "Commit gate passed: cargo fmt --check, cargo clippy --locked -- -D warnings, no test erosion. cargo test --locked runs in CI on the pushed branch, and the merge into main waits for it. The review gate runs inside git next.${unsynced:-}"
 fi
 note "Commit gate: no Rust, manifest, or gate change staged, so the cargo gates were skipped. The review gate runs inside git next.${unsynced:-}"

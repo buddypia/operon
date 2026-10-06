@@ -119,7 +119,16 @@ $(printf '%s' "$output" | tail -c "$TAIL_BYTES")"
 command -v cargo >/dev/null 2>&1 || { echo "cargo is not on PATH; the three gates cannot be run"; exit 2; }
 
 gate "cargo fmt --check" cargo fmt --check
-gate "cargo test --locked" cargo test --locked
+# The suite is CI's when CI ran exactly this tree: `--worktree` refuses any
+# edit or untracked file, and a passing run has to be on HEAD or on a parent
+# with HEAD's tree (change 128). Anything else — local edits, a commit never
+# pushed, CI out of reach — and it runs here, as it always did.
+if ci_verdict=$(cd "$repo_root" && bash scripts/ci-verified.sh --worktree HEAD 2>&1); then
+  suite="cargo test --locked: $ci_verdict"
+else
+  gate "cargo test --locked" cargo test --locked
+  suite="cargo test --locked: run on this tree"
+fi
 gate "cargo clippy --locked -- -D warnings" cargo clippy --locked -- -D warnings
 
 # --- 3. is the staged bundle what this tree packages? -------------------------
@@ -185,4 +194,4 @@ $running
 Quit it, then install — the verification has to use the new executable."
 fi
 
-echo "checked: the canonical swap; cargo fmt/test/clippy on this tree; $expected_staged reproduced byte-for-byte by scripts/package-macos.sh; no Operon running. The six #[ignore]d tests were not run — they need a live agent CLI."
+echo "checked: the canonical swap; cargo fmt/clippy on this tree; $suite; $expected_staged reproduced byte-for-byte by scripts/package-macos.sh; no Operon running. The six #[ignore]d tests were not run — they need a live agent CLI."

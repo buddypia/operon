@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: bash scripts/package-macos.sh [--fast]
+# Usage: bash scripts/package-macos.sh [--full]
 # Produces a self-contained .app bundle under dist/.
-# When --fast or OPERON_FAST_PACKAGE=1 is set, skips cargo test --locked (offloaded to CI/CD).
+# --full or OPERON_FULL_PACKAGE=1 also runs cargo test --locked, which otherwise
+# runs in CI before the merge into main (change 128).
 
-fast_mode=0
+full_mode=0
 for arg in "$@"; do
-  if [[ "$arg" == "--fast" ]]; then
-    fast_mode=1
-    break
+  if [[ "$arg" == "--full" ]]; then
+    full_mode=1
   fi
 done
-if [[ "${OPERON_FAST_PACKAGE:-0}" == "1" ]]; then
-  fast_mode=1
+if [[ "${OPERON_FULL_PACKAGE:-0}" == "1" ]]; then
+  full_mode=1
 fi
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -45,21 +45,20 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# The installed application is what a person runs, so it passes the same three
-# gates a commit does, over the tree it is built from — which may hold work no
-# commit has gated (sdlc 096). Inside the lock, so two packagers do not both
-# run the suite — but with fd 9 closed for each child (`9>&-`): the suite starts
+# The installed application is what a person runs, so it passes the gates over
+# the tree it is built from — which may hold work no commit has gated (sdlc 096).
+# The three are `cargo fmt --check`, `cargo test --locked`, and
+# `cargo clippy --locked -- -D warnings`; the suite runs here only with --full. A
+# tree on main already passed it in CI (.claude/hooks/gate-merge.sh), and the
+# swap into /Applications re-establishes that through
+# scripts/check-release-preconditions.sh, which runs the suite locally when the
+# tree is not one CI ran. Inside the lock, so two packagers do not both run the
+# gates — but with fd 9 closed for each child (`9>&-`): the suite starts
 # processes that can outlive it (a tmux server, a background sleep), and one
 # that inherited the lock would hold it after this script exits, refusing every
 # later packager with nothing running.
-#
-# When fast mode is requested (--fast or OPERON_FAST_PACKAGE=1), the heavy test
-# suite is skipped in favor of CI/CD execution while formatting and clippy
-# lint gates still run.
 cargo fmt --check 9>&-
-if [[ "$fast_mode" -eq 1 ]]; then
-  echo "[packager] Fast mode: skipping test gate (delegated to CI/CD); running fmt & clippy."
-else
+if [[ "$full_mode" -eq 1 ]]; then
   cargo test --locked 9>&-
 fi
 cargo clippy --locked -- -D warnings 9>&-

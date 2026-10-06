@@ -87,8 +87,10 @@ order is fixed:
 2. **One failing test per requirement**, watched failing, then the code.
 3. **Wiring**: module, strings, keys, background task, constants.
 4. **Tidy** the diff.
-5. **Verify**: `make q.check`; `cargo test --locked -- --ignored` when restore or
-   the shared-session archive moved, or say that you could not.
+5. **Verify**: `make q.fast` and `cargo test --locked <filter>` for the tests the
+   spec names — the whole suite runs in CI on the push (change 128);
+   `cargo test --locked -- --ignored` when restore or the shared-session archive
+   moved, or say that you could not.
 
 Move `state.yaml` (stage, status, contract verdicts) as each one closes. A
 departure from the plan goes under **Departures from the plan** in `plan.md`;
@@ -100,9 +102,15 @@ the earlier sections stay as they were.
   reviewers in `.claude/agents/`; `REVIEW.md` is the policy and
   `scripts/check-review.sh` the gate.
 - **Commit** in the worktree directory — never `git -C` from elsewhere.
-- **Land** from the main checkout with `git merge --no-ff --no-edit <branch>`,
-  then `node .claude/scripts/create-pr/ops.mjs cleanup-worktree --worktree <path>`.
-  No push, no pull request, no `gh`.
+- **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
+  for CI with `gh run watch` (in the background; about five minutes). A red run
+  is fixed on the branch and pushed again. When `main` has moved, merge it into
+  the branch first: the merge gate wants the branch to contain `main`.
+- **Land** from the main checkout with `git merge --no-ff --no-edit <branch>` —
+  `.claude/hooks/gate-merge.sh` admits it once CI passed on the branch head —
+  then `git push origin main` and
+  `node .claude/scripts/create-pr/ops.mjs cleanup-worktree --worktree <path>`.
+  No pull request.
 - **Package** when the `release-binary` contract item says so:
   `bash scripts/package-macos.sh`, then the swap in `.claude/skills/ship/SKILL.md`.
 - **Close** per `.claude/skills/sdlc/SKILL.md` §10: `status: done`, and a lesson
@@ -124,8 +132,10 @@ a symlink to `.claude`; measured 2026-10-04, lesson 060). Their hook files carry
 `.claude/hooks/gate-stop.sh` do not run for them. Do by hand what those refuse:
 
 - before stage 3, `bash scripts/check-readiness.sh <change-dir>` reads Go;
-- before the commit, `make q.check` passes, and `grep -c '#\[test\]' src/tests.rs`
+- before the commit, `make q.fast` passes, and `grep -c '#\[test\]' src/tests.rs`
   has not fallen nor `grep -c '#\[ignore' src/tests.rs` risen against `main`;
+- before the merge, `bash scripts/ci-verified.sh <branch>` exits 0 (their hooks
+  do not carry `.claude/hooks/gate-merge.sh` either);
 - before saying done, no `machine` item in the `state.yaml` contract is `pending`.
 
 `scripts/check-review.sh` runs from git itself, so it holds under every CLI.
