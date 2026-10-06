@@ -1,0 +1,27 @@
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Retro review of 122/124 done; both 124 defects fixed with failing-first tests, 122 tests made real. Next: review this diff, commit, merge, move refs/operon/audited/main past 037405a/029779f/3ac57e7 citing report.md, package."
+
+contract:
+  three-gates: "machine passed cargo test --locked"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed both new tests watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

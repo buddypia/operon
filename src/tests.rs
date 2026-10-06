@@ -11139,6 +11139,122 @@ pub(crate) fn deleting_session_with_missing_tmux_socket_removes_session_record()
     assert!(load_store(&app.data_file).unwrap().sessions.is_empty());
     fs::remove_dir_all(root).unwrap();
 }
+/// Change 128: a stop that fails for a reason other than a gone server keeps
+/// the delete the person asked for, so the 「停止」 the notice asks for
+/// finishes it.
+#[test]
+pub(crate) fn failed_stop_keeps_the_requested_delete_for_the_retry() {
+    let root = std::env::temp_dir().join(format!("operon-delete-retry-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.remove_after_close.insert(session_id);
+    app.background_sender
+        .send(BackgroundResult::SessionStopped {
+            session_id,
+            result: Err("tmux timed out after 5s".to_owned()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        app.remove_after_close.contains(&session_id),
+        "the delete survives a stop that could not be confirmed"
+    );
+    assert_eq!(app.store.sessions.len(), 1);
+
+    app.background_sender
+        .send(BackgroundResult::SessionStopped {
+            session_id,
+            result: Ok(()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(app.store.sessions.is_empty(), "the retried stop deletes");
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 128: the same for closing a finished terminal — a close that fails
+/// for a reason other than a gone server keeps the requested delete.
+#[test]
+pub(crate) fn failed_close_keeps_the_requested_delete_for_the_retry() {
+    let root = std::env::temp_dir().join(format!("operon-close-retry-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Lost)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.remove_after_close.insert(session_id);
+    app.background_sender
+        .send(BackgroundResult::TerminalClosed {
+            session_id,
+            result: Err("tmux timed out after 5s".to_owned()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(app.remove_after_close.contains(&session_id));
+    assert_eq!(app.store.sessions.len(), 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 128: a resize that finds the tmux server gone while the store
+/// cannot be written keeps the session `Lost` in memory and retries the save.
+/// Rolling it back to `Active` re-requested a resize — a tmux child and a
+/// store write — every frame.
+#[test]
+pub(crate) fn gone_resize_with_unwritable_store_stays_lost_and_retries() {
+    let root = std::env::temp_dir().join(format!("operon-resize-unwritable-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    // A regular file where the store's directory should be: every write fails.
+    fs::write(root.join("blocker"), "").unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("blocker").join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id,
+            size: (80, 24),
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Lost);
+    assert!(app.store_retry_pending);
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::TerminalResize(session_id)),
+        "no resize is spawned for a session that is gone"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 pub(crate) fn closing_completed_terminal_with_missing_tmux_socket_removes_session_record() {
     let root = std::env::temp_dir().join(format!("operon-close-gone-{}", Uuid::new_v4()));
@@ -36655,61 +36771,34 @@ pub(crate) fn test_sidebar_defaults_left_files_and_right_conversation() {
     assert!(shapes_right.iter().any(|s| s.contains("project_only.txt")));
 }
 
-/// Change 122: Verify drag and drop between sidebar sides and dock toggle.
+/// Change 122 (made real by 128): a tab dropped past the middle of the
+/// workspace moves the panel to the other side, from either side.
 #[test]
 pub(crate) fn test_sidebar_tab_drag_between_sides() {
-    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-drag");
-
-    // 1. SidebarSide toggle/opposite logic.
     assert_eq!(SidebarSide::Left.opposite(), SidebarSide::Right);
     assert_eq!(SidebarSide::Right.opposite(), SidebarSide::Left);
-
-    // 2. Start drag from Left side.
-    fixture.app.session_inspector_side = SidebarSide::Left;
-    fixture.app.dragging_sidebar_tab = Some((InspectorTab::Files, SidebarSide::Left));
-    assert!(fixture.app.dragging_sidebar_tab.is_some());
-
-    // 3. Simulate drop on right half: switches to Right side and clears dragging state.
-    let screen_w = 1200.0;
-    let center_x = screen_w / 2.0;
-    let drop_x = center_x + 100.0;
-    if let Some((_, origin)) = fixture.app.dragging_sidebar_tab {
-        if origin == SidebarSide::Left && drop_x > center_x {
-            fixture.app.session_inspector_side = SidebarSide::Right;
-            fixture
-                .app
-                .notice_briefly(tr("サイドバーを右側に移動しました"));
-        }
-    }
-    fixture.app.dragging_sidebar_tab = None;
-    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Right);
-    assert!(fixture
-        .app
-        .notice
-        .as_ref()
-        .is_some_and(|m| m.contains("右側に移動")));
-
-    // 4. Start drag from Right side and drop on left half.
-    fixture.app.dragging_sidebar_tab = Some((InspectorTab::Conversation, SidebarSide::Right));
-    let drop_x_left = center_x - 100.0;
-    if let Some((_, origin)) = fixture.app.dragging_sidebar_tab {
-        if origin == SidebarSide::Right && drop_x_left < center_x {
-            fixture.app.session_inspector_side = SidebarSide::Left;
-            fixture
-                .app
-                .notice_briefly(tr("サイドバーを左側に移動しました"));
-        }
-    }
-    fixture.app.dragging_sidebar_tab = None;
-    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Left);
-    assert!(fixture
-        .app
-        .notice
-        .as_ref()
-        .is_some_and(|m| m.contains("左側に移動")));
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Left, egui::pos2(900.0, 400.0), area),
+        Some(SidebarSide::Right)
+    );
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Right, egui::pos2(100.0, 400.0), area),
+        Some(SidebarSide::Left)
+    );
+    // Released on its own side, it stays.
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Left, egui::pos2(100.0, 400.0), area),
+        None
+    );
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Right, egui::pos2(900.0, 400.0), area),
+        None
+    );
 }
 
-/// Change 122: Verify sidebar tab labels and selection switching.
+/// Change 122: the side panel's tab labels. The name promises reordering,
+/// which was specified but never built; it checks only the labels (128).
 #[test]
 pub(crate) fn test_sidebar_tab_reorder_within_side() {
     assert_eq!(InspectorTab::Files.label(), "ファイル");
@@ -36847,30 +36936,31 @@ pub(crate) fn test_sidebar_tab_drag_escape_cancellation() {
     assert!(fixture.app.notice.is_none());
 }
 
-/// Change 125: Verify that drops within the center deadzone or outside the panel are rejected.
+/// Change 125 (made real by 128): drops within the centre dead zone or
+/// outside the workspace are rejected.
 #[test]
 pub(crate) fn test_sidebar_tab_drag_deadzone_and_bounds() {
-    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-deadzone");
-    fixture.app.session_inspector_side = SidebarSide::Left;
-
-    let panel_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
-    let center_x = panel_rect.center().x;
-    const DEADZONE_PX: f32 = 24.0;
-
-    // 1. Release inside the deadzone should NOT switch
-    let drop_near_center = egui::pos2(center_x + 10.0, 400.0);
-    let should_switch_near = drop_near_center.x > (center_x + DEADZONE_PX);
-    assert!(!should_switch_near);
-
-    // 2. Release outside the panel rect should NOT switch
-    let drop_outside = egui::pos2(center_x + 100.0, -50.0);
-    assert!(!panel_rect.contains(drop_outside));
-
-    // 3. Clear release across deadzone within panel DOES switch
-    let drop_valid = egui::pos2(center_x + 100.0, 400.0);
-    assert!(panel_rect.contains(drop_valid));
-    let should_switch_valid = drop_valid.x > (center_x + DEADZONE_PX);
-    assert!(should_switch_valid);
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let center_x = area.center().x;
+    // Inside the 24px dead zone either way.
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Left, egui::pos2(center_x + 10.0, 400.0), area),
+        None
+    );
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Right, egui::pos2(center_x - 10.0, 400.0), area),
+        None
+    );
+    // Past the middle but outside the workspace.
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Left, egui::pos2(center_x + 100.0, -50.0), area),
+        None
+    );
+    // Clear of the dead zone and inside.
+    assert_eq!(
+        sidebar_drop_side(SidebarSide::Left, egui::pos2(center_x + 30.0, 400.0), area),
+        Some(SidebarSide::Right)
+    );
 }
 
 /// Every text the workspace paints, with where it was painted.

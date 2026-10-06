@@ -87,6 +87,26 @@ impl SessionColumnsLayout {
     }
 }
 
+/// Where a side-panel tab dragged from `origin` and released at `pos` sends
+/// the panel: the other side when the release is inside `area` and past its
+/// middle by more than a 24px dead zone, otherwise nowhere.
+pub(crate) fn sidebar_drop_side(
+    origin: SidebarSide,
+    pos: egui::Pos2,
+    area: egui::Rect,
+) -> Option<SidebarSide> {
+    const DEADZONE_PX: f32 = 24.0;
+    if !area.contains(pos) {
+        return None;
+    }
+    let center_x = area.center().x;
+    let past_middle = match origin {
+        SidebarSide::Left => pos.x > center_x + DEADZONE_PX,
+        SidebarSide::Right => pos.x < center_x - DEADZONE_PX,
+    };
+    past_middle.then(|| origin.opposite())
+}
+
 /// Heights of the session list and the side panel stacked under it.
 ///
 /// `split` is the list's share of `total_h`. The list keeps

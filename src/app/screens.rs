@@ -5868,24 +5868,16 @@ impl OperonApp {
                 );
 
                 if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
-                    if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-                        let panel_rect = area;
-                        if panel_rect.contains(pos) {
-                            let center_x = panel_rect.center().x;
-                            const DEADZONE_PX: f32 = 24.0;
-                            let should_switch = match origin_side {
-                                SidebarSide::Left => pos.x > (center_x + DEADZONE_PX),
-                                SidebarSide::Right => pos.x < (center_x - DEADZONE_PX),
-                            };
-                            if should_switch {
-                                self.session_inspector_side = target_side;
-                                let notice = match target_side {
-                                    SidebarSide::Left => tr("サイドバーを左側に移動しました"),
-                                    SidebarSide::Right => tr("サイドバーを右側に移動しました"),
-                                };
-                                self.notice_briefly(notice);
-                            }
-                        }
+                    let pos = ui.input(|i| i.pointer.hover_pos());
+                    if let Some(side) =
+                        pos.and_then(|pos| sidebar_drop_side(origin_side, pos, area))
+                    {
+                        self.session_inspector_side = side;
+                        let notice = match side {
+                            SidebarSide::Left => tr("サイドバーを左側に移動しました"),
+                            SidebarSide::Right => tr("サイドバーを右側に移動しました"),
+                        };
+                        self.notice_briefly(notice);
                     }
                     self.dragging_sidebar_tab = None;
                 }
