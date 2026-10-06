@@ -97,6 +97,9 @@ pub(crate) fn parse_tmux_observation(output: &str) -> TmuxObservation {
 /// session on the list after a reboot takes the tmux server with it.
 pub(crate) fn tmux_error_state(stderr: &str) -> TmuxState {
     let error = stderr.to_lowercase();
+    if error.contains("permission denied") || error.contains("operation not permitted") {
+        return TmuxState::Unknown;
+    }
     if [
         "can't find session",
         "can't find window",

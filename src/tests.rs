@@ -11063,6 +11063,14 @@ pub(crate) fn recognizes_gone_tmux_server_errors() {
         TmuxState::Gone
     );
     assert_eq!(tmux_error_state("permission denied"), TmuxState::Unknown);
+    assert_eq!(
+        tmux_error_state("error connecting to /tmp/tmux-501/default (Permission denied)"),
+        TmuxState::Unknown
+    );
+    assert_eq!(
+        tmux_error_state("error connecting to /tmp/tmux-501/default (Operation not permitted)"),
+        TmuxState::Unknown
+    );
 }
 #[test]
 pub(crate) fn terminal_resize_failure_from_missing_tmux_socket_transitions_session_to_lost_without_error_banner(
@@ -11160,6 +11168,160 @@ pub(crate) fn closing_completed_terminal_with_missing_tmux_socket_removes_sessio
 
     assert!(app.store.sessions.is_empty());
     assert!(load_store(&app.data_file).unwrap().sessions.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+pub(crate) fn stopping_active_session_with_missing_tmux_socket_cancels_cleanly_without_removal() {
+    let root = std::env::temp_dir().join(format!("operon-stop-gone-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            pending_cancellations: vec![session_id],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.background_sender
+        .send(BackgroundResult::SessionStopped {
+            session_id,
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions.len(), 1);
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Cancelled);
+    assert!(app.store.pending_cancellations.is_empty());
+    assert_eq!(
+        load_store(&app.data_file).unwrap().sessions[0].status,
+        SessionStatus::Cancelled
+    );
+    assert!(load_store(&app.data_file)
+        .unwrap()
+        .pending_cancellations
+        .is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+pub(crate) fn closing_terminal_with_missing_tmux_socket_without_removal_reports_success() {
+    let root = std::env::temp_dir().join(format!("operon-close-no-rem-gone-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Exited)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.background_sender
+        .send(BackgroundResult::TerminalClosed {
+            session_id,
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions.len(), 1);
+    assert_eq!(
+        app.notice,
+        Some("ターミナルを閉じました。記録は残しています。".into())
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+pub(crate) fn terminal_resize_failure_with_pending_cancellation_transitions_to_cancelled() {
+    let root = std::env::temp_dir().join(format!("operon-resize-cancel-gone-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            pending_cancellations: vec![session_id],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+
+    app.background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id,
+            size: (80, 24),
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (No such file or directory)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert_eq!(app.notice, Some("セッションをキャンセルしました。".into()));
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Cancelled);
+    assert!(app.store.pending_cancellations.is_empty());
+    assert_eq!(
+        load_store(&app.data_file).unwrap().sessions[0].status,
+        SessionStatus::Cancelled
+    );
+    assert!(load_store(&app.data_file)
+        .unwrap()
+        .pending_cancellations
+        .is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
+pub(crate) fn terminal_resize_failure_with_permission_denied_shows_error_notice_and_keeps_session_active(
+) {
+    let root = std::env::temp_dir().join(format!("operon-resize-perm-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        root.join("store.json"),
+        Store {
+            sessions: vec![test_session(session_id, SessionStatus::Active)],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+    app.persist();
+
+    app.background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id,
+            size: (80, 24),
+            result: Err(
+                "error connecting to /private/tmp/tmux-306374814/default (Permission denied)"
+                    .to_owned(),
+            ),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert!(app
+        .notice
+        .as_deref()
+        .is_some_and(|notice| notice.contains("ターミナルのサイズを変更できませんでした")));
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Active);
+    assert_eq!(
+        load_store(&app.data_file).unwrap().sessions[0].status,
+        SessionStatus::Active
+    );
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
