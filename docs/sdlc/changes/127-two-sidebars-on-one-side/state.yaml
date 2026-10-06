@@ -1,7 +1,7 @@
 state:
   route: "modify"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -9,12 +9,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Implemented and reviewed (approve-with-nits, 2 carried). Next: commit, merge to main, package and swap /Applications/Operon.app."
+resume: "Landed on main, packaged (718 passed, 0 failed, 6 ignored) and installed to /Applications/Operon.app. Two review nits carried in review.yaml. Not verified by clicking in the running app."
 
 contract:
   three-gates: "machine passed cargo test --locked"
   bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed each new guard watched failing"
 
 sets:
