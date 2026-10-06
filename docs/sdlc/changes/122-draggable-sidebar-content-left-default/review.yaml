@@ -1,0 +1,22 @@
+# Review record for change 122.
+#
+# Round 1:
+# - rust-reviewer: Verified clean enum and struct extensions for SidebarSide and InspectorTab.
+#   All width operations clamped with SIDEBAR_MIN_W and SIDEBAR_MAX_W constants.
+#   Drag and drop and splitter resize logic integrates cleanly with egui's immediate-mode UI.
+#   cargo fmt, cargo clippy (-D warnings), and all 704 tests pass cleanly.
+# - subprocess-safety-reviewer: Verified no Command::new, spawn, or external process calls
+#   are introduced. All interactions are strictly in-process UI rendering and state transitions.
+# - durability-reviewer: Verified no persistent store schema or migration code is modified.
+#   Sidebar width and docking side state are safe in-memory defaults with backward-compatible contracts.
+#
+# Verdict: approved across all required reviewers.
+
+digest: "27d6990371bc2426"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
