@@ -37,7 +37,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -45,13 +45,13 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Reviewed (approve). Next: push, CI, merge, package, install."
+resume: "Done. Landed 1e55287 after CI passed; installed. Open: the same git -c route in front of git push/log (guard header)."
 
 contract:
-  three-gates: "machine passed cargo test --locked 731 passed 0 failed 6 ignored (before the round 2 judgedWords tightening; CI re-runs it on the branch), fmt and clippy at commit"
+  three-gates: "machine passed cargo test --locked 731 passed 0 failed 6 ignored locally; CI test suite passed on 127b347, fmt and clippy at commit"
   failing-test-first: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refused ps -o pid,ppid,command -p 473 on the unedited policy"
   guards-verified-by-mutation: "machine passed nine mutations each red: quote check removed from judgedWords (uniq README.md >&1), sed address class without \\ and [ (sed -n /a\\/p;/w out/p), redirect filter on quoted words (uniq README.md >&1), fd dup without a word end (ps >&1x), fetch options check off (git -c core.sshCommand=./x fetch origin), redirect filter removed (git push origin main 2>&1), sysctl names widened (sysctl -n kern.x=1), fetch tail opened (git fetch origin main:main), codesign path lookahead dropped (codesign --verify -s -)"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh, installed through replace-macos-bundle.sh"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
