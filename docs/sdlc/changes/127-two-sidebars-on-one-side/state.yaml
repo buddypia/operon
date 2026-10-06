@@ -1,0 +1,27 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Implemented and reviewed (approve-with-nits, 2 carried). Next: commit, merge to main, package and swap /Applications/Operon.app."
+
+contract:
+  three-gates: "machine passed cargo test --locked"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

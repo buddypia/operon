@@ -1,0 +1,20 @@
+# Review record for change 127.
+#
+# Round 1: rust-reviewer requested changes for one Important finding (the
+# stacked side panel could get 120px, below its ~155px floor). The finding was
+# fixed with SIDEBAR_PANEL_MIN_H, and so were three nits: the shared push_id,
+# the guard on the rule drag, and the corrected allocation claim in the plan.
+# The re-read approved with two nits, carried below.
+
+digest: "84086e13dba72d86"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · in the halved fallback (column below 300px) the panel can still get less than 180px and overflow
+    person: "ウィンドウの高さが極端に低いとき（左列が約300px未満）だけ、下段のファイル一覧の末尾が切れることがあります。対応は不要です。"
+  - rust-reviewer/2 · the 56+100 panel floor is asserted only in a test; ui_session_inspector could read SIDEBAR_PANEL_MIN_H
+    person: "画面上の変化はありません。将来パネルの見た目を変えるときに最小高さの見直しが必要になるという注意だけです。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

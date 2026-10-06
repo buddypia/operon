@@ -1,0 +1,4 @@
+2026-10-06T08:35:53Z auto intent intent.md 29745d1fedfec6a7 approve evaluator: restates the person's quoted request; decision delegated
+2026-10-06T08:35:53Z auto spec spec.md adb50eeb0e91a0a0 approve evaluator: covers the four outcomes, each requirement names a test
+2026-10-06T08:35:53Z person screen screen.md a7ba84f0544339e3 approve evaluator escalated (layout re-arranged); person delegated the layout decision in the request: 結論を出して進めて
+2026-10-06T08:35:53Z auto plan plan.md b39fd73795085520 approve evaluator: maps every requirement to a file and a test-first order
