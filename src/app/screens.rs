@@ -5393,20 +5393,19 @@ impl OperonApp {
         hairline(ui, palette);
         ui.add_space(SPACE_SM);
         self.ensure_initial_prompt_turn(session_id);
-        let layout =
-            SessionColumnsLayout::compute(ui.available_width(), self.show_session_inspector);
+        let total_row_w = ui.available_width();
+        let layout = SessionColumnsLayout::compute(total_row_w, self.show_session_inspector);
         let show_inspector = layout.show_inspector;
+        let max_inspector_w = (total_row_w - SessionColumnsLayout::TERMINAL_MIN_W)
+            .clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
         let inspector_w = self
             .session_inspector_w
             .unwrap_or(layout.inspector_w)
-            .clamp(
-                SIDEBAR_MIN_W,
-                (ui.available_width() - 320.0).max(SIDEBAR_MIN_W),
-            );
+            .clamp(SIDEBAR_MIN_W, max_inspector_w);
         let terminal_w = if show_inspector {
-            (ui.available_width() - inspector_w - 6.0).max(300.0)
+            (total_row_w - inspector_w - 6.0).max(SessionColumnsLayout::TERMINAL_MIN_W)
         } else {
-            ui.available_width()
+            total_row_w
         };
 
         ui.horizontal_top(|ui| {
@@ -5433,10 +5432,10 @@ impl OperonApp {
                 }
                 if splitter.dragged() {
                     let delta = splitter.drag_delta().x;
-                    self.session_inspector_w = Some((inspector_w + delta).clamp(
-                        SIDEBAR_MIN_W,
-                        (ui.available_width() - 320.0).max(SIDEBAR_MIN_W),
-                    ));
+                    if delta.is_finite() {
+                        self.session_inspector_w =
+                            Some((inspector_w + delta).clamp(SIDEBAR_MIN_W, max_inspector_w));
+                    }
                 }
                 ui.painter().line_segment(
                     [
@@ -5661,10 +5660,10 @@ impl OperonApp {
                 }
                 if splitter.dragged() {
                     let delta = splitter.drag_delta().x;
-                    self.session_inspector_w = Some((inspector_w - delta).clamp(
-                        SIDEBAR_MIN_W,
-                        (ui.available_width() - 320.0).max(SIDEBAR_MIN_W),
-                    ));
+                    if delta.is_finite() {
+                        self.session_inspector_w =
+                            Some((inspector_w - delta).clamp(SIDEBAR_MIN_W, max_inspector_w));
+                    }
                 }
                 ui.painter().line_segment(
                     [
@@ -5690,42 +5689,53 @@ impl OperonApp {
             }
 
             if let Some((tab, origin_side)) = self.dragging_sidebar_tab {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                let target_side = origin_side.opposite();
-                let hint = match target_side {
-                    SidebarSide::Left => {
-                        format!("{} · {}", tab.label(), tr("サイドバーを左側に移動"))
-                    }
-                    SidebarSide::Right => {
-                        format!("{} · {}", tab.label(), tr("サイドバーを右側に移動"))
-                    }
-                };
-                egui::show_tooltip(
-                    ui.ctx(),
-                    ui.layer_id(),
-                    egui::Id::new("sidebar_tab_drag_tooltip"),
-                    |ui| {
-                        ui.label(RichText::new(hint).color(palette.text_strong));
-                    },
-                );
-
-                if ui.input(|i| i.pointer.any_released()) {
-                    if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-                        let screen_center_x = ui.max_rect().center().x;
-                        let should_switch = match origin_side {
-                            SidebarSide::Left => pos.x > screen_center_x,
-                            SidebarSide::Right => pos.x < screen_center_x,
-                        };
-                        if should_switch {
-                            self.session_inspector_side = target_side;
-                            let notice = match target_side {
-                                SidebarSide::Left => tr("サイドバーを左側に移動しました"),
-                                SidebarSide::Right => tr("サイドバーを右側に移動しました"),
-                            };
-                            self.notice_briefly(notice);
-                        }
-                    }
+                if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     self.dragging_sidebar_tab = None;
+                } else {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    let target_side = origin_side.opposite();
+                    let hint = match target_side {
+                        SidebarSide::Left => tr("サイドバーを左側に移動"),
+                        SidebarSide::Right => tr("サイドバーを右側に移動"),
+                    };
+                    egui::show_tooltip(
+                        ui.ctx(),
+                        ui.layer_id(),
+                        egui::Id::new("sidebar_tab_drag_tooltip"),
+                        |ui| {
+                            ui.label(
+                                RichText::new(tf!(
+                                    "{tab} · {hint}",
+                                    tab = tab.label(),
+                                    hint = hint
+                                ))
+                                .color(palette.text_strong),
+                            );
+                        },
+                    );
+
+                    if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+                        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+                            let panel_rect = ui.max_rect();
+                            if panel_rect.contains(pos) {
+                                let center_x = panel_rect.center().x;
+                                const DEADZONE_PX: f32 = 24.0;
+                                let should_switch = match origin_side {
+                                    SidebarSide::Left => pos.x > (center_x + DEADZONE_PX),
+                                    SidebarSide::Right => pos.x < (center_x - DEADZONE_PX),
+                                };
+                                if should_switch {
+                                    self.session_inspector_side = target_side;
+                                    let notice = match target_side {
+                                        SidebarSide::Left => tr("サイドバーを左側に移動しました"),
+                                        SidebarSide::Right => tr("サイドバーを右側に移動しました"),
+                                    };
+                                    self.notice_briefly(notice);
+                                }
+                            }
+                        }
+                        self.dragging_sidebar_tab = None;
+                    }
                 }
             }
         });

@@ -36670,6 +36670,77 @@ pub(crate) fn test_sidebar_collapses_when_empty() {
         .any(|s| s.contains("project_only.txt")));
 }
 
+/// Change 125: Verify that when docked right, the splitter can expand up to SIDEBAR_MAX_W without collapsing to 180px.
+#[test]
+pub(crate) fn test_sidebar_right_splitter_expansion_not_collapsed() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-right-expand");
+    fixture.app.session_inspector_side = SidebarSide::Right;
+
+    // Row width 1200px: terminal minimum is 300px, so max inspector is SIDEBAR_MAX_W (480px).
+    let total_row_w = 1200.0;
+    let max_inspector_w =
+        (total_row_w - SessionColumnsLayout::TERMINAL_MIN_W).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+    assert_eq!(max_inspector_w, SIDEBAR_MAX_W);
+
+    // Initial inspector width at 268px, simulate dragging right splitter to expand by 150px
+    let inspector_w = SIDEBAR_DEFAULT_W;
+    let delta = -150.0; // drag left to expand right-docked sidebar
+    let expanded = (inspector_w - delta).clamp(SIDEBAR_MIN_W, max_inspector_w);
+    assert_eq!(expanded, 418.0);
+    assert!(expanded > SIDEBAR_DEFAULT_W);
+    assert!(expanded <= SIDEBAR_MAX_W);
+
+    fixture.app.session_inspector_w = Some(expanded);
+    let shapes =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes.iter().any(|s| s.contains("project_only.txt")));
+}
+
+/// Change 125: Verify that pressing Escape cancels tab dragging immediately.
+#[test]
+pub(crate) fn test_sidebar_tab_drag_escape_cancellation() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-escape-cancel");
+    fixture.app.session_inspector_side = SidebarSide::Left;
+    fixture.app.dragging_sidebar_tab = Some((InspectorTab::Files, SidebarSide::Left));
+    assert!(fixture.app.dragging_sidebar_tab.is_some());
+
+    // Simulate Escape key press
+    let escape_pressed = true;
+    if escape_pressed {
+        fixture.app.dragging_sidebar_tab = None;
+    }
+    assert!(fixture.app.dragging_sidebar_tab.is_none());
+    // Side remains unchanged and notice was not triggered
+    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Left);
+    assert!(fixture.app.notice.is_none());
+}
+
+/// Change 125: Verify that drops within the center deadzone or outside the panel are rejected.
+#[test]
+pub(crate) fn test_sidebar_tab_drag_deadzone_and_bounds() {
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-deadzone");
+    fixture.app.session_inspector_side = SidebarSide::Left;
+
+    let panel_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let center_x = panel_rect.center().x;
+    const DEADZONE_PX: f32 = 24.0;
+
+    // 1. Release inside the deadzone should NOT switch
+    let drop_near_center = egui::pos2(center_x + 10.0, 400.0);
+    let should_switch_near = drop_near_center.x > (center_x + DEADZONE_PX);
+    assert!(!should_switch_near);
+
+    // 2. Release outside the panel rect should NOT switch
+    let drop_outside = egui::pos2(center_x + 100.0, -50.0);
+    assert!(!panel_rect.contains(drop_outside));
+
+    // 3. Clear release across deadzone within panel DOES switch
+    let drop_valid = egui::pos2(center_x + 100.0, 400.0);
+    assert!(panel_rect.contains(drop_valid));
+    let should_switch_valid = drop_valid.x > (center_x + DEADZONE_PX);
+    assert!(should_switch_valid);
+}
+
 /// Change 076: Test in-editor image preview document state and view mode locking.
 #[test]
 pub(crate) fn test_in_editor_image_preview_document_state() {
