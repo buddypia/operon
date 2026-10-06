@@ -1494,6 +1494,7 @@ impl OperonApp {
                 BackgroundResult::SessionStopped { session_id, result } => {
                     self.background_tasks
                         .remove(&BackgroundKey::SessionStop(session_id));
+                    let remove_requested = self.remove_after_close.remove(&session_id);
                     match result {
                         Ok(()) => {
                             self.store
@@ -1511,7 +1512,7 @@ impl OperonApp {
                                 tr("セッションをキャンセルしました。"),
                                 tr("tmux セッションはキャンセルされました"),
                             );
-                            if self.remove_after_close.contains(&session_id) {
+                            if remove_requested {
                                 self.remove_session_record(session_id);
                             }
                         }
@@ -1523,9 +1524,7 @@ impl OperonApp {
                                 .find(|session| session.id == session_id)
                                 .is_some_and(|session| session.status == SessionStatus::Cancelled);
                             let gone = tmux_error_state(&error) == TmuxState::Gone;
-                            if already_cancelled
-                                || (self.remove_after_close.contains(&session_id) && gone)
-                            {
+                            if already_cancelled || gone {
                                 if let Some(session) = self
                                     .store
                                     .sessions
@@ -1541,7 +1540,7 @@ impl OperonApp {
                                     tr("セッションをキャンセルしました。"),
                                     tr("tmux セッションはキャンセルされました"),
                                 );
-                                if self.remove_after_close.contains(&session_id) {
+                                if remove_requested {
                                     self.remove_session_record(session_id);
                                 }
                                 continue;
@@ -1669,17 +1668,43 @@ impl OperonApp {
                                 self.terminal_resize_requested.remove(&session_id);
                             }
                             if tmux_error_state(&error) == TmuxState::Gone {
-                                if let Some(session) =
-                                    self.store.sessions.iter_mut().find(|session| {
-                                        session.id == session_id
-                                            && matches!(
-                                                session.status,
-                                                SessionStatus::Active | SessionStatus::Starting
-                                            )
-                                    })
-                                {
-                                    session.status = SessionStatus::Lost;
-                                    self.persist();
+                                let cancellation_was_pending =
+                                    self.cancellation_pending(session_id);
+                                if cancellation_was_pending {
+                                    self.store
+                                        .pending_cancellations
+                                        .retain(|pending| *pending != session_id);
+                                    if let Some(session) =
+                                        self.store.sessions.iter_mut().find(|session| {
+                                            session.id == session_id
+                                                && matches!(
+                                                    session.status,
+                                                    SessionStatus::Active | SessionStatus::Starting
+                                                )
+                                        })
+                                    {
+                                        session.status = SessionStatus::Cancelled;
+                                    }
+                                    self.persist_external_transition(
+                                        tr("セッションをキャンセルしました。"),
+                                        tr("tmux セッションはキャンセルされました"),
+                                    );
+                                } else {
+                                    let previous_store = self.store.clone();
+                                    if let Some(session) =
+                                        self.store.sessions.iter_mut().find(|session| {
+                                            session.id == session_id
+                                                && matches!(
+                                                    session.status,
+                                                    SessionStatus::Active | SessionStatus::Starting
+                                                )
+                                        })
+                                    {
+                                        session.status = SessionStatus::Lost;
+                                        if !self.persist() {
+                                            self.store = previous_store;
+                                        }
+                                    }
                                 }
                             } else {
                                 self.notice = Some(tf!(
@@ -1694,38 +1719,34 @@ impl OperonApp {
                 BackgroundResult::TerminalClosed { session_id, result } => {
                     self.background_tasks
                         .remove(&BackgroundKey::TerminalClose(session_id));
+                    let remove_requested = self.remove_after_close.remove(&session_id);
                     let failed_session = self
                         .store
                         .sessions
                         .iter()
                         .find(|session| session.id == session_id)
                         .is_some_and(|session| session.status == SessionStatus::Failed);
-                    match result {
-                        Ok(()) if self.remove_after_close.contains(&session_id) => {
+                    let is_gone = match &result {
+                        Ok(()) => true,
+                        Err(error) => tmux_error_state(error) == TmuxState::Gone,
+                    };
+                    if is_gone {
+                        if remove_requested {
                             self.remove_session_record(session_id);
-                        }
-                        Ok(()) if failed_session => {
+                        } else if failed_session {
                             self.notice = Some(
                                 tr("古いターミナルを停止しました。失敗したセッションを再試行できます。")
                                     .into(),
                             );
-                        }
-                        Ok(()) => {
+                        } else {
                             self.notice =
                                 Some(tr("ターミナルを閉じました。記録は残しています。").into());
                         }
-                        Err(error) => {
-                            if self.remove_after_close.contains(&session_id)
-                                && tmux_error_state(&error) == TmuxState::Gone
-                            {
-                                self.remove_session_record(session_id);
-                            } else {
-                                self.notice = Some(tf!(
-                                    "ターミナルを閉じられませんでした: {error}",
-                                    error = error
-                                ));
-                            }
-                        }
+                    } else if let Err(error) = result {
+                        self.notice = Some(tf!(
+                            "ターミナルを閉じられませんでした: {error}",
+                            error = error
+                        ));
                     }
                 }
                 BackgroundResult::ListeningPorts(ports) => {
