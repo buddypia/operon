@@ -1,0 +1,19 @@
+# Review record for change 130.
+#
+# Round 1: rust-reviewer requested changes: an insertion had moved #[test]
+# attributes, leaving one test unattached. Fixed; 128 added to the
+# grandfathered numbers after main brought its second 128. The re-read
+# approved with two nits, carried below. Re-read at the staged digest: approve-with-nits.
+
+digest: "acb64a19763517da"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · the EN and KO rows keep the Japanese 「停止」 because it names the button
+    person: "英語・韓国語表示でも、停止ボタンの名前は日本語のまま表示されます。"
+  - rust-reviewer/2 · the stop-gate test's failure message still names again_waited
+    person: "影響はありません。テストが失敗したときの説明文の言い回しだけの問題です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

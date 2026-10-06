@@ -1550,11 +1550,15 @@ impl OperonApp {
                                 continue;
                             }
                             // The 「停止」 this asks for must still finish a
-                            // delete the person already confirmed.
+                            // delete the person already confirmed, and the
+                            // notice says so: a stop that deletes without
+                            // saying it would is a surprise.
                             if remove_requested {
                                 self.remove_after_close.insert(session_id);
+                                self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。削除は保留中です。もう一度「停止」を実行すると、停止を確かめてから記録を削除します。", error = error));
+                            } else {
+                                self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。永続化されたキャンセル指示は保留のままです。もう一度「停止」を実行してください。", error = error));
                             }
-                            self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。永続化されたキャンセル指示は保留のままです。もう一度「停止」を実行してください。", error = error));
                         }
                     }
                 }

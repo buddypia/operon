@@ -11169,6 +11169,13 @@ pub(crate) fn failed_stop_keeps_the_requested_delete_for_the_retry() {
         app.remove_after_close.contains(&session_id),
         "the delete survives a stop that could not be confirmed"
     );
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("削除は保留中")),
+        "the notice says the next stop will delete: {:?}",
+        app.notice
+    );
     assert_eq!(app.store.sessions.len(), 1);
 
     app.background_sender
@@ -17860,9 +17867,18 @@ pub(crate) fn the_stop_gate_reports_an_installed_build_that_is_behind() {
     // stop; asked first, the stamp is never reached and the next stop re-enters
     // the identical hang, which is the one promise in this file's own header —
     // refuses once and never twice.
+    // Whether the second stop asked again is read from the check itself: it
+    // leaves a mark when it runs. Comparing the two stops' durations said the
+    // same thing on an idle machine and failed on a loaded one, where the
+    // hook's own git walk outlasts the one-second bound (lesson 064).
+    let asked_again = root.join("asked-again");
     let again_started = std::time::Instant::now();
-    let again = run("exec sleep 30", false);
+    let again = run(
+        &format!("touch '{}'\nexec sleep 30", asked_again.display()),
+        false,
+    );
     let again_waited = again_started.elapsed();
+    let asked_twice = asked_again.exists();
     // Further work on the code is a new position: an item still pending at
     // the real finish is refused again, not waved through by an old stamp.
     fs::write(working.join(UNTRACKED), "fn main() { let _edited = 1; }\n").unwrap();
@@ -17892,7 +17908,7 @@ pub(crate) fn the_stop_gate_reports_an_installed_build_that_is_behind() {
         "期限切れの出力を報告として印字しています:\n{hanging}"
     );
     assert!(
-        again.is_empty() && again_waited < waited,
+        again.is_empty() && !asked_twice,
         "同じ位置で二度目も止まりました。答えないバンドルの前に位置が記録されていません \
          (1 回目 {waited:?}、2 回目 {again_waited:?}):\n{again}"
     );
@@ -19056,7 +19072,65 @@ fn state_files() -> Vec<(String, PathBuf)> {
     files
 }
 
+/// Lesson 065. The commit guard told a refused session to commit with
+/// `git -C <worktree> commit`, and `.claude/hooks/gate-commit.sh` refuses exactly
+/// that, so following one guard's advice ran into the other. Advice a guard gives
+/// has to be advice the other guards accept.
 #[test]
+pub(crate) fn the_commit_guard_never_advises_a_commit_the_commit_gate_refuses() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let guard = fs::read_to_string(root.join(".cli/hooks/commit-guard.mjs")).unwrap();
+    let gate = fs::read_to_string(root.join(".claude/hooks/gate-commit.sh")).unwrap();
+    assert!(
+        gate.contains("a commit aimed at another directory"),
+        "gate-commit.sh がもう -C 付きの commit を拒否していません。このテストの前提を見直してください"
+    );
+    let advised: Vec<&str> = guard
+        .lines()
+        // The messages are template-literal lines; comments about what the
+        // guard accepts are not advice.
+        .filter(|line| line.trim_start().starts_with('`'))
+        .filter(|line| line.contains("git -C") && line.contains("commit"))
+        .filter(|line| !line.contains("Not 'git -C"))
+        .collect();
+    assert!(
+        advised.is_empty(),
+        "commit-guard.mjs が gate-commit.sh に拒否される `git -C … commit` を勧めています: {advised:?}"
+    );
+}
+
+/// Lesson 063. Two sessions working at once each took "the next free number"
+/// and landed two change directories under it (059, 060, 098, 128). A number names a change in every commit message, state file, and
+/// lesson that cites it, so the second lander renumbers before it lands.
+/// The four collisions that landed before this test are grandfathered.
+#[test]
+pub(crate) fn change_directory_numbers_are_unique() {
+    const GRANDFATHERED: [&str; 4] = ["059", "060", "098", "128"];
+    let changes = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/sdlc/changes");
+    let mut seen: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for entry in fs::read_dir(&changes).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !entry.path().is_dir() {
+            continue;
+        }
+        let Some(number) = name
+            .get(..3)
+            .filter(|n| n.bytes().all(|b| b.is_ascii_digit()))
+        else {
+            continue;
+        };
+        seen.entry(number.to_owned()).or_default().push(name);
+    }
+    let reused: Vec<_> = seen
+        .iter()
+        .filter(|(number, names)| names.len() > 1 && !GRANDFATHERED.contains(&number.as_str()))
+        .collect();
+    assert!(
+        reused.is_empty(),
+        "同じ変更番号が二つの変更に使われています。後から着地する方を次の空き番号に付け替えてください: {reused:?}"
+    );
+}
+
 /// `state.yaml` is the file a session arriving cold reads before the prose: it
 /// says which route, which stage, what is spent, and what to do next. Every way
 /// it can be wrong is silent. A status outside the closed set is read as a status
@@ -19068,6 +19142,7 @@ fn state_files() -> Vec<(String, PathBuf)> {
 /// stages and routes out of the files that already own them, rather than being
 /// restated here. Lesson 004: a guard that retypes the value it guards goes blind
 /// on the rename it exists to survive.
+#[test]
 pub(crate) fn every_state_file_names_a_route_and_a_stage_that_exist() {
     const STAGES: [&str; 6] = ["plan", "design", "build", "test", "deploy", "maintain"];
 
@@ -34828,6 +34903,13 @@ fn node_steered_at(root: &Path, git_dir: &Path, work_tree: &Path) -> Command {
     command
 }
 
+/// How long a test that drives the node hooks waits for them. Each script runs
+/// dozens of policy decisions, every one spawning git; idle that is ~15 s, and
+/// with another session's suite on the same machine it passed 55 s and the old
+/// 60 s bound failed a correct hook (lesson 064). The bound is still a bound —
+/// a hook that hangs fails the test.
+const NODE_HOOK_TEST_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// Change 080. A session that carries `GIT_DIR` and `GIT_WORK_TREE` ran
 /// `cleanup-worktree` on a merged worktree, and the branch it read in that
 /// worktree's directory was the session's: `main`. git reads the pointers
@@ -34844,11 +34926,11 @@ pub(crate) fn cleanup_removes_the_worktree_it_was_given_when_the_session_names_a
     command
         .arg(&ops)
         .args(["cleanup-worktree", "--worktree", merged.to_str().unwrap()]);
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(60));
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
     let branches = git_in(&root, &["branch", "--list"]);
     let merged_survived = merged.exists();
     discard_worktree_fixture(&root);
-    let output = output.expect("node が見つからないか、60 秒で終わりませんでした");
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
 
     assert!(
         !branches.contains("feature/merged") && !merged_survived,
@@ -34896,7 +34978,7 @@ pub(crate) fn cleanup_removes_a_worktree_landed_on_main_while_origin_trails() {
         command
             .arg(&ops)
             .args(["cleanup-worktree", "--worktree", worktree.to_str().unwrap()]);
-        run_command_with_timeout(&mut command, Duration::from_secs(60))
+        run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
     };
     let removed = cleanup(&landed);
     let refused = cleanup(&unlanded);
@@ -34921,10 +35003,10 @@ pub(crate) fn cleanup_removes_a_worktree_landed_on_main_while_origin_trails() {
     let main_after = git_in(&root, &["rev-parse", "main"]);
     let on_main_survived = on_main.exists();
     discard_worktree_fixture(&root);
-    let removed = removed.expect("node が見つからないか、60 秒で終わりませんでした");
-    let refused = refused.expect("node が見つからないか、60 秒で終わりませんでした");
+    let removed = removed.expect("node が見つからないか、時間内に終わりませんでした");
+    let refused = refused.expect("node が見つからないか、時間内に終わりませんでした");
     let on_main_refused =
-        on_main_refused.expect("node が見つからないか、60 秒で終わりませんでした");
+        on_main_refused.expect("node が見つからないか、時間内に終わりませんでした");
 
     assert!(
         removed.status.success() && !landed_survived && !branches.contains("feature/landed"),
@@ -34958,8 +35040,8 @@ fn worktree_new_in(root: &Path, branch: &str) -> serde_json::Value {
     );
     let mut command = node_in(root);
     command.args(["--input-type=module", "-e", &script]);
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(60))
-        .expect("node が見つからないか、60 秒で終わりませんでした");
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+        .expect("node が見つからないか、時間内に終わりませんでした");
     serde_json::from_slice(&output.stdout).unwrap_or_else(|_| panic!("{}", both_streams(&output)))
 }
 
@@ -35051,9 +35133,9 @@ pub(crate) fn a_git_dir_that_no_longer_exists_does_not_stop_the_worktree_tools()
         &project.join(".worktrees/removed"),
     );
     command.args(["--input-type=module", "-e", &script]);
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(60));
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
     discard_worktree_fixture(&root);
-    let output = output.expect("node が見つからないか、60 秒で終わりませんでした");
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
     assert!(output.status.success(), "{}", both_streams(&output));
     let result: serde_json::Value = serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
@@ -35346,9 +35428,9 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
     );
     let mut command = node_in(&project);
     command.args(["--input-type=module", "-e", &script]);
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(60));
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
     discard_worktree_fixture(&root);
-    let output = output.expect("node が見つからないか、60 秒で終わりませんでした");
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
     assert!(output.status.success(), "{}", both_streams(&output));
     let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|_| panic!("{}", both_streams(&output)));

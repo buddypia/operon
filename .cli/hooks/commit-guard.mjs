@@ -398,8 +398,7 @@ function buildDenyMessage(kind, branch = 'main') {
       `Branch creation must be paired with worktrees to prevent multi-terminal conflicts.\n\n` +
       `Alternatives (standard entry point — based on fetch + ff main + worktree add from the newer of main and origin/main):\n` +
       `  make wt.new BR=feature/<task>\n` +
-      `  # Or: node .claude/scripts/worktree-new.mjs --branch feature/<task>\n` +
-      `Or use the /create-pr skill — automatically handles feature branch + PR + squash merge.\n`
+      `  # Or: node .claude/scripts/worktree-new.mjs --branch feature/<task>\n`
     );
   }
   if (kind === 'paren_hash') {
@@ -420,21 +419,20 @@ function buildDenyMessage(kind, branch = 'main') {
       `What to do:\n` +
       `  - Retry: transient load is the common cause and the retry usually resolves the branch\n` +
       `  - Check the state: git status / git branch --show-current\n` +
-      `  - Commit inside a worktree instead: git -C .worktrees/feature/<task> commit -m "<msg>"\n`
+      `  - Commit inside a worktree instead: cd .worktrees/feature/<task>, then git commit -m "<msg>"\n`
     );
   }
   // main_commit
   return (
-    `[Commit Guard] To commit inside a worktree, explicitly specify 'git -C <worktree-path> commit' (when an existing worktree is present).\n` +
-    `  git -C .worktrees/feature/<task> add <files>\n` +
-    `  git -C .worktrees/feature/<task> commit -m "<msg>"\n\n` +
-    `Blocked due to direct commit on ${trunk} branch (purpose: prevent code conflicts during concurrent multi-terminal work).\n` +
-    `Commits are permitted inside worktree branches. While 'cd <worktree> && git commit' is also allowed,\n` +
-    `using 'git -C <worktree>' is recommended as it does not rely on hook evaluation-time cwd.\n\n` +
+    `[Commit Guard] Blocked due to direct commit on ${trunk} branch (purpose: prevent code conflicts during concurrent multi-terminal work).\n\n` +
+    `Commit from inside the worktree: move the shell there in its own call, then commit without -C.\n` +
+    `  cd .worktrees/feature/<task>\n` +
+    `  git add <files> && git commit -m "<msg>"\n` +
+    `Not 'git -C <worktree> commit': .claude/hooks/gate-commit.sh refuses a commit aimed at another\n` +
+    `directory, because this session's gates would vouch for another checkout's code.\n\n` +
     `If a new worktree is needed (standard entry point — based on fetch + ff main + worktree add from the newer of main and origin/main):\n` +
     `  make wt.new BR=feature/<task>\n` +
-    `  # Or: node .claude/scripts/worktree-new.mjs --branch feature/<task>\n\n` +
-    `Or use the /create-pr skill — automatically handles feature branch + PR + squash merge.\n`
+    `  # Or: node .claude/scripts/worktree-new.mjs --branch feature/<task>\n`
   );
 }
 
