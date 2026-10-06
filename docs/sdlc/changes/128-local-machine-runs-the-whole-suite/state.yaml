@@ -1,0 +1,27 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "3 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Lands by git merge --no-ff into main once CI passes on this head."
+
+contract:
+  three-gates: "machine passed fmt and clippy locally; cargo test --locked in CI run 37450507462 on 56e3cb6"
+  bands: "machine passed bash scripts/check-bands.sh (warn tier only, no action)"
+  release-binary: "machine waived touches no src/ file except src/tests.rs; the installed app does not go stale"
+  guards-verified-by-mutation: "human passed timeout guard watched failing; the rest argued from main's text in plan.md departures"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

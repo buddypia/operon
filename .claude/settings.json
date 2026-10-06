@@ -28,7 +28,13 @@
             "type": "command",
             "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-commit.sh",
             "timeout": 600,
-            "statusMessage": "Running the commit gate (fmt, test, clippy)..."
+            "statusMessage": "Running the commit gate (fmt, clippy)..."
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/gate-merge.sh",
+            "timeout": 600,
+            "statusMessage": "Checking CI before the merge..."
           },
           {
             "type": "command",

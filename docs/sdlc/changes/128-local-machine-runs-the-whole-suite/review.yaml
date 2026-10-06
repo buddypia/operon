@@ -1,0 +1,54 @@
+# Review record for change 128.
+#
+# Round 1: all three requested changes. durability: the release check took CI's
+# verdict over a tree with untracked build inputs. subprocess: force pushes
+# matched the plain-push pattern; the merge gate's branch reader let `-m` after
+# the branch, chained merges, `git -C` and `cd` through; the offline suite had
+# no bound of its own. rust: hollow assertions in the non-main and release
+# cases. Fixed with ci-verified.sh --worktree, the canonical-form-only merge
+# gate, scripts/run-bounded.sh, and behavioural cases.
+# Round 2: subprocess: the word "merge" anywhere refused ordinary commits, and a
+# tab got past the reader. Fixed with a subcommand reader and [[:space:]].
+# Round 3: subprocess: a merge behind another word (`bash -c`, `env`, `then`)
+# was not seen. Fixed: the first `git` anywhere in a segment.
+# Round 4: rust: heredoc commit messages describing a merge were refused. Fixed
+# by dropping heredoc bodies.
+# Round 5: subprocess: a heredoc fed to a shell hid a merge. Fixed: a body is
+# dropped only when it feeds a text sink and no interpreter.
+# Round 6: all three approve with the findings below carried. `main` moved twice
+# during review (changes 127 and 128 elsewhere); each merge of it brought no
+# change outside docs/sdlc/changes/ the second time.
+# At landing, main had moved once more (the hook-timeout fix); merged in, the
+# diff against main differs from 041bb8fb2e5630f1 only in hunk offsets and
+# index lines of src/tests.rs, so the verdicts carry to 13a2495776f51bc2.
+
+digest: "13a2495776f51bc2"
+
+rounds: 6
+
+carried:
+  - durability-reviewer/1 · ci-verified.sh queries runs of every event; a green pull_request run tested the merge ref, not the sha (--event push)
+    person: "GitHub 上で PR を作った場合にだけ関係します。この運用では PR を作らないので、今は対応不要です。"
+  - durability-reviewer/2 · git status does not see assume-unchanged / skip-worktree files or .git/info/exclude
+    person: "git に変更を隠す設定を自分で入れた場合にだけ、インストール前のテストが省かれることがあります。通常の作業では起きません。"
+  - durability-reviewer/3 · package-macos.sh silently accepts unknown arguments (--ful, the removed --fast)
+    person: "packager のオプションを打ち間違えると、テストなしでビルドされます。インストール前の確認でテストは走るので、壊れたものが入ることはありません。"
+  - subprocess-safety-reviewer/1 · `cat <<EOF | /bin/bash` (absolute path or parenthesised interpreter) is not recognised, so a merge in the body is not read
+    person: "かなり特殊な書き方で main への merge を書いた場合にだけ、CI の確認を通らずに merge できてしまいます。通常の手順では起きません。"
+  - subprocess-safety-reviewer/2 · a heredoc written to a file and then run, and pull/cherry-pick/rebase on main, are outside what the merge gate reads
+    person: "スクリプトファイル経由や pull など merge 以外の方法で main を変えると、この確認は働きません。main ではそれらのコマンドは別の仕組みで止められています。"
+  - subprocess-safety-reviewer/3 · `echo git merge x`, a here-string, a quoted `;` are read as merges (refused with an explanation); run-bounded does not kill stragglers after a normal exit; gh PATH is not repaired; gh stderr reaches the verdict text
+    person: "merge でないコマンドがまれに止められることがあります。止められたときは理由が表示されます。対応は不要です。"
+  - rust-reviewer/1 · an interpreter outside the list (python3 - <<EOF running git merge) is not read
+    person: "Python などから git merge を実行する特殊な書き方は確認の対象外です。通常の作業では起きません。"
+  - rust-reviewer/2 · a bare interpreter word on a heredoc's opening line (`-m "fix sh bug"`) makes the body read and can refuse a commit
+    person: "commit メッセージに sh などの単語があると、まれに commit が止められることがあります。止められたときは理由が表示されます。"
+  - rust-reviewer/3 · ci_verified non-timeout cases rely on the 20 s gh default under load; new fixtures do not isolate git config; packager default test does not env_remove OPERON_FULL_PACKAGE; missing-gh case assumes /usr/bin has no gh
+    person: "マシンが非常に重いときや、git の個人設定によっては、テストがたまたま失敗することがあります。アプリの動作には影響しません。"
+  - rust-reviewer/4 · the ci.yml branches check is a loose contains; new tests clean up only on success, so a panic leaks a temp directory and a worktree
+    person: "テストが失敗したときに一時フォルダが残ることがあります。アプリの動作には影響しません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  durability-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

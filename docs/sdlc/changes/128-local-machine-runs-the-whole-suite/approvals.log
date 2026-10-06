@@ -1,0 +1,10 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The plan relaxes the commit gate and the packager (gate-configuration), which
+# approval.md sends to a person. The person chose the landing flow and the local
+# reviews by answer, then approved the plan as summarised to them, 2026-10-06.
+2026-10-06T08:47:36Z person intent intent.md 0cff0a095b4e4e6c approve restates the request and the two choices the person made
+2026-10-06T08:47:36Z person spec spec.md 30d28e6e6ac5d77a approve approved with the plan summary: test leaves the commit gate, the merge waits for CI, offline falls back to the local suite
+2026-10-06T08:47:36Z person plan plan.md f14fa365cc6f7332 approve 承認して進める
+2026-10-06T08:47:36Z person gate-configuration plan.md f14fa365cc6f7332 approve relaxation approved by the person; the full suite moves to the merge gate
+2026-10-06T09:40:00Z auto spec spec.md ea6be06519e81816 approve wording only: R1 names the script without a placeholder argument in backticks, which harness_documents_only_name_paths_that_exist read as a path; no requirement moved

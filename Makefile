@@ -33,6 +33,14 @@ q.check:
 	cargo test --locked
 	cargo clippy --locked -- -D warnings
 
+# What the commit gate runs (change 128). The suite runs in CI on the pushed
+# branch, and the merge into main waits for it; locally, run the tests a change
+# names with `cargo test --locked <filter>` beside this.
+.PHONY: q.fast
+q.fast:
+	cargo fmt --check
+	cargo clippy --locked -- -D warnings
+
 q.fix:
 	cargo fmt
 	cargo clippy --locked --fix --allow-dirty --allow-staged

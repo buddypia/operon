@@ -188,9 +188,11 @@ failing test first, confirm it fails for the stated reason, then fix the code
 without touching the test.
 
 `.claude/hooks/gate-commit.sh` makes that deterministic at the commit boundary. It
-runs the three gates when a Rust or manifest file changed, and it refuses a commit
+runs fmt and clippy when a Rust or manifest file changed, and it refuses a commit
 that lost a test or gained an `#[ignore]` — the two shapes "make the test pass"
-takes when it goes wrong in a Rust repository.
+takes when it goes wrong in a Rust repository. The suite itself runs in CI on the
+pushed branch, and `.claude/hooks/gate-merge.sh` refuses the merge into `main`
+until it has passed there (change 128).
 
 `.claude/hooks/gate-stop.sh` holds a change to what it promised: it refuses the
 first attempt to finish while an open change's `machine` contract item is still

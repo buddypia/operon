@@ -62,8 +62,20 @@ if has 'gh release'; then
   decide ask "Release gate — a GitHub release is published to users and cannot be quietly withdrawn. Confirm the tag points at a tree that passed the three gates, and that the attached bundle is the verified dist/Operon.app."
 fi
 
+# A plain push of one branch to origin is how a change reaches CI, which runs the
+# suite the merge into main waits for (change 128), so it is part of landing and
+# not a question. Plain means the whole command is that push and nothing else:
+# no force, no `+` or `:` refspec, no second command. Anything else still asks.
+# The branch word starts with a letter or digit, so `git push origin --force`,
+# `-f` or `--mirror` — options git reads after the remote too — are not a branch.
+plain_push='^git +push( +(-u|--set-upstream))? +origin +[A-Za-z0-9][A-Za-z0-9._/-]*$'
 if printf '%s' "$command" | grep -E '\bgit +push\b' >/dev/null; then
-  decide ask "Publishing gate — a push is outward-facing and this repository has no remote yet, so confirm the destination is the one you mean. Force-pushing main rewrites the audit trail the SDLC pipeline depends on (docs/sdlc/README.md)."
+  pushed=$(printf '%s' "$command" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+  if [ "$(printf '%s\n' "$pushed" | grep -c .)" = 1 ] \
+    && printf '%s' "$pushed" | grep -E "$plain_push" >/dev/null; then
+    exit 0
+  fi
+  decide ask "Publishing gate — this push is not a plain push of one branch to origin, so confirm the destination and the refspec are the ones you mean. Force-pushing main rewrites the audit trail the SDLC pipeline depends on (docs/sdlc/README.md)."
 fi
 
 if printf '%s' "$command" | grep -E '\bgit +tag\b' >/dev/null \

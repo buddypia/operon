@@ -12368,6 +12368,10 @@ pub(crate) fn packaging_lock_allows_exactly_one_of_two_simultaneous_packagers() 
 /// And none of them inherits the packaging lock (fd 9): the suite starts
 /// processes that can outlive it — a tmux server — and one holding the lock
 /// refuses every later packager with nothing running. Review of 096.
+///
+/// With `--full`: since change 128 the suite runs in CI before the merge, and
+/// the packager runs it only when asked —
+/// `the_packager_leaves_the_suite_to_ci_by_default` holds the other side.
 #[test]
 pub(crate) fn the_packager_runs_the_three_gates_before_it_builds() {
     use std::os::unix::fs::PermissionsExt;
@@ -12395,6 +12399,7 @@ pub(crate) fn the_packager_runs_the_three_gates_before_it_builds() {
 
     let output = Command::new("bash")
         .arg("scripts/package-macos.sh")
+        .arg("--full")
         .env("OPERON_DIST_DIR", &root)
         .env("OPERON_TEST_MARKER", &log)
         .env("PATH", &path)
@@ -12419,11 +12424,14 @@ pub(crate) fn the_packager_runs_the_three_gates_before_it_builds() {
     );
 }
 
+/// Change 128. Without `--full` the packager runs fmt and clippy and leaves the
+/// suite to CI, which ran it before the merge into main; `OPERON_FULL_PACKAGE=1`
+/// asks for it the same way `--full` does.
 #[test]
-pub(crate) fn the_packager_fast_mode_skips_tests_when_requested() {
+pub(crate) fn the_packager_leaves_the_suite_to_ci_by_default() {
     use std::os::unix::fs::PermissionsExt;
 
-    let root = std::env::temp_dir().join(format!("operon-package-fast-{}", Uuid::new_v4()));
+    let root = std::env::temp_dir().join(format!("operon-package-default-{}", Uuid::new_v4()));
     let fake_bin = root.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
     let log = root.join("cargo-calls");
@@ -12444,10 +12452,8 @@ pub(crate) fn the_packager_fast_mode_skips_tests_when_requested() {
         std::env::var("PATH").unwrap_or_default()
     );
 
-    // Test 1: with --fast argument
     let output = Command::new("bash")
         .arg("scripts/package-macos.sh")
-        .arg("--fast")
         .env("OPERON_DIST_DIR", &root)
         .env("OPERON_TEST_MARKER", &log)
         .env("PATH", &path)
@@ -12467,13 +12473,12 @@ pub(crate) fn the_packager_fast_mode_skips_tests_when_requested() {
             "clippy --locked -- -D warnings",
             "build --release --locked",
         ],
-        "--fast で test --locked がスキップされ、fmt, clippy, build が走る必要があります"
+        "既定の packager が test --locked を走らせているか、fmt, clippy, build を走らせていません"
     );
 
-    // Test 2: with OPERON_FAST_PACKAGE=1 environment variable
     let output2 = Command::new("bash")
         .arg("scripts/package-macos.sh")
-        .env("OPERON_FAST_PACKAGE", "1")
+        .env("OPERON_FULL_PACKAGE", "1")
         .env("OPERON_DIST_DIR", &root)
         .env("OPERON_TEST_MARKER", &log)
         .env("PATH", &path)
@@ -12490,10 +12495,11 @@ pub(crate) fn the_packager_fast_mode_skips_tests_when_requested() {
         calls2.lines().collect::<Vec<_>>(),
         [
             "fmt --check",
+            "test --locked",
             "clippy --locked -- -D warnings",
             "build --release --locked",
         ],
-        "OPERON_FAST_PACKAGE=1 で test --locked がスキップされ、fmt, clippy, build が走る必要があります"
+        "OPERON_FULL_PACKAGE=1 で test --locked が fmt と clippy の間に走っていません"
     );
 }
 #[test]
@@ -14637,7 +14643,7 @@ pub(crate) fn the_commit_gate_runs_the_gates_in_the_tree_the_commit_lands_in() {
     // so the landing tree's staged `.rs` is on the list whichever directory the
     // hook cd'd into, and "the first cargo gate failed" would be true of both.
     // A buildable crate here and none in the landing tree separates them:
-    // `cargo fmt --check` passes in this one and then `cargo test --locked`
+    // `cargo fmt --check` passes in this one and then `cargo clippy --locked`
     // fails on the absent lock file, which is a different refusal than the one
     // the landing tree produces. Measured as necessary — with both trees
     // Cargo-less, dropping the pointers before resolving was a mutation the
@@ -14707,8 +14713,8 @@ pub(crate) fn the_commit_gate_runs_the_gates_in_the_tree_the_commit_lands_in() {
         "フィクスチャの前提が崩れています: 間違ったツリーで cargo fmt --check が通りません"
     );
     assert!(
-        !cargo_in_elsewhere(&["test", "--locked"]),
-        "フィクスチャの前提が崩れています: 間違ったツリーで cargo test --locked が通ってしまい、\
+        !cargo_in_elsewhere(&["clippy", "--locked"]),
+        "フィクスチャの前提が崩れています: 間違ったツリーで cargo clippy --locked が通ってしまい、\
          二つのツリーの拒否文が同じになります"
     );
 
@@ -35314,7 +35320,7 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
          const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
          const bash = (command) => ({{ tool_name: 'Bash', tool_input: {{ command }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
          const out = {{}};\n\
-         for (const c of ['cargo build', \"make wt.run CMD='cargo build'\", 'node .claude/scripts/wt-run.mjs cargo build', 'make wt.new BR=feature/x', 'make -C /tmp/operon wt.new BR=feature/x', 'make q.check', 'make q.check 2>&1', 'git merge --no-ff feature/x', 'cargo test --locked', 'trash dist/Operon.previous.app', 'trash -v dist/Operon.previous.app', 'trashcan foo', 'make wt.new BR=feature/x --eval=x', 'make --eval=x q.check', 'make wt.new BR=feature/x SHELL=/tmp/sh', 'make q.check SHELL=/tmp/sh', 'git merge --abort', 'git branch -d feature/x', 'git branch --delete feature/x feature/y', 'git branch -D feature/x', 'git branch -d -f feature/x', 'git branch -d --force feature/x', 'git merge --abort --no-ff', {reads}])\n\
+         for (const c of ['cargo build', \"make wt.run CMD='cargo build'\", 'node .claude/scripts/wt-run.mjs cargo build', 'make wt.new BR=feature/x', 'make -C /tmp/operon wt.new BR=feature/x', 'make q.check', 'make q.check 2>&1', 'git merge --no-ff feature/x', 'cargo test --locked', 'trash dist/Operon.previous.app', 'trash -v dist/Operon.previous.app', 'trashcan foo', 'make wt.new BR=feature/x --eval=x', 'make --eval=x q.check', 'make wt.new BR=feature/x SHELL=/tmp/sh', 'make q.check SHELL=/tmp/sh', 'git merge --abort', 'git branch -d feature/x', 'git branch --delete feature/x feature/y', 'git branch -D feature/x', 'git branch -d -f feature/x', 'git branch -d --force feature/x', 'git merge --abort --no-ff', 'git push origin main', 'git push origin feature/x', 'git push --force origin main', 'gh run watch', 'gh run list --branch feature/x', 'gh run rerun 1', 'make q.fast', 'bash scripts/ci-verified.sh HEAD', {reads}])\n\
            out['trunk: ' + c] = decide(await policy(bash(c)));\n\
          const edit = (file_path) => ({{ tool_name: 'Edit', tool_input: {{ file_path }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
          for (const p of ['.agents/teamwork/reviewer_r1/report.md', 'dist/Operon.app', 'src/main.rs'])\n\
@@ -35402,6 +35408,12 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "trunk: git branch -d -f feature/x",
         "trunk: git branch -d --force feature/x",
         "trunk: git merge --abort --no-ff",
+        // Change 128: main is pushed after the landing merge, and CI is
+        // watched from here. Only main, unforced, and only the reading half of
+        // `gh run`.
+        "trunk: git push origin feature/x",
+        "trunk: git push --force origin main",
+        "trunk: gh run rerun 1",
     ] {
         assert_eq!(
             verdict(forced),
@@ -35419,6 +35431,11 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "trunk: make q.check 2>&1",
         "trunk: git merge --no-ff feature/x",
         "trunk: cargo test --locked",
+        "trunk: git push origin main",
+        "trunk: gh run watch",
+        "trunk: gh run list --branch feature/x",
+        "trunk: make q.fast",
+        "trunk: bash scripts/ci-verified.sh HEAD",
         "trunk: trash dist/Operon.previous.app",
         "trunk: trash -v dist/Operon.previous.app",
         "edit: .agents/teamwork/reviewer_r1/report.md",
@@ -40654,4 +40671,748 @@ pub(crate) fn the_eval_runner_exits_3_when_nothing_can_start() {
     assert_eq!(code, 3, "{printed}");
     assert!(printed.contains("no eval could run"), "{printed}");
     fs::remove_dir_all(&root).ok();
+}
+
+// ── CI runs the whole suite; the merge waits for it (change 128) ────────────
+
+/// A `gh` that answers `gh run list --commit SHA` from the environment:
+/// `completed/success` for `FAKE_GH_PASS`, `completed/failure` for
+/// `FAKE_GH_FAILED`, nothing for any other commit; `FAKE_GH_FAIL` makes it fail
+/// the way an unreachable API does, `FAKE_GH_SLEEP` makes it hang. And a
+/// `cargo` that records its arguments and exits `FAKE_CARGO_STATUS`.
+fn ci_gate_fake_tools(root: &Path) -> String {
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let gh = "#!/bin/sh\n\
+        [ -n \"$FAKE_GH_SLEEP\" ] && sleep \"$FAKE_GH_SLEEP\"\n\
+        [ -n \"$FAKE_GH_FAIL\" ] && { echo 'error connecting to api.github.com' >&2; exit 1; }\n\
+        commit=''\n\
+        while [ $# -gt 0 ]; do case \"$1\" in --commit) commit=\"$2\" ;; esac; shift; done\n\
+        [ -n \"$commit\" ] && [ \"$commit\" = \"$FAKE_GH_PASS\" ] && echo completed/success\n\
+        [ -n \"$commit\" ] && [ \"$commit\" = \"$FAKE_GH_FAILED\" ] && echo completed/failure\n\
+        exit 0\n";
+    let cargo = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_CARGO_LOG\"\n\
+        [ -n \"$FAKE_CARGO_SLEEP\" ] && sleep \"$FAKE_CARGO_SLEEP\"\n\
+        exit \"${FAKE_CARGO_STATUS:-0}\"\n";
+    for (name, body) in [("gh", gh), ("cargo", cargo)] {
+        let path = bin.join(name);
+        fs::write(&path, body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+fn ci_gate_git(repository: &Path, arguments: &[&str]) -> String {
+    let output = git_command(repository)
+        .args([
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.invalid",
+        ])
+        .args(arguments)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {arguments:?} がフィクスチャで失敗しました: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn ci_gate_commit(repository: &Path, file: &str, text: &str) -> String {
+    fs::write(repository.join(file), text).unwrap();
+    ci_gate_git(repository, &["add", file]);
+    ci_gate_git(repository, &["commit", "-q", "-m", file]);
+    ci_gate_git(repository, &["rev-parse", "HEAD"])
+}
+
+/// `scripts/ci-verified.sh` is the one place "CI passed on this tree" is
+/// decided, for the merge gate and the release check alike. Its three answers
+/// have to stay apart: a pass, a not-yet (which blocks), and a could-not-ask
+/// (which falls back to the local suite). And only an identical tree counts —
+/// a green run on the commit underneath says nothing about the one on top.
+#[test]
+pub(crate) fn ci_verified_tells_passed_failed_absent_and_unreachable_apart() {
+    let root = temporary_directory("ci-verified");
+    let repository = root.join("repo");
+    fs::create_dir_all(&repository).unwrap();
+    let path = ci_gate_fake_tools(&root);
+    ci_gate_git(&repository, &["init", "-q", "--initial-branch=main"]);
+    let base = ci_gate_commit(&repository, "a.txt", "a\n");
+    ci_gate_git(&repository, &["checkout", "-q", "-b", "feature/x"]);
+    let branch = ci_gate_commit(&repository, "b.txt", "b\n");
+    let on_top = ci_gate_commit(&repository, "c.txt", "c\n");
+    ci_gate_git(&repository, &["checkout", "-q", "main"]);
+    ci_gate_git(
+        &repository,
+        &["merge", "-q", "--no-ff", "--no-edit", &branch],
+    );
+    let merge = ci_gate_git(&repository, &["rev-parse", "HEAD"]);
+
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/ci-verified.sh");
+    let ask = |commit: &str, environment: &[(&str, &str)], search: &str| {
+        let mut command = Command::new("bash");
+        forget_inherited_repository(&mut command)
+            .arg(&script)
+            .arg(commit)
+            .current_dir(&repository)
+            .env("PATH", search)
+            .env_remove("FAKE_GH_PASS")
+            .env_remove("FAKE_GH_FAILED")
+            .env_remove("FAKE_GH_FAIL")
+            .env_remove("FAKE_GH_SLEEP");
+        for (key, value) in environment {
+            command.env(key, value);
+        }
+        let started = Instant::now();
+        let output = command.output().unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).to_string(),
+            started.elapsed(),
+        )
+    };
+
+    let passed = [("FAKE_GH_PASS", branch.as_str())];
+    let (code, said, _) = ask(&branch, &passed, &path);
+    assert_eq!(
+        code,
+        Some(0),
+        "CI が通った commit を通過と言いません: {said}"
+    );
+    let (code, said, _) = ask(&merge, &passed, &path);
+    assert_eq!(
+        code,
+        Some(0),
+        "同じ tree を持つ親で CI が通った --no-ff merge を通過と言いません: {said}"
+    );
+    let (code, said, _) = ask(&on_top, &passed, &path);
+    assert_eq!(
+        code,
+        Some(1),
+        "tree の違う親の CI の結果で、その上の commit を通過と言いました: {said}"
+    );
+    let (code, said, _) = ask(&base, &passed, &path);
+    assert_eq!(
+        code,
+        Some(1),
+        "CI の走っていない commit を通過と言いました: {said}"
+    );
+    assert!(said.contains("no run"), "{said}");
+    let (code, said, _) = ask(&branch, &[("FAKE_GH_FAILED", branch.as_str())], &path);
+    assert_eq!(
+        code,
+        Some(1),
+        "CI が失敗した commit を通過と言いました: {said}"
+    );
+    assert!(said.contains("completed/failure"), "{said}");
+
+    let (code, said, _) = ask(&branch, &[("FAKE_GH_FAIL", "1")], &path);
+    assert_eq!(
+        code,
+        Some(2),
+        "CI に問い合わせられないことを区別していません: {said}"
+    );
+    let (code, said, took) = ask(
+        &branch,
+        &[("FAKE_GH_SLEEP", "10"), ("OPERON_CI_TIMEOUT", "1")],
+        &path,
+    );
+    assert_eq!(code, Some(2), "応答しない gh を待ち続けました: {said}");
+    assert!(
+        took < Duration::from_secs(8),
+        "gh の待ち時間に上限がありません: {took:?}"
+    );
+    let (code, said, _) = ask(&branch, &passed, "/usr/bin:/bin");
+    assert_eq!(code, Some(2), "gh がないことを区別していません: {said}");
+
+    // `--worktree` is the release check's question: is what is on disk the
+    // tree CI ran? An edit or an untracked file — cargo reads a build.rs it
+    // is not told about — makes the answer no, whatever CI said.
+    let worktree = |extra: &[&str]| {
+        let mut arguments = vec!["--worktree"];
+        arguments.extend_from_slice(extra);
+        let mut command = Command::new("bash");
+        forget_inherited_repository(&mut command)
+            .arg(&script)
+            .args(&arguments)
+            .current_dir(&repository)
+            .env("PATH", &path)
+            .env("FAKE_GH_PASS", &branch)
+            .env_remove("FAKE_GH_FAILED")
+            .env_remove("FAKE_GH_FAIL")
+            .env_remove("FAKE_GH_SLEEP");
+        let output = command.output().unwrap();
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).to_string(),
+        )
+    };
+    let (code, said) = worktree(&["HEAD"]);
+    assert_eq!(
+        code,
+        Some(0),
+        "CI が走った tree そのものを通過と言いません: {said}"
+    );
+    fs::write(repository.join("build.rs"), "fn main() {}\n").unwrap();
+    let (code, said) = worktree(&["HEAD"]);
+    assert_eq!(
+        code,
+        Some(1),
+        "untracked のファイルがある tree を CI の結果で通しました: {said}"
+    );
+    fs::remove_file(repository.join("build.rs")).unwrap();
+    fs::write(repository.join("a.txt"), "edited\n").unwrap();
+    let (code, said) = worktree(&["HEAD"]);
+    assert_eq!(
+        code,
+        Some(1),
+        "変更のある tree を CI の結果で通しました: {said}"
+    );
+    ci_gate_git(&repository, &["checkout", "-q", "--", "a.txt"]);
+    let (code, said) = worktree(&[branch.as_str()]);
+    assert_eq!(
+        code,
+        Some(1),
+        "HEAD でない commit を作業ツリーとして通しました: {said}"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// The suite left the commit gate for CI, and this is where its verdict is
+/// waited for: a merge into main is refused until CI passed on the branch head,
+/// and the branch has to contain main so the merge is the tree CI ran. When CI
+/// cannot be asked, the suite runs in the branch's worktree instead.
+#[test]
+pub(crate) fn the_merge_gate_waits_for_ci_and_falls_back_to_the_local_suite() {
+    let root = temporary_directory("merge-gate");
+    let repository = root.join("repo");
+    let worktree = root.join("wt");
+    fs::create_dir_all(repository.join("scripts")).unwrap();
+    let path = ci_gate_fake_tools(&root);
+    let cargo_log = root.join("cargo-calls");
+    ci_gate_git(&repository, &["init", "-q", "--initial-branch=main"]);
+    ci_gate_commit(&repository, "a.txt", "a\n");
+    ci_gate_git(&repository, &["checkout", "-q", "-b", "feature/stale"]);
+    ci_gate_commit(&repository, "s.txt", "s\n");
+    ci_gate_git(&repository, &["checkout", "-q", "main"]);
+    ci_gate_commit(&repository, "a2.txt", "a2\n");
+    ci_gate_git(
+        &repository,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature/x",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let branch = ci_gate_commit(&worktree, "b.txt", "b\n");
+    // Untracked, so the main checkout's tree stays what main holds; the hook
+    // runs the script from the repository it is asked about.
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for script in ["scripts/ci-verified.sh", "scripts/run-bounded.sh"] {
+        fs::copy(manifest.join(script), repository.join(script)).unwrap();
+    }
+    let hook = manifest.join(".claude/hooks/gate-merge.sh");
+
+    let attempt = |from: &Path, command: &str, environment: &[(&str, &str)]| {
+        let _ = fs::remove_file(&cargo_log);
+        let mut process = Command::new("bash");
+        forget_inherited_repository(&mut process)
+            .arg(&hook)
+            .current_dir(from)
+            .env("CLAUDE_PROJECT_DIR", &repository)
+            .env("PATH", &path)
+            .env("FAKE_CARGO_LOG", &cargo_log)
+            .env_remove("FAKE_GH_PASS")
+            .env_remove("FAKE_GH_FAILED")
+            .env_remove("FAKE_GH_FAIL")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        for (key, value) in environment {
+            process.env(key, value);
+        }
+        let mut child = process.spawn().unwrap();
+        let payload = serde_json::json!({
+            "cwd": from.to_string_lossy(),
+            "tool_input": { "command": command },
+        });
+        let _ = child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes());
+        let finished = child.wait_with_output().unwrap();
+        (
+            finished.status.code(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&finished.stdout),
+                String::from_utf8_lossy(&finished.stderr)
+            ),
+            fs::read_to_string(&cargo_log).unwrap_or_default(),
+        )
+    };
+    let merge = "git merge --no-ff --no-edit feature/x";
+    let passed = [("FAKE_GH_PASS", branch.as_str())];
+    let offline = [("FAKE_GH_FAIL", "1")];
+
+    let (code, said, _) = attempt(&repository, "git status", &[]);
+    assert_eq!(
+        (code, said.as_str()),
+        (Some(0), ""),
+        "merge でないコマンドに口を出しました"
+    );
+    let (code, said, _) = attempt(&repository, "git merge --abort", &[]);
+    assert_eq!(
+        (code, said.as_str()),
+        (Some(0), ""),
+        "merge --abort を止めました"
+    );
+    // Silent and with no suite run: the merge of main into a branch is the
+    // step the gate itself asks for, and it is not a merge into main.
+    let (code, said, calls) = attempt(&worktree, "git merge --no-ff --no-edit main", &offline);
+    assert_eq!(
+        (code, said.as_str(), calls.as_str()),
+        (Some(0), "", ""),
+        "main 以外への merge に口を出しました"
+    );
+    let (code, said, calls) = attempt(&worktree, "git merge main", &offline);
+    assert_eq!(
+        (code, said.as_str(), calls.as_str()),
+        (Some(0), "", ""),
+        "worktree での素の merge に口を出しました"
+    );
+
+    // Every other spelling of a merge into main is refused rather than read:
+    // an option after the branch, a merge chained behind another, and a merge
+    // aimed at main from a worktree session. Review of 128 found each of these
+    // passing ungated through a reader that tried to understand them.
+    let repository_text = repository.to_str().unwrap();
+    for (from, spelled) in [
+        (
+            &repository,
+            "git merge --no-ff feature/x -m done".to_owned(),
+        ),
+        (
+            &repository,
+            "git merge --no-ff feature/x -s ours".to_owned(),
+        ),
+        (
+            &repository,
+            "git merge --abort && git merge --no-ff feature/x".to_owned(),
+        ),
+        (
+            &repository,
+            "git merge --no-ff feature/stale && git merge --no-ff feature/x".to_owned(),
+        ),
+        (
+            &worktree,
+            format!("git -C {repository_text} merge --no-ff feature/x"),
+        ),
+        (
+            &worktree,
+            format!("cd {repository_text} && git merge --no-ff --no-edit feature/x"),
+        ),
+        (
+            &worktree,
+            format!("GIT_DIR={repository_text}/.git git merge --no-ff feature/x"),
+        ),
+        // A merge behind another word: a shell, `env`, a keyword. Review of
+        // 128 found a reader of only the first word letting each through.
+        (
+            &worktree,
+            format!("bash -c 'git -C {repository_text} merge --no-ff feature/x'"),
+        ),
+        (
+            &worktree,
+            format!("env GIT_DIR={repository_text}/.git git merge --no-ff feature/x"),
+        ),
+        (
+            &worktree,
+            format!("if true; then git -C {repository_text} merge --no-ff feature/x; fi"),
+        ),
+        (&repository, "env git merge --no-ff feature/x".to_owned()),
+        // A heredoc that feeds a shell is a program, not a message: its body
+        // is read. Review of 128 found a stripper of every body hiding these.
+        (
+            &worktree,
+            format!("bash <<'EOF'\ncd {repository_text} && git merge --no-ff feature/x\nEOF"),
+        ),
+        (
+            &worktree,
+            format!("cat <<EOF | sh\ngit -C {repository_text} merge --no-ff feature/x\nEOF"),
+        ),
+        (
+            &worktree,
+            format!(
+                "eval \"$(cat <<'EOF'\ngit -C {repository_text} merge --no-ff feature/x\nEOF\n)\""
+            ),
+        ),
+        // The same two redirections with a tab, which the shell splits on too.
+        (
+            &worktree,
+            format!("cd\t{repository_text} && git merge --no-ff feature/x"),
+        ),
+        (
+            &worktree,
+            format!("git\t-C {repository_text} merge --no-ff feature/x"),
+        ),
+    ] {
+        let (code, said, calls) = attempt(from, &spelled, &passed);
+        assert_eq!(
+            code,
+            Some(2),
+            "読めない形の merge を通しました ({spelled}): {said}"
+        );
+        assert!(said.contains("does not read"), "{spelled}: {said}");
+        assert!(calls.is_empty(), "{spelled}: {calls}");
+    }
+    // The word merge is not a merge. Review of 128 found commits with it in
+    // their message refused, from exactly the `-C` and `cd` shapes a worktree
+    // session commits with.
+    let worktree_text = worktree.to_str().unwrap();
+    for (from, harmless) in [
+        (
+            &worktree,
+            format!("git -C {worktree_text} commit -m \"refuse a merge into main\""),
+        ),
+        (
+            &worktree,
+            format!("cd {worktree_text} && git commit -m \"handle merge conflicts\""),
+        ),
+        // A heredoc body is a message, whatever it says. Review of 128 found
+        // this repository's own commit form refused for describing a merge.
+        (
+            &worktree,
+            format!(
+                "git -C {worktree_text} commit -q -m \"$(cat <<'EOF'\n\
+                 feat(gate): refuse a git merge written oddly\n\
+                 git merge --no-ff feature/x is the one form\n\
+                 EOF\n\
+                 )\""
+            ),
+        ),
+        (&repository, "git log --oneline --grep merge".to_owned()),
+        (&repository, "git merge-base main feature/x".to_owned()),
+    ] {
+        let (code, said, _) = attempt(from, &harmless, &[]);
+        assert_eq!(
+            (code, said.as_str()),
+            (Some(0), ""),
+            "merge でないコマンドを止めました ({harmless})"
+        );
+    }
+    // A tab separates words for the shell, and the trunk allowlist reads it
+    // with `\s`; a reader splitting on spaces let this merge past unjudged.
+    let (code, said, _) = attempt(&repository, "git\tmerge --no-ff\tfeature/x", &[]);
+    assert_eq!(code, Some(2), "tab で書いた merge を素通ししました: {said}");
+    assert!(said.contains("CI has not passed"), "{said}");
+    let (code, said, _) = attempt(&repository, "git merge --no-ff --no-edit no-such", &passed);
+    assert_eq!(
+        code,
+        Some(2),
+        "存在しない branch の merge を素通ししました: {said}"
+    );
+
+    let (code, said, _) = attempt(&repository, merge, &passed);
+    assert_eq!(
+        code,
+        Some(0),
+        "CI が通った branch の merge を止めました: {said}"
+    );
+    assert!(said.contains("CI passed"), "{said}");
+    let (code, said, _) = attempt(&repository, merge, &[]);
+    assert_eq!(
+        code,
+        Some(2),
+        "CI が走っていない branch の merge を通しました: {said}"
+    );
+    assert!(said.contains("git push -u origin feature/x"), "{said}");
+    let (code, said, _) = attempt(&repository, merge, &[("FAKE_GH_FAILED", branch.as_str())]);
+    assert_eq!(
+        code,
+        Some(2),
+        "CI が失敗した branch の merge を通しました: {said}"
+    );
+    let stale = "git merge --no-ff --no-edit feature/stale";
+    let (code, said, _) = attempt(&repository, stale, &passed);
+    assert_eq!(
+        code,
+        Some(2),
+        "main を含まない branch の merge を通しました: {said}"
+    );
+    assert!(said.contains("does not contain main"), "{said}");
+
+    let (code, said, calls) = attempt(&repository, merge, &offline);
+    assert_eq!(
+        code,
+        Some(0),
+        "CI に問い合わせられないときの代わりの suite が通ったのに止めました: {said}"
+    );
+    assert_eq!(
+        calls.trim(),
+        "test --locked",
+        "代わりに suite を走らせていません: {said}"
+    );
+    let failing = [("FAKE_GH_FAIL", "1"), ("FAKE_CARGO_STATUS", "1")];
+    let (code, said, _) = attempt(&repository, merge, &failing);
+    assert_eq!(
+        code,
+        Some(2),
+        "代わりの suite が失敗したのに merge を通しました: {said}"
+    );
+    assert!(said.contains("cargo test --locked in"), "{said}");
+    // A hook that times out is a non-blocking error, so the gate has to end a
+    // slow suite itself and refuse — not be killed with the merge let through.
+    let hanging = [
+        ("FAKE_GH_FAIL", "1"),
+        ("FAKE_CARGO_SLEEP", "60"),
+        ("OPERON_MERGE_SUITE_TIMEOUT", "1"),
+    ];
+    let started = Instant::now();
+    let (code, said, _) = attempt(&repository, merge, &hanging);
+    assert_eq!(
+        code,
+        Some(2),
+        "終わらない suite のまま merge を通しました: {said}"
+    );
+    assert!(said.contains("did not finish"), "{said}");
+    // Against the fake suite's 60 s, not against the 1 s limit: the hook does
+    // git and script work before the bounded run, and under the parallel suite
+    // that took 16 s once. Under 45 s can only mean the limit ended it.
+    assert!(
+        started.elapsed() < Duration::from_secs(45),
+        "suite の時間切れを待ちすぎました: {:?}",
+        started.elapsed()
+    );
+    fs::write(worktree.join("b.txt"), "edited\n").unwrap();
+    let (code, said, calls) = attempt(&repository, merge, &offline);
+    assert_eq!(
+        code,
+        Some(2),
+        "branch と違う中身の worktree で suite を走らせて merge を通しました: {said}"
+    );
+    assert!(calls.is_empty(), "{calls}");
+
+    ci_gate_git(
+        &repository,
+        &["worktree", "remove", "--force", worktree.to_str().unwrap()],
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// The split change 128 made, read off the files that carry it: the commit
+/// gate runs fmt and clippy and no longer the suite, the merge gate is
+/// registered on every Bash call, and it asks the one script that decides.
+#[test]
+pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let read = |relative: &str| fs::read_to_string(root.join(relative)).unwrap();
+    let code = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .map(str::to_owned)
+            .collect()
+    };
+    let commit_gate = code(&read(".claude/hooks/gate-commit.sh"));
+    for runs in [
+        "$(cargo fmt --check",
+        "$(cargo clippy --locked -- -D warnings",
+    ] {
+        assert!(
+            commit_gate.iter().any(|line| line.contains(runs)),
+            "gate-commit.sh が `{runs}` を走らせていません"
+        );
+    }
+    assert!(
+        !commit_gate.iter().any(|line| line.contains("$(cargo test")),
+        "gate-commit.sh がまた commit のたびに suite を走らせています — suite は CI と merge gate のものです"
+    );
+
+    let merge_gate = code(&read(".claude/hooks/gate-merge.sh"));
+    assert!(
+        merge_gate
+            .iter()
+            .any(|line| line.contains("scripts/ci-verified.sh")),
+        "gate-merge.sh が scripts/ci-verified.sh に CI の結果を聞いていません"
+    );
+    let settings: serde_json::Value = serde_json::from_str(&read(".claude/settings.json")).unwrap();
+    let registered = settings["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["matcher"] == "Bash" && entry.get("if").is_none())
+        .flat_map(|entry| entry["hooks"].as_array().unwrap().iter())
+        .find(|hook| {
+            hook["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with(".claude/hooks/gate-merge.sh"))
+                && hook.get("if").is_none()
+        })
+        .expect(
+            ".claude/settings.json が gate-merge.sh をすべての Bash 呼び出しで動かしていません",
+        );
+    // A hook that times out lets the command through, so the gate's own limit
+    // on its offline suite has to end first, with time left to refuse.
+    let timeout = registered["timeout"].as_u64().unwrap_or(0);
+    assert!(
+        merge_gate
+            .iter()
+            .any(|line| line.contains("OPERON_MERGE_SUITE_TIMEOUT:-540}")),
+        "gate-merge.sh の代わりの suite の時間上限が 540 秒ではありません"
+    );
+    assert!(
+        timeout >= 600,
+        "gate-merge.sh の hook timeout ({timeout}s) が suite の時間上限 540 秒に余裕を残していません"
+    );
+}
+
+/// The swap into /Applications used to run the suite twice. CI's verdict
+/// stands in for it only when CI ran exactly this tree. What "exactly" means —
+/// no edit, no untracked file — is `ci-verified.sh --worktree`'s, and
+/// `ci_verified_tells_passed_failed_absent_and_unreachable_apart` runs it
+/// against both. What is left here is that the release check asks that one
+/// question as the whole condition of a branch whose other arm is the local
+/// suite: review found the first shape, two conditions joined by `&&`, one
+/// operator away from skipping the suite on a dirty tree.
+#[test]
+pub(crate) fn the_release_check_takes_cis_verdict_only_for_a_clean_tree() {
+    let text = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/check-release-preconditions.sh"),
+    )
+    .unwrap();
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    let condition = lines
+        .iter()
+        .position(|line| line.contains("ci-verified.sh"))
+        .expect("check-release-preconditions.sh が scripts/ci-verified.sh に聞いていません");
+    assert_eq!(
+        lines[condition],
+        "if ci_verdict=$(cd \"$repo_root\" && bash scripts/ci-verified.sh --worktree HEAD 2>&1); then",
+        "release check が CI の結果を作業ツリーごと (--worktree) の一つの条件として聞いていません"
+    );
+    assert_eq!(
+        lines[condition + 2],
+        "else",
+        "CI の結果を使う枝の他方がありません"
+    );
+    assert_eq!(
+        lines[condition + 3],
+        "gate \"cargo test --locked\" cargo test --locked",
+        "CI が走っていない tree でローカルの suite が走りません"
+    );
+}
+
+/// The branches CI runs on have to be the branches changes are made on, or the
+/// merge gate waits for a run that never starts. And it asks for this workflow
+/// by its file name.
+#[test]
+pub(crate) fn ci_runs_on_the_branches_the_merge_gate_asks_about() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+    let triggers = workflow
+        .lines()
+        .find(|line| line.trim_start().starts_with("branches:"))
+        .expect("ci.yml に push の branches がありません");
+    for branch in ["main", "'feature/**'", "'fix/**'"] {
+        assert!(
+            triggers.contains(branch),
+            "ci.yml が {branch} への push で走りません: {triggers}"
+        );
+    }
+    assert!(
+        workflow
+            .lines()
+            .any(|line| line.trim() == "run: cargo test --locked"),
+        "ci.yml が suite を走らせていないか、失敗を握りつぶしています"
+    );
+    let script = fs::read_to_string(root.join("scripts/ci-verified.sh")).unwrap();
+    assert!(
+        script.lines().any(|line| line == "workflow=ci.yml"),
+        "scripts/ci-verified.sh が ci.yml 以外の workflow を見ています"
+    );
+}
+
+/// A push of one branch to origin is how a change reaches CI, so it is not a
+/// question for a person. Everything else a push can be still is.
+#[test]
+pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
+    let hook = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".claude/hooks/guard-bash.sh");
+    let decide = |command: &str| {
+        let mut child = Command::new("bash")
+            .arg(&hook)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let payload = serde_json::json!({ "tool_input": { "command": command } });
+        let _ = child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes());
+        let output = child.wait_with_output().unwrap();
+        let printed = String::from_utf8_lossy(&output.stdout).to_string();
+        if printed.trim().is_empty() {
+            "allow".to_owned()
+        } else {
+            let decision: serde_json::Value = serde_json::from_str(&printed).unwrap();
+            decision["hookSpecificOutput"]["permissionDecision"]
+                .as_str()
+                .unwrap_or("missing")
+                .to_owned()
+        }
+    };
+    for plain in [
+        "git push origin feature/127-x",
+        "git push -u origin feature/127-x",
+        "git push --set-upstream origin fix/1",
+        "git push origin main",
+    ] {
+        assert_eq!(
+            decide(plain),
+            "allow",
+            "素の push に確認を求めました: {plain}"
+        );
+    }
+    for asked in [
+        "git push",
+        "git push --force origin main",
+        "git push -f origin feature/x",
+        "git push origin +main",
+        "git push origin feature/x:main",
+        "git push upstream main",
+        // git reads these after the remote too. Review of 128 found each one
+        // matching the branch word.
+        "git push origin --force",
+        "git push origin -f",
+        "git push origin --mirror",
+        "git push origin --delete",
+        "git push -u origin --all",
+        "git push origin --force-with-lease",
+        "git push origin feature/x && rm -rf target",
+        "git push origin feature/x\ngit push origin main",
+    ] {
+        assert_eq!(
+            decide(asked),
+            "ask",
+            "素でない push を確認なしで通しました: {asked}"
+        );
+    }
 }
