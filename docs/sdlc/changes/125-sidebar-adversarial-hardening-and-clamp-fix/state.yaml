@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -9,7 +9,7 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Commit and land change 125"
+resume: "Adversarial hardening for sidebar splitters, drag drop bounds, and ID isolation complete and verified."
 
 contract:
   three-gates: "machine passed cargo test --locked"
