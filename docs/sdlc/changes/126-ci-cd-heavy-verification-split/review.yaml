@@ -1,0 +1,22 @@
+# Review record for change 126.
+#
+# Round 1:
+# - rust-reviewer: Verified fast mode logic in scripts/package-macos.sh and unit test in src/tests.rs.
+#   Default sequence of gates is strictly preserved.
+#   cargo fmt, cargo clippy (-D warnings), and package tests pass cleanly.
+# - subprocess-safety-reviewer: Verified that subprocess execution in scripts/package-macos.sh
+#   safely propagates exit status, closes file descriptor 9 for child processes,
+#   and contains no unescaped variables or unsafe shell operations.
+# - durability-reviewer: Verified no impact on database, persistence, or migration state.
+#   Packaging lock semantics (flock on fd 9) remain fully intact.
+#
+# Verdict: approved across all required reviewers.
+
+digest: "6e332823ddf3ed7e"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
