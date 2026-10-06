@@ -249,7 +249,9 @@ impl OperonApp {
                         self.ui_session_files_tab(ui, session, project, palette, body_height)
                     }
                     (InspectorTab::Sessions, _) => {
-                        self.ui_terminal_session_tabs(ui);
+                        ui.push_id("inspector_sessions_isolated", |ui| {
+                            self.ui_terminal_session_tabs(ui);
+                        });
                     }
                     (InspectorTab::Changes, Some(project)) => self.ui_session_changes_tab(
                         ui,

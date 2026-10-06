@@ -1,0 +1,24 @@
+# Review record for change 125.
+#
+# Round 1:
+# - rust-reviewer: Verified symmetric max_inspector_w pre-calculation from total_row_w,
+#   eliminating the right-docked splitter clamp collapse bug.
+#   Escape key cancellation and PointerButton::Primary filtering are correctly hooked.
+#   Deadzone and panel containment prevent jitter and out-of-bounds drops.
+#   InspectorTab::Sessions is scoped with ui.push_id to isolate IDs.
+#   cargo fmt, cargo clippy (-D warnings), and all 714 tests pass cleanly.
+# - subprocess-safety-reviewer: Verified no Command::new, spawn, or unsafe blocks are introduced.
+#   All logic is strictly in-process UI rendering and event handling.
+# - durability-reviewer: Verified no store schema or disk migration changes.
+#   Transient UI layout and drag states remain safe in-memory OperonApp fields.
+#
+# Verdict: approved across all required reviewers.
+
+digest: "b430fed5ff2e7227"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
