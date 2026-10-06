@@ -35705,8 +35705,28 @@ fn collect_text_shapes(shape: &egui::epaint::Shape, out: &mut Vec<String>) {
 }
 
 /// Headless frame renderer that runs two layout passes to resolve sizes and returns text galleys.
+///
+/// It draws the whole workspace with `session` selected, not only its
+/// terminal panel: docked left, the side panel lives in the session column
+/// (change 127), outside `ui_terminal_panel`.
 #[cfg(test)]
 pub(crate) fn render_terminal_panel_shapes(
+    app: &mut OperonApp,
+    session: &Session,
+    width: f32,
+    height: f32,
+) -> Vec<String> {
+    let mut texts = Vec::new();
+    for shape in render_workspace_output(app, session, width, height).shapes {
+        collect_text_shapes(&shape.shape, &mut texts);
+    }
+    texts
+}
+
+/// The terminal panel alone, at `width`: the row a right-docked side panel
+/// shares with the terminal, which is where the 640px rule applies.
+#[cfg(test)]
+pub(crate) fn render_panel_row_shapes(
     app: &mut OperonApp,
     session: &Session,
     width: f32,
@@ -35720,27 +35740,54 @@ pub(crate) fn render_terminal_panel_shapes(
         )),
         ..Default::default()
     };
+    let mut output = None;
+    for _ in 0..2 {
+        output = Some(context.run(screen.clone(), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_panel(ui, session));
+        }));
+    }
+    let mut texts = Vec::new();
+    for shape in output.map(|output| output.shapes).unwrap_or_default() {
+        collect_text_shapes(&shape.shape, &mut texts);
+    }
+    texts
+}
+
+#[cfg(test)]
+fn render_workspace_output(
+    app: &mut OperonApp,
+    session: &Session,
+    width: f32,
+    height: f32,
+) -> egui::FullOutput {
+    app.selected_session = Some(session.id);
+    app.session_library_open = false;
+    let context = egui::Context::default();
+    let screen = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(width, height),
+        )),
+        ..Default::default()
+    };
     // Pass 1: register widget IDs and layout sizing
     let _ = context.run(screen.clone(), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                app.ui_terminal_panel(ui, session);
+                app.ui_terminal_workspace(ui);
             });
     });
     // Pass 2: resolve immediate-mode layout and extract output shapes
-    let output = context.run(screen, |ctx| {
+    context.run(screen, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
-                app.ui_terminal_panel(ui, session);
+                app.ui_terminal_workspace(ui);
             });
-    });
-    let mut texts = Vec::new();
-    for shape in output.shapes {
-        collect_text_shapes(&shape.shape, &mut texts);
-    }
-    texts
+    })
 }
 
 /// F8: Default state and the fold / reopen mechanics of the side panel.
@@ -35789,6 +35836,9 @@ pub(crate) fn test_session_file_tree_default_and_toggle_state() {
 pub(crate) fn test_session_file_tree_responsive_width_thresholds() {
     let mut fixture = SessionTreeTestFixture::new("m2-responsive-widths");
     assert!(fixture.app.show_session_inspector);
+    // The rule is the right-docked panel's: docked left it is stacked in the
+    // session column and costs the terminal nothing (change 127).
+    fixture.app.session_inspector_side = SidebarSide::Right;
     let panel_drawn = |shapes: &[String]| shapes.iter().any(|s| s.contains("会話 1"));
 
     for (width, drawn) in [
@@ -35801,7 +35851,7 @@ pub(crate) fn test_session_file_tree_responsive_width_thresholds() {
         (1200.0, true),
     ] {
         let shapes =
-            render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
+            render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
         assert_eq!(panel_drawn(&shapes), drawn, "panel at {width}px");
         assert_eq!(
             shapes.iter().any(|s| s.contains("project_only.txt")),
@@ -35818,13 +35868,19 @@ pub(crate) fn test_session_file_tree_responsive_width_thresholds() {
         (1200.0, true),
     ] {
         let shapes =
-            render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
+            render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
         assert_eq!(
             panel_drawn(&shapes),
             drawn,
             "panel at {width}px in sequence"
         );
     }
+
+    // Docked left, the panel stays at a width where docked right it yields.
+    fixture.app.session_inspector_side = SidebarSide::Left;
+    let shapes =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 600.0, 600.0);
+    assert!(panel_drawn(&shapes), "stacked panel at 600px");
 }
 
 /// F9 & F10: Filesystem scoping & scan cache isolation between project root and worktrees.
@@ -36163,35 +36219,34 @@ pub(crate) fn test_session_file_tree_real_world_workload_scenarios() {
 
     // Scenario S3: the one side panel, resizing down and back, then folded and reopened
     fixture.app.selected_session = Some(fixture.normal_session.id);
+    // Docked right, where the panel shares the terminal's row (change 127).
+    fixture.app.session_inspector_side = SidebarSide::Right;
 
     // 1200px: terminal and the panel on its files tab
-    let s3_wide =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    let s3_wide = render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(s3_wide.iter().any(|s| s.contains("project_only.txt")));
     assert!(s3_wide.iter().any(|s| s.contains("会話 1")));
 
     // Resize to 800px: the panel stays
-    let s3_med =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
+    let s3_med = render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
     assert!(s3_med.iter().any(|s| s.contains("project_only.txt")));
 
     // Resize to 600px: the panel yields, terminal occupies full width
     let s3_narrow =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 600.0, 800.0);
+        render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 600.0, 800.0);
     assert!(!s3_narrow.iter().any(|s| s.contains("project_only.txt")));
     assert!(!s3_narrow.iter().any(|s| s.contains("会話 1")));
 
     // Folded at 800px: nothing beside the terminal
     fixture.app.show_session_inspector = false;
     let s3_folded =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
+        render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
     assert!(!s3_folded.iter().any(|s| s.contains("project_only.txt")));
     assert!(!s3_folded.iter().any(|s| s.contains("会話 1")));
 
     // Reopened at 800px: the files tab is back
     fixture.app.show_session_inspector = true;
-    let s3_open =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
+    let s3_open = render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
     assert!(s3_open.iter().any(|s| s.contains("project_only.txt")));
 }
 
@@ -36658,7 +36713,6 @@ pub(crate) fn test_sidebar_tab_drag_between_sides() {
 #[test]
 pub(crate) fn test_sidebar_tab_reorder_within_side() {
     assert_eq!(InspectorTab::Files.label(), "ファイル");
-    assert_eq!(InspectorTab::Sessions.label(), "セッション");
     assert_eq!(InspectorTab::Conversation.label(), "会話");
     assert_eq!(InspectorTab::Changes.label(), "変更");
 }
@@ -36682,11 +36736,11 @@ pub(crate) fn test_sidebar_renders_selected_tab_content() {
         .iter()
         .any(|s| s.contains("Initial prompt for test")));
 
-    // Sessions tab
-    fixture.app.session_inspector_tab = InspectorTab::Sessions;
-    let shapes_sess =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
-    assert!(!shapes_sess.is_empty());
+    // The session list is not a tab: it heads the column whatever tab shows
+    // (change 127).
+    assert!(shapes_conv
+        .iter()
+        .any(|s| s.contains("プロジェクト別セッション")));
 }
 
 /// Change 122: Verify sidebar splitter resize clamping between SIDEBAR_MIN_W and SIDEBAR_MAX_W.
@@ -36817,6 +36871,116 @@ pub(crate) fn test_sidebar_tab_drag_deadzone_and_bounds() {
     assert!(panel_rect.contains(drop_valid));
     let should_switch_valid = drop_valid.x > (center_x + DEADZONE_PX);
     assert!(should_switch_valid);
+}
+
+/// Every text the workspace paints, with where it was painted.
+#[cfg(test)]
+fn render_workspace_text_positions(
+    app: &mut OperonApp,
+    session: &Session,
+    width: f32,
+    height: f32,
+) -> Vec<(String, egui::Pos2)> {
+    fn collect(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Pos2)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => out.push((text.galley.text().to_owned(), text.pos)),
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for shape in render_workspace_output(app, session, width, height).shapes {
+        collect(&shape.shape, &mut texts);
+    }
+    texts
+}
+
+/// Change 127: the split is a fraction of the column, each half keeps its
+/// minimum, and a fraction that is not a number falls back to the default.
+#[test]
+pub(crate) fn test_stacked_sidebar_heights_clamp() {
+    let default_top = 1000.0 * SIDEBAR_SPLIT_DEFAULT;
+    assert_eq!(
+        stacked_sidebar_heights(1000.0, SIDEBAR_SPLIT_DEFAULT),
+        (default_top, 1000.0 - default_top)
+    );
+    assert_eq!(
+        stacked_sidebar_heights(1000.0, 0.01),
+        (SIDEBAR_SECTION_MIN_H, 1000.0 - SIDEBAR_SECTION_MIN_H)
+    );
+    assert_eq!(
+        stacked_sidebar_heights(1000.0, 0.99),
+        (1000.0 - SIDEBAR_PANEL_MIN_H, SIDEBAR_PANEL_MIN_H)
+    );
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(
+            stacked_sidebar_heights(1000.0, bad),
+            (default_top, 1000.0 - default_top)
+        );
+    }
+    // Too short for both minimums: halves.
+    assert_eq!(stacked_sidebar_heights(280.0, 0.9), (140.0, 140.0));
+    // The panel's minimum covers its own floors: tab row plus a 100px body.
+    assert!(SIDEBAR_PANEL_MIN_H >= 56.0 + 100.0);
+    assert_eq!(stacked_sidebar_heights(-5.0, 0.4), (0.0, 0.0));
+}
+
+/// Change 127: docked left, the session list and the side panel share one
+/// column — sessions on top, files below — both in the same frame.
+#[test]
+pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
+    let mut fixture = SessionTreeTestFixture::new("m2-stacked-together");
+    let session = fixture.normal_session.clone();
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
+    let find = |needle: &str| {
+        texts
+            .iter()
+            .find(|(text, _)| text.contains(needle))
+            .map(|(_, pos)| *pos)
+    };
+    let sessions = find("プロジェクト別セッション").expect("session list drawn");
+    let files = find("project_only.txt").expect("file tree drawn");
+    assert!(
+        files.y > sessions.y,
+        "files below sessions: {files:?} vs {sessions:?}"
+    );
+    assert!(
+        (files.x - sessions.x).abs() < fixture.app.session_list_w / 2.0,
+        "files in the session column: {files:?} vs {sessions:?}"
+    );
+}
+
+/// Change 127: docked left, the side panel sits inside the session column,
+/// so it adds no second column between the list and the terminal.
+#[test]
+pub(crate) fn test_stacked_sidebar_returns_column_width_to_terminal() {
+    let mut fixture = SessionTreeTestFixture::new("m2-stacked-width");
+    let session = fixture.normal_session.clone();
+    let column_w = fixture.app.session_list_w;
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
+    let files = texts
+        .iter()
+        .find(|(text, _)| text.contains("project_only.txt"))
+        .map(|(_, pos)| *pos)
+        .expect("file tree drawn");
+    assert!(
+        files.x < column_w,
+        "file tree inside the {column_w}px column, found at {files:?}"
+    );
+
+    // Docked right it is a column of its own, past the terminal.
+    fixture.app.session_inspector_side = SidebarSide::Right;
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
+    let files = texts
+        .iter()
+        .find(|(text, _)| text.contains("project_only.txt"))
+        .map(|(_, pos)| *pos)
+        .expect("file tree drawn on the right");
+    assert!(files.x > 600.0, "file tree on the right edge: {files:?}");
 }
 
 /// Change 076: Test in-editor image preview document state and view mode locking.

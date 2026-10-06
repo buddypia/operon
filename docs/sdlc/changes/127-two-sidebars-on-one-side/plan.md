@@ -41,4 +41,19 @@
 
 ## Departures from the plan
 
-None yet.
+- **Panel minimum.** Review found 120px too small for the lower half: the tab
+  row and frame take ~56px and the panel body floors at 100px. The panel now has
+  its own `SIDEBAR_PANEL_MIN_H` (180px); the list keeps `SIDEBAR_SECTION_MIN_H`.
+  A rule drag in a column too short for both is ignored.
+- **Allocation.** The spec's "no allocation" was wrong: the stacked column
+  clones the selected `Session` and its `Project` per frame, as
+  `ui_terminal_workspace` and `ui_terminal_panel` already did.
+- **Responsive tests.** The 640px rule now applies only docked right, so
+  `test_session_file_tree_responsive_width_thresholds` and S3 of
+  `test_session_file_tree_real_world_workload_scenarios` render the panel row
+  alone (`render_panel_row_shapes`) docked right; F7 also pins that docked left
+  the panel stays at 600px.
+- **Screen.** Not verified in the running app: synthetic clicks did not reach the
+  dev window. Positions are pinned by the headless render tests instead.
+- `the_trunk_allowlist_and_the_ownership_check_are_switched_on_here` failed once
+  under the full parallel run (60s node timeout) and passed alone; unrelated.

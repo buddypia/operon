@@ -10,7 +10,6 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum InspectorTab {
     Files,
-    Sessions,
     Conversation,
     Changes,
 }
@@ -19,7 +18,6 @@ impl InspectorTab {
     pub(crate) fn label(&self) -> &'static str {
         match self {
             Self::Files => tr("ファイル"),
-            Self::Sessions => tr("セッション"),
             Self::Conversation => tr("会話"),
             Self::Changes => tr("変更"),
         }
@@ -48,6 +46,10 @@ impl SidebarSide {
 /// There used to be two side columns, a conversation list and a file tree,
 /// and between them they took about 480px from the terminal while one of them
 /// was usually empty. They are tabs of one panel now.
+///
+/// Docked right, the panel is a column beside the terminal and this decides
+/// its width. Docked left, it is stacked under the session list in that
+/// column (change 127) and `stacked_sidebar_heights` splits it instead.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SessionColumnsLayout {
     pub(crate) show_inspector: bool,
@@ -83,6 +85,26 @@ impl SessionColumnsLayout {
             terminal_w,
         }
     }
+}
+
+/// Heights of the session list and the side panel stacked under it.
+///
+/// `split` is the list's share of `total_h`. The list keeps
+/// `SIDEBAR_SECTION_MIN_H` and the panel `SIDEBAR_PANEL_MIN_H` while the
+/// column has room for both; a column too short for that is halved. A share
+/// that is not finite is the default.
+pub(crate) fn stacked_sidebar_heights(total_h: f32, split: f32) -> (f32, f32) {
+    let total_h = total_h.max(0.0);
+    if total_h < SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H {
+        return (total_h / 2.0, total_h / 2.0);
+    }
+    let split = if split.is_finite() {
+        split
+    } else {
+        SIDEBAR_SPLIT_DEFAULT
+    };
+    let top = (total_h * split).clamp(SIDEBAR_SECTION_MIN_H, total_h - SIDEBAR_PANEL_MIN_H);
+    (top, total_h - top)
 }
 
 /// The top level of a tree, split into what is shown and the entries whose
@@ -247,11 +269,6 @@ impl OperonApp {
                 match (shown, project) {
                     (InspectorTab::Files, Some(project)) => {
                         self.ui_session_files_tab(ui, session, project, palette, body_height)
-                    }
-                    (InspectorTab::Sessions, _) => {
-                        ui.push_id("inspector_sessions_isolated", |ui| {
-                            self.ui_terminal_session_tabs(ui);
-                        });
                     }
                     (InspectorTab::Changes, Some(project)) => self.ui_session_changes_tab(
                         ui,

@@ -577,6 +577,9 @@ pub(crate) struct OperonApp {
     pub(crate) dragging_sidebar_tab: Option<(InspectorTab, SidebarSide)>,
     /// Custom width for the workspace session list sidebar.
     pub(crate) session_list_w: f32,
+    /// The session list's share of its column while the side panel is
+    /// stacked under it.
+    pub(crate) session_list_split: f32,
     /// What the files tab is narrowed to. Empty draws the tree.
     pub(crate) session_file_filter: String,
     /// The paths that filter matched, as `(root, query, matches)`, so a scan of
@@ -917,6 +920,7 @@ impl OperonApp {
             session_inspector_w: None,
             dragging_sidebar_tab: None,
             session_list_w: SIDEBAR_DEFAULT_W,
+            session_list_split: SIDEBAR_SPLIT_DEFAULT,
             session_file_filter: String::new(),
             session_filter_results: None,
             session_hidden_expanded: false,

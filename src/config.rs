@@ -65,6 +65,14 @@ pub(crate) const SIDEBAR_MIN_W: f32 = 180.0;
 pub(crate) const SIDEBAR_MAX_W: f32 = 480.0;
 /// Default width for workspace sidebars.
 pub(crate) const SIDEBAR_DEFAULT_W: f32 = 268.0;
+/// Share of the session column the session list takes when the side panel is
+/// stacked under it; the panel gets the rest.
+pub(crate) const SIDEBAR_SPLIT_DEFAULT: f32 = 0.4;
+/// Least height the session list shrinks to in the stacked column.
+pub(crate) const SIDEBAR_SECTION_MIN_H: f32 = 120.0;
+/// Least height the side panel shrinks to under the session list: its tab
+/// row and frame take about 56px and its body floors at 100px.
+pub(crate) const SIDEBAR_PANEL_MIN_H: f32 = 180.0;
 pub(crate) const FILE_SCAN_VISIT_LIMIT: usize = 100_000;
 pub(crate) const DIRECTORY_ENTRY_BUFFER_LIMIT: usize = 10_000;
 pub(crate) const COMMAND_OUTPUT_MAX_BYTES: usize = 8 * 1024 * 1024;

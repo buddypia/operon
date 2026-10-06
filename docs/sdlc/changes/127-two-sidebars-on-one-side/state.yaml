@@ -1,7 +1,7 @@
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -9,13 +9,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Stacked left sidebar (sessions above, inspector below). Next: implement per plan.md, then review, land, package."
+resume: "Implemented and reviewed (approve-with-nits, 2 carried). Next: commit, merge to main, package and swap /Applications/Operon.app."
 
 contract:
-  three-gates: "machine pending cargo test --locked"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed cargo test --locked"
+  bands: "machine passed bash scripts/check-bands.sh"
   release-binary: "machine pending bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed each new guard watched failing"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
