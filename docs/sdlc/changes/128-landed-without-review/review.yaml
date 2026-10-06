@@ -1,0 +1,22 @@
+# Review record for change 128.
+#
+# Round 1: rust-reviewer requested changes for the new notice's missing EN/KO
+# rows. Fixed, along with a test for the TerminalClosed arm. The re-read
+# approved with one nit, carried below. Round 1 also covered a clippy collapse
+# of the resize arm (same behaviour), re-confirmed by the same reviewer.
+#
+# The retroactive verdicts on the commits this change answers for are in
+# report.md: 029779f (subprocess-safety-reviewer approve-with-nits, rust-reviewer
+# request-changes — both Important findings fixed here) and 037405a
+# (rust-reviewer request-changes — code fixed by 125/127, tests made real here).
+
+digest: "79126895c6dcc9b4"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · the re-inserted remove_after_close lingers after a failed stop or close; a later stop deletes without the notice naming the delete
+    person: "削除を押したあと tmux の停止が失敗した場合、次に「停止」を押すとセッションの記録も削除されます。通知にはそのことが書かれていません。削除したくなくなった場合は、停止の前にアプリを再起動してください。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"

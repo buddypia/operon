@@ -1549,6 +1549,11 @@ impl OperonApp {
                                 }
                                 continue;
                             }
+                            // The 「停止」 this asks for must still finish a
+                            // delete the person already confirmed.
+                            if remove_requested {
+                                self.remove_after_close.insert(session_id);
+                            }
                             self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。永続化されたキャンセル指示は保留のままです。もう一度「停止」を実行してください。", error = error));
                         }
                     }
@@ -1693,21 +1698,24 @@ impl OperonApp {
                                         tr("セッションをキャンセルしました。"),
                                         tr("tmux セッションはキャンセルされました"),
                                     );
-                                } else {
-                                    let previous_store = self.store.clone();
-                                    if let Some(session) =
-                                        self.store.sessions.iter_mut().find(|session| {
-                                            session.id == session_id
-                                                && matches!(
-                                                    session.status,
-                                                    SessionStatus::Active | SessionStatus::Starting
-                                                )
-                                        })
-                                    {
-                                        session.status = SessionStatus::Lost;
-                                        if !self.persist() {
-                                            self.store = previous_store;
-                                        }
+                                } else if let Some(session) =
+                                    self.store.sessions.iter_mut().find(|session| {
+                                        session.id == session_id
+                                            && matches!(
+                                                session.status,
+                                                SessionStatus::Active | SessionStatus::Starting
+                                            )
+                                    })
+                                {
+                                    // The server is gone whether or not the store
+                                    // can be written. Rolling back to `Active`
+                                    // would ask for a resize, and so a tmux child
+                                    // and a store write, every frame; stay `Lost`
+                                    // and retry the save.
+                                    session.status = SessionStatus::Lost;
+                                    if !self.persist() {
+                                        self.store_retry_pending = true;
+                                        self.notice = Some(tr("tmux が見つからないためセッションを停止扱いにしましたが、保存できませんでした。Operon が自動的に再試行します。").into());
                                     }
                                 }
                             } else {
@@ -1747,6 +1755,9 @@ impl OperonApp {
                                 Some(tr("ターミナルを閉じました。記録は残しています。").into());
                         }
                     } else if let Err(error) = result {
+                        if remove_requested {
+                            self.remove_after_close.insert(session_id);
+                        }
                         self.notice = Some(tf!(
                             "ターミナルを閉じられませんでした: {error}",
                             error = error
