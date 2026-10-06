@@ -24040,7 +24040,10 @@ pub(crate) fn claude_hook_install_is_idempotent_and_keeps_every_foreign_entry() 
             *needs_matcher,
             "{event} の matcher"
         );
-        assert_eq!(managed[0]["hooks"][0]["timeout"], 10);
+        assert_eq!(
+            managed[0]["hooks"][0]["timeout"],
+            HOOK_ENTRY_TIMEOUT_SECONDS
+        );
     }
     // The other tools' entries, and everything outside `hooks`, are untouched.
     assert_eq!(settings["model"], original["model"]);
@@ -24056,6 +24059,103 @@ pub(crate) fn claude_hook_install_is_idempotent_and_keeps_every_foreign_entry() 
         read_json(&claude_settings_in(&claude_config_root(&home))),
         original
     );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The CLI kills a hook at this timeout and reports `timed out after Ns`. The
+/// script's own post is capped at 1.5 s, but on a machine at load average 100
+/// with 25 sessions running, the path that posts nothing was measured at 11 s —
+/// starting `/bin/sh` alone — so 10 s failed the hook before its first line.
+pub(crate) fn hook_entry_timeout_outlasts_a_shell_start_on_a_loaded_machine() {
+    assert!(
+        HOOK_ENTRY_TIMEOUT_SECONDS >= 60,
+        "高負荷時のシェル起動 (実測 11 秒) に対して短すぎます: {HOOK_ENTRY_TIMEOUT_SECONDS}"
+    );
+}
+
+#[test]
+/// The timeout is part of the entry Codex hashes, so a build that changes it
+/// finds every trust block an older build wrote carrying the old hash. The keys
+/// are by index and do not move; the next install must replace each block, not
+/// keep the stale one or add a second beside it, or Codex stops trusting ours.
+pub(crate) fn codex_reinstall_replaces_trust_hashes_written_with_an_older_timeout() {
+    let root = temporary_directory("codex-hook-timeout");
+    let home = root.join("home");
+    let data_file = root.join("data").join("store-v2.json");
+    fs::create_dir_all(data_file.parent().unwrap()).unwrap();
+    home_with_foreign_hooks(&home);
+    write_hook_runtime(&data_file, &root.join("hook.sock"), &[CliProvider::Codex]).unwrap();
+    let codex_root = codex_config_root(&home);
+    let keys = install_codex_hooks(&data_file, &codex_root, &[], false).unwrap();
+
+    // Turn the install into one an older build wrote: timeout 10 in the
+    // entries, and the hashes Codex took over those entries.
+    let script = hook_script_path(&data_file, CliProvider::Codex);
+    let hashes: Vec<(String, String)> = hook_events(CliProvider::Codex)
+        .iter()
+        .map(|(event, _)| {
+            let command = hook_managed_command(&script, CliProvider::Codex, event);
+            (
+                codex_trusted_hash_with(event, &command, None, 10, None),
+                codex_trusted_hash(event, &command, None),
+            )
+        })
+        .collect();
+    let config_path = codex_config_in(&codex_root);
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    for (old, new) in &hashes {
+        assert_ne!(old, new);
+        assert_eq!(config.matches(new.as_str()).count(), 1, "{config}");
+        config = config.replace(new.as_str(), old);
+    }
+    fs::write(&config_path, &config).unwrap();
+    let hooks_path = codex_hooks_in(&codex_root);
+    let current = format!("\"timeout\": {HOOK_ENTRY_TIMEOUT_SECONDS}");
+    let older_hooks = fs::read_to_string(&hooks_path).unwrap();
+    assert!(older_hooks.contains(&current), "{older_hooks}");
+    fs::write(
+        &hooks_path,
+        older_hooks.replace(&current, "\"timeout\": 10"),
+    )
+    .unwrap();
+
+    let keys_again = install_codex_hooks(&data_file, &codex_root, &keys, false).unwrap();
+    assert_eq!(keys, keys_again, "再インストールで信頼キーが変わりました");
+    let config = fs::read_to_string(&config_path).unwrap();
+    for (old, new) in &hashes {
+        assert!(
+            !config.contains(old.as_str()),
+            "古い信頼ハッシュが残っています:\n{config}"
+        );
+        assert_eq!(config.matches(new.as_str()).count(), 1, "{config}");
+    }
+    for key in &keys {
+        assert_eq!(
+            config.matches(&format!("[hooks.state.\"{key}\"]")).count(),
+            1,
+            "{key} が重複しています"
+        );
+    }
+    let marker = hook_command_marker(CliProvider::Codex);
+    let hooks = read_json(&hooks_path);
+    for (event, _) in hook_events(CliProvider::Codex) {
+        let managed: Vec<_> = hooks["hooks"][*event]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|group| {
+                group["hooks"][0]["command"]
+                    .as_str()
+                    .is_some_and(|command| command.contains(&marker))
+            })
+            .collect();
+        assert_eq!(managed.len(), 1, "{event} が二重登録されています");
+        assert_eq!(
+            managed[0]["hooks"][0]["timeout"],
+            HOOK_ENTRY_TIMEOUT_SECONDS
+        );
+    }
     fs::remove_dir_all(&root).ok();
 }
 

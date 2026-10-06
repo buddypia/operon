@@ -1,0 +1,22 @@
+# Review record for change 129.
+#
+# Round 1: rust-reviewer traced the Codex migration claim (startup apply,
+# managed groups re-pushed at their indices, hashes recomputed, owned blocks
+# dropped) and approved with four nits. The report.md nit (the unreadable-table
+# exception) was taken there, outside the judged diff; the other three are
+# carried below.
+
+digest: "cc6e4b23c32c1713"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · hook_entry_timeout_outlasts_a_shell_start_on_a_loaded_machine asserts >= 60 against a literal; a named MEASURED_SHELL_START_SECONDS = 11 with a margin factor would say what the floor means
+    person: "動作への影響はありません。60 秒という下限の根拠 (実測 11 秒) がテスト内で数値として結び付いていないだけで、対応は不要です。"
+  - rust-reviewer/2 · the older timeout is a bare 10 in two places in codex_reinstall_replaces_trust_hashes_written_with_an_older_timeout; one const would keep hash and entry seeds from drifting
+    person: "動作への影響はありません。テストの準備データで同じ数値を二か所に書いているだけで、対応は不要です。"
+  - rust-reviewer/3 · config.rs doc says "every UserPromptSubmit" which overstates the observation, and drops the trade-off: a wedged /bin/sh start now blocks a synchronous hook for up to 60 s instead of 10
+    person: "マシンが極端に詰まってフックのシェルが起動しきれない場合、プロンプト送信が最大 60 秒待たされることがあります (以前は 10 秒で打ち切り)。通常時は変わらず、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
