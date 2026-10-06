@@ -12302,6 +12302,84 @@ pub(crate) fn the_packager_runs_the_three_gates_before_it_builds() {
         "packager が 3 つの検査を build の前に走らせていないか、子プロセスが packaging lock を引き継いでいます"
     );
 }
+
+#[test]
+pub(crate) fn the_packager_fast_mode_skips_tests_when_requested() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!("operon-package-fast-{}", Uuid::new_v4()));
+    let fake_bin = root.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let log = root.join("cargo-calls");
+    let fake_cargo = fake_bin.join("cargo");
+    fs::write(
+        &fake_cargo,
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$OPERON_TEST_MARKER\"\n\
+         [ -e /dev/fd/9 ] && echo 'holds the packaging lock' >> \"$OPERON_TEST_MARKER\"\n\
+         [ \"$1\" = build ] && exit 42\nexit 0\n",
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&fake_cargo).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_cargo, permissions).unwrap();
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    // Test 1: with --fast argument
+    let output = Command::new("bash")
+        .arg("scripts/package-macos.sh")
+        .arg("--fast")
+        .env("OPERON_DIST_DIR", &root)
+        .env("OPERON_TEST_MARKER", &log)
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    let calls = fs::read_to_string(&log).unwrap_or_default();
+    let _ = fs::remove_file(&log);
+
+    assert!(
+        !output.status.success(),
+        "偽の cargo build が失敗しても packager が成功しました"
+    );
+    assert_eq!(
+        calls.lines().collect::<Vec<_>>(),
+        [
+            "fmt --check",
+            "clippy --locked -- -D warnings",
+            "build --release --locked",
+        ],
+        "--fast で test --locked がスキップされ、fmt, clippy, build が走る必要があります"
+    );
+
+    // Test 2: with OPERON_FAST_PACKAGE=1 environment variable
+    let output2 = Command::new("bash")
+        .arg("scripts/package-macos.sh")
+        .env("OPERON_FAST_PACKAGE", "1")
+        .env("OPERON_DIST_DIR", &root)
+        .env("OPERON_TEST_MARKER", &log)
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    let calls2 = fs::read_to_string(&log).unwrap_or_default();
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(
+        !output2.status.success(),
+        "偽の cargo build が失敗しても packager が成功しました"
+    );
+    assert_eq!(
+        calls2.lines().collect::<Vec<_>>(),
+        [
+            "fmt --check",
+            "clippy --locked -- -D warnings",
+            "build --release --locked",
+        ],
+        "OPERON_FAST_PACKAGE=1 で test --locked がスキップされ、fmt, clippy, build が走る必要があります"
+    );
+}
 #[test]
 pub(crate) fn bundle_replacement_leaves_the_current_app_when_staging_is_missing() {
     let root = std::env::temp_dir().join(format!("operon-bundle-rollback-{}", Uuid::new_v4()));

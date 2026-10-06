@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: bash scripts/package-macos.sh
+# Usage: bash scripts/package-macos.sh [--fast]
 # Produces a self-contained .app bundle under dist/.
+# When --fast or OPERON_FAST_PACKAGE=1 is set, skips cargo test --locked (offloaded to CI/CD).
+
+fast_mode=0
+for arg in "$@"; do
+  if [[ "$arg" == "--fast" ]]; then
+    fast_mode=1
+    break
+  fi
+done
+if [[ "${OPERON_FAST_PACKAGE:-0}" == "1" ]]; then
+  fast_mode=1
+fi
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 dist_dir="${OPERON_DIST_DIR:-$repo_root/dist}"
@@ -40,8 +52,16 @@ trap 'exit 143' TERM
 # processes that can outlive it (a tmux server, a background sleep), and one
 # that inherited the lock would hold it after this script exits, refusing every
 # later packager with nothing running.
+#
+# When fast mode is requested (--fast or OPERON_FAST_PACKAGE=1), the heavy test
+# suite is skipped in favor of CI/CD execution while formatting and clippy
+# lint gates still run.
 cargo fmt --check 9>&-
-cargo test --locked 9>&-
+if [[ "$fast_mode" -eq 1 ]]; then
+  echo "[packager] Fast mode: skipping test gate (delegated to CI/CD); running fmt & clippy."
+else
+  cargo test --locked 9>&-
+fi
 cargo clippy --locked -- -D warnings 9>&-
 cargo build --release --locked 9>&-
 staging_root="$(mktemp -d "$dist_dir/.operon-package.XXXXXX")"
