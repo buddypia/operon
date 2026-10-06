@@ -1,7 +1,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,12 +9,12 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Reviewed (approve-with-nits). Next: push, CI, merge, package, install. Trunk-allowlist exemption awaits the person."
+resume: "Landed 19c3c77 after CI passed; installed. Trunk-allowlist exemption for non-repo commands awaits the person."
 
 contract:
-  three-gates: "machine pending cargo test --locked"
+  three-gates: "machine passed cargo test --locked"
   bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed each new guard watched failing"
 
 sets:
