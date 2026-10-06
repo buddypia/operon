@@ -1,7 +1,7 @@
 state:
   route: "bugfix"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,12 +9,12 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Retro review of 122/124 done; both 124 defects fixed with failing-first tests, 122 tests made real. Next: review this diff, commit, merge, move refs/operon/audited/main past 037405a/029779f/3ac57e7 citing report.md, package."
+resume: "Landed; audit mark moved past 037405a/029779f/3ac57e7 (reflog reason cites report.md); packaged (721 passed, 0 failed, 6 ignored) and installed. One review note carried in review.yaml."
 
 contract:
   three-gates: "machine passed cargo test --locked"
   bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed both new tests watched failing"
 
 sets:
