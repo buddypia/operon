@@ -1764,3 +1764,39 @@ under change 115's mutations 1, 2, and 10.
 
 **Guard.** `recognizes_gone_tmux_server_errors`, `terminal_resize_failure_from_missing_tmux_socket_transitions_session_to_lost_without_error_banner`, `deleting_session_with_missing_tmux_socket_removes_session_record`, and `closing_completed_terminal_with_missing_tmux_socket_removes_session_record`. Watched failing on the unedited tree.
 
+## 063 — Two sessions took the same change number
+
+**What happened.** Change numbers are picked as "the next free number under `docs/sdlc/changes/`". Two sessions working at once each read the same tree, took the same number, and both landed: 059, 060, and 098 each name two changes. On 2026-10-06 it happened three more times within hours: two branches took 127, two took 129, and two changes numbered 128 both landed on main.
+
+**Why it was invisible.** Nothing compares the numbers. Each change is consistent on its own branch; the collision exists only after both merge, and then every commit message, state file, and lesson that cites the number is ambiguous.
+
+**Cure.** Change 130 adds a test that fails when a number names two change directories. The four that landed before it (059, 060, 098, 128) are grandfathered by number.
+
+**The rule.** The second lander renumbers before it lands; a number is an identifier, not a counter.
+
+**Guard.** `change_directory_numbers_are_unique`. Watched failing with 098 removed from the grandfathered list.
+
+## 064 — Hook tests judged by elapsed time failed on a loaded machine
+
+**What happened.** `the_stop_gate_reports_an_installed_build_that_is_behind` checked that a second stop did not re-run a hanging check by asserting it finished faster than the first. `the_trunk_allowlist_and_the_ownership_check_are_switched_on_here` gave its node script 60 s. With another session's suite running on the same machine, the second stop took longer for reasons unrelated to the check, and the node script needed 55–60 s. Both failed against correct code and stopped packaging twice in one afternoon.
+
+**Why it was invisible.** On an idle machine both margins were wide. The suite is run by several sessions on one Mac, so idle is not the normal case.
+
+**Cure.** Change 130 has the check leave a mark when it runs, and the test asserts the mark is absent after the second stop — whether it was asked, not how long it took. The node-driven hook tests share `NODE_HOOK_TEST_TIMEOUT` (180 s): still a bound, with room for contention.
+
+**The rule.** Assert the event, not its duration. Where a timeout is the point, size it for a shared machine.
+
+**Guard.** The marker assertion, watched failing by giving the second stop a fresh position (the check then runs and leaves its mark).
+
+## 065 — One guard advised the command another guard refuses
+
+**What happened.** `.cli/hooks/commit-guard.mjs` refused a commit on main and recommended `git -C .worktrees/<task> commit`. `.claude/hooks/gate-commit.sh` refuses exactly that: a commit aimed at another directory. A session following the first message hit the second, and only a separate `cd` into the worktree followed by a plain `git commit` worked.
+
+**Why it was invisible.** Each guard was right on its own; nothing read their advice together.
+
+**Cure.** Change 130 rewrites both commit-guard messages to say `cd` into the worktree in its own call, then `git commit`, and says why `-C` is refused. The stale `/create-pr` advice, a skill that does not run here, is gone too.
+
+**The rule.** Advice a guard prints has to be accepted by the other guards on the same path.
+
+**Guard.** `the_commit_guard_never_advises_a_commit_the_commit_gate_refuses`, watched failing against the previous `commit-guard.mjs`.
+
