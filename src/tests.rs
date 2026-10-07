@@ -12132,6 +12132,128 @@ pub(crate) fn zero_match_transcript_search_obeys_shared_byte_and_line_budgets() 
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
+pub(crate) fn parse_eg2_rank_output_handles_indexed_documents_and_malformed_json() {
+    let valid_json = r#"[
+        {"score": 0.88, "document": "[2] third item"},
+        {"score": 0.75, "document": "[0] first item"},
+        {"score": 0.65, "document": "[1] second item"}
+    ]"#;
+    let parsed = parse_eg2_rank_output(valid_json, 3);
+    assert_eq!(
+        parsed,
+        vec![
+            Eg2RankItem {
+                index: 2,
+                score: 0.88,
+            },
+            Eg2RankItem {
+                index: 0,
+                score: 0.75,
+            },
+            Eg2RankItem {
+                index: 1,
+                score: 0.65,
+            },
+        ]
+    );
+
+    // Out-of-bounds index is skipped
+    let out_of_bounds = r#"[{"score": 0.9, "document": "[5] out of bounds"}]"#;
+    assert!(parse_eg2_rank_output(out_of_bounds, 3).is_empty());
+
+    // Duplicate index is deduplicated
+    let duplicates = r#"[
+        {"score": 0.9, "document": "[1] first seen"},
+        {"score": 0.8, "document": "[1] duplicate"}
+    ]"#;
+    let parsed_dupes = parse_eg2_rank_output(duplicates, 3);
+    assert_eq!(parsed_dupes.len(), 1);
+    assert_eq!(parsed_dupes[0].score, 0.9);
+
+    // Malformed JSON returns empty
+    assert!(parse_eg2_rank_output("not valid json", 3).is_empty());
+    assert!(parse_eg2_rank_output("", 3).is_empty());
+
+    // Unindexed document returns empty
+    let unindexed = r#"[{"score": 0.9, "document": "plain text without index"}]"#;
+    assert!(parse_eg2_rank_output(unindexed, 3).is_empty());
+}
+#[test]
+pub(crate) fn rank_transcripts_with_eg2_handles_edge_cases() {
+    let mut empty: Vec<TranscriptMatch> = Vec::new();
+    assert!(!rank_transcripts_with_eg2("query", &mut empty));
+
+    let mut single = vec![TranscriptMatch {
+        provider: "Claude".into(),
+        session_id: "s1".into(),
+        title: Some("Title".into()),
+        path: PathBuf::from("/tmp/test.jsonl"),
+        snippet: "Snippet".into(),
+    }];
+    assert!(!rank_transcripts_with_eg2("query", &mut single));
+    assert_eq!(single.len(), 1);
+}
+#[test]
+pub(crate) fn eg2_semantic_search_ranks_or_falls_back_when_available() {
+    let root = std::env::temp_dir().join(format!("operon-eg2-test-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let auth_file = root.join("auth.jsonl");
+    let ui_file = root.join("ui.jsonl");
+
+    // File 1: about authentication & jwt tokens
+    fs::write(
+        &auth_file,
+        "{\"type\":\"ai-title\",\"aiTitle\":\"Auth service fixes\"}\n{\"type\":\"assistant\",\"message\":{\"content\":\"We resolved token validation errors and jwt refresh issues in the backend.\"}}\n",
+    )
+    .unwrap();
+
+    // File 2: about user interface styling
+    fs::write(
+        &ui_file,
+        "{\"type\":\"ai-title\",\"aiTitle\":\"UI button styles\"}\n{\"type\":\"assistant\",\"message\":{\"content\":\"Updated color palette and rounded corners on primary action buttons.\"}}\n",
+    )
+    .unwrap();
+
+    let roots = vec![("Claude".to_owned(), root.clone(), 1)];
+    let limits = TranscriptSearchLimits {
+        visited_entries: 10,
+        candidates: 10,
+        bytes: 100_000,
+        lines: 100,
+    };
+
+    // 1. Verbatim exact keyword search works as expected
+    let exact_scan = search_local_transcripts_in(&roots, &HashMap::new(), "palette", 10, limits);
+    assert_eq!(exact_scan.matches.len(), 1);
+    assert_eq!(exact_scan.matches[0].session_id, "ui");
+
+    // 2. Conceptual query with no exact substring match: "authentication token"
+    // "authentication" does not appear verbatim (it is "Auth"), but semantically matches auth/token
+    let semantic_scan =
+        search_local_transcripts_in(&roots, &HashMap::new(), "authentication token", 10, limits);
+
+    if tool_available("eg2") {
+        // If eg2 is available on this system, semantic fallback should find the auth session
+        assert!(!semantic_scan.matches.is_empty());
+        assert_eq!(semantic_scan.matches[0].session_id, "auth");
+    } else {
+        // Without eg2, exact keyword failure returns 0 matches gracefully
+        assert!(semantic_scan.matches.is_empty());
+    }
+
+    // 3. Completely unrelated query does not match anything even with eg2 (filtered by threshold)
+    let unrelated_scan = search_local_transcripts_in(
+        &roots,
+        &HashMap::new(),
+        "gardening hydroponic tomatoes",
+        10,
+        limits,
+    );
+    assert!(unrelated_scan.matches.is_empty());
+
+    fs::remove_dir_all(root).unwrap();
+}
+#[test]
 pub(crate) fn history_partial_results_are_disclosed_even_during_automatic_discovery() {
     let root =
         std::env::temp_dir().join(format!("operon-history-partial-notice-{}", Uuid::new_v4()));

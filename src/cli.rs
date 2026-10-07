@@ -213,6 +213,8 @@ pub(crate) struct AntigravityLogScan {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TranscriptFileSearch {
     pub(crate) hit: Option<TranscriptHit>,
+    pub(crate) first_text: Option<String>,
+    pub(crate) title: Option<String>,
     pub(crate) bytes_read: u64,
     pub(crate) lines_read: usize,
     pub(crate) truncated: bool,
@@ -2340,6 +2342,165 @@ pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptS
     snapshot
 }
 
+pub(crate) const EG2_SEMANTIC_MATCH_MIN_SCORE: f64 = 0.73;
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct Eg2RawRankItem {
+    pub(crate) score: f64,
+    pub(crate) document: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Eg2RankItem {
+    pub(crate) index: usize,
+    pub(crate) score: f64,
+}
+
+pub(crate) fn parse_eg2_rank_output(json_str: &str, expected_count: usize) -> Vec<Eg2RankItem> {
+    let raw_items = match serde_json::from_str::<Vec<Eg2RawRankItem>>(json_str) {
+        Ok(items) => items,
+        Err(_) => return Vec::new(),
+    };
+    let mut results = Vec::new();
+    let mut seen_indices = HashSet::new();
+    for item in raw_items {
+        let index = if let Some(rest) = item.document.strip_prefix('[') {
+            if let Some((idx_str, _)) = rest.split_once(']') {
+                idx_str.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(idx) = index {
+            if idx < expected_count && seen_indices.insert(idx) {
+                results.push(Eg2RankItem {
+                    index: idx,
+                    score: item.score,
+                });
+            }
+        }
+    }
+    results
+}
+
+pub(crate) fn rank_transcripts_with_eg2(query: &str, matches: &mut [TranscriptMatch]) -> bool {
+    if matches.len() <= 1 || !tool_available("eg2") {
+        return false;
+    }
+    let rank_count = matches.len().min(24);
+    let mut command = Command::new("eg2");
+    command.arg("rank").arg(query);
+    for (index, m) in matches[..rank_count].iter().enumerate() {
+        let text = match &m.title {
+            Some(title) => format!("{title}: {}", m.snippet),
+            None => m.snippet.clone(),
+        };
+        let preview = text.chars().take(400).collect::<String>();
+        command.arg(format!("[{index}] {preview}"));
+    }
+    command.arg("--json");
+
+    let Ok(limited) =
+        run_command_with_output_limit(&mut command, Duration::from_secs(5), 64 * 1024, 16 * 1024)
+    else {
+        return false;
+    };
+
+    if !limited.output.status.success() {
+        return false;
+    }
+
+    let Ok(stdout) = std::str::from_utf8(&limited.output.stdout) else {
+        return false;
+    };
+
+    let ranked = parse_eg2_rank_output(stdout, rank_count);
+    if ranked.is_empty() {
+        return false;
+    }
+
+    let original = matches[..rank_count].to_vec();
+    let mut reordered = Vec::with_capacity(rank_count);
+    let mut used = vec![false; rank_count];
+
+    for item in ranked {
+        if item.index < rank_count && !used[item.index] {
+            used[item.index] = true;
+            reordered.push(original[item.index].clone());
+        }
+    }
+    for (index, item) in original.into_iter().enumerate() {
+        if !used[index] {
+            reordered.push(item);
+        }
+    }
+
+    matches[..rank_count].clone_from_slice(&reordered);
+    true
+}
+
+pub(crate) fn rank_fallback_candidates_with_eg2(
+    query: &str,
+    candidates: &[(String, String, Option<String>, PathBuf, String)],
+    limit: usize,
+) -> Vec<TranscriptMatch> {
+    if candidates.is_empty() || limit == 0 || !tool_available("eg2") {
+        return Vec::new();
+    }
+    let rank_count = candidates.len().min(24);
+    let mut command = Command::new("eg2");
+    command.arg("rank").arg(query);
+    for (index, (_provider, _session_id, title, _path, text)) in
+        candidates[..rank_count].iter().enumerate()
+    {
+        let doc = match title {
+            Some(t) => format!("{t}: {text}"),
+            None => text.clone(),
+        };
+        let preview = doc.chars().take(400).collect::<String>();
+        command.arg(format!("[{index}] {preview}"));
+    }
+    command.arg("--json");
+
+    let Ok(limited) =
+        run_command_with_output_limit(&mut command, Duration::from_secs(5), 64 * 1024, 16 * 1024)
+    else {
+        return Vec::new();
+    };
+
+    if !limited.output.status.success() {
+        return Vec::new();
+    }
+
+    let Ok(stdout) = std::str::from_utf8(&limited.output.stdout) else {
+        return Vec::new();
+    };
+
+    let ranked = parse_eg2_rank_output(stdout, rank_count);
+    let mut matches = Vec::new();
+    for item in ranked {
+        if item.score < EG2_SEMANTIC_MATCH_MIN_SCORE {
+            continue;
+        }
+        if matches.len() >= limit {
+            break;
+        }
+        if let Some((provider, session_id, title, path, text)) = candidates.get(item.index) {
+            let snippet = text.chars().take(360).collect::<String>();
+            matches.push(TranscriptMatch {
+                provider: provider.clone(),
+                session_id: session_id.clone(),
+                title: title.clone(),
+                path: path.clone(),
+                snippet,
+            });
+        }
+    }
+    matches
+}
+
 pub(crate) fn search_local_transcripts_in(
     roots: &[(String, PathBuf, usize)],
     codex_titles: &HashMap<String, String>,
@@ -2363,6 +2524,7 @@ pub(crate) fn search_local_transcripts_in(
     };
     let mut remaining_bytes = limits.bytes;
     let mut remaining_lines = limits.lines;
+    let mut fallback_candidates = Vec::new();
     for (index, (provider, path)) in recent.candidates.iter().enumerate() {
         if snapshot.matches.len() >= limit {
             snapshot.truncated |= index < recent.candidates.len();
@@ -2389,26 +2551,41 @@ pub(crate) fn search_local_transcripts_in(
         if file_scan.unreadable {
             snapshot.unreadable_entries += 1;
         }
+        let session_id = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("session")
+            .to_owned();
+        let title = file_scan.title.or_else(|| {
+            (provider == "Codex")
+                .then(|| codex_session_id(&session_id))
+                .flatten()
+                .and_then(|id| codex_titles.get(&id).cloned())
+        });
         if let Some(hit) = file_scan.hit {
-            let session_id = path
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("session")
-                .to_owned();
-            let title = hit.title.or_else(|| {
-                (provider == "Codex")
-                    .then(|| codex_session_id(&session_id))
-                    .flatten()
-                    .and_then(|id| codex_titles.get(&id).cloned())
-            });
             snapshot.matches.push(TranscriptMatch {
                 provider: provider.clone(),
                 session_id,
-                title,
+                title: hit.title.or(title),
                 path: path.clone(),
                 snippet: hit.snippet,
             });
+        } else if fallback_candidates.len() < limits.candidates.min(24) {
+            let candidate_text = match (&title, &file_scan.first_text) {
+                (Some(t), Some(text)) => Some(format!("{t}: {text}")),
+                (Some(t), None) => Some(t.clone()),
+                (None, Some(text)) => Some(text.clone()),
+                (None, None) => None,
+            };
+            if let Some(text) = candidate_text {
+                fallback_candidates.push((provider.clone(), session_id, title, path.clone(), text));
+            }
         }
+    }
+    if !snapshot.matches.is_empty() {
+        rank_transcripts_with_eg2(query, &mut snapshot.matches);
+    } else if !fallback_candidates.is_empty() {
+        snapshot.matches = rank_fallback_candidates_with_eg2(query, &fallback_candidates, limit);
     }
     snapshot
 }
@@ -2479,6 +2656,7 @@ pub(crate) fn search_transcript_hit_limited(
     let mut line = String::new();
     let mut title = None;
     let mut hit_snippet = None;
+    let mut first_text = None;
     let mut lines_read = 0;
     let mut reached_eof = false;
     let mut unreadable = false;
@@ -2506,6 +2684,12 @@ pub(crate) fn search_transcript_hit_limited(
                 .map(ToOwned::to_owned);
         }
         let text = transcript_text(&value);
+        if first_text.is_none() {
+            let trimmed = text.trim();
+            if !trimmed.is_empty() {
+                first_text = Some(trimmed.chars().take(400).collect());
+            }
+        }
         let lowered = text.to_lowercase();
         if hit_snippet.is_none() && words.iter().all(|word| lowered.contains(word)) {
             hit_snippet = Some(transcript_snippet(&text, words));
@@ -2519,7 +2703,12 @@ pub(crate) fn search_transcript_hit_limited(
         .map(|latest| latest.len() > read_limit)
         .unwrap_or(true);
     TranscriptFileSearch {
-        hit: hit_snippet.map(|snippet| TranscriptHit { snippet, title }),
+        hit: hit_snippet.map(|snippet| TranscriptHit {
+            snippet,
+            title: title.clone(),
+        }),
+        first_text,
+        title,
         bytes_read,
         lines_read,
         truncated: !reached_eof || grew_while_reading,

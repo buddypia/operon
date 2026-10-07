@@ -1,0 +1,16 @@
+# Review record for change 133.
+#
+# Round 1: rust-reviewer and subprocess-safety-reviewer reviewed the diff.
+# Subprocess safety: Command::new("eg2") is guarded by tool_available("eg2"), uses
+# run_command_with_output_limit with bounded 5s timeout and 64 KiB output limit, and
+# passes args via separate .arg() elements without shell interpolation.
+# Rust craft: No per-frame work (executed in background search task), no new panics or unwrap sites,
+# safe bounds-checked indexing, and graceful fallback to exact keyword matching when eg2 is absent.
+
+digest: "13f5ae296022c875"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
