@@ -1,6 +1,6 @@
 state:
   route: "modify"
-  stage: "review"
+  stage: "test"
   status: "done"
   attempts: "0 3"
   questions: "0 7"
@@ -13,6 +13,6 @@ resume: "Implemented semantic transcript search & ranking via local eg2-cli with
 
 contract:
   three-gates: "machine passed cargo test --locked"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
   release-binary: "machine pending bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed each new guard watched failing"
