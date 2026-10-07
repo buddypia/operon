@@ -33,6 +33,7 @@ import {
   safeReadJson,
   resolveProjectDir,
   withCommandCwd,
+  isDirectInvocation,
 } from '../lib/utils.mjs';
 import { HookOutput } from '../lib/hook-output.mjs';
 import { extractApplyPatchFilePaths } from '../lib/apply-patch-paths.mjs';
@@ -383,7 +384,7 @@ export async function run(data) {
 }
 
 // Standalone fallback (when called directly via settings.json)
-if (!globalThis.__HOOK_ORCHESTRATOR__) {
+if (!globalThis.__HOOK_ORCHESTRATOR__ && isDirectInvocation(import.meta.url)) {
   safeHookMainWithProfile('worktree-policy-guard', async () => {
     const data = await readStdin();
     return output(await run(data));

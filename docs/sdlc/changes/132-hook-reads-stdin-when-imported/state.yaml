@@ -1,0 +1,51 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. During change 131's review, two reviewer probes imported
+#    .cli/hooks/worktree-policy-guard.mjs to call one exported function. Both
+#    were still alive nine hours later (PIDs 16845, 61549), and the person
+#    read it as the review being stuck (「レビューまだsubagentやshellで止まって
+#    そう」).
+# 2. Cause: four hooks (worktree-policy-guard, worktree-session-owner-guard,
+#    worktree-shipping-guard, worktree-owner-tracker) started their standalone
+#    main on any import that was not the dispatcher's, and main reads stdin to
+#    its end. A probe with an open stdin pipe waits forever. commit-guard and
+#    destructive-git-guard already asked isDirectInvocation(import.meta.url);
+#    the four never got it. Watched failing: the new test stopped at
+#    worktree-owner-tracker.mjs with STDIN-READ.
+# 3. Fix: the same isDirectInvocation condition on the four. Started as the
+#    entry script (Claude's settings.json), through a symlink, and through
+#    _cli-dispatch.mjs (Codex), the policy guard still denies `rm -rf` on main.
+# 4. The fix's own failure mode is fail-open: a condition that is never true
+#    leaves the hook silent and every command allowed. No existing test
+#    noticed (mutation `&& false` passed all 32 trunk/worktree/policy tests),
+#    so the test also runs each hook directly and requires an answer.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Committed on fix/132-guard-waits-on-stdin-when-imported; review, push, CI, land, install."
+
+contract:
+  three-gates: "machine pending cargo test --locked in CI; fmt and clippy at commit"
+  failing-test-first: "machine passed importing_a_hook_never_reads_its_stdin stopped at worktree-owner-tracker.mjs with STDIN-READ before the fix"
+  guards-verified-by-mutation: "machine passed worktree-policy-guard condition forced to && false: the same test failed (直接起動しても応答しませんでした) while the 32 existing trunk/worktree/policy tests passed"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

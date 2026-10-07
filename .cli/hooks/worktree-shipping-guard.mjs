@@ -43,6 +43,7 @@ import {
   resolveProjectDir,
   safeGit,
   shellQuote,
+  isDirectInvocation,
 } from '../lib/utils.mjs';
 import { HookOutput } from '../lib/hook-output.mjs';
 import {
@@ -982,7 +983,7 @@ export async function run(data, opts = {}) {
   }
 }
 
-if (!globalThis.__HOOK_ORCHESTRATOR__) {
+if (!globalThis.__HOOK_ORCHESTRATOR__ && isDirectInvocation(import.meta.url)) {
   safeHookMainWithProfile('worktree-shipping-guard', async () => {
     const data = await readStdin();
     return output(await run(data));
