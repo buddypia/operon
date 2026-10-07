@@ -33,6 +33,8 @@
  * Behavior:
  *   - tool is not Edit|Write|MultiEdit|Bash → passthrough
  *   - target not under .worktrees/ (main repo file) → passthrough (worktree-policy-guard domain)
+ *   - target in another repository's .worktrees/ → passthrough: its owner is that repository's
+ *     hooks, and claiming a lease there would write into it (change 135)
  *   - `.tmp/create-pr-active` exists → passthrough (ship/create-pr carve-out)
  *   - Bash is not `git commit` / is `--dry-run` → passthrough (default `session_owner_scope: "commit"`)
  *   - opt-in `session_owner_scope: "all_bash"` (worktree-policy.json): every Bash command is checked
@@ -69,10 +71,10 @@ import {
 } from '../lib/worktree-owner-lease.mjs';
 import { HookOutput } from '../lib/hook-output.mjs';
 // Worktree root evaluation SSOT .
-import { resolveWorktreeRoot } from '../lib/worktree-path.mjs';
+import { repositoryOf, resolveWorktreeRoot } from '../lib/worktree-path.mjs';
 import { extractApplyPatchFilePaths } from '../lib/apply-patch-paths.mjs';
 import { commitTargets } from '../lib/git-commit-target.mjs';
-import { pathArgs, walkSegments } from '../lib/bash-segments.mjs';
+import { isInside, pathArgs, walkSegments } from '../lib/bash-segments.mjs';
 import { loadWorktreePolicy } from '../lib/trunk-branch.mjs';
 // The create-pr carve-out below is a lease with a TTL, not a permanent switch .
 import { isCreatePrLeaseActive } from '../lib/create-pr-lease.mjs';
@@ -158,12 +160,32 @@ function withCanonicalCwd(data) {
   return typeof data?.cwd === 'string' && data.cwd ? { ...data, cwd: canonicalizePath(data.cwd) } : data;
 }
 
-/** Groups targets by worktree root; flags are OR-ed (any owning use of a worktree owns it). */
-function byWorktree(targets) {
+/** `realpathSync.native` when the path exists — it returns the case stored on disk. */
+function onDiskPath(p) {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Groups this repository's worktree targets by root; flags are OR-ed (any owning use of a worktree
+ * owns it). A worktree under another repository's `.worktrees/` is not this guard's (change 135).
+ */
+function byWorktree(targets, projectDir) {
+  // On-disk case, as `repositoryOf` answers: a project directory typed in another case must still
+  // contain this repository's worktrees (review of 135).
+  const project = onDiskPath(canonicalizePath(projectDir));
+  const home = repositoryOf(project);
   const map = new Map();
   for (const t of targets) {
     const root = t.path ? resolveWorktreeRoot(canonicalizePath(t.path)) : null;
     if (!root) continue; // main repo files / non-worktree targets are worktree-policy-guard's domain
+    // Ours when it lies inside the project — whatever its `.git` file says, so a renamed main
+    // checkout keeps the check — or when its main checkout is the project's (a project root given
+    // as a subdirectory, or as a worktree outside `.worktrees/`). Both sides are on-disk case.
+    if (!isInside(onDiskPath(root), project) && repositoryOf(root) !== home) continue;
     const prev = map.get(root);
     map.set(
       root,
@@ -209,7 +231,7 @@ export async function run(rawData) {
       targets = [{ path: editTargetPath(toolName, data.tool_input, baseDir), ...OWNING, action: 'edit' }];
     }
 
-    for (const [wtRoot, t] of byWorktree(targets)) {
+    for (const [wtRoot, t] of byWorktree(targets, projectDir)) {
       const denied = checkWorktree(wtRoot, { data, projectDir, sessionId, ...t });
       if (denied) return denied;
     }

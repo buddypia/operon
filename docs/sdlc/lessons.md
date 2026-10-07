@@ -1812,3 +1812,15 @@ under change 115's mutations 1, 2, and 10.
 **The rule.** A hook module runs its main only as the entry script; importing it has no side effects. A check on how a guard starts also checks that it still starts.
 
 **Guard.** `importing_a_hook_never_reads_its_stdin`, watched failing on the unedited `worktree-owner-tracker.mjs` (STDIN-READ) and on `worktree-policy-guard.mjs` with its condition forced false (no answer).
+
+## 067 — The trunk guard judged another repository as this trunk
+
+**What happened.** Asked to fix nichenext's Supabase settings, a session whose project was operon could not run anything there: the trunk allowlist judged `cd <nichenext worktree> && python3 …` as trunk work, and the session owner guard called nichenext's worktree a different worktree of operon — and would have written its lease into nichenext.
+
+**Why it was invisible.** Every test placed its worktrees under the project's own `.worktrees/`. "Not this repository's worktree" and "the trunk" were the same set in every fixture.
+
+**Cure.** Change 135 exempts a segment whose certain directory is inside another repository, on the worktree segment's terms (no path into the trunk, after realpath); the owner guard ignores worktrees of other repositories.
+
+**The rule.** A guard names the territory it governs; anything outside it is judged by where it reaches, not refused for not being home.
+
+**Guard.** `work_inside_another_repository_is_not_judged_as_this_trunk`, watched failing on main's guards and on each of five mutations.

@@ -35894,6 +35894,270 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
     }
 }
 
+/// Change 135. A session whose project is this repository was asked to fix
+/// another repository, and neither guard would let it: the trunk allowlist
+/// judged a command inside that repository's worktree as trunk work, and the
+/// ownership check took the other repository's `.worktrees/` for this one's —
+/// and would have written its lease there. A command that runs inside another
+/// repository and names no path in the trunk checkout is that repository's
+/// business; one that reaches back here is still judged.
+#[test]
+pub(crate) fn work_inside_another_repository_is_not_judged_as_this_trunk() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("other-repo-project");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+    let add_worktree = |repo: &Path, dir: &Path, branch: &str| {
+        git_in(
+            repo,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                dir.to_str().unwrap(),
+                "main",
+            ],
+        );
+    };
+    let mine = project.join(".worktrees/feature/mine");
+    let foreign = project.join(".worktrees/feature/foreign");
+    add_worktree(&project, &mine, "feature/mine");
+    add_worktree(&project, &foreign, "feature/foreign");
+    // A worktree whose `.git` file still names the main checkout's old
+    // path, as after the trunk directory was renamed (review of 135).
+    let stale = project.join(".worktrees/feature/stale");
+    add_worktree(&project, &stale, "feature/stale");
+    fs::write(
+        stale.join(".git"),
+        "gitdir: /nonexistent-operon-135/.git/worktrees/stale\n",
+    )
+    .unwrap();
+    // This repository's own worktree outside `.worktrees/`, and a project
+    // root given as a subdirectory (review of 135: both read as "another").
+    let elsewhere_root = temporary_directory("other-repo-elsewhere");
+    let elsewhere = fs::canonicalize(&elsewhere_root).unwrap().join("wt");
+    add_worktree(&project, &elsewhere, "feature/elsewhere");
+    // The guard reads its policy from the project root it was given.
+    fs::create_dir_all(project.join("sub/.claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        project.join("sub/.claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+
+    let neighbour_root = worktree_fixture_repository("other-repo-neighbour");
+    let neighbour = fs::canonicalize(&neighbour_root).unwrap();
+    let neighbour_worktree = neighbour.join(".worktrees/fix/token");
+    add_worktree(&neighbour, &neighbour_worktree, "fix/token");
+    // A directory inside the other repository that is really the trunk.
+    std::os::unix::fs::symlink(&project, neighbour.join("back-to-trunk")).unwrap();
+    let nowhere = temporary_directory("other-repo-nowhere");
+    // A project nested in a larger repository: a sibling directory of that
+    // repository is not another repository's business, it contains the trunk.
+    let outer_root = worktree_fixture_repository("other-repo-outer");
+    let outer = fs::canonicalize(&outer_root).unwrap();
+    let nested = outer.join("inner");
+    fs::rename(worktree_fixture_repository("other-repo-inner"), &nested).unwrap();
+    fs::create_dir_all(nested.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        nested.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    fs::create_dir_all(outer.join("sibling")).unwrap();
+
+    let p = project.to_str().unwrap();
+    let ow = neighbour_worktree.to_str().unwrap();
+    let om = neighbour.to_str().unwrap();
+    let allowed = [
+        format!("cd {ow} && python3 edit.py"),
+        format!("cd {om} && npm test"),
+        format!("cd {ow} && node --test scripts/a.test.mjs"),
+    ];
+    let denied = [
+        format!("cd {ow} && rm -rf {p}/src"),
+        format!("cd {ow} && cp a {p}/README.md"),
+        format!("cd {ow} && echo x > {p}/README.md"),
+        format!("cd {ow} && rm -rf {p}/.."),
+        format!("cd {ow} && cd {p} && cargo build"),
+        format!("cd {om}/back-to-trunk && cargo build"),
+        format!("cd {ow}; python3 edit.py"),
+        format!("cd {} && python3 edit.py", nowhere.to_str().unwrap()),
+        format!("cd {om}/missing && python3 edit.py"),
+        // The trunk spelled in another case. APFS as macOS formats it is
+        // case-insensitive; on a case-sensitive volume the path does not
+        // exist and these are refused as a missing directory instead.
+        format!("cd {} && cargo build", p.to_uppercase()),
+        format!("cd {ow} && rm -rf {}/src", p.to_uppercase()),
+        format!("cd {ow} && export GIT_DIR={p}/.git GIT_WORK_TREE={p} && git status"),
+        format!("cd {ow} && builtin export GIT_DIR={p}/.git && git status"),
+        format!("cd {ow} && export GIT_{{DIR={p}/.git,WORK_TREE={p}}} && git status"),
+        format!("cd {ow} && export GIT_DIR+={p}/.git && git status"),
+        format!("cd {} && cargo build", elsewhere.to_str().unwrap()),
+    ];
+    let quoted = |cases: &[String]| {
+        cases
+            .iter()
+            .map(|c| serde_json::to_string(c).unwrap())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const fs = await import('node:fs');\n\
+         const path = await import('node:path');\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const {{ run: owner }} = await import({owner:?});\n\
+         const {{ worktreeOwnerPath }} = await import({lease:?});\n\
+         const sidecar = worktreeOwnerPath({foreign:?}, null);\n\
+         fs.mkdirSync(path.dirname(sidecar), {{ recursive: true }});\n\
+         fs.writeFileSync(sidecar, 'another-session\\n');\n\
+         const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
+const staleSidecar = worktreeOwnerPath({stale:?}, null);\n\
+         fs.mkdirSync(path.dirname(staleSidecar), {{ recursive: true }});\n\
+         fs.writeFileSync(staleSidecar, 'another-session\\n');\n\
+         const call = (tool_name, tool_input, cwd) => ({{ tool_name, tool_input, cwd, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
+         const out = {{}};\n\
+         for (const c of [{allowed}, {denied}])\n\
+           out['trunk: ' + c] = decide(await policy(call('Bash', {{ command: c }}, {project:?})));\n\
+         out['trunk cwd: python3 edit.py'] = decide(await policy(call('Bash', {{ command: 'python3 edit.py' }}, {ow:?})));\n\
+         out['owner: cd neighbour'] = decide(await owner(call('Bash', {{ command: 'cd {ow} && npm test' }}, {mine:?})));\n\
+         out['owner: edit neighbour'] = decide(await owner(call('Edit', {{ file_path: {ow:?} + '/a.txt' }}, {mine:?})));\n\
+         out['owner: stale'] = decide(await owner(call('Edit', {{ file_path: {stale:?} + '/a.txt' }}, {project:?})));\n\
+         out['owner: foreign'] = decide(await owner(call('Bash', {{ command: 'git -C {foreign} status' }}, {mine:?})));\n\
+         out['owner: edit neighbour from trunk'] = decide(await owner(call('Edit', {{ file_path: {ow:?} + '/b.txt' }}, {project:?})));\n\
+         out['neighbour lease written'] = String(fs.existsSync(worktreeOwnerPath({ow:?}, null)));\n\
+         process.env.CLAUDE_PROJECT_DIR = {elsewhere:?};\n\
+         out['elsewhere: owner edit foreign'] = decide(await owner(call('Edit', {{ file_path: {foreign:?} + '/a.txt' }}, {elsewhere:?})));\n\
+         process.env.CLAUDE_PROJECT_DIR = {project_upper:?};\n\
+         out['upper: owner edit foreign'] = decide(await owner(call('Edit', {{ file_path: {foreign:?} + '/a.txt' }}, {project_upper:?})));\n\
+         process.env.CLAUDE_PROJECT_DIR = {project:?} + '/sub';\n\
+         out['sub: owner edit foreign'] = decide(await owner(call('Edit', {{ file_path: {foreign:?} + '/a.txt' }}, {project:?} + '/sub')));\n\
+         out['sub: cd mine'] = decide(await policy(call('Bash', {{ command: 'cd {mine} && cargo build' }}, {project:?} + '/sub')));\n\
+         process.env.CLAUDE_PROJECT_DIR = {nested:?};\n\
+         out['nested: sibling'] = decide(await policy(call('Bash', {{ command: 'cd {outer}/sibling && python3 edit.py' }}, {nested:?})));\n\
+         console.log(JSON.stringify(out));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        owner = repository
+            .join(".cli/hooks/worktree-session-owner-guard.mjs")
+            .to_str()
+            .unwrap(),
+        lease = repository
+            .join(".cli/lib/worktree-plan-path.mjs")
+            .to_str()
+            .unwrap(),
+        foreign = foreign.to_str().unwrap(),
+        mine = mine.to_str().unwrap(),
+        stale = stale.to_str().unwrap(),
+        nested = nested.to_str().unwrap(),
+        outer = outer.to_str().unwrap(),
+        project = p,
+        project_upper = p.to_uppercase(),
+        elsewhere = elsewhere.to_str().unwrap(),
+        allowed = quoted(&allowed),
+        denied = quoted(&denied),
+    );
+    let mut command = node_in(&project);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    discard_worktree_fixture(&neighbour_root);
+    let _ = fs::remove_dir_all(&nowhere);
+    discard_worktree_fixture(&outer_root);
+    let _ = fs::remove_dir_all(&elsewhere_root);
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
+    let verdict = |key: &str| verdicts[key].as_str().unwrap_or("missing").to_owned();
+
+    for c in &allowed {
+        assert_eq!(
+            verdict(&format!("trunk: {c}")),
+            "allow",
+            "別リポジトリの中だけで動くコマンドが main の規則で止められました ({c}): {verdicts}"
+        );
+    }
+    assert_eq!(
+        verdict("trunk cwd: python3 edit.py"),
+        "allow",
+        "別リポジトリの worktree を cwd にしたコマンドが止められました: {verdicts}"
+    );
+    for c in &denied {
+        assert_eq!(
+            verdict(&format!("trunk: {c}")),
+            "deny",
+            "main の checkout に届くか、場所の確かでないコマンドが通りました ({c}): {verdicts}"
+        );
+    }
+    assert_eq!(
+        verdict("nested: sibling"),
+        "deny",
+        "このプロジェクトを含む外側のリポジトリが、別リポジトリとして素通りしました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("owner: cd neighbour"),
+        "allow",
+        "別リポジトリの worktree が、このリポジトリの他人の worktree として拒否されました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("owner: edit neighbour"),
+        "allow",
+        "別リポジトリの worktree のファイル編集が拒否されました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("owner: edit neighbour from trunk"),
+        "allow",
+        "main から別リポジトリの worktree のファイル編集が拒否されました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("sub: owner edit foreign"),
+        "deny",
+        "プロジェクトのサブディレクトリから見ると、他セッションの worktree の所有確認が外れました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("elsewhere: owner edit foreign"),
+        "deny",
+        "`.worktrees/` の外にあるこのリポジトリの worktree から見ると、他セッションの worktree の所有確認が外れました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("upper: owner edit foreign"),
+        "deny",
+        "大文字小文字の違うプロジェクトパスから見ると、他セッションの worktree の所有確認が外れました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("sub: cd mine"),
+        "deny",
+        "プロジェクトのサブディレクトリから見ると、このリポジトリの worktree が別リポジトリ扱いになりました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("neighbour lease written"),
+        "false",
+        "別リポジトリの worktree に、このリポジトリの所有記録が書かれました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("owner: stale"),
+        "deny",
+        "`.git` が古い main を指す worktree が別リポジトリ扱いになり、所有確認が外れました: {verdicts}"
+    );
+    assert_eq!(
+        verdict("owner: foreign"),
+        "deny",
+        "このリポジトリの他セッションの worktree への命令が通りました: {verdicts}"
+    );
+}
+
 /// Change 072. Recent agent launch settings save and load round-trip.
 #[test]
 pub(crate) fn recent_agent_settings_save_and_load_round_trip() {
