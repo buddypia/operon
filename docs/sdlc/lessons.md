@@ -1800,3 +1800,15 @@ under change 115's mutations 1, 2, and 10.
 
 **Guard.** `the_commit_guard_never_advises_a_commit_the_commit_gate_refuses`, watched failing against the previous `commit-guard.mjs`.
 
+
+## 066 — A hook read stdin when it was only imported
+
+**What happened.** Change 131's reviewers imported `.cli/hooks/worktree-policy-guard.mjs` to call one exported function. The import started the hook's own main, which reads stdin to its end; with stdin an open pipe, both probes waited nine hours, and the person took the review for stuck.
+
+**Why it was invisible.** `commit-guard.mjs` and `destructive-git-guard.mjs` already asked `isDirectInvocation(import.meta.url)`; the other four hooks did not, and nothing compared them. Their only callers, Claude's settings and the dispatcher, never exposed the difference.
+
+**Cure.** Change 132 gives the four the same condition. Its own failure mode is fail-open — a condition never true leaves the guard silent — and no existing test noticed that, so the guard checks both sides.
+
+**The rule.** A hook module runs its main only as the entry script; importing it has no side effects. A check on how a guard starts also checks that it still starts.
+
+**Guard.** `importing_a_hook_never_reads_its_stdin`, watched failing on the unedited `worktree-owner-tracker.mjs` (STDIN-READ) and on `worktree-policy-guard.mjs` with its condition forced false (no answer).

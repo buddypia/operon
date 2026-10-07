@@ -60,6 +60,7 @@ import {
   resolveProjectDir,
   withCommandCwd,
   canonicalizePath,
+  isDirectInvocation,
 } from '../lib/utils.mjs';
 import {
   claimOwnerLease,
@@ -266,7 +267,7 @@ function liveLeaseDenyMessage(lease, { relRoot, action, sessionId }) {
   );
 }
 
-if (!globalThis.__HOOK_ORCHESTRATOR__) {
+if (!globalThis.__HOOK_ORCHESTRATOR__ && isDirectInvocation(import.meta.url)) {
   safeHookMainWithProfile('worktree-session-owner-guard', async () => {
     const data = await readStdin();
     return output(await run(data));

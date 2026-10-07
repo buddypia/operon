@@ -1,0 +1,22 @@
+# Review record for change 132.
+#
+# Round 1: rust-reviewer approve-with-nits, 0 important, 3 nits. It probed
+# every real start-up path for fail-open (the Claude settings form, symlinked,
+# relative and spaced/unicode/%/#/' paths, wrong case on APFS, Codex and
+# Antigravity through _cli-dispatch.mjs) and found none; it confirmed the test
+# is not vacuous by running the import probe on all four unfixed hooks (each
+# printed STDIN-READ). Nits taken: name the six hooks instead of a count; say
+# the stub sees only reads through process.stdin. Nit kept: the direct-run
+# half launches only the canonical path.
+# Round 2: rust-reviewer re-read both fixes; approve-with-nits, 0 1.
+
+digest: "5f27204099f7350e"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · the direct-run check launches each hook only by its canonical path
+    person: "フックを別名のパス（シンボリックリンクや空白を含むパス）から起動した場合は、自動テストでは確かめていません。今日の時点では手で確かめて問題ありません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"

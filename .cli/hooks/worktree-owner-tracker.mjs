@@ -48,7 +48,7 @@
 
 import { isAbsolute, resolve } from 'node:path';
 import { HookOutput } from '../lib/hook-output.mjs';
-import { readStdin, output, safeHookMain, safeGit, resolveProjectDir } from '../lib/utils.mjs';
+import { readStdin, output, safeHookMain, safeGit, resolveProjectDir, isDirectInvocation } from '../lib/utils.mjs';
 import { DERIVED_LOCK_BRANCH_RE, isEditLockEnforced, isTestFilePath } from '../lib/test-lock.mjs';
 import { parseWorktreeList } from '../lib/worktree-plan-path.mjs';
 import { claimOwnerLease, renewOwnerLease } from '../lib/worktree-owner-lease.mjs';
@@ -200,7 +200,7 @@ async function recordOwner(data, cmd) {
   return {};
 }
 
-if (!globalThis.__HOOK_ORCHESTRATOR__) {
+if (!globalThis.__HOOK_ORCHESTRATOR__ && isDirectInvocation(import.meta.url)) {
   safeHookMain(async () => {
     const data = await readStdin();
     return output(await run(data));

@@ -34910,6 +34910,76 @@ fn node_steered_at(root: &Path, git_dir: &Path, work_tree: &Path) -> Command {
 /// a hook that hangs fails the test.
 const NODE_HOOK_TEST_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// Change 132. A reviewer imported `worktree-policy-guard.mjs` to call one
+/// exported function, and the import started the hook's own `main`, which
+/// read stdin: the probe, its stdin an open pipe, waited nine hours. Importing
+/// a hook must not read stdin; only running it as the entry script may. The
+/// stub `process.stdin` exits on first touch, so a hook that reads fails at
+/// once instead of hanging until the bound. It sees reads through
+/// `process.stdin`, which is how `readStdin` in `.cli/lib/utils.mjs` reads; a
+/// hook reading fd 0 directly would slip past it.
+#[test]
+pub(crate) fn importing_a_hook_never_reads_its_stdin() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let hooks = root.join(".cli/hooks");
+    let mut names: Vec<_> = fs::read_dir(&hooks)
+        .unwrap()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".mjs"))
+        .collect();
+    names.sort();
+    for expected in [
+        "commit-guard.mjs",
+        "destructive-git-guard.mjs",
+        "worktree-owner-tracker.mjs",
+        "worktree-policy-guard.mjs",
+        "worktree-session-owner-guard.mjs",
+        "worktree-shipping-guard.mjs",
+    ] {
+        assert!(
+            names.iter().any(|name| name == expected),
+            "{expected} が {} にありません",
+            hooks.display()
+        );
+    }
+
+    for name in names {
+        let script = format!(
+            "Object.defineProperty(process, 'stdin', {{ get() {{ console.log('STDIN-READ'); process.exit(3); }} }});\n\
+             await import({:?});",
+            hooks.join(&name).to_str().unwrap()
+        );
+        let mut command = node_in(&root);
+        command
+            .args(["--input-type=module", "-e", &script])
+            .stdin(std::process::Stdio::null());
+        let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+            .expect("node が見つからないか、時間内に終わりませんでした");
+        assert!(
+            output.status.success() && !both_streams(&output).contains("STDIN-READ"),
+            "{name} を import しただけで stdin を読みました: {}",
+            both_streams(&output)
+        );
+
+        // The other side of the same condition: run as the entry script, the
+        // hook still answers. A condition that is never true fails open, and
+        // no other test notices a guard that silently stopped running.
+        let mut command = node_in(&root);
+        command
+            .arg(hooks.join(&name))
+            .stdin(std::process::Stdio::null());
+        let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+            .expect("node が見つからないか、時間内に終わりませんでした");
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .starts_with('{'),
+            "{name} を直接起動しても応答しませんでした (フックが動いていません): {}",
+            both_streams(&output)
+        );
+    }
+}
+
 /// Change 080. A session that carries `GIT_DIR` and `GIT_WORK_TREE` ran
 /// `cleanup-worktree` on a merged worktree, and the branch it read in that
 /// worktree's directory was the session's: `main`. git reads the pointers
