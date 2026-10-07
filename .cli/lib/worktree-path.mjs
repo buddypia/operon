@@ -7,7 +7,9 @@
  *   The session axis is the wrong axis for per-target evaluation — in multi-session worktrees,
  *   a wt1 session would mis-evaluate wt2 / its own worktree (cross-worktree context misdelivery).
  *
- * This module provides **pure functions only** — 0 file reads, 0 git calls, 0 global state.
+ * The path functions above `repositoryTop` are **pure** — 0 file reads, 0 git calls, 0 global state.
+ * Change 135's functions below it read the filesystem (`stat`, a worktree's `.git` file) but still make
+ * no git call and keep no state.
  *   → Shared state conflicts structurally impossible even during concurrent multi-session / multi-worktree calls.
  *   → As a non-hook module, importing causes zero standalone stdin pre-consumption side effects.
  *
@@ -17,6 +19,8 @@
  *   Escape variants (`hotfix-foo`) and single names (`wt1`) evaluate as 1 segment.
  */
 
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { KNOWN_BRANCH_PREFIXES } from './worktree-plan-path.mjs';
 
 const WORKTREES_SEGMENT = '/.worktrees/';
@@ -94,4 +98,53 @@ export function resolveMainRepoRoot(absPath) {
  */
 export function isWorktreeAbsPath(absPath) {
   return resolveWorktreeRoot(absPath) !== null;
+}
+
+/**
+ * Change 135. The nearest ancestor of `dir` (itself included) holding a `.git` entry, or null.
+ * Path-only apart from the `existsSync` per level; no git call.
+ */
+export function repositoryTop(dir) {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, '.git'))) return d;
+    if (dirname(d) === d) return null;
+  }
+}
+
+/**
+ * Change 135. The main checkout a repository top belongs to. A linked worktree's `.git` is a file
+ * naming `<main>/.git/worktrees/<name>`, wherever the worktree lives; anything else is its own
+ * main checkout. Unreadable or unexpected contents answer `top` itself, and so does a worktree of a
+ * bare repository (`<repo>.git/worktrees/<name>`): it reads as its own repository, which only
+ * narrows what is called "this one" for a layout this repository does not use.
+ */
+export function mainCheckoutOf(top) {
+  const gitEntry = join(top, '.git');
+  try {
+    if (!statSync(gitEntry).isFile()) return top;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(gitEntry, 'utf8'));
+    if (!m) return top;
+    const gitdir = resolve(top, m[1]);
+    const at = gitdir.lastIndexOf('/.git/worktrees/');
+    return at === -1 ? top : gitdir.slice(0, at);
+  } catch {
+    return top;
+  }
+}
+
+/**
+ * Change 135. The main checkout of the repository `dir` is in, or null when `dir` is in none.
+ * Walking up to the `.git` makes the answer the same from any subdirectory of the repository.
+ */
+export function repositoryOf(dir) {
+  const top = repositoryTop(dir);
+  if (top === null) return null;
+  // Realpath, so `/var/…` written into a gitdir file and `/private/var/…` name one checkout;
+  // `.native`, so a case-variant spelling on a case-insensitive volume does too.
+  const main = mainCheckoutOf(top);
+  try {
+    return realpathSync.native(main);
+  } catch {
+    return main;
+  }
 }

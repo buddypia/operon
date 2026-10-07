@@ -40,7 +40,7 @@ import { extractApplyPatchFilePaths } from '../lib/apply-patch-paths.mjs';
 import { isEscapeHatch, matchesGlob, requiresWorktree } from '../lib/trunk-branch.mjs';
 import { existsSync, realpathSync } from 'fs';
 import { commandText, isInside, pathArgs, walkSegments } from '../lib/bash-segments.mjs';
-import { resolveWorktreeRoot } from '../lib/worktree-path.mjs';
+import { repositoryOf, resolveWorktreeRoot } from '../lib/worktree-path.mjs';
 
 // Glob + escape-hatch matching live in trunk-branch.mjs (shared with commit-guard / trunk-start-warning
 // through `requiresWorktree`); re-exported here for existing importers.
@@ -146,6 +146,14 @@ function buildDenyMessage(relPath, branch = 'main') {
 //     project root outside `.worktrees/`) or fails to resolve. `cd .worktrees/x && rm -rf ../..`,
 //     `git -C .worktrees/x -C ../.. reset --hard`, `git -C .worktrees/x --work-tree=../.. …` and
 //     `make -C .worktrees/x -f ../../Makefile` are therefore judged as trunk commands.
+//   - Change 135: the same, with the effective directory outside the project root and inside
+//     *another* git repository. A repository is named by its main checkout (`repositoryOf`: the
+//     nearest `.git`, followed through a linked worktree's `gitdir:` file), so this repository's
+//     own worktrees — under `.worktrees/` or anywhere else — and a repository that contains the
+//     project are not "another". That repository's work is governed by its own hooks. The
+//     path-argument and redirect check is the same, so `cd ../other && rm -rf ../operon/src` is
+//     still a trunk command. Not exempt: a directory in no repository (`/tmp`, `$HOME` — while they
+//     hold no `.git`), a directory that does not exist, and `~`-paths (unresolved, as everywhere).
 //   - After `;` / `||` / `|` / `&` the preceding `cd` may have failed, so it no longer exempts.
 //   - `env -C <dir>` counts as a cd for that one command. Directories and path arguments are
 //     compared after realpath, so a symlink inside a worktree that points at the trunk does not
@@ -213,7 +221,10 @@ export function realPath(abs) {
   let tail = '';
   for (;;) {
     try {
-      return join(realpathSync(head), tail);
+      // `.native` returns the on-disk case: on a case-insensitive volume `/Users/x/DEV/operon` is
+      // the trunk, and a string comparison against `/Users/x/dev/operon` would say it is not
+      // (review of 135).
+      return join(realpathSync.native(head), tail);
     } catch {
       const parent = dirname(head);
       if (parent === head) return abs;
@@ -235,8 +246,29 @@ export function isWorktreeSegment(seg, projectDir, linked = hasGitEntry) {
   return !unresolved && !paths.some((p) => isTrunkPath(realPath(p), root));
 }
 
+/**
+ * Change 135. Is this segment work inside another git repository that cannot touch the trunk
+ * checkout? The certainty rules and the path check are `isWorktreeSegment`'s (see header).
+ */
+export function isOtherRepositorySegment(seg, projectDir) {
+  if (!seg.cwdCertain || !seg.effectiveDir || seg.dirs.includes(null)) return false;
+  const root = realPath(projectDir);
+  const dir = realPath(seg.effectiveDir);
+  if (!existsSync(dir) || isInside(dir, root) || isInside(root, dir)) return false;
+  // `other` is named by its main checkout, so this repository's own linked worktree — wherever it
+  // lives — names a checkout that contains the project root, as does a repository containing the
+  // project, and a project root given as a subdirectory still lies inside its own repository.
+  const other = repositoryOf(dir);
+  if (!other || isInside(root, other) || isInside(other, root)) return false;
+  const { paths, unresolved } = pathArgs(seg.words, seg.cwd, dir);
+  return !unresolved && !paths.some((p) => isTrunkPath(realPath(p), root));
+}
+
 /** GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE … and CDPATH redirect what a command acts on. */
 const LOCATION_ENV_RE = /^(?:GIT_[A-Z_]+|CDPATH)$/;
+// Unanchored: `GIT_{DIR=x,WORK_TREE=y}` (brace expansion) and `GIT_DIR+=x` name the same variables.
+const LOCATION_ASSIGN_RE = /GIT_|CDPATH/;
+const EXPORTING_RE = /^(?:export|declare|typeset|readonly|local)$/;
 
 /**
  * A redirect that writes no file: an fd duplicated or closed (`2>&1`, `>&2`, `2>&-`) or output
@@ -274,8 +306,15 @@ export function findDisallowedTrunkSegment(cmd, cwd, projectDir, allowlist, link
     // Checked before the exemption and before the empty-command skip: a bare `GIT_DIR=x` statement
     // or `env -S '…'` changes or hides what later commands do, wherever it runs.
     if (seg.opaque || seg.assigns.some((n) => LOCATION_ENV_RE.test(n))) return seg.raw;
+    // The same assignment made by a builtin lasts for every later command (review of 135). Any
+    // position, so `builtin export`, `noglob export` and the like are caught too; an `echo export
+    // GIT_DIR=x` refused with them costs a retry, not a trunk.
+    if (seg.words.some((w) => EXPORTING_RE.test(w)) && seg.words.some((w) => LOCATION_ASSIGN_RE.test(w))) {
+      return seg.raw;
+    }
     if (seg.isCd || seg.words.length === 0) continue;
     if (isWorktreeSegment(seg, projectDir, linked)) continue;
+    if (isOtherRepositorySegment(seg, projectDir)) continue;
     if (seg.redirect) return seg.raw;
     const words = judgedWords(seg);
     const text = commandText(words);

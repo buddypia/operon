@@ -1,0 +1,79 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. 2026-10-07: the person asked this session (project: operon) to fix the
+#    Supabase token that nichenext's .mcp.json put on a process's command
+#    line. Every step in nichenext was refused by operon's guards: the trunk
+#    allowlist judged `cd <nichenext worktree> && python3 …` as trunk work,
+#    and the session owner guard called nichenext's worktree "a different
+#    worktree" of this repository. The person chose to fix the guard
+#    (「ガードを直してから進める」) over handing the work to another session.
+# 2. Cause: isWorktreeSegment exempts only this repository's `.worktrees/`;
+#    any other directory, another repository included, is the trunk. The
+#    owner guard's byWorktree took every `.worktrees/` path as this
+#    repository's, so it also would have claimed a lease — written a
+#    `.session-owner` — inside the other repository. Watched failing: the new
+#    test refused `cd <neighbour wt> && python3 edit.py` on main's guards, and
+#    with only the owner guard reverted, refused the neighbour worktree.
+# 3. Fix: a segment whose certain effective directory lies in another git
+#    repository (nearest `.git` ancestor neither contains nor lies inside the
+#    project) is exempt on the same terms as a worktree segment: no path
+#    argument or redirect may resolve into the trunk, after realpath. The
+#    owner guard ignores worktrees whose main repository is not this one.
+# 4. Kept out: a directory in no repository (`/tmp`, `$HOME` while they hold
+#    no `.git`); a repository that contains the project (a sibling in it is
+#    next to the trunk); this repository's own linked worktrees anywhere (the
+#    gitdir file names the main checkout); a missing directory; `~` paths and
+#    a cd after `;`/`|` (uncertain). Scripts run there are as opaque as they
+#    are in a worktree (header threat model).
+# 5. Review round 1 (rust-reviewer, subprocess-safety-reviewer: both
+#    request-changes), all taken: the repository is named by its main
+#    checkout from the `.git` up (`repositoryOf` in lib/worktree-path.mjs), so
+#    a project root given as a subdirectory still owns its worktrees (owner
+#    guard failed open there); paths are compared in their on-disk case
+#    (`realpathSync.native`), because a case-variant spelling of the trunk on
+#    this case-insensitive volume read as another repository;
+#    `export`/`declare` of GIT_*/CDPATH is refused like the prefix form.
+#    Round 2 (both approve-with-nits), taken: a project root that is a
+#    worktree outside `.worktrees/` (owner guard compares main checkouts); a
+#    worktree whose `.git` names a renamed main (inside the project = ours);
+#    `builtin export` and other modifiers (an exporting word anywhere); the
+#    lib header and the bare-repository limit documented. Round 3 (both
+#    approve-with-nits), taken: `export GIT_{DIR=…}` and `GIT_DIR+=` (any word
+#    holding GIT_/CDPATH beside an exporting word is refused). An inode-based
+#    containment check tried in between was dropped: `.native` covers the
+#    case, and nothing left needed it.
+#    Pre-existing for worktree segments and widened by this change, recorded
+#    not fixed: a `cd` inside `$( … )` is not followed; attached short options
+#    (`-C<dir>`, `-o<file>`, `-f<file>`) and absolute globs/braces skip the
+#    path check; `link/..` folds textually; any `.git` counts as a repository
+#    (`/opt/homebrew` here); `printf -v`/`read`/`eval` of GIT_DIR (opaque).
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Review, then commit on fix/135-guard-judges-other-repos, push, CI, land, install; then the nichenext .mcp.json fix."
+
+contract:
+  three-gates: "machine pending cargo test --locked in CI; fmt and clippy at commit"
+  failing-test-first: "machine passed work_inside_another_repository_is_not_judged_as_this_trunk refused cd <neighbour wt> && python3 edit.py on main's guards; with only the owner guard reverted it refused the neighbour worktree"
+  guards-verified-by-mutation: "machine passed fourteen of fifteen mutations red: owner filter removed, owner guard from main, inside-project clause dropped (stale gitfile), identity clause dropped (subdirectory root), trunk path check off, cwd certainty ignored, root-inside-other dropped (nested project), gitdir file not followed, policy realpath not native, repositoryOf not native, export only as first word, export name anchored again (brace and += forms), export not refused, missing directory allowed. Survivor: owner project not on-disk case — covered by the identity clause except a renamed main seen through a case-variant spelling. The reviewers' real-path bypasses replayed: all deny"
+  release-binary: "machine pending bash scripts/package-macos.sh"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

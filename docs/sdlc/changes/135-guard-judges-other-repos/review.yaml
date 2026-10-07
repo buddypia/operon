@@ -1,0 +1,34 @@
+# Review record for change 135.
+#
+# Two reviewers: rust-reviewer (craft) and an adversarial
+# subprocess-safety-reviewer pass, as for 131, because this loosens a guard.
+# Round 1: both request-changes. The owner guard failed open when the project
+# root was a subdirectory; a case-variant spelling of the trunk read as
+# another repository (both guards); `export GIT_DIR=` passed. All fixed with
+# test cases, each mutation watched red.
+# Round 2: both approve-with-nits. Taken: a project root that is a worktree
+# outside .worktrees, a worktree whose gitfile names a renamed main,
+# `builtin export`, the lib header. The inode containment check tried in
+# round 1 was dropped for realpathSync.native.
+# Round 3: both approve-with-nits. Taken: `export GIT_{DIR=…}` and `+=`.
+# Round 4: both approve.
+# Round 5: renumbered 133 to 135 after another session landed its own 133;
+# both confirmed the diff is the number only.
+# Round 6: the gate refuses a commit touching two change directories, so the
+# pushed 133 commit and the renumber were recombined into one commit on
+# fix/135-guard-judges-other-repos; both confirmed it is the round-4 code
+# plus the renumbering, nothing else.
+
+digest: "dead5ff4549b0fda"
+
+rounds: 6
+
+carried:
+  - rust-reviewer/3 · an exporting word plus any GIT_/CDPATH word is refused even when harmless
+    person: "main では `export` などと `GIT_` を含む語が同じ命令にあると、害のない形でも止まります。止まったら分けて実行すれば通ります。"
+  - subprocess-safety-reviewer/1 · cd inside $(), attached short options, absolute globs, link/.., any .git as a repository, printf -v/read/eval
+    person: "worktree で前からあった抜け道（`$( )` の中の cd、`-o<ファイル>` のような付けた書き方、絶対パスのワイルドカードなど）は、別リポジトリでも同じく残っています。悪意のある操作を防ぐ仕組みではないので、今回は直していません。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
