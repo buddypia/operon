@@ -25,7 +25,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -33,10 +33,10 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Committed on fix/132-guard-waits-on-stdin-when-imported; review, push, CI, land, install."
+resume: "Done once landed and installed. Open: the direct-run check launches only the canonical path (review.yaml)."
 
 contract:
-  three-gates: "machine pending cargo test --locked in CI; fmt and clippy at commit"
+  three-gates: "machine passed CI test suite on 949e374 (run 37561737878); fmt and clippy at commit"
   failing-test-first: "machine passed importing_a_hook_never_reads_its_stdin stopped at worktree-owner-tracker.mjs with STDIN-READ before the fix"
   guards-verified-by-mutation: "machine passed worktree-policy-guard condition forced to && false: the same test failed (直接起動しても応答しませんでした) while the 32 existing trunk/worktree/policy tests passed"
   release-binary: "machine pending bash scripts/package-macos.sh"
