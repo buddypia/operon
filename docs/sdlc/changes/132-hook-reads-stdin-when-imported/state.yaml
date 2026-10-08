@@ -39,7 +39,7 @@ contract:
   three-gates: "machine passed CI test suite on 949e374 (run 37561737878); fmt and clippy at commit"
   failing-test-first: "machine passed importing_a_hook_never_reads_its_stdin stopped at worktree-owner-tracker.mjs with STDIN-READ before the fix"
   guards-verified-by-mutation: "machine passed worktree-policy-guard condition forced to && false: the same test failed (直接起動しても応答しませんでした) while the 32 existing trunk/worktree/policy tests passed"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh, installed through replace-macos-bundle.sh"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
