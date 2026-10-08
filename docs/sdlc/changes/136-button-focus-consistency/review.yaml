@@ -1,0 +1,40 @@
+# Review record for 136-button-focus-consistency.
+#
+# rust-reviewer read the staged diff (src/ui/widgets.rs, src/app.rs,
+# src/app/screens.rs, src/ui/session_tree.rs, src/tests.rs) against
+# .claude/rules/rust.md and .claude/rules/palette-and-glyphs.md.
+#
+# Round 1 returned request-changes with one Important finding: three frameless
+# buttons (session close, session menu, port badge) had no ring. Fixed in
+# screens.rs and app.rs; the spec, plan, and screen record them.
+#
+# Round 2 found no Important issues. Checked: no colour literal
+# at a call site (the ring reads palette.border_strong); no per-frame allocation
+# or I/O added in the draw path; no new unwrap or panic site; egui 0.31
+# rect_stroke, StrokeKind, and CornerRadius use; the focus test pins a real
+# decision (one ring on a focused control at RADIUS_CONTROL, none unfocused).
+#
+# Round 3 (this verdict, on digest dead4b97eb66f677) followed the verb_button
+# danger-only ring and the test's theme setup. No Important issues. Two nits,
+# not taken: the inline sites in screens.rs and app.rs are checked by hand, not
+# by the test; the plain verb row pins egui's native outline, not a ring.
+#
+# Contrast of the ring against the accent and danger fills was estimated by the
+# reviewer and is not measured on screen; it is carried below for the person.
+
+digest: "dead4b97eb66f677"
+
+rounds: 3
+
+# Open items, carried rather than taken. Each has a person line beneath it.
+carried:
+  - rust-reviewer/a · The inline buttons in src/app/screens.rs and src/app.rs (brand, two remove, session close, session menu, port badge) are not covered by the focus test; a source-walk test could guard them.
+    person: "今回の追加ボタンは自動テストでは確認していません。今後この並びのボタンを作り直した時にリングが消えても、テストでは気づけません。対応は不要ですが、アプリで Tab 操作して見た目を確認してください。"
+  - rust-reviewer/b · The ring's contrast against the accent fill (primary button) and the danger fill (remove buttons) is not tested. Estimated 2.2:1 and 1.96:1 on accent, 3.12, 2.61, and 2.27 on danger; several fall below the 3:1 non-text guideline.
+    person: "主要ボタン（青系）と削除ボタン（赤系）では、フォーカス枠が塗りの色と並んだ時に見えにくい可能性があります。見えにくければ、枠の色をどうするか決める必要があります。アプリで Tab 操作して、枠が見えるかを確認してください。"
+
+# One line per reviewer. Three tokens, no more and no fewer:
+#
+#   <verdict> <important-count> <nit-count>
+verdicts:
+  rust-reviewer: "approve 0 2"

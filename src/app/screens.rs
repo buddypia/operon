@@ -96,6 +96,7 @@ impl OperonApp {
                             .stroke(egui::Stroke::NONE)
                             .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
                     );
+                    paint_button_focus(ui, &brand_res, palette);
                     register_control(brand_res.rect);
                     if brand_res.on_hover_text(tr("ホーム")).clicked() {
                         self.page = Page::Home;
@@ -120,7 +121,7 @@ impl OperonApp {
                         }
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let settings_res = icon_button(ui, ICON_SETTINGS, tr("設定"));
+                        let settings_res = icon_button(ui, palette, ICON_SETTINGS, tr("設定"));
                         register_control(settings_res.rect);
                         if settings_res.on_hover_text(tr("設定")).clicked() {
                             self.page = Page::Settings;
@@ -1073,18 +1074,17 @@ impl OperonApp {
                                 );
                                 ui.add_space(SPACE_SM);
                                 ui.horizontal(|ui| {
-                                    if ui
-                                        .add(
-                                            egui::Button::new(
-                                                RichText::new(tr("Operon から削除"))
-                                                    .color(readable_text_on(palette.danger, palette)),
-                                            )
-                                            .fill(palette.danger)
-                                            .stroke(egui::Stroke::NONE)
-                                            .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
+                                    let remove_res = ui.add(
+                                        egui::Button::new(
+                                            RichText::new(tr("Operon から削除"))
+                                                .color(readable_text_on(palette.danger, palette)),
                                         )
-                                        .clicked()
-                                    {
+                                        .fill(palette.danger)
+                                        .stroke(egui::Stroke::NONE)
+                                        .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
+                                    );
+                                    paint_button_focus(ui, &remove_res, palette);
+                                    if remove_res.clicked() {
                                         self.remove_project(project.id);
                                     }
                                     if quiet_button(ui, palette, tr("キャンセル")).clicked() {
@@ -1112,6 +1112,7 @@ impl OperonApp {
                                     |ui| {
                                         if small_icon_button(
                                             ui,
+                                            palette,
                                             ICON_CLOSE,
                                             tr("プロジェクトを削除"),
                                         )
@@ -1121,6 +1122,7 @@ impl OperonApp {
                                         }
                                         if small_icon_button(
                                             ui,
+                                            palette,
                                             ICON_OPEN_EXTERNAL,
                                             tr("Finder で表示"),
                                         )
@@ -1268,7 +1270,7 @@ impl OperonApp {
                 {
                     remove_requested = true;
                 }
-                if icon_button(ui, ICON_OPEN_EXTERNAL, tr("Finder で表示")).clicked() {
+                if icon_button(ui, palette, ICON_OPEN_EXTERNAL, tr("Finder で表示")).clicked() {
                     let path = project.path.clone();
                     self.request_system_action(tr("Finder で表示"), move || reveal_path(&path));
                 }
@@ -1296,18 +1298,17 @@ impl OperonApp {
                     );
                     ui.add_space(SPACE_SM);
                     ui.horizontal(|ui| {
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    RichText::new(tr("Operon から削除"))
-                                        .color(readable_text_on(palette.danger, palette)),
-                                )
-                                .fill(palette.danger)
-                                .stroke(egui::Stroke::NONE)
-                                .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
+                        let remove_res = ui.add(
+                            egui::Button::new(
+                                RichText::new(tr("Operon から削除"))
+                                    .color(readable_text_on(palette.danger, palette)),
                             )
-                            .clicked()
-                        {
+                            .fill(palette.danger)
+                            .stroke(egui::Stroke::NONE)
+                            .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
+                        );
+                        paint_button_focus(ui, &remove_res, palette);
+                        if remove_res.clicked() {
                             self.remove_project(project.id);
                         }
                         if quiet_button(ui, palette, tr("キャンセル")).clicked() {
@@ -1851,8 +1852,13 @@ impl OperonApp {
                 self.session_path_input.clear();
                 self.session_path_project = None;
             }
-            if small_icon_button(ui, ICON_OPEN_EXTERNAL, tr("作業フォルダを Finder で表示"))
-                .clicked()
+            if small_icon_button(
+                ui,
+                palette,
+                ICON_OPEN_EXTERNAL,
+                tr("作業フォルダを Finder で表示"),
+            )
+            .clicked()
             {
                 let reveal_target = target_path.clone();
                 self.request_system_action(tr("Finder で表示"), move || {
@@ -2143,7 +2149,8 @@ impl OperonApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if small_icon_button(ui, ICON_CLOSE, tr("閉じる")).clicked()
+                                    if small_icon_button(ui, palette, ICON_CLOSE, tr("閉じる"))
+                                        .clicked()
                                     {
                                         close = true;
                                     }
@@ -2341,14 +2348,17 @@ impl OperonApp {
                                 .small()
                                 .weak(),
                         );
-                        if icon_button(ui, ICON_OPEN_EXTERNAL, tr("Finder で表示")).clicked() {
+                        if icon_button(ui, palette, ICON_OPEN_EXTERNAL, tr("Finder で表示"))
+                            .clicked()
+                        {
                             let path = cli_session.path.clone();
                             self.request_system_action(tr("Finder で表示"), move || {
                                 open_path(&path)
                             });
                         }
                         if is_safe_cli_session_id(&cli_session.id)
-                            && icon_button(ui, ICON_RESUME, tr("元の CLI で再開")).clicked()
+                            && icon_button(ui, palette, ICON_RESUME, tr("元の CLI で再開"))
+                                .clicked()
                         {
                             self.resume_cli_session(project, &cli_session);
                         }
@@ -2376,7 +2386,7 @@ impl OperonApp {
                             )
                             .truncate(),
                         );
-                        resume_copy_button(ui, cli_session.provider, &cli_session.id);
+                        resume_copy_button(ui, palette, cli_session.provider, &cli_session.id);
                     });
                     if let Some(branch) = &cli_session.branch {
                         ui.label(
@@ -2493,7 +2503,8 @@ impl OperonApp {
                         .color(palette.text_muted),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if small_icon_button(ui, ICON_CLOSE, tr("セッションを削除")).clicked() {
+                    if small_icon_button(ui, palette, ICON_CLOSE, tr("セッションを削除")).clicked()
+                    {
                         removal_requested = true;
                     }
                 });
@@ -2502,7 +2513,7 @@ impl OperonApp {
                 // This row is read while deciding which session to look at, so
                 // it carries one way in. Attaching from Terminal.app is a
                 // choice about a session already open, and lives there.
-                if icon_button(ui, ICON_SHOW, tr("ターミナルを表示")).clicked() {
+                if icon_button(ui, palette, ICON_SHOW, tr("ターミナルを表示")).clicked() {
                     self.open_session_in_terminal(session.id);
                 }
                 if matches!(
@@ -2510,6 +2521,7 @@ impl OperonApp {
                     SessionStatus::Exited | SessionStatus::Failed
                 ) && icon_button(
                     ui,
+                    palette,
                     ICON_CLOSE,
                     if session.status == SessionStatus::Failed {
                         tr("残ったターミナルを閉じる")
@@ -2640,7 +2652,7 @@ impl OperonApp {
                     self.git_view = view;
                 }
             }
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 match self.git_view {
                     GitView::Changes => self.request_git_changes(project),
                     GitView::Diff => self.request_git_diff(project, self.git_selected_file.clone()),
@@ -2698,7 +2710,8 @@ impl OperonApp {
                                 // Reviewing a change is usually the step before
                                 // editing it, so the file is one click from the
                                 // editor rather than a hunt through the tree.
-                                if icon_button(ui, ICON_EDIT, tr("エディタで開く")).clicked()
+                                if icon_button(ui, palette, ICON_EDIT, tr("エディタで開く"))
+                                    .clicked()
                                 {
                                     self.open_document(project, PathBuf::from(&file.path));
                                 }
@@ -2843,7 +2856,7 @@ impl OperonApp {
         let mutation_running = self.worktree_mutation_running(project.id);
         ui.horizontal(|ui| {
             ui.heading("worktree");
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_worktrees(project);
             }
         });
@@ -2926,7 +2939,8 @@ impl OperonApp {
                                     self.session_path_project = Some(project.id);
                                 }
                             }
-                            if icon_button(ui, ICON_OPEN_EXTERNAL, tr("Finder で表示")).clicked()
+                            if icon_button(ui, palette, ICON_OPEN_EXTERNAL, tr("Finder で表示"))
+                                .clicked()
                             {
                                 let path = worktree.path.clone();
                                 self.request_system_action(tr("Finder で表示"), move || {
@@ -3021,7 +3035,7 @@ impl OperonApp {
         ui.horizontal(|ui| {
             ui.heading(tr("プルリクエスト"));
             ui.label(RichText::new(tr("認証済み GitHub CLI 経由")).small().weak());
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_pull_requests(project);
             }
         });
@@ -3055,7 +3069,8 @@ impl OperonApp {
                                         .color(palette.text_muted),
                                 );
                             }
-                            if icon_button(ui, ICON_OPEN_EXTERNAL, tr("ブラウザで開く")).clicked()
+                            if icon_button(ui, palette, ICON_OPEN_EXTERNAL, tr("ブラウザで開く"))
+                                .clicked()
                             {
                                 let url = pull_request.url.clone();
                                 self.request_system_action(
@@ -3153,7 +3168,13 @@ impl OperonApp {
                     .hint_text(tr("ファイルを絞り込む"))
                     .desired_width(196.0),
             );
-            if icon_button(ui, ICON_REFRESH, tr("ファイル一覧と Git の状態を読み直す")).clicked()
+            if icon_button(
+                ui,
+                palette,
+                ICON_REFRESH,
+                tr("ファイル一覧と Git の状態を読み直す"),
+            )
+            .clicked()
             {
                 self.request_files(project);
                 self.invalidate_project_file_views(project.id);
@@ -3350,7 +3371,7 @@ impl OperonApp {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if icon_button(ui, ICON_OPEN_EXTERNAL, tr("既定のアプリで開く")).clicked()
+                if icon_button(ui, palette, ICON_OPEN_EXTERNAL, tr("既定のアプリで開く")).clicked()
                 {
                     let full = self.open_documents[index].absolute();
                     self.request_system_action(tr("ファイルを開く"), move || {
@@ -3359,6 +3380,7 @@ impl OperonApp {
                 }
                 if icon_button(
                     ui,
+                    palette,
                     ICON_REFRESH,
                     tr("ディスクから読み直す（編集内容は破棄されます）"),
                 )
@@ -3759,7 +3781,8 @@ impl OperonApp {
                                     )
                                     .on_hover_text(tr("未保存の変更があります"));
                                 }
-                                if small_icon_button(ui, ICON_CLOSE, tr("タブを閉じる")).clicked()
+                                if small_icon_button(ui, palette, ICON_CLOSE, tr("タブを閉じる"))
+                                    .clicked()
                                 {
                                     close = Some(document.clone());
                                 }
@@ -3792,7 +3815,7 @@ impl OperonApp {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
             ui.heading(tr("スキル"));
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_skills(project);
             }
         });
@@ -3819,7 +3842,8 @@ impl OperonApp {
             ui.horizontal(|ui| {
                 ui.label(ICON_SKILL);
                 ui.monospace(skill.display().to_string());
-                if icon_button(ui, ICON_SHOW, tr("「ファイル」タブで開く")).clicked() {
+                if icon_button(ui, palette, ICON_SHOW, tr("「ファイル」タブで開く")).clicked()
+                {
                     self.selected_file = Some(skill);
                     self.project_tab = ProjectTab::Files;
                 }
@@ -3831,7 +3855,7 @@ impl OperonApp {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
             ui.heading(tr("ルールと指示"));
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_rules(project);
             }
         });
@@ -3857,7 +3881,8 @@ impl OperonApp {
             ui.horizontal(|ui| {
                 ui.label("≡");
                 ui.monospace(rule.display().to_string());
-                if icon_button(ui, ICON_SHOW, tr("「ファイル」タブで開く")).clicked() {
+                if icon_button(ui, palette, ICON_SHOW, tr("「ファイル」タブで開く")).clicked()
+                {
                     self.selected_file = Some(rule);
                     self.project_tab = ProjectTab::Files;
                 }
@@ -3866,9 +3891,10 @@ impl OperonApp {
     }
 
     fn ui_sessions(&mut self, ui: &mut egui::Ui) {
+        let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
             ui.heading(tr("セッション"));
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_session_poll();
             }
             for (view, label) in [
@@ -3931,7 +3957,7 @@ impl OperonApp {
                                     )
                                     .strong(),
                                 );
-                                if icon_button(ui, ICON_OPEN_EXTERNAL, tr("Finder で表示"))
+                                if icon_button(ui, palette, ICON_OPEN_EXTERNAL, tr("Finder で表示"))
                                     .clicked()
                                 {
                                     let path = transcript.path.clone();
@@ -3997,7 +4023,8 @@ impl OperonApp {
                                 .weak(),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if small_icon_button(ui, ICON_SHOW, tr("プロジェクトを開く")).clicked()
+                            if small_icon_button(ui, palette, ICON_SHOW, tr("プロジェクトを開く"))
+                                .clicked()
                             {
                                 self.open_project_session_setup(project.id);
                             }
@@ -4016,7 +4043,8 @@ impl OperonApp {
                                     .small()
                                     .weak(),
                             );
-                            if small_icon_button(ui, ICON_ADD, tr("セッションを開始")).clicked()
+                            if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始"))
+                                .clicked()
                             {
                                 self.open_project_session_setup(project.id);
                             }
@@ -4036,6 +4064,7 @@ impl OperonApp {
     }
 
     fn ui_session_grid(&mut self, ui: &mut egui::Ui) {
+        let palette = self.store.theme.palette();
         ui.label(tr("エージェント一覧"));
         let needle = self.search.to_lowercase();
         let projects = self.store.projects.clone();
@@ -4070,7 +4099,8 @@ impl OperonApp {
                                 .small()
                                 .weak(),
                         );
-                        if icon_button(ui, ICON_SHOW, tr("プロジェクトを開く")).clicked() {
+                        if icon_button(ui, palette, ICON_SHOW, tr("プロジェクトを開く")).clicked()
+                        {
                             self.select_project(Some(project.id));
                             self.page = Page::Projects;
                         }
@@ -4116,7 +4146,8 @@ impl OperonApp {
                 ui.label(RichText::new(session_title(session)).strong());
                 agent_chip(ui, &session.agent, 12.0, palette);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if small_icon_button(ui, ICON_CLOSE, tr("セッションを削除")).clicked() {
+                    if small_icon_button(ui, palette, ICON_CLOSE, tr("セッションを削除")).clicked()
+                    {
                         removal_requested = true;
                     }
                 });
@@ -4145,7 +4176,7 @@ impl OperonApp {
                 );
             }
             ui.horizontal(|ui| {
-                if icon_button(ui, ICON_SHOW, tr("ターミナルを表示")).clicked() {
+                if icon_button(ui, palette, ICON_SHOW, tr("ターミナルを表示")).clicked() {
                     self.open_session_in_terminal(session.id);
                 }
                 if matches!(
@@ -4153,6 +4184,7 @@ impl OperonApp {
                     SessionStatus::Exited | SessionStatus::Failed
                 ) && icon_button(
                     ui,
+                    palette,
                     ICON_CLOSE,
                     if session.status == SessionStatus::Failed {
                         tr("残ったターミナルを閉じる")
@@ -4671,7 +4703,8 @@ impl OperonApp {
                     .truncate(),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if small_icon_button(ui, ICON_CLOSE, tr("このアカウントを削除")).clicked()
+                    if small_icon_button(ui, palette, ICON_CLOSE, tr("このアカウントを削除"))
+                        .clicked()
                     {
                         self.forget_agent_account(account.id);
                     }
@@ -4809,7 +4842,7 @@ impl OperonApp {
                             .weak(),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if small_icon_button(ui, ICON_ADD, tr("セッションを開始")).clicked() {
+                        if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始")).clicked() {
                             self.open_project_session_setup(project.id);
                         }
                     });
@@ -4965,14 +4998,15 @@ impl OperonApp {
                                     |ui| {
                                         ui.spacing_mut().item_spacing.x = 0.0;
                                         if row_active {
-                                            if ui
-                                                .add(
-                                                    egui::Button::new(
-                                                        RichText::new(ICON_CLOSE).size(15.0),
-                                                    )
-                                                    .frame(false)
-                                                    .min_size(egui::vec2(22.0, 22.0)),
+                                            let close_res = ui.add(
+                                                egui::Button::new(
+                                                    RichText::new(ICON_CLOSE).size(15.0),
                                                 )
+                                                .frame(false)
+                                                .min_size(egui::vec2(22.0, 22.0)),
+                                            );
+                                            paint_button_focus(ui, &close_res, palette);
+                                            if close_res
                                                 .on_hover_text(tr("セッションを削除"))
                                                 .clicked()
                                             {
@@ -4988,7 +5022,7 @@ impl OperonApp {
                                         // The rare actions sit behind the dots so
                                         // the row's one destructive corner control
                                         // keeps its neighbours predictable.
-                                        let _ = egui::menu::menu_custom_button(
+                                        let menu_res = egui::menu::menu_custom_button(
                                             ui,
                                             egui::Button::new(
                                                 RichText::new(ICON_MORE)
@@ -5015,6 +5049,7 @@ impl OperonApp {
                                         )
                                         .response
                                         .on_hover_text(tr("worktree · 名前を変更 · 復元 · 未読にする"));
+                                        paint_button_focus(ui, &menu_res, palette);
                                     },
                                 );
                             });
@@ -5351,7 +5386,8 @@ impl OperonApp {
                 // A folded side panel is reopened from here; an open one is
                 // folded from its own tab row, next to what it hides.
                 if !self.show_session_inspector
-                    && icon_button(ui, ICON_FOLDER_OPEN, tr("サイドパネルを表示")).clicked()
+                    && icon_button(ui, palette, ICON_FOLDER_OPEN, tr("サイドパネルを表示"))
+                        .clicked()
                 {
                     self.show_session_inspector = true;
                 }

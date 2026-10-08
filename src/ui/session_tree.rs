@@ -263,8 +263,13 @@ impl OperonApp {
                         );
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if icon_button(ui, ICON_DISCLOSURE_CLOSED, tr("サイドパネルを畳む"))
-                            .clicked()
+                        if icon_button(
+                            ui,
+                            palette,
+                            ICON_DISCLOSURE_CLOSED,
+                            tr("サイドパネルを畳む"),
+                        )
+                        .clicked()
                         {
                             self.show_session_inspector = false;
                         }
@@ -272,7 +277,7 @@ impl OperonApp {
                             SidebarSide::Left => (ICON_RESTORE, tr("サイドバーを右側に移動")),
                             SidebarSide::Right => (ICON_RESTORE, tr("サイドバーを左側に移動")),
                         };
-                        if icon_button(ui, dock_icon, dock_hint).clicked() {
+                        if icon_button(ui, palette, dock_icon, dock_hint).clicked() {
                             self.session_inspector_side = self.session_inspector_side.opposite();
                             let notice = match self.session_inspector_side {
                                 SidebarSide::Left => tr("サイドバーを左側に移動しました"),
@@ -329,7 +334,7 @@ impl OperonApp {
                     .hint_text(tr("ファイルを絞り込む"))
                     .desired_width((ui.available_width() - 30.0).max(60.0)),
             );
-            if icon_button(ui, ICON_REFRESH, tr("更新")).clicked() {
+            if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 if is_worktree {
                     self.session_file_cache.remove(&root);
                     self.request_session_files(&root);
