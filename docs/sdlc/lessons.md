@@ -1824,3 +1824,15 @@ under change 115's mutations 1, 2, and 10.
 **The rule.** A guard names the territory it governs; anything outside it is judged by where it reaches, not refused for not being home.
 
 **Guard.** `work_inside_another_repository_is_not_judged_as_this_trunk`, watched failing on main's guards and on each of five mutations.
+
+## 068 — state.yaml stage is checked against the closed pipeline stage set, not human review terminology
+
+**What happened.** In change 133, the AI session set `stage: "review"` in `state.yaml` after completing the build, confusing human review terminology (Stage 5 review) with the machine-checked stage name (`test` in route `modify`). This caused CI test suite failure in `tests::every_state_file_names_a_route_and_a_stage_that_exist`.
+
+**Why it was invisible.** Locally, the session ran targeted unit tests rather than the entire test suite, so the harness contract test was not executed until full CI ran.
+
+**Cure.** Change 134 permanently documents that `state.yaml` `stage` must be an exact member of the closed set `(plan design build test deploy maintain)` defined by `docs/sdlc/routes.yaml`.
+
+**The rule.** In `state.yaml`, `stage` must match the declared pipeline route's stages (`routes.yaml`), never colloquial or process-step terminology like `review`.
+
+**Guard.** `tests::every_state_file_names_a_route_and_a_stage_that_exist`.

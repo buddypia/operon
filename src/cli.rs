@@ -69,6 +69,7 @@ pub(crate) struct TranscriptMatch {
     pub(crate) title: Option<String>,
     pub(crate) path: PathBuf,
     pub(crate) snippet: String,
+    pub(crate) score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2342,7 +2343,39 @@ pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptS
     snapshot
 }
 
-pub(crate) const EG2_SEMANTIC_MATCH_MIN_SCORE: f64 = 0.73;
+use std::sync::atomic::AtomicU64;
+
+static EG2_FAILURE_COOLDOWN_UNTIL: AtomicU64 = AtomicU64::new(0);
+pub(crate) const EG2_COOLDOWN_DURATION_SECS: u64 = 30;
+pub(crate) const EG2_COMMAND_TIMEOUT_SECS: u64 = 3;
+
+pub(crate) fn is_eg2_circuit_open() -> bool {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    now < EG2_FAILURE_COOLDOWN_UNTIL.load(Ordering::Relaxed)
+}
+
+pub(crate) fn trip_eg2_circuit() {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    EG2_FAILURE_COOLDOWN_UNTIL.store(
+        now.saturating_add(EG2_COOLDOWN_DURATION_SECS),
+        Ordering::Relaxed,
+    );
+}
+
+#[cfg(test)]
+pub(crate) fn reset_eg2_circuit() {
+    EG2_FAILURE_COOLDOWN_UNTIL.store(0, Ordering::Relaxed);
+}
+
+pub(crate) const EG2_SEMANTIC_NOISE_FLOOR: f64 = 0.65;
+pub(crate) const EG2_SEMANTIC_HIGH_CONFIDENCE: f64 = 0.72;
+pub(crate) const EG2_SEMANTIC_MIN_MARGIN: f64 = 0.035;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Eg2RawRankItem {
@@ -2386,7 +2419,7 @@ pub(crate) fn parse_eg2_rank_output(json_str: &str, expected_count: usize) -> Ve
 }
 
 pub(crate) fn rank_transcripts_with_eg2(query: &str, matches: &mut [TranscriptMatch]) -> bool {
-    if matches.len() <= 1 || !tool_available("eg2") {
+    if matches.len() <= 1 || !tool_available("eg2") || is_eg2_circuit_open() {
         return false;
     }
     let rank_count = matches.len().min(24);
@@ -2402,13 +2435,18 @@ pub(crate) fn rank_transcripts_with_eg2(query: &str, matches: &mut [TranscriptMa
     }
     command.arg("--json");
 
-    let Ok(limited) =
-        run_command_with_output_limit(&mut command, Duration::from_secs(5), 64 * 1024, 16 * 1024)
-    else {
+    let Ok(limited) = run_command_with_output_limit(
+        &mut command,
+        Duration::from_secs(EG2_COMMAND_TIMEOUT_SECS),
+        64 * 1024,
+        16 * 1024,
+    ) else {
+        trip_eg2_circuit();
         return false;
     };
 
     if !limited.output.status.success() {
+        trip_eg2_circuit();
         return false;
     }
 
@@ -2428,7 +2466,9 @@ pub(crate) fn rank_transcripts_with_eg2(query: &str, matches: &mut [TranscriptMa
     for item in ranked {
         if item.index < rank_count && !used[item.index] {
             used[item.index] = true;
-            reordered.push(original[item.index].clone());
+            let mut match_item = original[item.index].clone();
+            match_item.score = Some(item.score);
+            reordered.push(match_item);
         }
     }
     for (index, item) in original.into_iter().enumerate() {
@@ -2446,7 +2486,7 @@ pub(crate) fn rank_fallback_candidates_with_eg2(
     candidates: &[(String, String, Option<String>, PathBuf, String)],
     limit: usize,
 ) -> Vec<TranscriptMatch> {
-    if candidates.is_empty() || limit == 0 || !tool_available("eg2") {
+    if candidates.is_empty() || limit == 0 || !tool_available("eg2") || is_eg2_circuit_open() {
         return Vec::new();
     }
     let rank_count = candidates.len().min(24);
@@ -2464,13 +2504,18 @@ pub(crate) fn rank_fallback_candidates_with_eg2(
     }
     command.arg("--json");
 
-    let Ok(limited) =
-        run_command_with_output_limit(&mut command, Duration::from_secs(5), 64 * 1024, 16 * 1024)
-    else {
+    let Ok(limited) = run_command_with_output_limit(
+        &mut command,
+        Duration::from_secs(EG2_COMMAND_TIMEOUT_SECS),
+        64 * 1024,
+        16 * 1024,
+    ) else {
+        trip_eg2_circuit();
         return Vec::new();
     };
 
     if !limited.output.status.success() {
+        trip_eg2_circuit();
         return Vec::new();
     }
 
@@ -2479,9 +2524,21 @@ pub(crate) fn rank_fallback_candidates_with_eg2(
     };
 
     let ranked = parse_eg2_rank_output(stdout, rank_count);
+    if ranked.is_empty() {
+        return Vec::new();
+    }
+
+    let min_score = ranked
+        .iter()
+        .map(|item| item.score)
+        .fold(f64::INFINITY, f64::min);
+
     let mut matches = Vec::new();
     for item in ranked {
-        if item.score < EG2_SEMANTIC_MATCH_MIN_SCORE {
+        let is_relevant = item.score >= EG2_SEMANTIC_HIGH_CONFIDENCE
+            || (item.score >= EG2_SEMANTIC_NOISE_FLOOR
+                && (item.score - min_score) >= EG2_SEMANTIC_MIN_MARGIN);
+        if !is_relevant {
             continue;
         }
         if matches.len() >= limit {
@@ -2495,6 +2552,7 @@ pub(crate) fn rank_fallback_candidates_with_eg2(
                 title: title.clone(),
                 path: path.clone(),
                 snippet,
+                score: Some(item.score),
             });
         }
     }
@@ -2569,6 +2627,7 @@ pub(crate) fn search_local_transcripts_in(
                 title: hit.title.or(title),
                 path: path.clone(),
                 snippet: hit.snippet,
+                score: None,
             });
         } else if fallback_candidates.len() < limits.candidates.min(24) {
             let candidate_text = match (&title, &file_scan.first_text) {

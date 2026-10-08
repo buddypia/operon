@@ -1,0 +1,15 @@
+# Review record for change 134.
+#
+# Round 1: rust-reviewer reviewed the diff.
+# Adaptive thresholding: dynamic margin against minimum score ensures conceptual matches (e.g. login credentials)
+# are retained while rejecting noise floor.
+# Circuit breaker: atomic cooldown on failure/timeout prevents UI freeze without extra thread overhead.
+# Explainability: TranscriptMatch.score attribution exposed cleanly to UI badges without breaking exact match rendering.
+# Rust craft: zero clippy warnings, zero unwrap/panic in production path, robust atomic operations.
+
+digest: "0d806f79d07314af"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

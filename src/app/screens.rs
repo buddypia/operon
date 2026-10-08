@@ -3916,6 +3916,12 @@ impl OperonApp {
                         egui::Frame::group(ui.style()).show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new(&transcript.provider).small().weak());
+                                if let Some(score) = transcript.score {
+                                    if score < 0.999 {
+                                        let pct = (score * 100.0).round() as u64;
+                                        ui.label(RichText::new(format!("({pct}%)")).small().weak());
+                                    }
+                                }
                                 ui.label(
                                     RichText::new(
                                         transcript
