@@ -12189,9 +12189,21 @@ pub(crate) fn rank_transcripts_with_eg2_handles_edge_cases() {
         title: Some("Title".into()),
         path: PathBuf::from("/tmp/test.jsonl"),
         snippet: "Snippet".into(),
+        score: None,
     }];
     assert!(!rank_transcripts_with_eg2("query", &mut single));
     assert_eq!(single.len(), 1);
+}
+#[test]
+pub(crate) fn eg2_circuit_breaker_trips_and_recovers() {
+    reset_eg2_circuit();
+    assert!(!is_eg2_circuit_open());
+
+    trip_eg2_circuit();
+    assert!(is_eg2_circuit_open());
+
+    reset_eg2_circuit();
+    assert!(!is_eg2_circuit_open());
 }
 #[test]
 pub(crate) fn eg2_semantic_search_ranks_or_falls_back_when_available() {
@@ -12226,6 +12238,7 @@ pub(crate) fn eg2_semantic_search_ranks_or_falls_back_when_available() {
     let exact_scan = search_local_transcripts_in(&roots, &HashMap::new(), "palette", 10, limits);
     assert_eq!(exact_scan.matches.len(), 1);
     assert_eq!(exact_scan.matches[0].session_id, "ui");
+    assert!(exact_scan.matches[0].score.is_none());
 
     // 2. Conceptual query with no exact substring match: "authentication token"
     // "authentication" does not appear verbatim (it is "Auth"), but semantically matches auth/token
@@ -12236,6 +12249,14 @@ pub(crate) fn eg2_semantic_search_ranks_or_falls_back_when_available() {
         // If eg2 is available on this system, semantic fallback should find the auth session
         assert!(!semantic_scan.matches.is_empty());
         assert_eq!(semantic_scan.matches[0].session_id, "auth");
+        assert!(semantic_scan.matches[0].score.is_some());
+
+        // 2b. Adaptive threshold admits "login credentials" (~0.6872) because of margin over ui file
+        let creds_scan =
+            search_local_transcripts_in(&roots, &HashMap::new(), "login credentials", 10, limits);
+        assert!(!creds_scan.matches.is_empty());
+        assert_eq!(creds_scan.matches[0].session_id, "auth");
+        assert!(creds_scan.matches[0].score.unwrap() >= 0.65);
     } else {
         // Without eg2, exact keyword failure returns 0 matches gracefully
         assert!(semantic_scan.matches.is_empty());
