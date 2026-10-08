@@ -53,7 +53,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -61,13 +61,13 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Review, then commit on fix/135-guard-judges-other-repos, push, CI, land, install; then the nichenext .mcp.json fix."
+resume: "Done. Landed 27360dc after CI passed (run 37654549945); installed. Next: the nichenext .mcp.json token fix this change unblocked."
 
 contract:
-  three-gates: "machine pending cargo test --locked in CI; fmt and clippy at commit"
+  three-gates: "machine passed CI test suite on 5059785 (run 37654549945); fmt and clippy at commit"
   failing-test-first: "machine passed work_inside_another_repository_is_not_judged_as_this_trunk refused cd <neighbour wt> && python3 edit.py on main's guards; with only the owner guard reverted it refused the neighbour worktree"
   guards-verified-by-mutation: "machine passed fourteen of fifteen mutations red: owner filter removed, owner guard from main, inside-project clause dropped (stale gitfile), identity clause dropped (subdirectory root), trunk path check off, cwd certainty ignored, root-inside-other dropped (nested project), gitdir file not followed, policy realpath not native, repositoryOf not native, export only as first word, export name anchored again (brace and += forms), export not refused, missing directory allowed. Survivor: owner project not on-disk case — covered by the identity clause except a renamed main seen through a case-variant spelling. The reviewers' real-path bypasses replayed: all deny"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh, installed through replace-macos-bundle.sh"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
