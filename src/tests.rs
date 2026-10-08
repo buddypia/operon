@@ -5753,6 +5753,97 @@ pub(crate) fn keyboard_focus_on_a_custom_row_is_a_strong_outline_or_nothing() {
     }
 }
 
+/// Every button helper shows keyboard focus with the same mark: a 1px
+/// `border_strong` ring at `RADIUS_CONTROL`, painted once and only while the
+/// button has focus. The ring is read back from the shapes egui emits, so this
+/// fails if a helper forgets the call, not only if the decision changes.
+#[test]
+pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
+    let buttons: [(&str, fn(&mut egui::Ui, &Palette) -> egui::Response); 10] = [
+        ("primary", |ui, p| primary_button(ui, p, "+", "新規")),
+        ("quiet", |ui, p| quiet_button(ui, p, "閉じる")),
+        ("nav tab", |ui, p| nav_tab(ui, p, "", "概要", false)),
+        ("selected nav tab", |ui, p| nav_tab(ui, p, "", "概要", true)),
+        ("tab with count", |ui, p| {
+            tab_item_with_count(ui, p, "変更", Some(3), false, false)
+        }),
+        ("selected tab with count", |ui, p| {
+            tab_item_with_count(ui, p, "変更", Some(3), false, true)
+        }),
+        ("icon", |ui, p| icon_button(ui, p, "×", "閉じる")),
+        ("small icon", |ui, p| {
+            small_icon_button(ui, p, "×", "閉じる")
+        }),
+        ("verb", |ui, p| verb_button(ui, p, "+", "作成", false)),
+        ("danger verb", |ui, p| verb_button(ui, p, "×", "削除", true)),
+    ];
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        for (name, draw) in buttons {
+            // The app installs its theme before drawing (app.rs, set_visuals), so
+            // a plain verb's own focus outline is the palette's `border_strong`.
+            let context = egui::Context::default();
+            context.set_visuals(theme.visuals());
+            let mut button_id = None;
+            let mut rings_by_pass = Vec::new();
+            let mut last_outline_by_pass = Vec::new();
+            for pass in 0..2 {
+                let output = context.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        if let (1, Some(id)) = (pass, button_id) {
+                            ctx.memory_mut(|memory| memory.request_focus(id));
+                        }
+                        let response = draw(ui, palette);
+                        button_id = Some(response.id);
+                    });
+                });
+                let rings: Vec<egui::CornerRadius> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|clipped| match &clipped.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.stroke == egui::Stroke::new(1.0, palette.border_strong) =>
+                        {
+                            Some(rect.corner_radius)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                rings_by_pass.push(rings);
+                // A focused danger verb is first outlined by egui in the danger
+                // colour; the ring must be the outline painted last, on top of it.
+                let last_outline =
+                    output
+                        .shapes
+                        .iter()
+                        .rev()
+                        .find_map(|clipped| match &clipped.shape {
+                            egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => Some(rect.stroke),
+                            _ => None,
+                        });
+                last_outline_by_pass.push(last_outline);
+            }
+            assert!(
+                rings_by_pass[0].is_empty(),
+                "{name} in {} paints a ring without focus",
+                theme.label(),
+            );
+            assert_eq!(
+                rings_by_pass[1],
+                vec![egui::CornerRadius::same(RADIUS_CONTROL)],
+                "{name} in {} must paint one ring at RADIUS_CONTROL when focused",
+                theme.label(),
+            );
+            assert_eq!(
+                last_outline_by_pass[1],
+                Some(egui::Stroke::new(1.0, palette.border_strong)),
+                "{name} in {} must paint the ring last when focused",
+                theme.label(),
+            );
+        }
+    }
+}
+
 /// `DESIGN.md` carries the tokens as YAML front matter, in the format
 /// <https://github.com/google-labs-code/design.md> specifies, so that the
 /// design system is readable by a person and by the next agent to open

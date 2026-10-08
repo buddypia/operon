@@ -150,6 +150,20 @@ pub(crate) fn focus_stroke(has_focus: bool, palette: &Palette) -> Option<egui::S
     has_focus.then(|| egui::Stroke::new(1.0, palette.border_strong))
 }
 
+/// The keyboard focus mark on a button: the same 1px ring at `RADIUS_CONTROL`
+/// for every button, painted only while the button holds focus. It adds an
+/// outline and nothing else, so the fill the button is drawn with stays as it is.
+pub(crate) fn paint_button_focus(ui: &egui::Ui, response: &egui::Response, palette: &Palette) {
+    if let Some(stroke) = focus_stroke(response.has_focus(), palette) {
+        ui.painter().rect_stroke(
+            response.rect,
+            egui::CornerRadius::same(RADIUS_CONTROL),
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+    }
+}
+
 /// One row of the ⌘K palette. The group is what the row is filed under and is
 /// searched along with the label, so typing a project's name finds it whether
 /// the person was thinking "project" or thinking of the name.
@@ -249,7 +263,7 @@ pub(crate) fn primary_button(
     icon: &str,
     label: &str,
 ) -> egui::Response {
-    ui.add(
+    let response = ui.add(
         egui::Button::new(
             RichText::new(format!("{icon}  {label}"))
                 .strong()
@@ -258,7 +272,9 @@ pub(crate) fn primary_button(
         .fill(palette.accent)
         .stroke(egui::Stroke::NONE)
         .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
-    )
+    );
+    paint_button_focus(ui, &response, palette);
+    response
 }
 
 /// Everything that is not the primary action: a hairline at rest, a fill under
@@ -275,11 +291,13 @@ pub(crate) fn quiet_button(
     palette: &Palette,
     label: impl Into<String>,
 ) -> egui::Response {
-    ui.add(
+    let response = ui.add(
         egui::Button::new(RichText::new(label.into()).color(palette.text_muted))
             .stroke(egui::Stroke::NONE)
             .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
-    )
+    );
+    paint_button_focus(ui, &response, palette);
+    response
 }
 
 /// The restore's live status and its dismissal action occupy separate rows.
@@ -366,7 +384,9 @@ pub(crate) fn nav_tab(
     if selected {
         button = button.fill(palette.row_selected);
     }
-    ui.add(button)
+    let response = ui.add(button);
+    paint_button_focus(ui, &response, palette);
+    response
 }
 
 /// One tab of an in-page tab bar, marked by an accent rule along its bottom
@@ -428,6 +448,7 @@ pub(crate) fn tab_item_with_count(
             .stroke(egui::Stroke::NONE)
             .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
     );
+    paint_button_focus(ui, &response, palette);
     if selected {
         let rect = response.rect;
         let y = rect.bottom() + 2.5;
@@ -451,23 +472,39 @@ pub(crate) fn tab_bar_rule(ui: &mut egui::Ui, palette: &Palette) {
 /// so the button stays discoverable for anyone who does not recognise the glyph.
 /// Square, frameless, and the same size everywhere — a toolbar is a row of
 /// equal targets or it is a row of buttons that happen to be near each other.
-pub(crate) fn icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(RichText::new(icon).size(16.0))
-            .stroke(egui::Stroke::NONE)
-            .min_size(egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT)),
-    )
-    .on_hover_text(tooltip)
+pub(crate) fn icon_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    icon: &str,
+    tooltip: &str,
+) -> egui::Response {
+    let response = ui
+        .add(
+            egui::Button::new(RichText::new(icon).size(16.0))
+                .stroke(egui::Stroke::NONE)
+                .min_size(egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT)),
+        )
+        .on_hover_text(tooltip);
+    paint_button_focus(ui, &response, palette);
+    response
 }
 
 /// The same control at the size dense surfaces use — session rows, list rows.
-pub(crate) fn small_icon_button(ui: &mut egui::Ui, icon: &str, tooltip: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(RichText::new(icon).size(14.0))
-            .stroke(egui::Stroke::NONE)
-            .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
-    )
-    .on_hover_text(tooltip)
+pub(crate) fn small_icon_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    icon: &str,
+    tooltip: &str,
+) -> egui::Response {
+    let response = ui
+        .add(
+            egui::Button::new(RichText::new(icon).size(14.0))
+                .stroke(egui::Stroke::NONE)
+                .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
+        )
+        .on_hover_text(tooltip);
+    paint_button_focus(ui, &response, palette);
+    response
 }
 
 /// A button that keeps its wording but leads with the shared icon, for the
@@ -508,7 +545,7 @@ pub(crate) fn verb_button(
             visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, palette.danger);
             visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, palette.danger);
         }
-        ui.add(
+        let response = ui.add(
             egui::Button::new(
                 RichText::new(format!("{icon}  {label}"))
                     .size(13.0)
@@ -516,7 +553,14 @@ pub(crate) fn verb_button(
             )
             .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
             .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
-        )
+        );
+        // A plain verb already takes egui's own focus outline, which is the
+        // same ring. A danger verb overwrites that outline with the danger
+        // stroke above, so the shared ring is painted again over it.
+        if danger {
+            paint_button_focus(ui, &response, palette);
+        }
+        response
     })
     .inner
 }
@@ -561,12 +605,14 @@ pub(crate) fn meta_separator(ui: &mut egui::Ui, palette: &Palette) {
 /// copied is one you have to paste somewhere else to read.
 pub(crate) fn resume_copy_button(
     ui: &mut egui::Ui,
+    palette: &Palette,
     provider: CliProvider,
     native_session_id: &str,
 ) {
     let command = native_resume_display(provider, native_session_id);
     if small_icon_button(
         ui,
+        palette,
         ICON_COPY,
         &tf!("「{command}」をコピー", command = command),
     )
@@ -593,7 +639,7 @@ pub(crate) fn plumbing_row(ui: &mut egui::Ui, palette: &Palette, label: &str, va
         )
         .on_hover_text(value);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if small_icon_button(ui, ICON_COPY, tr("コピー")).clicked() {
+            if small_icon_button(ui, palette, ICON_COPY, tr("コピー")).clicked() {
                 ui.ctx().copy_text(value.to_owned());
             }
         });

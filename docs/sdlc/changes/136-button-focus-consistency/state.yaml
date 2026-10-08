@@ -1,0 +1,56 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request (it is the intent on this route): the person said the UI lacks
+# consistency overall, and asked to fix the focus "shadow" size on buttons.
+#
+# Findings from reading the code (egui 0.31.1 style and button paint):
+# - A focused standard button takes egui's `active` style: a 1px border_strong
+#   outline plus the control_hovered fill, radius RADIUS_CONTROL (6).
+# - primary_button sets .fill(accent) and .stroke(NONE), so focus paints
+#   nothing extra: keyboard focus is invisible on the primary action.
+# - icon_button, small_icon_button, quiet_button set .stroke(NONE): focus shows
+#   only the grey control_hovered fill, with no outline.
+# - Custom focus rings (clickable_card, stat tile) are a 1px Outside stroke at
+#   RADIUS_CARD (10); diff rows and terminal use radius 0 and an Inside stroke.
+#
+# Screen: the change paints (risk.yaml `drawing`, screen yes), so the focus
+# treatment is agreed with the person before any code is written.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+# One sentence, for a session that has just arrived and read nothing else.
+resume: "The person approved plan.md at digest 77baca5236cfb33f; evaluator lines cover the departures added after it (plan 7083235a9fd1969a, spec 97862d8de9739ebb, screen e4231230e1319777). The review passed at diff dead4b97eb66f677 (rust-reviewer approve 0 2, round 3). Next: run gate-commit.sh with the commit, push the branch, merge into main after CI, clean up the worktree, re-run package-macos.sh, then ask the person before replacing /Applications. A person checks the running app (focus-visible-on-every-button)."
+
+# What "done" means for this change. A `machine` item names a command; a `human`
+# item names an observation a person makes.
+#
+#   <kind> <verdict> <what decides it>
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh; it runs with the commit, and the commit waits for the plan approval a person must give (two evaluator revise rounds used, approval.md escalates to a person). fmt and clippy already passed inside package-macos.sh"
+  bands: "machine waived bash scripts/check-bands.sh exits 0 and reports 3 of 21 breached (always_loaded_bytes, steering_bytes, reference_bytes); all come from instruction files this change does not touch, so they are pre-existing on main and this change adds no new breach"
+  transcript-vocabulary: "machine waived bash scripts/check-transcript-vocabulary.sh exits 1 on 3 locally observed kinds (claude agent-setting, claude dev-mods, gemini MODEL/assistant) with no row; they come from local agent stores and not from this diff. Adding rows needs a Conversation/Reasoning/Operational judgement under .claude/rules/transcripts.md, so it belongs to its own change"
+  design-md-matches-paint: "machine passed cargo test --locked design_md_documents_exactly_what_the_app_paints"
+  focus-test: "machine passed cargo test --locked focus_ring_on_a_button_is_the_strong_outline_at_control_radius"
+  full-suite: "machine passed with a known environmental failure: cargo test --locked gives 737 passed, 1 failed, 6 ignored with eg2 on PATH; zero_match_transcript_search_obeys_shared_byte_and_line_budgets fails on main too (checked in the main checkout), because the eg2 fallback returns matches the test does not expect. Not caused by this change; not quieted"
+  focus-visible-on-every-button: "human pending a focused primary, secondary, quiet, and icon button show the same ring in the agreed screen"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from the uncommitted tree (fmt, clippy, and build passed); must be re-run after the commit if the tree changes. /Applications/Operon.app is still stale and is replaced through scripts/replace-macos-bundle.sh only after the person confirms"
+
+# The closed sets, written once.
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

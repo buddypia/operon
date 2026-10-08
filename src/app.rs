@@ -5954,8 +5954,13 @@ impl eframe::App for OperonApp {
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if small_icon_button(ui, ICON_CLOSE, tr("この通知を閉じる"))
-                                            .clicked()
+                                        if small_icon_button(
+                                            ui,
+                                            palette,
+                                            ICON_CLOSE,
+                                            tr("この通知を閉じる"),
+                                        )
+                                        .clicked()
                                         {
                                             dismissed = true;
                                         }
@@ -6053,7 +6058,8 @@ impl OperonApp {
                                     .color(palette.success),
                             );
                             ui.label(RichText::new(text).size(13.0).color(palette.text));
-                            if small_icon_button(ui, ICON_CLOSE, tr("この通知を閉じる")).clicked()
+                            if small_icon_button(ui, palette, ICON_CLOSE, tr("この通知を閉じる"))
+                                .clicked()
                             {
                                 dismissed = true;
                             }
@@ -7962,7 +7968,7 @@ impl OperonApp {
         let mut opened_url = None;
         let mut copied_url = None;
 
-        let _ = egui::menu::menu_custom_button(
+        let badge_res = egui::menu::menu_custom_button(
             ui,
             egui::Button::new(
                 RichText::new(format!("{ICON_OPEN_EXTERNAL} {badge_text}"))
@@ -8014,6 +8020,7 @@ impl OperonApp {
         )
         .response
         .on_hover_text(tr("稼働中のローカルポート一覧を表示"));
+        paint_button_focus(ui, &badge_res, palette);
 
         if let Some(url) = opened_url {
             self.request_system_action(tr("ブラウザで開く"), move || open_url(&url));
