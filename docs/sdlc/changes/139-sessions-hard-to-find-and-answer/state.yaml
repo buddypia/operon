@@ -15,8 +15,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "supervised"
@@ -24,12 +24,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Committed f8c1173 after review round 2; main (change 138) merged into the branch. Next: i18n table order and the 139 tests on the merged tree, push, gh run watch, land with --no-ff from the main checkout, package and swap. zero_match_transcript_search_obeys_shared_byte_and_line_budgets also fails on an export of main locally — not this change."
+resume: "Landed: CI passed on 18eb6d2 (one commit on main after 138 moved it), merged as b7033bc and pushed. /Applications/Operon.app swapped from that build and launches. What outlives it: the two carried points in review.yaml, and zero_match_transcript_search_obeys_shared_byte_and_line_budgets failing locally (green in CI) — not this change."
 
 contract:
-  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt and clippy clean at the commit"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted 18eb6d2 (fmt, clippy, review gate SHIP at 5a585926538e8328); CI run 37937483178 green"
   bands: "machine passed bash scripts/check-bands.sh — the three breaches (always_loaded_bytes, steering_bytes, reference_bytes) measure CLAUDE.md, AGENTS.md and docs this change does not touch"
-  release-binary: "machine pending yes: the layout lives in src/app.rs and src/app/screens.rs, so it ends with bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh built dist/Operon.app from b7033bc; replace-macos-bundle.sh swapped it into /Applications, and it launches"
   guards-verified-by-mutation: "human passed each requirement test watched failing or killed a mutant; see plan.md Departures"
 
 sets:
