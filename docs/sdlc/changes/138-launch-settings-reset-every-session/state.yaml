@@ -10,21 +10,21 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
-  questions: "2 7"
+  questions: "3 7"
   autonomy: "supervised"
   risk: "low"
   readiness: "go"
   screen: "approved"
 
-resume: "Committed with review SHIP; push the branch, wait for CI, merge --no-ff into main, package."
+resume: "Landed: CI passed on 0242117, merged into main as 302f579. What outlives it: the /Applications swap of dist/Operon.app waits for the person (bundle-swap surface; asked, no answer), and the three carried points in review.yaml."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted commit 0242117 (fmt, clippy, review gate SHIP); CI run 37893401415 green"
   bands: "machine waived bash scripts/check-bands.sh reports the same three instruction-size bands as main (always_loaded_bytes, steering_bytes, reference_bytes); this change adds no instruction bytes"
   pin-tests: "machine passed cargo test --locked pinned_launch — 3 passed"
-  release-binary: "machine pending yes: touches src/app.rs, src/app/screens.rs, src/agents/settings.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from 302f579; the /Applications swap is the bundle-swap surface and waits for the person"
   guards-verified-by-mutation: "human passed removing the acknowledged=false on sanitise reddens pinned_launch_drops_what_no_longer_holds; removing the apply_pinned_launch call reddens pinned_launch_fills_the_sheet_each_time_it_opens"
 
 sets:
