@@ -9,7 +9,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -17,10 +17,10 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Write spec and plan, readiness, then the script, its test watched failing, and the workflow."
+resume: "Landed: CI passed on 99e7bb3, merged into main as 73a95a4. Its own push ran the workflow (run 37966138237), which logged pruned fix/140-merged-remote-branches-linger and nothing kept. What outlives it: the three carried test gaps in review.yaml."
 
 contract:
-  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt, clippy and review gate at the commit"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted 99e7bb3 (fmt, clippy, review gate SHIP at 72f9b9dca3edc4e5); CI run 37965360950 green"
   prune-test: "machine passed cargo test --locked landed_remote_branches and the_prune_workflow — both pass"
   release-binary: "machine waived no: the change is a workflow, a script and a test; the app binary does not change"
   guards-verified-by-mutation: "human passed both tests watched failing; three mutants of the script each killed (plan.md Departures)"
