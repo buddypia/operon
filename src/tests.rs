@@ -6270,6 +6270,179 @@ pub(crate) fn ui_text_uses_one_cjk_aware_face_before_symbol_fallback() {
     );
 }
 
+/// Production source, without this suite, with comment lines dropped and all
+/// whitespace removed, so a call rustfmt broke across lines reads as one. Each
+/// byte of the compact text keeps the line it came from, for the report.
+fn compact_drawing_sources() -> Vec<(PathBuf, String, Vec<usize>)> {
+    source_files()
+        .into_iter()
+        .filter(|(path, _)| !path.ends_with("src/tests.rs"))
+        .map(|(path, text)| {
+            let mut compact = String::new();
+            let mut lines = Vec::new();
+            for (index, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for c in line.chars().filter(|c| !c.is_whitespace()) {
+                    compact.push(c);
+                    lines.extend(std::iter::repeat_n(index + 1, c.len_utf8()));
+                }
+            }
+            (path, compact, lines)
+        })
+        .collect()
+}
+
+/// The text between a call's opening parenthesis (already consumed) and the
+/// parenthesis that closes it.
+fn call_arguments(rest: &str) -> &str {
+    let mut depth = 0usize;
+    for (at, c) in rest.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' if depth == 0 => return &rest[..at],
+            ')' | ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    rest
+}
+
+/// The `index`th argument of a call, split on the commas at its own depth.
+fn nth_argument(arguments: &str, index: usize) -> &str {
+    let mut depth = 0usize;
+    let mut start = 0;
+    let mut seen = 0;
+    for (at, c) in arguments.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                if seen == index {
+                    return &arguments[start..at];
+                }
+                seen += 1;
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    if seen == index {
+        &arguments[start..]
+    } else {
+        ""
+    }
+}
+
+/// egui's `small_button` and `Button::small()` zero the vertical button padding
+/// and skip the 28px minimum `apply_interface_metrics` sets, so a button built
+/// that way is the cramped one in a row of normal ones — change 137's "パスを手入力".
+/// A height a button asks for by number is the same failure by another route.
+/// `DESIGN.md` allows two heights; the helpers in `src/ui/widgets.rs` draw them.
+#[test]
+pub(crate) fn every_button_keeps_a_documented_height() {
+    let documented = |height: &str| height == "CONTROL_HEIGHT" || height == "CONTROL_HEIGHT_SMALL";
+    let mut offenders = Vec::new();
+    for (path, compact, lines) in compact_drawing_sources() {
+        let at = |offset: usize| format!("{}:{}", path.display(), lines[offset]);
+        for (offset, _) in compact.match_indices("small_button(") {
+            offenders.push(format!("{}: egui の small_button", at(offset)));
+        }
+        // `.small()` on a `RichText` is the documented 12px caption; on a
+        // `Button` it is the cramped variant. So only the builder chain after
+        // the button's own closing parenthesis is read, never its label.
+        for (offset, _) in compact.match_indices("Button::new(") {
+            let after = &compact[offset + "Button::new(".len()..];
+            let chain = after
+                .get(call_arguments(after).len() + 1..)
+                .unwrap_or("")
+                .split(';')
+                .next()
+                .unwrap_or("");
+            if nth_argument(call_arguments(chain), 0).contains(".small()") {
+                offenders.push(format!("{}: Button::small()", at(offset)));
+            }
+        }
+        for (offset, _) in compact.match_indices(".min_size(egui::vec2(") {
+            let arguments = call_arguments(&compact[offset + ".min_size(egui::vec2(".len()..]);
+            let height = nth_argument(arguments, 1);
+            if !documented(height) {
+                offenders.push(format!("{}: 高さ {height}", at(offset)));
+            }
+        }
+        for (offset, _) in compact.match_indices(".add_sized(") {
+            let arguments = call_arguments(&compact[offset + ".add_sized(".len()..]);
+            if !nth_argument(arguments, 1).contains("Button::") {
+                continue;
+            }
+            let size = nth_argument(arguments, 0);
+            let pair = size
+                .strip_prefix('[')
+                .or_else(|| size.strip_prefix("egui::vec2("))
+                .unwrap_or(size);
+            let height = nth_argument(call_arguments(pair), 1);
+            if !documented(height) {
+                offenders.push(format!("{}: 高さ {height}", at(offset)));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "DESIGN.md の高さ (CONTROL_HEIGHT / CONTROL_HEIGHT_SMALL) を通らないボタン — src/ui/widgets.rs のヘルパーを使ってください:\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// Every literal text size is a level of the scale `DESIGN.md` documents, read
+/// from the document itself so the scale has one home. Icons are glyphs of a
+/// font and take the same scale. A size picked by eye is how a screen ends up
+/// with 11, 11.5, and 12 on three labels that mean the same thing.
+#[test]
+pub(crate) fn every_text_size_is_a_level_on_the_type_scale() {
+    let document = include_str!("../DESIGN.md");
+    let typography = document
+        .split_once("\ntypography:\n")
+        .map(|(_, rest)| rest)
+        .expect("DESIGN.md front matter must define typography");
+    let scale: Vec<f32> = typography
+        .lines()
+        .take_while(|line| line.starts_with(' ') || line.trim().is_empty())
+        .filter_map(|line| line.trim().strip_prefix("fontSize: "))
+        .filter_map(|size| size.trim_end_matches("px").parse().ok())
+        .collect();
+    assert!(scale.len() >= 10, "DESIGN.md typography: {scale:?}");
+
+    // The call, and which of its arguments is a text size. `status_chip`
+    // passes its size straight through to `RichText::size`.
+    let callers = [
+        (".size(", 0),
+        ("FontId::proportional(", 0),
+        ("FontId::monospace(", 0),
+        ("FontId::new(", 0),
+        ("status_chip(", 2),
+    ];
+    let mut offenders = Vec::new();
+    for (path, compact, lines) in compact_drawing_sources() {
+        for (caller, index) in callers {
+            for (offset, _) in compact.match_indices(caller) {
+                let arguments = call_arguments(&compact[offset + caller.len()..]);
+                let Ok(size) = nth_argument(arguments, index).parse::<f32>() else {
+                    continue;
+                };
+                if !scale.contains(&size) {
+                    offenders.push(format!("{}:{}: {size}", path.display(), lines[offset]));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "DESIGN.md の typography にない文字サイズ ({scale:?}):\n{}",
+        offenders.join("\n")
+    );
+}
+
 /// Every name in the vocabulary has to be a glyph the bundled icon font
 /// actually draws, and no earlier face in the chain may claim its
 /// codepoint. Both failures are silent: a missing glyph is a blank box, and

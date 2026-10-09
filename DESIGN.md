@@ -489,6 +489,12 @@ The scale is narrow on purpose. Eleven levels, from a 38px empty-state mark
 down to an 11.5px chip, and most of the app lives in three of them: `body` for
 prose, `label` for the secondary line under a title, `caption` for metadata.
 
+A size is always one of the levels in the `typography` block above, icons
+included: a Phosphor glyph is a character in a font and sits on the same scale as
+the words beside it. A size between two levels is not a new level, it is the
+nearer one. `every_text_size_is_a_level_on_the_type_scale` reads the block and
+holds every `.size(…)` and `FontId` literal in the source to it.
+
 Weight carries hierarchy more than size does. A section heading is `section`
 semi-bold rather than a jump in size, because a list of session cards has to
 stay a list.
@@ -644,6 +650,31 @@ Everything else — icon buttons in a toolbar, the actions on a list row, the
 Every clickable thing is **28px** tall, or 24px inside a list row. A row of
 controls that each pick their own height is the loudest sign that an interface
 was assembled rather than drawn.
+
+So each kind of button has one helper in `src/ui/widgets.rs`, and that helper is
+the whole decision. A plain `ui.button` — a menu item, an ordinary action in a
+prompt — takes the shared padding and 28px from the context and is the same
+control as `secondary_button`; everything else goes through its helper:
+
+| The button is | Call |
+|---|---|
+| the one action that starts work | `primary_button` |
+| any ordinary action, a toggle, Cancel / Delete in a prompt | `secondary_button` |
+| the quiet action beside a heading | `quiet_button` |
+| an icon in a toolbar | `icon_button` (28px) |
+| an icon in a list row, a find bar, or a menu row | `small_icon_button` (24px) |
+| a word with its icon | `icon_text_button` |
+| a session's state verb, danger or not | `verb_button` |
+| a page or in-page tab | `nav_tab`, `tab_item_with_count` |
+
+egui's `small_button` and `Button::small()` are never used: they zero the
+vertical padding and skip the 28px minimum, which is how a label ends up pressed
+against its own frame beside buttons that breathe. A button built inline — `.min_size`,
+`add_sized`, or a rectangle it is `put` in — asks for `CONTROL_HEIGHT` or
+`CONTROL_HEIGHT_SMALL`, never a number; the test reads the first two, and the
+`put` rectangle is left to review, because the same call lays out terminal cells. Labels are not controls and keep their
+own row heights.
+`every_button_keeps_a_documented_height` holds both.
 
 ## Elevation & Depth
 

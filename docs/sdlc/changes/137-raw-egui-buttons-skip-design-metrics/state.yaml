@@ -1,0 +1,41 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request: the person showed the cramped "パスを手入力" toggle and asked for
+# consistent buttons and text, plus a mechanism (DESIGN.md and a guard) so an
+# agent writing UI cannot repeat it.
+#
+# Cause (read from egui 0.31 Button::ui): `small_button` / `Button::small()` set
+# button_padding.y to 0 and skip the interact_size.y (28px) minimum, so the
+# button ignores apply_interface_metrics.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Landed: CI passed on e4a2bab, merged into main with --no-ff. What outlives it: the /Applications swap of the packaged bundle waits for the person (bundle-swap surface), and the carried test-scan nit in review.yaml."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh ran with commit e4a2bab and admitted it (fmt, clippy, review gate SHIP)"
+  bands: "machine waived bash scripts/check-bands.sh reports 3 of 21 breached (always_loaded_bytes warn 12994, steering_bytes, reference_bytes), the same three as main; the CLAUDE.md row was shortened so always_loaded_bytes stays in the warn tier"
+  button-height-test: "machine passed cargo test --locked every_button_keeps_a_documented_height"
+  type-scale-test: "machine passed cargo test --locked every_text_size_is_a_level_on_the_type_scale"
+  design-md-matches-paint: "machine passed cargo test --locked design_md_documents_exactly_what_the_app_paints"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from e4a2bab; the /Applications swap is the bundle-swap surface and waits for the person"
+  guards-verified-by-mutation: "human passed both tests failed on main (13 and 32 sites) and on a reintroduced small_button and .size(13.0) in src/ui/diff.rs; each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

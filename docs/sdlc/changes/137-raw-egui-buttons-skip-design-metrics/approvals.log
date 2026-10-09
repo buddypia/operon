@@ -1,0 +1,6 @@
+2026-10-09T03:03:26Z auto intent intent.md b5bfc824b219ec7d approve evaluator (a0ede61b880745c43): restates the person's quoted request; the mechanism-plus-fix scope comes from that request
+2026-10-09T03:03:26Z auto spec spec.md a00bb1deacd5c353 approve evaluator (a0ede61b880745c43): requirement 2 is scoped to the .min_size( builder call and the 24->20 drop-overlay move is stated; egui 0.31.1 Button::small confirmed to zero padding.y and skip interact_size.y
+2026-10-09T03:03:26Z auto screen screen.md e9baa2666964ea38 approve evaluator (a0ede61b880745c43): sizes and heights inside the existing layout and palette; the drop-overlay 24->20 exception is stated; the screenshot check is still due
+2026-10-09T03:03:26Z auto plan plan.md e72ad0064cc0dc3b approve evaluator (a0ede61b880745c43): matches the spec's files, order and mutation proof; check-bands.sh is in the proof
+2026-10-09T03:14:29Z auto spec spec.md b00e9850e0e385b4 approve evaluator (a0ede61b880745c43): Behaviour now lists first-run 38/32->28 and 最新へ 26->24; requirements 2/3 match the code and the plan's Departures
+2026-10-09T03:14:29Z auto screen screen.md 156edabb3740a573 approve evaluator (a0ede61b880745c43): first-run and 最新へ resizes added, drop-overlay 24->20 exception stated; sizes stay inside the two documented heights, no new screen or layout
