@@ -1990,6 +1990,29 @@ impl OperonApp {
                 self.acknowledged_launch = acknowledged.then_some(pending);
             }
         }
+        // Change 138: the next sheet opens on the pin, whatever this one does.
+        let mut pinned = self.recent_agent_settings.pinned.is_some();
+        if ui.checkbox(&mut pinned, tr("この設定を毎回使う")).changed() {
+            if pinned {
+                self.pin_launch_settings();
+            } else {
+                self.unpin_launch_settings();
+            }
+        }
+        if pinned && !self.launch_matches_pin() {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(tr(
+                        "固定した設定から変更しています。次回は固定した設定で開きます。",
+                    ))
+                    .small()
+                    .weak(),
+                );
+                if quiet_button(ui, palette, tr("今の設定で固定し直す")).clicked() {
+                    self.pin_launch_settings();
+                }
+            });
+        }
         let launch_ready = self.launch_ready(project);
         if !launch_ready {
             let agent_ready = self.tools.agent_available(&self.selected_agent);

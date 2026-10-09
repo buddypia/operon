@@ -1,0 +1,37 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request (person, 2026-10-09): 「毎回新しい設定をするのはしんどいからセッション
+# 作成時にチェックボックスを入れて毎回同じ設定でセッション開始するとかチェック
+# したらそのようにするようにして。」
+# Asked twice: (1) pin the settings vs. skip the sheet — person chose "pin";
+# (2) whether the pin carries the danger acknowledgement — person chose yes.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Committed with review SHIP; push the branch, wait for CI, merge --no-ff into main, package."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine waived bash scripts/check-bands.sh reports the same three instruction-size bands as main (always_loaded_bytes, steering_bytes, reference_bytes); this change adds no instruction bytes"
+  pin-tests: "machine passed cargo test --locked pinned_launch — 3 passed"
+  release-binary: "machine pending yes: touches src/app.rs, src/app/screens.rs, src/agents/settings.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed removing the acknowledged=false on sanitise reddens pinned_launch_drops_what_no_longer_holds; removing the apply_pinned_launch call reddens pinned_launch_fills_the_sheet_each_time_it_opens"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

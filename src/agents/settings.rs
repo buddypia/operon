@@ -30,6 +30,23 @@ pub(crate) struct RecentAgentSettings {
     pub(crate) last_selected_agent: Option<String>,
     #[serde(default)]
     pub(crate) agents: HashMap<String, AgentLaunchSettings>,
+    /// Set by 「この設定を毎回使う」 (change 138): what every new launch sheet
+    /// opens with, untouched by the edits one launch makes.
+    #[serde(default)]
+    pub(crate) pinned: Option<PinnedLaunch>,
+}
+
+/// One whole launch combination a person chose to start every session with.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct PinnedLaunch {
+    pub(crate) agent: String,
+    pub(crate) settings: AgentLaunchSettings,
+    #[serde(default)]
+    pub(crate) account: Option<Uuid>,
+    /// Whether the danger acknowledgement was given for exactly this
+    /// combination when it was pinned. The person chose to carry it.
+    #[serde(default)]
+    pub(crate) acknowledged: bool,
 }
 
 pub(crate) fn recent_agent_settings_path(data_file: &Path) -> PathBuf {
@@ -56,6 +73,7 @@ pub(crate) fn load_recent_agent_settings(data_file: &Path) -> RecentAgentSetting
     for (agent, launch_settings) in settings.agents.iter_mut() {
         sanitize_agent_launch_settings(agent, launch_settings);
     }
+    settings.pinned = settings.pinned.take().and_then(sanitize_pinned_launch);
 
     settings
 }
@@ -77,6 +95,22 @@ pub(crate) fn save_recent_agent_settings(
     buffer.push(b'\n');
     write_file_atomically(&path, &buffer)?;
     Ok(())
+}
+
+/// A pin for an agent this build does not know is dropped. One the sanitiser
+/// had to change keeps the rest but loses its acknowledgement: that consent
+/// was for the combination as it was written, not the one now held.
+fn sanitize_pinned_launch(mut pinned: PinnedLaunch) -> Option<PinnedLaunch> {
+    // The mode table names every built-in agent; "custom" has no modes.
+    if pinned.agent != "custom" && agent_mode_options(&pinned.agent).is_empty() {
+        return None;
+    }
+    let written = pinned.settings.clone();
+    sanitize_agent_launch_settings(&pinned.agent, &mut pinned.settings);
+    if pinned.settings != written {
+        pinned.acknowledged = false;
+    }
+    Some(pinned)
 }
 
 /// Validate and prune obsolete, conflicting, or malformed options for an agent.

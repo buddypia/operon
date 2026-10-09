@@ -1005,6 +1005,77 @@ impl OperonApp {
         }
     }
 
+    /// 「この設定を毎回使う」 checked: the sheet as it stands becomes what every
+    /// new sheet opens with, the acknowledgement included when it is given.
+    pub(crate) fn pin_launch_settings(&mut self) {
+        self.record_current_agent_settings();
+        let agent = self.selected_agent.clone();
+        let settings = self
+            .recent_agent_settings
+            .agents
+            .get(&agent)
+            .cloned()
+            .unwrap_or_default();
+        self.recent_agent_settings.pinned = Some(PinnedLaunch {
+            account: self
+                .agent_account_input
+                .filter(|_| agent_supports_accounts(&agent)),
+            acknowledged: self.launch_acknowledged(),
+            agent,
+            settings,
+        });
+        self.save_pinned_launch();
+    }
+
+    pub(crate) fn unpin_launch_settings(&mut self) {
+        self.recent_agent_settings.pinned = None;
+        self.save_pinned_launch();
+    }
+
+    fn save_pinned_launch(&self) {
+        if let Err(error) = save_recent_agent_settings(&self.data_file, &self.recent_agent_settings)
+        {
+            eprintln!("Operon: failed to save recent agent settings: {error}");
+        }
+    }
+
+    /// Fills the sheet from the pin. Only the form: the recents are written,
+    /// as before, by an edit or a launch.
+    pub(crate) fn apply_pinned_launch(&mut self) {
+        let Some(pinned) = self.recent_agent_settings.pinned.clone() else {
+            return;
+        };
+        self.selected_agent = pinned.agent;
+        self.agent_model_input = pinned.settings.model;
+        self.agent_mode_input = pinned.settings.mode;
+        self.agent_effort_input = pinned.settings.effort;
+        self.agent_flag_inputs = pinned.settings.flags;
+        self.custom_command = pinned.settings.custom_command;
+        self.agent_account_input = pinned.account.filter(|id| self.accounts.get(*id).is_some());
+        // `pending_launch` is read after the form is filled, so the consent
+        // covers exactly the pinned combination and nothing an edit makes.
+        self.acknowledged_launch = pinned.acknowledged.then(|| self.pending_launch());
+    }
+
+    /// Whether the sheet still holds the pin. Drawn every frame the footer
+    /// shows, so it compares in place rather than building a `PinnedLaunch`.
+    pub(crate) fn launch_matches_pin(&self) -> bool {
+        let Some(pinned) = &self.recent_agent_settings.pinned else {
+            return false;
+        };
+        let account = self
+            .agent_account_input
+            .filter(|_| agent_supports_accounts(&self.selected_agent));
+        pinned.agent == self.selected_agent
+            && pinned.settings.model == self.agent_model_input.trim()
+            && pinned.settings.mode == self.agent_mode_input.trim()
+            && pinned.settings.effort == self.agent_effort_input.trim()
+            && pinned.settings.flags == self.agent_flag_inputs
+            && pinned.settings.custom_command == self.custom_command.trim()
+            && pinned.account == account
+            && pinned.acknowledged == self.launch_acknowledged()
+    }
+
     pub(crate) fn selected_project(&self) -> Option<&Project> {
         self.selected_project
             .and_then(|id| self.store.projects.iter().find(|project| project.id == id))
@@ -4928,6 +4999,7 @@ impl OperonApp {
     /// to start a session comes here, so none of them navigates away.
     pub(crate) fn open_project_session_setup(&mut self, project_id: Uuid) {
         self.select_project(Some(project_id));
+        self.apply_pinned_launch();
         self.launch_sheet_open = true;
         self.launch_sheet_needs_focus = true;
         self.launch_sheet_is_git = self

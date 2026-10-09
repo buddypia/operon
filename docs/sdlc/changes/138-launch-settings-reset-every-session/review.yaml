@@ -1,0 +1,21 @@
+# Review record for change 138. Shape: docs/sdlc/templates/review.yaml.
+#
+# rust-reviewer read the staged src diff at the digest below and confirmed the
+# carried acknowledgement is bound to exactly the pinned combination: it is
+# taken from pending_launch() after apply_pinned_launch fills the form, and
+# dropped on load when the sanitiser changed the pin. No I/O per frame.
+
+digest: "f45d59ccc11f4ec3"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app.rs save_pinned_launch only eprintln!s a failed write; the checkbox stays ticked but the pin is gone after restart, with no notice
+    person: "保存先に書き込めない特殊な状況でだけ、チェックしたのに再起動後に固定が外れていることがあります。通常の使い方では起きず、対応は不要です。"
+  - rust-reviewer/2 · src/app.rs launch_matches_pin compares flags in order; the same set re-ticked in another order shows the 変更しています note
+    person: "フラグを外して付け直すと、中身が同じでも「固定した設定から変更しています」と出ることがあります。起動される内容は正しく、対応は不要です。"
+  - rust-reviewer/3 · src/app.rs launch_matches_pin calls launch_acknowledged(), cloning and sorting per frame while a pin exists; optional
+    person: "固定中は起動画面の描画で小さな余計な処理が毎回走りますが、体感できる遅さにはなりません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"

@@ -1,0 +1,5 @@
+2026-10-09T05:54:21Z person spec spec.md 8c13d9246d08d438 approve the person chose, on 2026-10-09, that the pin carries the danger acknowledgement (「了承も固定する」); this is the protection-weakening decision in Flagged concerns
+2026-10-09T05:54:21Z auto intent intent.md 999ddabde2f6862e approve evaluator (ab5a2138fa393ba8d): intent restates the quoted request; both person answers (pin, pin carries acknowledgement) recorded; Today claims match code
+2026-10-09T05:54:21Z auto spec spec.md 8c13d9246d08d438 approve evaluator (ab5a2138fa393ba8d): spec covers intent; settings.rs, open_project_session_setup, pending_launch and launch_ready claims verified; ack-carry flagged and person-approved
+2026-10-09T05:54:21Z auto screen screen.md 327e45519984cc97 approve evaluator (ab5a2138fa393ba8d): footer-only addition with existing checkbox, weak note and quiet_button; no new role, glyph, size or layout; frames match spec Behaviour
+2026-10-09T05:54:21Z auto plan plan.md 89759bea64fe24ce approve evaluator (ab5a2138fa393ba8d): plan matches spec; launch_matches_pin comparison and fill-only apply stated; step 5 uses one cargo test per filter; risks map to tests
