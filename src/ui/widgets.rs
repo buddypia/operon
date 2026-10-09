@@ -548,7 +548,7 @@ pub(crate) fn verb_button(
         let response = ui.add(
             egui::Button::new(
                 RichText::new(format!("{icon}  {label}"))
-                    .size(13.0)
+                    .size(13.5)
                     .strong(),
             )
             .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
@@ -679,7 +679,7 @@ pub(crate) fn empty_state(ui: &mut egui::Ui, palette: &Palette, icon: &str, mess
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.vertical_centered(|ui| {
-                ui.label(RichText::new(icon).size(26.0).color(palette.text_faint));
+                ui.label(RichText::new(icon).size(28.0).color(palette.text_faint));
                 ui.add_space(SPACE_SM);
                 ui.label(RichText::new(message).color(palette.text_muted));
             });
@@ -783,7 +783,7 @@ pub(crate) fn readiness_row(
             } else {
                 ICON_UNAVAILABLE
             })
-            .size(13.0)
+            .size(13.5)
             .strong()
             .color(if available {
                 palette.success
@@ -791,7 +791,7 @@ pub(crate) fn readiness_row(
                 palette.warning
             }),
         );
-        ui.label(RichText::new(label).size(13.0).color(palette.text));
+        ui.label(RichText::new(label).size(13.5).color(palette.text));
         ui.label(RichText::new(detail).size(12.0).color(palette.text_muted));
     });
 }

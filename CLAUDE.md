@@ -110,7 +110,7 @@ are here because a rule you do not know exists cannot be consulted:
 
 | Rule | Arrives with | Forbids |
 |---|---|---|
-| `.claude/rules/palette-and-glyphs.md` | `src/theme.rs`, `src/glyphs.rs`, `src/app.rs`, `src/app/`, `src/ui/` | a colour or glyph literal at a call site |
+| `.claude/rules/palette-and-glyphs.md` | `src/theme.rs`, `src/glyphs.rs`, `src/app.rs`, `src/app/`, `src/ui/` | colour, glyph, size literals; raw buttons |
 | `.claude/rules/transcripts.md` | `src/history.rs`, `src/transcript.rs`, `src/cli.rs` | judging another CLI's record kind in a `match`; inferring a terminal's conversation |
 | `.claude/rules/identifiers.md` | `src/config.rs`, `src/tmux.rs`, `src/agents.rs` | one string in two places; a guard restating what it guards |
 | `.claude/rules/rust.md` | any `.rs`, `Cargo.toml` | work in a per-frame draw path; an unargued `unwrap`; a raw `.output()` |

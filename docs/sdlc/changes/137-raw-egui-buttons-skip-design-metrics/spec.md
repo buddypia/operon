@@ -9,10 +9,13 @@
    Both zero the vertical button padding and drop the 28px minimum height that
    `apply_interface_metrics` sets, which is exactly the cramped "パスを手入力".
    Pinned by `every_button_keeps_a_documented_height`.
-2. Every `min_size(egui::vec2(_, h))` on a control names `CONTROL_HEIGHT` or
+2. Every `.min_size(egui::vec2(_, h))` builder call on a control (not
+   `ui.set_min_size`, which sizes a region), and every `add_sized` of a button,
+   names `CONTROL_HEIGHT` or
    `CONTROL_HEIGHT_SMALL` for `h`, never a number. Pinned by the same test.
 3. Every literal text size in production source — `.size(N)`,
-   `FontId::proportional(N)`, `FontId::monospace(N)`, `FontId::new(N, …)` — is a
+   `FontId::proportional(N)`, `FontId::monospace(N)`, `FontId::new(N, …)`,
+   `status_chip(…, N, …)` — is a
    `fontSize` in `DESIGN.md`'s `typography` block. The test reads the document,
    so the document stays the single source. Pinned by
    `every_text_size_is_a_level_on_the_type_scale`.
@@ -32,9 +35,11 @@ No string is added or changed. What a person sees:
   other icon buttons in rows.
 - The session row's close (×) and "…" controls and the running-port badge are
   24px; the launch button is 28px like every other button (it was 34px).
+- The first-run screen's "プロジェクトフォルダを選択…" and "ワークスペースをスキャン…"
+  go from 38px and 32px to 28px; the terminal's "最新へ" button from 26px to 24px.
 - Off-scale text moves to the nearest documented level: 10 and 11 → 11.5,
-  13 → 13.5, 17 → 16, 18 → 20, 24 → 20, 26 and 30 → 28. Differences are half a
-  pixel to two pixels; nothing reflows beyond that.
+  13 → 13.5, 17 → 16, 18 → 20, 26 and 30 → 28: half a pixel to two pixels.
+  The drop overlay's message goes from 24 to 20 (`heading`), the one 4px move.
 
 ## Design
 

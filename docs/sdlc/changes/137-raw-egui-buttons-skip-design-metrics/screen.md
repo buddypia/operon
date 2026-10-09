@@ -9,7 +9,10 @@
 - Find bar arrows and the port-menu copy button become 24px icon buttons.
 - Session row × / "…" and the port badge go from 22 / 18px to 24px; the launch
   button from 34px to 28px.
-- Off-scale text sizes move to the nearest `DESIGN.md` level (≤2px).
+- The first-run screen's two buttons go from 38 / 32px to 28px; the terminal's
+  "最新へ" button from 26px to 24px.
+- Off-scale text sizes move to the nearest `DESIGN.md` level (≤2px), except
+  the drop overlay's message, 24 → 20 (`heading`).
 
 ## What does not change
 

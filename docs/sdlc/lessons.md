@@ -1836,3 +1836,15 @@ under change 115's mutations 1, 2, and 10.
 **The rule.** In `state.yaml`, `stage` must match the declared pipeline route's stages (`routes.yaml`), never colloquial or process-step terminology like `review`.
 
 **Guard.** `tests::every_state_file_names_a_route_and_a_stage_that_exist`.
+
+## 069 — A raw egui button ignored the app's control metrics
+
+**What happened.** The "パスを手入力" toggle, the sidebar's session-removal prompt, the find bar arrows, and diff note actions were drawn with egui's `small_button` / `Button::small()`. The person saw a button with its label pressed against the frame beside buttons with padding. Thirty-two text sizes sat between the levels of `DESIGN.md`'s type scale.
+
+**Why it was invisible.** `apply_interface_metrics` sets the padding and the 28px height on the context, so every button *looked* governed; egui's small variant opts out of both, and no rule or test said which constructor a button may use or which sizes text may take. Colour and icons had a rule and a test; geometry and type had prose only.
+
+**Cure.** Change 137 moved every site onto the helpers in `src/ui/widgets.rs` and the scale, and added the helper table to `DESIGN.md` *Controls* and the rule to `.claude/rules/palette-and-glyphs.md`.
+
+**The rule.** A button is drawn by its helper in `src/ui/widgets.rs`; a size is a level of `DESIGN.md`'s `typography` block.
+
+**Guard.** `every_button_keeps_a_documented_height` and `every_text_size_is_a_level_on_the_type_scale`, watched failing on main's tree (13 and 32 sites) and on a reintroduced `small_button` and `.size(13.0)`.

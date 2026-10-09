@@ -37,8 +37,18 @@ its `ICON_VOCABULARY` entry, and — if it changes how a kind of thing is marked
 its line in `DESIGN.md`. Never a literal at the call site, and never a Unicode
 symbol picked because it looked close enough.
 
+# Before writing any button or text size
+
+`DESIGN.md` → *Controls* has the table of which helper in `src/ui/widgets.rs`
+draws which kind of button; call that helper rather than `egui::Button`. Never
+`small_button` or `Button::small()` — they drop the padding and the 28px height
+— and an inline control asks for `CONTROL_HEIGHT` / `CONTROL_HEIGHT_SMALL`, not
+a number. Every `.size(…)` / `FontId` literal, icons included, is a `fontSize`
+from `DESIGN.md`'s `typography` block. `every_button_keeps_a_documented_height`
+and `every_text_size_is_a_level_on_the_type_scale` enforce both.
+
 ---
 
 This rule loads because you opened a file that paints. It is the reminder; the
-three tests above are the enforcement, and they run whether or not this text was
+tests above are the enforcement, and they run whether or not this text was
 in context. See `docs/sdlc/README.md` for why the split exists.

@@ -264,7 +264,7 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
                     .spacing(egui::vec2(14.0, 5.0))
                     .show(ui, |ui| {
                         for cell in header {
-                            ui.label(RichText::new(cell).size(13.0).strong());
+                            ui.label(RichText::new(cell).size(13.5).strong());
                         }
                         ui.end_row();
                         for row in rows {

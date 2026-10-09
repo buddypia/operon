@@ -1,0 +1,24 @@
+# Review record for 137-raw-egui-buttons-skip-design-metrics.
+#
+# rust-reviewer read the staged diff against .claude/rules/rust.md and
+# .claude/rules/palette-and-glyphs.md.
+#
+# Round 1: request-changes, 4 Important — two add_sized first-run buttons and
+# the terminal jump button at undocumented heights, status_chip 13.0 passed
+# through a parameter, and line-based scans that rustfmt could defeat. All
+# fixed; the tests now scan whitespace-stripped source, watched failing on
+# four mutations.
+# Round 2: approve-with-nits 0 3. Took the nested RichText .small() loophole
+# and the DESIGN.md claim about `put` rectangles.
+# Round 3 (this verdict, on digest ee6c54969ff2c0ce): approve-with-nits 0 1.
+
+digest: "ee6c54969ff2c0ce"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/a · compact_drawing_sources drops only whole-line comments, call_arguments counts brackets inside string literals and trailing comments, and only `.min_size(egui::vec2(` is matched (not `Vec2::new` or a bare `vec2`). None affects today's tree.
+    person: "ボタンの高さと文字サイズを確かめるテストには、珍しい書き方をすると見逃す抜け道が少し残っています。今のコードには該当箇所がなく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"

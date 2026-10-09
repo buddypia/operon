@@ -215,7 +215,7 @@ pub(crate) fn diff_pane(
                                 DiffFileChange::Removed => ICON_FILE_REMOVED,
                                 _ => file_tree_icon(&file.path),
                             })
-                            .size(13.0)
+                            .size(13.5)
                             .color(match file.change {
                                 DiffFileChange::Added => palette.diff_added,
                                 DiffFileChange::Removed => palette.diff_removed,
@@ -340,14 +340,14 @@ pub(crate) fn diff_pane(
                             if comment_sent {
                                 ui.label(
                                     RichText::new(format!("[{}]", tr("送信済み")))
-                                        .size(11.0)
+                                        .size(11.5)
                                         .color(palette.accent),
                                 );
                             }
                             if comment_resolved {
                                 ui.label(
                                     RichText::new(format!("[{}]", tr("解決済み")))
-                                        .size(11.0)
+                                        .size(11.5)
                                         .color(palette.success),
                                 );
                             }
@@ -404,7 +404,7 @@ pub(crate) fn diff_pane(
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
-                                        if ui.small_button(tr("削除")).clicked() {
+                                        if secondary_button(ui, tr("削除")).clicked() {
                                             changed |= annotations.remove(project, &path, number);
                                         }
                                         let toggle_label = if is_resolved {
@@ -412,7 +412,7 @@ pub(crate) fn diff_pane(
                                         } else {
                                             tr("解決")
                                         };
-                                        if ui.small_button(toggle_label).clicked() {
+                                        if secondary_button(ui, toggle_label).clicked() {
                                             changed |=
                                                 annotations.toggle_resolved(project, &path, number);
                                         }

@@ -40,7 +40,7 @@ pub(crate) fn file_tree_rows(
                         } else {
                             ICON_DISCLOSURE_CLOSED
                         })
-                        .size(11.0)
+                        .size(11.5)
                         .color(palette.text_faint),
                     )
                     .sense(egui::Sense::click()),
@@ -52,7 +52,7 @@ pub(crate) fn file_tree_rows(
                         } else {
                             ICON_FOLDER_CLOSED
                         })
-                        .size(13.0)
+                        .size(13.5)
                         .color(palette.text_muted),
                     )
                     .sense(egui::Sense::click()),
@@ -68,7 +68,7 @@ pub(crate) fn file_tree_rows(
                 let file_res = ui.add(
                     egui::Label::new(
                         RichText::new(file_tree_icon(&node.name))
-                            .size(13.0)
+                            .size(13.5)
                             .color(palette.text_muted),
                     )
                     .sense(egui::Sense::click()),
@@ -100,7 +100,7 @@ pub(crate) fn file_tree_rows(
             // agent that just finished actually touched.
             if let Some(status) = badges.get(node.path.to_string_lossy().as_ref()) {
                 let (mark, colour) = git_status_badge(status, palette);
-                ui.label(RichText::new(mark).size(11.0).color(colour))
+                ui.label(RichText::new(mark).size(11.5).color(colour))
                     .on_hover_text(git_status_wording(status));
             }
         });

@@ -758,7 +758,7 @@ impl OperonApp {
         let mut removal_requested = false;
         let row = clickable_card(ui, palette, ("home-row", list, session.id), true, |ui| {
             ui.horizontal(|ui| {
-                status_chip(ui, &status, 13.0, palette);
+                status_chip(ui, &status, 13.5, palette);
                 // Right to left first, so the action and the menu keep their
                 // place and the title takes whatever width is left.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -957,7 +957,7 @@ impl OperonApp {
                     ui.add_space(14.0);
                     if ui
                         .add_sized(
-                            [240.0, 38.0],
+                            [240.0, CONTROL_HEIGHT],
                             egui::Button::new(
                                 RichText::new(tr("プロジェクトフォルダを選択…")).strong(),
                             ),
@@ -969,7 +969,7 @@ impl OperonApp {
                     ui.add_space(4.0);
                     if ui
                         .add_sized(
-                            [240.0, 32.0],
+                            [240.0, CONTROL_HEIGHT],
                             egui::Button::new(tr("ワークスペースをスキャン…")),
                         )
                         .clicked()
@@ -1103,7 +1103,7 @@ impl OperonApp {
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(ICON_PROJECT)
-                                        .size(18.0)
+                                        .size(20.0)
                                         .color(palette.accent_text),
                                 );
                                 ui.add_space(SPACE_XS);
@@ -1195,10 +1195,10 @@ impl OperonApp {
             let mut manual_clicked = false;
             if first_run {
                 ui.vertical_centered(|ui| {
-                    manual_clicked = ui.small_button(manual_label).clicked();
+                    manual_clicked = secondary_button(ui, manual_label).clicked();
                 });
             } else {
-                manual_clicked = ui.small_button(manual_label).clicked();
+                manual_clicked = secondary_button(ui, manual_label).clicked();
             }
             if manual_clicked {
                 self.show_manual_project_entry = !self.show_manual_project_entry;
@@ -2054,7 +2054,7 @@ impl OperonApp {
                                 .color(readable_text_on(accent, palette)),
                         )
                         .fill(accent)
-                        .min_size(egui::vec2(0.0, 34.0)),
+                        .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
                     )
                     .clicked()
                 {
@@ -2489,7 +2489,7 @@ impl OperonApp {
         let mut removal_requested = false;
         let row = clickable_card(ui, palette, ("session-row", session.id), true, |ui| {
             ui.horizontal(|ui| {
-                status_chip(ui, &status, 13.0, palette);
+                status_chip(ui, &status, 13.5, palette);
                 ui.label(RichText::new(&title).strong());
                 agent_chip(ui, &session.agent, 12.0, palette);
                 ui.label(
@@ -3282,7 +3282,7 @@ impl OperonApp {
             ui.vertical_centered(|ui| {
                 ui.label(
                     RichText::new(ICON_FILE)
-                        .size(30.0)
+                        .size(28.0)
                         .color(palette.text_faint),
                 );
                 ui.label(
@@ -3544,7 +3544,7 @@ impl OperonApp {
             ui.vertical_centered(|ui| {
                 ui.label(
                     RichText::new(tr("画像データを読み込めませんでした。"))
-                        .size(13.0)
+                        .size(13.5)
                         .color(palette.text_muted),
                 );
             });
@@ -3764,19 +3764,19 @@ impl OperonApp {
                                 // tab looks exactly as it did.
                                 if let Some(branch) = branch {
                                     ui.label(
-                                        RichText::new(branch).size(11.0).color(palette.text_muted),
+                                        RichText::new(branch).size(11.5).color(palette.text_muted),
                                     );
                                 }
                                 if *saving {
                                     ui.label(
                                         RichText::new(ICON_PENDING)
-                                            .size(11.0)
+                                            .size(11.5)
                                             .color(palette.text_muted),
                                     );
                                 } else if *modified {
                                     ui.label(
                                         RichText::new(ICON_UNSAVED)
-                                            .size(10.0)
+                                            .size(11.5)
                                             .color(palette.accent_text),
                                     )
                                     .on_hover_text(tr("未保存の変更があります"));
@@ -4142,7 +4142,7 @@ impl OperonApp {
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.set_min_width(205.0);
             ui.horizontal(|ui| {
-                status_chip(ui, &status, 13.0, palette);
+                status_chip(ui, &status, 13.5, palette);
                 ui.label(RichText::new(session_title(session)).strong());
                 agent_chip(ui, &session.agent, 12.0, palette);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -4230,7 +4230,7 @@ impl OperonApp {
                 ui.set_width(200.0);
                 ui.label(
                     RichText::new(tr("設定"))
-                        .size(18.0)
+                        .size(20.0)
                         .strong()
                         .color(palette.text_strong),
                 );
@@ -5003,7 +5003,7 @@ impl OperonApp {
                                                     RichText::new(ICON_CLOSE).size(15.0),
                                                 )
                                                 .frame(false)
-                                                .min_size(egui::vec2(22.0, 22.0)),
+                                                .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
                                             );
                                             paint_button_focus(ui, &close_res, palette);
                                             if close_res
@@ -5015,7 +5015,7 @@ impl OperonApp {
                                         } else {
                                             ui.label(
                                                 RichText::new(relative_time(candidate.created_at))
-                                                    .size(11.0)
+                                                    .size(11.5)
                                                     .color(palette.text_faint),
                                             );
                                         }
@@ -5030,7 +5030,7 @@ impl OperonApp {
                                                     .color(palette.text_muted),
                                             )
                                             .frame(false)
-                                            .min_size(egui::vec2(22.0, 22.0)),
+                                            .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
                                             |ui| {
                                                 if ui.button("worktree").clicked() {
                                                     worktree_requested = true;
@@ -5184,7 +5184,7 @@ impl OperonApp {
                 } else {
                     ui.label(
                         RichText::new(tf!("{p0} 件を非表示中", p0 = sessions.len().saturating_sub(shown)))
-                            .size(11.0)
+                            .size(11.5)
                             .color(palette.text_faint),
                     );
                 }
@@ -5634,7 +5634,7 @@ impl OperonApp {
                     // scrolls, in the corner a reader's eye ends at.
                     let jump = egui::Rect::from_min_size(
                         terminal_rect.right_bottom() - egui::vec2(96.0, 36.0),
-                        egui::vec2(84.0, 26.0),
+                        egui::vec2(84.0, CONTROL_HEIGHT_SMALL),
                     );
                     if ui
                         .put(
@@ -6155,7 +6155,7 @@ impl OperonApp {
                                     format!("{}h", elapsed_secs / 3600)
                                 };
                                 ui.label(
-                                    RichText::new(time_str).size(11.0).color(palette.text_faint),
+                                    RichText::new(time_str).size(11.5).color(palette.text_faint),
                                 );
 
                                 ui.with_layout(
@@ -6164,13 +6164,13 @@ impl OperonApp {
                                         if turn.completed {
                                             ui.label(
                                                 RichText::new("✓ 完了")
-                                                    .size(11.0)
+                                                    .size(11.5)
                                                     .color(palette.success),
                                             );
                                         } else {
                                             ui.label(
                                                 RichText::new("● 実行中")
-                                                    .size(11.0)
+                                                    .size(11.5)
                                                     .color(palette.accent),
                                             );
                                         }

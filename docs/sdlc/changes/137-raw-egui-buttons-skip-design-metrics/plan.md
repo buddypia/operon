@@ -37,7 +37,22 @@
 - `cargo clippy --locked -- -D warnings` — no output past the compile lines.
 - `cargo test --locked every_button_keeps_a_documented_height` and
   `every_text_size_is_a_level_on_the_type_scale` — pass, and fail before step 2.
+- `bash scripts/check-bands.sh` — no new breach (the `CLAUDE.md` row grows a few words).
 - CI: `test result: ok. N passed; 0 failed; 6 ignored`.
 - The project page's "パスを手入力" at 28px with inset label.
 
 ## Departures from the plan
+
+- **rust-reviewer round 1 (request-changes, 4 Important).** Fixed:
+  the first-run screen's two `add_sized` buttons (38 / 32px → `CONTROL_HEIGHT`),
+  the terminal's "最新へ" jump button (26px → `CONTROL_HEIGHT_SMALL`), and
+  `status_chip(…, 13.0, …)` at three sites (→ 13.5). The two tests now read each
+  file with whitespace removed, so a call rustfmt breaks across lines is still
+  one call; they also check `add_sized` on a button and `status_chip`'s size
+  argument. Watched failing on four mutations: `add_sized` at 32, `.small()` on
+  its own line after `Button::new`, `.size(` with the literal on the next line,
+  and `status_chip` at 13.0. The `put` rectangle is fixed but not scanned:
+  `Rect::from_min_size` also lays out terminal cells, which are not controls.
+  `DESIGN.md` no longer claims `ui.button` is forbidden: it takes the shared
+  metrics from the context.
+

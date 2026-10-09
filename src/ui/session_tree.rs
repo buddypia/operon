@@ -459,7 +459,7 @@ impl OperonApp {
                     if !touched.is_empty() {
                         ui.label(
                             RichText::new(tr("ターミナルに出たファイル"))
-                                .size(11.0)
+                                .size(11.5)
                                 .color(palette.text_faint),
                         );
                         for path in touched {
@@ -542,7 +542,7 @@ impl OperonApp {
                     "{ICON_NOTICE} {}",
                     tr("一部のファイルを省略しています")
                 ))
-                .size(11.0)
+                .size(11.5)
                 .color(palette.text_faint),
             )
             .on_hover_text(warning);
@@ -623,7 +623,7 @@ impl OperonApp {
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = SPACE_XS;
                                 let (mark, colour) = git_status_badge(&file.status, palette);
-                                ui.label(RichText::new(mark).size(11.0).color(colour));
+                                ui.label(RichText::new(mark).size(11.5).color(colour));
                                 let row = ui.add(
                                     egui::Label::new(
                                         RichText::new(&file.path).size(12.5).color(palette.text),
@@ -656,7 +656,7 @@ fn path_row(ui: &mut egui::Ui, path: &Path, palette: &Palette) -> egui::Response
             .unwrap_or_default();
         ui.label(
             RichText::new(file_tree_icon(&name))
-                .size(13.0)
+                .size(13.5)
                 .color(palette.text_muted),
         );
         ui.add(

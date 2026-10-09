@@ -5024,10 +5024,10 @@ impl OperonApp {
             .color(self.store.theme.palette().accent_soft),
         );
         ui.horizontal(|ui| {
-            if ui.small_button(tr("キャンセル")).clicked() {
+            if secondary_button(ui, tr("キャンセル")).clicked() {
                 self.pending_session_close = None;
             }
-            if ui.small_button(tr("削除")).clicked() {
+            if secondary_button(ui, tr("削除")).clicked() {
                 self.pending_session_close = None;
                 self.remove_after_close.insert(session_id);
                 self.stop_session(session_id);
@@ -5940,7 +5940,7 @@ impl eframe::App for OperonApp {
                         // result of something the person just did, and closes.
                         if let Some(warning) = self.durability_warning.clone() {
                             banner(ui, palette, ICON_ATTENTION, palette.warning, |ui| {
-                                ui.label(RichText::new(warning).size(13.0).color(palette.text));
+                                ui.label(RichText::new(warning).size(13.5).color(palette.text));
                             });
                             ui.add_space(SPACE_SM);
                         }
@@ -5950,7 +5950,7 @@ impl eframe::App for OperonApp {
                         if let Some(notice) = self.notice.clone().filter(|_| !brief) {
                             let mut dismissed = false;
                             banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
-                                ui.label(RichText::new(notice).size(13.0).color(palette.text));
+                                ui.label(RichText::new(notice).size(13.5).color(palette.text));
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -6011,7 +6011,7 @@ impl eframe::App for OperonApp {
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 tr("フォルダをドロップしてプロジェクトを追加"),
-                egui::FontId::proportional(24.0),
+                egui::FontId::proportional(20.0),
                 palette.accent_soft,
             );
         }
@@ -6057,7 +6057,7 @@ impl OperonApp {
                                     .size(14.0)
                                     .color(palette.success),
                             );
-                            ui.label(RichText::new(text).size(13.0).color(palette.text));
+                            ui.label(RichText::new(text).size(13.5).color(palette.text));
                             if small_icon_button(ui, palette, ICON_CLOSE, tr("この通知を閉じる"))
                                 .clicked()
                             {
@@ -7051,7 +7051,7 @@ impl OperonApp {
                             if is_failure {
                                 ui.label(
                                     RichText::new(ICON_ATTENTION)
-                                        .size(17.0)
+                                        .size(16.0)
                                         .color(palette.danger),
                                 );
                             } else {
@@ -7976,7 +7976,7 @@ impl OperonApp {
                     .color(palette.info),
             )
             .frame(false)
-            .min_size(egui::vec2(0.0, 18.0)),
+            .min_size(egui::vec2(0.0, CONTROL_HEIGHT_SMALL)),
             |ui| {
                 ui.label(RichText::new(tr("稼働中のポート")).small().weak());
                 ui.separator();
@@ -8005,9 +8005,7 @@ impl OperonApp {
                                     opened_url = Some(url.clone());
                                     ui.close_menu();
                                 }
-                                if ui
-                                    .small_button(RichText::new(ICON_COPY).size(11.0))
-                                    .on_hover_text(tr("URL をコピー"))
+                                if small_icon_button(ui, palette, ICON_COPY, tr("URL をコピー"))
                                     .clicked()
                                 {
                                     copied_url = Some(url);
@@ -8164,7 +8162,7 @@ impl OperonApp {
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(ICON_SEARCH)
-                    .size(13.0)
+                    .size(13.5)
                     .color(palette.text_muted),
             );
             let field = ui.add(
@@ -8210,15 +8208,19 @@ impl OperonApp {
                 .color(palette.text_muted),
             );
             if ui
-                .add_enabled(total > 0, egui::Button::new(ICON_PREVIOUS).small())
-                .on_hover_text(tr("前の一致"))
+                .add_enabled_ui(total > 0, |ui| {
+                    small_icon_button(ui, palette, ICON_PREVIOUS, tr("前の一致"))
+                })
+                .inner
                 .clicked()
             {
                 step = Some(false);
             }
             if ui
-                .add_enabled(total > 0, egui::Button::new(ICON_NEXT).small())
-                .on_hover_text(tr("次の一致"))
+                .add_enabled_ui(total > 0, |ui| {
+                    small_icon_button(ui, palette, ICON_NEXT, tr("次の一致"))
+                })
+                .inner
                 .clicked()
             {
                 step = Some(true);
