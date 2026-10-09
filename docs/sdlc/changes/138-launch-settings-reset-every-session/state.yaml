@@ -9,8 +9,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "supervised"
@@ -18,14 +18,14 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the three pinned_launch_* tests in src/tests.rs, watch them fail, then follow plan.md Order of work from step 2."
+resume: "Committed with review SHIP; push the branch, wait for CI, merge --no-ff into main, package."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  pin-tests: "machine pending cargo test --locked pinned_launch"
+  bands: "machine waived bash scripts/check-bands.sh reports the same three instruction-size bands as main (always_loaded_bytes, steering_bytes, reference_bytes); this change adds no instruction bytes"
+  pin-tests: "machine passed cargo test --locked pinned_launch — 3 passed"
   release-binary: "machine pending yes: touches src/app.rs, src/app/screens.rs, src/agents/settings.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed removing the acknowledged=false on sanitise reddens pinned_launch_drops_what_no_longer_holds; removing the apply_pinned_launch call reddens pinned_launch_fills_the_sheet_each_time_it_opens"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

@@ -36452,6 +36452,7 @@ pub(crate) fn recent_agent_settings_save_and_load_round_trip() {
     let mut settings = RecentAgentSettings {
         last_selected_agent: Some("claude".to_owned()),
         agents: HashMap::new(),
+        ..RecentAgentSettings::default()
     };
     settings.agents.insert(
         "claude".to_owned(),
@@ -36669,6 +36670,7 @@ pub(crate) fn app_startup_restores_last_selected_agent_and_recent_settings() {
     let mut settings = RecentAgentSettings {
         last_selected_agent: Some("gemini".to_owned()),
         agents: HashMap::new(),
+        ..RecentAgentSettings::default()
     };
     settings.agents.insert(
         "gemini".to_owned(),
@@ -36696,6 +36698,147 @@ pub(crate) fn app_startup_restores_last_selected_agent_and_recent_settings() {
     assert_eq!(app.agent_flag_inputs, vec!["sandbox".to_owned()]);
 
     fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 138. The pinned launch survives the settings file, and a file written
+/// before the pin existed loads with none.
+#[test]
+pub(crate) fn pinned_launch_round_trips_through_the_settings_file() {
+    let temp = temporary_directory("pinned-launch-roundtrip");
+    let data_file = temp.join("store.json");
+    fs::write(
+        recent_agent_settings_path(&data_file),
+        br#"{"last_selected_agent":"claude","agents":{}}"#,
+    )
+    .unwrap();
+    assert_eq!(load_recent_agent_settings(&data_file).pinned, None);
+
+    let pinned = PinnedLaunch {
+        agent: "claude".to_owned(),
+        settings: AgentLaunchSettings {
+            model: "opus".to_owned(),
+            mode: "bypassPermissions".to_owned(),
+            effort: "high".to_owned(),
+            flags: Vec::new(),
+            custom_command: String::new(),
+        },
+        account: Some(Uuid::new_v4()),
+        acknowledged: true,
+    };
+    let settings = RecentAgentSettings {
+        pinned: Some(pinned.clone()),
+        ..RecentAgentSettings::default()
+    };
+    save_recent_agent_settings(&data_file, &settings).unwrap();
+    assert_eq!(load_recent_agent_settings(&data_file).pinned, Some(pinned));
+
+    fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 138. While pinned, every sheet opens on the pin — acknowledgement
+/// included, so it can launch untouched — whatever the last launch changed.
+/// Unpinned, the sheet is back to the last-touched settings.
+#[test]
+pub(crate) fn pinned_launch_fills_the_sheet_each_time_it_opens() {
+    let (mut app, project, root) = launch_screen_fixture("pinned-launch-fills");
+    let account = Uuid::new_v4();
+    app.accounts.accounts.push(AgentAccount {
+        id: account,
+        agent: "claude".to_owned(),
+        name: "仕事用".to_owned(),
+        path: root.join("account"),
+    });
+    app.select_agent("claude");
+    app.agent_model_input = "opus".to_owned();
+    app.agent_mode_input = "bypassPermissions".to_owned();
+    app.agent_account_input = Some(account);
+    app.acknowledged_launch = Some(app.pending_launch());
+    app.pin_launch_settings();
+    assert!(app.launch_matches_pin());
+
+    // One launch's change, then a project switch that clears the consent.
+    app.select_agent("codex");
+    app.agent_model_input = "gpt-5".to_owned();
+    app.agent_account_input = None;
+    assert!(!app.launch_matches_pin());
+    app.select_project(None);
+
+    app.open_project_session_setup(project.id);
+    assert_eq!(app.selected_agent, "claude");
+    assert_eq!(app.agent_model_input, "opus");
+    assert_eq!(app.agent_mode_input, "bypassPermissions");
+    assert_eq!(app.agent_account_input, Some(account));
+    assert!(app.launch_matches_pin());
+    assert!(
+        app.launch_ready(&project),
+        "the pinned acknowledgement lets ⌘↩ launch untouched"
+    );
+
+    // Unticking the consent is a difference from the pin.
+    app.acknowledged_launch = None;
+    assert!(!app.launch_matches_pin());
+
+    // The pin is on disk, so a restart opens on it too.
+    let saved = load_recent_agent_settings(&app.data_file);
+    assert_eq!(saved.pinned, app.recent_agent_settings.pinned);
+    assert!(saved.pinned.is_some());
+
+    app.unpin_launch_settings();
+    assert_eq!(load_recent_agent_settings(&app.data_file).pinned, None);
+    app.select_agent("codex");
+    app.open_project_session_setup(project.id);
+    assert_eq!(app.selected_agent, "codex", "unpinned, nothing is imposed");
+
+    fs::remove_dir_all(root).ok();
+}
+
+/// Change 138. A pin that no longer holds is not trusted past what still
+/// holds: an unknown agent drops it, a setting the sanitiser had to change
+/// drops its acknowledgement, and a removed account opens as 「このマシン」.
+#[test]
+pub(crate) fn pinned_launch_drops_what_no_longer_holds() {
+    let (mut app, project, root) = launch_screen_fixture("pinned-launch-drops");
+    let data_file = app.data_file.clone();
+    let write_pin = |pinned: PinnedLaunch| {
+        let settings = RecentAgentSettings {
+            pinned: Some(pinned),
+            ..RecentAgentSettings::default()
+        };
+        save_recent_agent_settings(&data_file, &settings).unwrap();
+        load_recent_agent_settings(&data_file).pinned
+    };
+    let dangerous = PinnedLaunch {
+        agent: "codex".to_owned(),
+        settings: AgentLaunchSettings {
+            flags: vec!["bypass-approvals".to_owned()],
+            ..AgentLaunchSettings::default()
+        },
+        account: Some(Uuid::new_v4()),
+        acknowledged: true,
+    };
+
+    let unknown = PinnedLaunch {
+        agent: "nonsense".to_owned(),
+        ..dangerous.clone()
+    };
+    assert_eq!(write_pin(unknown), None);
+
+    let mut changed = dangerous.clone();
+    changed.settings.flags.push("no-such-flag".to_owned());
+    let loaded = write_pin(changed).expect("a known agent keeps its pin");
+    assert_eq!(loaded.settings.flags, vec!["bypass-approvals".to_owned()]);
+    assert!(
+        !loaded.acknowledged,
+        "consent was given for a combination that is no longer the one held"
+    );
+
+    app.recent_agent_settings.pinned = write_pin(dangerous);
+    app.open_project_session_setup(project.id);
+    assert_eq!(app.selected_agent, "codex");
+    assert_eq!(app.agent_account_input, None, "the account is gone");
+    assert!(app.launch_ready(&project));
+
+    fs::remove_dir_all(root).ok();
 }
 
 // -----------------------------------------------------------------------------
