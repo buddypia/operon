@@ -1,0 +1,27 @@
+# Review record for change 139. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: all three reviewers found that a pinned row opened only from its
+# padding (selectable labels took the click); subprocess-safety-reviewer also
+# found a project emptied by pinning claiming it had no sessions. Both fixed
+# with tests watched failing against the old code. Round 2 judged the staged
+# diff at the digest below: rust and subprocess approve, durability approves
+# with two nits carried.
+#
+# Round 3: main (change 138) was merged into the branch, which shifted the
+# hunks of the landing diff (main..HEAD) without changing 139's lines; all
+# three reviewers compared the changed lines with f8c1173 and confirmed them.
+
+digest: "5a585926538e8328"
+
+rounds: 3
+
+carried:
+  - durability-reviewer/1 · src/app.rs select_session drops a focus request made for another session; no test pins that clause
+    person: "⌘J で開こうとしたセッションの画面が出る前に別のセッションへ移った場合の細かい挙動に、自動テストがまだありません。動作は正しく、対応は不要です。"
+  - durability-reviewer/2 · src/app/keymap.rs a keybindings.json that already gives ⌘J or ⌥⌘B to another action is refused whole; untested, accepted as the existing conflict rule
+    person: "キー割り当てファイルで ⌘J か ⌥⌘B を別の操作に割り当てている場合、そのファイルは読み込まれず、どの操作がぶつかっているかが表示されます。該当する場合だけ、どちらかのキーを変えてください。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve-with-nits 0 2"

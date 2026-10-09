@@ -198,8 +198,9 @@ Other actions:
 
 Click the pane to type into the agent; input methods such as the Japanese IME
 work. Scrollback is up to 5,000 lines in the app (`tmux` itself keeps 50,000).
-**Latest** jumps to the newest line. The side panel (fold it with its arrow,
-reopen with **Show side panel**) has three tabs: **Files**, **Conversation**
+**Latest** jumps to the newest line. The side panel opens to the right of the
+terminal (fold it with its arrow or ⌥⌘B, reopen with **Show side panel** or
+⌥⌘B) and has three tabs: **Files**, **Conversation**
 (the requests you have sent), and **Changes**.
 
 Paths in terminal output are links: hold **⌥** and click to open the file in the
@@ -227,6 +228,13 @@ The session list header has four toggle chips — **Needs you**, **Running**,
 **Idle**, **Finished** — each with a live count. Turn some on to show only those
 sessions; the list says how many it is hiding, and **フィルタを解除** (Clear
 filter) turns the filter off. The filter is not remembered after a restart.
+
+Sessions that need you are pinned under **要対応** (Needs you) at the top of the
+list, longest wait first, each with how long it has waited and — when its agent
+has finished a turn — what the agent last said, or 許可または回答を待っています
+(waiting for a permission or an answer). Click one, or press ⌘J, to open it with
+the keyboard already in its terminal; the toolbar's **要対応 N** button does the
+same while any session waits. Once answered, it returns to its project group.
 
 On **Home**, a banner counts the sessions waiting for you (waiting for an answer,
 blocked, or finished unread) and opens the list already narrowed to them. A turn
@@ -373,8 +381,10 @@ prompts, tool output, and source code.
 
 | Keys | Action | Notes |
 | --- | --- | --- |
-| ⌘K | **Search & actions** | Arrow keys move, Enter opens. Finds sessions by title, request, agent, branch, or project; projects by name or path |
+| ⌘K | **Search & actions** | Arrow keys move, Enter opens. Finds sessions by title, request, agent, branch, project, or what the agent last said; projects by name or path. Among equal matches a waiting session comes first |
 | ⌘N | **New session** | |
+| ⌘J | Next session that needs you | Longest wait first; the keyboard goes to its terminal. The toolbar's **要対応 N** (Needs you N) does the same |
+| ⌥⌘B | Show or hide the side panel | |
 | ⌘1 / ⌘2 / ⌘3 | **Home** / **Project** / **Session** | ⌘2 returns to the project list |
 | ⌘, | **Settings** | |
 | ⌘O | Choose a project folder | |
@@ -400,8 +410,9 @@ the current keys and reveals it; it never overwrites an existing file. The forma
 ```
 
 `Mod` means ⌘; other modifiers are `Shift`, `Alt`, and `Ctrl`. `null` removes the
-key. The actions are `palette.open`, `session.new`, `page.home`, `page.projects`,
-`page.sessions`, `page.settings`, `project.add`, and `terminal.find`. A file that
+key. The actions are `palette.open`, `session.new`, `attention.next`,
+`page.home`, `page.projects`, `page.sessions`, `page.settings`, `project.add`,
+`terminal.find`, and `panel.toggle`. A file that
 gives one chord to two actions, or names an unknown action, is refused whole and
 Operon starts with the defaults and tells you why.
 

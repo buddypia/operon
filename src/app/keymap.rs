@@ -1,6 +1,6 @@
 //! The keyboard, as data rather than as literals inside the frame loop.
 //!
-//! Eight actions have ids. A file names them and gives each a chord; what is
+//! Ten actions have ids. A file names them and gives each a chord; what is
 //! not named keeps its default. The whole of the decision — parsing, conflict,
 //! and every way a file can be wrong — is `resolve_keymap`, which takes a
 //! string and returns either a map or the sentence that says what is wrong with
@@ -63,6 +63,11 @@ pub(crate) const KEYMAP_ACTIONS: &[KeymapAction] = &[
         default: "Mod+N",
     },
     KeymapAction {
+        id: "attention.next",
+        label: "次の要対応セッションへ",
+        default: "Mod+J",
+    },
+    KeymapAction {
         id: "page.home",
         label: "ホームを開く",
         default: "Mod+1",
@@ -91,6 +96,11 @@ pub(crate) const KEYMAP_ACTIONS: &[KeymapAction] = &[
         id: "terminal.find",
         label: "ターミナル内を検索",
         default: "Mod+F",
+    },
+    KeymapAction {
+        id: "panel.toggle",
+        label: "サイドパネルを開閉",
+        default: "Mod+Alt+B",
     },
 ];
 

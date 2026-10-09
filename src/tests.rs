@@ -37888,25 +37888,26 @@ pub(crate) fn test_session_file_tree_icon_clicks_toggle_and_open() {
 
 /// Change 122: Verify that file list defaults to left sidebar and can be switched to right side.
 #[test]
-pub(crate) fn test_sidebar_defaults_left_files_and_right_conversation() {
+pub(crate) fn test_sidebar_defaults_right_files_from_either_side() {
     let mut fixture = SessionTreeTestFixture::new("m2-sidebar-defaults");
 
-    // 1. Initial defaults: left sidebar, files tab, visible, default session list width.
-    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Left);
+    // 1. Initial defaults: right panel (change 139), files tab, visible,
+    // default session list width.
+    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Right);
     assert_eq!(fixture.app.session_inspector_tab, InspectorTab::Files);
     assert!(fixture.app.show_session_inspector);
     assert_eq!(fixture.app.session_list_w, SIDEBAR_DEFAULT_W);
 
-    // 2. Render when docked left: project files are visible.
-    let shapes_left =
-        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
-    assert!(shapes_left.iter().any(|s| s.contains("project_only.txt")));
-
-    // 3. Switch to right side: project files are still rendered.
-    fixture.app.session_inspector_side = SidebarSide::Right;
+    // 2. Render when docked right: project files are visible.
     let shapes_right =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(shapes_right.iter().any(|s| s.contains("project_only.txt")));
+
+    // 3. Switch to the left side: project files are still rendered.
+    fixture.app.session_inspector_side = SidebarSide::Left;
+    let shapes_left =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    assert!(shapes_left.iter().any(|s| s.contains("project_only.txt")));
 }
 
 /// Change 122 (made real by 128): a tab dropped past the middle of the
@@ -38162,6 +38163,8 @@ pub(crate) fn test_stacked_sidebar_heights_clamp() {
 #[test]
 pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
     let mut fixture = SessionTreeTestFixture::new("m2-stacked-together");
+    // The stacked column is the left dock; the default is right (change 139).
+    fixture.app.session_inspector_side = SidebarSide::Left;
     let session = fixture.normal_session.clone();
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
     let find = |needle: &str| {
@@ -38187,6 +38190,8 @@ pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
 #[test]
 pub(crate) fn test_stacked_sidebar_returns_column_width_to_terminal() {
     let mut fixture = SessionTreeTestFixture::new("m2-stacked-width");
+    // The stacked column is the left dock; the default is right (change 139).
+    fixture.app.session_inspector_side = SidebarSide::Left;
     let session = fixture.normal_session.clone();
     let column_w = fixture.app.session_list_w;
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
@@ -42436,4 +42441,664 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
             "素でない push を確認なしで通しました: {asked}"
         );
     }
+}
+
+// ---- Change 139: waiting sessions first, one key to the next ----
+
+#[test]
+/// The queue is ordered by how long each session has wanted a person, so the
+/// one that has waited longest is the one a person reaches first.
+pub(crate) fn the_attention_queue_orders_waiting_sessions_by_how_long_they_have_waited() {
+    let root = temporary_directory("attention-queue-order");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.page = Page::Home;
+    let start = Instant::now();
+    app.note_session_activity_change(second);
+    app.track_attention(start);
+    app.note_session_activity_change(first);
+    app.track_attention(start + Duration::from_secs(60));
+    assert_eq!(app.attention_order, vec![second, first]);
+    assert_eq!(
+        app.attention_wait(second, start + Duration::from_secs(120)),
+        Some(Duration::from_secs(120))
+    );
+    assert_eq!(
+        app.attention_wait(first, start + Duration::from_secs(120)),
+        Some(Duration::from_secs(60))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A session read by a person leaves the queue, and coming back is a new wait
+/// rather than the old one resumed.
+pub(crate) fn a_session_that_stops_needing_a_person_leaves_the_attention_queue() {
+    let root = temporary_directory("attention-queue-leave");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.page = Page::Home;
+    let start = Instant::now();
+    app.note_session_activity_change(first);
+    app.note_session_activity_change(second);
+    app.track_attention(start);
+    assert_eq!(app.attention_order.len(), 2);
+
+    app.open_session_in_terminal(first);
+    app.track_attention(start + Duration::from_secs(10));
+    assert_eq!(app.attention_order, vec![second]);
+    assert_eq!(
+        app.attention_wait(first, start + Duration::from_secs(10)),
+        None
+    );
+
+    app.page = Page::Home;
+    app.note_session_activity_change(first);
+    app.track_attention(start + Duration::from_secs(30));
+    assert_eq!(app.attention_order, vec![second, first]);
+    assert_eq!(
+        app.attention_wait(first, start + Duration::from_secs(40)),
+        Some(Duration::from_secs(10))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Marks both sessions of `app_with_two_sessions` as needing a person, the
+/// second one first, and brings the queue up to date.
+fn queue_both_sessions(app: &mut OperonApp, first: Uuid, second: Uuid) {
+    app.page = Page::Home;
+    app.selected_session = None;
+    let start = Instant::now();
+    app.note_session_activity_change(second);
+    app.track_attention(start);
+    app.note_session_activity_change(first);
+    app.track_attention(start + Duration::from_secs(1));
+}
+
+#[test]
+/// ⌘J walks the queue from the session on screen, wrapping at the end.
+pub(crate) fn the_next_waiting_chord_opens_the_next_session_in_the_queue() {
+    let root = temporary_directory("attention-next");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_both_sessions(&mut app, first, second);
+    assert_eq!(app.attention_order, vec![second, first]);
+
+    // The chord is the keymap's, not a literal, and it is the key press that
+    // moves: the handler is what is under test, not the method it calls.
+    let chord = app
+        .keymap
+        .chord_for("attention.next")
+        .expect("attention.next should have a default chord");
+    assert_eq!(chord_label(chord), "⌘J");
+    let ctx = egui::Context::default();
+    let press = |app: &mut OperonApp| {
+        let mut raw = egui::RawInput::default();
+        raw.modifiers = chord.modifiers;
+        raw.events = vec![egui::Event::Key {
+            key: chord.key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: chord.modifiers,
+        }];
+        let _ = ctx.run(raw, |ctx| app.handle_app_shortcuts(ctx));
+    };
+
+    press(&mut app);
+    assert_eq!(app.selected_session, Some(second));
+    assert_eq!(app.page, Page::Sessions);
+
+    press(&mut app);
+    assert_eq!(app.selected_session, Some(first));
+
+    assert_eq!(
+        next_in_attention_queue(&[second, first], Some(first)),
+        Some(second)
+    );
+    assert_eq!(
+        next_in_attention_queue(&[second], Some(second)),
+        Some(second)
+    );
+    assert_eq!(next_in_attention_queue(&[], Some(second)), None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Opening a waiting session that is running leaves the keyboard in its pane,
+/// so the answer can be typed without reaching for the mouse.
+pub(crate) fn opening_the_next_waiting_session_focuses_its_terminal() {
+    let root = temporary_directory("attention-focus");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_both_sessions(&mut app, first, second);
+    app.open_next_waiting_session();
+    assert_eq!(app.terminal_focus_request, Some(second));
+
+    let session = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == second)
+        .cloned()
+        .expect("the second session should be in the store");
+    let context = egui::Context::default();
+    let screen = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 800.0),
+        )),
+        ..Default::default()
+    };
+    app.selected_session = Some(session.id);
+    let _ = context.run(screen, |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| {
+                app.ui_terminal_workspace(ui);
+            });
+    });
+    assert_eq!(
+        context.memory(|memory| memory.focused()),
+        Some(egui::Id::new(("terminal-pane", second))),
+        "the pane of the opened session should hold the keyboard"
+    );
+    assert_eq!(
+        app.terminal_focus_request, None,
+        "the request is spent once honoured"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A session whose pane is gone opens, but nothing asks a dead pane for the
+/// keyboard.
+pub(crate) fn opening_a_waiting_session_that_is_not_running_asks_for_no_focus() {
+    let root = temporary_directory("attention-no-focus");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    for session in &mut app.store.sessions {
+        if session.id == second {
+            session.status = SessionStatus::Exited;
+        }
+    }
+    queue_both_sessions(&mut app, first, second);
+    app.open_next_waiting_session();
+    assert_eq!(app.selected_session, Some(second));
+    assert_eq!(app.terminal_focus_request, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// With nobody waiting, ⌘J says so and moves nothing.
+pub(crate) fn the_next_waiting_chord_with_an_empty_queue_changes_nothing() {
+    let root = temporary_directory("attention-empty");
+    let (mut app, first, _second) = app_with_two_sessions(&root);
+    app.page = Page::Projects;
+    app.selected_session = Some(first);
+    app.track_attention(Instant::now());
+    assert!(app.attention_order.is_empty());
+    app.open_next_waiting_session();
+    assert_eq!(app.page, Page::Projects);
+    assert_eq!(app.selected_session, Some(first));
+    assert_eq!(app.terminal_focus_request, None);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("返事を待っているセッションはありません")
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Where each drawn text sits, for the pinned-section tests. `p` is the one
+/// project of `app_with_two_sessions`; its sessions are titled by name.
+fn pinned_layout(app: &mut OperonApp, on_screen: Uuid) -> Vec<(String, egui::Pos2)> {
+    app.track_attention(Instant::now());
+    let session = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == on_screen)
+        .cloned()
+        .expect("the session on screen should be in the store");
+    render_workspace_text_positions(app, &session, 1280.0, 800.0)
+}
+
+/// The pinned section's heading: a 「要対応」 drawn below the chip row, which
+/// carries the same word.
+fn pinned_heading_y(texts: &[(String, egui::Pos2)]) -> Option<f32> {
+    let chips = texts
+        .iter()
+        .find(|(text, _)| text.starts_with("すべて"))
+        .map(|(_, pos)| pos.y)?;
+    texts
+        .iter()
+        .find(|(text, pos)| text == "要対応" && pos.y > chips + 1.0)
+        .map(|(_, pos)| pos.y)
+}
+
+fn text_y(texts: &[(String, egui::Pos2)], exact: &str) -> Option<f32> {
+    texts
+        .iter()
+        .find(|(text, _)| text == exact)
+        .map(|(_, pos)| pos.y)
+}
+
+fn queue_first_only(app: &mut OperonApp, first: Uuid) {
+    app.page = Page::Home;
+    app.selected_session = None;
+    app.note_session_activity_change(first);
+    app.track_attention(Instant::now());
+    app.page = Page::Sessions;
+}
+
+#[test]
+/// A session that wants a person is drawn above the projects, under its own
+/// heading; one that does not stays in its project.
+pub(crate) fn the_session_list_pins_waiting_sessions_above_the_projects() {
+    let root = temporary_directory("pinned-above");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_first_only(&mut app, first);
+    let texts = pinned_layout(&mut app, second);
+    let heading = pinned_heading_y(&texts).expect("the pinned heading should be drawn");
+    let project = text_y(&texts, "p").expect("the project group should be drawn");
+    let pinned = text_y(&texts, "first").expect("the waiting session should be drawn");
+    let other = text_y(&texts, "second").expect("the other session should be drawn");
+    assert!(
+        heading < pinned && pinned < project,
+        "{heading} < {pinned} < {project}"
+    );
+    assert!(
+        other > project,
+        "the session nobody waits on stays in its project"
+    );
+    assert!(
+        texts.iter().any(|(text, _)| text == "たった今"),
+        "the pinned row says how long it has waited"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// One row per session: the pinned one is not repeated in its project.
+pub(crate) fn a_pinned_session_is_not_drawn_again_in_its_project() {
+    let root = temporary_directory("pinned-once");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_first_only(&mut app, first);
+    let texts = pinned_layout(&mut app, second);
+    assert_eq!(texts.iter().filter(|(text, _)| text == "first").count(), 1);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Chips that leave 要対応 out leave the section out too; the session is then
+/// wherever its own state puts it.
+pub(crate) fn chips_that_exclude_needs_you_hide_the_pinned_section() {
+    let root = temporary_directory("pinned-chips");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_first_only(&mut app, first);
+    app.status_filter = [false; 4];
+    app.status_filter[SessionStatusGroup::Busy.index()] = true;
+    let texts = pinned_layout(&mut app, second);
+    let project = text_y(&texts, "p").expect("the project group should be drawn");
+    let first_y = text_y(&texts, "first").expect("the session should still be drawn");
+    assert!(first_y > project, "no pinned section above the project");
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Reading a session that was pinned only for being unread clears the mark,
+/// and it goes back to its project.
+pub(crate) fn opening_an_unread_pinned_session_returns_it_to_its_project() {
+    let root = temporary_directory("pinned-read");
+    let (mut app, first, _second) = app_with_two_sessions(&root);
+    queue_first_only(&mut app, first);
+    app.open_session_in_terminal(first);
+    let texts = pinned_layout(&mut app, first);
+    let project = text_y(&texts, "p").expect("the project group should be drawn");
+    let first_y = text_y(&texts, "first").expect("the session should be drawn");
+    assert!(first_y > project, "back in its project once read");
+    assert!(
+        pinned_heading_y(&texts).is_none(),
+        "no pinned heading with nobody waiting"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The pinned row carries the words that ended the agent's turn, and a plain
+/// line while it waits on a permission — never last turn's words as a question.
+pub(crate) fn a_pinned_session_shows_what_its_agent_last_said() {
+    let root = temporary_directory("pinned-words");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_first_only(&mut app, first);
+    let now = Instant::now();
+    let status = |activity| HookStatus {
+        activity,
+        boundary: false,
+        tool: None,
+        last_message: Some("テストを追加しますか？".to_owned()),
+        started_at: now,
+        received_at: now,
+        completed_transcript: None,
+    };
+    app.hook_status.insert(first, status(AgentActivity::Idle));
+    let texts = pinned_layout(&mut app, second);
+    let words = texts
+        .iter()
+        .find(|(text, _)| text.contains("テストを追加しますか"))
+        .map(|(_, pos)| pos.y)
+        .expect("the agent's last words should be drawn under the pinned row");
+    let title = text_y(&texts, "first").expect("the pinned title should be drawn");
+    let project = text_y(&texts, "p").expect("the project group should be drawn");
+    assert!(
+        title < words && words < project,
+        "{title} < {words} < {project}"
+    );
+
+    app.hook_status
+        .insert(first, status(AgentActivity::AwaitingInput));
+    app.track_attention(Instant::now());
+    let texts = pinned_layout(&mut app, second);
+    assert!(texts
+        .iter()
+        .any(|(text, _)| text == "許可または回答を待っています"));
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text.contains("テストを追加しますか")),
+        "a carried message is not offered as the question being waited on"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// While anyone waits, the title bar offers ⌘J as a button; pressing it opens
+/// the next waiting session, and it is a control — no drag, no maximise.
+pub(crate) fn the_title_bar_offers_the_next_waiting_session_while_one_waits() {
+    let root = temporary_directory("titlebar-attention");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    let ctx = egui::Context::default();
+    let render = |app: &mut OperonApp, time: f64, events: Vec<egui::Event>| {
+        let mut raw = egui::RawInput::default();
+        raw.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 800.0),
+        ));
+        raw.time = Some(time);
+        raw.events = events;
+        ctx.run(raw, |ctx| app.ui_topbar(ctx))
+    };
+    let press = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+
+    app.track_attention(Instant::now());
+    let idle = render(&mut app, 0.0, vec![]);
+    assert!(
+        drawn_text_rect(&idle, |text| text.starts_with("要対応")).is_none(),
+        "no button while nobody waits"
+    );
+
+    queue_both_sessions(&mut app, first, second);
+    let layout = render(&mut app, 1.0, vec![]);
+    let at = drawn_text_rect(&layout, |text| text == "要対応 2  ⌘J")
+        .expect("the button names the count and the chord")
+        .center();
+
+    let click = render(
+        &mut app,
+        2.0,
+        vec![
+            egui::Event::PointerMoved(at),
+            press(at, true),
+            press(at, false),
+        ],
+    );
+    assert_eq!(
+        app.selected_session,
+        Some(second),
+        "it opens the longest wait"
+    );
+    assert_eq!(app.page, Page::Sessions);
+    let commands = &click.viewport_output[&egui::ViewportId::ROOT].commands;
+    assert!(!commands.contains(&egui::ViewportCommand::StartDrag));
+    assert!(!commands.contains(&egui::ViewportCommand::Maximized(true)));
+
+    let _ = render(&mut app, 3.0, vec![press(at, true), press(at, false)]);
+    let double = render(&mut app, 3.1, vec![press(at, true), press(at, false)]);
+    assert!(!double.viewport_output[&egui::ViewportId::ROOT]
+        .commands
+        .contains(&egui::ViewportCommand::Maximized(true)));
+
+    let _ = render(
+        &mut app,
+        4.0,
+        vec![egui::Event::PointerMoved(at), press(at, true)],
+    );
+    let drag = render(
+        &mut app,
+        4.05,
+        vec![egui::Event::PointerMoved(at + egui::vec2(20.0, 0.0))],
+    );
+    assert!(!drag.viewport_output[&egui::ViewportId::ROOT]
+        .commands
+        .contains(&egui::ViewportCommand::StartDrag));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// ⌘K reaches a session by the words its agent ended on.
+pub(crate) fn the_palette_finds_a_session_by_what_its_agent_last_said() {
+    let root = temporary_directory("palette-last-words");
+    let (mut app, first, _second) = app_with_two_sessions(&root);
+    let now = Instant::now();
+    app.hook_status.insert(
+        first,
+        HookStatus {
+            activity: AgentActivity::Idle,
+            boundary: false,
+            tool: None,
+            last_message: Some("migration 0042 を適用しますか".to_owned()),
+            started_at: now,
+            received_at: now,
+            completed_transcript: None,
+        },
+    );
+    app.command_search = "0042".to_owned();
+    let entries = app.palette_entries();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry.kind == PaletteKind::Session(first)),
+        "the session whose agent said it should be found"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Between two equally good matches, the one waiting for a person comes first.
+pub(crate) fn the_palette_ranks_a_waiting_session_above_an_equal_match() {
+    let root = temporary_directory("palette-waiting-first");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    for session in &mut app.store.sessions {
+        session.name = if session.id == first {
+            "deploy a"
+        } else {
+            "deploy b"
+        }
+        .to_owned();
+        if session.id == second {
+            session.created_at += 60;
+            session.launched_at = session.launched_at.map(|launched| launched + 60);
+        }
+    }
+    // `second` is the newer, so without the rule it would sort first.
+    app.page = Page::Home;
+    app.note_session_activity_change(first);
+    app.track_attention(Instant::now());
+    app.command_search = "deploy".to_owned();
+    let sessions: Vec<_> = app
+        .palette_entries()
+        .into_iter()
+        .filter_map(|entry| match entry.kind {
+            PaletteKind::Session(id) => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sessions, vec![first, second]);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Three columns by default: the side panel docks right, so the session list
+/// has the left column to itself.
+pub(crate) fn the_side_panel_opens_on_the_right_by_default() {
+    let root = temporary_directory("panel-default-right");
+    let app = test_app(root.join("store-v2.json"));
+    assert_eq!(app.session_inspector_side, SidebarSide::Right);
+    assert!(app.show_session_inspector);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// ⌘⌥B folds the side panel and opens it again.
+pub(crate) fn the_panel_chord_folds_and_reopens_the_side_panel() {
+    let root = temporary_directory("panel-chord");
+    let mut app = test_app(root.join("store-v2.json"));
+    let chord = app
+        .keymap
+        .chord_for("panel.toggle")
+        .expect("panel.toggle should have a default chord");
+    assert_eq!(chord_label(chord), "⌥⌘B");
+    let ctx = egui::Context::default();
+    let press = |app: &mut OperonApp| {
+        let mut raw = egui::RawInput::default();
+        raw.modifiers = chord.modifiers;
+        raw.events = vec![egui::Event::Key {
+            key: chord.key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: chord.modifiers,
+        }];
+        let _ = ctx.run(raw, |ctx| app.handle_app_shortcuts(ctx));
+    };
+    assert!(app.show_session_inspector);
+    press(&mut app);
+    assert!(!app.show_session_inspector);
+    press(&mut app);
+    assert!(app.show_session_inspector);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Requirement 7: one hairline between the session header and the terminal
+/// frame, not a spacer, a rule, and a second spacer.
+pub(crate) fn the_terminal_starts_directly_under_the_session_header() {
+    fn collect(
+        shape: &egui::epaint::Shape,
+        fill: Color32,
+        texts: &mut Vec<(String, egui::Rect)>,
+        frames: &mut Vec<egui::Rect>,
+    ) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                texts.push((text.galley.text().to_owned(), text.visual_bounding_rect()))
+            }
+            egui::epaint::Shape::Rect(rect) if rect.fill == fill => frames.push(rect.rect),
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect(child, fill, texts, frames);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut fixture = SessionTreeTestFixture::new("terminal-gap");
+    let session = fixture.normal_session.clone();
+    let fill = fixture.app.store.theme.palette().terminal_bg;
+    let title = session_title(&session);
+    let mut texts = Vec::new();
+    let mut frames = Vec::new();
+    for shape in render_workspace_output(&mut fixture.app, &session, 1200.0, 800.0).shapes {
+        collect(&shape.shape, fill, &mut texts, &mut frames);
+    }
+    let header = texts
+        .iter()
+        .filter(|(text, _)| *text == title)
+        .map(|(_, rect)| *rect)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the session header names the session");
+    let terminal = frames
+        .iter()
+        .filter(|rect| rect.top() > header.top())
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the terminal frame is drawn under the header");
+    let gap = terminal.top() - header.bottom();
+    assert!(
+        gap <= 24.0,
+        "the terminal frame starts {gap}px under the header title"
+    );
+}
+
+#[test]
+/// A pinned row opens from its words, not only from its padding: a selectable
+/// label would take the click for itself.
+pub(crate) fn clicking_a_pinned_rows_title_opens_the_session() {
+    let root = temporary_directory("pinned-click");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_first_only(&mut app, first);
+    app.track_attention(Instant::now());
+    app.selected_session = Some(second);
+    app.session_library_open = false;
+    let ctx = egui::Context::default();
+    let render = |app: &mut OperonApp, events: Vec<egui::Event>| {
+        let mut raw = egui::RawInput::default();
+        raw.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 800.0),
+        ));
+        raw.events = events;
+        ctx.run(raw, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        })
+    };
+    let _ = render(&mut app, vec![]);
+    let layout = render(&mut app, vec![]);
+    let at = drawn_text_rect(&layout, |text| text == "first")
+        .expect("the pinned title is drawn")
+        .center();
+    let press = |pressed: bool| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    let _ = render(
+        &mut app,
+        vec![egui::Event::PointerMoved(at), press(true), press(false)],
+    );
+    assert_eq!(app.selected_session, Some(first));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A project whose every session is pinned above still counts them, and does
+/// not say it has none.
+pub(crate) fn a_project_emptied_by_pinning_does_not_claim_it_has_no_sessions() {
+    let root = temporary_directory("pinned-empty-project");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_both_sessions(&mut app, first, second);
+    let texts = pinned_layout(&mut app, second);
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text == "セッションはまだありません"),
+        "both sessions are on screen, pinned"
+    );
+    assert!(
+        !texts.iter().any(|(text, _)| text == "0 件"),
+        "the project header counts its pinned sessions"
+    );
+    fs::remove_dir_all(&root).ok();
 }

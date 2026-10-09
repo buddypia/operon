@@ -483,6 +483,15 @@ pub(crate) struct OperonApp {
     /// state nobody has confirmed since the restart is a state the screen is
     /// better placed to answer for.
     pub(crate) hook_status: HashMap<Uuid, HookStatus>,
+    /// When each session that needs a person started needing one. In memory
+    /// only: after a restart every waiting session is timed from the launch.
+    pub(crate) attention_since: HashMap<Uuid, Instant>,
+    /// The same sessions, longest-waiting first. Rebuilt only when someone
+    /// joins or leaves, so the frames in between read it without sorting.
+    pub(crate) attention_order: Vec<Uuid>,
+    /// A session whose terminal should take the keyboard the next time it is
+    /// drawn — set by ⌘J, cleared by the pane that honours it.
+    pub(crate) terminal_focus_request: Option<Uuid>,
     /// The token this process minted for each session's current launch. An
     /// event carrying an older one belongs to a process that has been replaced.
     pub(crate) hook_launch_tokens: HashMap<Uuid, String>,
@@ -889,6 +898,9 @@ impl OperonApp {
             hook_listener: None,
             hook_events: None,
             hook_status: HashMap::new(),
+            attention_since: HashMap::new(),
+            attention_order: Vec::new(),
+            terminal_focus_request: None,
             hook_launch_tokens: HashMap::new(),
             hook_installs: Vec::new(),
             hooks_enabled,
@@ -916,7 +928,9 @@ impl OperonApp {
             session_prompt_turns: HashMap::new(),
             show_session_inspector: true,
             session_inspector_tab: InspectorTab::Files,
-            session_inspector_side: SidebarSide::Left,
+            // Right, beside the terminal, as an editor's secondary side bar is:
+            // the left edge belongs to the session list (change 139).
+            session_inspector_side: SidebarSide::Right,
             session_inspector_w: None,
             dragging_sidebar_tab: None,
             session_list_w: SIDEBAR_DEFAULT_W,
@@ -5190,6 +5204,105 @@ impl OperonApp {
         counts
     }
 
+    /// Keeps the 要対応 queue in step with the sessions, once per frame before
+    /// anything draws. The pass is the shape of `status_group_counts` — no
+    /// allocation — and the ordered list is rebuilt only when a session joins
+    /// or leaves, which is a handful of times a minute rather than sixty times
+    /// a second.
+    pub(crate) fn track_attention(&mut self, now: Instant) {
+        // Taken out of `self` for the pass so the predicates can borrow the
+        // app while the map changes; `take` moves the table, it does not copy.
+        let mut since = std::mem::take(&mut self.attention_since);
+        let before = since.len();
+        since.retain(|id, _| {
+            self.store
+                .sessions
+                .iter()
+                .find(|session| session.id == *id)
+                .is_some_and(|session| {
+                    self.session_in_status_group(session, SessionStatusGroup::NeedsYou)
+                })
+        });
+        let mut changed = since.len() != before;
+        for session in &self.store.sessions {
+            if !since.contains_key(&session.id)
+                && self.session_in_status_group(session, SessionStatusGroup::NeedsYou)
+            {
+                since.insert(session.id, now);
+                changed = true;
+            }
+        }
+        self.attention_since = since;
+        if changed {
+            let mut order: Vec<(Instant, Reverse<u64>, Uuid)> = self
+                .attention_since
+                .iter()
+                .map(|(id, entered)| {
+                    let launched = self
+                        .store
+                        .sessions
+                        .iter()
+                        .find(|session| session.id == *id)
+                        .map(|session| session.launched_at.unwrap_or(session.created_at))
+                        .unwrap_or_default();
+                    (*entered, Reverse(launched), *id)
+                })
+                .collect();
+            order.sort();
+            self.attention_order = order.into_iter().map(|(_, _, id)| id).collect();
+        }
+    }
+
+    /// ⌘J: the queued session after the one on screen, wrapping, opened with
+    /// the keyboard in its terminal when there is a live pane to type into.
+    /// With nobody waiting it says so and leaves the screen as it was.
+    pub(crate) fn open_next_waiting_session(&mut self) {
+        let Some(next) = next_in_attention_queue(&self.attention_order, self.selected_session)
+        else {
+            self.notice_briefly(tr("返事を待っているセッションはありません"));
+            return;
+        };
+        self.open_waiting_session(next);
+    }
+
+    /// Opens a session someone is waiting on, ⌘J's way or a pinned row's: the
+    /// keyboard goes to its pane when there is a live one to type into.
+    pub(crate) fn open_waiting_session(&mut self, session_id: Uuid) {
+        self.open_session_in_terminal(session_id);
+        let running = self
+            .store
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id && session.status == SessionStatus::Active);
+        self.terminal_focus_request = running.then_some(session_id);
+    }
+
+    /// What a pinned row says under its project line: the words that ended the
+    /// agent's turn, or that it is waiting on a permission or an answer. Only a
+    /// fresh hook status speaks — the message a status carries forward into a
+    /// new wait belongs to the turn before, so it is not offered as the
+    /// question.
+    pub(crate) fn session_attention_line(&self, session_id: Uuid) -> Option<&str> {
+        let status = self.fresh_hook_status(session_id)?;
+        match status.activity {
+            AgentActivity::AwaitingInput => Some(tr("許可または回答を待っています")),
+            AgentActivity::Idle => status
+                .last_message
+                .as_deref()
+                .map(str::trim)
+                .filter(|words| !words.is_empty()),
+            AgentActivity::Working => None,
+        }
+    }
+
+    /// How long a queued session has wanted a person, or `None` when it does
+    /// not.
+    pub(crate) fn attention_wait(&self, session_id: Uuid, now: Instant) -> Option<Duration> {
+        self.attention_since
+            .get(&session_id)
+            .map(|entered| now.saturating_duration_since(*entered))
+    }
+
     /// Whether the session list should show this session. With nothing
     /// selected everything passes, which is the list as it was before there
     /// was a filter at all.
@@ -5755,6 +5868,14 @@ impl OperonApp {
         if self.unread_hold.is_some_and(|held| held != session_id) {
             self.unread_hold = None;
         }
+        // A focus request is for the session it was made for; one left
+        // pending would take the keyboard on some later visit.
+        if self
+            .terminal_focus_request
+            .is_some_and(|wanted| wanted != session_id)
+        {
+            self.terminal_focus_request = None;
+        }
         if self.selected_session != Some(session_id) {
             self.resolved_paths.clear();
             self.resolved_paths_generation += 1;
@@ -5955,6 +6076,7 @@ impl eframe::App for OperonApp {
         self.resolve_terminal_paths();
         self.process_background_results();
         self.start_ready_queued_sessions();
+        self.track_attention(Instant::now());
         self.handle_app_shortcuts(ctx);
         if self.command_palette_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.close_command_palette();
@@ -6778,12 +6900,20 @@ impl OperonApp {
         }
         // The shortcuts a person brings with them from every other Mac app of
         // this shape: ⌘1–3 for the three places, ⌘, for settings, unless a
-        // keymap file says otherwise. They are deliberately not live while a
-        // terminal has focus — a TUI owns its own keys, and `⌘` is the one
-        // modifier macOS keeps for the app.
+        // keymap file says otherwise. They stay live while a terminal has
+        // focus: a TUI owns its own keys, but `⌘` is the one modifier macOS
+        // keeps for the app, and the pane drops every ⌘ chord rather than
+        // sending it (`terminal_key_binding`). That is what lets ⌘J leave the
+        // pane a person is typing in for the next one that is waiting.
         if !self.command_palette_open && !self.launch_sheet_open {
             if self.chord_pressed(ctx, "session.new") {
                 self.open_new_session();
+            }
+            if self.chord_pressed(ctx, "attention.next") {
+                self.open_next_waiting_session();
+            }
+            if self.chord_pressed(ctx, "panel.toggle") {
+                self.show_session_inspector = !self.show_session_inspector;
             }
             for (action, page) in [
                 ("page.home", Page::Home),
@@ -8658,5 +8788,30 @@ impl OperonApp {
         if dismissed || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.terminal_path_menu = None;
         }
+    }
+}
+
+/// The session ⌘J moves to: the one after `current` in the queue, wrapping,
+/// or the head of the queue when `current` is not in it. A queue of one is
+/// that one, so the chord still puts the keyboard back in its pane.
+pub(crate) fn next_in_attention_queue(order: &[Uuid], current: Option<Uuid>) -> Option<Uuid> {
+    let position = current.and_then(|current| order.iter().position(|id| *id == current));
+    match position {
+        Some(index) => order.get((index + 1) % order.len()).copied(),
+        None => order.first().copied(),
+    }
+}
+
+/// How long a pinned row has waited, in the coarsest unit that still moves:
+/// a person deciding which to answer first needs "a while" against "just now",
+/// not seconds.
+pub(crate) fn attention_wait_label(waited: Duration) -> String {
+    let minutes = waited.as_secs() / 60;
+    if minutes == 0 {
+        tr("たった今").to_owned()
+    } else if minutes < 60 {
+        tf!("{p0}分", p0 = minutes)
+    } else {
+        tf!("{p0}時間", p0 = minutes / 60)
     }
 }
