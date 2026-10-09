@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request: after change 139 landed the person asked that a merged branch's
+# remote copy be deleted with the merge, automatically. Sixteen merged remote
+# branches (plus two whose work had landed in another form) were deleted by
+# hand on 2026-10-09 before this change.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Write spec and plan, readiness, then the script, its test watched failing, and the workflow."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt, clippy and review gate at the commit"
+  prune-test: "machine passed cargo test --locked landed_remote_branches and the_prune_workflow — both pass"
+  release-binary: "machine waived no: the change is a workflow, a script and a test; the app binary does not change"
+  guards-verified-by-mutation: "human passed both tests watched failing; three mutants of the script each killed (plan.md Departures)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

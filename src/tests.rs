@@ -43102,3 +43102,149 @@ pub(crate) fn a_project_emptied_by_pinning_does_not_claim_it_has_no_sessions() {
     );
     fs::remove_dir_all(&root).ok();
 }
+
+// --- Change 140: a landed branch is deleted from the remote ---------------
+
+/// The remote's branch names, sorted.
+fn remote_heads(work: &Path) -> Vec<String> {
+    let mut heads: Vec<String> = git_in(work, &["ls-remote", "--heads", "origin"])
+        .lines()
+        .filter_map(|line| {
+            line.split_once("refs/heads/")
+                .map(|(_, name)| name.to_owned())
+        })
+        .collect();
+    heads.sort();
+    heads
+}
+
+fn run_prune(work: &Path, arguments: &[&str]) -> String {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/prune-landed-branches.sh");
+    // /bin/bash, as the shebang finds it (lesson 020), and no inherited base
+    // override: the test is about `main`.
+    let mut command = Command::new("/bin/bash");
+    forget_inherited_repository(&mut command);
+    let output = command
+        .env_remove("PRUNE_BASE")
+        .arg(&script)
+        .args(arguments)
+        .current_dir(work)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "prune-landed-branches.sh が失敗しました: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+/// Requirements 1 and 2: a branch merged into main with --no-ff goes; a branch
+/// with unlanded commits, one sitting on main's own line, and main stay.
+pub(crate) fn landed_remote_branches_are_deleted_and_nothing_else_is() {
+    let work = worktree_fixture_repository("prune-landed");
+    let origin = work.with_extension("origin.git");
+    let _ = fs::remove_dir_all(&origin);
+    git_in(
+        &work,
+        &[
+            "init",
+            "--bare",
+            "--initial-branch=main",
+            &origin.to_string_lossy(),
+        ],
+    );
+    git_in(
+        &work,
+        &["remote", "add", "origin", &origin.to_string_lossy()],
+    );
+    git_in(&work, &["push", "-q", "origin", "main"]);
+    // On main's first-parent line from the start: never worked on.
+    git_in(&work, &["push", "-q", "origin", "main:refs/heads/old"]);
+    // Landed the way this repository lands: --no-ff, tip as second parent.
+    // Named the way branches here are named, with a slash.
+    git_in(&work, &["checkout", "-q", "-b", "fix/landed"]);
+    git_in(
+        &work,
+        &["commit", "-q", "--allow-empty", "-m", "landed work"],
+    );
+    git_in(&work, &["push", "-q", "origin", "fix/landed"]);
+    // Landed too, under a name `git push` would read as an option.
+    git_in(
+        &work,
+        &["push", "-q", "origin", "fix/landed:refs/heads/-dash"],
+    );
+    git_in(&work, &["checkout", "-q", "main"]);
+    git_in(
+        &work,
+        &["merge", "-q", "--no-ff", "--no-edit", "fix/landed"],
+    );
+    git_in(&work, &["push", "-q", "origin", "main"]);
+    // Pushed from main's tip before its first commit.
+    git_in(&work, &["push", "-q", "origin", "main:refs/heads/fresh"]);
+    // Work in flight.
+    git_in(&work, &["checkout", "-q", "-b", "inflight"]);
+    git_in(
+        &work,
+        &["commit", "-q", "--allow-empty", "-m", "unlanded work"],
+    );
+    git_in(&work, &["push", "-q", "origin", "inflight"]);
+    git_in(&work, &["checkout", "-q", "main"]);
+    let everything = ["-dash", "fix/landed", "fresh", "inflight", "main", "old"];
+    assert_eq!(remote_heads(&work), everything);
+
+    let dry = run_prune(&work, &["--dry-run"]);
+    assert_eq!(
+        remote_heads(&work),
+        everything,
+        "--dry-run deleted something"
+    );
+    let would: Vec<&str> = dry
+        .lines()
+        .filter_map(|line| line.strip_prefix("would prune "))
+        .collect();
+    assert_eq!(would, ["-dash", "fix/landed"], "--dry-run said: {dry}");
+
+    let _ = run_prune(&work, &[]);
+    assert_eq!(remote_heads(&work), ["fresh", "inflight", "main", "old"]);
+
+    discard_worktree_fixture(&work);
+    let _ = fs::remove_dir_all(&origin);
+}
+
+#[test]
+/// Requirement 3: the rule runs on its own, after every push to main, with the
+/// history it needs and the permission to delete.
+pub(crate) fn the_prune_workflow_runs_the_script_on_every_push_to_main() {
+    let workflow = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(".github/workflows/prune-landed-branches.yml"),
+    )
+    .expect("the prune workflow should exist");
+    let lines: Vec<&str> = workflow
+        .lines()
+        .map(|line| line.trim().trim_start_matches("- "))
+        .filter(|line| !line.starts_with('#'))
+        .collect();
+    // `push:` and then its `branches: [main]`, in that order: the same line
+    // under `pull_request:` would run the prune on something else.
+    let push = lines.iter().position(|line| *line == "push:");
+    let branches = lines.iter().position(|line| *line == "branches: [main]");
+    assert!(
+        matches!((push, branches), (Some(push), Some(branches)) if branches == push + 1),
+        "it must run on pushes to main, and only there"
+    );
+    for (needle, why) in [
+        ("contents: write", "deleting a branch needs contents: write"),
+        (
+            "fetch-depth: 0",
+            "the ancestry check needs the whole history",
+        ),
+        (
+            "run: bash scripts/prune-landed-branches.sh",
+            "it must run the script, not a copy of the rule",
+        ),
+    ] {
+        assert!(lines.contains(&needle), "{why}: `{needle}` not found");
+    }
+}
