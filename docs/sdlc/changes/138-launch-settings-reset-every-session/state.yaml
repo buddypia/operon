@@ -1,0 +1,37 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request (person, 2026-10-09): 「毎回新しい設定をするのはしんどいからセッション
+# 作成時にチェックボックスを入れて毎回同じ設定でセッション開始するとかチェック
+# したらそのようにするようにして。」
+# Asked twice: (1) pin the settings vs. skip the sheet — person chose "pin";
+# (2) whether the pin carries the danger acknowledgement — person chose yes.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the three pinned_launch_* tests in src/tests.rs, watch them fail, then follow plan.md Order of work from step 2."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  pin-tests: "machine pending cargo test --locked pinned_launch"
+  release-binary: "machine pending yes: touches src/app.rs, src/app/screens.rs, src/agents/settings.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
