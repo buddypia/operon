@@ -1,0 +1,42 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request: the person finds the session workspace layout awkward (session list
+# and file/conversation/changes stacked in one left column since change 127;
+# top nav, session header and an empty band above the terminal) and, running
+# agents in parallel that finish at uneven times, wants to find a project and
+# the agent waiting for an answer instantly. They asked for HTML mockups first.
+#
+# Mockups: .tmp/session-layout/index.html in this worktree (git-ignored) —
+# A attention queue + 3 columns (recommended), B VS Code quick open + tabs,
+# C reply inbox. Evidence used: palette_entries (src/app/screens.rs:257) does
+# not search the agent's last question; src/app/keymap.rs has no "next waiting"
+# chord and ⌘1–3 switch pages.
+
+state:
+  route: "feature"
+  stage: "test"
+  status: "reviewing"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Committed f8c1173 after review round 2; main (change 138) merged into the branch. Next: i18n table order and the 139 tests on the merged tree, push, gh run watch, land with --no-ff from the main checkout, package and swap. zero_match_transcript_search_obeys_shared_byte_and_line_budgets also fails on an export of main locally — not this change."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt and clippy clean at the commit"
+  bands: "machine passed bash scripts/check-bands.sh — the three breaches (always_loaded_bytes, steering_bytes, reference_bytes) measure CLAUDE.md, AGENTS.md and docs this change does not touch"
+  release-binary: "machine pending yes: the layout lives in src/app.rs and src/app/screens.rs, so it ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed each requirement test watched failing or killed a mutant; see plan.md Departures"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

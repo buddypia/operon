@@ -50,6 +50,13 @@ Settings.
 - One "+" and one search, both in the toolbar: **新しいセッション** (`⌘N`)
   starts a session from any page, and **検索・操作** (`⌘K`) is the only search.
   The sidebar's **履歴** opens local transcript search and the session grid.
+- Sessions that wait for you are pinned above the projects in the session
+  list, longest wait first, each with how long it has waited and what its
+  agent last said. `⌘J` opens the next one and puts the keyboard in its
+  terminal, and the toolbar's **要対応 N** does the same while one waits.
+  `⌘K` also finds a session by what its agent last said, and among equal
+  matches a waiting session comes first. The side panel (files, conversation,
+  changes) opens on the right of the terminal; `⌥⌘B` folds it and opens it.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
   The launch button sits at its bottom right, and `⌘↩` presses it. A project's
@@ -57,7 +64,7 @@ Settings.
   finding and restoring past CLI conversations lives in **履歴**.
 - The keyboard is a file. Every shortcut the window answers to — the palette,
   a new session, the three pages, settings, the folder picker,
-  find-in-terminal — has an id and
+  find-in-terminal, the next waiting session, the side panel — has an id and
   a chord in `keybindings.json`, in the same folder as the local index, and
   `⌘K` lists each action with the key it currently has. `キー割り当てファイルを開く`
   in that list writes the file from the current keys the first time and reveals

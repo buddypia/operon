@@ -151,7 +151,27 @@ impl OperonApp {
                         if search_res.clicked() {
                             self.open_command_palette();
                         }
-                        // Left of the three controls in this right-to-left row:
+                        // While a session waits for a person, the way to it
+                        // stays in reach from every page. Gone while none
+                        // does: a zero is not something to act on.
+                        if !self.attention_order.is_empty() {
+                            let waiting = self.attention_order.len();
+                            let attention_label = match self.keymap.chord_for("attention.next") {
+                                Some(chord) => tf!(
+                                    "要対応 {p0}  {chord}",
+                                    p0 = waiting,
+                                    chord = chord_label(chord)
+                                ),
+                                None => tf!("要対応 {p0}", p0 = waiting),
+                            };
+                            let attention_res = quiet_button(ui, palette, attention_label)
+                                .on_hover_text(tr("次の要対応セッションへ移動します"));
+                            register_control(attention_res.rect);
+                            if attention_res.clicked() {
+                                self.open_next_waiting_session();
+                            }
+                        }
+                        // Left of the controls in this right-to-left row:
                         // a fact rather than a way somewhere, so it sits before
                         // the things that are.
                         ui.add_space(SPACE_SM);
@@ -256,7 +276,9 @@ impl OperonApp {
     /// the field is that it is not one.
     pub(crate) fn palette_entries(&self) -> Vec<PaletteEntry> {
         let query = self.command_search.trim().to_lowercase();
-        let mut entries: Vec<(PaletteEntry, u64)> = Vec::new();
+        // The third field is whether the row is a session waiting for a
+        // person: among equal matches, that is the one being looked for.
+        let mut entries: Vec<(PaletteEntry, u64, bool)> = Vec::new();
         for (action, label, keymap_id) in Self::palette_actions() {
             let score = if query.is_empty() {
                 Some(PaletteScore::Name)
@@ -273,6 +295,7 @@ impl OperonApp {
                         score,
                     },
                     u64::MAX,
+                    false,
                 ));
             }
         }
@@ -287,7 +310,18 @@ impl OperonApp {
                 let title = session_title(session);
                 let agent = agent_short_label(&session.agent);
                 let branch = session.branch.as_deref().unwrap_or_default();
-                let haystack = format!("{title} {} {agent} {branch} {project_name}", session.goal);
+                // What the agent last said is searchable too: "the one that asked
+                // about the migration" is how a waiting session is remembered.
+                // Fresh only, as the pinned row shows it: a stale status is a
+                // previous turn's words, matching text found nowhere on screen.
+                let last_words = self
+                    .fresh_hook_status(session.id)
+                    .and_then(|status| status.last_message.as_deref())
+                    .unwrap_or_default();
+                let haystack = format!(
+                    "{title} {} {agent} {branch} {project_name} {last_words}",
+                    session.goal
+                );
                 let Some(score) = palette_rank(&title, &haystack, &query) else {
                     continue;
                 };
@@ -305,6 +339,7 @@ impl OperonApp {
                         score,
                     },
                     session.launched_at.unwrap_or(session.created_at),
+                    self.attention_since.contains_key(&session.id),
                 ));
             }
             for project in &self.store.projects {
@@ -322,16 +357,20 @@ impl OperonApp {
                         score,
                     },
                     project.added_at,
+                    false,
                 ));
             }
         }
-        entries.sort_by(|(left, left_time), (right, right_time)| {
-            left.score
-                .cmp(&right.score)
-                .then(left.kind.rank().cmp(&right.kind.rank()))
-                .then(right_time.cmp(left_time))
-        });
-        entries.into_iter().map(|(entry, _)| entry).collect()
+        entries.sort_by(
+            |(left, left_time, left_waiting), (right, right_time, right_waiting)| {
+                left.score
+                    .cmp(&right.score)
+                    .then(left.kind.rank().cmp(&right.kind.rank()))
+                    .then(right_waiting.cmp(left_waiting))
+                    .then(right_time.cmp(left_time))
+            },
+        );
+        entries.into_iter().map(|(entry, _, _)| entry).collect()
     }
 
     /// The rows that fit, and how many were left over. One pass over the store
@@ -4762,6 +4801,148 @@ impl OperonApp {
         });
     }
 
+    /// The 要対応 section at the head of the session list: the queue, longest
+    /// waiting first, each row saying how long and — when the hooks said it —
+    /// what the agent last said. Returns how many rows it drew.
+    pub(crate) fn ui_pinned_sessions(&mut self, ui: &mut egui::Ui, sessions: &[Session]) -> usize {
+        let palette = self.store.theme.palette();
+        let ink = palette.status(SessionStatusGroup::NeedsYou.tone());
+        let now = Instant::now();
+        let count = self
+            .attention_order
+            .iter()
+            .filter(|id| sessions.iter().any(|session| session.id == **id))
+            .count();
+        if count == 0 {
+            return 0;
+        }
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = SPACE_XS;
+            ui.label(RichText::new(tr("要対応")).size(11.5).strong().color(ink));
+            ui.label(
+                RichText::new(count.to_string())
+                    .size(11.5)
+                    .color(palette.text_muted),
+            );
+        });
+        let mut open = None;
+        // By index: the queue is read while rows borrow the app, and copying
+        // it to iterate would allocate every frame.
+        for index in 0..self.attention_order.len() {
+            let session_id = self.attention_order[index];
+            let Some(session) = sessions.iter().find(|session| session.id == session_id) else {
+                continue;
+            };
+            let title = session_list_title(
+                session,
+                self.session_prompt_turns
+                    .get(&session_id)
+                    .and_then(|turns| turns.first())
+                    .map(|turn| turn.prompt.as_str()),
+            );
+            let project = self
+                .store
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .map(|project| project.name.as_str())
+                .unwrap_or_default();
+            let meta = match session.branch.as_deref() {
+                Some(branch) => format!("{project} · {ICON_BRANCH} {branch}"),
+                None => format!("{project} · {}", agent_short_label(&session.agent)),
+            };
+            let wait = self
+                .attention_wait(session_id, now)
+                .map(attention_wait_label)
+                .unwrap_or_default();
+            let line = self.session_attention_line(session_id);
+            let selected = self.selected_session == Some(session_id);
+            let row = ui.scope_builder(
+                egui::UiBuilder::new()
+                    .id_salt(("pinned-session", session_id))
+                    .sense(egui::Sense::click()),
+                |ui| {
+                    // A selectable label takes the click for itself, and the
+                    // row would then open only from its padding.
+                    ui.style_mut().interaction.selectable_labels = false;
+                    egui::Frame::default()
+                        .fill(if selected {
+                            palette.row_selected
+                        } else {
+                            Color32::TRANSPARENT
+                        })
+                        .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
+                        .inner_margin(egui::Margin::symmetric(6, 5))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = SPACE_XS + 2.0;
+                                let (dot, _) = ui.allocate_exact_size(
+                                    egui::vec2(8.0, 8.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().circle_filled(dot.center(), 4.0, ink);
+                                let title_width = (ui.available_width() - 56.0).max(40.0);
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(title_width, 20.0),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(&title)
+                                                    .strong()
+                                                    .size(13.5)
+                                                    .color(palette.text_strong),
+                                            )
+                                            .truncate(),
+                                        );
+                                    },
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(RichText::new(wait).size(11.5).color(ink));
+                                    },
+                                );
+                            });
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(meta).size(12.0).color(palette.text_muted),
+                                )
+                                .truncate(),
+                            );
+                            if let Some(line) = line {
+                                let mut job = egui::text::LayoutJob::single_section(
+                                    line.to_owned(),
+                                    egui::TextFormat {
+                                        font_id: egui::FontId::proportional(12.0),
+                                        color: palette.text,
+                                        ..Default::default()
+                                    },
+                                );
+                                job.wrap = egui::text::TextWrapping {
+                                    max_width: ui.available_width(),
+                                    max_rows: 2,
+                                    break_anywhere: true,
+                                    overflow_character: Some('…'),
+                                };
+                                ui.add(egui::Label::new(job));
+                            }
+                        });
+                },
+            );
+            if row.response.clicked() {
+                open = Some(session_id);
+            }
+        }
+        if let Some(session_id) = open {
+            self.open_waiting_session(session_id);
+        }
+        ui.add_space(SPACE_SM);
+        count
+    }
+
     pub(crate) fn ui_terminal_session_tabs(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         let mut projects = self.store.projects.clone();
@@ -4834,12 +5015,27 @@ impl OperonApp {
         });
         ui.separator();
         let mut shown = 0usize;
+        // The queue is drawn first unless the chips leave 要対応 out, and a
+        // session drawn there is not drawn again in its project.
+        let pinning = !filtering || self.status_filter[SessionStatusGroup::NeedsYou.index()];
         egui::ScrollArea::vertical().show(ui, |ui| {
+            if pinning && !self.attention_order.is_empty() {
+                shown += self.ui_pinned_sessions(ui, &sessions);
+            }
             for project in projects {
+                // Sessions of this project drawn in the pinned section above:
+                // still the project's, so they count in its header and keep
+                // it from claiming it has none.
+                let mut pinned_here = 0;
                 let mut project_sessions = sessions
                     .iter()
                     .filter(|session| session.project_id == project.id)
                     .filter(|session| self.session_matches_status_filter(session))
+                    .filter(|session| {
+                        let pinned = pinning && self.attention_since.contains_key(&session.id);
+                        pinned_here += usize::from(pinned);
+                        !pinned
+                    })
                     .cloned()
                     .collect::<Vec<_>>();
                 project_sessions.sort_by_key(|session| Reverse(session.created_at));
@@ -4847,7 +5043,7 @@ impl OperonApp {
                 // A project with nothing to show contributes nothing: not its
                 // name, not its path, not its empty line. Four lines each, and
                 // the whole point of the filter is the length of this column.
-                if filtering && project_sessions.is_empty() {
+                if filtering && project_sessions.is_empty() && pinned_here == 0 {
                     continue;
                 }
                 // One line. The full path is what tells two checkouts of the
@@ -4860,7 +5056,7 @@ impl OperonApp {
                             ui.label(project.path.display().to_string());
                         });
                     ui.label(
-                        RichText::new(tf!("{p0} 件", p0 = project_sessions.len()))
+                        RichText::new(tf!("{p0} 件", p0 = project_sessions.len() + pinned_here))
                             .small()
                             .weak(),
                     );
@@ -4871,10 +5067,12 @@ impl OperonApp {
                     });
                 });
                 if project_sessions.is_empty() {
-                    ui.horizontal(|ui| {
-                        ui.add_space(8.0);
-                        ui.label(RichText::new(tr("セッションはまだありません")).small().weak());
-                    });
+                    if pinned_here == 0 {
+                        ui.horizontal(|ui| {
+                            ui.add_space(8.0);
+                            ui.label(RichText::new(tr("セッションはまだありません")).small().weak());
+                        });
+                    }
                     ui.add_space(8.0);
                     continue;
                 }
@@ -5454,9 +5652,9 @@ impl OperonApp {
                 });
             });
         });
-        ui.add_space(SPACE_SM);
+        // One rule and nothing either side of it: the terminal is what the
+        // header is about, so it starts right under it (change 139).
         hairline(ui, palette);
-        ui.add_space(SPACE_SM);
         self.ensure_initial_prompt_turn(session_id);
         let total_row_w = ui.available_width();
         let layout = SessionColumnsLayout::compute(total_row_w, self.show_session_inspector);
@@ -5587,6 +5785,14 @@ impl OperonApp {
                         && session.status == SessionStatus::Active
                     {
                         terminal_response.request_focus();
+                    }
+                    // ⌘J opened this session for an answer: the keyboard
+                    // follows, once, so the reply can be typed straight away.
+                    if self.terminal_focus_request == Some(session_id) {
+                        self.terminal_focus_request = None;
+                        if session.status == SessionStatus::Active {
+                            terminal_response.request_focus();
+                        }
                     }
                     self.ui_terminal_path_menu(ui, session_id);
 
