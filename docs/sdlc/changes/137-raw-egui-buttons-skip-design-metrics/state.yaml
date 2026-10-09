@@ -12,7 +12,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -20,15 +20,15 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Reviewed (rust-reviewer approve-with-nits 0 1 at ee6c54969ff2c0ce) and approved; commit, push, wait for CI, merge into main, package, then ask the person before swapping /Applications."
+resume: "Landed: CI passed on e4a2bab, merged into main with --no-ff. What outlives it: the /Applications swap of the packaged bundle waits for the person (bundle-swap surface), and the carried test-scan nit in review.yaml."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh; make q.fast (fmt, clippy) passed on the staged tree, the hook runs with the commit after the review"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh ran with commit e4a2bab and admitted it (fmt, clippy, review gate SHIP)"
   bands: "machine waived bash scripts/check-bands.sh reports 3 of 21 breached (always_loaded_bytes warn 12994, steering_bytes, reference_bytes), the same three as main; the CLAUDE.md row was shortened so always_loaded_bytes stays in the warn tier"
   button-height-test: "machine passed cargo test --locked every_button_keeps_a_documented_height"
   type-scale-test: "machine passed cargo test --locked every_text_size_is_a_level_on_the_type_scale"
   design-md-matches-paint: "machine passed cargo test --locked design_md_documents_exactly_what_the_app_paints"
-  release-binary: "machine pending touches src/, so ends with bash scripts/package-macos.sh after the merge; /Applications swap waits for the person"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from e4a2bab; the /Applications swap is the bundle-swap surface and waits for the person"
   guards-verified-by-mutation: "human passed both tests failed on main (13 and 32 sites) and on a reintroduced small_button and .size(13.0) in src/ui/diff.rs; each new guard watched failing"
 
 sets:
