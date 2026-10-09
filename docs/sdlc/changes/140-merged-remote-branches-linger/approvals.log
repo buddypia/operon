@@ -1,0 +1,3 @@
+2026-10-09T14:32:05Z auto intent intent.md 2228464d565fafd4 approve evaluator (a5f5c854dcf8b61a0): restates the quoted request; the bundle constraint on ops.mjs checked against .bundle-receipt.json
+2026-10-09T14:32:05Z auto spec spec.md fc8d81ce5135c97a approve evaluator (a5f5c854dcf8b61a0): ancestry makes a deletion lossless, the first-parent exception only keeps more; contents: write and fetch-depth 0 are what the delete needs; nothing reads a landed remote branch
+2026-10-09T14:32:05Z auto plan plan.md 4794941a099c9f8a approve evaluator (a5f5c854dcf8b61a0): covers every requirement, failing test then mutations; dry-run test, delete lease and --ff-only wording taken as departures
