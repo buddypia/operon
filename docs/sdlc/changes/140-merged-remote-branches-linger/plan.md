@@ -50,3 +50,20 @@
   branch sits on the first-parent line and is kept either way. A zero-commit
   branch made from a landed branch's tip would also be deleted; only its name
   goes, its commits are all in `main`.
+- **The note for sessions went into `.claude/skills/feature-pilot/SKILL.md`,
+  not `AGENTS.md`.** One sentence in `AGENTS.md` took `always_loaded_bytes` from
+  12994 to 13133, past its diagnose tier at 13000; the skill's landing step is
+  where a session reads it at the moment it would otherwise delete by hand.
+- **Mutations:** removing the first-parent exception, the ancestry check, or the
+  `--dry-run` branch each turned `landed_remote_branches_are_deleted_and_nothing_else_is`
+  red; the wiring test failed on the missing workflow, then on the `- ` step prefix
+  it now strips.
+- **Review round 1 sent it back once.** The `--dry-run` assertion matched
+  "landed" inside `kept inflight (not landed)` and so could not fail; it now
+  compares the exact `would prune` list. A branch named `-dash` was read by
+  `git push --delete` as an option; the delete now names `refs/heads/<name>`,
+  and the fixture holds such a branch (watched failing without the fix). The
+  fixture branch is slash-named like real ones, the test runs `/bin/bash`
+  without an inherited `PRUNE_BASE`, an unknown argument exits 2 rather than
+  deleting, the workflow test checks `branches: [main]` sits under `push:`,
+  and the job has a five-minute timeout.

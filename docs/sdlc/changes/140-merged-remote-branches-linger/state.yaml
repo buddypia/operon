@@ -8,7 +8,7 @@
 
 state:
   route: "modify"
-  stage: "build"
+  stage: "test"
   status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
@@ -20,10 +20,10 @@ state:
 resume: "Write spec and plan, readiness, then the script, its test watched failing, and the workflow."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  prune-test: "machine pending cargo test --locked landed_remote_branches"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt, clippy and review gate at the commit"
+  prune-test: "machine passed cargo test --locked landed_remote_branches and the_prune_workflow — both pass"
   release-binary: "machine waived no: the change is a workflow, a script and a test; the app binary does not change"
-  guards-verified-by-mutation: "human pending the test watched failing"
+  guards-verified-by-mutation: "human passed both tests watched failing; three mutants of the script each killed (plan.md Departures)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

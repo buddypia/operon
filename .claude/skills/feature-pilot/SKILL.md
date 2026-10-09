@@ -110,6 +110,8 @@ the earlier sections stay as they were.
   `.claude/hooks/gate-merge.sh` admits it once CI passed on the branch head —
   then `git push origin main` and
   `node .claude/scripts/create-pr/ops.mjs cleanup-worktree --worktree <path>`.
+  The remote branch is not deleted by hand: on that push
+  `.github/workflows/prune-landed-branches.yml` deletes every landed branch.
   No pull request.
 - **Package** when the `release-binary` contract item says so:
   `bash scripts/package-macos.sh`, then the swap in `.claude/skills/ship/SKILL.md`.

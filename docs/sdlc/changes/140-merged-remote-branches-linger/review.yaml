@@ -1,0 +1,24 @@
+# Review record for change 140. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer found the --dry-run assertion could not fail (it
+# matched "landed" inside "kept inflight (not landed)"); subprocess-safety-
+# reviewer found a branch named -dash read as an option by git push --delete.
+# Both fixed, the second watched failing without the fix. Round 2 judged the
+# staged diff at the digest below; both reviewers ran the script against
+# throwaway repositories as well as reading it.
+
+digest: "72f9b9dca3edc4e5"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/tests.rs no test passes an unknown argument, so the exit-2 refusal in scripts/prune-landed-branches.sh is reviewed, not checked
+    person: "削除スクリプトにオプションを打ち間違えて渡すと止まる動きは確認済みですが、自動テストはまだありません。対応は不要です。"
+  - rust-reviewer/2 · scripts/prune-landed-branches.sh the origin/HEAD skip and the --force-with-lease lease turn no test red when removed
+    person: "削除の直前に誰かが同じ branch に push した場合に消さない仕組みは手で確認済みですが、自動テストはまだありません。対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/tests.rs the prune fixture removes its temporary repositories only when every assertion passed
+    person: "このテストが失敗したときだけ、一時フォルダが少し残ります。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

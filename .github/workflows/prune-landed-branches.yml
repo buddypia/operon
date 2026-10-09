@@ -1,0 +1,32 @@
+name: Prune landed branches
+
+# Change 140. A push to main is the last step of landing a change, so it is when
+# the change's branch stops meaning anything: delete it from the remote, and
+# every other branch whose work main already holds. The rule — and why a branch
+# merely pointing into main is not enough — is in the script, which is also what
+# `src/tests.rs` exercises against temporary repositories.
+
+on:
+  push:
+    branches: [main]
+
+# Two landings close together run two prunes; the second only finds less to do,
+# so they queue rather than cancel.
+concurrency:
+  group: prune-landed-branches
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prune:
+    name: delete landed branches
+    runs-on: ubuntu-latest
+    # A hung fetch or push would hold the queue every later prune waits in.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: bash scripts/prune-landed-branches.sh
