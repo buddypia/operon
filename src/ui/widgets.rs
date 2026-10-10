@@ -292,7 +292,7 @@ pub(crate) fn quiet_button(
     label: impl Into<String>,
 ) -> egui::Response {
     let response = ui.add(
-        egui::Button::new(RichText::new(label.into()).color(palette.text_muted))
+        egui::Button::new(RichText::new(label.into()).color(palette.link))
             .stroke(egui::Stroke::NONE)
             .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
     );
@@ -323,7 +323,7 @@ pub(crate) fn restore_progress_footer(
     ui.add_space(SPACE_XS);
     let action = ui
         .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            quiet_button(ui, palette, tr("バックグラウンドで続ける"))
+            secondary_button(ui, tr("バックグラウンドで続ける"))
         })
         .inner;
     (status, action)
@@ -351,7 +351,7 @@ pub(crate) fn launch_progress_footer(
     ui.add_space(SPACE_XS);
     let action = ui
         .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            quiet_button(ui, palette, tr("バックグラウンドで続ける"))
+            secondary_button(ui, tr("バックグラウンドで続ける"))
         })
         .inner;
     (status, action)

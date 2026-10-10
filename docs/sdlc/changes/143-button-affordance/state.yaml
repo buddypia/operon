@@ -1,0 +1,30 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request (it is the intent on this route): the person reported that
+# 「バックグラウンドで続ける」 looks like plain text and has no affordance
+# until hovered, and asked to address this and other similar controls across the app.
+#
+# Scope agreed with person: Scope 3 (comprehensive across Category A, B, and C):
+# - Category A: Modal and sheet footer actions using quiet_button -> secondary_button
+# - Category B: Inline action texts (AI options, worktree reset, pin update, setup steps) -> clear buttons
+# - Category C: Heading actions (quiet_button affordance improvement) and toolbar attention chip button
+#
+# Screen: the change paints (risk.yaml `drawing`, screen yes).
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Implementation and tests complete. make q.fast and named tests pass. Ready to commit in worktree."
+
+contract:
+  three-gates: "machine passed make q.fast and cargo test --locked for named tests"
+  readiness: "machine passed bash scripts/check-readiness.sh docs/sdlc/changes/143-button-affordance"

@@ -1,0 +1,21 @@
+# Review record for 143-button-affordance.
+#
+# rust-reviewer read the staged diff (src/ui/widgets.rs, src/app/screens.rs,
+# src/tests.rs) against .claude/rules/rust.md and DESIGN.md.
+#
+# Findings:
+# - No colour literal introduced: uses existing semantic role `palette.link`.
+# - Uses standard `secondary_button` for dialog/modal footers and action choices,
+#   restoring `border_subtle` hairline affordance at rest.
+# - Documented control height (28px) preserved across all updated controls.
+# - Unit tests in src/tests.rs verify link color on quiet_button and secondary_button
+#   outline on progress footers without geometry collisions.
+#
+# Round 1 verdict: approve 0 0.
+
+digest: "e2a4090c1c90a29c"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

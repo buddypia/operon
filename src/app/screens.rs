@@ -164,7 +164,7 @@ impl OperonApp {
                                 ),
                                 None => tf!("要対応 {p0}", p0 = waiting),
                             };
-                            let attention_res = quiet_button(ui, palette, attention_label)
+                            let attention_res = secondary_button(ui, attention_label)
                                 .on_hover_text(tr("次の要対応セッションへ移動します"));
                             register_control(attention_res.rect);
                             if attention_res.clicked() {
@@ -1126,7 +1126,7 @@ impl OperonApp {
                                     if remove_res.clicked() {
                                         self.remove_project(project.id);
                                     }
-                                    if quiet_button(ui, palette, tr("キャンセル")).clicked() {
+                                    if secondary_button(ui, tr("キャンセル")).clicked() {
                                         self.pending_project_removal = None;
                                     }
                                 });
@@ -1350,7 +1350,7 @@ impl OperonApp {
                         if remove_res.clicked() {
                             self.remove_project(project.id);
                         }
-                        if quiet_button(ui, palette, tr("キャンセル")).clicked() {
+                        if secondary_button(ui, tr("キャンセル")).clicked() {
                             self.pending_project_removal = None;
                         }
                     });
@@ -1733,7 +1733,7 @@ impl OperonApp {
             for agent in ["codex", "claude", "gemini"] {
                 self.ui_agent_choice(ui, agent);
             }
-            if quiet_button(ui, palette, tr("別のコマンドを使う")).clicked() {
+            if secondary_button(ui, tr("別のコマンドを使う")).clicked() {
                 self.select_agent("custom");
             }
         });
@@ -1886,7 +1886,7 @@ impl OperonApp {
                 tr("プロジェクト直下").to_owned()
             };
             ui.label(RichText::new(folder_chip).color(palette.accent_text));
-            if worktree_active && quiet_button(ui, palette, tr("プロジェクト直下に戻す")).clicked()
+            if worktree_active && secondary_button(ui, tr("プロジェクト直下に戻す")).clicked()
             {
                 self.session_path_input.clear();
                 self.session_path_project = None;
@@ -2047,7 +2047,7 @@ impl OperonApp {
                     .small()
                     .weak(),
                 );
-                if quiet_button(ui, palette, tr("今の設定で固定し直す")).clicked() {
+                if secondary_button(ui, tr("今の設定で固定し直す")).clicked() {
                     self.pin_launch_settings();
                 }
             });
@@ -2097,7 +2097,7 @@ impl OperonApp {
         let mut terminal_only = false;
         ui.horizontal(|ui| {
             ui.add_enabled_ui(self.tools.tmux && !worktree_mutation_running, |ui| {
-                if quiet_button(ui, palette, tr("ターミナルだけ開く")).clicked() {
+                if secondary_button(ui, tr("ターミナルだけ開く")).clicked() {
                     terminal_only = true;
                 }
             });
@@ -4536,7 +4536,7 @@ impl OperonApp {
                     palette,
                     |ui| {
                         // Drawn right to left, beside the verdict.
-                        if !available && quiet_button(ui, palette, tr("手順")).clicked() {
+                        if !available && secondary_button(ui, tr("手順")).clicked() {
                             open_setup = Some(setup);
                         }
                         if let Some(count) = accounts {
