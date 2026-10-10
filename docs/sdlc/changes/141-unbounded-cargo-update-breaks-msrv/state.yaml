@@ -1,0 +1,33 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request: The person asked to analyze and execute dependency and library updates
+# step-by-step. MSRV conflict was identified with uuid 1.27.0 requiring Rust 1.89
+# while the repo and CI are pinned to 1.88.0. Cargo.toml lacked rust-version.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Commit on branch, push, verify CI, then land."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt, clippy and review gate at the commit"
+  msrv-test: "machine passed cargo test --locked cargo_manifest_declares_msrv_matching_ci"
+  release-binary: "machine waived no: the change is manifest and lockfile configuration; app binary behavior is unchanged"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

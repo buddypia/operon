@@ -43248,3 +43248,48 @@ pub(crate) fn the_prune_workflow_runs_the_script_on_every_push_to_main() {
         assert!(lines.contains(&needle), "{why}: `{needle}` not found");
     }
 }
+
+#[test]
+/// Cargo.toml must declare `rust-version` under `[package]` matching the CI toolchain
+/// pinned in `.github/workflows/ci.yml`.
+///
+/// Without this manifest key, `cargo update` resolves packages that require newer
+/// rustc versions (e.g. uuid 1.27.0 requiring Rust 1.89.0), which breaks the build
+/// on the project's pinned toolchain (1.88.0).
+pub(crate) fn cargo_manifest_declares_msrv_matching_ci() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml should exist");
+    let ci_yml = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect(".github/workflows/ci.yml should exist");
+
+    let manifest_msrv = cargo_toml
+        .lines()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("rust-version") {
+                let (_, val) = trimmed.split_once('=')?;
+                Some(val.trim().trim_matches('"').to_string())
+            } else {
+                None
+            }
+        })
+        .expect("Cargo.toml must declare rust-version under [package]");
+
+    let ci_toolchain = ci_yml
+        .lines()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.starts_with("toolchain:") {
+                let (_, val) = trimmed.split_once(':')?;
+                Some(val.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .expect("ci.yml must declare a toolchain");
+
+    assert_eq!(
+        manifest_msrv, ci_toolchain,
+        "Cargo.toml rust-version ({manifest_msrv}) does not match ci.yml toolchain ({ci_toolchain})"
+    );
+}
