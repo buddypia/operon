@@ -8,7 +8,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -16,11 +16,11 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Commit on branch, push, verify CI, then land."
+resume: "Landed: CI passed on 71935f1 (run 38011662628), merged into main as cd72b56. Cargo.toml declares rust-version 1.88.0, libc locked at 0.2.190, MSRV regression test passing."
 
 contract:
-  three-gates: "machine passed bash .claude/hooks/gate-commit.sh — fmt, clippy and review gate at the commit"
-  msrv-test: "machine passed cargo test --locked cargo_manifest_declares_msrv_matching_ci"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted 71935f1; CI run 38011662628 green; merged into main"
+  msrv-test: "machine passed cargo test --locked cargo_manifest_declares_msrv_matching_ci passes in CI and locally"
   release-binary: "machine waived no: the change is manifest and lockfile configuration; app binary behavior is unchanged"
 
 sets:
