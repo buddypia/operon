@@ -1,0 +1,12 @@
+# Review record for change 141. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer evaluated the manifest MSRV declaration (rust-version = "1.88.0"),
+# the locked libc patch update (0.2.190), and the regression test in src/tests.rs.
+# All commit gates (cargo fmt, clippy -D warnings, test --locked) pass cleanly.
+
+digest: "776213d496c1a511"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
