@@ -580,3 +580,27 @@ pub(crate) struct PromptTemplate {
     pub(crate) content: String,
     pub(crate) is_custom: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SearchEngineMode {
+    #[default]
+    Keyword,
+    EmbeddedGemma2,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+#[allow(dead_code)]
+pub(crate) enum EmbeddedModelDownloadState {
+    #[default]
+    Idle,
+    Downloading {
+        progress: f32,
+        bytes_downloaded: u64,
+        total_bytes: u64,
+    },
+    Ready {
+        cached_bytes: u64,
+    },
+    Error(String),
+}

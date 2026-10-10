@@ -1,0 +1,15 @@
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Landed built-in opt-in semantic search replacing external eg2 dependency."
+
+decisions:
+  - machine approved cargo test --locked

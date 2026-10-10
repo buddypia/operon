@@ -1,0 +1,20 @@
+# Review record for change 142. Shape: docs/sdlc/templates/review.yaml.
+#
+# rust-reviewer confirmed that external eg2 subprocess logic, circuit breaker,
+# and timeout handling are cleanly removed. In-process search ranking is
+# deterministic, zero-allocation on fast paths, and respects limits.
+#
+# durability-reviewer confirmed that Store persistence preserves backwards
+# compatibility via #[serde(default)] for search_engine_mode. No schema version
+# migration is triggered, and missing or corrupted cache directories are
+# handled gracefully without data loss.
+
+digest: "5929c941e931e6df"
+
+rounds: 1
+
+carried: []
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"

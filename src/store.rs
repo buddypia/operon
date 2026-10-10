@@ -25,6 +25,8 @@ pub(crate) struct Store {
     pub(crate) cli_handoffs: Vec<CliHandoff>,
     #[serde(default)]
     pub(crate) agent_launch_presets: Vec<AgentLaunchPreset>,
+    #[serde(default)]
+    pub(crate) search_engine_mode: SearchEngineMode,
 }
 
 impl Default for Store {
@@ -42,6 +44,7 @@ impl Default for Store {
             native_session_references: Vec::new(),
             cli_handoffs: Vec::new(),
             agent_launch_presets: Vec::new(),
+            search_engine_mode: SearchEngineMode::default(),
         }
     }
 }
