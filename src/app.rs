@@ -379,6 +379,7 @@ pub(crate) struct OperonApp {
     pub(crate) file_search: String,
     pub(crate) transcript_search_input: String,
     pub(crate) transcript_matches: Vec<TranscriptMatch>,
+    pub(crate) model_download_state: EmbeddedModelDownloadState,
     pub(crate) cli_sessions: HashMap<Uuid, Vec<CliSession>>,
     pub(crate) handoff_note_input: String,
     pub(crate) handoff_target_inputs: HashMap<String, String>,
@@ -850,6 +851,13 @@ impl OperonApp {
             file_search: String::new(),
             transcript_search_input: String::new(),
             transcript_matches: Vec::new(),
+            model_download_state: if is_embedded_model_cached() {
+                EmbeddedModelDownloadState::Ready {
+                    cached_bytes: embedded_model_cached_bytes(),
+                }
+            } else {
+                EmbeddedModelDownloadState::Idle
+            },
             cli_sessions: HashMap::new(),
             handoff_note_input: String::new(),
             handoff_target_inputs: HashMap::new(),
@@ -4418,10 +4426,11 @@ impl OperonApp {
             return;
         }
         let search_query = query.clone();
+        let search_mode = self.store.search_engine_mode;
         self.spawn_background(BackgroundKey::TranscriptSearch, move || {
             BackgroundResult::TranscriptSearch {
                 query: search_query.clone(),
-                scan: search_local_transcripts(&search_query, 50),
+                scan: search_local_transcripts_with_mode(&search_query, 50, search_mode),
             }
         });
         self.notice = Some(tf!(

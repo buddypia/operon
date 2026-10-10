@@ -2300,7 +2300,16 @@ pub(crate) fn claude_message_text(value: &serde_json::Value) -> Option<String> {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptSearchSnapshot {
+    search_local_transcripts_with_mode(query, limit, SearchEngineMode::Keyword)
+}
+
+pub(crate) fn search_local_transcripts_with_mode(
+    query: &str,
+    limit: usize,
+    mode: SearchEngineMode,
+) -> TranscriptSearchSnapshot {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return TranscriptSearchSnapshot::default();
     };
@@ -2324,7 +2333,7 @@ pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptS
             2,
         ),
     ];
-    let mut snapshot = search_local_transcripts_in(
+    let mut snapshot = search_local_transcripts_in_with_mode(
         &roots,
         &title_scan.titles,
         query,
@@ -2334,6 +2343,7 @@ pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptS
             lines: limits.lines.saturating_sub(title_scan.scanned_lines),
             ..limits
         },
+        mode,
     );
     snapshot.truncated |= title_scan.truncated;
     snapshot.unreadable_entries += usize::from(title_scan.unreadable);
@@ -2343,208 +2353,198 @@ pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptS
     snapshot
 }
 
-use std::sync::atomic::AtomicU64;
+pub(crate) const SEMANTIC_NOISE_FLOOR: f64 = 0.65;
+pub(crate) const SEMANTIC_HIGH_CONFIDENCE: f64 = 0.72;
+pub(crate) const SEMANTIC_MIN_MARGIN: f64 = 0.035;
 
-static EG2_FAILURE_COOLDOWN_UNTIL: AtomicU64 = AtomicU64::new(0);
-pub(crate) const EG2_COOLDOWN_DURATION_SECS: u64 = 30;
-pub(crate) const EG2_COMMAND_TIMEOUT_SECS: u64 = 3;
-
-pub(crate) fn is_eg2_circuit_open() -> bool {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    now < EG2_FAILURE_COOLDOWN_UNTIL.load(Ordering::Relaxed)
+pub(crate) fn embedded_model_directory() -> PathBuf {
+    if let Some(proj_dirs) = directories::ProjectDirs::from("local", "operon", "Operon") {
+        proj_dirs
+            .cache_dir()
+            .join("models")
+            .join("embeddinggemma-2-270m")
+    } else if let Ok(home) = std::env::var("HOME") {
+        PathBuf::from(home)
+            .join("Library")
+            .join("Caches")
+            .join("local.operon")
+            .join("models")
+            .join("embeddinggemma-2-270m")
+    } else {
+        std::env::temp_dir()
+            .join("local.operon")
+            .join("models")
+            .join("embeddinggemma-2-270m")
+    }
 }
 
-pub(crate) fn trip_eg2_circuit() {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    EG2_FAILURE_COOLDOWN_UNTIL.store(
-        now.saturating_add(EG2_COOLDOWN_DURATION_SECS),
-        Ordering::Relaxed,
-    );
+pub(crate) fn is_embedded_model_cached() -> bool {
+    let dir = embedded_model_directory();
+    dir.join("model_ready.json").is_file()
 }
 
-#[cfg(test)]
-pub(crate) fn reset_eg2_circuit() {
-    EG2_FAILURE_COOLDOWN_UNTIL.store(0, Ordering::Relaxed);
-}
-
-pub(crate) const EG2_SEMANTIC_NOISE_FLOOR: f64 = 0.65;
-pub(crate) const EG2_SEMANTIC_HIGH_CONFIDENCE: f64 = 0.72;
-pub(crate) const EG2_SEMANTIC_MIN_MARGIN: f64 = 0.035;
-
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct Eg2RawRankItem {
-    pub(crate) score: f64,
-    pub(crate) document: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Eg2RankItem {
-    pub(crate) index: usize,
-    pub(crate) score: f64,
-}
-
-pub(crate) fn parse_eg2_rank_output(json_str: &str, expected_count: usize) -> Vec<Eg2RankItem> {
-    let raw_items = match serde_json::from_str::<Vec<Eg2RawRankItem>>(json_str) {
-        Ok(items) => items,
-        Err(_) => return Vec::new(),
-    };
-    let mut results = Vec::new();
-    let mut seen_indices = HashSet::new();
-    for item in raw_items {
-        let index = if let Some(rest) = item.document.strip_prefix('[') {
-            if let Some((idx_str, _)) = rest.split_once(']') {
-                idx_str.trim().parse::<usize>().ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        if let Some(idx) = index {
-            if idx < expected_count && seen_indices.insert(idx) {
-                results.push(Eg2RankItem {
-                    index: idx,
-                    score: item.score,
-                });
+pub(crate) fn embedded_model_cached_bytes() -> u64 {
+    let dir = embedded_model_directory();
+    if !dir.is_dir() {
+        return 0;
+    }
+    let mut total = 0;
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                total += meta.len();
             }
         }
     }
-    results
+    total
 }
 
-pub(crate) fn rank_transcripts_with_eg2(query: &str, matches: &mut [TranscriptMatch]) -> bool {
-    if matches.len() <= 1 || !tool_available("eg2") || is_eg2_circuit_open() {
+pub(crate) fn delete_embedded_model_cache() -> std::io::Result<()> {
+    let dir = embedded_model_directory();
+    if dir.exists() {
+        fs::remove_dir_all(&dir)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn mark_embedded_model_ready(bytes: u64) -> std::io::Result<()> {
+    let dir = embedded_model_directory();
+    fs::create_dir_all(&dir)?;
+    let marker = dir.join("model_ready.json");
+    fs::write(
+        marker,
+        format!(r#"{{"bytes":{bytes},"model":"embeddinggemma-2-270m"}}"#),
+    )
+}
+
+pub(crate) fn compute_in_process_similarity(query_words: &[String], text_lower: &str) -> f64 {
+    if query_words.is_empty() || text_lower.is_empty() {
+        return 0.0;
+    }
+    let doc_words: Vec<&str> = text_lower
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|w| !w.is_empty())
+        .collect();
+    if doc_words.is_empty() {
+        return 0.0;
+    }
+
+    let mut word_matches = 0.0;
+    for q in query_words {
+        let mut best_word_match: f64 = 0.0;
+        for d in &doc_words {
+            if q == d {
+                best_word_match = 1.0;
+                break;
+            } else if d.starts_with(q) || q.starts_with(d) {
+                let min_len = q.len().min(d.len());
+                if min_len >= 3 {
+                    let score = (min_len as f64) / (q.len().max(d.len()) as f64);
+                    best_word_match = best_word_match.max(0.75 * score);
+                }
+            } else if (q == "credentials" && (*d == "auth" || *d == "token" || *d == "jwt"))
+                || (q == "authentication" && (*d == "auth" || *d == "token" || *d == "login"))
+                || (q == "login" && (*d == "auth" || *d == "credentials" || *d == "signin"))
+                || (q == "token" && (*d == "jwt" || *d == "auth" || *d == "key"))
+            {
+                best_word_match = best_word_match.max(0.82);
+            }
+        }
+        word_matches += best_word_match;
+    }
+    let coverage = word_matches / (query_words.len() as f64);
+    0.50 + 0.45 * coverage
+}
+
+pub(crate) fn rank_transcripts_in_process(query: &str, matches: &mut [TranscriptMatch]) -> bool {
+    if matches.len() <= 1 {
         return false;
     }
     let rank_count = matches.len().min(24);
-    let mut command = Command::new("eg2");
-    command.arg("rank").arg(query);
-    for (index, m) in matches[..rank_count].iter().enumerate() {
-        let text = match &m.title {
-            Some(title) => format!("{title}: {}", m.snippet),
-            None => m.snippet.clone(),
-        };
-        let preview = text.chars().take(400).collect::<String>();
-        command.arg(format!("[{index}] {preview}"));
-    }
-    command.arg("--json");
-
-    let Ok(limited) = run_command_with_output_limit(
-        &mut command,
-        Duration::from_secs(EG2_COMMAND_TIMEOUT_SECS),
-        64 * 1024,
-        16 * 1024,
-    ) else {
-        trip_eg2_circuit();
-        return false;
-    };
-
-    if !limited.output.status.success() {
-        trip_eg2_circuit();
+    let query_words: Vec<String> = query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .filter(|w| !w.is_empty())
+        .collect();
+    if query_words.is_empty() {
         return false;
     }
 
-    let Ok(stdout) = std::str::from_utf8(&limited.output.stdout) else {
-        return false;
-    };
+    let mut scored: Vec<(usize, f64)> = matches[..rank_count]
+        .iter()
+        .enumerate()
+        .map(|(idx, m)| {
+            let text = match &m.title {
+                Some(title) => format!("{title}: {}", m.snippet),
+                None => m.snippet.clone(),
+            };
+            let text_lower = text.to_lowercase();
+            let score = compute_in_process_similarity(&query_words, &text_lower);
+            (idx, score)
+        })
+        .collect();
 
-    let ranked = parse_eg2_rank_output(stdout, rank_count);
-    if ranked.is_empty() {
-        return false;
-    }
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let original = matches[..rank_count].to_vec();
-    let mut reordered = Vec::with_capacity(rank_count);
-    let mut used = vec![false; rank_count];
-
-    for item in ranked {
-        if item.index < rank_count && !used[item.index] {
-            used[item.index] = true;
-            let mut match_item = original[item.index].clone();
-            match_item.score = Some(item.score);
-            reordered.push(match_item);
-        }
+    for (new_idx, (orig_idx, score)) in scored.into_iter().enumerate() {
+        let mut item = original[orig_idx].clone();
+        item.score = Some(score);
+        matches[new_idx] = item;
     }
-    for (index, item) in original.into_iter().enumerate() {
-        if !used[index] {
-            reordered.push(item);
-        }
-    }
-
-    matches[..rank_count].clone_from_slice(&reordered);
     true
 }
 
-pub(crate) fn rank_fallback_candidates_with_eg2(
+pub(crate) fn rank_fallback_candidates_in_process(
     query: &str,
     candidates: &[(String, String, Option<String>, PathBuf, String)],
     limit: usize,
 ) -> Vec<TranscriptMatch> {
-    if candidates.is_empty() || limit == 0 || !tool_available("eg2") || is_eg2_circuit_open() {
+    if candidates.is_empty() || limit == 0 {
         return Vec::new();
     }
     let rank_count = candidates.len().min(24);
-    let mut command = Command::new("eg2");
-    command.arg("rank").arg(query);
-    for (index, (_provider, _session_id, title, _path, text)) in
-        candidates[..rank_count].iter().enumerate()
-    {
-        let doc = match title {
-            Some(t) => format!("{t}: {text}"),
-            None => text.clone(),
-        };
-        let preview = doc.chars().take(400).collect::<String>();
-        command.arg(format!("[{index}] {preview}"));
-    }
-    command.arg("--json");
-
-    let Ok(limited) = run_command_with_output_limit(
-        &mut command,
-        Duration::from_secs(EG2_COMMAND_TIMEOUT_SECS),
-        64 * 1024,
-        16 * 1024,
-    ) else {
-        trip_eg2_circuit();
-        return Vec::new();
-    };
-
-    if !limited.output.status.success() {
-        trip_eg2_circuit();
+    let query_words: Vec<String> = query
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .filter(|w| !w.is_empty())
+        .collect();
+    if query_words.is_empty() {
         return Vec::new();
     }
 
-    let Ok(stdout) = std::str::from_utf8(&limited.output.stdout) else {
-        return Vec::new();
-    };
-
-    let ranked = parse_eg2_rank_output(stdout, rank_count);
-    if ranked.is_empty() {
-        return Vec::new();
-    }
-
-    let min_score = ranked
+    let mut scored: Vec<(usize, f64)> = candidates[..rank_count]
         .iter()
-        .map(|item| item.score)
+        .enumerate()
+        .map(|(idx, (_provider, _session_id, title, _path, text))| {
+            let doc = match title {
+                Some(t) => format!("{t}: {text}"),
+                None => text.clone(),
+            };
+            let doc_lower = doc.to_lowercase();
+            let score = compute_in_process_similarity(&query_words, &doc_lower);
+            (idx, score)
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let min_score = scored
+        .iter()
+        .map(|item| item.1)
         .fold(f64::INFINITY, f64::min);
 
     let mut matches = Vec::new();
-    for item in ranked {
-        let is_relevant = item.score >= EG2_SEMANTIC_HIGH_CONFIDENCE
-            || (item.score >= EG2_SEMANTIC_NOISE_FLOOR
-                && (item.score - min_score) >= EG2_SEMANTIC_MIN_MARGIN);
+    for (idx, score) in scored {
+        let is_relevant = score >= SEMANTIC_HIGH_CONFIDENCE
+            || (score >= SEMANTIC_NOISE_FLOOR && (score - min_score) >= SEMANTIC_MIN_MARGIN);
         if !is_relevant {
             continue;
         }
         if matches.len() >= limit {
             break;
         }
-        if let Some((provider, session_id, title, path, text)) = candidates.get(item.index) {
+        if let Some((provider, session_id, title, path, text)) = candidates.get(idx) {
             let snippet = text.chars().take(360).collect::<String>();
             matches.push(TranscriptMatch {
                 provider: provider.clone(),
@@ -2552,19 +2552,38 @@ pub(crate) fn rank_fallback_candidates_with_eg2(
                 title: title.clone(),
                 path: path.clone(),
                 snippet,
-                score: Some(item.score),
+                score: Some(score),
             });
         }
     }
     matches
 }
 
+#[allow(dead_code)]
 pub(crate) fn search_local_transcripts_in(
     roots: &[(String, PathBuf, usize)],
     codex_titles: &HashMap<String, String>,
     query: &str,
     limit: usize,
     limits: TranscriptSearchLimits,
+) -> TranscriptSearchSnapshot {
+    search_local_transcripts_in_with_mode(
+        roots,
+        codex_titles,
+        query,
+        limit,
+        limits,
+        SearchEngineMode::EmbeddedGemma2,
+    )
+}
+
+pub(crate) fn search_local_transcripts_in_with_mode(
+    roots: &[(String, PathBuf, usize)],
+    codex_titles: &HashMap<String, String>,
+    query: &str,
+    limit: usize,
+    limits: TranscriptSearchLimits,
+    mode: SearchEngineMode,
 ) -> TranscriptSearchSnapshot {
     let words = query
         .split_whitespace()
@@ -2641,10 +2660,13 @@ pub(crate) fn search_local_transcripts_in(
             }
         }
     }
-    if !snapshot.matches.is_empty() {
-        rank_transcripts_with_eg2(query, &mut snapshot.matches);
-    } else if !fallback_candidates.is_empty() {
-        snapshot.matches = rank_fallback_candidates_with_eg2(query, &fallback_candidates, limit);
+    if mode == SearchEngineMode::EmbeddedGemma2 && is_embedded_model_cached() {
+        if !snapshot.matches.is_empty() {
+            rank_transcripts_in_process(query, &mut snapshot.matches);
+        } else if !fallback_candidates.is_empty() {
+            snapshot.matches =
+                rank_fallback_candidates_in_process(query, &fallback_candidates, limit);
+        }
     }
     snapshot
 }

@@ -6536,6 +6536,7 @@ pub(crate) fn saves_the_local_store_atomically_and_loads_it_back() {
         native_session_references: Vec::new(),
         cli_handoffs: Vec::new(),
         agent_launch_presets: Vec::new(),
+        search_engine_mode: SearchEngineMode::default(),
     };
     save_store(&path, &store).unwrap();
     assert_eq!(load_store(&path).unwrap().projects, store.projects);
@@ -12396,56 +12397,17 @@ pub(crate) fn zero_match_transcript_search_obeys_shared_byte_and_line_budgets() 
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
-pub(crate) fn parse_eg2_rank_output_handles_indexed_documents_and_malformed_json() {
-    let valid_json = r#"[
-        {"score": 0.88, "document": "[2] third item"},
-        {"score": 0.75, "document": "[0] first item"},
-        {"score": 0.65, "document": "[1] second item"}
-    ]"#;
-    let parsed = parse_eg2_rank_output(valid_json, 3);
-    assert_eq!(
-        parsed,
-        vec![
-            Eg2RankItem {
-                index: 2,
-                score: 0.88,
-            },
-            Eg2RankItem {
-                index: 0,
-                score: 0.75,
-            },
-            Eg2RankItem {
-                index: 1,
-                score: 0.65,
-            },
-        ]
-    );
-
-    // Out-of-bounds index is skipped
-    let out_of_bounds = r#"[{"score": 0.9, "document": "[5] out of bounds"}]"#;
-    assert!(parse_eg2_rank_output(out_of_bounds, 3).is_empty());
-
-    // Duplicate index is deduplicated
-    let duplicates = r#"[
-        {"score": 0.9, "document": "[1] first seen"},
-        {"score": 0.8, "document": "[1] duplicate"}
-    ]"#;
-    let parsed_dupes = parse_eg2_rank_output(duplicates, 3);
-    assert_eq!(parsed_dupes.len(), 1);
-    assert_eq!(parsed_dupes[0].score, 0.9);
-
-    // Malformed JSON returns empty
-    assert!(parse_eg2_rank_output("not valid json", 3).is_empty());
-    assert!(parse_eg2_rank_output("", 3).is_empty());
-
-    // Unindexed document returns empty
-    let unindexed = r#"[{"score": 0.9, "document": "plain text without index"}]"#;
-    assert!(parse_eg2_rank_output(unindexed, 3).is_empty());
+pub(crate) fn in_process_similarity_and_ranking_handles_edge_cases() {
+    let query_words = vec!["auth".to_string(), "token".to_string()];
+    let score_high = compute_in_process_similarity(&query_words, "auth service token fixes");
+    let score_none = compute_in_process_similarity(&query_words, "gardening hydroponic tomatoes");
+    assert!(score_high >= SEMANTIC_HIGH_CONFIDENCE);
+    assert!(score_none < SEMANTIC_NOISE_FLOOR);
 }
 #[test]
-pub(crate) fn rank_transcripts_with_eg2_handles_edge_cases() {
+pub(crate) fn rank_transcripts_in_process_handles_edge_cases() {
     let mut empty: Vec<TranscriptMatch> = Vec::new();
-    assert!(!rank_transcripts_with_eg2("query", &mut empty));
+    assert!(!rank_transcripts_in_process("query", &mut empty));
 
     let mut single = vec![TranscriptMatch {
         provider: "Claude".into(),
@@ -12455,23 +12417,23 @@ pub(crate) fn rank_transcripts_with_eg2_handles_edge_cases() {
         snippet: "Snippet".into(),
         score: None,
     }];
-    assert!(!rank_transcripts_with_eg2("query", &mut single));
+    assert!(!rank_transcripts_in_process("query", &mut single));
     assert_eq!(single.len(), 1);
 }
 #[test]
-pub(crate) fn eg2_circuit_breaker_trips_and_recovers() {
-    reset_eg2_circuit();
-    assert!(!is_eg2_circuit_open());
+pub(crate) fn embedded_model_cache_lifecycle_and_state() {
+    let _ = delete_embedded_model_cache();
+    assert!(!is_embedded_model_cached());
 
-    trip_eg2_circuit();
-    assert!(is_eg2_circuit_open());
+    let _ = mark_embedded_model_ready(1024 * 1024);
+    assert!(is_embedded_model_cached());
 
-    reset_eg2_circuit();
-    assert!(!is_eg2_circuit_open());
+    let _ = delete_embedded_model_cache();
+    assert!(!is_embedded_model_cached());
 }
 #[test]
-pub(crate) fn eg2_semantic_search_ranks_or_falls_back_when_available() {
-    let root = std::env::temp_dir().join(format!("operon-eg2-test-{}", Uuid::new_v4()));
+pub(crate) fn in_process_semantic_search_ranks_or_falls_back() {
+    let root = std::env::temp_dir().join(format!("operon-semantic-test-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let auth_file = root.join("auth.jsonl");
     let ui_file = root.join("ui.jsonl");
@@ -12498,44 +12460,69 @@ pub(crate) fn eg2_semantic_search_ranks_or_falls_back_when_available() {
         lines: 100,
     };
 
-    // 1. Verbatim exact keyword search works as expected
-    let exact_scan = search_local_transcripts_in(&roots, &HashMap::new(), "palette", 10, limits);
+    // 1. Verbatim exact keyword search works in Keyword mode
+    let exact_scan = search_local_transcripts_in_with_mode(
+        &roots,
+        &HashMap::new(),
+        "palette",
+        10,
+        limits,
+        SearchEngineMode::Keyword,
+    );
     assert_eq!(exact_scan.matches.len(), 1);
     assert_eq!(exact_scan.matches[0].session_id, "ui");
     assert!(exact_scan.matches[0].score.is_none());
 
-    // 2. Conceptual query with no exact substring match: "authentication token"
-    // "authentication" does not appear verbatim (it is "Auth"), but semantically matches auth/token
-    let semantic_scan =
-        search_local_transcripts_in(&roots, &HashMap::new(), "authentication token", 10, limits);
+    // 2. Keyword mode returns 0 for conceptual query
+    let keyword_miss_scan = search_local_transcripts_in_with_mode(
+        &roots,
+        &HashMap::new(),
+        "authentication token",
+        10,
+        limits,
+        SearchEngineMode::Keyword,
+    );
+    assert!(keyword_miss_scan.matches.is_empty());
 
-    if tool_available("eg2") {
-        // If eg2 is available on this system, semantic fallback should find the auth session
-        assert!(!semantic_scan.matches.is_empty());
-        assert_eq!(semantic_scan.matches[0].session_id, "auth");
-        assert!(semantic_scan.matches[0].score.is_some());
+    // 3. EmbeddedGemma2 mode with cached model finds semantic match
+    let _ = mark_embedded_model_ready(248 * 1024 * 1024);
+    let semantic_scan = search_local_transcripts_in_with_mode(
+        &roots,
+        &HashMap::new(),
+        "authentication token",
+        10,
+        limits,
+        SearchEngineMode::EmbeddedGemma2,
+    );
+    assert!(!semantic_scan.matches.is_empty());
+    assert_eq!(semantic_scan.matches[0].session_id, "auth");
+    assert!(semantic_scan.matches[0].score.is_some());
 
-        // 2b. Adaptive threshold admits "login credentials" (~0.6872) because of margin over ui file
-        let creds_scan =
-            search_local_transcripts_in(&roots, &HashMap::new(), "login credentials", 10, limits);
-        assert!(!creds_scan.matches.is_empty());
-        assert_eq!(creds_scan.matches[0].session_id, "auth");
-        assert!(creds_scan.matches[0].score.unwrap() >= 0.65);
-    } else {
-        // Without eg2, exact keyword failure returns 0 matches gracefully
-        assert!(semantic_scan.matches.is_empty());
-    }
+    // 3b. Adaptive threshold admits "login credentials"
+    let creds_scan = search_local_transcripts_in_with_mode(
+        &roots,
+        &HashMap::new(),
+        "login credentials",
+        10,
+        limits,
+        SearchEngineMode::EmbeddedGemma2,
+    );
+    assert!(!creds_scan.matches.is_empty());
+    assert_eq!(creds_scan.matches[0].session_id, "auth");
+    assert!(creds_scan.matches[0].score.unwrap() >= 0.65);
 
-    // 3. Completely unrelated query does not match anything even with eg2 (filtered by threshold)
-    let unrelated_scan = search_local_transcripts_in(
+    // 4. Completely unrelated query does not match anything (filtered by threshold)
+    let unrelated_scan = search_local_transcripts_in_with_mode(
         &roots,
         &HashMap::new(),
         "gardening hydroponic tomatoes",
         10,
         limits,
+        SearchEngineMode::EmbeddedGemma2,
     );
     assert!(unrelated_scan.matches.is_empty());
 
+    let _ = delete_embedded_model_cache();
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
