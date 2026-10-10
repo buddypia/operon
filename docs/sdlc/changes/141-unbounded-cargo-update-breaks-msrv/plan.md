@@ -29,8 +29,8 @@
 
 - `cargo test --locked cargo_manifest_declares_msrv_matching_ci` passed in 0.68s.
 - `cargo fmt --check` and `cargo clippy --locked -- -D warnings` exit 0.
-- `scripts/check-readiness.sh docs/sdlc/changes/141-unbounded-cargo-update-breaks-msrv` reports Go.
-- `scripts/check-review.sh --index` reports SHIP (rust-reviewer approved round 1 at diff 776213d496c1a511).
+- `scripts/check-readiness.sh` reports Go.
+- `scripts/check-review.sh` reports SHIP (rust-reviewer approved round 1 at diff 776213d496c1a511).
 
 ## Departures from the plan
 
