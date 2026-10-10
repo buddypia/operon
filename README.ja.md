@@ -337,7 +337,8 @@ Operon 自身はテレメトリ・アカウント・クラウドサービスを�
 ## コントリビュート
 
 Issue・Pull Request・翻訳を歓迎します。[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md)
-と[行動規範](CODE_OF_CONDUCT.ja.md)をご覧ください。脆弱性は
+と[行動規範](CODE_OF_CONDUCT.ja.md)をご覧ください。リリースの履歴は
+[CHANGELOG.md](CHANGELOG.md) を参照してください。脆弱性は
 [SECURITY.ja.md](SECURITY.ja.md) の手順で非公開に報告してください。ドキュメント変更は
 [README.md](README.md)・[README.ko.md](README.ko.md)・[README.ja.md](README.ja.md)
 の 3 言語を同期させてください。

@@ -5,10 +5,24 @@
 # swap transaction, including its advisory lock file.
 /dist/
 
-# Scratch space for agent-generated drafts
-/.tmp/
-
+# macOS system and filesystem metadata
 .DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor & IDE local settings
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.bak
+
+# Rust tooling & profiling artifacts
+*.rs.bk
+*.profraw
+*.profdata
 
 # NOTE: assets/fonts/*.ttf are NOT ignored. They are build inputs, embedded via
 # include_bytes! in src/main.rs (~122 MB total). Removing them breaks the build.
@@ -29,4 +43,3 @@
 .claude/settings.local.json
 .codex/config.toml
 .agents/config.json
-

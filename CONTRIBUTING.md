@@ -90,6 +90,8 @@ read before they merge.
   update [README.md](README.md), [README.ko.md](README.ko.md), and
   [README.ja.md](README.ja.md) together. Keeping them structurally identical
   makes review easier.
+- **Keep the changelog updated.** Notable user-facing changes and release notes
+  are recorded in [CHANGELOG.md](CHANGELOG.md).
 - **Design tokens have one source of truth.** Colour/theme changes must update
   [`DESIGN.md`](DESIGN.md) alongside the constants and pass the WCAG 2.1 AA
   contrast tests.

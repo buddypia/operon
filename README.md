@@ -365,6 +365,7 @@ and each snapshot `0600`, so only the account that made them can read them.
 Issues, pull requests, and translations are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md) ([한국어](CONTRIBUTING.ko.md),
 [日本語](CONTRIBUTING.ja.md)) and the [Code of Conduct](CODE_OF_CONDUCT.md).
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Please keep documentation changes in sync
 across [README.md](README.md), [README.ko.md](README.ko.md), and
 [README.ja.md](README.ja.md).
