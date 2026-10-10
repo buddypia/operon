@@ -329,7 +329,8 @@ Operon 자체는 텔레메트리, 계정, 클라우드 서비스를 전혀 사�
 ## 기여
 
 이슈, Pull Request, 번역을 환영합니다. [CONTRIBUTING.ko.md](CONTRIBUTING.ko.md)와
-[행동 강령](CODE_OF_CONDUCT.ko.md)을 참고하세요. 보안 취약점은
+[행동 강령](CODE_OF_CONDUCT.ko.md)을 참고하세요. 릴리스 히스토리는
+[CHANGELOG.md](CHANGELOG.md)를 참조하세요. 보안 취약점은
 [SECURITY.ko.md](SECURITY.ko.md)에 따라 비공개로 제보해 주세요. 문서 변경은 [README.md](README.md),
 [README.ko.md](README.ko.md), [README.ja.md](README.ja.md) 세 언어를 함께
 맞춰 주세요.

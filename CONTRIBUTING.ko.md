@@ -86,6 +86,8 @@ commit 메시지에 그렇게 적어 주세요.
   [README.md](README.md), [README.ko.md](README.ko.md),
   [README.ja.md](README.ja.md)를 함께 갱신해 주세요. 구조를 동일하게 유지하면
   리뷰가 쉬워집니다.
+- **Changelog를 갱신합니다.** 사용자에게 영향을 미치는 주요 변경과 릴리스
+  노트는 [CHANGELOG.md](CHANGELOG.md)에 기록합니다.
 - **디자인 토큰의 기준은 한 곳입니다.** 색·테마 변경은 상수와 함께
   [`DESIGN.md`](DESIGN.md)를 갱신하고 WCAG 2.1 AA 명암비 테스트를 통과해야
   합니다.

@@ -86,6 +86,8 @@ commit メッセージにそう書いてください。
   ときは、[README.md](README.md)、[README.ko.md](README.ko.md)、
   [README.ja.md](README.ja.md) を同時に更新してください。構成を揃えておくと
   レビューしやすくなります。
+- **Changelog を更新します。** ユーザーに影響する重要な変更やリリースノートは
+  [CHANGELOG.md](CHANGELOG.md) に記録します。
 - **デザイントークンの正は 1 か所です。** 色・テーマの変更では、定数と併せて
   [`DESIGN.md`](DESIGN.md) を更新し、WCAG 2.1 AA のコントラストテストを通して
   ください。
