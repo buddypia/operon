@@ -3,7 +3,7 @@
 ## Execution Steps
 
 1. **Readiness & Screen Approval**:
-   - `scripts/check-readiness.sh docs/sdlc/changes/142-semantic-search-requires-external-tool` passes.
+   - Run `bash scripts/check-readiness.sh docs/sdlc/changes/142-semantic-search-requires-external-tool`.
    - Screen design in `screen.md` approved by user.
 
 2. **Remove External eg2 Dependency**:
@@ -25,7 +25,7 @@
    - Run `cargo test --locked`.
 
 6. **Review & Ship**:
-   - Run `scripts/check-review.sh docs/sdlc/changes/142-semantic-search-requires-external-tool`.
+   - Run `bash scripts/check-review.sh docs/sdlc/changes/142-semantic-search-requires-external-tool`.
    - Commit, push, monitor CI, merge to `main`, and package macOS bundle.
 
 ## Proof of completion
