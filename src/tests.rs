@@ -5844,6 +5844,97 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
     }
 }
 
+/// quiet_button renders with link color at rest so heading actions like
+/// 「すべて表示」 and 「履歴」 have visual affordance and are distinguished
+/// from static muted counter labels.
+#[test]
+pub(crate) fn quiet_button_renders_with_link_color_for_affordance() {
+    fn find_color(shape: &egui::epaint::Shape, target: &str) -> Option<egui::Color32> {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.text().contains(target) => {
+                text.galley.job.sections.first().map(|s| s.format.color)
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    if let Some(color) = find_color(child, target) {
+                        return Some(color);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        let context = egui::Context::default();
+        context.set_visuals(theme.visuals());
+        let output = context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                quiet_button(ui, palette, "すべて表示");
+            });
+        });
+        let color = output
+            .shapes
+            .iter()
+            .find_map(|clipped| find_color(&clipped.shape, "すべて表示"));
+        assert_eq!(
+            color,
+            Some(palette.link),
+            "quiet_button in {} must render with link color for affordance",
+            theme.label()
+        );
+    }
+}
+
+/// Progress footers render their dismiss button as secondary_button with
+/// border_subtle at rest, ensuring users can clearly see it is a button.
+#[test]
+pub(crate) fn progress_footers_use_secondary_button_affordance() {
+    fn count_strokes(shape: &egui::epaint::Shape, stroke: egui::Stroke) -> usize {
+        match shape {
+            egui::epaint::Shape::Rect(rect) if rect.stroke == stroke => 1,
+            egui::epaint::Shape::Vec(children) => {
+                children.iter().map(|c| count_strokes(c, stroke)).sum()
+            }
+            _ => 0,
+        }
+    }
+
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        let context = egui::Context::default();
+        context.set_visuals(theme.visuals());
+        let stroke = egui::Stroke::new(1.0, palette.border_subtle);
+        let cases: [(&str, fn(&mut egui::Ui, &Palette)); 2] = [
+            ("launch", |ui, p| {
+                let _ = launch_progress_footer(ui, p, 5);
+            }),
+            ("restore", |ui, p| {
+                let _ = restore_progress_footer(ui, p, 5);
+            }),
+        ];
+        for (name, draw) in cases {
+            let output = context.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draw(ui, palette);
+                });
+            });
+            let secondary_button_strokes: usize = output
+                .shapes
+                .iter()
+                .map(|clipped| count_strokes(&clipped.shape, stroke))
+                .sum();
+            assert!(
+                secondary_button_strokes >= 1,
+                "{name} progress footer in {} must render secondary button with border_subtle at rest (found {secondary_button_strokes})",
+                theme.label()
+            );
+        }
+    }
+}
+
 /// `DESIGN.md` carries the tokens as YAML front matter, in the format
 /// <https://github.com/google-labs-code/design.md> specifies, so that the
 /// design system is readable by a person and by the next agent to open
