@@ -8,6 +8,7 @@ pub(crate) use eframe::egui::{
 pub(crate) use egui_phosphor::regular as icons;
 pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use std::{
+    borrow::Cow,
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fs,

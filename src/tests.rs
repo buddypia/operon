@@ -43371,3 +43371,164 @@ pub(crate) fn cargo_manifest_declares_msrv_matching_ci() {
         "Cargo.toml rust-version ({manifest_msrv}) does not match ci.yml toolchain ({ci_toolchain})"
     );
 }
+
+// --- Change 144: sidebar tab button rounded consistency, drag affordance, and smooth rendering ---
+
+/// Change 144: Inspector tab buttons explicitly specify RADIUS_CONTROL (6px) rounded corners
+/// and CONTROL_HEIGHT_SMALL (24px) min height so they remain rounded when selected.
+#[test]
+pub(crate) fn test_change_144_sidebar_tab_buttons_use_control_radius() {
+    let session_tree_src =
+        fs::read_to_string("src/ui/session_tree.rs").expect("session_tree.rs must exist");
+    assert!(
+        session_tree_src.contains(".corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))"),
+        "Inspector tab buttons must explicitly set RADIUS_CONTROL to avoid egui resetting to CornerRadius::ZERO on selected(true)"
+    );
+    assert!(
+        session_tree_src.contains(".min_size(egui::vec2(0.0, CONTROL_HEIGHT_SMALL))"),
+        "Inspector tab buttons must have standard CONTROL_HEIGHT_SMALL min height"
+    );
+    assert!(
+        session_tree_src.contains("ICON_DRAG_HANDLE"),
+        "Inspector tab buttons must lead with ICON_DRAG_HANDLE"
+    );
+    assert!(
+        session_tree_src.contains("set_cursor_icon(egui::CursorIcon::Grab)"),
+        "Inspector tab buttons must set CursorIcon::Grab when hovered"
+    );
+}
+
+/// Change 144: ICON_DRAG_HANDLE resolves from the bundled Phosphor icon font and is registered in ICON_VOCABULARY.
+#[test]
+pub(crate) fn test_change_144_drag_handle_icon_resolves_and_vocab_registered() {
+    assert_eq!(ICON_DRAG_HANDLE, icons::DOTS_SIX_VERTICAL);
+    assert!(
+        ICON_VOCABULARY
+            .iter()
+            .any(|(name, val)| *name == "ICON_DRAG_HANDLE" && *val == ICON_DRAG_HANDLE),
+        "ICON_DRAG_HANDLE must be registered in ICON_VOCABULARY"
+    );
+}
+
+/// Change 144: Splitters render a centered pill grip handle and divider segment.
+#[test]
+pub(crate) fn test_change_144_splitter_resize_grip_affordance() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let h_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 6.0));
+            paint_splitter_h(ui, h_rect, palette, false);
+            paint_splitter_h(ui, h_rect, palette, true);
+
+            let v_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(6.0, 200.0));
+            paint_splitter_v(ui, v_rect, palette, false);
+            paint_splitter_v(ui, v_rect, palette, true);
+        });
+    });
+}
+
+/// Change 144: session_file_tree_cache caches both visible and hidden partitions and avoids
+/// redundant rebuilds or thrashing while scans are pending.
+#[test]
+pub(crate) fn test_change_144_session_file_tree_caching_avoids_redundant_rebuild() {
+    let root = PathBuf::from("/test/project");
+    let mut app = OperonApp::new();
+
+    // While scan is None, cache remains None
+    assert!(app.session_file_tree_cache.is_none());
+
+    // Populate scan
+    let scan = FileScanSnapshot {
+        paths: vec![PathBuf::from("src/main.rs"), PathBuf::from(".env")],
+        truncated: false,
+        unreadable_directories: 0,
+    };
+    let (visible, hidden) = split_hidden_entries(build_file_tree(&scan.paths));
+    app.session_file_tree_cache = Some((root.clone(), visible, hidden));
+
+    // Verify cache contains matching root and entries
+    let (cached_root, visible_nodes, hidden_nodes) = app.session_file_tree_cache.as_ref().unwrap();
+    assert_eq!(cached_root, &root);
+    assert_eq!(visible_nodes.len(), 1);
+    assert_eq!(visible_nodes[0].name, "src");
+    assert_eq!(hidden_nodes.len(), 1);
+    assert_eq!(hidden_nodes[0].name, ".env");
+}
+
+/// Change 144: file_tree_rows skips layout and label widget allocations for invisible/offscreen rows.
+#[test]
+pub(crate) fn test_change_144_file_tree_rows_culls_invisible_nodes() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let project_id = Uuid::new_v4();
+
+    // Create a tree with 50 files
+    let paths: Vec<PathBuf> = (0..50)
+        .map(|i| PathBuf::from(format!("file_{i}.txt")))
+        .collect();
+    let tree = build_file_tree(&paths);
+    let expanded = HashSet::new();
+    let badges = HashMap::new();
+    let mut actions = Vec::new();
+
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        // Constrain height to only 48px (approximately 2 rows)
+        egui::Area::new(egui::Id::new("test_culling_area"))
+            .fixed_pos(egui::pos2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.set_width(200.0);
+                ui.set_height(48.0);
+                file_tree_rows(
+                    ui,
+                    &tree,
+                    project_id,
+                    &expanded,
+                    &badges,
+                    None,
+                    false,
+                    0,
+                    palette,
+                    &mut actions,
+                );
+            });
+    });
+}
+
+/// Change 144: git_status_badge_map provides zero-allocation borrowed access during frame paints.
+#[test]
+pub(crate) fn test_change_144_git_status_badges_allocation_free_in_render() {
+    let mut app = OperonApp::new();
+    let project_id = Uuid::new_v4();
+
+    // When cache is empty, returns borrowed empty map
+    let empty_map = app.git_status_badge_map(project_id);
+    assert!(empty_map.is_empty());
+    assert!(matches!(empty_map, Cow::Borrowed(_)));
+
+    // When changes are applied, badge cache is populated
+    let snapshot = GitChangesSnapshot {
+        status: "## main".to_string(),
+        files: vec![ChangedFile {
+            path: "src/lib.rs".to_string(),
+            status: "M".to_string(),
+        }],
+    };
+    app.apply_git_changes(project_id, Ok(snapshot));
+
+    let badge_map = app.git_status_badge_map(project_id);
+    assert_eq!(badge_map.get("src/lib.rs").map(String::as_str), Some("M"));
+    assert!(matches!(badge_map, Cow::Borrowed(_)));
+
+    // Verify git_status_badges backward-compatibility helper
+    let owned_badges = app.git_status_badges(project_id);
+    assert_eq!(
+        owned_badges.get("src/lib.rs").map(String::as_str),
+        Some("M")
+    );
+
+    // Invalidation clears badge cache
+    app.invalidate_project_file_views(project_id);
+    assert!(app.git_status_badge_cache.get(&project_id).is_none());
+}

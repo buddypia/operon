@@ -385,6 +385,7 @@ pub(crate) struct OperonApp {
     pub(crate) handoff_target_inputs: HashMap<String, String>,
     pub(crate) managed_handoff_targets: HashMap<Uuid, String>,
     pub(crate) git_changes_cache: HashMap<Uuid, UiResult<GitChangesSnapshot>>,
+    pub(crate) git_status_badge_cache: HashMap<Uuid, HashMap<String, String>>,
     pub(crate) git_diff_cache: HashMap<(Uuid, Option<String>), UiResult<String>>,
     /// The current request generation per Diff. An older background result is
     /// not allowed to repopulate a cache an agent write just invalidated.
@@ -863,6 +864,7 @@ impl OperonApp {
             handoff_target_inputs: HashMap::new(),
             managed_handoff_targets: HashMap::new(),
             git_changes_cache: HashMap::new(),
+            git_status_badge_cache: HashMap::new(),
             git_diff_cache: HashMap::new(),
             git_diff_generations: HashMap::new(),
             git_history_cache: HashMap::new(),
@@ -1886,6 +1888,7 @@ impl OperonApp {
                             self.commit_message_input.clear();
                             self.git_staged_files.remove(&project_id);
                             self.git_changes_cache.remove(&project_id);
+                            self.git_status_badge_cache.remove(&project_id);
                             self.upstream_cache.remove(&project_id);
                             self.invalidate_project_diff_views(project_id);
                             self.notice_briefly(tr("コミットしました。"));
@@ -2229,6 +2232,19 @@ impl OperonApp {
             (self.git_changes_cache.get(&project_id), &result),
             (Some(Ok(previous)), Ok(next)) if previous.status != next.status
         );
+        match &result {
+            Ok(snapshot) => {
+                let badge_map: HashMap<String, String> = snapshot
+                    .files
+                    .iter()
+                    .map(|file| (file.path.clone(), file.status.clone()))
+                    .collect();
+                self.git_status_badge_cache.insert(project_id, badge_map);
+            }
+            Err(_) => {
+                self.git_status_badge_cache.remove(&project_id);
+            }
+        }
         self.git_changes_cache.insert(project_id, result);
         if changed {
             self.invalidate_project_diff_views(project_id);
@@ -2749,6 +2765,7 @@ impl OperonApp {
     /// them lagging a save behind the others.
     pub(crate) fn invalidate_project_file_views(&mut self, project_id: Uuid) {
         self.git_changes_cache.remove(&project_id);
+        self.git_status_badge_cache.remove(&project_id);
         self.invalidate_project_diff_views(project_id);
     }
 
@@ -2864,18 +2881,31 @@ impl OperonApp {
         self.diff_file_cache.insert(key, parsed);
     }
 
-    /// The working tree's status for each changed path, for the badges in the
-    /// tree. Absent until the Git view has been opened once, which is the point
-    /// at which this app has a reason to have run `git status`.
-    pub(crate) fn git_status_badges(&self, project_id: Uuid) -> HashMap<String, String> {
-        match self.git_changes_cache.get(&project_id) {
-            Some(Ok(snapshot)) => snapshot
+    /// Returns a borrowed reference to the cached git status badges for `project_id`,
+    /// avoiding per-frame HashMap cloning during UI tree rendering.
+    pub(crate) fn git_status_badge_map(
+        &self,
+        project_id: Uuid,
+    ) -> Cow<'_, HashMap<String, String>> {
+        if let Some(map) = self.git_status_badge_cache.get(&project_id) {
+            Cow::Borrowed(map)
+        } else if let Some(Ok(snapshot)) = self.git_changes_cache.get(&project_id) {
+            let map: HashMap<String, String> = snapshot
                 .files
                 .iter()
                 .map(|file| (file.path.clone(), file.status.clone()))
-                .collect(),
-            _ => HashMap::new(),
+                .collect();
+            Cow::Owned(map)
+        } else {
+            static EMPTY: std::sync::LazyLock<HashMap<String, String>> =
+                std::sync::LazyLock::new(HashMap::new);
+            Cow::Borrowed(&*EMPTY)
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn git_status_badges(&self, project_id: Uuid) -> HashMap<String, String> {
+        self.git_status_badge_map(project_id).into_owned()
     }
 
     pub(crate) fn request_skills(&mut self, project: &Project) {

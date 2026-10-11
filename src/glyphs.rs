@@ -97,6 +97,9 @@ pub(crate) const ICON_TREE_EXTRA: &str = icons::FOLDER_SIMPLE;
 /// actions a person reaches for while scanning stay on the row itself.
 pub(crate) const ICON_MORE: &str = icons::DOTS_THREE;
 
+/// Drag handle grip on draggable tabs and panels.
+pub(crate) const ICON_DRAG_HANDLE: &str = icons::DOTS_SIX_VERTICAL;
+
 /// A note a person wrote against a line of a diff. It marks the line in the
 /// review pane and counts the set in the footer, which is two places, which is
 /// why it is a constant rather than a glyph at a call site.
@@ -164,6 +167,7 @@ pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[
     ("ICON_TREE_MAIN", ICON_TREE_MAIN),
     ("ICON_TREE_EXTRA", ICON_TREE_EXTRA),
     ("ICON_MORE", ICON_MORE),
+    ("ICON_DRAG_HANDLE", ICON_DRAG_HANDLE),
 ];
 
 /// Each CLI's own product mark, so a card names an agent the way its vendor

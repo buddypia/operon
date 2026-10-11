@@ -26,85 +26,106 @@ pub(crate) fn file_tree_rows(
     palette: &Palette,
     actions: &mut Vec<FileTreeAction>,
 ) {
+    let row_height = CONTROL_HEIGHT_SMALL;
     for node in nodes {
-        let open = force_open || expanded.contains(&(project, node.path.clone()));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add_space(4.0 + depth as f32 * 13.0);
-            let mut icon_clicked = false;
-            if node.is_directory() {
-                let chevron_res = ui.add(
-                    egui::Label::new(
-                        RichText::new(if open {
-                            ICON_DISCLOSURE_OPEN
-                        } else {
-                            ICON_DISCLOSURE_CLOSED
-                        })
-                        .size(11.5)
-                        .color(palette.text_faint),
-                    )
-                    .sense(egui::Sense::click()),
-                );
-                let folder_res = ui.add(
-                    egui::Label::new(
-                        RichText::new(if open {
-                            ICON_FOLDER_OPEN
-                        } else {
-                            ICON_FOLDER_CLOSED
-                        })
-                        .size(13.5)
-                        .color(palette.text_muted),
-                    )
-                    .sense(egui::Sense::click()),
-                );
-                if chevron_res.clicked() || folder_res.clicked() {
-                    icon_clicked = true;
-                }
-            } else {
-                // A file's row lines up with the name of a directory beside it
-                // rather than with its caret, so the column of names stays a
-                // column.
-                ui.add_space(13.0);
-                let file_res = ui.add(
-                    egui::Label::new(
-                        RichText::new(file_tree_icon(&node.name))
+        let is_dir = node.is_directory();
+        let open = if is_dir {
+            force_open || expanded.contains(&(project, node.path.clone()))
+        } else {
+            false
+        };
+        let row_rect = egui::Rect::from_min_size(
+            ui.cursor().min,
+            egui::vec2(ui.available_width(), row_height),
+        );
+        let visible = ui.is_rect_visible(row_rect);
+
+        if visible {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.add_space(4.0 + depth as f32 * 13.0);
+                let mut icon_clicked = false;
+                if is_dir {
+                    let chevron_res = ui.add(
+                        egui::Label::new(
+                            RichText::new(if open {
+                                ICON_DISCLOSURE_OPEN
+                            } else {
+                                ICON_DISCLOSURE_CLOSED
+                            })
+                            .size(11.5)
+                            .color(palette.text_faint),
+                        )
+                        .sense(egui::Sense::click()),
+                    );
+                    let folder_res = ui.add(
+                        egui::Label::new(
+                            RichText::new(if open {
+                                ICON_FOLDER_OPEN
+                            } else {
+                                ICON_FOLDER_CLOSED
+                            })
                             .size(13.5)
                             .color(palette.text_muted),
-                    )
-                    .sense(egui::Sense::click()),
-                );
-                if file_res.clicked() {
-                    icon_clicked = true;
+                        )
+                        .sense(egui::Sense::click()),
+                    );
+                    if chevron_res.clicked() || folder_res.clicked() {
+                        icon_clicked = true;
+                    }
+                } else {
+                    // A file's row lines up with the name of a directory beside it
+                    // rather than with its caret, so the column of names stays a
+                    // column.
+                    ui.add_space(13.0);
+                    let file_res = ui.add(
+                        egui::Label::new(
+                            RichText::new(file_tree_icon(&node.name))
+                                .size(13.5)
+                                .color(palette.text_muted),
+                        )
+                        .sense(egui::Sense::click()),
+                    );
+                    if file_res.clicked() {
+                        icon_clicked = true;
+                    }
                 }
-            }
-            let selected = !node.is_directory()
-                && active
-                    .is_some_and(|active| active.project == project && active.path == node.path);
-            let response = ui.selectable_label(
-                selected,
-                RichText::new(&node.name).size(12.5).color(if selected {
-                    palette.text_strong
-                } else {
-                    palette.text
-                }),
+                let selected = !is_dir
+                    && active.is_some_and(|active| {
+                        active.project == project && active.path == node.path
+                    });
+                let response = ui.selectable_label(
+                    selected,
+                    RichText::new(&node.name).size(12.5).color(if selected {
+                        palette.text_strong
+                    } else {
+                        palette.text
+                    }),
+                );
+                if response.clicked() || icon_clicked {
+                    actions.push(if is_dir {
+                        FileTreeAction::Toggle(node.path.clone())
+                    } else {
+                        FileTreeAction::Open(node.path.clone())
+                    });
+                }
+                // The badge is the whole reason the editor knows about git: it is
+                // how a person spots, without opening anything, which files the
+                // agent that just finished actually touched.
+                if let Some(status) = badges.get(node.path.to_string_lossy().as_ref()) {
+                    let (mark, colour) = git_status_badge(status, palette);
+                    ui.label(RichText::new(mark).size(11.5).color(colour))
+                        .on_hover_text(git_status_wording(status));
+                }
+            });
+        } else {
+            ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), row_height),
+                egui::Sense::hover(),
             );
-            if response.clicked() || icon_clicked {
-                actions.push(if node.is_directory() {
-                    FileTreeAction::Toggle(node.path.clone())
-                } else {
-                    FileTreeAction::Open(node.path.clone())
-                });
-            }
-            // The badge is the whole reason the editor knows about git: it is
-            // how a person spots, without opening anything, which files the
-            // agent that just finished actually touched.
-            if let Some(status) = badges.get(node.path.to_string_lossy().as_ref()) {
-                let (mark, colour) = git_status_badge(status, palette);
-                ui.label(RichText::new(mark).size(11.5).color(colour))
-                    .on_hover_text(git_status_wording(status));
-            }
-        });
-        if node.is_directory() && open {
+        }
+
+        if is_dir && open {
             file_tree_rows(
                 ui,
                 &node.children,

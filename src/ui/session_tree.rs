@@ -220,18 +220,29 @@ impl OperonApp {
                     ui.spacing_mut().item_spacing.x = SPACE_XS;
                     let mut tab = |ui: &mut egui::Ui, which: InspectorTab, label: String| {
                         let selected = shown == which;
-                        let text = RichText::new(label).size(12.5).color(if selected {
-                            palette.text_strong
-                        } else {
-                            palette.text_muted
-                        });
+                        let text = RichText::new(format!("{ICON_DRAG_HANDLE} {label}"))
+                            .size(12.5)
+                            .color(if selected {
+                                palette.text_strong
+                            } else {
+                                palette.text_muted
+                            });
                         let response = ui
                             .add(
                                 egui::Button::new(text)
                                     .selected(selected)
+                                    .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
+                                    .min_size(egui::vec2(0.0, CONTROL_HEIGHT_SMALL))
                                     .sense(egui::Sense::click_and_drag()),
                             )
                             .on_hover_text(tr("ドラッグして移動"));
+                        if response.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+                        if response.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        }
+                        paint_button_focus(ui, &response, palette);
                         if response.clicked() {
                             self.session_inspector_tab = which;
                         }
@@ -380,15 +391,17 @@ impl OperonApp {
 
         // Built once per root, not per frame: the scan can be twelve
         // thousand paths.
-        let needs_rebuild = !matches!(
+        let cached_matches = matches!(
             &self.session_file_tree_cache,
             Some((cached_root, _, _)) if cached_root == &root
         );
-        if needs_rebuild {
-            self.session_file_tree_cache = scan.map(|scan| {
+        if !cached_matches {
+            if let Some(scan) = scan {
                 let (visible, hidden) = split_hidden_entries(build_file_tree(&scan.paths));
-                (root.clone(), visible, hidden)
-            });
+                self.session_file_tree_cache = Some((root.clone(), visible, hidden));
+            } else {
+                self.session_file_tree_cache = None;
+            }
         }
         let query = self.session_file_filter.trim().to_owned();
         let filter_stale = !matches!(
@@ -420,11 +433,7 @@ impl OperonApp {
             ));
         }
 
-        let badges = if is_worktree {
-            HashMap::new()
-        } else {
-            self.git_status_badges(project.id)
-        };
+        let badges = self.git_status_badge_map(if is_worktree { Uuid::nil() } else { project.id });
         let active_doc = self.active_document.as_ref().filter(|doc| doc.root == root);
         let mut actions = Vec::new();
         let mut toggle_hidden = false;

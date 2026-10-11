@@ -3292,7 +3292,7 @@ impl OperonApp {
             );
             return;
         }
-        let badges = self.git_status_badges(project.id);
+        let badges = self.git_status_badge_map(project.id);
         let mut actions = Vec::new();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -6007,9 +6007,11 @@ impl OperonApp {
 
             if show_inspector {
                 let height = ui.available_height();
-                let splitter =
-                    ui.allocate_response(egui::vec2(6.0, height), egui::Sense::click_and_drag());
-                if splitter.hovered() || splitter.dragged() {
+                let splitter = ui
+                    .allocate_response(egui::vec2(6.0, height), egui::Sense::click_and_drag())
+                    .on_hover_text(tr("ドラッグして移動"));
+                let active = splitter.hovered() || splitter.dragged();
+                if active {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                 }
                 if splitter.dragged() {
@@ -6019,13 +6021,7 @@ impl OperonApp {
                             Some((inspector_w - delta).clamp(SIDEBAR_MIN_W, max_inspector_w));
                     }
                 }
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(splitter.rect.center().x, splitter.rect.top()),
-                        egui::pos2(splitter.rect.center().x, splitter.rect.bottom()),
-                    ],
-                    egui::Stroke::new(1.0, palette.border_subtle),
-                );
+                paint_splitter_v(ui, splitter.rect, palette, active);
                 ui.allocate_ui_with_layout(
                     egui::vec2(inspector_w, height),
                     egui::Layout::top_down(egui::Align::LEFT),
@@ -6084,6 +6080,7 @@ impl OperonApp {
 
     pub(crate) fn ui_terminal_workspace(&mut self, ui: &mut egui::Ui) {
         self.select_default_terminal_session();
+        let palette = self.store.theme.palette();
         let workspace_size = ui.available_size();
         let workspace = ui.allocate_ui_with_layout(
             workspace_size,
@@ -6091,11 +6088,14 @@ impl OperonApp {
             |ui| {
                 ui.set_min_size(workspace_size);
                 self.ui_session_column(ui, workspace_size.y);
-                let sep_res = ui.allocate_response(
-                    egui::vec2(6.0, workspace_size.y),
-                    egui::Sense::click_and_drag(),
-                );
-                if sep_res.hovered() || sep_res.dragged() {
+                let sep_res = ui
+                    .allocate_response(
+                        egui::vec2(6.0, workspace_size.y),
+                        egui::Sense::click_and_drag(),
+                    )
+                    .on_hover_text(tr("ドラッグして移動"));
+                let active = sep_res.hovered() || sep_res.dragged();
+                if active {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                 }
                 if sep_res.dragged() {
@@ -6103,7 +6103,7 @@ impl OperonApp {
                     self.session_list_w =
                         (self.session_list_w + delta).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
                 }
-                ui.separator();
+                paint_splitter_v(ui, sep_res.rect, palette, active);
                 ui.vertical(|ui| {
                     ui.set_min_width(ui.available_width());
                     ui.set_min_height(workspace_size.y);
@@ -6182,8 +6182,11 @@ impl OperonApp {
                 },
             );
             let palette = self.store.theme.palette();
-            let rule = ui.allocate_response(egui::vec2(width, RULE_H), egui::Sense::drag());
-            if rule.hovered() || rule.dragged() {
+            let rule = ui
+                .allocate_response(egui::vec2(width, RULE_H), egui::Sense::drag())
+                .on_hover_text(tr("ドラッグして移動"));
+            let active = rule.hovered() || rule.dragged();
+            if active {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
             }
             if rule.dragged() {
@@ -6195,13 +6198,7 @@ impl OperonApp {
                     self.session_list_split = ((list_h + delta) / usable).clamp(0.0, 1.0);
                 }
             }
-            ui.painter().line_segment(
-                [
-                    egui::pos2(rule.rect.left(), rule.rect.center().y),
-                    egui::pos2(rule.rect.right(), rule.rect.center().y),
-                ],
-                egui::Stroke::new(1.0, palette.border_subtle),
-            );
+            paint_splitter_h(ui, rule.rect, palette, active);
             let project = self
                 .store
                 .projects
@@ -6242,6 +6239,41 @@ impl OperonApp {
                     SidebarSide::Left => tr("サイドバーを左側に移動"),
                     SidebarSide::Right => tr("サイドバーを右側に移動"),
                 };
+                let pos = ui.input(|i| i.pointer.hover_pos());
+                let is_valid_drop = pos
+                    .and_then(|p| sidebar_drop_side(origin_side, p, area))
+                    .is_some();
+
+                // Target drop zone visual affordance on the opposite side
+                let drop_width = (area.width() * 0.35).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+                let target_rect = match target_side {
+                    SidebarSide::Left => egui::Rect::from_min_max(
+                        area.min,
+                        egui::pos2(area.left() + drop_width, area.max.y),
+                    ),
+                    SidebarSide::Right => egui::Rect::from_min_max(
+                        egui::pos2(area.right() - drop_width, area.min.y),
+                        area.max,
+                    ),
+                };
+                let fill = if is_valid_drop {
+                    palette.accent.gamma_multiply(0.08)
+                } else {
+                    palette.raised.gamma_multiply(0.04)
+                };
+                let stroke = if is_valid_drop {
+                    egui::Stroke::new(2.0, palette.accent)
+                } else {
+                    egui::Stroke::new(1.0, palette.border_subtle)
+                };
+                ui.painter().rect(
+                    target_rect,
+                    egui::CornerRadius::same(RADIUS_CARD),
+                    fill,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+
                 egui::show_tooltip(
                     ui.ctx(),
                     ui.layer_id(),
@@ -6255,7 +6287,6 @@ impl OperonApp {
                 );
 
                 if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
-                    let pos = ui.input(|i| i.pointer.hover_pos());
                     if let Some(side) =
                         pos.and_then(|pos| sidebar_drop_side(origin_side, pos, area))
                     {
