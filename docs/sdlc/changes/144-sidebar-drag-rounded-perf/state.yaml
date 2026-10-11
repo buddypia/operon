@@ -1,0 +1,29 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request (it is the intent on this route):
+# 1. Unify button rounding so tab buttons and other buttons in the session UI
+#    use consistent rounded corners (RADIUS_CONTROL = 6px).
+# 2. Add visual drag handles and affordance (e.g. grip icons and splitter handles)
+#    to clearly indicate that the sidebar tabs and panels are draggable / resizable.
+# 3. Eliminate lag and stuttering when the sidebar opens or renders on new sessions.
+#
+# Route: modify
+# Screen: the change paints (risk.yaml `drawing`, screen yes).
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Review passed with SHIP verdict (0 important, 0 nits, digest 5bb184da57d184b1). Committing in worktree and landing to main."
+
+contract:
+  three-gates: "machine passed cargo fmt --check, cargo clippy --locked -- -D warnings, and check-review.sh"
+  readiness: "machine passed bash scripts/check-readiness.sh docs/sdlc/changes/144-sidebar-drag-rounded-perf"

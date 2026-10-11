@@ -1,0 +1,14 @@
+# Review record for change 144. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer evaluated changes across widgets.rs, session_tree.rs,
+# files.rs, screens.rs, glyphs.rs, and tests.rs. Tab button corner radius consistency,
+# Phosphor drag handle icon, splitter pill grip handles, drop zone visual cues,
+# cached file tree rebuilds, and zero-allocation git status badge lookups all pass.
+# Tests verified: cargo fmt, cargo clippy --locked -- -D warnings, and cargo test.
+
+digest: "5bb184da57d184b1"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

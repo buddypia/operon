@@ -209,6 +209,66 @@ pub(crate) fn hairline(ui: &mut egui::Ui, palette: &Palette) {
     ui.painter().rect_filled(rect, 0.0, palette.border_subtle);
 }
 
+/// Paints a horizontal splitter divider line and a centered pill grip handle.
+pub(crate) fn paint_splitter_h(ui: &egui::Ui, rect: egui::Rect, palette: &Palette, active: bool) {
+    let center_y = rect.center().y;
+    let line_stroke = egui::Stroke::new(
+        1.0,
+        if active {
+            palette.accent
+        } else {
+            palette.border_subtle
+        },
+    );
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left(), center_y),
+            egui::pos2(rect.right(), center_y),
+        ],
+        line_stroke,
+    );
+    const GRIP_W: f32 = 32.0;
+    const GRIP_H: f32 = 4.0;
+    let grip_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(GRIP_W, GRIP_H));
+    let grip_fill = if active {
+        palette.accent
+    } else {
+        palette.border
+    };
+    ui.painter()
+        .rect_filled(grip_rect, egui::CornerRadius::same(2), grip_fill);
+}
+
+/// Paints a vertical splitter divider line and a centered pill grip handle.
+pub(crate) fn paint_splitter_v(ui: &egui::Ui, rect: egui::Rect, palette: &Palette, active: bool) {
+    let center_x = rect.center().x;
+    let line_stroke = egui::Stroke::new(
+        1.0,
+        if active {
+            palette.accent
+        } else {
+            palette.border_subtle
+        },
+    );
+    ui.painter().line_segment(
+        [
+            egui::pos2(center_x, rect.top()),
+            egui::pos2(center_x, rect.bottom()),
+        ],
+        line_stroke,
+    );
+    const GRIP_W: f32 = 4.0;
+    const GRIP_H: f32 = 32.0;
+    let grip_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(GRIP_W, GRIP_H));
+    let grip_fill = if active {
+        palette.accent
+    } else {
+        palette.border
+    };
+    ui.painter()
+        .rect_filled(grip_rect, egui::CornerRadius::same(2), grip_fill);
+}
+
 /// How wide a page draws itself inside the window it was given.
 ///
 /// The page takes the window less a gutter each side. A window somebody dragged
