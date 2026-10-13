@@ -7,8 +7,8 @@
 
 state:
   route: "modify"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -16,10 +16,10 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Push the branch, wait for CI, merge into main, then package and install."
+resume: "Done. Carried findings are in review.yaml; the running-app look is the person's to confirm."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh at the change commit (fmt, clippy, test count 779 -> 787, no new ignore)"
   bands: "machine passed bash scripts/check-bands.sh exit 0; 4 pre-existing breaches, largest_module_lines fell 8856 -> 8843"
-  release-binary: "machine pending yes: touches src/ui, src/app, src/app.rs, src/config.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh at 88d03cf; /Applications/Operon.app swapped, check-installed-build CURRENT"
   guards-verified-by-mutation: "human passed the ten dock tests were run against stub bodies and all ten failed before the model was filled in"
