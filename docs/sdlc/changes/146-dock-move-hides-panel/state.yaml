@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: bugfix — change 145's dock announces a move the screen does not show.
+# Screen: the change paints (risk.yaml `drawing`); it adds states inside
+# existing palette roles and no layout, so the evaluator approves it
+# (references/approval.md, "Screens split by structure").
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Write spec.md and plan.md from intent.md, then the failing tests."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: src/ui/session_tree.rs and src/app/screens.rs change, so it ends with bash scripts/package-macos.sh and the swap"
+  guards-verified-by-mutation: "human pending each new guard watched failing on main's code"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
