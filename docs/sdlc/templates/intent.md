@@ -25,7 +25,9 @@ Codex to Claude" is useful; "users" is not.
 ## Desired outcome
 
 What would be true afterwards, stated so that it can be observed. Not the
-mechanism.
+mechanism. A cue that something can be done — an icon, a cursor, a notice — is
+not an outcome; the outcome is the thing done, as the person sees it afterwards
+(lesson 070).
 
 ## Constraints this change inherits
 

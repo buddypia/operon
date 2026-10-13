@@ -80,6 +80,14 @@ pub(crate) enum DockPanel {
 }
 
 impl DockPanel {
+    /// Every panel, in `index` order.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::Sessions,
+        Self::View(InspectorTab::Files),
+        Self::View(InspectorTab::Conversation),
+        Self::View(InspectorTab::Changes),
+    ];
+
     fn index(self) -> usize {
         match self {
             Self::Sessions => 0,
@@ -199,6 +207,41 @@ impl DockLayout {
             .filter(|tab| self.edge_of(DockPanel::View(*tab)) == edge && offered(tab))
             .or_else(|| self.views_at(edge).find(offered))
     }
+
+    /// The workspace divided for this layout. An edge is occupied by the
+    /// session list, and — while the views are open, `Some(has_project)` — by
+    /// a view it shows. Drawing and the move check both read this, so what is
+    /// checked is what is drawn.
+    pub(crate) fn rects(&self, area: egui::Rect, views: Option<bool>) -> DockRects {
+        let sessions = self.edge_of(DockPanel::Sessions);
+        let occupied = DockEdge::ALL.map(|edge| {
+            edge == sessions
+                || views.is_some_and(|has_project| self.shown_view(edge, has_project).is_some())
+        });
+        dock_rects(area, occupied, self.sizes, sessions)
+    }
+
+    /// Which panels `area` has room for with every view open, in
+    /// `DockPanel::ALL` order. Judged open so that a move made while the views
+    /// are folded, or while a session without a project offers only its
+    /// conversation, cannot hide them the moment they are shown.
+    fn with_room(&self, area: egui::Rect) -> [bool; 4] {
+        let rects = self.rects(area, Some(true));
+        DockPanel::ALL.map(|panel| rects.edges[self.edge_of(panel).index()].is_some())
+    }
+
+    /// Whether `after` keeps every panel this layout has room for, and gives
+    /// room to every panel it sends somewhere else. A small window gives up an
+    /// edge to keep the terminal its minimum; a move onto that edge, or one
+    /// that takes the room another edge had, is refused (lesson 070).
+    pub(crate) fn keeps_on_screen(&self, after: &DockLayout, area: egui::Rect) -> bool {
+        let (before, now) = (self.with_room(area), after.with_room(area));
+        DockPanel::ALL
+            .into_iter()
+            .zip(before)
+            .zip(now)
+            .all(|((panel, had), has)| has || (!had && self.edge_of(panel) == after.edge_of(panel)))
+    }
 }
 
 /// Where a panel released at `pos` goes: the nearest edge of `area` when the
@@ -218,6 +261,50 @@ pub(crate) fn dock_drop_edge(pos: egui::Pos2, area: egui::Rect) -> Option<DockEd
     .filter(|(_, share)| *share <= DOCK_DROP_BAND)
     .min_by(|a, b| a.1.total_cmp(&b.1))
     .map(|(edge, _)| edge)
+}
+
+/// What a refused move says, wherever it is refused: the drop zone's hint,
+/// the greyed menu entry, and the notice after a release.
+pub(crate) fn dock_no_room(edge: DockEdge) -> String {
+    tf!(
+        "ウィンドウが小さいため{edge}には置けません",
+        edge = edge.label()
+    )
+}
+
+/// What releasing `panel`, docked on `from`, at `at` does: the move, the
+/// refusal when it does not `fits`, or — in the middle and on its own edge
+/// alike — nothing.
+pub(crate) fn dock_drop_hint(
+    panel: DockPanel,
+    from: DockEdge,
+    at: Option<DockEdge>,
+    fits: bool,
+) -> String {
+    match at.filter(|edge| *edge != from) {
+        Some(edge) if fits => tf!(
+            "{panel}を{edge}に移動",
+            panel = panel.label(),
+            edge = edge.label()
+        ),
+        Some(edge) => dock_no_room(edge),
+        None => tr("ここで離すとキャンセル").to_owned(),
+    }
+}
+
+/// One "move to `to`" entry of a dock menu: greyed when the move changes
+/// nothing, or — saying why on hover — when it does not `fits`. True when
+/// clicked.
+fn dock_menu_entry(ui: &mut egui::Ui, to: DockEdge, moves: bool, fits: bool) -> bool {
+    let entry = ui.add_enabled(moves && fits, egui::Button::new(to.move_label()));
+    let entry = if moves && !fits {
+        entry.on_disabled_hover_ui(|ui| {
+            ui.label(dock_no_room(to));
+        })
+    } else {
+        entry
+    };
+    entry.clicked()
 }
 
 /// The workspace divided among its occupied edges and the terminal.
@@ -491,24 +578,26 @@ impl OperonApp {
                         {
                             self.show_session_inspector = false;
                         }
-                        ui.menu_button(RichText::new(ICON_RESTORE).size(16.0), |ui| {
-                            for to in DockEdge::ALL {
-                                if ui
-                                    .add_enabled(to != edge, egui::Button::new(to.move_label()))
-                                    .clicked()
-                                {
-                                    if self.dock.move_views(edge, to) {
-                                        self.notice_briefly(tf!(
-                                            "パネルを{edge}に移動しました",
-                                            edge = to.label()
-                                        ));
+                        // Drawn as `icon_button` draws the fold button beside it.
+                        let placement = egui::menu::menu_custom_button(
+                            ui,
+                            egui::Button::new(RichText::new(ICON_RESTORE).size(16.0))
+                                .stroke(egui::Stroke::NONE)
+                                .min_size(egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT)),
+                            |ui| {
+                                for to in DockEdge::ALL {
+                                    let mut after = self.dock;
+                                    let moves = after.move_views(edge, to);
+                                    if dock_menu_entry(ui, to, moves, self.dock_fits(&after)) {
+                                        self.dock_views_to(edge, to);
+                                        ui.close_menu();
                                     }
-                                    ui.close_menu();
                                 }
-                            }
-                        })
+                            },
+                        )
                         .response
                         .on_hover_text(tr("パネルの配置を変更"));
+                        paint_button_focus(ui, &placement, palette);
                     });
                 });
                 ui.add_space(SPACE_XS);
@@ -544,13 +633,11 @@ impl OperonApp {
         if grip.drag_started() {
             self.dock_drag = Some(panel);
         }
-        let from = self.dock.edge_of(panel);
         grip.context_menu(|ui| {
             for to in DockEdge::ALL {
-                if ui
-                    .add_enabled(to != from, egui::Button::new(to.move_label()))
-                    .clicked()
-                {
+                let mut after = self.dock;
+                let moves = after.move_panel(panel, to);
+                if dock_menu_entry(ui, to, moves, self.dock_fits(&after)) {
                     self.dock_panel_to(panel, to);
                     ui.close_menu();
                 }
@@ -558,14 +645,45 @@ impl OperonApp {
         });
     }
 
+    /// Whether `after` may replace the layout: it keeps on screen every panel
+    /// the workspace has room for. Before the workspace is first drawn there
+    /// is nothing on screen to lose.
+    pub(crate) fn dock_fits(&self, after: &DockLayout) -> bool {
+        self.dock_area
+            .is_none_or(|area| self.dock.keeps_on_screen(after, area))
+    }
+
+    /// Puts `after` in place and says `done`, or — when it would take a panel
+    /// off the screen — leaves the layout as it is and says why. Every move
+    /// passes through here.
+    fn dock_commit(&mut self, after: DockLayout, edge: DockEdge, done: String) {
+        if self.dock_fits(&after) {
+            self.dock = after;
+            self.notice_briefly(done);
+        } else {
+            self.notice_briefly(dock_no_room(edge));
+        }
+    }
+
     /// Sends `panel` to `edge` and says so; nothing when it is already there.
     pub(crate) fn dock_panel_to(&mut self, panel: DockPanel, edge: DockEdge) {
-        if self.dock.move_panel(panel, edge) {
-            self.notice_briefly(tf!(
+        let mut after = self.dock;
+        if after.move_panel(panel, edge) {
+            let done = tf!(
                 "{panel}を{edge}に移動しました",
                 panel = panel.label(),
                 edge = edge.label()
-            ));
+            );
+            self.dock_commit(after, edge, done);
+        }
+    }
+
+    /// Sends every view on `from` to `to`, as the placement menu does.
+    pub(crate) fn dock_views_to(&mut self, from: DockEdge, to: DockEdge) {
+        let mut after = self.dock;
+        if after.move_views(from, to) {
+            let done = tf!("パネルを{edge}に移動しました", edge = to.label());
+            self.dock_commit(after, to, done);
         }
     }
 

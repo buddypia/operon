@@ -38160,7 +38160,15 @@ pub(crate) fn test_sidebar_tab_drag_escape_cancellation() {
         repeat: false,
         modifiers: egui::Modifiers::NONE,
     };
-    let _ = context.run(frame(vec![escape]), |ctx| {
+    // The button is held, as in a real drag: with it up, the drag would end
+    // as a lost release and the test would pass with Escape ignored.
+    let held = egui::Event::PointerButton {
+        pos: egui::pos2(600.0, 400.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = context.run(frame(vec![held, escape]), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| fixture.app.ui_terminal_workspace(ui));
@@ -38197,6 +38205,12 @@ fn render_workspace_text_positions(
     width: f32,
     height: f32,
 ) -> Vec<(String, egui::Pos2)> {
+    text_positions(&render_workspace_output(app, session, width, height))
+}
+
+/// Every text a frame painted, with where.
+#[cfg(test)]
+fn text_positions(output: &egui::FullOutput) -> Vec<(String, egui::Pos2)> {
     fn collect(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Pos2)>) {
         match shape {
             egui::epaint::Shape::Text(text) => out.push((text.galley.text().to_owned(), text.pos)),
@@ -38209,7 +38223,7 @@ fn render_workspace_text_positions(
         }
     }
     let mut texts = Vec::new();
-    for shape in render_workspace_output(app, session, width, height).shapes {
+    for shape in &output.shapes {
         collect(&shape.shape, &mut texts);
     }
     texts
@@ -38684,6 +38698,210 @@ pub(crate) fn test_dock_drop_moves_and_tells_the_person() {
     assert_eq!(
         app.notice.as_deref(),
         Some("セッション一覧を上部に移動しました")
+    );
+}
+
+/// Which panels a render drew a grip for, in `DockPanel::ALL` order. A grip
+/// drawn is a panel the person can reach: its tab, or the list's heading.
+#[cfg(test)]
+fn dock_grips_drawn(texts: &[(String, egui::Pos2)]) -> [bool; 4] {
+    DockPanel::ALL.map(|panel| {
+        let label = match panel {
+            DockPanel::Sessions => "プロジェクト別セッション",
+            DockPanel::View(tab) => tab.label(),
+        };
+        let grip = format!("{ICON_DRAG_HANDLE} {label}");
+        texts.iter().any(|(text, _)| text.starts_with(&grip))
+    })
+}
+
+/// Change 146, requirement 1: whatever is moved where, at whatever window
+/// size, every panel on screen before the move is on screen after it. A small
+/// window gives up an edge to keep the terminal its minimum; change 145 moved
+/// panels onto such an edge, or pushed another panel off one, and said it had.
+#[test]
+pub(crate) fn test_dock_move_keeps_every_shown_panel_on_screen() {
+    let mut fixture = SessionTreeTestFixture::new("dock-keeps-on-screen");
+    let session = fixture.normal_session.clone();
+    let mut files_top = DockLayout::default();
+    files_top.move_panel(DockPanel::View(InspectorTab::Files), DockEdge::Top);
+    let mut list_bottom = DockLayout::default();
+    list_bottom.move_panel(DockPanel::Sessions, DockEdge::Bottom);
+    let mut refused = 0;
+    for (width, height) in [(1400.0, 900.0), (1200.0, 640.0), (640.0, 900.0)] {
+        for start in [DockLayout::default(), files_top, list_bottom] {
+            fixture.app.dock = start;
+            let before = dock_grips_drawn(&render_workspace_text_positions(
+                &mut fixture.app,
+                &session,
+                width,
+                height,
+            ));
+            for (panel, shown) in DockPanel::ALL.into_iter().zip(before) {
+                if !shown {
+                    continue;
+                }
+                for edge in DockEdge::ALL {
+                    fixture.app.dock = start;
+                    fixture.app.dock_panel_to(panel, edge);
+                    if fixture.app.dock == start && edge != start.edge_of(panel) {
+                        refused += 1;
+                    }
+                    let after = dock_grips_drawn(&render_workspace_text_positions(
+                        &mut fixture.app,
+                        &session,
+                        width,
+                        height,
+                    ));
+                    for ((which, was), is) in DockPanel::ALL.into_iter().zip(before).zip(after) {
+                        assert!(
+                            !was || is,
+                            "{width}x{height}, {start:?}: moving {panel:?} to {edge:?} hid {which:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+    assert!(refused > 0, "a small window refuses some move");
+}
+
+/// Change 146, requirement 2: a move with no room is not made, and the person
+/// reads why — by a grip and by the placement menu alike. A window with the
+/// room takes the same move.
+#[test]
+pub(crate) fn test_dock_refused_move_says_why() {
+    let mut fixture = SessionTreeTestFixture::new("dock-refused-move");
+    let session = fixture.normal_session.clone();
+    let conversation = DockPanel::View(InspectorTab::Conversation);
+    fixture
+        .app
+        .dock
+        .move_panel(DockPanel::View(InspectorTab::Files), DockEdge::Top);
+    let start = fixture.app.dock;
+    let refusal = Some("ウィンドウが小さいため下部には置けません");
+
+    render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 640.0);
+    fixture.app.dock_panel_to(conversation, DockEdge::Bottom);
+    assert_eq!(fixture.app.dock, start);
+    assert_eq!(fixture.app.notice.as_deref(), refusal);
+
+    fixture.app.notice = None;
+    fixture.app.dock_views_to(DockEdge::Right, DockEdge::Bottom);
+    assert_eq!(fixture.app.dock, start);
+    assert_eq!(fixture.app.notice.as_deref(), refusal);
+
+    // A panel with no room already is not sent to another edge with none: in
+    // 640 × 500 the right edge and a lone top edge both have none.
+    let small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 500.0));
+    let mut files_up = DockLayout::default();
+    files_up.move_panel(DockPanel::View(InspectorTab::Files), DockEdge::Top);
+    assert!(!DockLayout::default().keeps_on_screen(&files_up, small));
+
+    render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
+    fixture.app.dock_panel_to(conversation, DockEdge::Bottom);
+    assert_eq!(fixture.app.dock.edge_of(conversation), DockEdge::Bottom);
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some("会話を下部に移動しました")
+    );
+}
+
+/// Change 146, requirement 3: the drag as a person does it — press on a grip,
+/// move, release — through egui's own input, not by setting `dock_drag`.
+/// Escape with the button still held ends it; a release on the panel's own
+/// edge moves nothing and says nothing.
+#[test]
+pub(crate) fn test_dock_drag_by_pointer_events() {
+    let mut fixture = SessionTreeTestFixture::new("dock-pointer-drag");
+    let app = &mut fixture.app;
+    app.selected_session = Some(fixture.normal_session.id);
+    app.session_library_open = false;
+    let files = DockPanel::View(InspectorTab::Files);
+    let context = egui::Context::default();
+    let mut run = |app: &mut OperonApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        text_positions(&context.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        }))
+    };
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let grip_label = format!("{ICON_DRAG_HANDLE} ファイル");
+    let drag =
+        |app: &mut OperonApp,
+         run: &mut dyn FnMut(&mut OperonApp, Vec<egui::Event>) -> Vec<(String, egui::Pos2)>,
+         to: egui::Pos2,
+         last: Vec<egui::Event>| {
+            run(app, Vec::new());
+            let texts = run(app, Vec::new());
+            let grip =
+                painted_at(&texts, &grip_label).expect("files grip drawn") + egui::vec2(6.0, 6.0);
+            run(
+                app,
+                vec![egui::Event::PointerMoved(grip), button(grip, true)],
+            );
+            for step in 1..=4 {
+                let pos = grip + (to - grip) * (step as f32 / 4.0);
+                run(app, vec![egui::Event::PointerMoved(pos)]);
+            }
+            run(app, last);
+            run(app, vec![button(to, false)]);
+        };
+
+    // Released on the left edge: moved, and said.
+    let left = egui::pos2(40.0, 450.0);
+    drag(app, &mut run, left, Vec::new());
+    assert_eq!(app.dock.edge_of(files), DockEdge::Left);
+    assert_eq!(app.notice.as_deref(), Some("ファイルを左側に移動しました"));
+    assert!(app.dock_drag.is_none());
+
+    // Escape with the button held: nothing moves, the drag is over.
+    app.notice = None;
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    drag(app, &mut run, egui::pos2(1360.0, 450.0), vec![escape]);
+    assert_eq!(app.dock.edge_of(files), DockEdge::Left);
+    assert!(app.notice.is_none());
+    assert!(app.dock_drag.is_none());
+
+    // Released on its own edge: nothing moves, nothing is said.
+    drag(app, &mut run, egui::pos2(60.0, 300.0), Vec::new());
+    assert_eq!(app.dock.edge_of(files), DockEdge::Left);
+    assert!(app.notice.is_none());
+    assert!(app.dock_drag.is_none());
+}
+
+/// Change 146, requirement 4: the hint says what a release does. On the
+/// panel's own edge that is nothing, as in the middle.
+#[test]
+pub(crate) fn test_dock_drop_hint_names_what_a_release_does() {
+    let files = DockPanel::View(InspectorTab::Files);
+    let hint = |at, fits| dock_drop_hint(files, DockEdge::Right, at, fits);
+    assert_eq!(hint(None, true), "ここで離すとキャンセル");
+    assert_eq!(hint(Some(DockEdge::Right), true), "ここで離すとキャンセル");
+    assert_eq!(hint(Some(DockEdge::Left), true), "ファイルを左側に移動");
+    assert_eq!(
+        hint(Some(DockEdge::Bottom), false),
+        "ウィンドウが小さいため下部には置けません"
     );
 }
 

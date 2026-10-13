@@ -1,0 +1,21 @@
+# Review record for change 146. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer approved with two nits. It checked the borrows inside
+# both menu closures, the egui 0.31.1 calls (menu_custom_button,
+# on_disabled_hover_ui), the per-frame cost while a drag or menu is live, the
+# keeps_on_screen cases (moving off a crowded edge, moving the list, the narrow
+# default), and that the new tests fail when the gate is removed. Both nits are
+# carried below.
+
+digest: "57cdc4a90c11f2b8"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · dock_no_room names the target edge even when the move is refused because another panel would lose its edge
+    person: "移動が断られるのは、移動先ではなく別のパネルが押し出される場合もあります。そのときも表示は「ウィンドウが小さいため（移動先）には置けません」になります。断る判断そのものは正しく、ウィンドウを広げれば置けます。対応は不要です。"
+  - rust-reviewer/2 · the Escape scenario of test_dock_drag_by_pointer_events does not assert that the press armed a drag before Escape
+    person: "テストの書き方の細かな点で、アプリの動作には影響しません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

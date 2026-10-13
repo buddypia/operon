@@ -6076,14 +6076,11 @@ impl OperonApp {
             }
         }
         let sessions_edge = self.dock.edge_of(DockPanel::Sessions);
-        let shown = DockEdge::ALL.map(|edge| {
-            views_open
-                .then(|| self.dock.shown_view(edge, project.is_some()))
-                .flatten()
-        });
-        let occupied =
-            DockEdge::ALL.map(|edge| edge == sessions_edge || shown[edge.index()].is_some());
-        let rects = dock_rects(area, occupied, self.dock.sizes, sessions_edge);
+        let views = views_open.then_some(project.is_some());
+        let shown = DockEdge::ALL
+            .map(|edge| views.and_then(|has_project| self.dock.shown_view(edge, has_project)));
+        self.dock_area = Some(area);
+        let rects = self.dock.rects(area, views);
         for edge in DockEdge::ALL {
             let Some(rect) = rects.edges[edge.index()] else {
                 continue;
@@ -6340,9 +6337,12 @@ impl OperonApp {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         let pos = ui.input(|i| i.pointer.hover_pos());
         let from = self.dock.edge_of(panel);
-        let target = pos
-            .and_then(|pos| dock_drop_edge(pos, area))
-            .filter(|edge| *edge != from);
+        let at = pos.and_then(|pos| dock_drop_edge(pos, area));
+        let target = at.filter(|edge| *edge != from);
+        let fits = DockEdge::ALL.map(|edge| {
+            let mut after = self.dock;
+            after.move_panel(panel, edge) && self.dock_fits(&after)
+        });
         let painter = ui.ctx().layer_painter(egui::LayerId::new(
             egui::Order::Foreground,
             egui::Id::new("dock-drop-zones"),
@@ -6362,7 +6362,16 @@ impl OperonApp {
                 DockEdge::Top => area.with_max_y(area.top() + depth),
                 DockEdge::Bottom => area.with_min_y(area.bottom() - depth),
             };
-            let (fill, stroke) = if target == Some(edge) {
+            let under = target == Some(edge);
+            // An edge with no room for the panel says so before the pointer
+            // reaches it.
+            let refused = edge != from && !fits[edge.index()];
+            let (fill, stroke) = if refused {
+                (
+                    palette.raised.gamma_multiply(0.04),
+                    egui::Stroke::new(if under { 2.0 } else { 1.0 }, palette.warning),
+                )
+            } else if under {
                 (
                     palette.accent.gamma_multiply(0.12),
                     egui::Stroke::new(2.0, palette.accent),
@@ -6386,14 +6395,8 @@ impl OperonApp {
             ui.layer_id(),
             egui::Id::new("dock-drag-tooltip"),
             |ui| {
-                let hint = match target {
-                    Some(edge) => tf!(
-                        "{panel}を{edge}に移動",
-                        panel = panel.label(),
-                        edge = edge.label()
-                    ),
-                    None => tr("中央で離すとキャンセル").to_owned(),
-                };
+                let fits = at.is_some_and(|edge| fits[edge.index()]);
+                let hint = dock_drop_hint(panel, from, at, fits);
                 ui.label(RichText::new(hint).color(palette.text_strong));
             },
         );

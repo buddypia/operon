@@ -27,6 +27,9 @@ inputs or state → wrong outcome. A finding with no scenario is a preference.
   it is sound.
 - It violates a policy in the table below.
 - It claims something in a document that the repository does not do.
+- It tells the person something happened that the screen does not show, or
+  leaves a panel, control, or piece of content with no way back to it
+  (lesson 070).
 
 **Nit** — everything else: naming, ordering, a clearer expression of the same
 logic, a comment that could say more. **At most five nits per review**, chosen
