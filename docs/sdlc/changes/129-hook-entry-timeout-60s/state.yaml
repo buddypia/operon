@@ -1,7 +1,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,12 +9,12 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Timeout raised 10 -> 60 with failing-first tests; migration test watched failing by mutation. Next: rust-reviewer verdict, commit, merge, package."
+resume: "Done. Hook entry timeout raised 10 -> 60s, landed, and packaged."
 
 contract:
-  three-gates: "machine pending .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed .claude/hooks/gate-commit.sh"
   bands: "machine passed bash scripts/check-bands.sh, three pre-existing warn-tier byte metrics, no action"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed both new tests watched failing"
 
 sets:
