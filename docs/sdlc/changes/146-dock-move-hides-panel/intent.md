@@ -16,7 +16,8 @@ The person asked, after change 145 landed: 「批判的思考と敵対的レビ�
    panel to the top can push the bottom edge — and a panel that was on screen —
    off it; putting the session list on the bottom hides the views on the top.
    The panel that vanished takes its own grip and menu with it, so the only way
-   back is to make the window bigger, which the person is not told.
+   back is to make the window bigger. The app does not say so; change 145's
+   report told the person it needed no action.
 2. Change 145's review saw the first case and carried it to the person as
    "no action needed". Its rubric has no line for "the app says something
    happened that the screen does not show", so the finding was graded a nit.

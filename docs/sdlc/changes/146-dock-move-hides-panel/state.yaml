@@ -17,7 +17,7 @@ state:
   readiness: "pending"
   screen: "pending"
 
-resume: "Write spec.md and plan.md from intent.md, then the failing tests."
+resume: "Code committed; run rust-reviewer, then push, CI, land, package."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"

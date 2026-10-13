@@ -1,0 +1,4 @@
+2026-10-13T10:03:47Z person intent intent.md 20dd236b72031818 approve evaluator escalated (agent-originated findings); the person chose refusing the move over folding views (2026-10-13)
+2026-10-13T10:03:47Z auto screen screen.md 61ddde4aa238bf3e approve evaluator round 2: existing roles only, glyph removed, placement menu covered
+2026-10-13T10:03:47Z auto spec spec.md 24e68cbca35f5746 approve evaluator round 3: moved panels must have room; views judged open
+2026-10-13T10:03:47Z auto plan plan.md cd5e7b47ee46d691 approve evaluator round 3: proof matches spec; order compiles with stubs
