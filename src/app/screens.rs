@@ -1397,6 +1397,143 @@ impl OperonApp {
         self.ui_rules(ui, project);
     }
 
+    pub(crate) fn record_current_agent_settings(&mut self) {
+        let agent = self.selected_agent.clone();
+        let is_custom = agent == "custom";
+        let settings = AgentLaunchSettings {
+            model: if is_custom {
+                String::new()
+            } else {
+                self.agent_model_input.trim().to_owned()
+            },
+            mode: if is_custom {
+                String::new()
+            } else {
+                self.agent_mode_input.trim().to_owned()
+            },
+            effort: if is_custom {
+                String::new()
+            } else {
+                self.agent_effort_input.trim().to_owned()
+            },
+            flags: if is_custom {
+                Vec::new()
+            } else {
+                self.agent_flag_inputs.clone()
+            },
+            custom_command: if is_custom {
+                self.custom_command.trim().to_owned()
+            } else {
+                String::new()
+            },
+        };
+        self.recent_agent_settings.last_selected_agent = Some(agent.clone());
+        self.recent_agent_settings.agents.insert(agent, settings);
+    }
+
+    pub(crate) fn persist_recent_agent_settings(&mut self) {
+        let prev = self.recent_agent_settings.clone();
+        self.record_current_agent_settings();
+        if prev == self.recent_agent_settings {
+            return;
+        }
+        if let Err(error) = save_recent_agent_settings(&self.data_file, &self.recent_agent_settings)
+        {
+            eprintln!("Operon: failed to save recent agent settings: {error}");
+        }
+    }
+
+    pub(crate) fn apply_agent_launch_settings(&mut self, agent: &str) {
+        if let Some(settings) = self.recent_agent_settings.agents.get(agent).cloned() {
+            self.agent_model_input = settings.model;
+            self.agent_mode_input = settings.mode;
+            self.agent_effort_input = settings.effort;
+            self.agent_flag_inputs = settings.flags;
+            if agent == "custom" {
+                self.custom_command = settings.custom_command;
+            } else {
+                self.custom_command.clear();
+            }
+        } else {
+            self.agent_model_input.clear();
+            self.agent_mode_input.clear();
+            self.agent_effort_input.clear();
+            self.agent_flag_inputs.clear();
+            self.custom_command.clear();
+        }
+    }
+
+    /// 「この設定を毎回使う」 checked: the sheet as it stands becomes what every
+    /// new sheet opens with, the acknowledgement included when it is given.
+    pub(crate) fn pin_launch_settings(&mut self) {
+        self.record_current_agent_settings();
+        let agent = self.selected_agent.clone();
+        let settings = self
+            .recent_agent_settings
+            .agents
+            .get(&agent)
+            .cloned()
+            .unwrap_or_default();
+        self.recent_agent_settings.pinned = Some(PinnedLaunch {
+            account: self
+                .agent_account_input
+                .filter(|_| agent_supports_accounts(&agent)),
+            acknowledged: self.launch_acknowledged(),
+            agent,
+            settings,
+        });
+        self.save_pinned_launch();
+    }
+
+    pub(crate) fn unpin_launch_settings(&mut self) {
+        self.recent_agent_settings.pinned = None;
+        self.save_pinned_launch();
+    }
+
+    fn save_pinned_launch(&self) {
+        if let Err(error) = save_recent_agent_settings(&self.data_file, &self.recent_agent_settings)
+        {
+            eprintln!("Operon: failed to save recent agent settings: {error}");
+        }
+    }
+
+    /// Fills the sheet from the pin. Only the form: the recents are written,
+    /// as before, by an edit or a launch.
+    pub(crate) fn apply_pinned_launch(&mut self) {
+        let Some(pinned) = self.recent_agent_settings.pinned.clone() else {
+            return;
+        };
+        self.selected_agent = pinned.agent;
+        self.agent_model_input = pinned.settings.model;
+        self.agent_mode_input = pinned.settings.mode;
+        self.agent_effort_input = pinned.settings.effort;
+        self.agent_flag_inputs = pinned.settings.flags;
+        self.custom_command = pinned.settings.custom_command;
+        self.agent_account_input = pinned.account.filter(|id| self.accounts.get(*id).is_some());
+        // `pending_launch` is read after the form is filled, so the consent
+        // covers exactly the pinned combination and nothing an edit makes.
+        self.acknowledged_launch = pinned.acknowledged.then(|| self.pending_launch());
+    }
+
+    /// Whether the sheet still holds the pin. Drawn every frame the footer
+    /// shows, so it compares in place rather than building a `PinnedLaunch`.
+    pub(crate) fn launch_matches_pin(&self) -> bool {
+        let Some(pinned) = &self.recent_agent_settings.pinned else {
+            return false;
+        };
+        let account = self
+            .agent_account_input
+            .filter(|_| agent_supports_accounts(&self.selected_agent));
+        pinned.agent == self.selected_agent
+            && pinned.settings.model == self.agent_model_input.trim()
+            && pinned.settings.mode == self.agent_mode_input.trim()
+            && pinned.settings.effort == self.agent_effort_input.trim()
+            && flags_match_ignoring_order(&pinned.settings.flags, &self.agent_flag_inputs)
+            && pinned.settings.custom_command == self.custom_command.trim()
+            && pinned.account == account
+            && pinned.acknowledged == self.launch_acknowledged()
+    }
+
     pub(crate) fn select_agent(&mut self, agent: &str) {
         if self.selected_agent == agent {
             return;
@@ -1428,7 +1565,12 @@ impl OperonApp {
     pub(crate) fn launch_acknowledged(&self) -> bool {
         self.acknowledged_launch
             .as_ref()
-            .is_some_and(|acknowledged| *acknowledged == self.pending_launch())
+            .is_some_and(|acknowledged| {
+                acknowledged.agent == self.selected_agent
+                    && acknowledged.mode == self.agent_mode_input
+                    && acknowledged.custom_command == self.custom_command
+                    && flags_match_ignoring_order(&acknowledged.flags, &self.agent_flag_inputs)
+            })
     }
 
     /// One agent on the sheet's single row: its mark, its name, and whether
@@ -6062,12 +6204,11 @@ impl OperonApp {
                 })
             })
             .flatten();
-        let project = selected.as_ref().and_then(|session| {
+        let has_project = selected.as_ref().is_some_and(|session| {
             self.store
                 .projects
                 .iter()
-                .find(|project| project.id == session.project_id)
-                .cloned()
+                .any(|project| project.id == session.project_id)
         });
         let views_open = self.show_session_inspector && selected.is_some();
         if views_open {
@@ -6076,7 +6217,7 @@ impl OperonApp {
             }
         }
         let sessions_edge = self.dock.edge_of(DockPanel::Sessions);
-        let views = views_open.then_some(project.is_some());
+        let views = views_open.then_some(has_project);
         let shown = DockEdge::ALL
             .map(|edge| views.and_then(|has_project| self.dock.shown_view(edge, has_project)));
         self.dock_area = Some(area);
@@ -6085,9 +6226,7 @@ impl OperonApp {
             let Some(rect) = rects.edges[edge.index()] else {
                 continue;
             };
-            let view = shown[edge.index()]
-                .zip(selected.as_ref())
-                .map(|(tab, session)| (tab, session, project.as_ref()));
+            let view = shown[edge.index()].zip(selected.as_ref());
             self.ui_dock_edge(ui, edge, rect, edge == sessions_edge, view, palette);
             self.ui_dock_edge_rule(ui, edge, rect, palette);
         }
@@ -6127,7 +6266,7 @@ impl OperonApp {
         edge: DockEdge,
         rect: egui::Rect,
         has_sessions: bool,
-        view: Option<(InspectorTab, &Session, Option<&Project>)>,
+        view: Option<(InspectorTab, &Session)>,
         palette: &Palette,
     ) {
         let horizontal = edge.is_horizontal();
@@ -6232,7 +6371,7 @@ impl OperonApp {
             list.shrink_clip_rect(list_rect);
             self.ui_terminal_session_tabs(&mut list);
         }
-        if let (Some(view_rect), Some((tab, session, project))) = (view_rect, view) {
+        if let (Some(view_rect), Some((tab, session))) = (view_rect, view) {
             let mut views = ui.new_child(
                 egui::UiBuilder::new()
                     .id_salt(("dock-view", tab))
@@ -6243,7 +6382,6 @@ impl OperonApp {
             self.ui_session_inspector(
                 &mut views,
                 session,
-                project,
                 palette,
                 edge,
                 tab,
@@ -6966,4 +7104,18 @@ impl OperonApp {
             self.pending_run_script = None;
         }
     }
+}
+
+fn flags_match_ignoring_order(a: &[String], b: &[String]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    if a == b {
+        return true;
+    }
+    let mut a_refs: Vec<&str> = a.iter().map(String::as_str).collect();
+    let mut b_refs: Vec<&str> = b.iter().map(String::as_str).collect();
+    a_refs.sort_unstable();
+    b_refs.sort_unstable();
+    a_refs == b_refs
 }

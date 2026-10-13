@@ -35923,6 +35923,7 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "gh run watch 1 --exit-status >/dev/null 2>&1",
         "sed -n '/^contract:/,$p' docs/sdlc/changes/096-x/state.yaml",
         "sed -n '/## Acceptance/,/## Rejected/p' $W/spec.md",
+        "bash scripts/check-transcript-vocabulary.sh",
     ];
     let writes_denied = [
         "sed -n 1w src/main.rs README.md",
@@ -38858,6 +38859,11 @@ pub(crate) fn test_dock_drag_by_pointer_events() {
                 let pos = grip + (to - grip) * (step as f32 / 4.0);
                 run(app, vec![egui::Event::PointerMoved(pos)]);
             }
+            assert_eq!(
+                app.dock_drag,
+                Some(files),
+                "pointer press and drag must arm dock_drag before release or Escape"
+            );
             run(app, last);
             run(app, vec![button(to, false)]);
         };
@@ -44146,4 +44152,112 @@ pub(crate) fn test_change_144_git_status_badges_allocation_free_in_render() {
     // Invalidation clears badge cache
     app.invalidate_project_file_views(project_id);
     assert!(app.git_status_badge_cache.get(&project_id).is_none());
+}
+
+// --- Change 148: launch_matches_pin flag order, select_session focus clearing, prune script argument check, and CI branch prefixes ---
+
+/// Change 148: launch_matches_pin and launch_acknowledged treat flag order as
+/// insignificant, matching pending_launch. Toggling a flag off and back on
+/// appends it in a different order; the sheet still holds the pinned settings
+/// and its acknowledgement.
+#[test]
+pub(crate) fn launch_matches_pin_ignores_flag_order_and_acknowledgement_stays_intact() {
+    let mut fixture = SessionTreeTestFixture::new("launch-matches-pin-flag-order");
+    let app = &mut fixture.app;
+    app.selected_agent = "claude".to_owned();
+    app.agent_model_input = "claude-opus-4-7".to_owned();
+    app.agent_mode_input = "--dangerously-skip-permissions".to_owned();
+    app.agent_effort_input = "high".to_owned();
+    app.agent_flag_inputs = vec!["--chrome".to_owned(), "--ide".to_owned()];
+    app.acknowledged_launch = Some(app.pending_launch());
+
+    app.pin_launch_settings();
+    assert!(app.launch_matches_pin());
+    assert!(app.launch_acknowledged());
+
+    // Reordering the same flags (e.g. toggling --chrome off and back on) must
+    // still match both the acknowledgement and the pin.
+    app.agent_flag_inputs = vec!["--ide".to_owned(), "--chrome".to_owned()];
+    assert!(
+        app.launch_acknowledged(),
+        "launch_acknowledged must ignore flag order"
+    );
+    assert!(
+        app.launch_matches_pin(),
+        "launch_matches_pin must ignore flag order"
+    );
+
+    // Changing a flag to a different switch must break both.
+    app.agent_flag_inputs = vec!["--ide".to_owned(), "--verbose".to_owned()];
+    assert!(!app.launch_acknowledged());
+    assert!(!app.launch_matches_pin());
+}
+
+/// Change 148 (durability-reviewer/1 from change 139): selecting a different
+/// session drops a pending terminal_focus_request aimed at an earlier session,
+/// while selecting the session the request was made for preserves it.
+#[test]
+pub(crate) fn select_session_clears_terminal_focus_request_for_other_session() {
+    let mut fixture = SessionTreeTestFixture::new("select-session-focus-request");
+    let first = fixture.normal_session.id;
+    let second = fixture.worktree_session.id;
+
+    fixture.app.terminal_focus_request = Some(first);
+    fixture.app.select_session(first);
+    assert_eq!(
+        fixture.app.terminal_focus_request,
+        Some(first),
+        "selecting the target session keeps its pending focus request"
+    );
+
+    fixture.app.select_session(second);
+    assert_eq!(
+        fixture.app.terminal_focus_request, None,
+        "selecting another session must clear a stale focus request"
+    );
+}
+
+/// Change 148 (rust-reviewer/1 from change 140): prune-landed-branches.sh
+/// refuses an unknown flag with exit status 2 rather than running the deleting
+/// form on a mistyped --dry-run.
+#[test]
+pub(crate) fn prune_script_refuses_unknown_flag_with_exit_2() {
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/prune-landed-branches.sh");
+    let mut command = Command::new("/bin/bash");
+    forget_inherited_repository(&mut command);
+    let output = command.arg(&script).arg("--dry-rn").output().unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "unknown flag must exit 2: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Change 148: .github/workflows/ci.yml triggers on all worktree branch
+/// prefixes (feature/**, fix/**, docs/**, refactor/**, chore/**) so that
+/// gate-merge.sh never waits on a branch prefix CI did not run on.
+#[test]
+pub(crate) fn ci_workflow_triggers_on_all_worktree_branch_prefixes() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ci_yml = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+        .expect(".github/workflows/ci.yml should exist");
+    let branches_line = ci_yml
+        .lines()
+        .map(str::trim)
+        .find(|line| line.starts_with("branches:"))
+        .expect("ci.yml must have a branches: trigger line");
+    for prefix in [
+        "main",
+        "'feature/**'",
+        "'fix/**'",
+        "'docs/**'",
+        "'refactor/**'",
+        "'chore/**'",
+    ] {
+        assert!(
+            branches_line.contains(prefix),
+            "ci.yml branches line `{branches_line}` is missing `{prefix}`"
+        );
+    }
 }

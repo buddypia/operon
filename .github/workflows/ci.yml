@@ -10,7 +10,7 @@ name: CI
 
 on:
   push:
-    branches: [main, 'feature/**', 'fix/**']
+    branches: [main, 'feature/**', 'fix/**', 'docs/**', 'refactor/**', 'chore/**']
   pull_request:
 
 # A newer push of the same branch supersedes the run in flight: the merge gate
