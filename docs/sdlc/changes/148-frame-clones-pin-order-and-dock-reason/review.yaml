@@ -1,0 +1,18 @@
+# Review record for 148-frame-clones-pin-order-and-dock-reason.
+#
+# rust-reviewer checked per-frame allocation elimination in ui_terminal_workspace,
+# launch_matches_pin, and launch_acknowledged, order-insensitive flag matching
+# via flags_match_ignoring_order, module boundary relocation from src/app.rs to
+# src/app/screens.rs (bringing largest_module_lines below warn), and regression
+# tests in src/tests.rs.
+#
+# subprocess-safety-reviewer checked .claude/config/worktree-policy.json
+# trunk_bash_allowlist addition of check-transcript-vocabulary.sh, .github/workflows/ci.yml
+# branch prefix triggers, and subprocess environment hygiene in prune_script_refuses_unknown_flag_with_exit_2.
+
+digest: "7f64e8281b24b2ab"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

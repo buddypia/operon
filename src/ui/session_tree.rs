@@ -495,31 +495,39 @@ impl OperonApp {
         &mut self,
         ui: &mut egui::Ui,
         session: &Session,
-        project: Option<&Project>,
         palette: &Palette,
         edge: DockEdge,
         shown: InspectorTab,
         width: f32,
         height: f32,
     ) {
+        let project_id = self
+            .store
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .map(|project| project.id);
+        let is_worktree = self
+            .store
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .zip(session.worktree_path.as_ref())
+            .is_some_and(|(project, path)| path != &project.path);
         // Files and changes are a project's; a session without one offers
         // only its conversation. Decided here rather than stored, so the tab
         // chosen for other sessions survives visiting this one.
         let offered = InspectorTab::ALL.map(|tab| {
             (self.dock.edge_of(DockPanel::View(tab)) == edge
-                && (project.is_some() || tab == InspectorTab::Conversation))
+                && (project_id.is_some() || tab == InspectorTab::Conversation))
                 .then_some(tab)
         });
-        let is_worktree = match (project, &session.worktree_path) {
-            (Some(project), Some(path)) => path != &project.path,
-            _ => false,
-        };
         let turns = self
             .session_prompt_turns
             .get(&session.id)
             .map_or(0, Vec::len);
-        let changes = match project {
-            Some(project) if !is_worktree => match self.git_changes_cache.get(&project.id) {
+        let changes = match project_id {
+            Some(id) if !is_worktree => match self.git_changes_cache.get(&id) {
                 Some(Ok(snapshot)) => snapshot.files.len(),
                 _ => 0,
             },
@@ -604,14 +612,19 @@ impl OperonApp {
                 hairline(ui, palette);
                 ui.add_space(SPACE_XS);
                 let body_height = (height - 56.0).max(100.0);
-                match (shown, project) {
-                    (InspectorTab::Files, Some(project)) => {
-                        self.ui_session_files_tab(ui, session, project, palette, body_height)
-                    }
-                    (InspectorTab::Changes, Some(project)) => self.ui_session_changes_tab(
+                match (shown, project_id) {
+                    (InspectorTab::Files, Some(project_id)) => self.ui_session_files_tab(
                         ui,
                         session,
-                        project,
+                        project_id,
+                        is_worktree,
+                        palette,
+                        body_height,
+                    ),
+                    (InspectorTab::Changes, Some(project_id)) => self.ui_session_changes_tab(
+                        ui,
+                        session,
+                        project_id,
                         palette,
                         is_worktree,
                         body_height,
@@ -693,18 +706,20 @@ impl OperonApp {
         &mut self,
         ui: &mut egui::Ui,
         session: &Session,
-        project: &Project,
+        project_id: Uuid,
+        is_worktree: bool,
         palette: &Palette,
         height: f32,
     ) {
-        let root = session
-            .worktree_path
-            .clone()
-            .unwrap_or_else(|| project.path.clone());
-        let is_worktree = session
-            .worktree_path
-            .as_ref()
-            .is_some_and(|p| p != &project.path);
+        let Some(root) = session.worktree_path.clone().or_else(|| {
+            self.store
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .map(|project| project.path.clone())
+        }) else {
+            return;
+        };
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = SPACE_XS;
@@ -717,9 +732,15 @@ impl OperonApp {
                 if is_worktree {
                     self.session_file_cache.remove(&root);
                     self.request_session_files(&root);
-                } else {
+                } else if let Some(project) = self
+                    .store
+                    .projects
+                    .iter()
+                    .find(|project| project.id == project_id)
+                    .cloned()
+                {
                     self.file_cache.remove(&project.id);
-                    self.request_files(project);
+                    self.request_files(&project);
                 }
                 self.session_file_tree_cache = None;
                 self.session_filter_results = None;
@@ -731,8 +752,16 @@ impl OperonApp {
             if !self.session_file_cache.contains_key(&root) {
                 self.request_session_files(&root);
             }
-        } else if !self.file_cache.contains_key(&project.id) {
-            self.request_files(project);
+        } else if !self.file_cache.contains_key(&project_id) {
+            if let Some(project) = self
+                .store
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .cloned()
+            {
+                self.request_files(&project);
+            }
         }
         let is_scanning = if is_worktree {
             self.background_tasks
@@ -740,8 +769,8 @@ impl OperonApp {
                 && !self.session_file_cache.contains_key(&root)
         } else {
             self.background_tasks
-                .contains(&BackgroundKey::Files(project.id))
-                && !self.file_cache.contains_key(&project.id)
+                .contains(&BackgroundKey::Files(project_id))
+                && !self.file_cache.contains_key(&project_id)
         };
         if is_scanning {
             ui.label(
@@ -753,7 +782,7 @@ impl OperonApp {
         let scan = if is_worktree {
             self.session_file_cache.get(&root)
         } else {
-            self.file_cache.get(&project.id)
+            self.file_cache.get(&project_id)
         };
         let scan_warning = scan.and_then(file_scan_warning);
 
@@ -801,7 +830,7 @@ impl OperonApp {
             ));
         }
 
-        let badges = self.git_status_badge_map(if is_worktree { Uuid::nil() } else { project.id });
+        let badges = self.git_status_badge_map(if is_worktree { Uuid::nil() } else { project_id });
         let active_doc = self.active_document.as_ref().filter(|doc| doc.root == root);
         let mut actions = Vec::new();
         let mut toggle_hidden = false;
@@ -866,7 +895,7 @@ impl OperonApp {
                 file_tree_rows(
                     ui,
                     visible,
-                    project.id,
+                    project_id,
                     &self.expanded_directories,
                     &badges,
                     active_doc,
@@ -900,7 +929,7 @@ impl OperonApp {
                         file_tree_rows(
                             ui,
                             hidden,
-                            project.id,
+                            project_id,
                             &self.expanded_directories,
                             &badges,
                             active_doc,
@@ -930,10 +959,18 @@ impl OperonApp {
         for action in actions {
             match action {
                 FileTreeAction::Open(path) => {
-                    self.navigate_to_file(project, root.clone(), path, None);
+                    if let Some(project) = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|project| project.id == project_id)
+                        .cloned()
+                    {
+                        self.navigate_to_file(&project, root.clone(), path, None);
+                    }
                 }
                 FileTreeAction::Toggle(path) => {
-                    let key = (project.id, path);
+                    let key = (project_id, path);
                     if !self.expanded_directories.remove(&key) {
                         self.expanded_directories.insert(key);
                     }
@@ -948,7 +985,7 @@ impl OperonApp {
         &mut self,
         ui: &mut egui::Ui,
         session: &Session,
-        project: &Project,
+        project_id: Uuid,
         palette: &Palette,
         is_worktree: bool,
         height: f32,
@@ -963,11 +1000,19 @@ impl OperonApp {
             );
             return;
         }
-        if !self.git_changes_cache.contains_key(&project.id) {
-            self.request_git_changes(project);
+        if !self.git_changes_cache.contains_key(&project_id) {
+            if let Some(project) = self
+                .store
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .cloned()
+            {
+                self.request_git_changes(&project);
+            }
         }
         let mut open = None;
-        match self.git_changes_cache.get(&project.id) {
+        match self.git_changes_cache.get(&project_id) {
             None => {
                 ui.label(
                     RichText::new(tr("変更を読み込んでいます…"))
@@ -1017,7 +1062,16 @@ impl OperonApp {
             }
         }
         if let Some(path) = open {
-            self.navigate_to_file(project, project.path.clone(), path, None);
+            if let Some(project) = self
+                .store
+                .projects
+                .iter()
+                .find(|project| project.id == project_id)
+                .cloned()
+            {
+                let root = project.path.clone();
+                self.navigate_to_file(&project, root, path, None);
+            }
         }
     }
 }
