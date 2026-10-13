@@ -1,53 +1,35 @@
 # Branch Completion Options
 
-> Scope: `create-pr` Mode B branch-finishing UX principles, without deploying local merge/discard procedures directly.
-
-## Core Principle
-
-Completing a development branch is an integration decision point rather than simply "stopping work." Confirm verification evidence first, then clearly present available completion options to the user.
+> Scope: `create-pr` Mode B branch-finishing UX principles.
 
 ## Completion Options
 
+Confirm verification evidence first, then present completion options:
+
 | Option | Action | Worktree Handling | Safety Rule |
 |---|---|---|---|
-| **Create PR** | `create-pr ship-worktree` | Auto-cleanup (default), or retain via `--no-cleanup` | Halts if uncommitted changes exist |
-| **Local Merge** | High-risk action outside standard flow | Requires manual cleanup after merge | Must not claim completion before main sync and verification check |
-| **Keep / Archive** | No automated cleanup performed | Retain worktree as-is | Document paused status and next actions in `PLAN.md` |
-| **Discard** | Destructive operation | Deletes worktree and branch | Requires explicit typed user confirmation |
+| **Create PR** | `create-pr ship-worktree` | Auto-cleanup (or `--no-cleanup`) | Halts if uncommitted changes exist |
+| **Local Merge** | Outside `create-pr` flow | Manual cleanup after merge | Sync `main` and pass checks first |
+| **Keep / Archive** | No cleanup | Retain worktree as-is | Record status and next actions |
+| **Discard** | Destructive | Deletes worktree and branch | Requires typed user confirmation |
 
-## Before Presenting Options
+## Pre-Check & Prompt
 
-1. Verify current branch and worktree path.
-2. Check `PLAN.md` for any remaining uncompleted checkboxes.
-3. Confirm all changes are committed.
-4. Review latest verification evidence and test results.
-5. Confirm base branch is `main` or specify alternative base.
-
-## Recommended Prompt Shape
-
-Present options aligned with the existing automation:
+Verify current branch, worktree path, clean status, and test results before prompting:
 
 ```text
 The worktree is verified. Choose an action:
-
 1. Create PR: Push + create PR via create-pr Mode B
-2. Keep: Preserve worktree and branch as-is with PLAN.md handoff
+2. Keep: Preserve worktree and branch as-is
 3. Discard: Delete worktree/branch after typed confirmation
-
-(If local merge to main is required, request it separately.)
 ```
 
 ## Do Not
 
-- Do NOT present completion options without verifying tests or `PLAN.md`.
-- Do NOT perform discard operations implicitly.
-- Do NOT clean up using `git reset --hard`, `git clean`, or `git checkout --`.
-
-## Mapping to Existing Automation
+- Do NOT present options before verifying tests.
+- Do NOT discard implicitly or use `git reset --hard`, `git clean`, or `git checkout --`.
 
 | Step | Automation |
 |---|---|
-| Verify tests | `make q.check`, `npm run validate`, or task proving command |
+| Verify tests | `make q.check` or task proving command |
 | Push and create PR | `node .claude/scripts/create-pr/ops.mjs ship-worktree ...` |
-| Keep branch as-is | Preserve worktree + `PLAN.md` handoff |
-| Discard | Handled under destructive guard rules following typed user confirmation |

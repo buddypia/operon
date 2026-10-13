@@ -1,0 +1,12 @@
+# Review record for 147-steering-and-reference-bytes-breach-bands.
+#
+# Subprocess-safety review checked all compressed steering and reference files
+# (CLAUDE.md, AGENTS.md, docs/sdlc/lessons.md, and .claude/skills/*/references/*.md)
+# to verify that subprocess wrapper requirements, quoting rules, worktree guards,
+# and document invariants remain intact.
+
+digest: "aed0e397ec8db3d5"
+rounds: 1
+
+verdicts:
+  subprocess-safety-reviewer: "approve 0 0"
