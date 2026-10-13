@@ -5069,7 +5069,22 @@ impl OperonApp {
         // path that runs sixty times a second.
         let group_counts = self.status_group_counts();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("プロジェクト別セッション")).strong());
+            // The heading is the list's grip: it is dragged to an edge the
+            // way a view's tab is (change 145).
+            let grip = ui
+                .add(
+                    egui::Label::new(
+                        RichText::new(format!(
+                            "{ICON_DRAG_HANDLE} {}",
+                            tr("プロジェクト別セッション")
+                        ))
+                        .strong(),
+                    )
+                    .selectable(false)
+                    .sense(egui::Sense::click_and_drag()),
+                )
+                .on_hover_text(tr("ドラッグして移動"));
+            self.dock_grip(ui, &grip, DockPanel::Sessions);
             ui.label(
                 RichText::new(tf!("{p0} 件", p0 = sessions.len()))
                     .small()
@@ -5772,24 +5787,9 @@ impl OperonApp {
         // header is about, so it starts right under it (change 139).
         hairline(ui, palette);
         self.ensure_initial_prompt_turn(session_id);
-        let total_row_w = ui.available_width();
-        let layout = SessionColumnsLayout::compute(total_row_w, self.show_session_inspector);
-        // Docked left, the panel is stacked under the session list in the
-        // workspace's own column (change 127); only docked right does it take
-        // width from this row.
-        let show_inspector =
-            layout.show_inspector && self.session_inspector_side == SidebarSide::Right;
-        let max_inspector_w = (total_row_w - SessionColumnsLayout::TERMINAL_MIN_W)
-            .clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
-        let inspector_w = self
-            .session_inspector_w
-            .unwrap_or(layout.inspector_w)
-            .clamp(SIDEBAR_MIN_W, max_inspector_w);
-        let terminal_w = if show_inspector {
-            (total_row_w - inspector_w - 6.0).max(SessionColumnsLayout::TERMINAL_MIN_W)
-        } else {
-            total_row_w
-        };
+        // The views about this session are docked around the workspace, not
+        // in this row: the terminal takes all of it (change 145).
+        let terminal_w = ui.available_width();
 
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
@@ -6004,39 +6004,6 @@ impl OperonApp {
                     }
                 },
             );
-
-            if show_inspector {
-                let height = ui.available_height();
-                let splitter = ui
-                    .allocate_response(egui::vec2(6.0, height), egui::Sense::click_and_drag())
-                    .on_hover_text(tr("ドラッグして移動"));
-                let active = splitter.hovered() || splitter.dragged();
-                if active {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                }
-                if splitter.dragged() {
-                    let delta = splitter.drag_delta().x;
-                    if delta.is_finite() {
-                        self.session_inspector_w =
-                            Some((inspector_w - delta).clamp(SIDEBAR_MIN_W, max_inspector_w));
-                    }
-                }
-                paint_splitter_v(ui, splitter.rect, palette, active);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(inspector_w, height),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        self.ui_session_inspector(
-                            ui,
-                            session,
-                            project.as_ref(),
-                            palette,
-                            inspector_w,
-                            height,
-                        );
-                    },
-                );
-            }
         });
     }
 
@@ -6078,75 +6045,13 @@ impl OperonApp {
         }
     }
 
+    /// The session workspace: the terminal in the middle and every panel on
+    /// the edge it is docked to (change 145).
     pub(crate) fn ui_terminal_workspace(&mut self, ui: &mut egui::Ui) {
         self.select_default_terminal_session();
         let palette = self.store.theme.palette();
-        let workspace_size = ui.available_size();
-        let workspace = ui.allocate_ui_with_layout(
-            workspace_size,
-            egui::Layout::left_to_right(egui::Align::TOP),
-            |ui| {
-                ui.set_min_size(workspace_size);
-                self.ui_session_column(ui, workspace_size.y);
-                let sep_res = ui
-                    .allocate_response(
-                        egui::vec2(6.0, workspace_size.y),
-                        egui::Sense::click_and_drag(),
-                    )
-                    .on_hover_text(tr("ドラッグして移動"));
-                let active = sep_res.hovered() || sep_res.dragged();
-                if active {
-                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-                }
-                if sep_res.dragged() {
-                    let delta = sep_res.drag_delta().x;
-                    self.session_list_w =
-                        (self.session_list_w + delta).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
-                }
-                paint_splitter_v(ui, sep_res.rect, palette, active);
-                ui.vertical(|ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.set_min_height(workspace_size.y);
-                    if self.session_library_open {
-                        ui.horizontal(|ui| {
-                            ui.heading(tr("履歴"));
-                            if ui.button(tr("ターミナルに戻る")).clicked() {
-                                self.session_library_open = false;
-                            }
-                        });
-                        ui.separator();
-                        self.ui_history_cli_section(ui);
-                        self.ui_sessions(ui);
-                    } else {
-                        let selected = self
-                            .selected_session
-                            .and_then(|id| {
-                                self.store.sessions.iter().find(|session| session.id == id)
-                            })
-                            .cloned();
-                        if let Some(session) = selected {
-                            self.ui_terminal_panel(ui, &session);
-                        } else {
-                            ui.add_space(36.0);
-                            ui.heading(tr("セッションを選択"));
-                            ui.label(tr("左の一覧からセッションを選んでください。"));
-                        }
-                    }
-                });
-            },
-        );
-        let palette = self.store.theme.palette();
-        self.ui_sidebar_tab_drop(ui, workspace.response.rect, palette);
-    }
-
-    /// The workspace's left column: the session list, and — docked left,
-    /// open, and with a session to describe — the side panel stacked under
-    /// it, split by a draggable rule (change 127).
-    fn ui_session_column(&mut self, ui: &mut egui::Ui, height: f32) {
-        let width = self.session_list_w;
-        let selected = (!self.session_library_open
-            && self.show_session_inspector
-            && self.session_inspector_side == SidebarSide::Left)
+        let (area, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
+        let selected = (!self.session_library_open)
             .then(|| {
                 self.selected_session.and_then(|id| {
                     self.store
@@ -6157,149 +6062,351 @@ impl OperonApp {
                 })
             })
             .flatten();
-        ui.vertical(|ui| {
-            ui.set_width(width);
-            ui.set_min_height(height);
-            // One id for the list stacked or not, so folding the panel keeps
-            // its scroll position.
-            let Some(session) = selected else {
-                ui.push_id("session-column-list", |ui| {
-                    self.ui_terminal_session_tabs(ui);
-                });
-                return;
-            };
-            const RULE_H: f32 = 6.0;
-            let (list_h, panel_h) =
-                stacked_sidebar_heights(height - RULE_H, self.session_list_split);
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, list_h),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_min_height(list_h);
-                    ui.push_id("session-column-list", |ui| {
-                        self.ui_terminal_session_tabs(ui);
-                    });
-                },
-            );
-            let palette = self.store.theme.palette();
-            let rule = ui
-                .allocate_response(egui::vec2(width, RULE_H), egui::Sense::drag())
-                .on_hover_text(tr("ドラッグして移動"));
-            let active = rule.hovered() || rule.dragged();
-            if active {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
-            }
-            if rule.dragged() {
-                let delta = rule.drag_delta().y;
-                let usable = height - RULE_H;
-                // A column too short for both minimums is halved whatever the
-                // split says; a drag there would only overwrite the split.
-                if delta.is_finite() && usable >= SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H {
-                    self.session_list_split = ((list_h + delta) / usable).clamp(0.0, 1.0);
-                }
-            }
-            paint_splitter_h(ui, rule.rect, palette, active);
-            let project = self
-                .store
+        let project = selected.as_ref().and_then(|session| {
+            self.store
                 .projects
                 .iter()
                 .find(|project| project.id == session.project_id)
-                .cloned();
-            self.ensure_initial_prompt_turn(session.id);
-            ui.allocate_ui_with_layout(
-                egui::vec2(width, panel_h),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.push_id("session-column-panel", |ui| {
-                        self.ui_session_inspector(
-                            ui,
-                            &session,
-                            project.as_ref(),
-                            palette,
-                            width,
-                            panel_h,
-                        );
-                    });
-                },
-            );
+                .cloned()
         });
+        let views_open = self.show_session_inspector && selected.is_some();
+        if views_open {
+            if let Some(session) = &selected {
+                self.ensure_initial_prompt_turn(session.id);
+            }
+        }
+        let sessions_edge = self.dock.edge_of(DockPanel::Sessions);
+        let shown = DockEdge::ALL.map(|edge| {
+            views_open
+                .then(|| self.dock.shown_view(edge, project.is_some()))
+                .flatten()
+        });
+        let occupied =
+            DockEdge::ALL.map(|edge| edge == sessions_edge || shown[edge.index()].is_some());
+        let rects = dock_rects(area, occupied, self.dock.sizes, sessions_edge);
+        for edge in DockEdge::ALL {
+            let Some(rect) = rects.edges[edge.index()] else {
+                continue;
+            };
+            let view = shown[edge.index()]
+                .zip(selected.as_ref())
+                .map(|(tab, session)| (tab, session, project.as_ref()));
+            self.ui_dock_edge(ui, edge, rect, edge == sessions_edge, view, palette);
+            self.ui_dock_edge_rule(ui, edge, rect, palette);
+        }
+        let mut center = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("dock-center")
+                .max_rect(rects.center)
+                .layout(egui::Layout::top_down(egui::Align::LEFT)),
+        );
+        center.shrink_clip_rect(rects.center);
+        if self.session_library_open {
+            center.horizontal(|ui| {
+                ui.heading(tr("履歴"));
+                if ui.button(tr("ターミナルに戻る")).clicked() {
+                    self.session_library_open = false;
+                }
+            });
+            center.separator();
+            self.ui_history_cli_section(&mut center);
+            self.ui_sessions(&mut center);
+        } else if let Some(session) = &selected {
+            self.ui_terminal_panel(&mut center, session);
+        } else {
+            center.add_space(36.0);
+            center.heading(tr("セッションを選択"));
+            center.label(tr("一覧からセッションを選んでください。"));
+        }
+        self.ui_dock_drop(ui, area, palette);
     }
 
-    /// A side-panel tab being dragged: the hint beside the pointer, and on
-    /// release past the middle of `area` (outside a dead zone), the panel
-    /// moves to that side.
-    fn ui_sidebar_tab_drop(&mut self, ui: &egui::Ui, area: egui::Rect, palette: &Palette) {
-        if let Some((tab, origin_side)) = self.dragging_sidebar_tab {
-            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.dragging_sidebar_tab = None;
-            } else {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                let target_side = origin_side.opposite();
-                let hint = match target_side {
-                    SidebarSide::Left => tr("サイドバーを左側に移動"),
-                    SidebarSide::Right => tr("サイドバーを右側に移動"),
-                };
-                let pos = ui.input(|i| i.pointer.hover_pos());
-                let is_valid_drop = pos
-                    .and_then(|p| sidebar_drop_side(origin_side, p, area))
-                    .is_some();
-
-                // Target drop zone visual affordance on the opposite side
-                let drop_width = (area.width() * 0.35).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
-                let target_rect = match target_side {
-                    SidebarSide::Left => egui::Rect::from_min_max(
-                        area.min,
-                        egui::pos2(area.left() + drop_width, area.max.y),
-                    ),
-                    SidebarSide::Right => egui::Rect::from_min_max(
-                        egui::pos2(area.right() - drop_width, area.min.y),
-                        area.max,
-                    ),
-                };
-                let fill = if is_valid_drop {
-                    palette.accent.gamma_multiply(0.08)
+    /// One edge: the session list, a group of views, or both split by a
+    /// draggable rule — stacked on the left and right, side by side on the
+    /// top and bottom, the list first.
+    fn ui_dock_edge(
+        &mut self,
+        ui: &mut egui::Ui,
+        edge: DockEdge,
+        rect: egui::Rect,
+        has_sessions: bool,
+        view: Option<(InspectorTab, &Session, Option<&Project>)>,
+        palette: &Palette,
+    ) {
+        let horizontal = edge.is_horizontal();
+        let (list_rect, view_rect) = match (has_sessions, view.is_some()) {
+            (true, true) => {
+                let length = if horizontal {
+                    rect.width()
                 } else {
-                    palette.raised.gamma_multiply(0.04)
-                };
-                let stroke = if is_valid_drop {
-                    egui::Stroke::new(2.0, palette.accent)
+                    rect.height()
+                } - DOCK_GAP;
+                let (first, _) = if horizontal {
+                    split_lengths(
+                        length,
+                        self.dock.splits[edge.index()],
+                        SIDEBAR_MIN_W,
+                        SIDEBAR_MIN_W,
+                    )
                 } else {
-                    egui::Stroke::new(1.0, palette.border_subtle)
+                    stacked_sidebar_heights(length, self.dock.splits[edge.index()])
                 };
-                ui.painter().rect(
-                    target_rect,
-                    egui::CornerRadius::same(RADIUS_CARD),
-                    fill,
-                    stroke,
-                    egui::StrokeKind::Inside,
-                );
-
-                egui::show_tooltip(
-                    ui.ctx(),
-                    ui.layer_id(),
-                    egui::Id::new("sidebar_tab_drag_tooltip"),
-                    |ui| {
-                        ui.label(
-                            RichText::new(tf!("{tab} · {hint}", tab = tab.label(), hint = hint))
-                                .color(palette.text_strong),
-                        );
-                    },
-                );
-
-                if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
-                    if let Some(side) =
-                        pos.and_then(|pos| sidebar_drop_side(origin_side, pos, area))
-                    {
-                        self.session_inspector_side = side;
-                        let notice = match side {
-                            SidebarSide::Left => tr("サイドバーを左側に移動しました"),
-                            SidebarSide::Right => tr("サイドバーを右側に移動しました"),
-                        };
-                        self.notice_briefly(notice);
-                    }
-                    self.dragging_sidebar_tab = None;
+                let (list, rest) = if horizontal {
+                    (
+                        egui::Rect::from_min_size(rect.min, egui::vec2(first, rect.height())),
+                        egui::Rect::from_min_max(
+                            egui::pos2(rect.left() + first, rect.top()),
+                            rect.max,
+                        ),
+                    )
+                } else {
+                    (
+                        egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), first)),
+                        egui::Rect::from_min_max(
+                            egui::pos2(rect.left(), rect.top() + first),
+                            rect.max,
+                        ),
+                    )
+                };
+                let (rule, views) = if horizontal {
+                    (
+                        egui::Rect::from_min_size(rest.min, egui::vec2(DOCK_GAP, rest.height())),
+                        rest.with_min_x(rest.left() + DOCK_GAP),
+                    )
+                } else {
+                    (
+                        egui::Rect::from_min_size(rest.min, egui::vec2(rest.width(), DOCK_GAP)),
+                        rest.with_min_y(rest.top() + DOCK_GAP),
+                    )
+                };
+                let response = ui
+                    .interact(
+                        rule,
+                        egui::Id::new(("dock-split", edge.index())),
+                        egui::Sense::drag(),
+                    )
+                    .on_hover_text(tr("ドラッグして大きさを調整"));
+                let active = response.hovered() || response.dragged();
+                if active {
+                    ui.ctx().set_cursor_icon(if horizontal {
+                        egui::CursorIcon::ResizeHorizontal
+                    } else {
+                        egui::CursorIcon::ResizeVertical
+                    });
                 }
+                if response.dragged() {
+                    let delta = if horizontal {
+                        response.drag_delta().x
+                    } else {
+                        response.drag_delta().y
+                    };
+                    let floor = if horizontal {
+                        2.0 * SIDEBAR_MIN_W
+                    } else {
+                        SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H
+                    };
+                    // An edge too short for both minimums is halved whatever
+                    // the split says; a drag there would only overwrite it.
+                    if delta.is_finite() && length >= floor {
+                        self.dock.splits[edge.index()] = ((first + delta) / length).clamp(0.0, 1.0);
+                    }
+                }
+                if horizontal {
+                    paint_splitter_v(ui, rule, palette, active);
+                } else {
+                    paint_splitter_h(ui, rule, palette, active);
+                }
+                (Some(list), Some(views))
             }
+            (true, false) => (Some(rect), None),
+            (false, true) => (None, Some(rect)),
+            (false, false) => (None, None),
+        };
+        // Each section is its own child named by what it holds — the list, or
+        // the view showing — not by the edge, so scroll positions and folded
+        // folders survive a move.
+        if let Some(list_rect) = list_rect {
+            let mut list = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt("dock-sessions")
+                    .max_rect(list_rect)
+                    .layout(egui::Layout::top_down(egui::Align::LEFT)),
+            );
+            list.shrink_clip_rect(list_rect);
+            self.ui_terminal_session_tabs(&mut list);
+        }
+        if let (Some(view_rect), Some((tab, session, project))) = (view_rect, view) {
+            let mut views = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt(("dock-view", tab))
+                    .max_rect(view_rect)
+                    .layout(egui::Layout::top_down(egui::Align::LEFT)),
+            );
+            views.shrink_clip_rect(view_rect);
+            self.ui_session_inspector(
+                &mut views,
+                session,
+                project,
+                palette,
+                edge,
+                tab,
+                view_rect.width(),
+                view_rect.height(),
+            );
+        }
+    }
+
+    /// The rule between `edge` and the terminal, which resizes the edge.
+    fn ui_dock_edge_rule(
+        &mut self,
+        ui: &mut egui::Ui,
+        edge: DockEdge,
+        rect: egui::Rect,
+        palette: &Palette,
+    ) {
+        let rule = match edge {
+            DockEdge::Left => {
+                egui::Rect::from_min_size(rect.right_top(), egui::vec2(DOCK_GAP, rect.height()))
+            }
+            DockEdge::Right => egui::Rect::from_min_size(
+                rect.left_top() - egui::vec2(DOCK_GAP, 0.0),
+                egui::vec2(DOCK_GAP, rect.height()),
+            ),
+            DockEdge::Top => {
+                egui::Rect::from_min_size(rect.left_bottom(), egui::vec2(rect.width(), DOCK_GAP))
+            }
+            DockEdge::Bottom => egui::Rect::from_min_size(
+                rect.left_top() - egui::vec2(0.0, DOCK_GAP),
+                egui::vec2(rect.width(), DOCK_GAP),
+            ),
+        };
+        let response = ui
+            .interact(
+                rule,
+                egui::Id::new(("dock-edge-rule", edge.index())),
+                egui::Sense::drag(),
+            )
+            .on_hover_text(tr("ドラッグして大きさを調整"));
+        let active = response.hovered() || response.dragged();
+        let horizontal = edge.is_horizontal();
+        if active {
+            ui.ctx().set_cursor_icon(if horizontal {
+                egui::CursorIcon::ResizeVertical
+            } else {
+                egui::CursorIcon::ResizeHorizontal
+            });
+        }
+        if response.dragged() {
+            let delta = response.drag_delta();
+            // Dragging toward the terminal grows the edge. The base is the size
+            // drawn, not the one stored: a narrow window may be showing less,
+            // and the edge should follow the pointer from where it is.
+            let (now, grow, min, max) = match edge {
+                DockEdge::Left => (rect.width(), delta.x, SIDEBAR_MIN_W, SIDEBAR_MAX_W),
+                DockEdge::Right => (rect.width(), -delta.x, SIDEBAR_MIN_W, SIDEBAR_MAX_W),
+                DockEdge::Top => (rect.height(), delta.y, DOCK_MIN_H, DOCK_MAX_H),
+                DockEdge::Bottom => (rect.height(), -delta.y, DOCK_MIN_H, DOCK_MAX_H),
+            };
+            if grow.is_finite() {
+                self.dock.sizes[edge.index()] = (now + grow).clamp(min, max);
+            }
+        }
+        if horizontal {
+            paint_splitter_h(ui, rule, palette, active);
+        } else {
+            paint_splitter_v(ui, rule, palette, active);
+        }
+    }
+
+    /// A panel being dragged: a drop zone on each edge of `area`, the one
+    /// under the pointer highlighted, a hint beside the pointer, and on
+    /// release the move. Escape cancels.
+    fn ui_dock_drop(&mut self, ui: &egui::Ui, area: egui::Rect, palette: &Palette) {
+        let Some(panel) = self.dock_drag else {
+            return;
+        };
+        // A release the window never saw — focus left mid-drag — would leave
+        // the drag armed for the next click; no button down ends it too.
+        let (escaped, lost) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Escape),
+                !i.pointer.primary_down() && !i.pointer.primary_released(),
+            )
+        });
+        if escaped || lost {
+            self.dock_drag = None;
+            return;
+        }
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        let pos = ui.input(|i| i.pointer.hover_pos());
+        let from = self.dock.edge_of(panel);
+        let target = pos
+            .and_then(|pos| dock_drop_edge(pos, area))
+            .filter(|edge| *edge != from);
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(
+            egui::Order::Foreground,
+            egui::Id::new("dock-drop-zones"),
+        ));
+        for edge in DockEdge::ALL {
+            let span = if edge.is_horizontal() {
+                area.height()
+            } else {
+                area.width()
+            };
+            // As deep as `dock_drop_edge` reaches, so the frame is where a
+            // release lands.
+            let depth = span * DOCK_DROP_BAND;
+            let zone = match edge {
+                DockEdge::Left => area.with_max_x(area.left() + depth),
+                DockEdge::Right => area.with_min_x(area.right() - depth),
+                DockEdge::Top => area.with_max_y(area.top() + depth),
+                DockEdge::Bottom => area.with_min_y(area.bottom() - depth),
+            };
+            let (fill, stroke) = if target == Some(edge) {
+                (
+                    palette.accent.gamma_multiply(0.12),
+                    egui::Stroke::new(2.0, palette.accent),
+                )
+            } else {
+                (
+                    palette.raised.gamma_multiply(0.04),
+                    egui::Stroke::new(1.0, palette.border_subtle),
+                )
+            };
+            painter.rect(
+                zone.shrink(SPACE_XS),
+                egui::CornerRadius::same(RADIUS_CARD),
+                fill,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+        }
+        egui::show_tooltip(
+            ui.ctx(),
+            ui.layer_id(),
+            egui::Id::new("dock-drag-tooltip"),
+            |ui| {
+                let hint = match target {
+                    Some(edge) => tf!(
+                        "{panel}を{edge}に移動",
+                        panel = panel.label(),
+                        edge = edge.label()
+                    ),
+                    None => tr("中央で離すとキャンセル").to_owned(),
+                };
+                ui.label(RichText::new(hint).color(palette.text_strong));
+            },
+        );
+        if ui.input(|i| i.pointer.button_released(egui::PointerButton::Primary)) {
+            self.finish_dock_drag(target);
+        }
+    }
+
+    /// Ends the drag in progress: the panel goes to `target` and the person
+    /// is told, or — no target, or the edge it is already on — nothing moves.
+    pub(crate) fn finish_dock_drag(&mut self, target: Option<DockEdge>) {
+        if let (Some(panel), Some(edge)) = (self.dock_drag.take(), target) {
+            self.dock_panel_to(panel, edge);
         }
     }
 }

@@ -575,22 +575,15 @@ pub(crate) struct OperonApp {
     pub(crate) terminal_path_menu: Option<(Uuid, PathBuf)>,
     /// User prompt turns recorded per session for navigation.
     pub(crate) session_prompt_turns: HashMap<Uuid, Vec<PromptTurn>>,
-    /// Whether the one side panel beside the terminal is open. Defaults to
-    /// true; folded from its own tab row and reopened from the header.
+    /// Whether the views about the selected session are open, wherever they
+    /// are docked. Defaults to true; folded from a group's tab row and
+    /// reopened from the header.
     pub(crate) show_session_inspector: bool,
-    /// Which tab of that panel is showing.
-    pub(crate) session_inspector_tab: InspectorTab,
-    /// Which side of the terminal the inspector panel is docked to.
-    pub(crate) session_inspector_side: SidebarSide,
-    /// Custom width for the session inspector when resized by dragging.
-    pub(crate) session_inspector_w: Option<f32>,
-    /// Active drag of a sidebar tab, if any.
-    pub(crate) dragging_sidebar_tab: Option<(InspectorTab, SidebarSide)>,
-    /// Custom width for the workspace session list sidebar.
-    pub(crate) session_list_w: f32,
-    /// The session list's share of its column while the side panel is
-    /// stacked under it.
-    pub(crate) session_list_split: f32,
+    /// Where the session list and each view are docked, and how big each
+    /// edge of the workspace is.
+    pub(crate) dock: DockLayout,
+    /// The panel being dragged by its grip, if any.
+    pub(crate) dock_drag: Option<DockPanel>,
     /// What the files tab is narrowed to. Empty draws the tree.
     pub(crate) session_file_filter: String,
     /// The paths that filter matched, as `(root, query, matches)`, so a scan of
@@ -937,14 +930,8 @@ impl OperonApp {
             terminal_path_menu: None,
             session_prompt_turns: HashMap::new(),
             show_session_inspector: true,
-            session_inspector_tab: InspectorTab::Files,
-            // Right, beside the terminal, as an editor's secondary side bar is:
-            // the left edge belongs to the session list (change 139).
-            session_inspector_side: SidebarSide::Right,
-            session_inspector_w: None,
-            dragging_sidebar_tab: None,
-            session_list_w: SIDEBAR_DEFAULT_W,
-            session_list_split: SIDEBAR_SPLIT_DEFAULT,
+            dock: DockLayout::default(),
+            dock_drag: None,
             session_file_filter: String::new(),
             session_filter_results: None,
             session_hidden_expanded: false,
