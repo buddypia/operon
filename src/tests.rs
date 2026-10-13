@@ -35205,7 +35205,7 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
     // Wide enough that the side panel is drawn beside the pane, and long enough
     // that both scroll areas have something to scroll. Either alone was fine.
     app.show_session_inspector = true;
-    app.session_inspector_tab = InspectorTab::Conversation;
+    app.dock.select(InspectorTab::Conversation);
     let screenful = (0..400)
         .map(|line| format!("エージェントの出力 {line}"))
         .collect::<Vec<_>>()
@@ -37055,36 +37055,12 @@ pub(crate) fn render_terminal_panel_shapes(
     texts
 }
 
-/// The terminal panel alone, at `width`: the row a right-docked side panel
-/// shares with the terminal, which is where the 640px rule applies.
+/// Puts every view on `edge` as one group, keeping the one showing — what the
+/// side panel's left/right switch did before change 145.
 #[cfg(test)]
-pub(crate) fn render_panel_row_shapes(
-    app: &mut OperonApp,
-    session: &Session,
-    width: f32,
-    height: f32,
-) -> Vec<String> {
-    let context = egui::Context::default();
-    let screen = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(width, height),
-        )),
-        ..Default::default()
-    };
-    let mut output = None;
-    for _ in 0..2 {
-        output = Some(context.run(screen.clone(), |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_panel(ui, session));
-        }));
-    }
-    let mut texts = Vec::new();
-    for shape in output.map(|output| output.shapes).unwrap_or_default() {
-        collect_text_shapes(&shape.shape, &mut texts);
-    }
-    texts
+pub(crate) fn dock_views_on(app: &mut OperonApp, edge: DockEdge) {
+    let from = app.dock.edge_of(DockPanel::View(InspectorTab::Files));
+    app.dock.move_views(from, edge);
 }
 
 #[cfg(test)]
@@ -37129,7 +37105,10 @@ pub(crate) fn test_session_file_tree_default_and_toggle_state() {
 
     // 1. The panel starts open, on its files tab.
     assert!(fixture.app.show_session_inspector);
-    assert_eq!(fixture.app.session_inspector_tab, InspectorTab::Files);
+    assert_eq!(
+        fixture.app.dock.shown_view(DockEdge::Right, true),
+        Some(InspectorTab::Files)
+    );
 
     // 2. At 1200px the files tab draws the tree, and the header names the project.
     let shapes =
@@ -37153,7 +37132,7 @@ pub(crate) fn test_session_file_tree_default_and_toggle_state() {
     assert!(shapes_on.iter().any(|s| s.contains("project_only.txt")));
 
     // 5. The conversation tab shows the turns instead of the tree.
-    fixture.app.session_inspector_tab = InspectorTab::Conversation;
+    fixture.app.dock.select(InspectorTab::Conversation);
     let shapes_turns =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(shapes_turns
@@ -37162,28 +37141,30 @@ pub(crate) fn test_session_file_tree_default_and_toggle_state() {
     assert!(!shapes_turns.iter().any(|s| s.contains("project_only.txt")));
 }
 
-/// F7: Responsive width threshold: the panel needs 640px, and is one panel at
-/// every width above it.
+/// F7 (made dock-wide by 145): the right-docked views need room for the
+/// terminal's minimum beside the session list at its own minimum, and are one
+/// group at every width above it.
 #[test]
 pub(crate) fn test_session_file_tree_responsive_width_thresholds() {
     let mut fixture = SessionTreeTestFixture::new("m2-responsive-widths");
     assert!(fixture.app.show_session_inspector);
-    // The rule is the right-docked panel's: docked left it is stacked in the
-    // session column and costs the terminal nothing (change 127).
-    fixture.app.session_inspector_side = SidebarSide::Right;
+    // The rule is the right edge's: docked left the views share the session
+    // list's edge, which is never dropped (change 127).
+    dock_views_on(&mut fixture.app, DockEdge::Right);
     let panel_drawn = |shapes: &[String]| shapes.iter().any(|s| s.contains("会話 1"));
+    let threshold = DOCK_CENTER_MIN_W + 2.0 * (SIDEBAR_MIN_W + DOCK_GAP);
 
     for (width, drawn) in [
         (350.0, false),
         (600.0, false),
-        (639.0, false),
-        (640.0, true),
+        (threshold - 1.0, false),
+        (threshold, true),
         (800.0, true),
         (960.0, true),
         (1200.0, true),
     ] {
         let shapes =
-            render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
+            render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
         assert_eq!(panel_drawn(&shapes), drawn, "panel at {width}px");
         assert_eq!(
             shapes.iter().any(|s| s.contains("project_only.txt")),
@@ -37200,7 +37181,7 @@ pub(crate) fn test_session_file_tree_responsive_width_thresholds() {
         (1200.0, true),
     ] {
         let shapes =
-            render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
+            render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, width, 600.0);
         assert_eq!(
             panel_drawn(&shapes),
             drawn,
@@ -37209,7 +37190,7 @@ pub(crate) fn test_session_file_tree_responsive_width_thresholds() {
     }
 
     // Docked left, the panel stays at a width where docked right it yields.
-    fixture.app.session_inspector_side = SidebarSide::Left;
+    dock_views_on(&mut fixture.app, DockEdge::Left);
     let shapes =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 600.0, 600.0);
     assert!(panel_drawn(&shapes), "stacked panel at 600px");
@@ -37551,34 +37532,37 @@ pub(crate) fn test_session_file_tree_real_world_workload_scenarios() {
 
     // Scenario S3: the one side panel, resizing down and back, then folded and reopened
     fixture.app.selected_session = Some(fixture.normal_session.id);
-    // Docked right, where the panel shares the terminal's row (change 127).
-    fixture.app.session_inspector_side = SidebarSide::Right;
+    // Docked right, the edge that yields first when the window narrows.
+    dock_views_on(&mut fixture.app, DockEdge::Right);
 
     // 1200px: terminal and the panel on its files tab
-    let s3_wide = render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
+    let s3_wide =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(s3_wide.iter().any(|s| s.contains("project_only.txt")));
     assert!(s3_wide.iter().any(|s| s.contains("会話 1")));
 
     // Resize to 800px: the panel stays
-    let s3_med = render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
+    let s3_med =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
     assert!(s3_med.iter().any(|s| s.contains("project_only.txt")));
 
-    // Resize to 600px: the panel yields, terminal occupies full width
+    // Resize to 600px: the right edge yields to the terminal
     let s3_narrow =
-        render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 600.0, 800.0);
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 600.0, 800.0);
     assert!(!s3_narrow.iter().any(|s| s.contains("project_only.txt")));
     assert!(!s3_narrow.iter().any(|s| s.contains("会話 1")));
 
     // Folded at 800px: nothing beside the terminal
     fixture.app.show_session_inspector = false;
     let s3_folded =
-        render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
     assert!(!s3_folded.iter().any(|s| s.contains("project_only.txt")));
     assert!(!s3_folded.iter().any(|s| s.contains("会話 1")));
 
     // Reopened at 800px: the files tab is back
     fixture.app.show_session_inspector = true;
-    let s3_open = render_panel_row_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
+    let s3_open =
+        render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 800.0, 800.0);
     assert!(s3_open.iter().any(|s| s.contains("project_only.txt")));
 }
 
@@ -37971,10 +37955,22 @@ pub(crate) fn test_sidebar_defaults_right_files_from_either_side() {
 
     // 1. Initial defaults: right panel (change 139), files tab, visible,
     // default session list width.
-    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Right);
-    assert_eq!(fixture.app.session_inspector_tab, InspectorTab::Files);
+    assert_eq!(
+        fixture
+            .app
+            .dock
+            .edge_of(DockPanel::View(InspectorTab::Files)),
+        DockEdge::Right
+    );
+    assert_eq!(
+        fixture.app.dock.shown_view(DockEdge::Right, true),
+        Some(InspectorTab::Files)
+    );
     assert!(fixture.app.show_session_inspector);
-    assert_eq!(fixture.app.session_list_w, SIDEBAR_DEFAULT_W);
+    assert_eq!(
+        fixture.app.dock.sizes[DockEdge::Left.index()],
+        SIDEBAR_DEFAULT_W
+    );
 
     // 2. Render when docked right: project files are visible.
     let shapes_right =
@@ -37982,36 +37978,40 @@ pub(crate) fn test_sidebar_defaults_right_files_from_either_side() {
     assert!(shapes_right.iter().any(|s| s.contains("project_only.txt")));
 
     // 3. Switch to the left side: project files are still rendered.
-    fixture.app.session_inspector_side = SidebarSide::Left;
+    dock_views_on(&mut fixture.app, DockEdge::Left);
     let shapes_left =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(shapes_left.iter().any(|s| s.contains("project_only.txt")));
 }
 
-/// Change 122 (made real by 128): a tab dropped past the middle of the
-/// workspace moves the panel to the other side, from either side.
+/// Change 122 (made real by 128, per view since 145): a tab dropped on the
+/// other side's edge moves that view there, from either side.
 #[test]
 pub(crate) fn test_sidebar_tab_drag_between_sides() {
-    assert_eq!(SidebarSide::Left.opposite(), SidebarSide::Right);
-    assert_eq!(SidebarSide::Right.opposite(), SidebarSide::Left);
+    let mut fixture = SessionTreeTestFixture::new("m2-sidebar-drag-sides");
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let files = DockPanel::View(InspectorTab::Files);
+    assert_eq!(fixture.app.dock.edge_of(files), DockEdge::Right);
+    fixture.app.dock_drag = Some(files);
+    fixture
+        .app
+        .finish_dock_drag(dock_drop_edge(egui::pos2(100.0, 400.0), area));
+    assert_eq!(fixture.app.dock.edge_of(files), DockEdge::Left);
+    fixture.app.dock_drag = Some(files);
+    fixture
+        .app
+        .finish_dock_drag(dock_drop_edge(egui::pos2(1100.0, 400.0), area));
+    assert_eq!(fixture.app.dock.edge_of(files), DockEdge::Right);
+    // Released on its own edge, it stays.
     assert_eq!(
-        sidebar_drop_side(SidebarSide::Left, egui::pos2(900.0, 400.0), area),
-        Some(SidebarSide::Right)
+        dock_drop_edge(egui::pos2(1100.0, 400.0), area),
+        Some(DockEdge::Right)
     );
-    assert_eq!(
-        sidebar_drop_side(SidebarSide::Right, egui::pos2(100.0, 400.0), area),
-        Some(SidebarSide::Left)
-    );
-    // Released on its own side, it stays.
-    assert_eq!(
-        sidebar_drop_side(SidebarSide::Left, egui::pos2(100.0, 400.0), area),
-        None
-    );
-    assert_eq!(
-        sidebar_drop_side(SidebarSide::Right, egui::pos2(900.0, 400.0), area),
-        None
-    );
+    fixture.app.notice = None;
+    fixture.app.dock_drag = Some(files);
+    fixture.app.finish_dock_drag(Some(DockEdge::Right));
+    assert_eq!(fixture.app.dock.edge_of(files), DockEdge::Right);
+    assert!(fixture.app.notice.is_none());
 }
 
 /// Change 122: the side panel's tab labels. The name promises reordering,
@@ -38029,13 +38029,13 @@ pub(crate) fn test_sidebar_renders_selected_tab_content() {
     let mut fixture = SessionTreeTestFixture::new("m2-sidebar-content");
 
     // Files tab
-    fixture.app.session_inspector_tab = InspectorTab::Files;
+    fixture.app.dock.select(InspectorTab::Files);
     let shapes_files =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(shapes_files.iter().any(|s| s.contains("project_only.txt")));
 
     // Conversation tab
-    fixture.app.session_inspector_tab = InspectorTab::Conversation;
+    fixture.app.dock.select(InspectorTab::Conversation);
     let shapes_conv =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(shapes_conv
@@ -38074,11 +38074,14 @@ pub(crate) fn test_sidebar_splitter_resize_clamp() {
     assert_eq!(clamped_valid, 300.0);
 
     // Applying clamped width to app
-    fixture.app.session_inspector_w = Some(clamped_valid);
-    assert_eq!(fixture.app.session_inspector_w, Some(300.0));
+    fixture.app.dock.sizes[DockEdge::Right.index()] = clamped_valid;
+    assert_eq!(fixture.app.dock.sizes[DockEdge::Right.index()], 300.0);
 
-    fixture.app.session_list_w = clamped_large;
-    assert_eq!(fixture.app.session_list_w, SIDEBAR_MAX_W);
+    fixture.app.dock.sizes[DockEdge::Left.index()] = clamped_large;
+    assert_eq!(
+        fixture.app.dock.sizes[DockEdge::Left.index()],
+        SIDEBAR_MAX_W
+    );
 }
 
 /// Change 122: Verify sidebar collapses when hidden.
@@ -38112,12 +38115,11 @@ pub(crate) fn test_sidebar_collapses_when_empty() {
 #[test]
 pub(crate) fn test_sidebar_right_splitter_expansion_not_collapsed() {
     let mut fixture = SessionTreeTestFixture::new("m2-sidebar-right-expand");
-    fixture.app.session_inspector_side = SidebarSide::Right;
+    dock_views_on(&mut fixture.app, DockEdge::Right);
 
     // Row width 1200px: terminal minimum is 300px, so max inspector is SIDEBAR_MAX_W (480px).
     let total_row_w = 1200.0;
-    let max_inspector_w =
-        (total_row_w - SessionColumnsLayout::TERMINAL_MIN_W).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
+    let max_inspector_w = (total_row_w - DOCK_CENTER_MIN_W).clamp(SIDEBAR_MIN_W, SIDEBAR_MAX_W);
     assert_eq!(max_inspector_w, SIDEBAR_MAX_W);
 
     // Initial inspector width at 268px, simulate dragging right splitter to expand by 150px
@@ -38128,56 +38130,63 @@ pub(crate) fn test_sidebar_right_splitter_expansion_not_collapsed() {
     assert!(expanded > SIDEBAR_DEFAULT_W);
     assert!(expanded <= SIDEBAR_MAX_W);
 
-    fixture.app.session_inspector_w = Some(expanded);
+    fixture.app.dock.sizes[DockEdge::Right.index()] = expanded;
     let shapes =
         render_terminal_panel_shapes(&mut fixture.app, &fixture.normal_session, 1200.0, 800.0);
     assert!(shapes.iter().any(|s| s.contains("project_only.txt")));
 }
 
-/// Change 125: Verify that pressing Escape cancels tab dragging immediately.
+/// Change 125 (made real by 145): Escape during a drag ends it, a release
+/// afterwards moves nothing, and nothing is announced.
 #[test]
 pub(crate) fn test_sidebar_tab_drag_escape_cancellation() {
     let mut fixture = SessionTreeTestFixture::new("m2-sidebar-escape-cancel");
-    fixture.app.session_inspector_side = SidebarSide::Left;
-    fixture.app.dragging_sidebar_tab = Some((InspectorTab::Files, SidebarSide::Left));
-    assert!(fixture.app.dragging_sidebar_tab.is_some());
-
-    // Simulate Escape key press
-    let escape_pressed = true;
-    if escape_pressed {
-        fixture.app.dragging_sidebar_tab = None;
-    }
-    assert!(fixture.app.dragging_sidebar_tab.is_none());
-    // Side remains unchanged and notice was not triggered
-    assert_eq!(fixture.app.session_inspector_side, SidebarSide::Left);
+    let files = DockPanel::View(InspectorTab::Files);
+    fixture.app.dock_drag = Some(files);
+    fixture.app.selected_session = Some(fixture.normal_session.id);
+    let context = egui::Context::default();
+    let frame = |events: Vec<egui::Event>| egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1200.0, 800.0),
+        )),
+        events,
+        ..Default::default()
+    };
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = context.run(frame(vec![escape]), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| fixture.app.ui_terminal_workspace(ui));
+    });
+    assert!(fixture.app.dock_drag.is_none());
+    assert_eq!(fixture.app.dock.edge_of(files), DockEdge::Right);
     assert!(fixture.app.notice.is_none());
 }
 
-/// Change 125 (made real by 128): drops within the centre dead zone or
-/// outside the workspace are rejected.
+/// Change 125 (made real by 128, four edges since 145): a release in the
+/// middle of the workspace, or outside it, lands nowhere.
 #[test]
 pub(crate) fn test_sidebar_tab_drag_deadzone_and_bounds() {
     let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
-    let center_x = area.center().x;
-    // Inside the 24px dead zone either way.
+    let center = area.center();
+    assert_eq!(dock_drop_edge(center, area), None);
+    // Just past the band on the right: still the middle.
+    let band_x = area.right() - area.width() * DOCK_DROP_BAND;
+    assert_eq!(dock_drop_edge(egui::pos2(band_x - 10.0, 400.0), area), None);
     assert_eq!(
-        sidebar_drop_side(SidebarSide::Left, egui::pos2(center_x + 10.0, 400.0), area),
-        None
+        dock_drop_edge(egui::pos2(band_x + 10.0, 400.0), area),
+        Some(DockEdge::Right)
     );
-    assert_eq!(
-        sidebar_drop_side(SidebarSide::Right, egui::pos2(center_x - 10.0, 400.0), area),
-        None
-    );
-    // Past the middle but outside the workspace.
-    assert_eq!(
-        sidebar_drop_side(SidebarSide::Left, egui::pos2(center_x + 100.0, -50.0), area),
-        None
-    );
-    // Clear of the dead zone and inside.
-    assert_eq!(
-        sidebar_drop_side(SidebarSide::Left, egui::pos2(center_x + 30.0, 400.0), area),
-        Some(SidebarSide::Right)
-    );
+    // Outside the workspace.
+    assert_eq!(dock_drop_edge(egui::pos2(1100.0, -50.0), area), None);
+    assert_eq!(dock_drop_edge(egui::pos2(1300.0, 400.0), area), None);
 }
 
 /// Every text the workspace paints, with where it was painted.
@@ -38242,7 +38251,7 @@ pub(crate) fn test_stacked_sidebar_heights_clamp() {
 pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
     let mut fixture = SessionTreeTestFixture::new("m2-stacked-together");
     // The stacked column is the left dock; the default is right (change 139).
-    fixture.app.session_inspector_side = SidebarSide::Left;
+    dock_views_on(&mut fixture.app, DockEdge::Left);
     let session = fixture.normal_session.clone();
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
     let find = |needle: &str| {
@@ -38258,7 +38267,7 @@ pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
         "files below sessions: {files:?} vs {sessions:?}"
     );
     assert!(
-        (files.x - sessions.x).abs() < fixture.app.session_list_w / 2.0,
+        (files.x - sessions.x).abs() < fixture.app.dock.sizes[DockEdge::Left.index()] / 2.0,
         "files in the session column: {files:?} vs {sessions:?}"
     );
 }
@@ -38269,9 +38278,9 @@ pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
 pub(crate) fn test_stacked_sidebar_returns_column_width_to_terminal() {
     let mut fixture = SessionTreeTestFixture::new("m2-stacked-width");
     // The stacked column is the left dock; the default is right (change 139).
-    fixture.app.session_inspector_side = SidebarSide::Left;
+    dock_views_on(&mut fixture.app, DockEdge::Left);
     let session = fixture.normal_session.clone();
-    let column_w = fixture.app.session_list_w;
+    let column_w = fixture.app.dock.sizes[DockEdge::Left.index()];
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
     let files = texts
         .iter()
@@ -38284,7 +38293,7 @@ pub(crate) fn test_stacked_sidebar_returns_column_width_to_terminal() {
     );
 
     // Docked right it is a column of its own, past the terminal.
-    fixture.app.session_inspector_side = SidebarSide::Right;
+    dock_views_on(&mut fixture.app, DockEdge::Right);
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1200.0, 800.0);
     let files = texts
         .iter()
@@ -38292,6 +38301,390 @@ pub(crate) fn test_stacked_sidebar_returns_column_width_to_terminal() {
         .map(|(_, pos)| *pos)
         .expect("file tree drawn on the right");
     assert!(files.x > 600.0, "file tree on the right edge: {files:?}");
+}
+
+// --- Change 145: each workspace panel docks on any of the four edges ---
+
+/// Change 145, requirement 1: one panel moves alone; a view arrives showing,
+/// and the edge it left falls back to what remains there.
+#[test]
+pub(crate) fn test_dock_layout_moves_one_panel_and_leaves_the_rest() {
+    let mut dock = DockLayout::default();
+    let files = DockPanel::View(InspectorTab::Files);
+    let conversation = DockPanel::View(InspectorTab::Conversation);
+    let changes = DockPanel::View(InspectorTab::Changes);
+    assert_eq!(dock.edge_of(DockPanel::Sessions), DockEdge::Left);
+    assert_eq!(
+        dock.shown_view(DockEdge::Right, true),
+        Some(InspectorTab::Files)
+    );
+
+    assert!(dock.move_panel(files, DockEdge::Bottom));
+    assert_eq!(dock.edge_of(files), DockEdge::Bottom);
+    assert_eq!(dock.edge_of(conversation), DockEdge::Right);
+    assert_eq!(dock.edge_of(changes), DockEdge::Right);
+    assert_eq!(dock.edge_of(DockPanel::Sessions), DockEdge::Left);
+    assert_eq!(
+        dock.shown_view(DockEdge::Bottom, true),
+        Some(InspectorTab::Files)
+    );
+    assert_eq!(
+        dock.shown_view(DockEdge::Right, true),
+        Some(InspectorTab::Conversation)
+    );
+    assert_eq!(
+        dock.views_at(DockEdge::Right).collect::<Vec<_>>(),
+        vec![InspectorTab::Conversation, InspectorTab::Changes]
+    );
+
+    // A second view on the same edge arrives as its showing tab.
+    assert!(dock.move_panel(changes, DockEdge::Bottom));
+    assert_eq!(
+        dock.shown_view(DockEdge::Bottom, true),
+        Some(InspectorTab::Changes)
+    );
+    dock.select(InspectorTab::Files);
+    assert_eq!(
+        dock.shown_view(DockEdge::Bottom, true),
+        Some(InspectorTab::Files)
+    );
+
+    // Without a project only the conversation is offered.
+    assert_eq!(dock.shown_view(DockEdge::Bottom, false), None);
+    assert_eq!(
+        dock.shown_view(DockEdge::Right, false),
+        Some(InspectorTab::Conversation)
+    );
+
+    // The list moves too, and moving to where it is changes nothing.
+    assert!(dock.move_panel(DockPanel::Sessions, DockEdge::Top));
+    assert_eq!(dock.edge_of(DockPanel::Sessions), DockEdge::Top);
+    assert!(!dock.move_panel(DockPanel::Sessions, DockEdge::Top));
+    assert_eq!(dock.shown_view(DockEdge::Top, true), None);
+    assert_eq!(dock.shown_view(DockEdge::Left, true), None);
+}
+
+/// Change 145, requirement 2: the nearest edge within the band, else nothing.
+#[test]
+pub(crate) fn test_dock_drop_edge_partitions_the_workspace() {
+    let area = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(1000.0, 600.0));
+    assert_eq!(
+        dock_drop_edge(egui::pos2(120.0, 350.0), area),
+        Some(DockEdge::Left)
+    );
+    assert_eq!(
+        dock_drop_edge(egui::pos2(1080.0, 350.0), area),
+        Some(DockEdge::Right)
+    );
+    assert_eq!(
+        dock_drop_edge(egui::pos2(600.0, 60.0), area),
+        Some(DockEdge::Top)
+    );
+    assert_eq!(
+        dock_drop_edge(egui::pos2(600.0, 640.0), area),
+        Some(DockEdge::Bottom)
+    );
+    // In a corner the nearer edge, measured as a share of its span, wins.
+    assert_eq!(
+        dock_drop_edge(egui::pos2(110.0, 120.0), area),
+        Some(DockEdge::Left)
+    );
+    assert_eq!(
+        dock_drop_edge(egui::pos2(250.0, 60.0), area),
+        Some(DockEdge::Top)
+    );
+    // The middle and the outside land nowhere.
+    assert_eq!(dock_drop_edge(area.center(), area), None);
+    assert_eq!(dock_drop_edge(egui::pos2(50.0, 350.0), area), None);
+    assert_eq!(dock_drop_edge(egui::pos2(600.0, 700.0), area), None);
+    // A degenerate workspace has no edges.
+    let empty = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO);
+    assert_eq!(dock_drop_edge(egui::Pos2::ZERO, empty), None);
+}
+
+/// Change 145, requirement 3: top and bottom span the workspace, left and
+/// right fill the band between, and each axis yields to the terminal on its
+/// own: shrink, then drop, never the session list's edge.
+#[test]
+pub(crate) fn test_dock_rects_keep_the_terminal_its_minimum() {
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+    let sizes = DockLayout::default().sizes;
+    let all = [true; 4];
+    let rects = dock_rects(area, all, sizes, DockEdge::Left);
+    let edge = |rects: &DockRects, edge: DockEdge| rects.edges[edge.index()];
+    let top = edge(&rects, DockEdge::Top).expect("top drawn");
+    let bottom = edge(&rects, DockEdge::Bottom).expect("bottom drawn");
+    let left = edge(&rects, DockEdge::Left).expect("left drawn");
+    let right = edge(&rects, DockEdge::Right).expect("right drawn");
+    assert_eq!(
+        top,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, DOCK_DEFAULT_H))
+    );
+    assert_eq!(bottom.width(), 1400.0);
+    assert_eq!(bottom.bottom(), 900.0);
+    assert_eq!(left.top(), DOCK_DEFAULT_H + DOCK_GAP);
+    assert_eq!(left.bottom(), 900.0 - DOCK_DEFAULT_H - DOCK_GAP);
+    assert_eq!(left.width(), SIDEBAR_DEFAULT_W);
+    assert_eq!(right.right(), 1400.0);
+    assert_eq!(rects.center.left(), SIDEBAR_DEFAULT_W + DOCK_GAP);
+    assert_eq!(rects.center.right(), 1400.0 - SIDEBAR_DEFAULT_W - DOCK_GAP);
+    assert_eq!(rects.center.top(), left.top());
+
+    // Too short: top and bottom shrink to their minimum, then bottom goes,
+    // and a narrow window is not why.
+    let short = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 700.0));
+    let rects = dock_rects(short, all, sizes, DockEdge::Left);
+    assert!(edge(&rects, DockEdge::Bottom).is_none());
+    assert!(edge(&rects, DockEdge::Right).is_some());
+    assert!(rects.center.height() >= DOCK_CENTER_MIN_H);
+    let tight = DOCK_CENTER_MIN_H + 2.0 * (DOCK_MIN_H + DOCK_GAP);
+    let fits = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, tight));
+    let rects = dock_rects(fits, all, sizes, DockEdge::Left);
+    assert_eq!(
+        edge(&rects, DockEdge::Top).map(|r| r.height()),
+        Some(DOCK_MIN_H)
+    );
+    assert_eq!(
+        edge(&rects, DockEdge::Bottom).map(|r| r.height()),
+        Some(DOCK_MIN_H)
+    );
+    assert_eq!(rects.center.height(), DOCK_CENTER_MIN_H);
+
+    // Too narrow: right goes before left, and the list's edge stays even
+    // when the terminal cannot have its minimum.
+    let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 900.0));
+    let rects = dock_rects(narrow, [true, true, false, false], sizes, DockEdge::Left);
+    assert!(edge(&rects, DockEdge::Right).is_none());
+    assert_eq!(
+        edge(&rects, DockEdge::Left).map(|r| r.width()),
+        Some(SIDEBAR_DEFAULT_W)
+    );
+    let rects = dock_rects(narrow, [true, true, false, false], sizes, DockEdge::Right);
+    assert!(edge(&rects, DockEdge::Left).is_none());
+    assert!(edge(&rects, DockEdge::Right).is_some());
+    let tiny = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 900.0));
+    let rects = dock_rects(tiny, [true, false, false, false], sizes, DockEdge::Left);
+    assert_eq!(
+        edge(&rects, DockEdge::Left).map(|r| r.width()),
+        Some(SIDEBAR_MIN_W)
+    );
+
+    // Nothing docked: the terminal has it all.
+    let rects = dock_rects(area, [false; 4], sizes, DockEdge::Left);
+    assert_eq!(rects.edges, [None; 4]);
+    assert_eq!(rects.center, area);
+}
+
+/// Change 145, requirement 3 (from the inline tests change 139 left in
+/// `session_tree.rs`): sizes that are not finite or out of range fall back or
+/// clamp, and nothing panics.
+#[test]
+pub(crate) fn test_dock_rects_adversarial_sizes() {
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let rects = dock_rects(area, [true; 4], [bad; 4], DockEdge::Left);
+        let left = rects.edges[DockEdge::Left.index()].expect("left drawn");
+        let top = rects.edges[DockEdge::Top.index()].expect("top drawn");
+        assert_eq!(left.width(), SIDEBAR_DEFAULT_W, "{bad}");
+        assert_eq!(top.height(), DOCK_DEFAULT_H, "{bad}");
+    }
+    let rects = dock_rects(area, [true; 4], [10_000.0; 4], DockEdge::Left);
+    assert_eq!(
+        rects.edges[DockEdge::Right.index()].map(|r| r.width()),
+        Some(SIDEBAR_MAX_W)
+    );
+    let rects = dock_rects(area, [true; 4], [-5.0; 4], DockEdge::Left);
+    assert_eq!(
+        rects.edges[DockEdge::Bottom.index()].map(|r| r.height()),
+        Some(DOCK_MIN_H)
+    );
+    let degenerate = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO);
+    let rects = dock_rects(degenerate, [true; 4], [f32::NAN; 4], DockEdge::Left);
+    assert!(rects.center.width() >= 0.0 && rects.center.height() >= 0.0);
+}
+
+/// Change 145, requirement 4: two sections on one edge keep both minimums.
+#[test]
+pub(crate) fn test_dock_split_lengths_keep_both_minimums() {
+    assert_eq!(split_lengths(1000.0, 0.4, 100.0, 200.0), (400.0, 600.0));
+    assert_eq!(split_lengths(1000.0, 0.01, 100.0, 200.0), (100.0, 900.0));
+    assert_eq!(split_lengths(1000.0, 0.99, 100.0, 200.0), (800.0, 200.0));
+    assert_eq!(split_lengths(250.0, 0.4, 100.0, 200.0), (125.0, 125.0));
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        let (first, second) = split_lengths(1000.0, bad, 100.0, 200.0);
+        assert_eq!(first, 1000.0 * SIDEBAR_SPLIT_DEFAULT, "{bad}");
+        assert_eq!(first + second, 1000.0);
+    }
+    assert_eq!(split_lengths(-5.0, 0.4, 100.0, 200.0), (0.0, 0.0));
+}
+
+/// Where `needle` was first painted.
+#[cfg(test)]
+fn painted_at(texts: &[(String, egui::Pos2)], needle: &str) -> Option<egui::Pos2> {
+    texts
+        .iter()
+        .find(|(text, _)| text.contains(needle))
+        .map(|(_, pos)| *pos)
+}
+
+/// Change 145, requirement 5: every panel can be put on every edge, and its
+/// content is drawn there.
+#[test]
+pub(crate) fn test_dock_every_panel_docks_on_every_edge_in_the_workspace() {
+    let mut fixture = SessionTreeTestFixture::new("dock-every-edge");
+    let session = fixture.normal_session.clone();
+    let (width, height) = (1400.0, 900.0);
+    let inside = |edge: DockEdge, pos: egui::Pos2| match edge {
+        DockEdge::Left => pos.x < SIDEBAR_DEFAULT_W,
+        DockEdge::Right => pos.x >= width - SIDEBAR_DEFAULT_W,
+        DockEdge::Top => pos.y < DOCK_DEFAULT_H,
+        DockEdge::Bottom => pos.y >= height - DOCK_DEFAULT_H,
+    };
+    for (panel, needle) in [
+        (DockPanel::Sessions, "プロジェクト別セッション"),
+        (DockPanel::View(InspectorTab::Files), "project_only.txt"),
+        (
+            DockPanel::View(InspectorTab::Conversation),
+            "Initial prompt for test",
+        ),
+        (DockPanel::View(InspectorTab::Changes), "変更"),
+    ] {
+        for edge in DockEdge::ALL {
+            fixture.app.dock = DockLayout::default();
+            fixture.app.dock.move_panel(panel, edge);
+            if let DockPanel::View(tab) = panel {
+                fixture.app.dock.select(tab);
+            }
+            let texts = render_workspace_text_positions(&mut fixture.app, &session, width, height);
+            let found = texts
+                .iter()
+                .filter(|(text, _)| text.contains(needle))
+                .any(|(_, pos)| inside(edge, *pos));
+            assert!(found, "{panel:?} on {edge:?}: {needle} not drawn there");
+        }
+    }
+}
+
+/// Change 145, requirement 6: the list and a group on one edge are drawn
+/// together, list first; views on one edge are tabs showing one at a time.
+#[test]
+pub(crate) fn test_dock_same_edge_list_and_views_share_it() {
+    let mut fixture = SessionTreeTestFixture::new("dock-same-edge");
+    let session = fixture.normal_session.clone();
+    let files = DockPanel::View(InspectorTab::Files);
+
+    // Left: stacked, the list above.
+    fixture.app.dock.move_panel(files, DockEdge::Left);
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
+    let list = painted_at(&texts, "プロジェクト別セッション").expect("list drawn");
+    let tree = painted_at(&texts, "project_only.txt").expect("tree drawn");
+    assert!(
+        tree.y > list.y && tree.x < SIDEBAR_DEFAULT_W,
+        "{list:?} {tree:?}"
+    );
+
+    // Top: side by side, the list on the left.
+    fixture.app.dock = DockLayout::default();
+    fixture
+        .app
+        .dock
+        .move_panel(DockPanel::Sessions, DockEdge::Top);
+    fixture.app.dock.move_panel(files, DockEdge::Top);
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
+    let list = painted_at(&texts, "プロジェクト別セッション").expect("list drawn");
+    let tree = painted_at(&texts, "project_only.txt").expect("tree drawn");
+    assert!(
+        tree.x > list.x && tree.y < DOCK_DEFAULT_H,
+        "{list:?} {tree:?}"
+    );
+    assert!(list.y < DOCK_DEFAULT_H);
+
+    // Two views on the bottom: one group, one showing.
+    fixture.app.dock = DockLayout::default();
+    fixture.app.dock.move_panel(files, DockEdge::Bottom);
+    fixture
+        .app
+        .dock
+        .move_panel(DockPanel::View(InspectorTab::Changes), DockEdge::Bottom);
+    fixture.app.dock.select(InspectorTab::Files);
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
+    assert!(
+        painted_at(&texts, "project_only.txt").is_some_and(|pos| pos.y > 900.0 - DOCK_DEFAULT_H)
+    );
+    fixture.app.dock.select(InspectorTab::Changes);
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
+    assert!(painted_at(&texts, "project_only.txt").is_none());
+}
+
+/// Change 145, requirement 7: the list is dragged by its heading, which wears
+/// the same grip as a view's tab.
+#[test]
+pub(crate) fn test_dock_session_list_has_its_own_grip() {
+    let mut fixture = SessionTreeTestFixture::new("dock-list-grip");
+    let session = fixture.normal_session.clone();
+    let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text.starts_with(ICON_DRAG_HANDLE)
+                && text.contains("プロジェクト別セッション")),
+        "the list heading leads with ICON_DRAG_HANDLE"
+    );
+}
+
+/// Change 145, requirement 8: the placement menu moves a group as one,
+/// keeping its showing view; the list stays.
+#[test]
+pub(crate) fn test_dock_layout_moves_a_group_together() {
+    let mut dock = DockLayout::default();
+    dock.select(InspectorTab::Conversation);
+    assert!(dock.move_panel(DockPanel::Sessions, DockEdge::Right));
+    assert!(dock.move_views(DockEdge::Right, DockEdge::Bottom));
+    for tab in InspectorTab::ALL {
+        assert_eq!(dock.edge_of(DockPanel::View(tab)), DockEdge::Bottom);
+    }
+    assert_eq!(
+        dock.shown_view(DockEdge::Bottom, true),
+        Some(InspectorTab::Conversation)
+    );
+    assert_eq!(dock.edge_of(DockPanel::Sessions), DockEdge::Right);
+    assert_eq!(dock.shown_view(DockEdge::Right, true), None);
+    // An edge with no views has nothing to move.
+    assert!(!dock.move_views(DockEdge::Top, DockEdge::Left));
+    assert!(!dock.move_views(DockEdge::Bottom, DockEdge::Bottom));
+}
+
+/// Change 145, requirement 9: a drop on another edge moves the panel and says
+/// so; a drop in the middle or on its own edge does neither. The drag ends.
+#[test]
+pub(crate) fn test_dock_drop_moves_and_tells_the_person() {
+    let mut fixture = SessionTreeTestFixture::new("dock-drop-notice");
+    let app = &mut fixture.app;
+    let files = DockPanel::View(InspectorTab::Files);
+
+    app.dock_drag = Some(files);
+    app.finish_dock_drag(Some(DockEdge::Bottom));
+    assert_eq!(app.dock.edge_of(files), DockEdge::Bottom);
+    assert_eq!(app.notice.as_deref(), Some("ファイルを下部に移動しました"));
+    assert!(app.dock_drag.is_none());
+
+    app.notice = None;
+    app.dock_drag = Some(DockPanel::Sessions);
+    app.finish_dock_drag(None);
+    assert_eq!(app.dock.edge_of(DockPanel::Sessions), DockEdge::Left);
+    assert!(app.notice.is_none());
+    assert!(app.dock_drag.is_none());
+
+    app.dock_drag = Some(DockPanel::Sessions);
+    app.finish_dock_drag(Some(DockEdge::Left));
+    assert!(app.notice.is_none());
+
+    app.dock_drag = Some(DockPanel::Sessions);
+    app.finish_dock_drag(Some(DockEdge::Top));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("セッション一覧を上部に移動しました")
+    );
 }
 
 /// Change 076: Test in-editor image preview document state and view mode locking.
@@ -39869,7 +40262,7 @@ pub(crate) fn a_filter_typed_before_the_scan_arrives_is_answered_once_it_does() 
     let mut fixture = SessionTreeTestFixture::new("filter-before-scan");
     fixture.app.page = Page::Sessions;
     fixture.app.selected_session = Some(fixture.worktree_session.id);
-    fixture.app.session_inspector_tab = InspectorTab::Files;
+    fixture.app.dock.select(InspectorTab::Files);
     fixture.app.session_file_filter = "WORKTREE_ONLY".to_owned();
     let scan = fixture
         .app
@@ -40629,10 +41022,11 @@ pub(crate) fn cli_restore_is_in_history_not_in_the_overview() {
         "履歴 has the section and its finder"
     );
     let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    // Read without whitespace: where the library is drawn moved into the
+    // dock's centre in change 145 and took its indentation with it.
+    let compact = screens.split_whitespace().collect::<String>();
     assert!(
-        screens.contains(
-            "self.ui_history_cli_section(ui);\n                        self.ui_sessions(ui);"
-        ),
+        compact.contains("self.ui_history_cli_section(&mutcenter);self.ui_sessions(&mutcenter);"),
         "the library draws the CLI section"
     );
     fs::remove_dir_all(&root).ok();
@@ -43031,7 +43425,10 @@ pub(crate) fn the_palette_ranks_a_waiting_session_above_an_equal_match() {
 pub(crate) fn the_side_panel_opens_on_the_right_by_default() {
     let root = temporary_directory("panel-default-right");
     let app = test_app(root.join("store-v2.json"));
-    assert_eq!(app.session_inspector_side, SidebarSide::Right);
+    assert_eq!(
+        app.dock.edge_of(DockPanel::View(InspectorTab::Files)),
+        DockEdge::Right
+    );
     assert!(app.show_session_inspector);
     fs::remove_dir_all(&root).ok();
 }

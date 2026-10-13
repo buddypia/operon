@@ -1,0 +1,27 @@
+# Review record for change 145. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer approved with nits and one Important finding — the
+# view group's child was salted by edge, so moving a group reset its scroll and
+# folded folders. Taken: salt by the showing tab; the drop zone painted as deep
+# as dock_drop_edge reaches; a drag with no button down ends (a release the
+# window never saw); the double tr dropped. Declined, with the reviewer's
+# agreement: resizing an edge from its stored size, because in a narrow window
+# that changes a hidden value while nothing on screen moves.
+#
+# Round 2: the reviewer checked each taken fix against the diff and approved;
+# three findings are carried below.
+
+digest: "24a7865b8af11626"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/6 · the パネルの配置を変更 menu button has no 28px minimum, stroke override, or focus paint, unlike the fold button beside it
+    person: "パネルの配置メニューのボタンだけ、隣の畳むボタンと見た目やフォーカス表示が少し違います。操作には影響せず、対応は不要です。"
+  - rust-reviewer/5 · a drop on an edge the window cannot show reports the move and then draws nothing
+    person: "ウィンドウが低すぎるときにパネルを上部や下部へ移すと、「移動しました」と出ても表示されません。ウィンドウを広げれば現れます。対応は不要です。"
+  - rust-reviewer/8 · the selected session's project is cloned every frame in ui_terminal_workspace
+    person: "表示のたびに小さなデータを 1 件複製していますが、体感できる遅さはありません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"

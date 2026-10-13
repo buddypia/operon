@@ -7,19 +7,19 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "approved"
 
-resume: "Run the readiness gate, get spec and plan judged, then build per plan.md."
+resume: "Push the branch, wait for CI, merge into main, then package and install."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh at the change commit (fmt, clippy, test count 779 -> 787, no new ignore)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0; 4 pre-existing breaches, largest_module_lines fell 8856 -> 8843"
   release-binary: "machine pending yes: touches src/ui, src/app, src/app.rs, src/config.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new dock test watched failing"
+  guards-verified-by-mutation: "human passed the ten dock tests were run against stub bodies and all ten failed before the model was filled in"

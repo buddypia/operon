@@ -73,6 +73,22 @@ pub(crate) const SIDEBAR_SECTION_MIN_H: f32 = 120.0;
 /// Least height the side panel shrinks to under the session list: its tab
 /// row and frame take about 56px and its body floors at 100px.
 pub(crate) const SIDEBAR_PANEL_MIN_H: f32 = 180.0;
+/// Height a panel docked on the workspace's top or bottom edge starts at.
+pub(crate) const DOCK_DEFAULT_H: f32 = 240.0;
+/// Least height of a top or bottom edge: the side panel's own floor.
+pub(crate) const DOCK_MIN_H: f32 = SIDEBAR_PANEL_MIN_H;
+/// Most height a top or bottom edge is dragged to.
+pub(crate) const DOCK_MAX_H: f32 = 560.0;
+/// Least width the terminal keeps whatever is docked beside it.
+pub(crate) const DOCK_CENTER_MIN_W: f32 = 300.0;
+/// Least height the terminal keeps whatever is docked above or below it: the
+/// pane's header and the terminal's own 320px floor.
+pub(crate) const DOCK_CENTER_MIN_H: f32 = 360.0;
+/// How far into the workspace, as a share of its span, a release still lands
+/// on the nearest edge. Past it on every side is the middle, which cancels.
+pub(crate) const DOCK_DROP_BAND: f32 = 0.3;
+/// The rule between an edge and the terminal, or two sections on one edge.
+pub(crate) const DOCK_GAP: f32 = 6.0;
 pub(crate) const FILE_SCAN_VISIT_LIMIT: usize = 100_000;
 pub(crate) const DIRECTORY_ENTRY_BUFFER_LIMIT: usize = 10_000;
 pub(crate) const COMMAND_OUTPUT_MAX_BYTES: usize = 8 * 1024 * 1024;

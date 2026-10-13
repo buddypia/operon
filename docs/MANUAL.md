@@ -201,7 +201,10 @@ work. Scrollback is up to 5,000 lines in the app (`tmux` itself keeps 50,000).
 **Latest** jumps to the newest line. The side panel opens to the right of the
 terminal (fold it with its arrow or ⌥⌘B, reopen with **Show side panel** or
 ⌥⌘B) and has three tabs: **Files**, **Conversation**
-(the requests you have sent), and **Changes**.
+(the requests you have sent), and **Changes**. Each tab, and the session
+list's heading, has a grip (⠿): drag it to the left, right, top, or bottom edge
+of the workspace to dock that panel there on its own, or right-click the grip
+to choose an edge. Releasing in the middle, or pressing Escape, cancels.
 
 Paths in terminal output are links: hold **⌥** and click to open the file in the
 built-in editor at that line, or **⌘** and click to open it externally. Only

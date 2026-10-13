@@ -14,10 +14,13 @@
    edge; the middle and anything outside the workspace pick nothing.
 3. `test_dock_rects_keep_the_terminal_its_minimum` — the rectangles for the
    occupied edges: top and bottom span the full width, left and right fill the
-   band between them, the centre keeps `DOCK_CENTER_MIN_W` × `DOCK_CENTER_MIN_H`
-   by shrinking edges to their minimum and then dropping edges that do not hold
-   the session list (bottom before top, right before left); sizes that are not
-   finite fall back to the defaults.
+   band between them, and the centre keeps `DOCK_CENTER_MIN_W` ×
+   `DOCK_CENTER_MIN_H`. Each axis is fitted on its own: a shortage of height
+   shrinks top and bottom to `DOCK_MIN_H`, then drops bottom, then top; a
+   shortage of width shrinks left and right to `SIDEBAR_MIN_W`, then drops
+   right, then left. The edge holding the session list is never dropped. A
+   dropped edge's views stay docked there and are drawn again once the window
+   has room. Sizes that are not finite fall back to the defaults.
 4. `test_dock_split_lengths_keep_both_minimums` — two sections sharing an edge
    split its length by the stored share, each keeping its minimum, halving when
    the edge is too short for both.
@@ -25,12 +28,19 @@
    workspace with each panel on each edge draws that panel's content inside that
    edge's rectangle (session list heading, file tree row, conversation turn,
    changes tab).
-6. `test_same_edge_list_and_views_share_it` — the session list and a view on the
+6. `test_dock_same_edge_list_and_views_share_it` — the session list and a view on the
    same edge are drawn together, list first (above on left/right, left of it on
    top/bottom); views on one edge are tabs of one group showing one at a time.
-7. `test_session_list_has_its_own_grip` — the session list heading leads with
-   `ICON_DRAG_HANDLE` like the view tabs, so it can be dragged.
-8. The existing side-panel tests (changes 122–144) are rewritten against the
+7. `test_dock_session_list_has_its_own_grip` — the session list heading leads
+   with `ICON_DRAG_HANDLE` like the view tabs, so it can be dragged.
+8. `test_dock_layout_moves_a_group_together` — moving the views on one edge as a
+   group (the 「パネルの配置を変更」 menu) moves every one of them and keeps the
+   one that was showing; the session list on that edge stays.
+9. `test_dock_drop_moves_and_tells_the_person` — finishing a drag on an edge the
+   panel is not on moves it and leaves the brief notice
+   「{panel}を{edge}に移動しました」; finishing in the middle or on its own edge
+   moves nothing and leaves no notice; the drag ends either way.
+10. The existing side-panel tests (changes 122–144) are rewritten against the
    dock model rather than deleted: defaults, fold and reopen, the selected tab's
    content, Escape cancelling a drag, and the stacked list-over-files layout.
 
@@ -70,7 +80,7 @@
   or with the history open, the view groups are not drawn. A session that
   belongs to no project has only the conversation view; a group holding only
   files and changes is then not drawn.
-- **Too narrow / too short.** The terminal keeps at least 300 × 240. Edges shrink
+- **Too narrow / too short.** The terminal keeps at least `DOCK_CENTER_MIN_W` × `DOCK_CENTER_MIN_H` (300 × 360). Edges shrink
   to their minimum first; then the edges that do not hold the session list are
   dropped, bottom before top and right before left. The session list's edge is
   never dropped (as today: the list column is always drawn).
@@ -95,7 +105,7 @@ The side panel's layout types live in `src/ui/session_tree.rs`
   - Add `DockPanel { Sessions, View(InspectorTab) }` with `ALL`, `label`.
   - Add `DockLayout { edges: [DockEdge; 4], showing: [Option<InspectorTab>; 4],
     sizes: [f32; 4], splits: [f32; 4] }` with `Default`, `edge_of`, `move_panel`,
-    `select`, `views_at(edge) -> impl Iterator` (no allocation), `shown_view(edge,
+    `move_views(from, to)`, `select`, `views_at(edge) -> impl Iterator` (no allocation), `shown_view(edge,
     has_project)`.
   - Add `dock_drop_edge(pos, area) -> Option<DockEdge>`, `dock_rects(area,
     occupied, sizes, keep) -> DockRects { edges: [Option<Rect>; 4], center: Rect }`,
@@ -108,7 +118,9 @@ The side panel's layout types live in `src/ui/session_tree.rs`
   - `ui_terminal_workspace` allocates the workspace rect, computes `dock_rects`,
     draws each occupied edge (`ui_dock_edge`), the edge-to-centre splitters, the
     centre (history, terminal panel, or the empty state), then the drop overlay
-    (`ui_dock_drop`, replacing `ui_sidebar_tab_drop`).
+    (`ui_dock_drop`, replacing `ui_sidebar_tab_drop`), which ends a drag through
+    `finish_dock_drag(target)` — the move and its notice, testable without a
+    frame.
   - `ui_session_column` becomes `ui_dock_edge`: list, group, or both with a rule.
   - `ui_terminal_panel` no longer draws a side panel; the terminal takes the
     centre's width.
@@ -117,8 +129,10 @@ The side panel's layout types live in `src/ui/session_tree.rs`
   `session_inspector_w`, `dragging_sidebar_tab`, `session_list_w`,
   `session_list_split` are replaced by `dock: DockLayout` and
   `dock_drag: Option<DockPanel>`. `show_session_inspector` stays.
-- `src/config.rs` — `DOCK_DEFAULT_H`, `DOCK_MIN_H`, `DOCK_MAX_H`,
-  `DOCK_CENTER_MIN_W`, `DOCK_CENTER_MIN_H`, `DOCK_DROP_BAND`.
+- `src/config.rs` — `DOCK_DEFAULT_H` (240), `DOCK_MIN_H` (= `SIDEBAR_PANEL_MIN_H`),
+  `DOCK_MAX_H` (560), `DOCK_CENTER_MIN_W` (300), `DOCK_CENTER_MIN_H` (360: the
+  pane header plus the terminal's 320px floor), `DOCK_DROP_BAND` (0.3),
+  `DOCK_GAP` (6, the rule between an edge and the terminal or two sections).
 - `src/i18n_tables.rs` — the new message ids in the English and Korean tables;
   the four 「サイドバーを…」 ids are removed with their last caller.
 
@@ -154,8 +168,8 @@ The draw path reads `DockLayout` (plain `Copy` arrays) and allocates nothing new
 
 - `cargo fmt --check` — nothing.
 - `cargo clippy --locked -- -D warnings` — nothing past the compile lines.
-- `cargo test --locked dock` and `cargo test --locked sidebar` pass, including the
-  requirement tests above; CI runs the suite.
+- `cargo test --locked dock`, `sidebar`, `stacked`, and `session_file_tree` pass —
+  every requirement test above has `dock` in its name; CI runs the suite.
 - In the running app: drag 「ファイル」 to the bottom — the tree spans the window
   under the terminal while 会話/変更 stay right; drag 「プロジェクト別セッション」
   to the top — the list runs across the top; release in the middle — nothing

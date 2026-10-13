@@ -24,107 +24,334 @@ impl InspectorTab {
     }
 }
 
-/// Which side of the terminal the inspector panel is docked to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-pub(crate) enum SidebarSide {
-    #[default]
+impl InspectorTab {
+    /// The three views, in the order their tabs are drawn.
+    pub(crate) const ALL: [Self; 3] = [Self::Files, Self::Conversation, Self::Changes];
+}
+
+/// An edge of the session workspace a panel can be docked on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum DockEdge {
     Left,
     Right,
+    Top,
+    Bottom,
 }
 
-impl SidebarSide {
-    pub(crate) fn opposite(self) -> Self {
+impl DockEdge {
+    pub(crate) const ALL: [Self; 4] = [Self::Left, Self::Right, Self::Top, Self::Bottom];
+
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
+
+    /// Top and bottom run across the workspace, so what shares one of them
+    /// sits side by side; on the left and right it is stacked.
+    pub(crate) fn is_horizontal(self) -> bool {
+        matches!(self, Self::Top | Self::Bottom)
+    }
+
+    pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Left => Self::Right,
-            Self::Right => Self::Left,
+            Self::Left => tr("左側"),
+            Self::Right => tr("右側"),
+            Self::Top => tr("上部"),
+            Self::Bottom => tr("下部"),
+        }
+    }
+
+    /// The menu entry that sends a panel here.
+    pub(crate) fn move_label(self) -> &'static str {
+        match self {
+            Self::Left => tr("左側に移動"),
+            Self::Right => tr("右側に移動"),
+            Self::Top => tr("上部に移動"),
+            Self::Bottom => tr("下部に移動"),
         }
     }
 }
 
-/// Layout of the session view: the terminal, and one side panel beside it.
+/// Something in the session workspace that can be dragged to an edge: the
+/// session list, or one of the views about the selected session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum DockPanel {
+    Sessions,
+    View(InspectorTab),
+}
+
+impl DockPanel {
+    fn index(self) -> usize {
+        match self {
+            Self::Sessions => 0,
+            Self::View(InspectorTab::Files) => 1,
+            Self::View(InspectorTab::Conversation) => 2,
+            Self::View(InspectorTab::Changes) => 3,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Sessions => tr("セッション一覧"),
+            Self::View(tab) => tab.label(),
+        }
+    }
+}
+
+/// Where each panel of the session workspace is docked, which view each edge
+/// is showing, and how big each edge is.
 ///
-/// There used to be two side columns, a conversation list and a file tree,
-/// and between them they took about 480px from the terminal while one of them
-/// was usually empty. They are tabs of one panel now.
-///
-/// Docked right, the panel is a column beside the terminal and this decides
-/// its width. Docked left, it is stacked under the session list in that
-/// column (change 127) and `stacked_sidebar_heights` splits it instead.
+/// The views on one edge are tabs of one group. The session list is not a
+/// tab: on an edge it shares with a group it sits beside it, split by a rule
+/// (change 127's stacked column, generalised to every edge).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct SessionColumnsLayout {
-    pub(crate) show_inspector: bool,
-    pub(crate) inspector_w: f32,
-    pub(crate) terminal_w: f32,
+pub(crate) struct DockLayout {
+    /// By `DockPanel::index`.
+    edges: [DockEdge; 4],
+    /// By `DockEdge::index`: the view last chosen there.
+    showing: [Option<InspectorTab>; 4],
+    /// By `DockEdge::index`: width for left and right, height for top and
+    /// bottom.
+    pub(crate) sizes: [f32; 4],
+    /// By `DockEdge::index`: the session list's share of an edge it shares.
+    pub(crate) splits: [f32; 4],
 }
 
-impl SessionColumnsLayout {
-    /// Below this width the terminal keeps the whole row.
-    pub(crate) const INSPECTOR_MIN_TOTAL: f32 = 640.0;
-    pub(crate) const INSPECTOR_MIN_W: f32 = 240.0;
-    pub(crate) const INSPECTOR_MAX_W: f32 = 300.0;
-    pub(crate) const TERMINAL_MIN_W: f32 = 300.0;
-
-    /// The panel is drawn when it is open and the row is at least
-    /// `INSPECTOR_MIN_TOTAL` wide; it takes 28% of the row, clamped to
-    /// 240–300, and the terminal takes the rest, at least 300.
-    pub(crate) fn compute(total_avail_w: f32, show_session_inspector: bool) -> Self {
-        let show_inspector = show_session_inspector && total_avail_w >= Self::INSPECTOR_MIN_TOTAL;
-        let inspector_w = if show_inspector {
-            (total_avail_w * 0.28).clamp(Self::INSPECTOR_MIN_W, Self::INSPECTOR_MAX_W)
-        } else {
-            0.0
-        };
-        let terminal_w = if show_inspector {
-            (total_avail_w - inspector_w - SPACE_SM).max(Self::TERMINAL_MIN_W)
-        } else {
-            total_avail_w
-        };
+impl Default for DockLayout {
+    /// The list on the left and the three views on the right, files showing
+    /// (change 139).
+    fn default() -> Self {
         Self {
-            show_inspector,
-            inspector_w,
-            terminal_w,
+            edges: [
+                DockEdge::Left,
+                DockEdge::Right,
+                DockEdge::Right,
+                DockEdge::Right,
+            ],
+            showing: [None, Some(InspectorTab::Files), None, None],
+            sizes: [
+                SIDEBAR_DEFAULT_W,
+                SIDEBAR_DEFAULT_W,
+                DOCK_DEFAULT_H,
+                DOCK_DEFAULT_H,
+            ],
+            splits: [SIDEBAR_SPLIT_DEFAULT; 4],
         }
     }
 }
 
-/// Where a side-panel tab dragged from `origin` and released at `pos` sends
-/// the panel: the other side when the release is inside `area` and past its
-/// middle by more than a 24px dead zone, otherwise nowhere.
-pub(crate) fn sidebar_drop_side(
-    origin: SidebarSide,
-    pos: egui::Pos2,
-    area: egui::Rect,
-) -> Option<SidebarSide> {
-    const DEADZONE_PX: f32 = 24.0;
-    if !area.contains(pos) {
+impl DockLayout {
+    pub(crate) fn edge_of(&self, panel: DockPanel) -> DockEdge {
+        self.edges[panel.index()]
+    }
+
+    /// Sends `panel` to `edge`; a view arrives as that edge's showing tab.
+    /// False when it was already there.
+    pub(crate) fn move_panel(&mut self, panel: DockPanel, edge: DockEdge) -> bool {
+        let from = self.edge_of(panel);
+        if from == edge {
+            return false;
+        }
+        self.edges[panel.index()] = edge;
+        if let DockPanel::View(tab) = panel {
+            if self.showing[from.index()] == Some(tab) {
+                self.showing[from.index()] = None;
+            }
+            self.showing[edge.index()] = Some(tab);
+        }
+        true
+    }
+
+    /// Sends every view on `from` to `to`, keeping the one that was showing.
+    /// The session list stays where it is.
+    pub(crate) fn move_views(&mut self, from: DockEdge, to: DockEdge) -> bool {
+        let showing = self.shown_view(from, true);
+        let mut moved = false;
+        for tab in InspectorTab::ALL {
+            if self.edge_of(DockPanel::View(tab)) == from {
+                moved |= self.move_panel(DockPanel::View(tab), to);
+            }
+        }
+        if let Some(tab) = showing.filter(|_| moved) {
+            self.select(tab);
+        }
+        moved
+    }
+
+    /// Makes `tab` the showing view of whichever edge it is on.
+    pub(crate) fn select(&mut self, tab: InspectorTab) {
+        let edge = self.edge_of(DockPanel::View(tab));
+        self.showing[edge.index()] = Some(tab);
+    }
+
+    /// The views docked on `edge`, in tab order.
+    pub(crate) fn views_at(&self, edge: DockEdge) -> impl Iterator<Item = InspectorTab> + '_ {
+        InspectorTab::ALL
+            .into_iter()
+            .filter(move |tab| self.edge_of(DockPanel::View(*tab)) == edge)
+    }
+
+    /// The view `edge` shows: the one last chosen there if it is still there
+    /// and offered, else the first offered. A session with no project offers
+    /// only its conversation, since files and changes are a project's.
+    pub(crate) fn shown_view(&self, edge: DockEdge, has_project: bool) -> Option<InspectorTab> {
+        let offered = |tab: &InspectorTab| has_project || *tab == InspectorTab::Conversation;
+        self.showing[edge.index()]
+            .filter(|tab| self.edge_of(DockPanel::View(*tab)) == edge && offered(tab))
+            .or_else(|| self.views_at(edge).find(offered))
+    }
+}
+
+/// Where a panel released at `pos` goes: the nearest edge of `area` when the
+/// release is within `DOCK_DROP_BAND` of it, otherwise — the middle, or
+/// outside the workspace — nowhere.
+pub(crate) fn dock_drop_edge(pos: egui::Pos2, area: egui::Rect) -> Option<DockEdge> {
+    if !area.contains(pos) || area.width() <= 0.0 || area.height() <= 0.0 {
         return None;
     }
-    let center_x = area.center().x;
-    let past_middle = match origin {
-        SidebarSide::Left => pos.x > center_x + DEADZONE_PX,
-        SidebarSide::Right => pos.x < center_x - DEADZONE_PX,
-    };
-    past_middle.then(|| origin.opposite())
+    [
+        (DockEdge::Left, (pos.x - area.left()) / area.width()),
+        (DockEdge::Right, (area.right() - pos.x) / area.width()),
+        (DockEdge::Top, (pos.y - area.top()) / area.height()),
+        (DockEdge::Bottom, (area.bottom() - pos.y) / area.height()),
+    ]
+    .into_iter()
+    .filter(|(_, share)| *share <= DOCK_DROP_BAND)
+    .min_by(|a, b| a.1.total_cmp(&b.1))
+    .map(|(edge, _)| edge)
 }
 
-/// Heights of the session list and the side panel stacked under it.
-///
-/// `split` is the list's share of `total_h`. The list keeps
-/// `SIDEBAR_SECTION_MIN_H` and the panel `SIDEBAR_PANEL_MIN_H` while the
-/// column has room for both; a column too short for that is halved. A share
-/// that is not finite is the default.
-pub(crate) fn stacked_sidebar_heights(total_h: f32, split: f32) -> (f32, f32) {
-    let total_h = total_h.max(0.0);
-    if total_h < SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H {
-        return (total_h / 2.0, total_h / 2.0);
+/// The workspace divided among its occupied edges and the terminal.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DockRects {
+    /// By `DockEdge::index`; `None` for an edge with nothing on it or no room.
+    pub(crate) edges: [Option<egui::Rect>; 4],
+    pub(crate) center: egui::Rect,
+}
+
+/// Lays the occupied edges around the terminal. Top and bottom span `area`;
+/// left and right fill the band between them, with a `DOCK_GAP` rule between
+/// each edge and the centre. Each axis is fitted on its own so the centre keeps
+/// `DOCK_CENTER_MIN_W` × `DOCK_CENTER_MIN_H`: edges shrink to their minimum,
+/// then bottom and then top, right and then left, are dropped — never `keep`,
+/// the edge the session list is on.
+pub(crate) fn dock_rects(
+    area: egui::Rect,
+    occupied: [bool; 4],
+    sizes: [f32; 4],
+    keep: DockEdge,
+) -> DockRects {
+    let size = |edge: DockEdge| {
+        let (default, min, max) = if edge.is_horizontal() {
+            (DOCK_DEFAULT_H, DOCK_MIN_H, DOCK_MAX_H)
+        } else {
+            (SIDEBAR_DEFAULT_W, SIDEBAR_MIN_W, SIDEBAR_MAX_W)
+        };
+        let size = sizes[edge.index()];
+        let size = if size.is_finite() { size } else { default };
+        occupied[edge.index()].then_some(size.clamp(min, max))
+    };
+    // Top and bottom first: they span the workspace, and what they leave is
+    // the band the left and right edges and the terminal share.
+    let [top, bottom] = fit_axis(
+        area.height(),
+        DOCK_CENTER_MIN_H,
+        DOCK_MIN_H,
+        [size(DockEdge::Top), size(DockEdge::Bottom)],
+        [keep == DockEdge::Top, keep == DockEdge::Bottom],
+    );
+    let [left, right] = fit_axis(
+        area.width(),
+        DOCK_CENTER_MIN_W,
+        SIDEBAR_MIN_W,
+        [size(DockEdge::Left), size(DockEdge::Right)],
+        [keep == DockEdge::Left, keep == DockEdge::Right],
+    );
+    let taken = |length: Option<f32>| length.map_or(0.0, |length| length + DOCK_GAP);
+    let band_top = area.top() + taken(top);
+    let band_bottom = (area.bottom() - taken(bottom)).max(band_top);
+    let center_left = area.left() + taken(left);
+    let center_right = (area.right() - taken(right)).max(center_left);
+    let mut edges = [None; 4];
+    edges[DockEdge::Top.index()] =
+        top.map(|h| egui::Rect::from_min_size(area.min, egui::vec2(area.width(), h)));
+    edges[DockEdge::Bottom.index()] = bottom
+        .map(|h| egui::Rect::from_min_max(egui::pos2(area.left(), area.bottom() - h), area.max));
+    edges[DockEdge::Left.index()] = left.map(|w| {
+        egui::Rect::from_min_max(
+            egui::pos2(area.left(), band_top),
+            egui::pos2(area.left() + w, band_bottom),
+        )
+    });
+    edges[DockEdge::Right.index()] = right.map(|w| {
+        egui::Rect::from_min_max(
+            egui::pos2(area.right() - w, band_top),
+            egui::pos2(area.right(), band_bottom),
+        )
+    });
+    DockRects {
+        edges,
+        center: egui::Rect::from_min_max(
+            egui::pos2(center_left, band_top),
+            egui::pos2(center_right, band_bottom),
+        ),
     }
-    let split = if split.is_finite() {
-        split
+}
+
+/// The two opposite edges of one axis, fitted around a centre that keeps
+/// `center_min` of `total`: each shrinks toward `min`, the second before the
+/// first, and while that is not enough the second and then the first is
+/// dropped — never one that `keep` marks.
+fn fit_axis(
+    total: f32,
+    center_min: f32,
+    min: f32,
+    wanted: [Option<f32>; 2],
+    keep: [bool; 2],
+) -> [Option<f32>; 2] {
+    let mut present = wanted;
+    loop {
+        let mut lengths = present;
+        let used: f32 = lengths
+            .iter()
+            .flatten()
+            .map(|length| length + DOCK_GAP)
+            .sum();
+        let mut over = center_min - (total - used);
+        for length in lengths.iter_mut().rev().flatten() {
+            let cut = (*length - min).clamp(0.0, over.max(0.0));
+            *length -= cut;
+            over -= cut;
+        }
+        if over <= 0.0 {
+            return lengths;
+        }
+        match (0..2).rev().find(|&i| present[i].is_some() && !keep[i]) {
+            Some(i) => present[i] = None,
+            None => return lengths,
+        }
+    }
+}
+
+/// Two sections sharing `total`: the first takes `share` of it, each keeps
+/// its minimum while there is room for both, and a length too short for both
+/// is halved. A share that is not finite is the default.
+pub(crate) fn split_lengths(total: f32, share: f32, min_first: f32, min_second: f32) -> (f32, f32) {
+    let total = total.max(0.0);
+    if total < min_first + min_second {
+        return (total / 2.0, total / 2.0);
+    }
+    let share = if share.is_finite() {
+        share
     } else {
         SIDEBAR_SPLIT_DEFAULT
     };
-    let top = (total_h * split).clamp(SIDEBAR_SECTION_MIN_H, total_h - SIDEBAR_PANEL_MIN_H);
-    (top, total_h - top)
+    let first = (total * share).clamp(min_first, total - min_second);
+    (first, total - first)
+}
+
+/// Heights of the session list and the side panel stacked under it.
+pub(crate) fn stacked_sidebar_heights(total_h: f32, split: f32) -> (f32, f32) {
+    split_lengths(total_h, split, SIDEBAR_SECTION_MIN_H, SIDEBAR_PANEL_MIN_H)
 }
 
 /// The top level of a tree, split into what is shown and the entries whose
@@ -175,7 +402,7 @@ pub(crate) fn filter_scanned_paths(paths: &[PathBuf], query: &str, limit: usize)
 }
 
 impl OperonApp {
-    /// The side panel: its tab row and whichever tab is showing.
+    /// One edge's group of views: its tab row and the view `shown`.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn ui_session_inspector(
         &mut self,
@@ -183,17 +410,19 @@ impl OperonApp {
         session: &Session,
         project: Option<&Project>,
         palette: &Palette,
+        edge: DockEdge,
+        shown: InspectorTab,
         width: f32,
         height: f32,
     ) {
-        // Files and changes are a project's; a session without one has only
-        // its conversation to show. Decided here rather than stored, so the
-        // tab chosen for other sessions survives visiting this one.
-        let shown = if project.is_some() {
-            self.session_inspector_tab
-        } else {
-            InspectorTab::Conversation
-        };
+        // Files and changes are a project's; a session without one offers
+        // only its conversation. Decided here rather than stored, so the tab
+        // chosen for other sessions survives visiting this one.
+        let offered = InspectorTab::ALL.map(|tab| {
+            (self.dock.edge_of(DockPanel::View(tab)) == edge
+                && (project.is_some() || tab == InspectorTab::Conversation))
+                .then_some(tab)
+        });
         let is_worktree = match (project, &session.worktree_path) {
             (Some(project), Some(path)) => path != &project.path,
             _ => false,
@@ -218,7 +447,16 @@ impl OperonApp {
                 ui.set_width((width - 16.0).max(100.0));
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = SPACE_XS;
-                    let mut tab = |ui: &mut egui::Ui, which: InspectorTab, label: String| {
+                    for which in offered.into_iter().flatten() {
+                        let label = match which {
+                            InspectorTab::Conversation if turns > 0 => {
+                                tf!("会話 {count}", count = turns)
+                            }
+                            InspectorTab::Changes if changes > 0 => {
+                                tf!("変更 {count}", count = changes)
+                            }
+                            _ => which.label().to_owned(),
+                        };
                         let selected = shown == which;
                         let text = RichText::new(format!("{ICON_DRAG_HANDLE} {label}"))
                             .size(12.5)
@@ -236,42 +474,11 @@ impl OperonApp {
                                     .sense(egui::Sense::click_and_drag()),
                             )
                             .on_hover_text(tr("ドラッグして移動"));
-                        if response.hovered() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-                        }
-                        if response.dragged() {
-                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        }
                         paint_button_focus(ui, &response, palette);
                         if response.clicked() {
-                            self.session_inspector_tab = which;
+                            self.dock.select(which);
                         }
-                        if response.drag_started() {
-                            self.dragging_sidebar_tab = Some((which, self.session_inspector_side));
-                        }
-                    };
-                    if project.is_some() {
-                        tab(ui, InspectorTab::Files, tr("ファイル").to_owned());
-                    }
-                    tab(
-                        ui,
-                        InspectorTab::Conversation,
-                        if turns > 0 {
-                            tf!("会話 {count}", count = turns)
-                        } else {
-                            tr("会話").to_owned()
-                        },
-                    );
-                    if project.is_some() {
-                        tab(
-                            ui,
-                            InspectorTab::Changes,
-                            if changes > 0 {
-                                tf!("変更 {count}", count = changes)
-                            } else {
-                                tr("変更").to_owned()
-                            },
-                        );
+                        self.dock_grip(ui, &response, DockPanel::View(which));
                     }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if icon_button(
@@ -284,18 +491,24 @@ impl OperonApp {
                         {
                             self.show_session_inspector = false;
                         }
-                        let (dock_icon, dock_hint) = match self.session_inspector_side {
-                            SidebarSide::Left => (ICON_RESTORE, tr("サイドバーを右側に移動")),
-                            SidebarSide::Right => (ICON_RESTORE, tr("サイドバーを左側に移動")),
-                        };
-                        if icon_button(ui, palette, dock_icon, dock_hint).clicked() {
-                            self.session_inspector_side = self.session_inspector_side.opposite();
-                            let notice = match self.session_inspector_side {
-                                SidebarSide::Left => tr("サイドバーを左側に移動しました"),
-                                SidebarSide::Right => tr("サイドバーを右側に移動しました"),
-                            };
-                            self.notice_briefly(notice);
-                        }
+                        ui.menu_button(RichText::new(ICON_RESTORE).size(16.0), |ui| {
+                            for to in DockEdge::ALL {
+                                if ui
+                                    .add_enabled(to != edge, egui::Button::new(to.move_label()))
+                                    .clicked()
+                                {
+                                    if self.dock.move_views(edge, to) {
+                                        self.notice_briefly(tf!(
+                                            "パネルを{edge}に移動しました",
+                                            edge = to.label()
+                                        ));
+                                    }
+                                    ui.close_menu();
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text(tr("パネルの配置を変更"));
                     });
                 });
                 ui.add_space(SPACE_XS);
@@ -317,6 +530,43 @@ impl OperonApp {
                     _ => self.ui_prompt_timeline(ui, palette, session.id),
                 }
             });
+    }
+
+    /// What every panel's grip does beyond its own click: the open and closed
+    /// hand, starting a drag of `panel`, and a right-click menu that sends it
+    /// to an edge without dragging.
+    pub(crate) fn dock_grip(&mut self, ui: &egui::Ui, grip: &egui::Response, panel: DockPanel) {
+        if grip.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if grip.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if grip.drag_started() {
+            self.dock_drag = Some(panel);
+        }
+        let from = self.dock.edge_of(panel);
+        grip.context_menu(|ui| {
+            for to in DockEdge::ALL {
+                if ui
+                    .add_enabled(to != from, egui::Button::new(to.move_label()))
+                    .clicked()
+                {
+                    self.dock_panel_to(panel, to);
+                    ui.close_menu();
+                }
+            }
+        });
+    }
+
+    /// Sends `panel` to `edge` and says so; nothing when it is already there.
+    pub(crate) fn dock_panel_to(&mut self, panel: DockPanel, edge: DockEdge) {
+        if self.dock.move_panel(panel, edge) {
+            self.notice_briefly(tf!(
+                "{panel}を{edge}に移動しました",
+                panel = panel.label(),
+                edge = edge.label()
+            ));
+        }
     }
 
     /// The files tab: a filter, the files the terminal mentioned, the tree
@@ -679,70 +929,4 @@ fn path_row(ui: &mut egui::Ui, path: &Path, palette: &Palette) -> egui::Response
         )
     })
     .inner
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_session_columns_layout_thresholds() {
-        // Below 640 the terminal keeps the row, whether or not the panel is open.
-        let l639 = SessionColumnsLayout::compute(639.0, true);
-        assert!(!l639.show_inspector);
-        assert_eq!(l639.inspector_w, 0.0);
-        assert_eq!(l639.terminal_w, 639.0);
-
-        // At 640 the panel appears at its minimum width.
-        let l640 = SessionColumnsLayout::compute(640.0, true);
-        assert!(l640.show_inspector);
-        assert_eq!(l640.inspector_w, 240.0);
-        assert_eq!(l640.terminal_w, 640.0 - 240.0 - SPACE_SM);
-
-        // 28% of the row, inside the clamp.
-        let l1000 = SessionColumnsLayout::compute(1000.0, true);
-        assert_eq!(l1000.inspector_w, 280.0);
-
-        // Folded: nothing is taken from the terminal at any width.
-        let folded = SessionColumnsLayout::compute(1400.0, false);
-        assert!(!folded.show_inspector);
-        assert_eq!(folded.inspector_w, 0.0);
-        assert_eq!(folded.terminal_w, 1400.0);
-    }
-
-    #[test]
-    fn test_session_columns_layout_adversarial_boundaries() {
-        let zero = SessionColumnsLayout::compute(0.0, true);
-        assert!(!zero.show_inspector);
-        assert_eq!(zero.terminal_w, 0.0);
-
-        let neg = SessionColumnsLayout::compute(-100.0, true);
-        assert!(!neg.show_inspector);
-        assert_eq!(neg.inspector_w, 0.0);
-        assert_eq!(neg.terminal_w, -100.0);
-
-        // Huge width: the panel stops at its maximum.
-        let huge = SessionColumnsLayout::compute(10_000.0, true);
-        assert_eq!(huge.inspector_w, 300.0);
-        assert!(huge.terminal_w > 9000.0);
-
-        let sub = SessionColumnsLayout::compute(639.99, true);
-        assert!(!sub.show_inspector);
-
-        // Non-finite widths never panic.
-        let nan = SessionColumnsLayout::compute(f32::NAN, true);
-        assert!(!nan.show_inspector);
-        assert_eq!(nan.inspector_w, 0.0);
-        assert!(nan.terminal_w.is_nan());
-
-        let inf = SessionColumnsLayout::compute(f32::INFINITY, true);
-        assert!(inf.show_inspector);
-        assert_eq!(inf.inspector_w, 300.0);
-        assert!(inf.terminal_w.is_infinite());
-
-        let neg_inf = SessionColumnsLayout::compute(f32::NEG_INFINITY, true);
-        assert!(!neg_inf.show_inspector);
-        assert_eq!(neg_inf.inspector_w, 0.0);
-        assert!(neg_inf.terminal_w.is_infinite());
-    }
 }
