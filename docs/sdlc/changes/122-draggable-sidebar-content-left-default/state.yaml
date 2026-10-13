@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -9,12 +9,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Commit and land draggable sidebar content and left sidebar default"
+resume: "Done. Draggable sidebar content and left sidebar default landed and packaged."
 
 contract:
   three-gates: "machine passed cargo test --locked"
   bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed each new guard watched failing"
 
 sets:
