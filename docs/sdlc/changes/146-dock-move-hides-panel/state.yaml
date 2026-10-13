@@ -9,7 +9,7 @@
 state:
   route: "bugfix"
   stage: "deploy"
-  status: "planning"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
