@@ -1,0 +1,25 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify — the side panel's drag exists and moves the wrong thing.
+# Screen: the change paints (risk.yaml `drawing`, screen yes); the layout is
+# re-arranged, so a person approved it (2026-10-13).
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "approved"
+
+resume: "Run the readiness gate, get spec and plan judged, then build per plan.md."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: touches src/ui, src/app, src/app.rs, src/config.rs, src/i18n_tables.rs; ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human pending each new dock test watched failing"
