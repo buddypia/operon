@@ -11,11 +11,11 @@ state:
   stage: "deploy"
   status: "planning"
   attempts: "0 3"
-  questions: "0 7"
+  questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
 resume: "Done. Two carried notes are in review.yaml; the running-app look is the person's to confirm."
 
