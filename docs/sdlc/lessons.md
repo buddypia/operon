@@ -1848,3 +1848,15 @@ under change 115's mutations 1, 2, and 10.
 **The rule.** A button is drawn by its helper in `src/ui/widgets.rs`; a size is a level of `DESIGN.md`'s `typography` block.
 
 **Guard.** `every_button_keeps_a_documented_height` and `every_text_size_is_a_level_on_the_type_scale`, watched failing on main's tree (13 and 32 sites) and on a reintroduced `small_button` and `.size(13.0)`.
+
+## 070 — The app promised a move the screen did not make
+
+**What happened.** Change 144 put grips on the side panel's tabs that could only move the panel within its column; the person had to point out that a grip which cannot put a panel where a grip promises is meaningless. Change 145 made every panel dock on any edge, and announced 「…を下部に移動しました」 for a move onto an edge a small window gives up for room — the panel, or another one it pushed off, vanished with its own grip. 145's review saw it and carried it to the person as "no action needed".
+
+**Why it was invisible.** 144's intent stated the cue (an icon, a cursor) as the outcome, so nothing asked what the grip could actually do. In 145 whether a panel is drawn was decided after the move, by a function the move never consulted, and every dock test ran in a window large enough for all four edges. `REVIEW.md`'s Important list had no line for a message the screen does not bear out, so the finding was graded a nit.
+
+**Cure.** Change 146: drawing and the move check read one `DockLayout::rects`; every move passes `dock_commit`, which refuses one that would take a panel off the screen and says why; the drop zones and menus show the refusal before it is tried. `REVIEW.md` grades the class Important, and the intent template says a cue is not an outcome.
+
+**The rule.** An action that tells the person it happened is checked against what is painted afterwards, at the sizes the person uses, not against the state it changed.
+
+**Guard.** `test_dock_move_keeps_every_shown_panel_on_screen` (every panel × edge × three window sizes, judged by painted grips) and `test_dock_refused_move_says_why`, watched failing on 145's `dock_panel_to` and on the gate replaced by `true`; `test_dock_drag_by_pointer_events`, watched failing with the Escape branch deleted and with the drag never armed.

@@ -204,7 +204,9 @@ terminal (fold it with its arrow or ⌥⌘B, reopen with **Show side panel** or
 (the requests you have sent), and **Changes**. Each tab, and the session
 list's heading, has a grip (⠿): drag it to the left, right, top, or bottom edge
 of the workspace to dock that panel there on its own, or right-click the grip
-to choose an edge. Releasing in the middle, or pressing Escape, cancels.
+to choose an edge. Releasing in the middle or on the panel's own edge, or
+pressing Escape, cancels. An edge the window is too small to show the panel on
+is outlined in amber and refuses it; widen the window to use it.
 
 Paths in terminal output are links: hold **⌥** and click to open the file in the
 built-in editor at that line, or **⌘** and click to open it externally. Only

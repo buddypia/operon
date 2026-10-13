@@ -584,6 +584,9 @@ pub(crate) struct OperonApp {
     pub(crate) dock: DockLayout,
     /// The panel being dragged by its grip, if any.
     pub(crate) dock_drag: Option<DockPanel>,
+    /// The rect the session workspace was last drawn into; a dock move is
+    /// judged against it (change 146).
+    pub(crate) dock_area: Option<egui::Rect>,
     /// What the files tab is narrowed to. Empty draws the tree.
     pub(crate) session_file_filter: String,
     /// The paths that filter matched, as `(root, query, matches)`, so a scan of
@@ -932,6 +935,7 @@ impl OperonApp {
             show_session_inspector: true,
             dock: DockLayout::default(),
             dock_drag: None,
+            dock_area: None,
             session_file_filter: String::new(),
             session_filter_results: None,
             session_hidden_expanded: false,

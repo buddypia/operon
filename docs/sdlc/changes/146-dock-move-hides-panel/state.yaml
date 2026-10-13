@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: bugfix — change 145's dock announces a move the screen does not show.
+# Screen: the change paints (risk.yaml `drawing`); it adds states inside
+# existing palette roles and no layout, so the evaluator approves it
+# (references/approval.md, "Screens split by structure").
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Two carried notes are in review.yaml; the running-app look is the person's to confirm."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh at e0c42b5 (fmt, clippy, test count up by 4, no new ignore)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0; the 4 pre-existing breaches, largest_module_lines 8843 -> 8847"
+  release-binary: "machine passed bash scripts/package-macos.sh at 3bbc82c; /Applications/Operon.app swapped, check-installed-build CURRENT; CI green on 3bbc82c"
+  guards-verified-by-mutation: "human passed R1, R2, R4 failed on 145 behaviour; R3 and the Escape test failed with the Escape branch deleted and the drag never armed; the room clause and the gate each caught by mutation"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
