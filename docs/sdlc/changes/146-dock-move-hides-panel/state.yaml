@@ -8,7 +8,7 @@
 
 state:
   route: "bugfix"
-  stage: "test"
+  stage: "deploy"
   status: "planning"
   attempts: "0 3"
   questions: "0 7"
@@ -17,12 +17,12 @@ state:
   readiness: "pending"
   screen: "pending"
 
-resume: "Reviewed; push, wait for CI, land, then package and swap."
+resume: "Done. Two carried notes are in review.yaml; the running-app look is the person's to confirm."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh at e0c42b5 (fmt, clippy, test count up by 4, no new ignore)"
   bands: "machine passed bash scripts/check-bands.sh exit 0; the 4 pre-existing breaches, largest_module_lines 8843 -> 8847"
-  release-binary: "machine pending yes: src/ui/session_tree.rs and src/app/screens.rs change, so it ends with bash scripts/package-macos.sh and the swap"
+  release-binary: "machine passed bash scripts/package-macos.sh at 3bbc82c; /Applications/Operon.app swapped, check-installed-build CURRENT; CI green on 3bbc82c"
   guards-verified-by-mutation: "human passed R1, R2, R4 failed on 145 behaviour; R3 and the Escape test failed with the Escape branch deleted and the drag never armed; the room clause and the gate each caught by mutation"
 
 sets:
