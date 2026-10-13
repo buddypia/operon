@@ -1,0 +1,29 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "docs"
+  stage: "build"
+  status: "done"
+  attempts: "0 2"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. always_loaded_bytes (8555), steering_bytes (186058), and reference_bytes (15209) all brought below their warn tiers, and pipeline-indicators.sh --lessons passes 70 of 70."
+
+contract:
+  bands: "machine passed bash scripts/check-bands.sh reports always_loaded_bytes, steering_bytes, and reference_bytes all within their bands"
+  lesson-guards-intact: "machine passed bash scripts/pipeline-indicators.sh --lessons reports 70 of 70 name a guard this repository holds"
+  three-gates: "machine passed make q.fast and harness document invariant tests"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

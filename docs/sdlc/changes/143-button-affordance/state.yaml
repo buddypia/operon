@@ -15,7 +15,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -23,7 +23,7 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Implementation and tests complete. make q.fast and named tests pass. Ready to commit in worktree."
+resume: "Done. Button affordance improvements landed on main and packaged."
 
 contract:
   three-gates: "machine passed make q.fast and cargo test --locked for named tests"
