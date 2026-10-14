@@ -3806,6 +3806,127 @@ pub(crate) fn renders_ansi_terminal_colors_without_escape_codes() {
     );
 }
 #[test]
+pub(crate) fn renders_terminal_background_colors_and_half_block_banners() {
+    let palette = AppTheme::Dark.palette();
+    // Real Antigravity CLI 1.3.5 startup banner row 3 captured via
+    // `tmux capture-pane -e -p`: each cell pairs a 256-colour foreground (`38;5;n`)
+    // on an upper-half block (`▀`) with a 256-colour background (`48;5;n`) for the
+    // lower half, then resets background with `49` for the arch opening (`67` and
+    // `103`), and finishes the right edge with `\x1b[38;5;132m\x1b[48;5;97m▀`.
+    // When `48;5;n` is ignored without advancing past its arguments, `97` is
+    // misread as top-level `SGR 97` (bright white foreground) and every `▀` loses
+    // its lower-half background fill.
+    let banner = concat!(
+        "      \x1b[38;5;179m▄\x1b[38;5;208m\x1b[48;5;208m▀\x1b[38;5;203m\x1b[48;5;209m▀\x1b[49m▄\x1b[39m        \x1b[1m\x1b[38;5;32mAntigravity CLI 1.3.5\x1b[0m\n",
+        "     \x1b[38;5;149m\x1b[48;5;113m▀\x1b[38;5;143m\x1b[48;5;107m▀\x1b[38;5;173m\x1b[48;5;173m▀\x1b[38;5;209m\x1b[48;5;209m▀\x1b[38;5;203m\x1b[48;5;167m▀▀\x1b[39m\x1b[49m       \x1b[38;5;246muser@example.com\x1b[39m\n",
+        "    \x1b[38;5;107m\x1b[48;5;113m▀\x1b[38;5;71m\x1b[48;5;72m▀\x1b[38;5;72m\x1b[48;5;68m▀\x1b[38;5;67m\x1b[49m▀\x1b[38;5;103m▀\x1b[38;5;98m\x1b[48;5;68m▀\x1b[38;5;97m\x1b[48;5;62m▀\x1b[38;5;132m\x1b[48;5;97m▀\x1b[39m\x1b[49m      \x1b[38;5;246mGemini 3.8 Flash (High)\x1b[39m\n",
+        "   \x1b[38;5;78m▄\x1b[48;5;74m▀\x1b[38;5;73m▀\x1b[39m\x1b[49m    \x1b[38;5;68m\x1b[48;5;69m▀▀\x1b[49m▄\x1b[39m     \x1b[38;5;246m~/workspace\x1b[39m\n",
+        "  \x1b[38;5;75m▄\x1b[38;5;79m\x1b[48;5;75m▀\x1b[38;5;75m\x1b[49m▀\x1b[39m      \x1b[38;5;69m▀\x1b[48;5;69m▀\x1b[49m▄\x1b[39m",
+    );
+    let lines = terminal_line_layouts(banner, palette);
+    assert_eq!(lines.len(), 5);
+
+    // Row 3 (index 2): 8 half-block cells after the 4 leading spaces.
+    let row3_blocks: Vec<&egui::text::LayoutSection> = lines[2]
+        .sections
+        .iter()
+        .filter(|s| lines[2].text[s.byte_range.clone()].contains('▀'))
+        .collect();
+    assert_eq!(row3_blocks.len(), 8);
+
+    // First block on row 3: fg = 107, bg = 113.
+    assert_eq!(
+        row3_blocks[0].format.color,
+        terminal_ansi_256_color(107, palette)
+    );
+    assert_eq!(
+        row3_blocks[0].format.background,
+        terminal_ansi_256_color(113, palette)
+    );
+
+    // Fourth block on row 3 (`\x1b[38;5;67m\x1b[49m▀`): `49` resets background to transparent.
+    assert_eq!(
+        row3_blocks[3].format.color,
+        terminal_ansi_256_color(67, palette)
+    );
+    assert_eq!(row3_blocks[3].format.background, Color32::TRANSPARENT);
+
+    // Eighth block on row 3 (`\x1b[38;5;132m\x1b[48;5;97m▀`): `97` is the 256-colour
+    // background argument, not `SGR 97` bright white foreground.
+    assert_eq!(
+        row3_blocks[7].format.color,
+        terminal_ansi_256_color(132, palette)
+    );
+    assert_eq!(
+        row3_blocks[7].format.background,
+        terminal_ansi_256_color(97, palette)
+    );
+
+    // Trailing spaces after `\x1b[39m\x1b[49m` return to default fg and transparent bg.
+    let trailing = &lines[2].sections[9];
+    assert_eq!(trailing.format.color, palette.terminal_fg);
+    assert_eq!(trailing.format.background, Color32::TRANSPARENT);
+
+    // Standard, bright, 24-bit RGB, and inverse background SGR codes also round-trip.
+    let rich = terminal_line_layouts(
+        "\x1b[41;37mwarn\x1b[102;30m ok \x1b[48;2;10;20;30;38;2;40;50;60mrgb\x1b[7minv\x1b[27m\x1b[49;39mplain",
+        palette,
+    );
+    assert_eq!(
+        rich[0].sections[0].format.background,
+        terminal_ansi_color(1, false, palette)
+    );
+    assert_eq!(
+        rich[0].sections[1].format.background,
+        terminal_ansi_color(2, true, palette)
+    );
+    assert_eq!(
+        rich[0].sections[2].format.background,
+        Color32::from_rgb(10, 20, 30)
+    );
+    assert_eq!(
+        rich[0].sections[2].format.color,
+        Color32::from_rgb(40, 50, 60)
+    );
+    assert_eq!(
+        rich[0].sections[3].format.color,
+        Color32::from_rgb(10, 20, 30)
+    );
+    assert_eq!(
+        rich[0].sections[3].format.background,
+        Color32::from_rgb(40, 50, 60)
+    );
+    assert_eq!(rich[0].sections[4].format.background, Color32::TRANSPARENT);
+
+    // Underline colour (`58;5;97` / `58;2;31;32;33`) and colon-separated ITU T.416
+    // subparameters (`38:5:132;48:5:97`, `38:2::1:2:3;48:2:4:5:6`) must not leak
+    // their colour arguments into top-level foreground/background SGR codes.
+    let extended = terminal_line_layouts(
+        "\x1b[38;5;132;58;5;97mu\x1b[38:5:132;48:5:97mc\x1b[38:2::1:2:3;48:2:4:5:6mrgb",
+        palette,
+    );
+    assert_eq!(
+        extended[0].sections[0].format.color,
+        terminal_ansi_256_color(132, palette)
+    );
+    assert_eq!(
+        extended[0].sections[1].format.color,
+        terminal_ansi_256_color(132, palette)
+    );
+    assert_eq!(
+        extended[0].sections[1].format.background,
+        terminal_ansi_256_color(97, palette)
+    );
+    assert_eq!(
+        extended[0].sections[2].format.color,
+        Color32::from_rgb(1, 2, 3)
+    );
+    assert_eq!(
+        extended[0].sections[2].format.background,
+        Color32::from_rgb(4, 5, 6)
+    );
+}
+#[test]
 pub(crate) fn carries_terminal_color_across_the_lines_it_spans() {
     let palette = AppTheme::Dark.palette();
     // Splitting the buffer into rows is a rendering decision. A colour the
@@ -6318,10 +6439,17 @@ pub(crate) fn bundled_terminal_fonts_keep_cjk_at_exactly_two_ascii_cells() {
     ] {
         let font = ab_glyph::FontRef::try_from_slice(font_data)
             .expect("the bundled static terminal font should parse");
-        for character in ['X', 'あ', '次', '한'] {
+        for character in ['X', 'あ', '次', '한', '▀', '▄', '█'] {
             assert_ne!(font.glyph_id(character).0, 0, "missing {character}");
         }
         let ascii_advance = font.h_advance_unscaled(font.glyph_id('X'));
+        for block in ['▀', '▄', '█'] {
+            assert_eq!(
+                font.h_advance_unscaled(font.glyph_id(block)),
+                ascii_advance,
+                "block element {block} must advance by exactly one ASCII cell"
+            );
+        }
         assert_eq!(
             font.h_advance_unscaled(font.glyph_id('あ')),
             ascii_advance * 2.0

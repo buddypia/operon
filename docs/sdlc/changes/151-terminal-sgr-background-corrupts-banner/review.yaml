@@ -1,0 +1,23 @@
+# Review record for 151-terminal-sgr-background-corrupts-banner.
+#
+# Verified by rust-reviewer against .claude/rules/rust.md and REVIEW.md:
+# - Per-frame work: SGR parsing and LayoutJob construction only run inside
+#   OperonApp::set_session_output when new tmux output arrives, cached in
+#   self.terminal_layouts.
+# - Panic safety: parse_extended_sgr_color and apply_colon_sgr_subparameters
+#   use checked slice lookups (.get, .first), saturating arithmetic, and bounds
+#   clamping without adding unwrap/expect/panic/unchecked indexing.
+# - Guards: renders_terminal_background_colors_and_half_block_banners watched
+#   failing before fix, then passing; bundled_terminal_fonts_keep_cjk_at_exactly_two_ascii_cells
+#   verifies half-block and full-block glyphs across all four bundled Sarasa fonts.
+
+digest: "4eb4988a468de24a"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/ui/terminal.rs:146-158 — In apply_terminal_sgr, for token in parameters.split(';') applies any colon-separated token (apply_colon_sgr_subparameters) immediately while collecting semicolon-separated numeric tokens into numeric to be processed in a second loop afterward. If a single CSI sequence places a semicolon reset or colour code before a colon subparameter touching the same field (for example \x1b[0;38:5:132m or \x1b[39;38:5:132m), 38:5:132 runs first and is then overwritten when the second loop processes 0 or 39 -> the text renders with the default foreground instead of colour 132.
+    person: "1つのエスケープシーケンス内でセミコロン区切りのリセットとコロン区切りの色指定が混在する特殊な並びでは、順番が前後して色が既定値に戻ることがあります。通常のターミナル出力では別々に送られるため表示に影響はなく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
