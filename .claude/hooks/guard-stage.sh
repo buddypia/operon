@@ -20,22 +20,32 @@
 #
 #   OPERON_SKIP_STAGE_GATE=1   proceed anyway (say why in the report)
 set -uo pipefail
+export GIT_NO_REPLACE_OBJECTS=1
+export GIT_GRAFT_FILE=/dev/null
 
 payload=$(cat)
 [ "${OPERON_SKIP_STAGE_GATE:-0}" = "1" ] && exit 0
 
-path=$(printf '%s' "$payload" | jq -r '.tool_input.file_path // empty')
+path=$(printf '%s' "$payload" | jq -r '.tool_input.file_path // .tool_input.TargetFile // .toolCall.args.TargetFile // .toolCall.args.file_path // empty')
 [ -z "$path" ] && exit 0
 
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
-running_in=$(printf '%s' "$payload" | jq -r '.cwd // empty')
+running_in=$(printf '%s' "$payload" | jq -r '.tool_input.Cwd // .toolCall.args.Cwd // .cwd // .session.cwd // .workspacePaths[0] // empty')
 case "$path" in
   /*) target_dir=$(dirname -- "$path" 2>/dev/null) ;;
   *) target_dir="" ;;
 esac
-if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
-  resolved_target_dir=$(cd -- "$target_dir" 2>/dev/null && pwd -P)
-  [ -n "$resolved_target_dir" ] && path="$resolved_target_dir/$(basename -- "$path")"
+probe_dir=$target_dir
+while [ -n "$probe_dir" ] && [ "$probe_dir" != "/" ] && [ ! -d "$probe_dir" ]; do
+  probe_dir=$(dirname -- "$probe_dir" 2>/dev/null)
+done
+if [ -n "$probe_dir" ] && [ -d "$probe_dir" ]; then
+  resolved_probe_dir=$(cd -- "$probe_dir" 2>/dev/null && pwd -P)
+  if [ -n "$resolved_probe_dir" ]; then
+    suffix=${path#"$probe_dir/"}
+    path="$resolved_probe_dir/$suffix"
+    target_dir=$resolved_probe_dir
+  fi
 else
   target_dir=${running_in:-${CLAUDE_PROJECT_DIR:-.}}
 fi
@@ -89,12 +99,22 @@ in_flight=""
 for state_file in $candidates; do
   [ -f "$state_file" ] || continue
   case "$(field "$state_file" status)" in
-    planning | ready | in-progress | reviewing) in_flight="$state_file"; break ;;
+    planning | ready | in-progress | reviewing | awaiting-user | blocked | failed)
+      in_flight="$state_file"
+      break
+      ;;
   esac
 done
 [ -z "$in_flight" ] && exit 0
 
 change=$(dirname "$in_flight")
+in_flight_status=$(field "$in_flight" status)
+case "$in_flight_status" in
+  awaiting-user | blocked | failed)
+    block "$change has status \`$in_flight_status\`" \
+"This change is currently parked at \`$in_flight_status\`. Resolve the blocker or user question and set \`status: \"in-progress\"\` in $change/state.yaml before editing source files."
+    ;;
+esac
 route=$(field "$in_flight" route)
 readiness=$(field "$in_flight" readiness)
 screen=$(field "$in_flight" screen)
@@ -152,7 +172,9 @@ while IFS= read -r line; do
   surface=${line%%:*}
   surface=$(printf %s "$surface" | tr -d " ")
   tuple=$(printf '%s' "$line" | sed -n 's/.*"\(.*\)".*/\1/p')
+  set -f
   set -- $tuple
+  set +f
   tier=$1
   paths=$4
   IFS=',' read -ra candidates <<<"$paths"

@@ -1,0 +1,18 @@
+# Review record for 150-cross-cli-hook-and-merge-gate-hardening.
+#
+# rust-reviewer checked guard-stage.sh and gate-merge.sh cross-CLI payload extraction,
+# non-existent subdirectory path canonicalization, parked status enforcement,
+# whole-change-dir state/readiness/screen checks, GIT_NO_REPLACE_OBJECTS/GIT_GRAFT_FILE
+# exports, and src/tests.rs regression tests.
+#
+# subprocess-safety-reviewer checked git object-replacement hardening
+# (GIT_NO_REPLACE_OBJECTS=1, GIT_GRAFT_FILE=/dev/null), glob-safe set -f splitting,
+# cross-CLI jq selectors, fail-closed merge status/readiness/screen gates, and
+# isolated subprocess test invocations.
+
+digest: "53c530c1d759e1d0"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
