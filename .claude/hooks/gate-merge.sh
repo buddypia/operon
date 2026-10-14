@@ -135,6 +135,29 @@ git merge-base --is-ancestor main "$sha" ||
 tree CI never ran. Merge main into $branch in its worktree, push it, wait for CI
 (gh run watch), then merge."
 
+for changed_state in $(git diff --no-renames --name-only main "$sha" -- 'docs/sdlc/changes/*/state.yaml' 2>/dev/null); do
+  state_blob=$(git show "$sha:$changed_state" 2>/dev/null) || continue
+  state_status=$(printf '%s\n' "$state_blob" | sed -n 's/^  status: "\(.*\)"$/\1/p' | head -1)
+  case "$state_status" in
+    planning | ready | in-progress | reviewing)
+      block "$changed_state has status \`$state_status\` on $branch" \
+"A change that lands on main must record its terminal status (\`done\` or \`archived\`)
+in $changed_state on $branch before merging — main itself refuses direct edits."
+      ;;
+    done)
+      pending_contract=$(printf '%s\n' "$state_blob" | awk '
+        /^contract:/ { inside = 1; next }
+        inside && /^[a-z]/ { inside = 0 }
+        inside && /"machine pending / { print $1 }')
+      if [ -n "$pending_contract" ]; then
+        block "$changed_state is \`done\` with a \`machine pending\` contract on $branch" \
+"Run each pending contract command and record \`machine passed\` (or \`machine waived <reason>\`)
+in $changed_state on $branch before merging."
+      fi
+      ;;
+  esac
+done
+
 verdict=$(bash "$root/scripts/ci-verified.sh" "$sha" 2>&1)
 status=$?
 case "$status" in

@@ -1,0 +1,29 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. All adversarial review findings and recurrence-prevention guards implemented and verified: launch settings/flags trim and custom-agent consistency, zero-alloc multiset flag comparison, transcript vocabulary classification for agent-setting/dev-mods, guard-stage.sh worktree toplevel & in_play scoping, gate-merge.sh in-flight state.yaml check, rust-build-chain.md operational notes restored, CI branch prefix coverage from KNOWN_BRANCH_PREFIXES, and src/app.rs brought to 8,364 lines."
+
+contract:
+  bands: "machine passed bash scripts/check-bands.sh reports all 21 of 21 metrics within their bands"
+  three-gates: "machine passed make q.fast and named cargo test --locked runs"
+  guards-verified-by-mutation: "human passed failing-first tests watched failing before code changes"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
