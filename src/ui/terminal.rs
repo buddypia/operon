@@ -1,10 +1,12 @@
 use crate::prelude::*;
 use crate::*;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub(crate) struct TerminalTextStyle {
     pub(crate) foreground: Option<Color32>,
+    pub(crate) background: Option<Color32>,
     pub(crate) bright: bool,
+    pub(crate) inverse: bool,
 }
 
 /// The 16 ANSI colours in their standard order — black, red, green, yellow,
@@ -53,58 +55,161 @@ pub(crate) fn terminal_ansi_256_color(index: u8, palette: &Palette) -> Color32 {
     }
 }
 
+fn parse_extended_sgr_color(
+    parameters: &[u16],
+    index: usize,
+    palette: &Palette,
+) -> (Option<Color32>, usize) {
+    let last = parameters.len().saturating_sub(1);
+    match parameters.get(index + 1).copied() {
+        Some(5) => {
+            let color = parameters
+                .get(index + 2)
+                .map(|&value| terminal_ansi_256_color(value.min(255) as u8, palette));
+            (color, (index + 2).min(last))
+        }
+        Some(2) => {
+            let color = match (
+                parameters.get(index + 2),
+                parameters.get(index + 3),
+                parameters.get(index + 4),
+            ) {
+                (Some(&red), Some(&green), Some(&blue)) => Some(Color32::from_rgb(
+                    red.min(255) as u8,
+                    green.min(255) as u8,
+                    blue.min(255) as u8,
+                )),
+                _ => None,
+            };
+            (color, (index + 4).min(last))
+        }
+        _ => (None, index),
+    }
+}
+
+fn apply_colon_sgr_subparameters(token: &str, style: &mut TerminalTextStyle, palette: &Palette) {
+    let parts: Vec<Option<u16>> = token
+        .split(':')
+        .map(|part| part.parse::<u16>().ok())
+        .collect();
+    let parse_color = |parts: &[Option<u16>]| -> Option<Color32> {
+        match parts.get(1).copied().flatten() {
+            Some(5) => parts
+                .get(2)
+                .copied()
+                .flatten()
+                .map(|value| terminal_ansi_256_color(value.min(255) as u8, palette)),
+            Some(2) => {
+                let rgb = if parts.len() >= 6 {
+                    (parts.get(3), parts.get(4), parts.get(5))
+                } else {
+                    (parts.get(2), parts.get(3), parts.get(4))
+                };
+                match rgb {
+                    (Some(Some(r)), Some(Some(g)), Some(Some(b))) => Some(Color32::from_rgb(
+                        (*r).min(255) as u8,
+                        (*g).min(255) as u8,
+                        (*b).min(255) as u8,
+                    )),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    };
+    match parts.first().copied().flatten() {
+        Some(0) | None => *style = TerminalTextStyle::default(),
+        Some(38) => {
+            if let Some(color) = parse_color(&parts) {
+                style.foreground = Some(color);
+            }
+        }
+        Some(48) => {
+            if let Some(color) = parse_color(&parts) {
+                style.background = Some(color);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(crate) fn apply_terminal_sgr(
     parameters: &str,
     style: &mut TerminalTextStyle,
     palette: &Palette,
 ) {
-    let parameters = if parameters.is_empty() {
-        vec![0]
-    } else {
-        parameters
-            .split(';')
-            .filter_map(|value| value.parse::<u16>().ok())
-            .collect::<Vec<_>>()
-    };
+    if parameters.is_empty() {
+        *style = TerminalTextStyle::default();
+        return;
+    }
+    let mut numeric = Vec::new();
+    for token in parameters.split(';') {
+        if token.contains(':') {
+            apply_colon_sgr_subparameters(token, style, palette);
+            continue;
+        }
+        if token.is_empty() {
+            numeric.push(0);
+        } else if let Ok(value) = token.parse::<u16>() {
+            numeric.push(value);
+        }
+    }
     let mut index = 0;
-    while index < parameters.len() {
-        match parameters[index] {
+    while index < numeric.len() {
+        match numeric[index] {
             0 => *style = TerminalTextStyle::default(),
             1 => style.bright = true,
+            7 => style.inverse = true,
             22 => style.bright = false,
+            27 => style.inverse = false,
             30..=37 => {
                 style.foreground = Some(terminal_ansi_color(
-                    (parameters[index] - 30) as u8,
+                    (numeric[index] - 30) as u8,
                     false,
                     palette,
                 ))
             }
+            38 => {
+                let (color, next) = parse_extended_sgr_color(&numeric, index, palette);
+                if let Some(color) = color {
+                    style.foreground = Some(color);
+                }
+                index = next;
+            }
             39 => style.foreground = None,
+            40..=47 => {
+                style.background = Some(terminal_ansi_color(
+                    (numeric[index] - 40) as u8,
+                    false,
+                    palette,
+                ))
+            }
+            48 => {
+                let (color, next) = parse_extended_sgr_color(&numeric, index, palette);
+                if let Some(color) = color {
+                    style.background = Some(color);
+                }
+                index = next;
+            }
+            49 => style.background = None,
+            58 => {
+                let (_, next) = parse_extended_sgr_color(&numeric, index, palette);
+                index = next;
+            }
             90..=97 => {
                 style.foreground = Some(terminal_ansi_color(
-                    (parameters[index] - 90) as u8,
+                    (numeric[index] - 90) as u8,
                     true,
                     palette,
                 ))
             }
-            38 => match parameters.get(index + 1) {
-                Some(5) if parameters.get(index + 2).is_some() => {
-                    style.foreground = Some(terminal_ansi_256_color(
-                        parameters[index + 2] as u8,
-                        palette,
-                    ));
-                    index += 2;
-                }
-                Some(2) if parameters.len() >= index + 5 => {
-                    style.foreground = Some(Color32::from_rgb(
-                        parameters[index + 2] as u8,
-                        parameters[index + 3] as u8,
-                        parameters[index + 4] as u8,
-                    ));
-                    index += 4;
-                }
-                _ => {}
-            },
+            100..=107 => {
+                style.background = Some(terminal_ansi_color(
+                    (numeric[index] - 100) as u8,
+                    true,
+                    palette,
+                ))
+            }
             _ => {}
         }
         index += 1;
@@ -120,17 +225,23 @@ pub(crate) fn append_terminal_text(
     if text.is_empty() {
         return;
     }
-    let color = style.foreground.unwrap_or(if style.bright {
+    let foreground = style.foreground.unwrap_or(if style.bright {
         palette.ansi_bright[7]
     } else {
         palette.terminal_fg
     });
+    let (color, background) = if style.inverse {
+        (style.background.unwrap_or(palette.terminal_bg), foreground)
+    } else {
+        (foreground, style.background.unwrap_or(Color32::TRANSPARENT))
+    };
     job.append(
         text,
         0.0,
         TextFormat {
             font_id: FontId::monospace(MONOSPACE_SIZE),
             color,
+            background,
             ..Default::default()
         },
     );

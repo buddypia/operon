@@ -827,3 +827,19 @@ is `plan design build test deploy maintain`. **The rule:** `stage` in
 **The rule.** An action that tells the person it happened is checked against what is painted afterwards, at the sizes the person uses, not against the state it changed.
 
 **Guard.** `test_dock_move_keeps_every_shown_panel_on_screen` (every panel × edge × three window sizes, judged by painted grips) and `test_dock_refused_move_says_why`, watched failing on 145's `dock_panel_to` and on the gate replaced by `true`; `test_dock_drag_by_pointer_events`, watched failing with the Escape branch deleted and with the drag never armed.
+
+---
+
+## 071 — Unhandled SGR subparameters leaked into foreground colour codes and dropped half-block backgrounds
+
+`apply_terminal_sgr` only parsed foreground SGR codes and stepped one token at a
+time over unknown codes, so `48;5;97` (256-colour background) dropped the lower
+half of `▀`/`▄` banner cells and read `97` as top-level `SGR 97` (bright white
+foreground). **The rule:** parse background (`40..=47`, `48`, `49`, `100..=107`)
+and inverse (`7`, `27`) SGR attributes into `TextFormat::background`, and
+advance past multi-token extended colour sequences (`38`, `48`, `58` and `:`
+subparameters).
+
+**Guard.** `renders_terminal_background_colors_and_half_block_banners` and
+`bundled_terminal_fonts_keep_cjk_at_exactly_two_ascii_cells`.
+
