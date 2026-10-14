@@ -1,0 +1,29 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Hardened guard-stage.sh and gate-merge.sh for cross-CLI payload schemas (Antigravity TargetFile/CommandLine/Cwd), non-existent subdirectory path canonicalization, parked status blocking, untouched state.yaml detection across touched change directories, readiness/screen verification on done merges, and GIT_NO_REPLACE_OBJECTS/GIT_GRAFT_FILE enforcement."
+
+contract:
+  bands: "machine passed bash scripts/check-bands.sh reports all 21 of 21 metrics within their bands"
+  three-gates: "machine passed make q.fast and named cargo test --locked runs"
+  guards-verified-by-mutation: "human passed failing-first tests watched failing before code changes"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -27,10 +27,12 @@
 # `git merge --abort` and `--quit` pass. In a worktree session, a merge with no
 # redirection (`-C`, `cd`, `--git-dir`, `GIT_*=`) is not into main and passes.
 set -uo pipefail
+export GIT_NO_REPLACE_OBJECTS=1
+export GIT_GRAFT_FILE=/dev/null
 
 payload=$(cat)
-command=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')
-running_in=$(printf '%s' "$payload" | jq -r '.cwd // empty')
+command=$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.CommandLine // .toolCall.args.CommandLine // .toolCall.args.command // empty')
+running_in=$(printf '%s' "$payload" | jq -r '.tool_input.Cwd // .toolCall.args.Cwd // .cwd // .session.cwd // .workspacePaths[0] // empty')
 
 # Is any simple command a git whose subcommand is `merge`? The subcommand is
 # the first word past git's own options (`-C dir`, `-c k=v`, `--git-dir …`), so
@@ -135,15 +137,18 @@ git merge-base --is-ancestor main "$sha" ||
 tree CI never ran. Merge main into $branch in its worktree, push it, wait for CI
 (gh run watch), then merge."
 
-for changed_state in $(git diff --no-renames --name-only main "$sha" -- 'docs/sdlc/changes/*/state.yaml' 2>/dev/null); do
-  state_blob=$(git show "$sha:$changed_state" 2>/dev/null) || continue
+touched_changes=$(git diff --no-renames --name-only main "$sha" -- 'docs/sdlc/changes/' 2>/dev/null |
+  sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u)
+routes_blob=$(git show "$sha:docs/sdlc/routes.yaml" 2>/dev/null || cat "$root/docs/sdlc/routes.yaml" 2>/dev/null || true)
+for change_dir in $touched_changes; do
+  [ -n "$(git ls-tree --name-only "$sha" "docs/sdlc/changes/$change_dir/" 2>/dev/null)" ] || continue
+  changed_state="docs/sdlc/changes/$change_dir/state.yaml"
+  state_blob=$(git show "$sha:$changed_state" 2>/dev/null) ||
+    block "$changed_state is missing on $branch" \
+"Every change directory under docs/sdlc/changes/ must carry a state.yaml file."
   state_status=$(printf '%s\n' "$state_blob" | sed -n 's/^  status: "\(.*\)"$/\1/p' | head -1)
   case "$state_status" in
-    planning | ready | in-progress | reviewing)
-      block "$changed_state has status \`$state_status\` on $branch" \
-"A change that lands on main must record its terminal status (\`done\` or \`archived\`)
-in $changed_state on $branch before merging — main itself refuses direct edits."
-      ;;
+    archived) ;;
     done)
       pending_contract=$(printf '%s\n' "$state_blob" | awk '
         /^contract:/ { inside = 1; next }
@@ -154,6 +159,33 @@ in $changed_state on $branch before merging — main itself refuses direct edits
 "Run each pending contract command and record \`machine passed\` (or \`machine waived <reason>\`)
 in $changed_state on $branch before merging."
       fi
+      state_screen=$(printf '%s\n' "$state_blob" | sed -n 's/^  screen: "\(.*\)"$/\1/p' | head -1)
+      if [ "$state_screen" = pending ]; then
+        block "$changed_state is \`done\` with \`screen: \"pending\"\` on $branch" \
+"Settle screen approval (\`approved\` or \`n/a\`) in $changed_state on $branch before merging."
+      fi
+      state_route=$(printf '%s\n' "$state_blob" | sed -n 's/^  route: "\(.*\)"$/\1/p' | head -1)
+      state_readiness=$(printf '%s\n' "$state_blob" | sed -n 's/^  readiness: "\(.*\)"$/\1/p' | head -1)
+      route_stages=""
+      if [ -n "$routes_blob" ] && [ -n "$state_route" ]; then
+        route_stages=$(printf '%s\n' "$routes_blob" | sed -n "s/^  $state_route: \"\([^ ]*\).*\"$/\1/p" | head -1)
+      fi
+      case ",${route_stages:-design}," in
+        *,design,*)
+          case "$state_readiness" in
+            go | conditional) ;;
+            *)
+              block "$changed_state is \`done\` with \`readiness: \"$state_readiness\"\` on $branch" \
+"Route \`$state_route\` includes the design stage; pass scripts/check-readiness.sh and record \`readiness: \"go\"\` (or \`\"conditional\"\`) in $changed_state on $branch before merging."
+              ;;
+          esac
+          ;;
+      esac
+      ;;
+    *)
+      block "$changed_state has status \`$state_status\` on $branch" \
+"A change that lands on main must record its terminal status (\`done\` or \`archived\`)
+in $changed_state on $branch before merging — main itself refuses direct edits."
       ;;
   esac
 done

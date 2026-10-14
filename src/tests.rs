@@ -21528,6 +21528,8 @@ pub(crate) fn every_judging_script_reads_the_real_objects() {
         ".githooks/installed/reference-transaction",
         "scripts/check-review.sh",
         ".claude/hooks/gate-stop.sh",
+        ".claude/hooks/gate-merge.sh",
+        ".claude/hooks/guard-stage.sh",
     ] {
         let text = fs::read_to_string(root.join(rel)).unwrap();
         // Code, not prose, and the whole line: entry 011 in docs/sdlc/lessons.md
@@ -44400,7 +44402,7 @@ pub(crate) fn guard_stage_hook_enforces_readiness_on_worktree_change_not_change_
     )
     .unwrap();
 
-    let invoke = |target_file: &Path| -> (Option<i32>, String) {
+    let invoke_payload = |payload: serde_json::Value| -> (Option<i32>, String) {
         let mut cmd = Command::new("/bin/bash");
         forget_inherited_repository(&mut cmd)
             .arg(&hook)
@@ -44410,10 +44412,6 @@ pub(crate) fn guard_stage_hook_enforces_readiness_on_worktree_change_not_change_
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn().unwrap();
-        let payload = serde_json::json!({
-            "cwd": wt.to_string_lossy(),
-            "tool_input": { "file_path": target_file.to_string_lossy() }
-        });
         child
             .stdin
             .take()
@@ -44426,6 +44424,12 @@ pub(crate) fn guard_stage_hook_enforces_readiness_on_worktree_change_not_change_
             String::from_utf8_lossy(&out.stderr).into_owned(),
         )
     };
+    let invoke = |target_file: &Path| -> (Option<i32>, String) {
+        invoke_payload(serde_json::json!({
+            "cwd": wt.to_string_lossy(),
+            "tool_input": { "file_path": target_file.to_string_lossy() }
+        }))
+    };
 
     let (code, stderr) = invoke(&wt.join("src/app.rs"));
     assert_eq!(
@@ -44436,6 +44440,43 @@ pub(crate) fn guard_stage_hook_enforces_readiness_on_worktree_change_not_change_
     assert!(
         stderr.contains("999-new"),
         "refusal must name the worktree's in-play change 999-new, got: {stderr}"
+    );
+
+    // Antigravity payload shape (.toolCall.args.TargetFile + .workspacePaths) targeting a non-existent
+    // subdirectory under src/ must also resolve the worktree and refuse when readiness is pending.
+    let (code_agy, stderr_agy) = invoke_payload(serde_json::json!({
+        "workspacePaths": [wt.to_string_lossy()],
+        "toolCall": {
+            "args": {
+                "TargetFile": wt.join("src/new_subdir/mod.rs").to_string_lossy()
+            }
+        }
+    }));
+    assert_eq!(
+        code_agy,
+        Some(2),
+        "guard-stage.sh must refuse Antigravity payload targeting a new src/ subdirectory when readiness is pending, stderr={stderr_agy}"
+    );
+    assert!(
+        stderr_agy.contains("999-new"),
+        "Antigravity refusal must name 999-new, got: {stderr_agy}"
+    );
+
+    // Parked status (awaiting-user) must refuse src/*.rs edits even if readiness is go.
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"feature\"\n  stage: \"build\"\n  status: \"awaiting-user\"\n  risk: \"medium\"\n  readiness: \"go\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+    let (code_parked, stderr_parked) = invoke(&wt.join("src/app.rs"));
+    assert_eq!(
+        code_parked,
+        Some(2),
+        "guard-stage.sh must refuse editing src/app.rs when 999-new is parked at awaiting-user, stderr={stderr_parked}"
+    );
+    assert!(
+        stderr_parked.contains("has status `awaiting-user`"),
+        "parked refusal must report has status `awaiting-user`, got: {stderr_parked}"
     );
 
     fs::write(
@@ -44466,15 +44507,28 @@ pub(crate) fn guard_stage_hook_enforces_readiness_on_worktree_change_not_change_
     let _ = fs::remove_dir_all(&repo);
 }
 
-/// Change 149: gate-merge.sh refuses merging a branch into main when a
-/// docs/sdlc/changes/*/state.yaml touched by main..branch still has an in-flight
-/// status (`in-progress` or `reviewing`).
+/// Change 149 & 150: gate-merge.sh refuses merging a branch into main when any
+/// change directory touched by main..branch has a non-terminal state.yaml
+/// (even if state.yaml itself was already committed on main and not modified on
+/// the branch), or when status is `done` with an unpassed readiness/screen gate
+/// or `machine pending` contract, across both Claude Code and Antigravity payloads.
 #[test]
 pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let hook = manifest.join(".claude/hooks/gate-merge.sh");
     let repo = temporary_directory("merge-gate-state-yaml");
-    fs::create_dir_all(repo.join("docs/sdlc/changes")).unwrap();
+    fs::create_dir_all(repo.join("docs/sdlc/changes/998-preexisting")).unwrap();
+    fs::copy(
+        manifest.join("docs/sdlc/routes.yaml"),
+        repo.join("docs/sdlc/routes.yaml"),
+    )
+    .unwrap();
+    // 998-preexisting already exists on main with status: reviewing.
+    fs::write(
+        repo.join("docs/sdlc/changes/998-preexisting/state.yaml"),
+        "state:\n  route: \"bugfix\"\n  stage: \"test\"\n  status: \"reviewing\"\n  screen: \"skipped\"\n",
+    )
+    .unwrap();
     fs::write(repo.join("a.txt"), "a\n").unwrap();
 
     let run_git = |dir: &Path, args: &[&str]| {
@@ -44504,7 +44558,7 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
     fs::create_dir_all(&change_dir).unwrap();
     fs::write(
         change_dir.join("state.yaml"),
-        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"in-progress\"\n",
+        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"in-progress\"\n  screen: \"skipped\"\n",
     )
     .unwrap();
     run_git(&repo, &["add", "-A"]);
@@ -44523,29 +44577,36 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
     );
     run_git(&repo, &["checkout", "-q", "main"]);
 
-    let mut cmd = Command::new("/bin/bash");
-    forget_inherited_repository(&mut cmd)
-        .arg(&hook)
-        .current_dir(&repo)
-        .env("CLAUDE_PROJECT_DIR", &repo)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = cmd.spawn().unwrap();
-    let payload = serde_json::json!({
+    let invoke_merge = |payload: serde_json::Value| -> (Option<i32>, String) {
+        let mut cmd = Command::new("/bin/bash");
+        forget_inherited_repository(&mut cmd)
+            .arg(&hook)
+            .current_dir(&repo)
+            .env("CLAUDE_PROJECT_DIR", &repo)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    let claude_payload = serde_json::json!({
         "cwd": repo.to_string_lossy(),
         "tool_input": { "command": "git merge --no-ff --no-edit fix/unclosed" }
     });
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(payload.to_string().as_bytes())
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
+    let (code, stderr) = invoke_merge(claude_payload.clone());
     assert_eq!(
-        out.status.code(),
+        code,
         Some(2),
         "gate-merge.sh must refuse merging a branch with status: in-progress, stderr={stderr}"
     );
@@ -44554,11 +44615,27 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
         "expected refusal naming 999-unclosed/state.yaml and status `in-progress`, got: {stderr}"
     );
 
+    // Antigravity payload shape (.toolCall.args.CommandLine + .toolCall.args.Cwd) must also be enforced.
+    let agy_payload = serde_json::json!({
+        "toolCall": {
+            "args": {
+                "Cwd": repo.to_string_lossy(),
+                "CommandLine": "git merge --no-ff --no-edit fix/unclosed"
+            }
+        }
+    });
+    let (code_agy, stderr_agy) = invoke_merge(agy_payload.clone());
+    assert_eq!(
+        code_agy,
+        Some(2),
+        "gate-merge.sh must refuse Antigravity merge payload with status: in-progress, stderr={stderr_agy}"
+    );
+
     // Setting status: done while leaving a `machine pending` contract item must also be refused.
     run_git(&repo, &["checkout", "-q", "fix/unclosed"]);
     fs::write(
         change_dir.join("state.yaml"),
-        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"done\"\n\ncontract:\n  bands: \"machine pending bash scripts/check-bands.sh\"\n",
+        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"done\"\n  screen: \"skipped\"\n\ncontract:\n  bands: \"machine pending bash scripts/check-bands.sh\"\n",
     )
     .unwrap();
     run_git(&repo, &["add", "-A"]);
@@ -44577,31 +44654,89 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
     );
     run_git(&repo, &["checkout", "-q", "main"]);
 
-    let mut cmd2 = Command::new("/bin/bash");
-    forget_inherited_repository(&mut cmd2)
-        .arg(&hook)
-        .current_dir(&repo)
-        .env("CLAUDE_PROJECT_DIR", &repo)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child2 = cmd2.spawn().unwrap();
-    child2
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(payload.to_string().as_bytes())
-        .unwrap();
-    let out2 = child2.wait_with_output().unwrap();
-    let stderr2 = String::from_utf8_lossy(&out2.stderr);
+    let (code2, stderr2) = invoke_merge(claude_payload.clone());
     assert_eq!(
-        out2.status.code(),
+        code2,
         Some(2),
         "gate-merge.sh must refuse merging a branch with done status and machine pending contract, stderr={stderr2}"
     );
     assert!(
         stderr2.contains("is `done` with a `machine pending` contract"),
         "expected refusal naming machine pending contract, got: {stderr2}"
+    );
+
+    // Setting status: done on a `feature` route while readiness is still `pending` must be refused.
+    run_git(&repo, &["checkout", "-q", "fix/unclosed"]);
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"feature\"\n  stage: \"test\"\n  status: \"done\"\n  readiness: \"pending\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+    run_git(&repo, &["add", "-A"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "done with pending readiness",
+        ],
+    );
+    run_git(&repo, &["checkout", "-q", "main"]);
+
+    let (code3, stderr3) = invoke_merge(claude_payload.clone());
+    assert_eq!(
+        code3,
+        Some(2),
+        "gate-merge.sh must refuse merging a feature branch with done status and pending readiness, stderr={stderr3}"
+    );
+    assert!(
+        stderr3.contains("with `readiness: \"pending\"`"),
+        "expected refusal naming with `readiness: \"pending\"`, got: {stderr3}"
+    );
+
+    // Closing 999-unclosed properly, but touching 998-preexisting/notes.md without closing
+    // 998-preexisting/state.yaml (which is still `reviewing` from main) must also be refused.
+    run_git(&repo, &["checkout", "-q", "fix/unclosed"]);
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"feature\"\n  stage: \"test\"\n  status: \"done\"\n  readiness: \"go\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("docs/sdlc/changes/998-preexisting/notes.md"),
+        "extra note\n",
+    )
+    .unwrap();
+    run_git(&repo, &["add", "-A"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "touch 998-preexisting without updating its state.yaml",
+        ],
+    );
+    run_git(&repo, &["checkout", "-q", "main"]);
+
+    let (code4, stderr4) = invoke_merge(agy_payload);
+    assert_eq!(
+        code4,
+        Some(2),
+        "gate-merge.sh must refuse merging when a touched change dir has an unclosed state.yaml from main, stderr={stderr4}"
+    );
+    assert!(
+        stderr4.contains("998-preexisting/state.yaml has status `reviewing`"),
+        "expected refusal naming 998-preexisting/state.yaml and status `reviewing`, got: {stderr4}"
     );
 
     let _ = fs::remove_dir_all(&repo);
