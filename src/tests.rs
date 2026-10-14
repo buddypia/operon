@@ -44166,31 +44166,76 @@ pub(crate) fn launch_matches_pin_ignores_flag_order_and_acknowledgement_stays_in
     let app = &mut fixture.app;
     app.selected_agent = "claude".to_owned();
     app.agent_model_input = "claude-opus-4-7".to_owned();
-    app.agent_mode_input = "--dangerously-skip-permissions".to_owned();
+    app.agent_mode_input = "  bypassPermissions  ".to_owned();
     app.agent_effort_input = "high".to_owned();
-    app.agent_flag_inputs = vec!["--chrome".to_owned(), "--ide".to_owned()];
+    app.agent_flag_inputs = vec![
+        "skip-permissions".to_owned(),
+        "ide".to_owned(),
+        "verbose".to_owned(),
+    ];
+    // Leftover custom command text on a built-in agent must be ignored by both
+    // pending_launch/launch_acknowledged and record_current_agent_settings/launch_matches_pin.
+    app.custom_command = "stale-custom-cmd".to_owned();
     app.acknowledged_launch = Some(app.pending_launch());
 
     app.pin_launch_settings();
     assert!(app.launch_matches_pin());
     assert!(app.launch_acknowledged());
 
-    // Reordering the same flags (e.g. toggling --chrome off and back on) must
-    // still match both the acknowledgement and the pin.
-    app.agent_flag_inputs = vec!["--ide".to_owned(), "--chrome".to_owned()];
+    let persisted = load_recent_agent_settings(&app.data_file)
+        .pinned
+        .expect("pinned settings must persist to recent-agent-settings.json");
+    assert_eq!(persisted.agent, "claude");
+    assert_eq!(persisted.settings.mode, "bypassPermissions");
+    assert_eq!(persisted.settings.custom_command, "");
+
+    // Changing leftover custom_command while still on "claude" must not break
+    // either launch_acknowledged or launch_matches_pin.
+    app.custom_command = "another-ignored-custom-cmd".to_owned();
+    assert!(app.launch_acknowledged());
+    assert!(app.launch_matches_pin());
+
+    // Reordering the same flags (e.g. toggling skip-permissions off and back on)
+    // and varying surrounding whitespace on mode must still match both the
+    // acknowledgement and the pin.
+    app.agent_mode_input = "bypassPermissions".to_owned();
+    app.agent_flag_inputs = vec![
+        "verbose".to_owned(),
+        "skip-permissions".to_owned(),
+        "ide".to_owned(),
+    ];
     assert!(
         app.launch_acknowledged(),
-        "launch_acknowledged must ignore flag order"
+        "launch_acknowledged must ignore flag order and mode whitespace"
     );
     assert!(
         app.launch_matches_pin(),
-        "launch_matches_pin must ignore flag order"
+        "launch_matches_pin must ignore flag order and mode whitespace"
     );
 
     // Changing a flag to a different switch must break both.
-    app.agent_flag_inputs = vec!["--ide".to_owned(), "--verbose".to_owned()];
+    app.agent_flag_inputs = vec![
+        "verbose".to_owned(),
+        "skip-permissions".to_owned(),
+        "chrome".to_owned(),
+    ];
     assert!(!app.launch_acknowledged());
     assert!(!app.launch_matches_pin());
+
+    // Switching to "custom" agent must compare trimmed custom_command and ignore model/mode/effort/flags.
+    app.selected_agent = "custom".to_owned();
+    app.custom_command = "  my-agent --flag  ".to_owned();
+    app.acknowledged_launch = Some(app.pending_launch());
+    app.pin_launch_settings();
+    app.custom_command = "my-agent --flag".to_owned();
+    assert!(
+        app.launch_acknowledged(),
+        "custom agent acknowledgement must trim custom_command"
+    );
+    assert!(
+        app.launch_matches_pin(),
+        "custom agent pin match must trim custom_command"
+    );
 }
 
 /// Change 148 (durability-reviewer/1 from change 139): selecting a different
@@ -44234,9 +44279,9 @@ pub(crate) fn prune_script_refuses_unknown_flag_with_exit_2() {
     );
 }
 
-/// Change 148: .github/workflows/ci.yml triggers on all worktree branch
-/// prefixes (feature/**, fix/**, docs/**, refactor/**, chore/**) so that
-/// gate-merge.sh never waits on a branch prefix CI did not run on.
+/// Change 148 & 149: .github/workflows/ci.yml triggers on main plus every branch
+/// prefix in KNOWN_BRANCH_PREFIXES from .claude/scripts/worktree-new.mjs (Lesson 004:
+/// read the live source of truth rather than a hardcoded list).
 #[test]
 pub(crate) fn ci_workflow_triggers_on_all_worktree_branch_prefixes() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -44247,17 +44292,333 @@ pub(crate) fn ci_workflow_triggers_on_all_worktree_branch_prefixes() {
         .map(str::trim)
         .find(|line| line.starts_with("branches:"))
         .expect("ci.yml must have a branches: trigger line");
-    for prefix in [
-        "main",
-        "'feature/**'",
-        "'fix/**'",
-        "'docs/**'",
-        "'refactor/**'",
-        "'chore/**'",
-    ] {
+    assert!(
+        branches_line.contains("main"),
+        "ci.yml branches line `{branches_line}` is missing `main`"
+    );
+
+    let wt_new = fs::read_to_string(root.join(".claude/scripts/worktree-new.mjs"))
+        .expect(".claude/scripts/worktree-new.mjs should exist");
+    let prefixes_block = wt_new
+        .split("KNOWN_BRANCH_PREFIXES")
+        .nth(1)
+        .and_then(|rest| rest.split(']').next())
+        .expect("worktree-new.mjs must define KNOWN_BRANCH_PREFIXES");
+    let mut count = 0usize;
+    for part in prefixes_block.split('\'') {
+        if part
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+            && !part.is_empty()
+        {
+            count += 1;
+            let pattern = format!("'{part}/**'");
+            assert!(
+                branches_line.contains(&pattern),
+                "ci.yml branches line `{branches_line}` is missing `{pattern}` from KNOWN_BRANCH_PREFIXES"
+            );
+        }
+    }
+    assert!(
+        count >= 7,
+        "expected at least 7 branch prefixes in KNOWN_BRANCH_PREFIXES, found {count}"
+    );
+}
+
+/// Change 149: guard-stage.sh resolves the worktree's own toplevel and scopes
+/// its state.yaml lookup to changes in play on the branch, rather than resolving
+/// paths against CLAUDE_PROJECT_DIR (.worktrees/.../src/app.rs) or stopping at an
+/// old unclosed state.yaml from main (like change 008).
+#[test]
+pub(crate) fn guard_stage_hook_enforces_readiness_on_worktree_change_not_change_008() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let hook = root.join(".claude/hooks/guard-stage.sh");
+    let repo = temporary_directory("guard-stage-worktree");
+    fs::create_dir_all(repo.join("docs/sdlc/changes/008-old")).unwrap();
+    fs::create_dir_all(repo.join("src")).unwrap();
+    fs::copy(
+        root.join("docs/sdlc/routes.yaml"),
+        repo.join("docs/sdlc/routes.yaml"),
+    )
+    .unwrap();
+    fs::copy(
+        root.join("docs/sdlc/risk.yaml"),
+        repo.join("docs/sdlc/risk.yaml"),
+    )
+    .unwrap();
+    // 008 on main is parked at `reviewing` with `readiness: "go"`, matching the
+    // real repository's historical 008 record.
+    fs::write(
+        repo.join("docs/sdlc/changes/008-old/state.yaml"),
+        "state:\n  route: \"feature\"\n  stage: \"test\"\n  status: \"reviewing\"\n  risk: \"medium\"\n  readiness: \"go\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+    fs::write(repo.join("src/app.rs"), "fn main() {}\n").unwrap();
+
+    let run_git = |dir: &Path, args: &[&str]| {
         assert!(
-            branches_line.contains(prefix),
-            "ci.yml branches line `{branches_line}` is missing `{prefix}`"
+            git_command(dir).args(args).status().unwrap().success(),
+            "git {args:?} failed in {}",
+            dir.display()
         );
+    };
+    run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+    run_git(&repo, &["add", "-A"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "initial",
+        ],
+    );
+
+    let wt = repo.join(".worktrees/feature/test-guard");
+    run_git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature/test-guard",
+            wt.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    let change_dir = wt.join("docs/sdlc/changes/999-new");
+    fs::create_dir_all(&change_dir).unwrap();
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"feature\"\n  stage: \"build\"\n  status: \"in-progress\"\n  risk: \"medium\"\n  readiness: \"pending\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+
+    let invoke = |target_file: &Path| -> (Option<i32>, String) {
+        let mut cmd = Command::new("/bin/bash");
+        forget_inherited_repository(&mut cmd)
+            .arg(&hook)
+            .current_dir(&repo)
+            .env("CLAUDE_PROJECT_DIR", &repo)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().unwrap();
+        let payload = serde_json::json!({
+            "cwd": wt.to_string_lossy(),
+            "tool_input": { "file_path": target_file.to_string_lossy() }
+        });
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    let (code, stderr) = invoke(&wt.join("src/app.rs"));
+    assert_eq!(
+        code,
+        Some(2),
+        "guard-stage.sh must refuse editing src/app.rs in a worktree when 999-new has readiness: pending, stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("999-new"),
+        "refusal must name the worktree's in-play change 999-new, got: {stderr}"
+    );
+
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"feature\"\n  stage: \"build\"\n  status: \"in-progress\"\n  risk: \"medium\"\n  readiness: \"go\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+    let (code_after, stderr_after) = invoke(&wt.join("src/app.rs"));
+    assert_eq!(
+        code_after,
+        Some(0),
+        "guard-stage.sh must allow editing src/app.rs once readiness is go, stderr={stderr_after}"
+    );
+
+    // A bugfix route has no design stage in routes.yaml, so readiness: pending must not block stage 3.
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"in-progress\"\n  risk: \"medium\"\n  readiness: \"pending\"\n  screen: \"approved\"\n",
+    )
+    .unwrap();
+    let (code_bugfix, stderr_bugfix) = invoke(&wt.join("src/app.rs"));
+    assert_eq!(
+        code_bugfix,
+        Some(0),
+        "guard-stage.sh must allow bugfix route with readiness: pending, stderr={stderr_bugfix}"
+    );
+
+    let _ = fs::remove_dir_all(&repo);
+}
+
+/// Change 149: gate-merge.sh refuses merging a branch into main when a
+/// docs/sdlc/changes/*/state.yaml touched by main..branch still has an in-flight
+/// status (`in-progress` or `reviewing`).
+#[test]
+pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let hook = manifest.join(".claude/hooks/gate-merge.sh");
+    let repo = temporary_directory("merge-gate-state-yaml");
+    fs::create_dir_all(repo.join("docs/sdlc/changes")).unwrap();
+    fs::write(repo.join("a.txt"), "a\n").unwrap();
+
+    let run_git = |dir: &Path, args: &[&str]| {
+        assert!(
+            git_command(dir).args(args).status().unwrap().success(),
+            "git {args:?} failed in {}",
+            dir.display()
+        );
+    };
+    run_git(&repo, &["init", "-q", "--initial-branch=main"]);
+    run_git(&repo, &["add", "-A"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "initial",
+        ],
+    );
+    run_git(&repo, &["checkout", "-q", "-b", "fix/unclosed"]);
+    let change_dir = repo.join("docs/sdlc/changes/999-unclosed");
+    fs::create_dir_all(&change_dir).unwrap();
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"in-progress\"\n",
+    )
+    .unwrap();
+    run_git(&repo, &["add", "-A"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "work with unclosed state",
+        ],
+    );
+    run_git(&repo, &["checkout", "-q", "main"]);
+
+    let mut cmd = Command::new("/bin/bash");
+    forget_inherited_repository(&mut cmd)
+        .arg(&hook)
+        .current_dir(&repo)
+        .env("CLAUDE_PROJECT_DIR", &repo)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    let payload = serde_json::json!({
+        "cwd": repo.to_string_lossy(),
+        "tool_input": { "command": "git merge --no-ff --no-edit fix/unclosed" }
+    });
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "gate-merge.sh must refuse merging a branch with status: in-progress, stderr={stderr}"
+    );
+    assert!(
+        stderr.contains("999-unclosed/state.yaml has status `in-progress`"),
+        "expected refusal naming 999-unclosed/state.yaml and status `in-progress`, got: {stderr}"
+    );
+
+    // Setting status: done while leaving a `machine pending` contract item must also be refused.
+    run_git(&repo, &["checkout", "-q", "fix/unclosed"]);
+    fs::write(
+        change_dir.join("state.yaml"),
+        "state:\n  route: \"bugfix\"\n  stage: \"build\"\n  status: \"done\"\n\ncontract:\n  bands: \"machine pending bash scripts/check-bands.sh\"\n",
+    )
+    .unwrap();
+    run_git(&repo, &["add", "-A"]);
+    run_git(
+        &repo,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "done with pending contract",
+        ],
+    );
+    run_git(&repo, &["checkout", "-q", "main"]);
+
+    let mut cmd2 = Command::new("/bin/bash");
+    forget_inherited_repository(&mut cmd2)
+        .arg(&hook)
+        .current_dir(&repo)
+        .env("CLAUDE_PROJECT_DIR", &repo)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child2 = cmd2.spawn().unwrap();
+    child2
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    let out2 = child2.wait_with_output().unwrap();
+    let stderr2 = String::from_utf8_lossy(&out2.stderr);
+    assert_eq!(
+        out2.status.code(),
+        Some(2),
+        "gate-merge.sh must refuse merging a branch with done status and machine pending contract, stderr={stderr2}"
+    );
+    assert!(
+        stderr2.contains("is `done` with a `machine pending` contract"),
+        "expected refusal naming machine pending contract, got: {stderr2}"
+    );
+
+    let _ = fs::remove_dir_all(&repo);
+}
+
+/// Change 149: newly observed Claude Code record kinds `agent-setting` and
+/// `dev-mods` are classified in TRANSCRIPT_VOCABULARY so
+/// check-transcript-vocabulary.sh passes without unclassified kinds.
+#[test]
+pub(crate) fn transcript_vocabulary_covers_agent_setting_and_dev_mods() {
+    for kind in ["agent-setting", "dev-mods"] {
+        let entry = TRANSCRIPT_VOCABULARY
+            .iter()
+            .find(|row| {
+                row.provider == "claude" && row.layer == TranscriptLayer::Record && row.kind == kind
+            })
+            .unwrap_or_else(|| panic!("TRANSCRIPT_VOCABULARY is missing claude/record/{kind}"));
+        assert_eq!(entry.class, TranscriptClass::Operational);
     }
 }

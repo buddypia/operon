@@ -103,12 +103,14 @@ const fn kind(
 pub(crate) const TRANSCRIPT_VOCABULARY: &[TranscriptKind] = &[
     // ---- Claude Code: records ------------------------------------------------
     kind("claude", Record, "agent-name", Operational, "which subagent produced the next records; names the harness, not a turn"),
+    kind("claude", Record, "agent-setting", Operational, "agent configuration state Claude Code recorded for the session, not a turn"),
     kind("claude", Record, "ai-title", Operational, "the conversation title Claude Code generated for its own picker"),
     kind("claude", Record, "assistant", Conversation, "a turn the model took"),
     kind("claude", Record, "atis-latch", Operational, "internal latch state; carries no message"),
     kind("claude", Record, "attachment", Operational, "context Claude Code injected into its own prompt — hook output, file contents, skill listings. Restoring it puts a third CLI's internals into the destination conversation"),
     kind("claude", Record, "cost-state", Operational, "accumulated spend for this session"),
     kind("claude", Record, "custom-title", Operational, "the title the person gave the session, not something they said in it"),
+    kind("claude", Record, "dev-mods", Operational, "developer modification state Claude Code recorded for its own harness"),
     kind("claude", Record, "file-history-delta", Operational, "Claude Code's own undo history for files it edited"),
     kind("claude", Record, "file-history-snapshot", Operational, "as file-history-delta"),
     kind("claude", Record, "last-prompt", Operational, "a duplicate of the most recent user record, kept for the resume picker"),

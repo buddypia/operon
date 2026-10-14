@@ -27,8 +27,26 @@ payload=$(cat)
 path=$(printf '%s' "$payload" | jq -r '.tool_input.file_path // empty')
 [ -z "$path" ] && exit 0
 
-cd "${CLAUDE_PROJECT_DIR:-.}" || exit 0
-relative=${path#"$PWD/"}
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+running_in=$(printf '%s' "$payload" | jq -r '.cwd // empty')
+case "$path" in
+  /*) target_dir=$(dirname -- "$path" 2>/dev/null) ;;
+  *) target_dir="" ;;
+esac
+if [ -n "$target_dir" ] && [ -d "$target_dir" ]; then
+  resolved_target_dir=$(cd -- "$target_dir" 2>/dev/null && pwd -P)
+  [ -n "$resolved_target_dir" ] && path="$resolved_target_dir/$(basename -- "$path")"
+else
+  target_dir=${running_in:-${CLAUDE_PROJECT_DIR:-.}}
+fi
+working_tree=$(cd -- "$target_dir" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null)
+if [ -z "$working_tree" ] && [ -n "$running_in" ] && [ -d "$running_in" ]; then
+  working_tree=$(cd -- "$running_in" 2>/dev/null && pwd -P)
+fi
+cd -- "${working_tree:-${CLAUDE_PROJECT_DIR:-.}}" || exit 0
+pwd_phys=$(pwd -P 2>/dev/null || pwd)
+relative=${path#"$pwd_phys/"}
+[ "$relative" = "$path" ] && relative=${path#"$PWD/"}
 
 # Only source edits are gated. The artifacts, the harness, and the documents are
 # how a change gets itself *to* stage 3; gating those would deadlock the pipeline
@@ -47,11 +65,28 @@ field() { sed -n "s/^  $2: \"\(.*\)\"$/\1/p" "$1" | head -1; }
 
 # --- which change is in flight? -------------------------------------------------
 #
-# At most one. Two open changes is its own problem and not this hook's to solve,
-# so the first is taken and named in the message.
+# Scoped to the change directories touched in this worktree/branch against
+# refs/heads/main (matching gate-stop.sh), so historical pre-035 changes on main
+# (such as 008 at `reviewing`) never shadow the change in flight.
+
+if git merge-base refs/heads/main HEAD >/dev/null 2>&1; then
+  in_play=$(
+    {
+      git diff -z --no-renames --name-only HEAD -- docs/sdlc/changes 2>/dev/null
+      git ls-files -z --others --exclude-standard -- docs/sdlc/changes 2>/dev/null
+      git diff -z --no-renames --name-only "$(git merge-base refs/heads/main HEAD 2>/dev/null)" HEAD -- docs/sdlc/changes 2>/dev/null
+    } | tr '\0' '\n' | sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u
+  )
+  candidates=""
+  for dir_name in $in_play; do
+    candidates="$candidates docs/sdlc/changes/$dir_name/state.yaml"
+  done
+else
+  candidates=$(ls -r docs/sdlc/changes/*/state.yaml 2>/dev/null || true)
+fi
 
 in_flight=""
-for state_file in docs/sdlc/changes/*/state.yaml; do
+for state_file in $candidates; do
   [ -f "$state_file" ] || continue
   case "$(field "$state_file" status)" in
     planning | ready | in-progress | reviewing) in_flight="$state_file"; break ;;
@@ -60,16 +95,23 @@ done
 [ -z "$in_flight" ] && exit 0
 
 change=$(dirname "$in_flight")
+route=$(field "$in_flight" route)
 readiness=$(field "$in_flight" readiness)
 screen=$(field "$in_flight" screen)
 risk=$(field "$in_flight" risk)
 
-# --- gate 1: the readiness verdict ----------------------------------------------
+# --- gate 1: the readiness verdict (for routes with a design stage) -------------
 
-case "$readiness" in
-  go | conditional) ;;
-  *)
-    block "$change has readiness \`$readiness\`" \
+route_stages=""
+if [ -f docs/sdlc/routes.yaml ] && [ -n "$route" ]; then
+  route_stages=$(sed -n "s/^  $route: \"\([^ ]*\).*\"$/\1/p" docs/sdlc/routes.yaml | head -1)
+fi
+case ",${route_stages:-design}," in
+  *,design,*)
+    case "$readiness" in
+      go | conditional) ;;
+      *)
+        block "$change has readiness \`$readiness\`" \
 "Stage 3 sits behind the readiness gate, and this change has not passed it.
 
   bash scripts/check-readiness.sh $change
@@ -77,6 +119,8 @@ case "$readiness" in
 Then record the verdict in $change/state.yaml as \`readiness\`. A No-Go is fixed
 in the spec — answering a document problem in the implementation is what the gate
 exists to prevent."
+        ;;
+    esac
     ;;
 esac
 

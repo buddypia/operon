@@ -1,0 +1,21 @@
+# Review record for 149-adversarial-review-and-recurrence-guards.
+#
+# rust-reviewer checked zero-allocation multiset flag comparison in
+# flags_match_ignoring_order, consistent custom_command/mode trimming and
+# is_custom partitioning across launch_matches_pin/pending_launch/launch_acknowledged,
+# module relocation from src/app.rs to src/app/screens.rs (bringing src/app.rs to
+# 8,364 lines), sorted TRANSCRIPT_VOCABULARY entries for agent-setting and dev-mods,
+# and the strengthened regression tests in src/tests.rs.
+#
+# subprocess-safety-reviewer checked .claude/hooks/guard-stage.sh worktree toplevel
+# resolution, in_play scoping, and route design-stage gating, .claude/hooks/gate-merge.sh
+# terminal status and settled machine-contract checks, .github/workflows/ci.yml branch
+# prefix triggers, restored operational safety notes in rust-build-chain.md, and
+# subprocess environment hygiene in the new hook tests.
+
+digest: "951939e8e544c714"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

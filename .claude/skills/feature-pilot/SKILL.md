@@ -101,6 +101,11 @@ the earlier sections stay as they were.
 - **Review**: the route's `review` column in `docs/sdlc/routes.yaml` names the
   reviewers in `.claude/agents/`; `REVIEW.md` is the policy and
   `scripts/check-review.sh` the gate.
+- **Close** per `.claude/skills/sdlc/SKILL.md` §10 before committing the branch:
+  set `status: done` and settle contract verdicts in `state.yaml` (and add a
+  lesson with its guard when the mistake could recur) — `.claude/hooks/gate-merge.sh`
+  refuses a branch whose `state.yaml` is still in-flight, and `main` refuses
+  direct edits after `cleanup-worktree`.
 - **Commit** in the worktree directory — never `git -C` from elsewhere.
 - **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
   for CI with `gh run watch` (in the background; about five minutes). A red run
@@ -115,8 +120,6 @@ the earlier sections stay as they were.
   No pull request.
 - **Package** when the `release-binary` contract item says so:
   `bash scripts/package-macos.sh`, then the swap in `.claude/skills/ship/SKILL.md`.
-- **Close** per `.claude/skills/sdlc/SKILL.md` §10: `status: done`, and a lesson
-  with its guard when the mistake could recur.
 
 ## Stopping
 

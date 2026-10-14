@@ -26,9 +26,11 @@ Read with `CLAUDE.md` open for the module map and conventions.
 - **Agent CLIs**: never use timeout helpers. Use `build_agent_launch_command` in
   `src/agents.rs` (`is_safe_agent_command` / `is_safe_agent_option`) and
   `launch_stored_session` in `src/tmux.rs` (`tool_available`, `agent_shell_command`,
-  `shell_quote`, `start_tmux_agent_session`). Validate resume IDs with
-  `is_safe_cli_session_id` and tmux names with `is_safe_tmux_name`. Every shell-spliced
-  value in `src/app.rs` or `src/app/screens.rs` must pass `shell_quote`.
+  `shell_quote`, `start_tmux_agent_session` — note `start_tmux_agent_session` does
+  no quoting itself and passes its string to `tmux`, which runs `sh -c`). Validate
+  resume IDs with `is_safe_cli_session_id` and tmux names with `is_safe_tmux_name`.
+  Every shell-spliced value in `src/app.rs` or `src/app/screens.rs` must pass
+  `shell_quote`.
 - **Long-lived children** (Codex app-server in `src/history.rs`): strip
   `INHERITED_REPOSITORY_POINTERS` (`src/config.rs`) and ensure wait/kill on all
   paths.
@@ -37,6 +39,9 @@ Read with `CLAUDE.md` open for the module map and conventions.
   `SQLITE_OPEN_READ_ONLY` except inside the restore transaction.
 - `src/exec.rs`, `src/agents.rs`, `src/tmux.rs`, and `src/git.rs` pull in
   `.claude/agents/subprocess-safety-reviewer.md` (`scripts/check-review.sh`).
+  `src/history.rs` is classified under `foreign-store` (`durability-reviewer` +
+  `rust-reviewer`), so when `src/history.rs` changes child-process spawning or
+  termination, invoke `subprocess-safety-reviewer` manually in addition.
 
 ## 2. Tests
 
@@ -63,6 +68,8 @@ Read with `CLAUDE.md` open for the module map and conventions.
 ## 4. Tidy & Verify
 
 - No `dbg!`, stray `println!`/`eprintln!`, unused imports, or magic numbers;
-  run `make q.fix` / `make q.check`.
+  run `make q.fix` / `make q.fast` and named tests (`cargo test --locked <name>`).
+- When `screen.md` exists, verify the rendered Japanese view against `screen.md`
+  (copy, badge placement, key hints, and empty states) before review.
 - Run `cargo test --locked -- --ignored` when restore or archive paths change,
   and `bash scripts/check-bands.sh` when steering/reference text changes.
