@@ -1979,7 +1979,7 @@ impl OperonApp {
                     .color(palette.text_strong),
             );
             ui.menu_button(tr("テンプレートを挿入"), |ui| {
-                let templates = list_prompt_templates(Some(&project.path));
+                let templates = self.cached_prompt_templates_for(Some(&project.path));
                 for t in templates {
                     if ui.button(&t.title).clicked() {
                         if self.goal_input.is_empty() {
@@ -4893,6 +4893,14 @@ impl OperonApp {
         );
 
         if self.store.search_engine_mode != previous_mode {
+            if self.store.search_engine_mode == SearchEngineMode::EmbeddedGemma2
+                && matches!(self.model_download_state, EmbeddedModelDownloadState::Idle)
+                && is_embedded_model_cached()
+            {
+                self.model_download_state = EmbeddedModelDownloadState::Ready {
+                    cached_bytes: embedded_model_cached_bytes(),
+                };
+            }
             self.persist();
         }
 
@@ -4900,12 +4908,7 @@ impl OperonApp {
             ui.add_space(4.0);
             match &self.model_download_state {
                 EmbeddedModelDownloadState::Idle => {
-                    if is_embedded_model_cached() {
-                        self.model_download_state = EmbeddedModelDownloadState::Ready {
-                            cached_bytes: embedded_model_cached_bytes(),
-                        };
-                    } else if ui.button(tr("モデルをダウンロード (約 250MB)")).clicked()
-                    {
+                    if ui.button(tr("モデルをダウンロード (約 250MB)")).clicked() {
                         let _ = mark_embedded_model_ready(248 * 1024 * 1024);
                         self.model_download_state = EmbeddedModelDownloadState::Ready {
                             cached_bytes: 248 * 1024 * 1024,
@@ -5851,7 +5854,7 @@ impl OperonApp {
                         if let Some(project) = &project {
                             let wt_to_check =
                                 session.worktree_path.as_deref().unwrap_or(&project.path);
-                            if let SetupScriptRead::Found(script) = read_run_script(wt_to_check) {
+                            if let Some(script) = self.cached_run_script_for(wt_to_check) {
                                 ui.separator();
                                 if ui
                                     .button(tr("実行スクリプト (.operon/run.sh) を起動…"))
@@ -5867,6 +5870,9 @@ impl OperonApp {
                             }
                         }
                         if let Some(ref _wt) = session.worktree_path {
+                            if !self.session_checkpoints.contains_key(&session_id) {
+                                self.refresh_checkpoints(session_id);
+                            }
                             ui.separator();
                             ui.label(RichText::new(tr("チェックポイント")).small().weak());
                             if ui.button(tr("手動チェックポイントを作成")).clicked() {
@@ -6949,14 +6955,7 @@ impl OperonApp {
                 });
                 ui.horizontal(|ui| {
                     ui.label(tr("マージ先:"));
-                    let base_name = detect_worktree_base(&project.path)
-                        .map(|b| {
-                            b.display
-                                .strip_prefix("origin/")
-                                .unwrap_or(&b.display)
-                                .to_owned()
-                        })
-                        .unwrap_or_else(|| "main".into());
+                    let base_name = self.cached_land_worktree_base(&project);
                     ui.monospace(base_name);
                 });
                 ui.add_space(8.0);
@@ -6968,6 +6967,7 @@ impl OperonApp {
                 ui.horizontal(|ui| {
                     if ui.button(tr("キャンセル")).clicked() {
                         self.pending_land_worktree = None;
+                        self.cached_land_base = None;
                     }
                     if ui
                         .button(
@@ -6988,6 +6988,7 @@ impl OperonApp {
             });
         if !open {
             self.pending_land_worktree = None;
+            self.cached_land_base = None;
         }
     }
 

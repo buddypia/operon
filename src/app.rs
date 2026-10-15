@@ -77,6 +77,9 @@ pub(crate) enum BackgroundKey {
     /// settings files. One key: the three CLIs are done in one pass so that a
     /// toggle cannot leave two of them half-registered.
     HookApply,
+    CheckpointCapture(Uuid, usize),
+    Checkpoints(Uuid),
+    CheckpointRestore(Uuid),
 }
 
 #[derive(Debug)]
@@ -253,6 +256,20 @@ pub(crate) enum BackgroundResult {
     },
     Notification {
         id: Uuid,
+        result: UiResult<()>,
+    },
+    CheckpointCaptured {
+        session_id: Uuid,
+        turn_index: usize,
+        result: UiResult<Checkpoint>,
+    },
+    CheckpointsLoaded {
+        session_id: Uuid,
+        result: UiResult<Vec<Checkpoint>>,
+    },
+    CheckpointRestored {
+        session_id: Uuid,
+        project_id: Uuid,
         result: UiResult<()>,
     },
 }
@@ -617,6 +634,9 @@ pub(crate) struct OperonApp {
     pub(crate) cached_github_issues: HashMap<Uuid, Vec<GitHubIssue>>,
     pub(crate) session_checkpoints: HashMap<Uuid, Vec<Checkpoint>>,
     pub(crate) pending_run_script: Option<PendingRunScript>,
+    pub(crate) cached_land_base: Option<(Uuid, String)>,
+    pub(crate) cached_run_script: Option<(PathBuf, Instant, Option<SetupScript>)>,
+    pub(crate) cached_prompt_templates: Option<(Option<PathBuf>, Instant, Vec<PromptTemplate>)>,
 }
 
 impl OperonApp {
@@ -951,7 +971,59 @@ impl OperonApp {
             cached_github_issues: HashMap::new(),
             session_checkpoints: HashMap::new(),
             pending_run_script: None,
+            cached_land_base: None,
+            cached_run_script: None,
+            cached_prompt_templates: None,
         }
+    }
+
+    pub(crate) fn cached_land_worktree_base(&mut self, project: &Project) -> String {
+        if let Some((id, base)) = &self.cached_land_base {
+            if *id == project.id {
+                return base.clone();
+            }
+        }
+        let base = detect_worktree_base(&project.path)
+            .map(|b| {
+                b.display
+                    .strip_prefix("origin/")
+                    .unwrap_or(&b.display)
+                    .to_owned()
+            })
+            .unwrap_or_else(|| "main".into());
+        self.cached_land_base = Some((project.id, base.clone()));
+        base
+    }
+
+    pub(crate) fn cached_run_script_for(&mut self, worktree: &Path) -> Option<SetupScript> {
+        let now = Instant::now();
+        if let Some((cached_path, read_at, cached_script)) = &self.cached_run_script {
+            if cached_path == worktree && now.duration_since(*read_at) < Duration::from_secs(2) {
+                return cached_script.clone();
+            }
+        }
+        let found = match read_run_script(worktree) {
+            SetupScriptRead::Found(script) => Some(script),
+            _ => None,
+        };
+        self.cached_run_script = Some((worktree.to_path_buf(), now, found.clone()));
+        found
+    }
+
+    pub(crate) fn cached_prompt_templates_for(
+        &mut self,
+        project_path: Option<&Path>,
+    ) -> Vec<PromptTemplate> {
+        let now = Instant::now();
+        let key = project_path.map(Path::to_path_buf);
+        if let Some((cached_path, read_at, templates)) = &self.cached_prompt_templates {
+            if *cached_path == key && now.duration_since(*read_at) < Duration::from_secs(2) {
+                return templates.clone();
+            }
+        }
+        let templates = list_prompt_templates(project_path);
+        self.cached_prompt_templates = Some((key, now, templates.clone()));
+        templates
     }
 
     pub(crate) fn selected_project(&self) -> Option<&Project> {
@@ -2048,6 +2120,48 @@ impl OperonApp {
                             Some(tf!("通知を送信できませんでした: {error}", error = error));
                     }
                 }
+                BackgroundResult::CheckpointCaptured {
+                    session_id,
+                    turn_index,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::CheckpointCapture(session_id, turn_index));
+                    if let Ok(checkpoint) = result {
+                        self.session_checkpoints
+                            .entry(session_id)
+                            .or_default()
+                            .push(checkpoint);
+                    }
+                }
+                BackgroundResult::CheckpointsLoaded { session_id, result } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::Checkpoints(session_id));
+                    if let Ok(checkpoints) = result {
+                        self.session_checkpoints.insert(session_id, checkpoints);
+                    }
+                }
+                BackgroundResult::CheckpointRestored {
+                    session_id,
+                    project_id,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::CheckpointRestore(session_id));
+                    match result {
+                        Ok(()) => {
+                            self.invalidate_project_file_views(project_id);
+                            self.invalidate_project_diff_views(project_id);
+                            self.notice = Some(tr("チェックポイントを復元しました。").into());
+                        }
+                        Err(e) => {
+                            self.notice = Some(tf!(
+                                "チェックポイントの復元に失敗しました: {error}",
+                                error = e
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
@@ -2884,7 +2998,7 @@ impl OperonApp {
         output: Option<(Uuid, UiResult<TerminalCapture>)>,
     ) {
         self.apply_session_previews(previews);
-        let previous_store = self.store.clone();
+        let mut previous_store = None;
         let mut changed = false;
         let mut completed = Vec::new();
         let mut failed = Vec::new();
@@ -2892,41 +3006,44 @@ impl OperonApp {
         let mut finished_setups: Vec<(Uuid, Option<i32>)> = Vec::new();
         for (id, observation) in states {
             let cancellation_pending = self.cancellation_pending(id);
-            if let Some(session) = self.store.sessions.iter_mut().find(|session| {
+            let Some(idx) = self.store.sessions.iter().position(|session| {
                 session.id == id
                     && matches!(
                         session.status,
                         SessionStatus::Starting | SessionStatus::Active | SessionStatus::Unknown
                     )
-            }) {
-                let next = if cancellation_pending
-                    && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
-                {
-                    Some(SessionStatus::Cancelled)
-                } else {
-                    session_status_after_observation(&session.status, observation)
-                };
-                if let Some(next) = next {
-                    if next == SessionStatus::Exited {
-                        completed.push(session.name.clone());
-                    } else if next == SessionStatus::Failed {
-                        failed.push(session.name.clone());
-                    } else if next == SessionStatus::Cancelled {
-                        completed_cancellations.push(id);
-                    }
-                    // A setup run is a session like any other, and it ends like
-                    // one. The only difference is which sentence says so, and
-                    // the status alone cannot say it: `Failed` folds every
-                    // non-zero code together, and the code is the thing worth
-                    // reading.
-                    if self.setup_sessions.contains(&id)
-                        && matches!(next, SessionStatus::Exited | SessionStatus::Failed)
-                    {
-                        finished_setups.push((id, observation.exit_status));
-                    }
-                    session.status = next;
-                    changed = true;
+            }) else {
+                continue;
+            };
+            let next = if cancellation_pending
+                && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
+            {
+                Some(SessionStatus::Cancelled)
+            } else {
+                session_status_after_observation(&self.store.sessions[idx].status, observation)
+            };
+            if let Some(next) = next {
+                previous_store.get_or_insert_with(|| self.store.clone());
+                let session = &mut self.store.sessions[idx];
+                if next == SessionStatus::Exited {
+                    completed.push(session.name.clone());
+                } else if next == SessionStatus::Failed {
+                    failed.push(session.name.clone());
+                } else if next == SessionStatus::Cancelled {
+                    completed_cancellations.push(id);
                 }
+                // A setup run is a session like any other, and it ends like
+                // one. The only difference is which sentence says so, and
+                // the status alone cannot say it: `Failed` folds every
+                // non-zero code together, and the code is the thing worth
+                // reading.
+                if self.setup_sessions.contains(&id)
+                    && matches!(next, SessionStatus::Exited | SessionStatus::Failed)
+                {
+                    finished_setups.push((id, observation.exit_status));
+                }
+                session.status = next;
+                changed = true;
             }
         }
         if !completed_cancellations.is_empty() {
@@ -2938,7 +3055,9 @@ impl OperonApp {
             self.set_session_output(id, capture.output, capture.cursor);
         }
         if changed && !self.persist() {
-            self.store = previous_store;
+            if let Some(previous_store) = previous_store {
+                self.store = previous_store;
+            }
             return;
         }
         if changed {
@@ -3335,10 +3454,21 @@ impl OperonApp {
         };
         let goal = goal.trim();
         if !goal.is_empty() {
-            self.record_prompt_turn(session_id, goal.to_string());
-            if !is_active {
-                self.mark_prompt_turn_completed(session_id);
-            }
+            let line = self
+                .terminal_layouts
+                .get(&session_id)
+                .map(|lines| lines.len())
+                .unwrap_or(0);
+            self.session_prompt_turns
+                .entry(session_id)
+                .or_default()
+                .push(PromptTurn {
+                    turn: 1,
+                    prompt: goal.chars().take(300).collect(),
+                    timestamp: Instant::now(),
+                    line,
+                    completed: !is_active,
+                });
         }
     }
 
@@ -4193,7 +4323,7 @@ impl OperonApp {
         let Some(session) = self.store.sessions.iter().find(|s| s.id == session_id) else {
             return;
         };
-        let Some(ref wt_path) = session.worktree_path else {
+        let Some(wt_path) = session.worktree_path.clone() else {
             return;
         };
         let turn_index = self
@@ -4201,12 +4331,19 @@ impl OperonApp {
             .get(&session_id)
             .map(|turns| turns.len())
             .unwrap_or(0);
-        if let Ok(checkpoint) = git_create_checkpoint(wt_path, session_id, turn_index, summary) {
-            self.session_checkpoints
-                .entry(session_id)
-                .or_default()
-                .push(checkpoint);
-        }
+        let summary = summary.to_owned();
+        self.spawn_background(
+            BackgroundKey::CheckpointCapture(session_id, turn_index),
+            move || {
+                let result = git_create_checkpoint(&wt_path, session_id, turn_index, &summary)
+                    .map_err(|e| e.to_string());
+                BackgroundResult::CheckpointCaptured {
+                    session_id,
+                    turn_index,
+                    result,
+                }
+            },
+        );
     }
 
     pub(crate) fn restore_checkpoint(&mut self, session_id: Uuid, commit_sha: &str) {
@@ -4217,31 +4354,28 @@ impl OperonApp {
             return;
         };
         let project_id = session.project_id;
-        match git_restore_checkpoint(&wt_path, commit_sha) {
-            Ok(()) => {
-                self.invalidate_project_file_views(project_id);
-                self.invalidate_project_diff_views(project_id);
-                self.notice = Some(tr("チェックポイントを復元しました。").into());
+        let commit_sha = commit_sha.to_owned();
+        self.spawn_background(BackgroundKey::CheckpointRestore(session_id), move || {
+            let result = git_restore_checkpoint(&wt_path, &commit_sha).map_err(|e| e.to_string());
+            BackgroundResult::CheckpointRestored {
+                session_id,
+                project_id,
+                result,
             }
-            Err(e) => {
-                self.notice = Some(tf!(
-                    "チェックポイントの復元に失敗しました: {error}",
-                    error = e
-                ));
-            }
-        }
+        });
     }
 
     pub(crate) fn refresh_checkpoints(&mut self, session_id: Uuid) {
         let Some(session) = self.store.sessions.iter().find(|s| s.id == session_id) else {
             return;
         };
-        let Some(ref wt_path) = session.worktree_path else {
+        let Some(wt_path) = session.worktree_path.clone() else {
             return;
         };
-        if let Ok(checkpoints) = git_list_checkpoints(wt_path, session_id) {
-            self.session_checkpoints.insert(session_id, checkpoints);
-        }
+        self.spawn_background(BackgroundKey::Checkpoints(session_id), move || {
+            let result = git_list_checkpoints(&wt_path, session_id).map_err(|e| e.to_string());
+            BackgroundResult::CheckpointsLoaded { session_id, result }
+        });
     }
 
     pub(crate) fn scan_orphaned_tmux_sessions(&mut self) {
@@ -5776,7 +5910,6 @@ impl OperonApp {
             self.resolved_paths_session = Some(session_id);
         }
         self.selected_session = Some(session_id);
-        self.refresh_checkpoints(session_id);
         if self.unread_hold != Some(session_id) {
             self.unread_sessions.remove(&session_id);
         }
@@ -5841,16 +5974,25 @@ impl OperonApp {
         output: String,
         cursor: Option<(u16, u16)>,
     ) {
+        if let Some(cursor) = cursor {
+            self.terminal_cursors.insert(session_id, cursor);
+        }
         // ANSI parsing is noticeably more expensive than drawing a button.
-        // Parse only when tmux has supplied fresh output, rather than once per
-        // egui repaint while the user interacts with the terminal.
+        // Parse only when tmux has supplied fresh output (or when a theme change
+        // cleared `terminal_layouts`), rather than once per poll while the
+        // terminal pane is idle.
+        if self
+            .session_output
+            .get(&session_id)
+            .is_some_and(|existing| *existing == output)
+            && self.terminal_layouts.contains_key(&session_id)
+        {
+            return;
+        }
         let palette = self.store.theme.palette();
         self.terminal_layouts
             .insert(session_id, terminal_line_layouts(&output, palette));
         self.session_output.insert(session_id, output);
-        if let Some(cursor) = cursor {
-            self.terminal_cursors.insert(session_id, cursor);
-        }
         // The buffer moved, so where the query occurs moved with it. Here
         // rather than per frame: this walks every line, and the lines only
         // change when tmux has said something new.

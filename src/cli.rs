@@ -717,26 +717,24 @@ pub(crate) fn check_transcript_resume_readiness(path: &Path) -> TranscriptResume
         return TranscriptResumeReadiness::EmptyOrMissing;
     };
 
-    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.is_empty() {
+    let Some(last_line) = text.lines().rfind(|l| !l.trim().is_empty()) else {
         return TranscriptResumeReadiness::EmptyOrMissing;
-    }
+    };
 
-    let mut valid_records = 0usize;
-    for &line in &lines[..lines.len() - 1] {
-        if serde_json::from_str::<serde_json::Value>(line).is_ok() {
-            valid_records += 1;
-        }
-    }
-
-    let last_line = lines[lines.len() - 1];
-    if serde_json::from_str::<serde_json::Value>(last_line).is_ok() {
+    if serde_json::from_str::<serde::de::IgnoredAny>(last_line).is_ok() {
         return TranscriptResumeReadiness::Ready(path.to_path_buf());
     }
 
-    // The last non-empty line failed JSON parsing. If there are prior valid records,
-    // this is a truncated line caused by sudden termination.
-    if valid_records > 0 {
+    // The last non-empty line failed JSON parsing. If there is at least one
+    // prior valid record, this is a truncated line caused by sudden termination.
+    let last_ptr = last_line.as_ptr() as usize;
+    let has_prior_valid_record = text
+        .lines()
+        .take_while(|line| (line.as_ptr() as usize) < last_ptr)
+        .filter(|line| !line.trim().is_empty())
+        .any(|line| serde_json::from_str::<serde::de::IgnoredAny>(line).is_ok());
+
+    if has_prior_valid_record {
         if let Some(sanitized_bytes) = sanitize_transcript_tail_if_needed(path, &content, last_line)
         {
             return TranscriptResumeReadiness::Sanitized {
