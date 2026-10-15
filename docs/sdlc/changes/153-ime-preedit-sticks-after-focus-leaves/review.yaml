@@ -16,7 +16,7 @@
 #   a_focused_terminal_pane_claims_the_ime_without_redrawing_every_frame watched
 #   failing before the fix and under targeted mutations.
 
-digest: "e3742ee39d1f718e"
+digest: "4ca156845da3937e"
 
 rounds: 1
 

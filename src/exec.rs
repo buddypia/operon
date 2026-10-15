@@ -41,6 +41,7 @@ pub(crate) fn run_command_with_output_limit(
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
     let mut output_limited = false;
+    let mut poll_sleep = Duration::from_millis(1);
     let status = loop {
         match child.try_wait()? {
             Some(status) => break status,
@@ -49,11 +50,16 @@ pub(crate) fn run_command_with_output_limit(
                 let _ = child.kill();
                 break child.wait()?;
             }
-            None if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
             None => {
-                timed_out = true;
-                let _ = child.kill();
-                break child.wait()?;
+                let now = Instant::now();
+                if now < deadline {
+                    thread::sleep(poll_sleep.min(deadline - now));
+                    poll_sleep = (poll_sleep * 2).min(Duration::from_millis(25));
+                } else {
+                    timed_out = true;
+                    let _ = child.kill();
+                    break child.wait()?;
+                }
             }
         }
     };

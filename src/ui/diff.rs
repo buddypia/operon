@@ -24,7 +24,17 @@ pub(crate) fn diff_pane_rows(
     collapsed: &HashSet<String>,
     annotated: &dyn Fn(&str, usize) -> bool,
 ) -> Vec<DiffRow> {
-    let mut rows = Vec::new();
+    let capacity: usize = files
+        .iter()
+        .map(|file| {
+            1 + if collapsed.contains(&file.path) {
+                0
+            } else {
+                file.lines.len()
+            }
+        })
+        .sum();
+    let mut rows = Vec::with_capacity(capacity);
     for (index, file) in files.iter().enumerate() {
         rows.push(DiffRow::File(index));
         if collapsed.contains(&file.path) {
@@ -236,7 +246,7 @@ pub(crate) fn diff_pane(
                         }
                     }
                     DiffRow::Line(file, line) => {
-                        let path = files[file].path.clone();
+                        let path = &files[file].path;
                         let line = &files[file].lines[line];
                         let wash = match line.kind {
                             DiffLineKind::Added => Some(palette.diff_added_bg),
@@ -266,19 +276,19 @@ pub(crate) fn diff_pane(
                         if let Some(number) = line.new_number {
                             let response = ui.interact(
                                 rect,
-                                ui.id().with(("diff-line", &path, number)),
+                                ui.id().with(("diff-line", path, number)),
                                 egui::Sense::click(),
                             );
                             if response.hovered()
                                 || response.has_focus()
-                                || annotations.shows_row(project, &path, number)
+                                || annotations.shows_row(project, path, number)
                             {
                                 ui.painter().text(
                                     rect.right_center() - egui::vec2(8.0, 0.0),
                                     egui::Align2::RIGHT_CENTER,
                                     ICON_COMMENT,
                                     egui::FontId::proportional(12.0),
-                                    if annotations.find(project, &path, number).is_some() {
+                                    if annotations.find(project, path, number).is_some() {
                                         palette.accent_soft
                                     } else {
                                         palette.text_muted
@@ -294,23 +304,23 @@ pub(crate) fn diff_pane(
                                 );
                             }
                             if response.clicked() {
-                                opened = Some((path, number));
+                                opened = Some((path.clone(), number));
                             }
                         }
                     }
                     DiffRow::Comment(file, line) => {
-                        let path = files[file].path.clone();
+                        let path = &files[file].path;
                         let source = &files[file].lines[line];
                         let Some(number) = source.new_number else {
                             continue;
                         };
                         let stale = annotations
-                            .find(project, &path, number)
+                            .find(project, path, number)
                             .is_some_and(|comment| comment.anchor != comment_anchor(&source.text));
                         let editing = annotations
                             .editing
                             .as_ref()
-                            .is_some_and(|(open, at)| open == &path && *at == number);
+                            .is_some_and(|(open, at)| open == path && *at == number);
                         ui.painter().rect_filled(
                             rect.shrink2(egui::vec2(8.0, 2.0)),
                             4.0,
@@ -323,7 +333,7 @@ pub(crate) fn diff_pane(
                                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
                         );
                         let (comment_sent, comment_resolved) = annotations
-                            .find(project, &path, number)
+                            .find(project, path, number)
                             .map(|c| (c.sent, c.resolved))
                             .unwrap_or((false, false));
                         note.horizontal(|ui| {
@@ -376,19 +386,19 @@ pub(crate) fn diff_pane(
                             }
                             note.horizontal(|ui| {
                                 if ui.button(tr("削除")).clicked() {
-                                    changed |= annotations.remove(project, &path, number);
+                                    changed |= annotations.remove(project, path, number);
                                 }
                                 if ui.button(tr("保存")).clicked() {
                                     changed |= annotations.save(
                                         project,
-                                        &path,
+                                        path,
                                         number,
                                         &comment_anchor(&source.text),
                                     );
                                 }
                             });
                         } else if let Some((body, is_resolved)) = annotations
-                            .find(project, &path, number)
+                            .find(project, path, number)
                             .map(|c| (c.body.clone(), c.resolved))
                         {
                             note.horizontal(|ui| {
@@ -405,7 +415,7 @@ pub(crate) fn diff_pane(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
                                         if secondary_button(ui, tr("削除")).clicked() {
-                                            changed |= annotations.remove(project, &path, number);
+                                            changed |= annotations.remove(project, path, number);
                                         }
                                         let toggle_label = if is_resolved {
                                             tr("再開")
@@ -414,7 +424,7 @@ pub(crate) fn diff_pane(
                                         };
                                         if secondary_button(ui, toggle_label).clicked() {
                                             changed |=
-                                                annotations.toggle_resolved(project, &path, number);
+                                                annotations.toggle_resolved(project, path, number);
                                         }
                                     },
                                 );
