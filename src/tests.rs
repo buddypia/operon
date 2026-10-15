@@ -35306,6 +35306,227 @@ pub(crate) fn prune_target_script_runs_dry_run_cleanly() {
     );
 }
 
+/// A pane with an active session, drawn alone in a 900×600 window, for driving
+/// the keyboard and the IME through `ui_terminal_panel`. The tmux name is
+/// unique so that a key the pane forwards cannot reach a real session.
+fn ime_pane_fixture(label: &str) -> (PathBuf, OperonApp, Session) {
+    let root = std::env::temp_dir().join(format!("operon-{label}-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.tmux_name = format!("operon-test-{}", Uuid::new_v4());
+    let mut store = Store::default();
+    store.sessions.push(session.clone());
+    let mut app =
+        OperonApp::from_state(root.join("store.json"), store, ToolStatus::default(), None);
+    app.page = Page::Sessions;
+    app.selected_session = Some(session.id);
+    app.show_session_inspector = false;
+    app.set_session_output(session.id, "$ ".into(), Some((2, 0)));
+    (root, app, session)
+}
+
+fn ime_pane_pass(
+    context: &egui::Context,
+    app: &mut OperonApp,
+    session: &Session,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    context.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |context| {
+            egui::CentralPanel::default().show(context, |ui| {
+                app.ui_terminal_panel(ui, session);
+            });
+        },
+    )
+}
+
+/// A conversion left half-typed when the keyboard moves off the pane — to
+/// another screen, another session, or anywhere else — must not outlive the
+/// move.
+///
+/// It did. The pane recorded the IME's composition only in frames where it
+/// held the keyboard, so the event that ended the composition arrived in a
+/// frame where nobody was listening, and the half-typed text stayed in
+/// `terminal_preedits`: drawn over the terminal for good, and — worse — read
+/// back as "still composing" when the pane took the keyboard again, which
+/// swallows Backspace, the arrows, Escape and Enter. The IME had no composition
+/// left to end, so nothing ever cleared it, and the text could not be deleted.
+#[test]
+pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
+    let (root, mut app, session) = ime_pane_fixture("ime-abandoned");
+    let pane = egui::Id::new(("terminal-pane", session.id));
+    let context = egui::Context::default();
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    click_at(&context, egui::pos2(450.0, 300.0), |context| {
+        egui::CentralPanel::default().show(context, |ui| {
+            app.ui_terminal_panel(ui, &session);
+        });
+    });
+    assert_eq!(context.memory(|memory| memory.focused()), Some(pane));
+
+    // Half-way through a conversion.
+    let _ = ime_pane_pass(
+        &context,
+        &mut app,
+        &session,
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into()))],
+    );
+    assert_eq!(
+        app.terminal_preedits.get(&session.id).map(String::as_str),
+        Some("にほん"),
+        "the pane did not record the composition it was given"
+    );
+
+    // The keyboard goes elsewhere, and the IME ends its composition there.
+    context.memory_mut(|memory| memory.surrender_focus(pane));
+    let left = ime_pane_pass(
+        &context,
+        &mut app,
+        &session,
+        vec![egui::Event::Ime(egui::ImeEvent::Disabled)],
+    );
+    assert_eq!(
+        app.terminal_preedits.get(&session.id),
+        None,
+        "a pane without the keyboard still holds the composition it was given"
+    );
+    assert!(
+        left.platform_output.ime.is_none(),
+        "a pane without the keyboard still claims the IME, so macOS keeps the composition alive"
+    );
+
+    // Back to the pane: Backspace is Backspace again.
+    click_at(&context, egui::pos2(450.0, 300.0), |context| {
+        egui::CentralPanel::default().show(context, |ui| {
+            app.ui_terminal_panel(ui, &session);
+        });
+    });
+    let _ = ime_pane_pass(
+        &context,
+        &mut app,
+        &session,
+        vec![egui::Event::Key {
+            key: egui::Key::Backspace,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }],
+    );
+    let forwarded = app
+        .background_tasks
+        .contains(&BackgroundKey::TerminalInput(session.id))
+        || app
+            .terminal_input_queue
+            .get(&session.id)
+            .is_some_and(|queue| !queue.is_empty());
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(app.terminal_preedits.get(&session.id), None);
+    assert!(
+        forwarded,
+        "Backspace was swallowed as if a composition were still in progress"
+    );
+}
+
+/// The same, when the move is to another screen: the pane is not drawn at all
+/// while the keyboard is away, and ⌘J can hand it back the keyboard in the very
+/// frame it reappears — so there is no unfocused frame to notice the loss in.
+#[test]
+pub(crate) fn a_conversion_does_not_survive_a_trip_to_another_screen() {
+    let (root, mut app, session) = ime_pane_fixture("ime-screen");
+    let pane = egui::Id::new(("terminal-pane", session.id));
+    let context = egui::Context::default();
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    app.terminal_focus_request = Some(session.id);
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    assert_eq!(context.memory(|memory| memory.focused()), Some(pane));
+    let _ = ime_pane_pass(
+        &context,
+        &mut app,
+        &session,
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into()))],
+    );
+    assert!(app.terminal_preedits.contains_key(&session.id));
+
+    // Another screen: the pane is not drawn, and egui lets its focus go.
+    for _ in 0..2 {
+        let _ = context.run(Default::default(), |context| {
+            egui::CentralPanel::default().show(context, |_| {});
+        });
+    }
+    assert_ne!(context.memory(|memory| memory.focused()), Some(pane));
+
+    // Back, with the keyboard handed straight to the pane.
+    app.terminal_focus_request = Some(session.id);
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(context.memory(|memory| memory.focused()), Some(pane));
+    assert_eq!(
+        app.terminal_preedits.get(&session.id),
+        None,
+        "the composition from before the trip came back with the keyboard"
+    );
+}
+
+/// The pane takes the IME the way a text field does — through egui's platform
+/// output — rather than by sending window commands every frame.
+///
+/// Each `send_viewport_cmd` asks for another frame, and the pane sent three
+/// every frame it held the keyboard, so a focused terminal redrew at the
+/// display's refresh rate for as long as it was open: CPU on an idle screen,
+/// and the window redrawing under the pointer while it was being dragged. The
+/// commands also bypassed egui-winit's own record of whether the IME is
+/// allowed, so leaving the pane never turned the IME off again.
+#[test]
+pub(crate) fn a_focused_terminal_pane_claims_the_ime_without_redrawing_every_frame() {
+    let (root, mut app, session) = ime_pane_fixture("ime-idle");
+    let context = egui::Context::default();
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    click_at(&context, egui::pos2(450.0, 300.0), |context| {
+        egui::CentralPanel::default().show(context, |ui| {
+            app.ui_terminal_panel(ui, &session);
+        });
+    });
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    let idle = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    fs::remove_dir_all(&root).ok();
+
+    let ime = idle
+        .platform_output
+        .ime
+        .expect("a focused terminal pane does not claim the IME");
+    let cursor = ime.cursor_rect;
+    assert_eq!(
+        ime.rect, cursor,
+        "egui-winit places the candidate window at `rect`, so it must be the cursor"
+    );
+    let root_viewport = &idle.viewport_output[&egui::ViewportId::ROOT];
+    assert!(
+        !root_viewport.commands.iter().any(|command| matches!(
+            command,
+            egui::ViewportCommand::IMEAllowed(_)
+                | egui::ViewportCommand::IMEPurpose(_)
+                | egui::ViewportCommand::IMERect(_)
+        )),
+        "the pane still sends IME window commands every frame: {:?}",
+        root_viewport.commands
+    );
+    assert!(
+        root_viewport.repaint_delay > std::time::Duration::ZERO,
+        "an idle focused terminal pane asks for the next frame immediately"
+    );
+}
+
 /// Typing to an agent begins with a click on the pane, and the pane has to keep
 /// answering one for as long as the session is open.
 ///

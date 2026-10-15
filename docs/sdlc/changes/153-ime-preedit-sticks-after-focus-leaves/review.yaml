@@ -1,0 +1,24 @@
+# Review record for 153-ime-preedit-sticks-after-focus-leaves.
+#
+# Verified by rust-reviewer against .claude/rules/rust.md and REVIEW.md:
+# - Focus & IME composition lifecycle: Response::has_focus() and gained_focus()
+#   are evaluated after in-frame request_focus() calls, so stale preedit state
+#   is cleared whenever the terminal pane lacks focus or regains it across an
+#   undrawn screen transition.
+# - Platform IME output & frame rate: claiming IME via output.ime replaces three
+#   per-frame send_viewport_cmd calls (which each triggered request_repaint_of
+#   in egui 0.31) and lets egui_winit::State::handle_platform_output toggle
+#   window.set_ime_allowed(false) when focus leaves the pane.
+# - Panic safety & per-frame work: zero new unwrap/expect/panic sites and no
+#   per-frame allocations, I/O, or subprocesses added.
+# - Guards: a_conversion_abandoned_by_leaving_the_pane_does_not_stick,
+#   a_conversion_does_not_survive_a_trip_to_another_screen, and
+#   a_focused_terminal_pane_claims_the_ime_without_redrawing_every_frame watched
+#   failing before the fix and under targeted mutations.
+
+digest: "4ca156845da3937e"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

@@ -6106,6 +6106,15 @@ impl OperonApp {
                         .copied()
                         .unwrap_or((0, 0));
                     let cursor_rect = terminal_cursor_rect(terminal_rect, cursor, cell);
+                    // A composition belongs to the pane that holds the keyboard,
+                    // and to no frame after it lets go. Leaving the pane ends the
+                    // composition, but the IME says so in a frame this pane no
+                    // longer reads input in; kept, the half-typed text stayed on
+                    // screen and, on return, read as "still composing" — which
+                    // swallows Backspace with nothing left to clear it (change 153).
+                    if !terminal_response.has_focus() || terminal_response.gained_focus() {
+                        self.terminal_preedits.remove(&session_id);
+                    }
                     let preedit = self
                         .terminal_preedits
                         .get(&session_id)
@@ -6130,14 +6139,18 @@ impl OperonApp {
                     if terminal_response.has_focus() {
                         // Unlike a hidden TextEdit, the terminal pane owns IME input too.
                         // This keeps Japanese text committed by macOS available to tmux.
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::IMEAllowed(true));
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::IMEPurpose(
-                                egui::viewport::IMEPurpose::Terminal,
-                            ));
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::IMERect(cursor_rect));
+                        // Claimed the way a TextEdit claims it, through the platform
+                        // output: egui-winit then allows the IME while the pane is
+                        // focused and disallows it — cancelling any composition —
+                        // once nothing claims it. A window command here would ask for
+                        // a repaint every frame and bypass that record (change 153).
+                        // `rect` is where egui-winit puts the candidate window.
+                        ui.ctx().output_mut(|output| {
+                            output.ime = Some(egui::output::IMEOutput {
+                                rect: cursor_rect,
+                                cursor_rect,
+                            });
+                        });
                         ui.memory_mut(|memory| {
                             memory.set_focus_lock_filter(
                                 terminal_id,
