@@ -1,0 +1,20 @@
+# Review record for change 152-performance-latency-and-io-hardening.
+#
+# Both required reviewers (`rust-reviewer` and `subprocess-safety-reviewer`)
+# reviewed diff 4948ed5672187a09 and approved with 0 blocking findings.
+
+digest: "4948ed5672187a09"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · `src/app.rs:2130-2135` / `src/app/screens.rs:5873-5875` — `CheckpointCaptured` populates `session_checkpoints` before initial load and appends to `session_checkpoints` before `refresh_checkpoints` runs if a prompt turn is recorded before the terminal `···` menu is opened.
+    person: "ターミナルの「…」メニューを一度も開く前に新しいプロンプトを送った場合、以前に保存されていた古いチェックポイントが一覧に出ないことがあります。必要な場合はセッションを選び直すと再読み込みされます。"
+  - rust-reviewer/2 · `src/app/screens.rs:5879-5880` / `src/app.rs:2123-2136` — Clicking "手動チェックポイントを作成" shows `チェックポイントを作成しました。` when the background capture starts rather than when `CheckpointCaptured` finishes.
+    person: "「手動チェックポイントを作成」を押した際、バックグラウンドでの作成完了を待たずに完了通知が表示されるため、変更がない状態では実際には作成されないことがあります。利用上の支障や必要な操作はありません。"
+  - rust-reviewer/3 · `src/app.rs:980-1027` / `src/app/screens.rs:1982, 5857, 6958` — Cache-miss / 2s TTL expiry in `cached_land_worktree_base`, `cached_run_script_for`, and `cached_prompt_templates_for` still performs a single synchronous read when the modal or menu first opens.
+    person: "worktree のマージ画面やテンプレートメニューを開いた最初の瞬間だけ、ブランチ名やファイルの確認でわずかに待たされることがありますが、開いている間の毎フレームの負荷は解消されています。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve 0 0"

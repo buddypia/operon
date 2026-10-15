@@ -44885,3 +44885,107 @@ pub(crate) fn transcript_vocabulary_covers_agent_setting_and_dev_mods() {
         assert_eq!(entry.class, TranscriptClass::Operational);
     }
 }
+
+/// Change 152: `set_session_output` must short-circuit when the captured output
+/// is identical to the previous poll and `terminal_layouts` is already populated,
+/// avoiding redundant 5,000-line ANSI layout rebuilds, search scans, and
+/// `resolved_paths_generation` cache invalidations every 2 seconds on idle sessions.
+#[test]
+pub(crate) fn test_set_session_output_skips_redundant_relayout_and_generation_bump_when_unchanged()
+{
+    let root = temporary_directory("idle-session-output-short-circuit");
+    let mut app = test_app(root.join("store.json"));
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let session_id = session.id;
+    app.store.sessions.push(session);
+    app.select_session(session_id);
+
+    app.set_session_output(session_id, "line 1\nline 2\n".into(), Some((2, 1)));
+    let gen_after_first = app.resolved_paths_generation;
+    app.resolved_paths.insert("src/missing.rs".into(), None);
+
+    // Second poll with identical output but updated cursor position must update
+    // the cursor without re-running layout/search or bumping resolved_paths_generation.
+    app.set_session_output(session_id, "line 1\nline 2\n".into(), Some((6, 1)));
+    assert_eq!(app.terminal_cursors.get(&session_id), Some(&(6, 1)));
+    assert_eq!(
+        app.resolved_paths_generation, gen_after_first,
+        "identical session output must not bump resolved_paths_generation on every poll"
+    );
+    assert!(
+        app.resolved_paths.contains_key("src/missing.rs"),
+        "identical session output must not evict negative path cache entries"
+    );
+
+    // When new output arrives, layout and generation must advance as before.
+    app.set_session_output(session_id, "line 1\nline 2\nline 3\n".into(), Some((0, 2)));
+    assert!(app.resolved_paths_generation > gen_after_first);
+    assert!(!app.resolved_paths.contains_key("src/missing.rs"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Change 152: `run_command_with_output_limit` must start polling with short
+/// exponential backoff (1ms doubling to 25ms) rather than sleeping a flat 25ms
+/// on the first miss right after `spawn()`, so fast commands do not pay a >=25ms
+/// artificial latency floor.
+#[test]
+pub(crate) fn test_fast_subprocess_completes_without_25ms_polling_floor() {
+    let start = Instant::now();
+    for _ in 0..4 {
+        let mut cmd = Command::new("/usr/bin/true");
+        let out = run_command_with_timeout(&mut cmd, Duration::from_secs(5)).unwrap();
+        assert!(out.status.success());
+    }
+    let elapsed = start.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(85),
+        "4 sequential fast commands took {elapsed:?}, expected < 85ms without 25ms polling floor"
+    );
+}
+
+/// Change 152: `ensure_initial_prompt_turn` is called from the UI draw path
+/// (`ui_terminal_panel` and `ui_dock_edge`) to seed the initial prompt card from
+/// `session.goal`. It must only populate `session_prompt_turns` in memory and
+/// must never spawn `git` checkpoint subprocesses on the UI thread, whereas
+/// `record_prompt_turn` schedules checkpoint capture on a background thread.
+#[test]
+pub(crate) fn test_ensure_initial_prompt_turn_does_not_create_git_checkpoint_on_draw_path() {
+    let root = temporary_directory("initial-prompt-no-sync-checkpoint");
+    let git = |args: &[&str]| {
+        assert!(git_command(&root).args(args).status().unwrap().success());
+    };
+    git(&["init"]);
+    git(&["config", "user.email", "test@example.invalid"]);
+    git(&["config", "user.name", "Operon test"]);
+    fs::write(root.join("README.md"), "hello\n").unwrap();
+    git(&["add", "README.md"]);
+    git(&["commit", "-m", "init"]);
+
+    let mut app = test_app(root.join("store.json"));
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.goal = "Initial session goal".into();
+    session.worktree_path = Some(root.clone());
+    let session_id = session.id;
+    app.store.sessions.push(session);
+
+    app.ensure_initial_prompt_turn(session_id);
+    assert_eq!(
+        app.session_prompt_turns
+            .get(&session_id)
+            .map(|turns| turns.len()),
+        Some(1)
+    );
+    assert!(
+        app.session_checkpoints
+            .get(&session_id)
+            .is_none_or(|cps| cps.is_empty()),
+        "seeding initial prompt turn on draw path must not synchronously create a git checkpoint"
+    );
+    assert!(
+        git_list_checkpoints(&root, session_id).unwrap().is_empty(),
+        "seeding initial prompt turn on draw path must not write checkpoint refs in git"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}

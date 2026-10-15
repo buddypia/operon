@@ -1,0 +1,52 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Root cause:
+# 1. `run_command_with_output_limit` in `src/exec.rs` sleeps for a fixed 25ms
+#    whenever the initial immediate `try_wait()` after `spawn()` returns `None`,
+#    imposing a >=25ms latency floor on every `git` and `tmux` subprocess.
+# 2. `OperonApp::set_session_output` in `src/app.rs` unconditionally re-parses
+#    up to 5,000 lines of ANSI layouts, re-runs terminal search, and bumps
+#    `resolved_paths_generation` every 2s on `SessionPoll` even when output is
+#    byte-for-byte unchanged, and `terminal_search_matches` in `src/ui/terminal.rs`
+#    allocates `O(line_len^2)` strings per match to compute display columns.
+# 3. `ensure_initial_prompt_turn` (called from the draw path in `screens.rs`)
+#    delegates to `record_prompt_turn` -> `capture_checkpoint`, running 4
+#    synchronous `git` subprocesses on the UI thread when a session is first
+#    drawn; `select_session` runs `git_list_checkpoints` synchronously on every
+#    session click; and `capture_checkpoint` / `restore_checkpoint` block the UI
+#    thread instead of running via `spawn_background`.
+# 4. Open modals and menus in `src/app/screens.rs` execute synchronous subprocess
+#    and disk I/O at 60fps (`detect_worktree_base` in `ui_land_worktree_modal`,
+#    `read_run_script` in `ui_terminal_panel`, `list_prompt_templates` in
+#    `ui_launch_form`, and `is_embedded_model_cached` in `ui_settings_data`).
+# 5. `check_transcript_resume_readiness` in `src/cli.rs` parses every line of a
+#    transcript into a heap-allocated `serde_json::Value` before checking the
+#    trailing line.
+
+state:
+  route: "bugfix"
+  stage: "review"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Reviewed at diff 4948ed5672187a09 and ready to commit and merge."
+
+contract:
+  bands: "machine passed bash scripts/check-bands.sh reports all 21 of 21 metrics within their bands"
+  three-gates: "machine passed make q.fast and named cargo test --locked runs"
+  guards-verified-by-mutation: "human passed failing-first tests watched failing before code changes"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

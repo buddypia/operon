@@ -672,29 +672,36 @@ pub(crate) fn terminal_search_matches(lines: &[LayoutJob], query: &str) -> Vec<T
     if needle.is_empty() {
         return Vec::new();
     }
+    let needle_columns: usize = needle.iter().copied().map(terminal_character_columns).sum();
     let mut matches = Vec::new();
+    let mut haystack = Vec::new();
     for (index, line) in lines.iter().enumerate() {
-        let haystack: Vec<char> = line.text.chars().map(|c| c.to_ascii_lowercase()).collect();
+        if line.text.len() < needle.len() {
+            continue;
+        }
+        haystack.clear();
+        haystack.extend(line.text.chars().map(|c| c.to_ascii_lowercase()));
         if haystack.len() < needle.len() {
             continue;
         }
         let mut at = 0;
+        let mut column = 0;
         while at + needle.len() <= haystack.len() {
             if haystack[at..at + needle.len()] != needle[..] {
+                column += terminal_character_columns(haystack[at]);
                 at += 1;
                 continue;
             }
-            let prefix: String = line.text.chars().take(at).collect();
-            let found: String = line.text.chars().skip(at).take(needle.len()).collect();
             matches.push(TerminalMatch {
                 line: index,
-                column: terminal_display_columns(&prefix),
-                columns: terminal_display_columns(&found),
+                column,
+                columns: needle_columns,
             });
             if matches.len() >= TERMINAL_SEARCH_MAX_MATCHES {
                 return matches;
             }
             // Occurrences do not overlap: the next one starts after this one.
+            column += needle_columns;
             at += needle.len();
         }
     }
