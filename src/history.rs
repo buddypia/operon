@@ -2210,7 +2210,13 @@ fn antigravity_transcript_record(
     let mut chunks = Vec::new();
     if let Some(text) = value.get("content").and_then(|value| value.as_str()) {
         if !text.trim().is_empty() {
-            chunks.push(text.to_owned());
+            // A tool's output also carries agy's instructions to its own model.
+            // Unmarked, the destination reads them as words it said itself.
+            if kind == ANTIGRAVITY_TOOL_RESULT_RECORD {
+                chunks.push(format!("[Tool result]\n{text}"));
+            } else {
+                chunks.push(text.to_owned());
+            }
         }
     }
     // The model's reasoning rides on the record that produced it rather than in
