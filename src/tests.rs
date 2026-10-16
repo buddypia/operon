@@ -24237,7 +24237,9 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         "cached) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text --cached \"$base\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
         "commit) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text \"$base\" \"$commit\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
         "*) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text \"$base\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
-        "digest=$(run_diff | shasum -a 256 | cut -c1-16)",
+        REVIEW_DIGEST_LINE,
+        REVIEW_LEGACY_DIGEST_LINE,
+        REVIEW_DIGEST_COMPARISON_LINE,
         "changed=$(run_diff --name-only)",
         // The base is HEAD unless the caller says which commit an amend
         // records against, and it is verified to be a commit: a base that is
@@ -24256,7 +24258,11 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         .iter()
         .filter(|line| {
             line.contains("--relative")
-                || (line.contains("shasum") && !line.contains("digest=$(run_diff"))
+                // Change 162: exactly the two pinned assignments may hash,
+                // not any line that merely contains their prefix.
+                || (line.contains("shasum")
+                    && line.trim() != REVIEW_DIGEST_LINE
+                    && line.trim() != REVIEW_LEGACY_DIGEST_LINE)
                 // Any git diff, however git is configured on the way in: the
                 // digest lines read `git -c … diff`, and a filter that looked
                 // for the literal `git diff` matched nothing at all.
@@ -24278,6 +24284,255 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         "digest を狭められる行があります — EXCLUDE 以外の git diff、二つ目の shasum、\
          --relative のどれかです:\n{}",
         narrowing.join("\n")
+    );
+    // One comparison decides freshness, and it accepts the two digests and
+    // nothing else: a second `!=` elsewhere would be a third digest.
+    let comparisons = code
+        .iter()
+        .filter(|line| line.contains("\"$recorded_digest\" !="))
+        .count();
+    assert!(
+        comparisons == 1,
+        "記録された digest との比較が {comparisons} 箇所あります — 新しさを決める比較は一つです"
+    );
+}
+
+/// The digest the review gate binds a verdict to (change 162): the diff with
+/// hunk line numbers and blob ids removed, under `LC_ALL=C` so a byte that is
+/// not UTF-8 cannot end what is hashed.
+const REVIEW_DIGEST_LINE: &str = "digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\\.\\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16)";
+/// The digest as taken before change 162, still accepted.
+const REVIEW_LEGACY_DIGEST_LINE: &str = "legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16)";
+/// The one comparison, accepting those two and nothing else.
+const REVIEW_DIGEST_COMPARISON_LINE: &str =
+    "&& [ \"$recorded_digest\" != \"$digest\" ] && [ \"$recorded_digest\" != \"$legacy_digest\" ]; then";
+
+// --- Change 162: work landing on main does not void a finished review -----
+
+/// Stages `src/store.rs` as `text` with the fixture's change directory, so the
+/// gate has a change to judge and names the digest of what is staged.
+fn stage_store_as(f: &ReviewGateFixture, text: &str, stamp: &str) {
+    f.write("src/store.rs", text);
+    f.append(
+        "docs/sdlc/changes/900-fixture/state.yaml",
+        &format!("# {stamp}\n"),
+    );
+    f.git(&["add", "-A"]);
+}
+
+/// Commits what is staged, as main moving under a branch would.
+fn land_on_fixture_main(f: &ReviewGateFixture, text: &str, stamp: &str) {
+    stage_store_as(f, text, stamp);
+    f.git(&["commit", "-q", "-m", stamp]);
+}
+
+#[test]
+/// The digest is about the change, not about where in the file it sits: main
+/// gaining lines above a reviewed edit leaves the verdict standing, and
+/// anything that alters the edit or the lines around it still moves it.
+pub(crate) fn a_review_survives_main_moving_the_lines_above_it() {
+    let f = ReviewGateFixture::new();
+    let base: String = (1..=40).map(|n| format!("// line {n}\n")).collect();
+    land_on_fixture_main(&f, &base, "forty lines");
+    stage_store_as(&f, &format!("{base}// reviewed\n"), "edit");
+    let reviewed = f.current_digest();
+
+    // Another session lands five lines at the top of the same file.
+    let moved = format!("// main 1\n// main 2\n// main 3\n// main 4\n// main 5\n{base}");
+    land_on_fixture_main(&f, &moved, "main moved");
+    stage_store_as(&f, &format!("{moved}// reviewed\n"), "edit again");
+    assert_eq!(
+        f.current_digest(),
+        reviewed,
+        "main が上に行を足しただけで判定が古くなりました"
+    );
+
+    // A different edit is a different change.
+    stage_store_as(&f, &format!("{moved}// something else\n"), "other edit");
+    assert_ne!(
+        f.current_digest(),
+        reviewed,
+        "別の変更が同じ digest になりました"
+    );
+
+    // Main editing a line the reviewed hunk shows as context is a reason to
+    // look again.
+    let touched = moved.replace("// line 40\n", "// line 40, edited on main\n");
+    land_on_fixture_main(&f, &touched, "main touched the context");
+    stage_store_as(&f, &format!("{touched}// reviewed\n"), "edit over context");
+    assert_ne!(
+        f.current_digest(),
+        reviewed,
+        "レビューした行のすぐ隣を main が変えても判定が生きています"
+    );
+
+    // A line that is not UTF-8 does not end what is hashed. Under a UTF-8
+    // locale BSD sed stops at the first such line and prints only what came
+    // before it, so without `LC_ALL=C` the edit after it would not count.
+    let digest_under_utf8 = |f: &ReviewGateFixture| {
+        ReviewGateFixture::digest_named_in(
+            &f.gate_in_env("--index", &[], &[("LANG", "ja_JP.UTF-8"), ("LC_ALL", "")])
+                .1,
+        )
+    };
+    fs::write(f.root.join("src/latin1.rs"), b"// caf\xe9\n").unwrap();
+    stage_store_as(&f, &format!("{touched}// first\n"), "after latin1, first");
+    let first = digest_under_utf8(&f);
+    stage_store_as(&f, &format!("{touched}// second\n"), "after latin1, second");
+    assert_ne!(
+        digest_under_utf8(&f),
+        first,
+        "UTF-8 でない行より後ろの変更が digest に入っていません"
+    );
+}
+
+#[test]
+/// A verdict recorded before change 162 carries the digest of the diff byte
+/// for byte. It still counts: a byte-identical diff is the strictest match
+/// there is, and sessions mid-review elsewhere must not be sent back by this.
+pub(crate) fn a_review_recorded_before_change_162_still_counts() {
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    let f = ReviewGateFixture::new();
+    f.append("src/store.rs", "// change\n");
+    f.append(
+        "docs/sdlc/changes/900-fixture/state.yaml",
+        "resume: \"x\"\n",
+    );
+    f.git(&["add", "-A"]);
+    let output = f
+        .command("bash")
+        .args([
+            "-c",
+            "git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text --cached HEAD -- . ':(exclude)docs/sdlc/changes' | shasum -a 256 | cut -c1-16",
+        ])
+        .output()
+        .unwrap();
+    let legacy = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    assert_eq!(legacy.len(), 16, "byte-for-byte digest could not be taken");
+    assert_ne!(
+        f.current_digest(),
+        legacy,
+        "digest がまだ diff をそのまま hash しています — 行番号と blob id で動きます"
+    );
+    f.record(&legacy, all);
+    f.git(&["add", "-A"]);
+    let (code, printed) = f.gate(&[]);
+    assert!(
+        code == Some(0) && printed.contains("✅ SHIP"),
+        "change 162 より前に書かれた判定が通りません (exit {code:?}):\n{printed}"
+    );
+}
+
+#[test]
+/// Change 162. Parallel sessions pick change numbers from what main holds, and
+/// four numbers on main already name two changes each. A new branch may not
+/// take a number another change, branch, or remote branch already holds under
+/// another slug.
+pub(crate) fn a_new_change_cannot_take_a_number_already_in_use() {
+    let root = temporary_directory("change-number");
+    let repo = root.join("repo");
+    let origin = root.join("origin.git");
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::create_dir_all(repo.join("scripts")).unwrap();
+    fs::create_dir_all(repo.join("docs/sdlc/changes/005-alpha")).unwrap();
+    for script in ["scripts/check-change-number.sh", "scripts/run-bounded.sh"] {
+        fs::copy(source.join(script), repo.join(script)).unwrap();
+    }
+    fs::write(repo.join("docs/sdlc/changes/005-alpha/state.yaml"), "x\n").unwrap();
+    let command = |cwd: &Path, program: &str, args: &[&str]| {
+        let mut command = std::process::Command::new(program);
+        forget_inherited_repository(&mut command);
+        let output = command
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "fixture")
+            .env("GIT_AUTHOR_EMAIL", "fixture@operon")
+            .env("GIT_COMMITTER_NAME", "fixture")
+            .env("GIT_COMMITTER_EMAIL", "fixture@operon")
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        )
+    };
+    let git = |args: &[&str]| {
+        let (code, printed) = command(&repo, "git", args);
+        assert_eq!(code, Some(0), "git {args:?}: {printed}");
+    };
+    command(&root, "git", &["init", "-q", "--bare", "origin.git"]);
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "main"]);
+    git(&["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(&["push", "-q", "origin", "main"]);
+    // A local branch, and a branch only another session's clone pushed.
+    git(&["branch", "fix/007-beta"]);
+    git(&["push", "-q", "origin", "main:refs/heads/feature/009-gamma"]);
+    let check = |branch: &str| command(&repo, "bash", &["scripts/check-change-number.sh", branch]);
+
+    let mut wrong = Vec::new();
+    let mut expect = |label: &str, branch: &str, want_code: i32, want: &[&str]| {
+        let (code, printed) = check(branch);
+        if code != Some(want_code) || want.iter().any(|text| !printed.contains(text)) {
+            wrong.push(format!(
+                "{label} ({branch}): expected exit {want_code} with {want:?}, got {code:?}:\n    {}",
+                printed.trim()
+            ));
+        }
+    };
+    expect(
+        "a change directory on main holds it",
+        "fix/005-other",
+        1,
+        &[
+            "変更番号 005 は使用中です",
+            "005-alpha",
+            "次の空き番号は 010 です",
+        ],
+    );
+    expect(
+        "the same change, re-cut as a feature",
+        "feature/007-beta",
+        0,
+        &[],
+    );
+    expect(
+        "a remote branch holds it",
+        "fix/009-delta",
+        1,
+        &["変更番号 009 は使用中です", "feature/009-gamma"],
+    );
+    expect("no number", "chore/install-159-160", 0, &[]);
+    expect("a free number", "feature/010-new", 0, &[]);
+    git(&[
+        "remote",
+        "set-url",
+        "origin",
+        root.join("missing.git").to_str().unwrap(),
+    ]);
+    expect(
+        "origin unreachable: warns, still refuses",
+        "fix/005-other",
+        1,
+        &["origin を取得できませんでした", "変更番号 005 は使用中です"],
+    );
+    fs::remove_dir_all(&root).ok();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+
+    // `make wt.new` asks before it creates anything.
+    let makefile = fs::read_to_string(source.join("Makefile")).unwrap();
+    let asks = makefile.find("bash scripts/check-change-number.sh $(BR)");
+    let creates = makefile.find("node .claude/scripts/worktree-new.mjs");
+    assert!(
+        matches!((asks, creates), (Some(a), Some(c)) if a < c),
+        "make wt.new が worktree を作る前に番号を確かめていません"
     );
 }
 
