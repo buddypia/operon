@@ -26,7 +26,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -34,9 +34,8 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Get the rust-reviewer and subprocess-safety-reviewer verdicts on the
-  staged digest into review.yaml, then commit, push, wait for CI, land, and
-  package."
+resume: "Closed. Swap dist/Operon.app into /Applications once the person
+  allows quitting the running Operon."
 
 contract:
   failing-test-first: "machine passed
@@ -52,8 +51,10 @@ contract:
     their bands"
   review: "human passed rust-reviewer approve 0 2, subprocess-safety-reviewer
     approve 0 5 at c6ab90331476b7a4, all remarks carried in review.yaml"
-  release-binary: "machine pending bash scripts/package-macos.sh and the swap
-    in .claude/skills/ship/SKILL.md, carrying 159 as well"
+  release-binary: "machine waived bash scripts/package-macos.sh passed (fmt +
+    clippy green, release build signed into dist/Operon.app, carrying 159 as
+    well); the swap into /Applications needs the running Operon quit, which
+    waits for the person who is using it"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
