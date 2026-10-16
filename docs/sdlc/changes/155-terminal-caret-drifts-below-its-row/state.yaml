@@ -40,8 +40,11 @@ contract:
     main; commit gate runs fmt + clippy)"
   bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
     their bands"
-  release-binary: "machine pending this change touches src/ so it makes
-    /Applications/Operon.app stale and ends with bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh (fmt + clippy
+    green, release build signed into dist/), then
+    scripts/replace-macos-bundle.sh swapped /Applications/Operon.app at
+    00:01:58; the running app quit and relaunched on the new binary; obsolete
+    dist/Operon.previous.app moved to Trash with no rollback copy retained"
   guards-verified-by-mutation: "human passed each new guard watched failing
     before the fix: the rewritten parses_tmux_capture_with_cursor_marker,
     parses_tmux_cursor_line_needs_all_three_fields,
@@ -50,9 +53,10 @@ contract:
     all failed against the old API (25 compile errors) and the old anchor
     (caret None / wrong row) before the code landed"
   review: "human passed rust-reviewer, durability-reviewer,
-    subprocess-safety-reviewer all approve 0 0 at digest c6c9b8aad11eb86e;
-    rounds 3 (two nit-driven returns, both acted on; the record remarks are
-    carried in review.yaml)"
+    subprocess-safety-reviewer all approve 0 0 — rounds 3 at
+    c6c9b8aad11eb86e (two nit-driven returns, both acted on; record remarks
+    carried in review.yaml) plus the round-4 recombination confirmations at
+    238c33e9801c1ac3 after 156 landed on main first"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
