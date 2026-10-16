@@ -355,6 +355,13 @@ pub(crate) struct OperonApp {
     /// picked. `build_agent_launch_command` orders them by the catalogue, so
     /// this holds the person's clicks and never the command's word order.
     pub(crate) agent_flag_inputs: Vec<String>,
+    /// The switches typed beside the ticked ones, remembered per agent like
+    /// them (change 156).
+    pub(crate) agent_extra_args_input: String,
+    /// A conversation the next launch reopens instead of starting one. For one
+    /// launch only, and for the agent it was typed under: never remembered,
+    /// cleared by a launch and by `select_agent`.
+    pub(crate) resume_conversation_input: String,
     pub(crate) recent_agent_settings: RecentAgentSettings,
     pub(crate) acknowledged_launch: Option<LaunchAcknowledgement>,
     pub(crate) session_path_input: String,
@@ -794,6 +801,7 @@ impl OperonApp {
             agent_effort_input,
             agent_flag_inputs,
             custom_command,
+            agent_extra_args_input,
         ) = if let Some(settings) = recent_agent_settings.agents.get(&selected_agent) {
             (
                 settings.model.clone(),
@@ -801,6 +809,7 @@ impl OperonApp {
                 settings.effort.clone(),
                 settings.flags.clone(),
                 settings.custom_command.clone(),
+                settings.extra_args.clone(),
             )
         } else {
             (
@@ -808,6 +817,7 @@ impl OperonApp {
                 String::new(),
                 String::new(),
                 Vec::new(),
+                String::new(),
                 String::new(),
             )
         };
@@ -849,6 +859,8 @@ impl OperonApp {
             agent_mode_input,
             agent_effort_input,
             agent_flag_inputs,
+            agent_extra_args_input,
+            resume_conversation_input: String::new(),
             recent_agent_settings,
             acknowledged_launch: None,
             session_path_input: String::new(),
@@ -3894,7 +3906,16 @@ impl OperonApp {
             self.notice = Some(reason);
             return;
         }
+        if let Some(error) = self.launch_input_error() {
+            self.notice = Some(error);
+            return;
+        }
         let user_goal = self.goal_input.trim().to_owned();
+        let resume_id = if self.selected_agent == "custom" {
+            String::new()
+        } else {
+            self.resume_conversation_input.trim().to_owned()
+        };
         let agent_command = match build_agent_launch_command(
             &self.selected_agent,
             &self.custom_command,
@@ -3902,6 +3923,7 @@ impl OperonApp {
             &self.agent_mode_input,
             &self.agent_effort_input,
             &self.agent_flag_inputs,
+            &self.agent_extra_args_input,
         ) {
             Ok(command) => command,
             Err(error) => {
@@ -3922,8 +3944,19 @@ impl OperonApp {
             }
         };
         let id = Uuid::new_v4();
-        let (agent_command, native_session_id) =
-            command_with_managed_native_session_id(&self.selected_agent, agent_command, id);
+        // A typed conversation is reopened rather than allocated, and the
+        // record names it from the start (change 156).
+        let (agent_command, native_session_id) = if resume_id.is_empty() {
+            command_with_managed_native_session_id(&self.selected_agent, agent_command, id)
+        } else {
+            match launch_command_resuming(&self.selected_agent, &agent_command, &resume_id) {
+                Ok(command) => (command, Some(resume_id)),
+                Err(error) => {
+                    self.notice = Some(error);
+                    return;
+                }
+            }
+        };
         let goal = goal_with_native_tracking_token(&self.selected_agent, user_goal.clone(), id);
         let tmux_name = managed_tmux_name(id);
         let raw_name = if self.session_name_input.trim().is_empty() {
@@ -4011,6 +4044,7 @@ impl OperonApp {
         self.persist_recent_agent_settings();
         self.goal_input.clear();
         self.session_name_input.clear();
+        self.resume_conversation_input.clear();
         self.depends_on_input = None;
         if should_queue {
             self.notice = Some(tr("依存セッションの完了までキューに入れました。").into());
@@ -5081,12 +5115,49 @@ impl OperonApp {
             &self.agent_mode_input,
             &self.agent_flag_inputs,
             &self.custom_command,
+            &self.agent_extra_args_input,
         );
         self.tools.tmux
             && agent_ready
             && custom_command_ready
             && !self.worktree_mutation_running(project.id)
+            && self.launch_input_error().is_none()
             && (!dangerous_mode || self.launch_acknowledged())
+    }
+
+    /// Why the typed arguments or the conversation ID cannot launch, if they
+    /// cannot (change 156). One answer for the disabled button, the footer's
+    /// reason line, and `launch_session`, so the three never disagree.
+    ///
+    /// Read every frame the sheet is open; see `typed_launch_arguments` for
+    /// what that costs.
+    pub(crate) fn launch_input_error(&self) -> Option<String> {
+        if self.selected_agent == "custom" {
+            return None;
+        }
+        if let Err(error) =
+            typed_launch_arguments(&self.selected_agent, &self.agent_extra_args_input)
+        {
+            return Some(error);
+        }
+        let resume_id = self.resume_conversation_input.trim();
+        if resume_id.is_empty() {
+            return None;
+        }
+        if !is_safe_cli_session_id(resume_id) {
+            return Some(
+                tr("会話 ID には英数字とハイフンだけを、64 文字以内で入力してください。").into(),
+            );
+        }
+        // A resume never carries a prompt (`agent_shell_command`): a retry
+        // would replay it. Refused rather than dropped without a word.
+        if !self.goal_input.trim().is_empty() {
+            return Some(
+                tr("会話を再開するときは依頼を空にしてください。再開後にターミナルで入力できます。")
+                    .into(),
+            );
+        }
+        resume_refusal(&self.selected_agent, &self.agent_flag_inputs)
     }
 
     pub(crate) fn open_project_worktrees(&mut self, project_id: Uuid) {
@@ -6784,6 +6855,9 @@ pub(crate) struct LaunchAcknowledgement {
     /// held after the line was edited to run something else entirely: the other
     /// three fields do not move when a custom command is retyped.
     pub(crate) custom_command: String,
+    /// The typed switches, for the same reason as `custom_command`: consent to
+    /// one line is not consent to the line it was edited into.
+    pub(crate) extra_args: String,
 }
 
 fn git_branch(path: &Path) -> Result<String> {
@@ -6943,6 +7017,20 @@ impl OperonApp {
         for flag in agent_flag_options(&self.selected_agent) {
             if self.agent_flag_inputs.iter().any(|id| id == flag.id) {
                 chosen.push(tr(flag.label).to_owned());
+            }
+        }
+        if self.selected_agent != "custom" {
+            // Cut, because the entry cap counts entries and not width.
+            for (label, value) in [
+                (tr("追加の引数"), self.agent_extra_args_input.trim()),
+                (tr("再開する会話"), self.resume_conversation_input.trim()),
+            ] {
+                if !value.is_empty() {
+                    chosen.push(named(
+                        label,
+                        &truncate_chars(value, LAUNCH_DETAIL_SUMMARY_VALUE_MAX),
+                    ));
+                }
             }
         }
         if !self.session_path_input.trim().is_empty() {

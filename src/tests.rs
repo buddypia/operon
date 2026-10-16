@@ -5307,11 +5307,11 @@ pub(crate) fn flag_ids(ids: &[&str]) -> Vec<String> {
 #[test]
 pub(crate) fn builds_safe_native_agent_launch_options() {
     assert_eq!(
-        build_agent_launch_command("codex", "", "gpt-5", "workspace-write", "high", &[]),
+        build_agent_launch_command("codex", "", "gpt-5", "workspace-write", "high", &[], ""),
         Ok("codex --model gpt-5 -c model_reasoning_effort=high --sandbox workspace-write".into())
     );
     assert_eq!(
-        build_agent_launch_command("claude", "", "sonnet", "plan", "medium", &[]),
+        build_agent_launch_command("claude", "", "sonnet", "plan", "medium", &[], ""),
         Ok("claude --model sonnet --effort medium --permission-mode plan".into())
     );
     assert_eq!(
@@ -5321,15 +5321,18 @@ pub(crate) fn builds_safe_native_agent_launch_options() {
             "",
             "",
             "high",
-            &flag_ids(&["skip-permissions"])
+            &flag_ids(&["skip-permissions"]),
+            ""
         ),
         Ok("agy --effort high --dangerously-skip-permissions".into())
     );
-    assert!(build_agent_launch_command("codex", "", "$(whoami)", "", "", &[]).is_err());
-    assert!(build_agent_launch_command("claude", "", "", "danger-full-access", "", &[]).is_err());
-    assert!(build_agent_launch_command("gemini", "", "", "", "xhigh", &[]).is_err());
-    assert!(build_agent_launch_command("gemini", "", "", "no-sandbox", "", &[]).is_err());
-    assert!(build_agent_launch_command("claude", "", "", "", "minimal", &[]).is_err());
+    assert!(build_agent_launch_command("codex", "", "$(whoami)", "", "", &[], "").is_err());
+    assert!(
+        build_agent_launch_command("claude", "", "", "danger-full-access", "", &[], "").is_err()
+    );
+    assert!(build_agent_launch_command("gemini", "", "", "", "xhigh", &[], "").is_err());
+    assert!(build_agent_launch_command("gemini", "", "", "no-sandbox", "", &[], "").is_err());
+    assert!(build_agent_launch_command("claude", "", "", "", "minimal", &[], "").is_err());
 }
 /// The switches are the feature: a person combines a mode with one or more
 /// of them, and the command has to come out in the CLI's own spelling
@@ -5343,7 +5346,8 @@ pub(crate) fn combines_launch_switches_with_the_mode_beside_them() {
             "",
             "workspace-write",
             "",
-            &flag_ids(&["search", "approval-never"])
+            &flag_ids(&["search", "approval-never"]),
+            ""
         ),
         Ok("codex --sandbox workspace-write --ask-for-approval never --search".into())
     );
@@ -5355,7 +5359,8 @@ pub(crate) fn combines_launch_switches_with_the_mode_beside_them() {
             "",
             "workspace-write",
             "",
-            &flag_ids(&["approval-never", "search"])
+            &flag_ids(&["approval-never", "search"]),
+            ""
         ),
         build_agent_launch_command(
             "codex",
@@ -5363,7 +5368,8 @@ pub(crate) fn combines_launch_switches_with_the_mode_beside_them() {
             "",
             "workspace-write",
             "",
-            &flag_ids(&["search", "approval-never"])
+            &flag_ids(&["search", "approval-never"]),
+            ""
         )
     );
     assert_eq!(
@@ -5373,7 +5379,8 @@ pub(crate) fn combines_launch_switches_with_the_mode_beside_them() {
             "",
             "acceptEdits",
             "",
-            &flag_ids(&["ide", "verbose"])
+            &flag_ids(&["ide", "verbose"]),
+            ""
         ),
         Ok("claude --permission-mode acceptEdits --ide --verbose".into())
     );
@@ -5384,13 +5391,14 @@ pub(crate) fn combines_launch_switches_with_the_mode_beside_them() {
             "",
             "accept-edits",
             "",
-            &flag_ids(&["sandbox"])
+            &flag_ids(&["sandbox"]),
+            ""
         ),
         Ok("agy --mode accept-edits --sandbox".into())
     );
     // A repeated ID is a person clicking twice, not a doubled flag.
     assert_eq!(
-        build_agent_launch_command("claude", "", "", "", "", &flag_ids(&["ide", "ide"])),
+        build_agent_launch_command("claude", "", "", "", "", &flag_ids(&["ide", "ide"]), ""),
         Ok("claude --ide".into())
     );
 }
@@ -5406,7 +5414,8 @@ pub(crate) fn refuses_switch_combinations_the_cli_rejects() {
         "",
         "",
         "",
-        &flag_ids(&["approval-never", "approve-for-me"])
+        &flag_ids(&["approval-never", "approve-for-me"]),
+        ""
     )
     .is_err());
     assert!(build_agent_launch_command(
@@ -5415,7 +5424,8 @@ pub(crate) fn refuses_switch_combinations_the_cli_rejects() {
         "",
         "",
         "",
-        &flag_ids(&["approval-never", "bypass-approvals"])
+        &flag_ids(&["approval-never", "bypass-approvals"]),
+        ""
     )
     .is_err());
     assert!(build_agent_launch_command(
@@ -5424,7 +5434,8 @@ pub(crate) fn refuses_switch_combinations_the_cli_rejects() {
         "",
         "workspace-write",
         "",
-        &flag_ids(&["approve-for-me"])
+        &flag_ids(&["approve-for-me"]),
+        ""
     )
     .is_err());
     // The bypass switch is fine beside a sandbox: Codex accepts that pair.
@@ -5434,7 +5445,8 @@ pub(crate) fn refuses_switch_combinations_the_cli_rejects() {
         "",
         "read-only",
         "",
-        &flag_ids(&["bypass-approvals"])
+        &flag_ids(&["bypass-approvals"]),
+        ""
     )
     .is_ok());
     assert!(build_agent_launch_command(
@@ -5443,35 +5455,45 @@ pub(crate) fn refuses_switch_combinations_the_cli_rejects() {
         "",
         "",
         "",
-        &flag_ids(&["skip-permissions", "allow-skip-permissions"])
+        &flag_ids(&["skip-permissions", "allow-skip-permissions"]),
+        ""
     )
     .is_err());
     // A switch belonging to another CLI, and any switch at all on a custom
     // command, are both refused rather than pasted in.
-    assert!(build_agent_launch_command("claude", "", "", "", "", &flag_ids(&["search"])).is_err());
     assert!(
-        build_agent_launch_command("custom", "my-agent", "", "", "", &flag_ids(&["search"]))
-            .is_err()
+        build_agent_launch_command("claude", "", "", "", "", &flag_ids(&["search"]), "").is_err()
     );
+    assert!(build_agent_launch_command(
+        "custom",
+        "my-agent",
+        "",
+        "",
+        "",
+        &flag_ids(&["search"]),
+        ""
+    )
+    .is_err());
 }
 #[test]
 pub(crate) fn every_displayed_provider_option_passes_its_typed_contract() {
     for agent in ["codex", "claude", "gemini"] {
         for mode in agent_mode_options(agent) {
             assert!(
-                build_agent_launch_command(agent, "", "", mode, "", &[]).is_ok(),
+                build_agent_launch_command(agent, "", "", mode, "", &[], "").is_ok(),
                 "{agent} mode {mode}"
             );
         }
         for effort in agent_effort_options(agent) {
             assert!(
-                build_agent_launch_command(agent, "", "", "", effort, &[]).is_ok(),
+                build_agent_launch_command(agent, "", "", "", effort, &[], "").is_ok(),
                 "{agent} effort {effort}"
             );
         }
         for flag in agent_flag_options(agent) {
             assert!(
-                build_agent_launch_command(agent, "", "", "", "", &flag_ids(&[flag.id])).is_ok(),
+                build_agent_launch_command(agent, "", "", "", "", &flag_ids(&[flag.id]), "")
+                    .is_ok(),
                 "{agent} flag {}",
                 flag.id
             );
@@ -7988,7 +8010,7 @@ pub(crate) fn recognizes_agent_modes_that_require_explicit_confirmation() {
         for mode in agent_mode_options(agent) {
             if is_dangerous_agent_mode(mode) {
                 assert!(
-                    launch_needs_acknowledgement(agent, mode, &[], ""),
+                    launch_needs_acknowledgement(agent, mode, &[], "", ""),
                     "{agent} mode {mode}"
                 );
             }
@@ -8012,36 +8034,42 @@ pub(crate) fn a_dangerous_switch_asks_for_the_same_confirmation_a_dangerous_mode
         "claude",
         "",
         &flag_ids(&["skip-permissions"]),
+        "",
         ""
     ));
     assert!(launch_needs_acknowledgement(
         "codex",
         "read-only",
         &flag_ids(&["bypass-approvals"]),
+        "",
         ""
     ));
     assert!(launch_needs_acknowledgement(
         "gemini",
         "",
         &flag_ids(&["skip-permissions"]),
+        "",
         ""
     ));
     assert!(launch_needs_acknowledgement(
         "codex",
         "danger-full-access",
         &[],
+        "",
         ""
     ));
     assert!(!launch_needs_acknowledgement(
         "codex",
         "workspace-write",
         &flag_ids(&["approval-never", "search"]),
+        "",
         ""
     ));
     assert!(!launch_needs_acknowledgement(
         "claude",
         "acceptEdits",
         &flag_ids(&["allow-skip-permissions"]),
+        "",
         ""
     ));
 }
@@ -8070,7 +8098,7 @@ pub(crate) fn a_dangerous_switch_typed_into_a_custom_command_still_asks() {
                 format!("{} {}", agent, flag.args.join("=")),
             ] {
                 assert!(
-                    launch_needs_acknowledgement("custom", "", &[], &command),
+                    launch_needs_acknowledgement("custom", "", &[], &command, ""),
                     "`{command}` runs the agent without asking and was not gated"
                 );
             }
@@ -8104,7 +8132,7 @@ pub(crate) fn a_dangerous_switch_typed_into_a_custom_command_still_asks() {
         "codex --yolo",
     ] {
         assert!(
-            launch_needs_acknowledgement("custom", "", &[], command),
+            launch_needs_acknowledgement("custom", "", &[], command, ""),
             "`{command}` runs the agent without asking and was not gated"
         );
     }
@@ -8114,7 +8142,7 @@ pub(crate) fn a_dangerous_switch_typed_into_a_custom_command_still_asks() {
     for alias in DANGEROUS_ARGUMENT_ALIASES {
         let command = format!("codex {}", alias.join(" "));
         assert!(
-            launch_needs_acknowledgement("custom", "", &[], &command),
+            launch_needs_acknowledgement("custom", "", &[], &command, ""),
             "`{command}` is written down as an unguarded run and was not gated"
         );
     }
@@ -8125,7 +8153,8 @@ pub(crate) fn a_dangerous_switch_typed_into_a_custom_command_still_asks() {
         "custom",
         "",
         &[],
-        "aider --model gpt-5"
+        "aider --model gpt-5",
+        ""
     ));
 
     // Matched as whole arguments. A path that spells the switch inside a longer
@@ -8135,7 +8164,8 @@ pub(crate) fn a_dangerous_switch_typed_into_a_custom_command_still_asks() {
         "custom",
         "",
         &[],
-        "/opt/--dangerously-skip-permissions-notes/run.sh"
+        "/opt/--dangerously-skip-permissions-notes/run.sh",
+        ""
     ));
 }
 
@@ -32525,9 +32555,16 @@ pub(crate) fn test_terminal_session_file_resolution_separation() {
 /// agent the way it was running.
 #[test]
 pub(crate) fn a_resume_carries_every_launch_option_it_was_started_with() {
-    let launch =
-        build_agent_launch_command("claude", "", "opus", "acceptEdits", "high", &["ide".into()])
-            .expect("a claude launch with a model, a mode, an effort, and a flag");
+    let launch = build_agent_launch_command(
+        "claude",
+        "",
+        "opus",
+        "acceptEdits",
+        "high",
+        &["ide".into()],
+        "",
+    )
+    .expect("a claude launch with a model, a mode, an effort, and a flag");
     let resumed = resume_command_with_launch_options(
         CliProvider::Claude,
         "claude",
@@ -32553,6 +32590,7 @@ pub(crate) fn a_resume_carries_every_launch_option_it_was_started_with() {
         "workspace-write",
         "high",
         &["search".into()],
+        "",
     )
     .expect("a codex launch");
     let resumed = resume_command_with_launch_options(
@@ -32595,6 +32633,7 @@ pub(crate) fn every_launch_option_the_pickers_offer_survives_a_resume() {
                         mode,
                         effort,
                         &[flag.id.into()],
+                        "",
                     ) else {
                         // The builder refuses combinations the CLI itself
                         // refuses. Those never reach a resume.
@@ -32641,7 +32680,7 @@ pub(crate) fn every_launch_option_the_pickers_offer_survives_a_resume() {
 /// string nothing writes.
 #[test]
 pub(crate) fn a_resume_refuses_the_options_that_contradict_it() {
-    let base = build_agent_launch_command("claude", "", "opus", "", "", &[]).expect("a launch");
+    let base = build_agent_launch_command("claude", "", "opus", "", "", &[], "").expect("a launch");
     let (launch, allocated) =
         command_with_managed_native_session_id("claude", base, Uuid::new_v4());
     let allocated = allocated.expect("claude allocates its own conversation id at launch");
@@ -32666,7 +32705,7 @@ pub(crate) fn a_resume_refuses_the_options_that_contradict_it() {
 
     // Antigravity's `--new-project` says in its own help that it starts a new
     // project, which is the conversation being resumed thrown away.
-    let launch = build_agent_launch_command("gemini", "", "", "", "", &["new-project".into()])
+    let launch = build_agent_launch_command("gemini", "", "", "", "", &["new-project".into()], "")
         .expect("an antigravity launch that starts a new project");
     let resumed = resume_command_with_launch_options(
         CliProvider::Gemini,
@@ -32688,7 +32727,7 @@ pub(crate) fn a_resume_refuses_the_options_that_contradict_it() {
         let first = "e7cf0e2a-0000-4000-8000-00000000000a";
         let second = "e7cf0e2a-0000-4000-8000-00000000000b";
         let launch =
-            build_agent_launch_command(agent, "", "a-model", "", "", &[]).expect("a launch");
+            build_agent_launch_command(agent, "", "a-model", "", "", &[], "").expect("a launch");
         let once = resume_command_with_launch_options(provider, agent, &launch, first);
         let twice = resume_command_with_launch_options(provider, agent, &once, second);
         assert!(
@@ -32731,7 +32770,7 @@ pub(crate) fn a_resume_carrying_options_is_still_a_native_resume() {
         ("claude", CliProvider::Claude),
         ("gemini", CliProvider::Gemini),
     ] {
-        let launch = build_agent_launch_command(agent, "", "a-model", "", "", &[])
+        let launch = build_agent_launch_command(agent, "", "a-model", "", "", &[], "")
             .expect("a launch with one option");
         let resumed = resume_command_with_launch_options(
             provider,
@@ -32766,7 +32805,7 @@ pub(crate) fn a_conversation_id_survives_the_options_around_it() {
         ("gemini", CliProvider::Gemini),
     ] {
         let id = "e7cf0e2a-0000-4000-8000-000000000008";
-        let launch = build_agent_launch_command(agent, "", "a-model", "", "high", &[])
+        let launch = build_agent_launch_command(agent, "", "a-model", "", "high", &[], "")
             .expect("a launch with options");
         let resumed = resume_command_with_launch_options(provider, agent, &launch, id);
         assert_eq!(
@@ -32782,9 +32821,16 @@ pub(crate) fn a_conversation_id_survives_the_options_around_it() {
 /// rather than a comment on it.
 #[test]
 pub(crate) fn the_resume_hint_names_what_it_will_carry() {
-    let launch =
-        build_agent_launch_command("claude", "", "opus", "", "", &["skip-permissions".into()])
-            .expect("a claude launch with a dangerous flag");
+    let launch = build_agent_launch_command(
+        "claude",
+        "",
+        "opus",
+        "",
+        "",
+        &["skip-permissions".into()],
+        "",
+    )
+    .expect("a claude launch with a dangerous flag");
     let labels = carried_launch_option_labels("claude", &launch);
     assert_eq!(
         labels,
@@ -32801,7 +32847,7 @@ pub(crate) fn the_resume_hint_names_what_it_will_carry() {
 
     // Codex writes its effort as one `-c key=value` pair; the person picked
     // "high", so that is what they should read back.
-    let launch = build_agent_launch_command("codex", "", "", "read-only", "high", &[])
+    let launch = build_agent_launch_command("codex", "", "", "read-only", "high", &[], "")
         .expect("a codex launch with a mode and an effort");
     assert_eq!(
         carried_launch_option_labels("codex", &launch),
@@ -32813,7 +32859,8 @@ pub(crate) fn the_resume_hint_names_what_it_will_carry() {
     assert!(!carried_launch_is_dangerous("codex", &launch));
 
     // Nothing chosen, nothing to say.
-    let launch = build_agent_launch_command("claude", "", "", "", "", &[]).expect("a bare launch");
+    let launch =
+        build_agent_launch_command("claude", "", "", "", "", &[], "").expect("a bare launch");
     assert!(carried_launch_option_labels("claude", &launch).is_empty());
 
     // The labels are only half the promise. The verb a person actually hovers
@@ -32822,9 +32869,16 @@ pub(crate) fn the_resume_hint_names_what_it_will_carry() {
     let mut session = test_session(Uuid::new_v4(), SessionStatus::Exited);
     session.agent = "claude".into();
     session.native_session_id = Some("native-id".into());
-    session.agent_command =
-        build_agent_launch_command("claude", "", "opus", "", "", &["skip-permissions".into()])
-            .expect("a claude launch with a dangerous flag");
+    session.agent_command = build_agent_launch_command(
+        "claude",
+        "",
+        "opus",
+        "",
+        "",
+        &["skip-permissions".into()],
+        "",
+    )
+    .expect("a claude launch with a dangerous flag");
     let verb = session_verb(&session, false).expect("an exited native session offers a resume");
     assert!(
         verb.hint.contains("モデル opus") && verb.hint.contains(tr("権限確認をすべてスキップする")),
@@ -32837,7 +32891,7 @@ pub(crate) fn the_resume_hint_names_what_it_will_carry() {
     );
 
     session.agent_command =
-        build_agent_launch_command("claude", "", "", "", "", &[]).expect("a bare launch");
+        build_agent_launch_command("claude", "", "", "", "", &[], "").expect("a bare launch");
     let verb = session_verb(&session, false).expect("an exited native session offers a resume");
     assert_eq!(
         verb.hint,
@@ -34686,7 +34740,7 @@ pub(crate) fn a_permission_escape_no_table_names_still_asks() {
         "agy -dangerously-invented-for-this-test",
     ] {
         assert!(
-            launch_needs_acknowledgement("custom", "", &[], command),
+            launch_needs_acknowledgement("custom", "", &[], command, ""),
             "`{command}` names itself a permission escape and was not gated"
         );
         assert!(
@@ -34714,7 +34768,7 @@ pub(crate) fn a_table_that_calls_a_flag_safe_outranks_the_heuristic() {
             }
             let command = format!("{} {}", agent, flag.args.join(" "));
             assert!(
-                !launch_needs_acknowledgement("custom", "", &[], &command),
+                !launch_needs_acknowledgement("custom", "", &[], &command, ""),
                 "`{command}` is `dangerous: false` in {agent}'s table and was gated anyway"
             );
             checked += 1;
@@ -34738,7 +34792,7 @@ pub(crate) fn a_value_that_spells_a_flag_is_not_a_flag() {
         "runner --name dangerously-fast",
     ] {
         assert!(
-            !launch_needs_acknowledgement("custom", "", &[], harmless),
+            !launch_needs_acknowledgement("custom", "", &[], harmless, ""),
             "`{harmless}` asked for a dangerous-launch confirmation it did not need"
         );
     }
@@ -34757,7 +34811,7 @@ pub(crate) fn a_value_that_spells_a_flag_is_not_a_flag() {
         "codex -a never -sdanger-full-access",
     ] {
         assert!(
-            launch_needs_acknowledgement("custom", "", &[], gated),
+            launch_needs_acknowledgement("custom", "", &[], gated, ""),
             "`{gated}` stopped being gated"
         );
     }
@@ -34777,7 +34831,7 @@ pub(crate) fn pre_approving_a_shell_tool_asks_and_pre_approving_a_reader_does_no
         for value in ["Bash", "Edit Bash", "Bash Edit", "Read Bash Glob"] {
             let command = format!("claude --{argument} {value}");
             assert!(
-                launch_needs_acknowledgement("custom", "", &[], &command),
+                launch_needs_acknowledgement("custom", "", &[], &command, ""),
                 "`{command}` hands over a shell before anybody is asked"
             );
             assert!(
@@ -34792,7 +34846,8 @@ pub(crate) fn pre_approving_a_shell_tool_asks_and_pre_approving_a_reader_does_no
                 "custom",
                 "",
                 &[],
-                &format!("claude --{argument} {value}")
+                &format!("claude --{argument} {value}"),
+                ""
             ));
         }
         // `BashOutput` reads an existing shell's output and runs nothing. A
@@ -34806,14 +34861,14 @@ pub(crate) fn pre_approving_a_shell_tool_asks_and_pre_approving_a_reader_does_no
         ] {
             let command = format!("claude --{argument} {value}");
             assert!(
-                !launch_needs_acknowledgement("custom", "", &[], &command),
+                !launch_needs_acknowledgement("custom", "", &[], &command, ""),
                 "`{command}` pre-approves nothing that runs a command and was gated anyway"
             );
         }
         // The list ends at the next argument: what follows one is not its value.
         let command = format!("claude --{argument} Read --model Bash-flavoured");
         assert!(
-            !launch_needs_acknowledgement("custom", "", &[], &command),
+            !launch_needs_acknowledgement("custom", "", &[], &command, ""),
             "`{command}` read past the end of the value list"
         );
     }
@@ -34822,7 +34877,8 @@ pub(crate) fn pre_approving_a_shell_tool_asks_and_pre_approving_a_reader_does_no
         "custom",
         "",
         &[],
-        "claude --allowed-tools"
+        "claude --allowed-tools",
+        ""
     ));
 }
 
@@ -35043,12 +35099,13 @@ pub(crate) fn a_restart_is_dangerous_for_everything_the_launch_gate_asks_about()
                     .map(|flag| (String::new(), vec![flag.id.to_owned()])),
             );
         for (mode, flags) in choices {
-            let Ok(command) = build_agent_launch_command(agent, "", "", &mode, "", &flags) else {
+            let Ok(command) = build_agent_launch_command(agent, "", "", &mode, "", &flags, "")
+            else {
                 continue;
             };
             assert_eq!(
                 carried_launch_is_dangerous(agent, &command),
-                launch_needs_acknowledgement(agent, &mode, &flags, ""),
+                launch_needs_acknowledgement(agent, &mode, &flags, "", ""),
                 "the restart chip and the launch screen disagree about `{command}`"
             );
             crossed += 1;
@@ -36892,6 +36949,7 @@ pub(crate) fn recent_agent_settings_save_and_load_round_trip() {
             effort: "high".to_owned(),
             flags: vec!["skip-permissions".to_owned()],
             custom_command: String::new(),
+            extra_args: String::new(),
         },
     );
     settings.agents.insert(
@@ -36902,6 +36960,7 @@ pub(crate) fn recent_agent_settings_save_and_load_round_trip() {
             effort: String::new(),
             flags: Vec::new(),
             custom_command: "aider --model sonnet".to_owned(),
+            extra_args: String::new(),
         },
     );
 
@@ -36934,6 +36993,7 @@ pub(crate) fn recent_agent_settings_sanitizes_invalid_options() {
             "skip-permissions".to_owned(),
         ],
         custom_command: "arbitrary-command".to_owned(),
+        extra_args: String::new(),
     };
     sanitize_agent_launch_settings("claude", &mut claude_settings);
 
@@ -36955,6 +37015,7 @@ pub(crate) fn recent_agent_settings_sanitizes_invalid_options() {
         // approve-for-me conflicts with mode in codex
         flags: vec!["approve-for-me".to_owned(), "search".to_owned()],
         custom_command: String::new(),
+        extra_args: String::new(),
     };
     sanitize_agent_launch_settings("codex", &mut codex_settings);
     assert_eq!(codex_settings.mode, "read-only");
@@ -37110,6 +37171,7 @@ pub(crate) fn app_startup_restores_last_selected_agent_and_recent_settings() {
             effort: "high".to_owned(),
             flags: vec!["sandbox".to_owned()],
             custom_command: String::new(),
+            extra_args: String::new(),
         },
     );
     save_recent_agent_settings(&data_file, &settings).unwrap();
@@ -37151,6 +37213,7 @@ pub(crate) fn pinned_launch_round_trips_through_the_settings_file() {
             effort: "high".to_owned(),
             flags: Vec::new(),
             custom_command: String::new(),
+            extra_args: String::new(),
         },
         account: Some(Uuid::new_v4()),
         acknowledged: true,
@@ -45319,4 +45382,443 @@ pub(crate) fn the_echo_poll_runs_at_frame_rate_only_while_typing() {
         terminal_echo_poll_wait(Some(typed), Some(polled), typed + TERMINAL_ECHO_WINDOW),
         None
     );
+}
+
+/// Change 156, requirement 1. What a person types runs after what they ticked,
+/// in the order they typed it, and an empty field changes nothing.
+#[test]
+pub(crate) fn typed_launch_arguments_follow_the_ticked_switches() {
+    assert_eq!(
+        build_agent_launch_command(
+            "claude",
+            "",
+            "opus",
+            "",
+            "",
+            &flag_ids(&["skip-permissions"]),
+            "--add-dir=../shared --verbose-hooks",
+        ),
+        Ok("claude --model opus --dangerously-skip-permissions --add-dir=../shared --verbose-hooks".into())
+    );
+    assert_eq!(
+        build_agent_launch_command(
+            "codex",
+            "",
+            "",
+            "workspace-write",
+            "",
+            &flag_ids(&["search"]),
+            "--enable=web_search -c=features.x=true",
+        ),
+        Ok(
+            "codex --sandbox workspace-write --search --enable=web_search -c=features.x=true"
+                .into()
+        )
+    );
+    assert_eq!(
+        build_agent_launch_command("gemini", "", "", "", "", &[], "  --debug  "),
+        Ok("agy --debug".into())
+    );
+    assert_eq!(
+        build_agent_launch_command("claude", "", "", "", "", &[], ""),
+        build_agent_launch_command("claude", "", "", "", "", &[], "   "),
+        "an empty field is the command as it was before the field existed"
+    );
+}
+
+/// Change 156, requirement 2. A typed token is a switch, spelled with the
+/// characters every launch is held to, and never one the sheet sets itself —
+/// whether by a field or by a checkbox, so the catalogue's exclusivity still
+/// decides every switch it knows.
+#[test]
+pub(crate) fn typed_launch_arguments_refuse_bare_words_unsafe_characters_and_owned_options() {
+    for agent in ["codex", "claude", "gemini"] {
+        assert_eq!(typed_launch_arguments(agent, ""), Ok(Vec::new()));
+        for refused in [
+            "fix the bug",
+            "--add-dir ../shared",
+            "--add-dir=../shared;rm",
+            "--x=$(whoami)",
+            "--",
+            "-",
+        ] {
+            assert!(
+                typed_launch_arguments(agent, refused).is_err(),
+                "{agent}: {refused:?} must be refused"
+            );
+            assert!(
+                build_agent_launch_command(agent, "", "", "", "", &[], refused).is_err(),
+                "{agent}: the builder must refuse {refused:?} too"
+            );
+        }
+        // Read out of the tables rather than retyped, so a renamed option moves
+        // this test with it (lesson 004).
+        for shape in launch_option_shapes(agent)
+            .iter()
+            .filter(|shape| shape.name.starts_with("--"))
+        {
+            for spelled in [shape.name.to_owned(), format!("{}=x", shape.name)] {
+                assert!(
+                    typed_launch_arguments(agent, &spelled).is_err(),
+                    "{agent}: {spelled} is a field on the sheet"
+                );
+            }
+        }
+        for flag in agent_flag_options(agent) {
+            let first = flag.args[0];
+            for spelled in [first.to_owned(), format!("{first}=x")] {
+                assert!(
+                    typed_launch_arguments(agent, &spelled).is_err(),
+                    "{agent}: {spelled} is a checkbox on the sheet"
+                );
+            }
+        }
+        // Which conversation runs, and that the CLI stays interactive, are
+        // Operon's to decide; so are the short spellings of owned options.
+        for owned in operon_owned_launch_options(agent) {
+            for spelled in [(*owned).to_owned(), format!("{owned}=x")] {
+                assert!(
+                    typed_launch_arguments(agent, &spelled).is_err(),
+                    "{agent}: {spelled} is decided by Operon"
+                );
+            }
+        }
+        // A bundle hides an owned short option inside another token.
+        for bundled in [
+            "-mo3",
+            "-cr",
+            "-xy=1",
+            "-new-project",
+            "-conversation=x",
+            "-rOTHER",
+        ] {
+            assert!(
+                typed_launch_arguments(agent, bundled).is_err(),
+                "{agent}: {bundled} must be refused"
+            );
+        }
+    }
+    assert!(typed_launch_arguments("claude", "--session-id=abc").is_err());
+    assert!(typed_launch_arguments("claude", "--continue").is_err());
+    assert!(typed_launch_arguments("codex", "-m=o3").is_err());
+    // The sibling of a ticked switch in its exclusive group is the case the
+    // catalogue exists to refuse; typing it must not be the way around it.
+    assert!(build_agent_launch_command(
+        "claude",
+        "",
+        "",
+        "",
+        "",
+        &flag_ids(&["skip-permissions"]),
+        "--allow-dangerously-skip-permissions",
+    )
+    .is_err());
+    assert_eq!(
+        typed_launch_arguments("claude", "--add-dir=../shared -x"),
+        Ok(vec!["--add-dir=../shared", "-x"])
+    );
+}
+
+/// Change 156, requirement 3. A typed switch that removes the permission
+/// prompts asks for the same consent a ticked one does, and the consent covers
+/// the typed line: editing it withdraws it.
+#[test]
+pub(crate) fn typed_launch_arguments_that_skip_permissions_need_the_acknowledgement() {
+    assert!(launch_needs_acknowledgement(
+        "claude",
+        "",
+        &[],
+        "",
+        "--allowedTools=Bash"
+    ));
+    assert!(!launch_needs_acknowledgement(
+        "claude",
+        "",
+        &[],
+        "",
+        "--add-dir=../shared"
+    ));
+
+    let temp = temporary_directory("typed-arguments-consent");
+    let mut app = test_app(temp.join("store.json"));
+    app.select_agent("claude");
+    app.agent_extra_args_input = "--allowedTools=Bash".into();
+    app.acknowledged_launch = Some(app.pending_launch());
+    assert!(app.launch_acknowledged());
+    app.agent_extra_args_input = "--allowedTools=Bash --verbose-hooks".into();
+    assert!(
+        !app.launch_acknowledged(),
+        "consent was given for the line as it was typed"
+    );
+    fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 156, requirement 4. The typed line is remembered per agent and with
+/// the pin; a file from before it existed still loads, and a stored line the
+/// gate would now refuse loads empty.
+#[test]
+pub(crate) fn typed_launch_arguments_are_remembered_per_agent_and_old_files_still_load() {
+    let temp = temporary_directory("typed-arguments-remembered");
+    let data_file = temp.join("store.json");
+    let mut app = test_app(data_file.clone());
+    app.select_agent("claude");
+    app.agent_extra_args_input = " --add-dir=../shared ".into();
+    app.persist_recent_agent_settings();
+    app.select_agent("codex");
+    assert_eq!(app.agent_extra_args_input, "");
+    app.select_agent("claude");
+    assert_eq!(app.agent_extra_args_input, "--add-dir=../shared");
+    assert_eq!(
+        load_recent_agent_settings(&data_file).agents["claude"].extra_args,
+        "--add-dir=../shared"
+    );
+
+    app.pin_launch_settings();
+    assert!(app.launch_matches_pin());
+    app.agent_extra_args_input = "--verbose-hooks".into();
+    assert!(!app.launch_matches_pin());
+    app.apply_pinned_launch();
+    assert_eq!(app.agent_extra_args_input, "--add-dir=../shared");
+
+    let path = recent_agent_settings_path(&data_file);
+    fs::write(
+        &path,
+        r#"{"last_selected_agent":"claude","agents":{"claude":{"model":"opus"},"codex":{"extra_args":"fix it"}},"pinned":{"agent":"claude","settings":{"extra_args":"--model=x"},"acknowledged":true}}"#,
+    )
+    .unwrap();
+    let loaded = load_recent_agent_settings(&data_file);
+    assert_eq!(loaded.agents["claude"].model, "opus");
+    assert_eq!(loaded.agents["claude"].extra_args, "");
+    assert_eq!(
+        loaded.agents["codex"].extra_args, "",
+        "a bare word is refused"
+    );
+    let pinned = loaded.pinned.expect("the pin survives");
+    assert_eq!(pinned.settings.extra_args, "");
+    assert!(
+        !pinned.acknowledged,
+        "consent was for the line as written, not the one now held"
+    );
+    fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 156, requirement 7. The folded header names the typed line and the
+/// conversation, cut short, so one long line cannot wrap the header.
+#[test]
+pub(crate) fn typed_launch_arguments_are_shortened_in_the_folded_header() {
+    let temp = temporary_directory("typed-arguments-summary");
+    let mut app = test_app(temp.join("store.json"));
+    app.select_agent("claude");
+    app.agent_extra_args_input = format!("--add-dir={}", "a".repeat(1000));
+    app.resume_conversation_input = "0f3c2a9e-1b7d-4c55-9e12-3456789abcde".into();
+    let summary = app.launch_detail_summary();
+    let typed = summary
+        .iter()
+        .find(|entry| entry.starts_with(tr("追加の引数")))
+        .expect("the typed line is named");
+    let resumed = summary
+        .iter()
+        .find(|entry| entry.starts_with(tr("再開する会話")))
+        .expect("the conversation is named");
+    for entry in [typed, resumed] {
+        assert!(entry.ends_with('…'), "{entry}");
+        assert!(
+            entry.chars().count()
+                <= tr("再開する会話").chars().count() + 1 + LAUNCH_DETAIL_SUMMARY_VALUE_MAX + 1,
+            "{entry}"
+        );
+    }
+    app.agent_extra_args_input.clear();
+    app.resume_conversation_input.clear();
+    assert!(app.launch_detail_summary().is_empty());
+    fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 156, requirement 5. A typed conversation ID turns the launch into the
+/// CLI's own resume, carrying every ticked and typed option — the dangerous
+/// one above all, which the bare-resume fallback would have dropped.
+#[test]
+pub(crate) fn a_resume_id_reopens_that_conversation_with_every_merged_option() {
+    let id = "0f3c2a9e-1b7d-4c55-9e12-3456789abcde";
+    let cases = [
+        ("claude", "skip-permissions", "--add-dir=../shared"),
+        ("codex", "bypass-approvals", "--enable=web_search"),
+        ("gemini", "skip-permissions", "--debug"),
+    ];
+    for (agent, flag, typed) in cases {
+        let provider = cli_provider_for_agent(agent).unwrap();
+        let launch =
+            build_agent_launch_command(agent, "", "a-model", "", "", &flag_ids(&[flag]), typed)
+                .unwrap();
+        let resumed = launch_command_resuming(agent, &launch, id).unwrap();
+        let tokens = resumed.split_whitespace().collect::<Vec<_>>();
+        for option in launch.split_whitespace().skip(1) {
+            assert!(
+                tokens.contains(&option),
+                "{agent}: {option} lost: {resumed}"
+            );
+        }
+        assert!(is_native_resume_command(&resumed), "{resumed}");
+        assert_eq!(
+            native_session_id_from_agent_command(provider, &resumed).as_deref(),
+            Some(id),
+            "{resumed}"
+        );
+        assert!(!resumed.contains("--session-id"), "{resumed}");
+        assert!(
+            carried_launch_is_dangerous(agent, &resumed),
+            "{agent}: the resume still runs unguarded: {resumed}"
+        );
+    }
+    assert_eq!(
+        launch_command_resuming("codex", "codex --search", id),
+        Ok(format!("codex resume --search {id}"))
+    );
+    assert_eq!(
+        launch_command_resuming("claude", "claude --verbose", id),
+        Ok(format!("claude --verbose --resume {id}"))
+    );
+}
+
+/// Change 156, requirement 5, end to end through the launch: the record names
+/// the conversation it reopened, and Claude is not asked to allocate another.
+#[test]
+pub(crate) fn a_resume_id_launch_records_the_conversation_it_reopens() {
+    let temp = temporary_directory("resume-id-launch");
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(temp.join("store.json"), Store::default(), tools, None);
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "project".into(),
+        path: temp.clone(),
+        added_at: now(),
+    };
+    app.store.projects.push(project.clone());
+    app.select_project(Some(project.id));
+    app.select_agent("claude");
+    app.toggle_launch_flag(agent_flag("claude", "skip-permissions").unwrap(), true);
+    app.acknowledged_launch = Some(app.pending_launch());
+    app.resume_conversation_input = " 0f3c2a9e-1b7d-4c55-9e12-3456789abcde ".into();
+
+    app.launch_session();
+
+    let session = app.store.sessions.last().expect("a session was recorded");
+    assert_eq!(
+        session.agent_command,
+        "claude --dangerously-skip-permissions --resume 0f3c2a9e-1b7d-4c55-9e12-3456789abcde"
+    );
+    assert_eq!(
+        session.native_session_id.as_deref(),
+        Some("0f3c2a9e-1b7d-4c55-9e12-3456789abcde")
+    );
+    assert!(
+        app.resume_conversation_input.is_empty(),
+        "the ID is for one launch"
+    );
+    fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 156, requirement 6. What a resume cannot honour is refused before a
+/// record is written, and an ID never outlives the agent it was typed for.
+#[test]
+pub(crate) fn a_resume_id_refuses_malformed_ids_a_request_and_a_new_project() {
+    let id = "0f3c2a9e-1b7d-4c55-9e12-3456789abcde";
+    assert!(launch_command_resuming("claude", "claude", "abc def").is_err());
+    assert!(launch_command_resuming("claude", "claude", "$(whoami)").is_err());
+    assert!(launch_command_resuming("claude", "claude", &"a".repeat(65)).is_err());
+    assert!(launch_command_resuming("custom", "aider", id).is_err());
+    let new_project =
+        build_agent_launch_command("gemini", "", "", "", "", &flag_ids(&["new-project"]), "")
+            .unwrap();
+    assert_eq!(
+        launch_command_resuming("gemini", &new_project, id),
+        Err(tf!(
+            "「{label}」は会話の再開と同時に指定できません。",
+            label = tr(agent_flag("gemini", "new-project").unwrap().label)
+        ))
+    );
+    // A word the resume would not carry is refused, not silently dropped.
+    assert!(launch_command_resuming("claude", "claude stray", id).is_err());
+
+    let temp = temporary_directory("resume-id-refusals");
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        antigravity: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(temp.join("store.json"), Store::default(), tools, None);
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "project".into(),
+        path: temp.clone(),
+        added_at: now(),
+    };
+    app.store.projects.push(project.clone());
+    app.select_project(Some(project.id));
+    app.select_agent("claude");
+
+    app.resume_conversation_input = "not an id".into();
+    assert!(app.launch_input_error().is_some());
+    assert!(!app.launch_ready(&project));
+
+    app.resume_conversation_input = id.into();
+    assert_eq!(app.launch_input_error(), None);
+    app.goal_input = "continue".into();
+    assert!(
+        app.launch_input_error().is_some(),
+        "a resume never sends a prompt, so a typed request would be lost"
+    );
+    app.launch_session();
+    assert!(app.store.sessions.is_empty());
+    assert!(app.notice.is_some());
+    app.goal_input.clear();
+
+    app.select_agent("gemini");
+    assert!(
+        app.resume_conversation_input.is_empty(),
+        "an ID belongs to the CLI it was typed for"
+    );
+    app.toggle_launch_flag(agent_flag("gemini", "new-project").unwrap(), true);
+    app.resume_conversation_input = id.into();
+    assert!(app.launch_input_error().is_some());
+    app.launch_session();
+    assert!(app.store.sessions.is_empty());
+
+    app.select_agent("custom");
+    assert!(app.resume_conversation_input.is_empty());
+    fs::remove_dir_all(temp).unwrap();
+}
+
+/// Change 156, review round 1. A line over the cap is refused whole and never
+/// written, so a pasted page cannot grow the settings file past the size its
+/// load accepts — which would lose every remembered option at the next start.
+#[test]
+pub(crate) fn typed_launch_arguments_too_long_are_refused_and_never_saved() {
+    let longest = format!("--x={}", "a".repeat(LAUNCH_EXTRA_ARGS_MAX_CHARS - 4));
+    assert_eq!(longest.chars().count(), LAUNCH_EXTRA_ARGS_MAX_CHARS);
+    assert!(typed_launch_arguments("claude", &longest).is_ok());
+    let over = format!("{longest}a");
+    assert!(typed_launch_arguments("claude", &over).is_err());
+
+    let temp = temporary_directory("typed-arguments-too-long");
+    let data_file = temp.join("store.json");
+    let mut app = test_app(data_file.clone());
+    app.select_agent("claude");
+    app.agent_model_input = "opus".into();
+    app.agent_extra_args_input = format!("--x={}", "a".repeat(200_000));
+    app.persist_recent_agent_settings();
+    let written = fs::metadata(recent_agent_settings_path(&data_file))
+        .unwrap()
+        .len();
+    assert!(written <= RECENT_AGENT_SETTINGS_FILE_MAX_BYTES, "{written}");
+    let loaded = load_recent_agent_settings(&data_file);
+    assert_eq!(loaded.agents["claude"].model, "opus", "the rest survives");
+    assert_eq!(loaded.agents["claude"].extra_args, "");
+    assert!(app.launch_input_error().is_some());
+    fs::remove_dir_all(temp).unwrap();
 }

@@ -1,7 +1,7 @@
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Build per plan.md order of work, step 1: failing tests for requirements 1, 2, 5, 6."
+resume: "Reviewed and committed; push the branch, wait for CI, merge on main, then package and swap the bundle."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
   release-binary: "machine pending yes: src/agents.rs, src/agents/settings.rs, src/app.rs and src/app/screens.rs change, so it ends with bash scripts/package-macos.sh and the bundle swap"
-  named-tests: "machine pending cargo test --locked typed_launch_arguments and cargo test --locked resume_id"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  named-tests: "machine passed cargo test --locked typed_launch_arguments and cargo test --locked resume_id"
+  guards-verified-by-mutation: "human passed 14 of 14 mutations caught by mutations.py, including the claim that typed arguments follow the ticked switches"

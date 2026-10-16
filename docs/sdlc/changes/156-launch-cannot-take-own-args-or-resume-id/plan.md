@@ -66,3 +66,27 @@
   conversation ID opens that conversation.
 
 ## Departures from the plan
+
+Review round 1 (digest 05ffebc0ddf41657) returned three Important findings,
+fixed together:
+
+- **durability-reviewer/1** — an over-long typed line was saved whole and could
+  push `recent-agent-settings.json` past its 64 KiB read cap, losing every
+  remembered option; a line between 1 024 characters and the cap was cut
+  mid-token on load. Now `LAUNCH_EXTRA_ARGS_MAX_CHARS` (1 024, `src/config.rs`)
+  bounds the field (`char_limit`), `typed_launch_arguments` refuses a longer
+  line whole, the save writes only a line the gate accepts, and the load no
+  longer cuts. Test: `typed_launch_arguments_too_long_are_refused_and_never_saved`.
+- **rust-reviewer/1** and **subprocess-safety-reviewer/1** — options Operon
+  decides that no shape or switch names (`--continue`, `-r`, `-p`, Codex's `-m`
+  `-s` `-a`, Antigravity's `-i`) and other spellings of owned ones
+  (`-rOTHER`, `-anever`, Antigravity's single-dash `-new-project`) passed.
+  Now `operon_owned_launch_options` lists the first kind, and a single-dash
+  token must be one short option (`-x` or `-x=value`), which refuses bundles
+  and single-dash long names. Requirement 2 is wider than the spec says by
+  these two rules. Tests: additions to
+  `typed_launch_arguments_refuse_bare_words_unsafe_characters_and_owned_options`.
+
+The sweep grew to 18 mutations, all caught. `cargo test --locked
+typed_launch_arguments` now runs 6 tests; `resume_id` runs 4 (the fourth is the
+existing `gives_new_managed_claude_sessions_a_persistent_resume_id`).
