@@ -28,10 +28,13 @@
 # round. Which is also why taking a nit is forbidden: see REVIEW.md.
 digest: "0000000000000000"
 
-# How many times this change has gone back to its reviewers. Self-reported, like
-# `attempts` in state.yaml: every round happens before any commit, so no script
-# can derive it. `scripts/check-review.sh` prints `round N of M` on every run
-# and refuses past the ceiling in docs/sdlc/routes.yaml.
+# How many review passes this change has had in total, the first pass being 1 —
+# every finding-driven return adds one, and a recombination confirm (another
+# session landed on main first; change 135 rounds 5-6) adds one more. The count
+# is self-reported, like `attempts` in state.yaml: every round happens before
+# any commit, so no script can derive it. `scripts/check-review.sh` prints
+# `round N of M` on every run and refuses past the ceiling in
+# docs/sdlc/routes.yaml; its escape is the `carried:` block below.
 rounds: 1
 
 # Open nits, carried rather than taken. Verbatim, with the reviewer who raised
