@@ -3,10 +3,15 @@
 # Round 1: all three reviewers approve with nits, 0 Important. The digest below
 # is the byte-for-byte one main's gate computes until this lands (plan.md,
 # "162's own record"); the new gate accepts it too. Nits are carried, not taken.
+#
+# Round 2: a recombination confirm. Change 161 landed on main first and shifted
+# lines in src/tests.rs; the normalized digest is unchanged (ebc56e01b72a9794
+# before and after taking main in), so the reviewed code is the same and only
+# the byte-for-byte digest main's gate reads is brought up to date.
 
-digest: "d276b8b6cb5b26c5"
+digest: "f88a8aa13338b41a"
 
-rounds: 1
+rounds: 2
 
 carried:
   - subprocess-safety-reviewer/1 · scripts/check-review.sh a failure of the digest sed is silent; with sed missing or crashing the digest is the hash of empty input

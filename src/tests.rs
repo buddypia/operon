@@ -12505,6 +12505,37 @@ pub(crate) fn an_agent_starts_only_after_its_placeholder_let_go_of_its_terminal(
     );
     assert_eq!(state, TmuxState::Alive, "the agent itself is running");
 }
+/// Change 161. The end-of-file that retires the placeholder is echoed by the
+/// pane's tty as "^D", and `respawn-pane` keeps the dead pane's cells, so every
+/// agent terminal opened with that line above its own output.
+#[test]
+pub(crate) fn an_agent_terminal_opens_without_its_placeholders_end_of_file() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let name = format!("operon-test-{}", Uuid::new_v4().simple());
+    let started = start_tmux_agent_session(
+        &name,
+        Path::new("/tmp"),
+        "printf 'operon-agent-started\\n'; sleep 30",
+        &[],
+    );
+    let mut output = String::new();
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        output = tmux_capture(&name).unwrap_or_default();
+        if output.contains("operon-agent-started") {
+            break;
+        }
+    }
+    let _ = tmux_command().args(["kill-session", "-t", &name]).output();
+    started.unwrap();
+    assert!(output.contains("operon-agent-started"), "{output}");
+    assert!(
+        !output.contains("^D"),
+        "the placeholder's end-of-file is left on the agent's screen:\n{output}"
+    );
+}
 /// The screen read must come from the live pane, not its scrollback: a real
 /// session scrolls its finished turns up and would otherwise keep reporting
 /// the interrupt hint printed minutes ago.
