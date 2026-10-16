@@ -863,3 +863,27 @@ was carrying.
 failing on main: no wake within 5s) and
 `typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands` (watched failing
 on main, and with the keystroke timestamp removed from `queue_terminal_input`).
+
+## 073 — A review was voided by work it never touched
+
+Change 158 was reviewed, its CI green, and its landing refused: two other
+sessions landed on main meanwhile, 158 took main in as the pipeline asks, and
+the review digest — a hash of the diff byte for byte — moved because the hunk
+line numbers and the whole-file blob ids on each `index` line describe the rest
+of the file, which the other changes had edited. No commit could bring the
+record up to date, since one holding only the record is refused. Change 135 had
+paid the same cost as an extra review round. On the way to the fix, the next
+change number, 161, turned out to be held by another session's branch; four
+numbers on main already name two changes each.
+**The rule:** what binds a verdict describes the change and nothing else
+around it; and anything parallel sessions pick from a shared sequence is
+checked against where in-flight work lives — branches, not main.
+
+**Guard.** `a_review_survives_main_moving_the_lines_above_it` (watched failing
+on main's gate: the digest moved when main added lines above the edit; its
+invalid-byte arm watched failing with `LC_ALL=C` removed),
+`a_review_recorded_before_change_162_still_counts`, the exact-line pins in
+`the_review_gate_has_no_bypass`, and
+`a_new_change_cannot_take_a_number_already_in_use` (watched failing before
+`scripts/check-change-number.sh` existed; on this repository it refuses
+`fix/161-…` and names 163).

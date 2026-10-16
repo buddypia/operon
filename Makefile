@@ -6,6 +6,7 @@ wt.new:
 		echo "❌ wt.new: BR=<branch> required. Example: make wt.new BR=feature/<task>"; \
 		exit 2; \
 	fi
+	@bash scripts/check-change-number.sh $(BR)
 	@node .claude/scripts/worktree-new.mjs --branch $(BR) $(if $(BASE),--base $(BASE)) $(if $(DRY),--dry-run)
 
 wt.run:

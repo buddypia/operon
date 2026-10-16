@@ -1,11 +1,15 @@
 # Review record for change 158. Shape: docs/sdlc/templates/review.yaml.
 #
-# Round 1: rust-reviewer approves with two nits, carried below rather than
-# taken, so the digest the approval names stays the one landed.
+# Round 1 (digest 8df20862c69930ad): rust-reviewer approves with two nits,
+# carried below rather than taken. Round 2: a recombination confirm. Changes
+# 159 to 162 landed on main first and moved lines around 158's hunks; the
+# digest below is change 162's normalized one, the same for the reviewed diff
+# and for the landing diff, so the code is the one approved. rust-reviewer also
+# re-read the landing diff and the verdict stands.
 
-digest: "8df20862c69930ad"
+digest: "03555c43b78c3415"
 
-rounds: 1
+rounds: 2
 
 carried:
   - rust-reviewer/1 · src/app/screens.rs:5443 the new comment narrates the old code; one line saying an empty, unpinned project offers its first session here would do

@@ -19,9 +19,13 @@
 # only the ones under `verdicts:`. Write prose as `#` comments and list items
 # as `  - `, never as `  key: "value"`.
 
-# Which diff these verdicts are about. First 16 characters of
-#   git diff --cached HEAD -- . ':(exclude)docs/sdlc/changes' | shasum -a 256
-# or just run `bash scripts/check-review.sh --index` and read it off.
+# Which diff these verdicts are about. Run `bash scripts/check-review.sh --index`
+# and read it off: the sha256 of
+#   git diff --cached HEAD -- . ':(exclude)docs/sdlc/changes'
+# with hunk line numbers and `index` blob ids removed (change 162), so work that
+# lands on main elsewhere in a file does not void it. The `digest=` line of that
+# script is the recipe; a record holding the older byte-for-byte digest of the
+# same diff is still accepted.
 #
 # A verdict that does not match the current diff is not a weaker verdict, it is
 # no verdict — so this field moving is what sends a change back for another

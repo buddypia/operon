@@ -353,13 +353,38 @@ fn retire_tmux_placeholder(name: &str) -> Result<()> {
     }
     // `cat` is gone within milliseconds. Should it outlive this, the respawn's
     // `-k` still replaces it, as it did before.
+    let mut dead = false;
     for _ in 0..100 {
         if tmux_observation(name).state == TmuxState::Dead {
+            dead = true;
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+    if dead {
+        clear_retired_placeholder(name);
+    }
     Ok(())
+}
+
+/// The tty echoed the placeholder's end-of-file as "^D", and the respawn keeps
+/// the pane's cells (change 161). The reset pushes the screen into the history,
+/// which the clear then drops; neither alone empties both. Only a dead pane is
+/// cleared, since a live `cat` could still echo. A failure costs one stray line,
+/// not the launch, so it is not reported.
+fn clear_retired_placeholder(name: &str) {
+    let mut tmux = tmux_command();
+    tmux.args([
+        "send-keys",
+        "-R",
+        "-t",
+        name,
+        ";",
+        "clear-history",
+        "-t",
+        name,
+    ]);
+    let _ = run_command_with_timeout(&mut tmux, Duration::from_secs(5));
 }
 
 /// Replaces whatever the pane is running with `command`, keeping the window and
