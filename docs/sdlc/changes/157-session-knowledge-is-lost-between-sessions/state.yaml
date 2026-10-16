@@ -40,8 +40,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "6 7"
   autonomy: "supervised"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Push the branch, wait for CI, land on main, then package and run the Acceptance list in the installed app."
+resume: "Landed; what outlives it is the packaged-app swap (release-binary), the in-app Acceptance list in spec.md, the 14 carried review findings, and change 158 (2D map)."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,6 +70,8 @@ resume: "Push the branch, wait for CI, land on main, then package and run the Ac
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
+  review: "human passed rust-reviewer, subprocess-safety-reviewer, durability-reviewer approve at a2c119329caf8272 after 3 rounds; 14 findings carried in review.yaml"
+  ci: "machine passed gh run 38944707430 on 3115670 (test suite, fmt/clippy, bands, bundle, cross-cli all success)"
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh (fmt, clippy, tests kept, review gate at bea49faad9293938)"
   bands: "machine passed bash scripts/check-bands.sh (21 metrics within their bands, 2026-10-17)"
   release-binary: "machine pending yes, it touches src/ and Cargo.toml, so it ends
