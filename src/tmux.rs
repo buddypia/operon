@@ -328,11 +328,36 @@ pub(crate) fn start_tmux_agent_session(
     if !created.status.success() {
         return Err(anyhow!(String::from_utf8_lossy(&created.stderr).to_string()));
     }
-    if let Err(error) =
-        configure_tmux_session(name).and_then(|()| respawn_tmux_pane(name, cwd, command))
+    if let Err(error) = configure_tmux_session(name)
+        .and_then(|()| retire_tmux_placeholder(name))
+        .and_then(|()| respawn_tmux_pane(name, cwd, command))
     {
         kill_tmux_session(name);
         return Err(error);
+    }
+    Ok(())
+}
+
+/// Lets the placeholder `cat` exit before the agent is forked. `respawn-pane -k`
+/// closes the pane's master and forks straight away, while the dying `cat`
+/// still holds its terminal, so for that moment the launch needs a second pty;
+/// with only one to spare macOS refuses with `fork failed: Device not
+/// configured` (change 160). An end-of-file on the pane's tty ends `cat`, and
+/// remain-on-exit — set by now — keeps the dead pane for the respawn.
+fn retire_tmux_placeholder(name: &str) -> Result<()> {
+    let mut tmux = tmux_command();
+    tmux.args(["send-keys", "-t", name, "C-d"]);
+    let sent = run_command_with_timeout(&mut tmux, Duration::from_secs(5))?;
+    if !sent.status.success() {
+        return Err(anyhow!(String::from_utf8_lossy(&sent.stderr).to_string()));
+    }
+    // `cat` is gone within milliseconds. Should it outlive this, the respawn's
+    // `-k` still replaces it, as it did before.
+    for _ in 0..100 {
+        if tmux_observation(name).state == TmuxState::Dead {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
     Ok(())
 }

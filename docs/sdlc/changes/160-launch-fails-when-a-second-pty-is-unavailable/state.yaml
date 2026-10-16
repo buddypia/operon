@@ -1,0 +1,65 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: an Antigravity conversation restored into Codex CLI wrote its Codex
+# rollout (01a14579-efb3-7ac3-b27d-ce87b533e839, 1.2 MB) and then failed to
+# open: "respawn pane failed: fork failed: Device not configured". (The same
+# report's Claude Code half is change 159.)
+#
+# Cause (root-cause skill): `start_tmux_agent_session` (src/tmux.rs) holds the
+# window open with a `/bin/cat` placeholder and then runs `respawn-pane -k`
+# over it while it is still alive. tmux's spawn.c, read at master: with
+# SPAWN_KILL it closes the pane's master fd and calls `fdforkpty` at once — it
+# sends no signal and waits for nothing — while `cat` still holds the slave. So
+# for that moment the launch needs a second pty, and forkpty's ENXIO is macOS
+# refusing a new pty. Measured during the failure window on tmux 3.8, private
+# servers: today's sequence failed 10/10; the same sequence with the
+# placeholder exited first succeeded 10/10, as did respawn retried after a
+# pause (the first attempt has by then freed the old pty). Some minutes later
+# every variant passed again: the shortage was transient, and what held the
+# ptys then is no longer observable (139 ttys open afterwards, limit 511).
+#
+# Fix: end `cat` with an EOF on its tty and wait (≤1 s) for the pane to be
+# dead before the respawn, so a launch never needs two ptys. `-k` stays as the
+# fallback if `cat` outlives the wait.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "reviewing"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Get the rust-reviewer and subprocess-safety-reviewer verdicts on the
+  staged digest into review.yaml, then commit, push, wait for CI, land, and
+  package."
+
+contract:
+  failing-test-first: "machine passed
+    an_agent_starts_only_after_its_placeholder_let_go_of_its_terminal failed
+    before the fix (pane-died never fired for the placeholder under -k) and
+    passes after"
+  three-gates: "machine passed cargo fmt --check · cargo clippy --locked -D
+    warnings · cargo test --locked tmux (23 passed) and session (117 passed;
+    the_stop_gate_reads_the_tree_the_session_is_working_in fails locally
+    because it reads this session's CLAUDE_PROJECT_DIR, and touches no tmux
+    code — CI on the branch decides it)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
+    their bands"
+  review: "human passed rust-reviewer approve 0 2, subprocess-safety-reviewer
+    approve 0 5 at c6ab90331476b7a4, all remarks carried in review.yaml"
+  release-binary: "machine pending bash scripts/package-macos.sh and the swap
+    in .claude/skills/ship/SKILL.md, carrying 159 as well"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

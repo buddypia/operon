@@ -1,0 +1,41 @@
+# Review record for 160-launch-fails-when-a-second-pty-is-unavailable.
+#
+# The change: `start_tmux_agent_session` ends its `/bin/cat` placeholder with
+# an EOF and waits for the pane to be dead before `respawn-pane`, so a launch
+# no longer needs a second pty while the old one is still held.
+#
+# Verified by rust-reviewer against .claude/rules/rust.md: both callers run in
+# spawn_background, the resume path is outside the frame loop; no new
+# unwrap/expect/panic, no SQL; both tmux calls go through tmux_command() with a
+# timeout; the test's .output() calls are in src/tests.rs, outside
+# unwrapped_spawns.
+#
+# Verified by subprocess-safety-reviewer: the EOF reaches the session's only
+# pane, and stays queued on the tty if cat has not started yet; every tmux call
+# is bounded at 5 s; on `?` the outer and_then chain still kills the new
+# session; a wait that never sees Dead falls back to -k as before; the brief
+# Dead state is not misread as Exited, because request_session_poll skips
+# Starting sessions (src/app.rs:2953-2958); the test hook only appends, and
+# matches its own session name exactly.
+
+digest: "c6ab90331476b7a4"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · a failed send-keys cancels the launch, although the respawn's -k fallback would still have completed it
+    person: "まれなケースの話です。終了の合図（Ctrl-D）を送るコマンド自体が失敗すると、従来どおり起動できたはずの場面でも起動失敗と表示されます。普段の操作では起きません。対応は不要です。"
+  - rust-reviewer/2 and subprocess-safety-reviewer/1 · the wait is bounded by a count, not a deadline, so a hung tmux could stretch it toward 500 s, and a vanished session is polled for the full second
+    person: "tmux 自体が応答しなくなった場合だけの話です。待ち時間が長引くことがあります。そうなると起動はいずれにしても失敗します。通常は数ミリ秒で終わります。対応は不要です。"
+  - subprocess-safety-reviewer/2 · a pane-died hook in the person's own tmux configuration now fires at each launch, and a kill-pane or kill-session hook would turn a working launch into a failed respawn
+    person: "ご自身の tmux 設定で pane-died フックを使っている場合だけ関係します。Operon がセッションを起動するたびに、そのフックが1回動きます。pane やセッションを閉じるフックを設定していると、起動に失敗することがあります。該当しなければ何もする必要はありません。"
+  - subprocess-safety-reviewer/3 · if the test process dies mid-test the global pane-died[160] hook stays on the operon_suite server, and the run-shell quoting breaks on a temp dir containing a quote
+    person: "テストを途中で強制終了したときだけの話です。テスト用の tmux に記録用のフックが残りますが、害はありません。対応は不要です。"
+  - subprocess-safety-reviewer/4 · no test covers the cleanup path when send-keys fails or the wait times out
+    person: "失敗時の後片付けを確かめるテストがまだありません。後片付けのコードは従来と同じ仕組みを通っています。対応は不要です。"
+  - subprocess-safety-reviewer/5 · the test reads the order from whether pane-died fired, not from timestamps, relying on -k never firing it — which the recorded before/after run establishes
+    person: "テストの確かめ方についての記録です。修正前は失敗し、修正後は通ることを確認済みなので、テストとして有効です。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 2"
+  subprocess-safety-reviewer: "approve 0 5"
