@@ -13,12 +13,16 @@
 # Departures 16). rust-reviewer's prune `total - removed` wrap was raised as a
 # minor but taken: a wrap deletes every unpinned entry, which is data loss.
 #
-# Round 2 (this digest): all three re-read the diff and approve; the open
+# Round 2 (bea49faad9293938): all three re-read the diff and approve; the open
 # minors below are carried to a follow-up change.
+#
+# Round 3 (this digest): CI's full suite refused a raw Command::new("git") in
+# git_top_level (now git_command) and the six-tab expectation (ナレッジ is the
+# seventh). All three re-read the delta and approve; nothing new raised.
 
-digest: "bea49faad9293938"
+digest: "a2c119329caf8272"
 
-rounds: 2
+rounds: 3
 
 carried:
   - rust-reviewer/1 · src/app/knowledge.rs:826-842,966 — hits.clone() (up to 50 with bodies and sources), entries.position over 50×2000, and session_hits.clone() every frame; build the row index when results arrive.

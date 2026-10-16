@@ -1941,11 +1941,8 @@ pub(crate) fn project_for_directory(directory: &Path, projects: &[Project]) -> O
 }
 
 fn git_top_level(directory: &Path) -> Option<PathBuf> {
-    let mut command = Command::new("git");
-    command
-        .arg("-C")
-        .arg(directory)
-        .args(["rev-parse", "--show-toplevel"]);
+    let mut command = git_command(directory);
+    command.args(["rev-parse", "--show-toplevel"]);
     let output = run_command_with_timeout(&mut command, Duration::from_secs(5)).ok()?;
     output
         .status

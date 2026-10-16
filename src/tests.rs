@@ -41672,7 +41672,8 @@ fn seed_tab_caches(app: &mut OperonApp, project: &Project, root: &Path) {
 }
 
 /// Change 093: six tabs, named for what they hold. スキル and ルール are one
-/// tab; Git is 変更 and エディタ is ファイル.
+/// tab; Git is 変更 and エディタ is ファイル. Change 157 adds ナレッジ last, a
+/// seventh; the name stays because change 093's spec cites it.
 #[test]
 pub(crate) fn the_project_page_has_six_tabs() {
     let labels: Vec<&str> = ProjectTab::all()
@@ -41688,6 +41689,7 @@ pub(crate) fn the_project_page_has_six_tabs() {
             "PR",
             tr("ファイル"),
             tr("エージェント設定"),
+            tr("ナレッジ"),
         ]
     );
 }
@@ -47294,10 +47296,7 @@ pub(crate) fn knowledge_cli_resolves_the_project_from_a_worktree() {
     fs::create_dir_all(&repository).unwrap();
     let git = |arguments: &[&str]| {
         let output = run_command_with_timeout(
-            Command::new("git")
-                .arg("-C")
-                .arg(&repository)
-                .args(arguments),
+            git_command(&repository).args(arguments),
             Duration::from_secs(20),
         )
         .unwrap();
