@@ -41,7 +41,7 @@
 state:
   route: "security"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 2"
   questions: "0 7"
   autonomy: "paused"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Record the three reviewers in review.yaml at the byte-for-byte digest main's gate computes, commit, push, land, then land 158."
+resume: "Done; what outlives it is the fourteen carried review points, two of which (a failing sed, a second digest assignment) are worth a follow-up change; lands-158 is settled when 158 lands."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,7 +70,7 @@ resume: "Record the three reviewers in review.yaml at the byte-for-byte digest m
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted c24895e (fmt, clippy, review gate SHIP at d276b8b6cb5b26c5 under main's gate and ebc56e01b72a9794 under this one)"
   bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
   release-binary: "machine waived no src/ file except src/tests.rs changes; the installed app is not made stale"
   named-tests: "machine passed the three new tests — 3 passed; cargo test --locked the_review_gate — 8 passed"

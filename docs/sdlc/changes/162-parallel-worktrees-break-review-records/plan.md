@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-17
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -80,4 +80,10 @@ requirement 3.
 
 ## Departures from the plan
 
-None yet.
+- **The digest also drops `index` blob ids**, found while measuring change
+  158 before any code: with hunk line numbers alone removed, 158's reviewed and
+  landing diffs still differed in one `index` line. The spec was revised and
+  re-approved before stage 3.
+- **The number check's script header names `make wt.new` as its caller**
+  (`not-wired:`), which `every_gate_script_is_wired_or_declares_why_not`
+  required.
