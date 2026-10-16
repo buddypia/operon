@@ -1,0 +1,24 @@
+# Review record for 154-terminal-typing-latency.
+#
+# Verified by rust-reviewer against .claude/rules/rust.md and REVIEW.md 2b:
+# - Wake on completion: every draw-path request_* is gated by a cache entry its
+#   result handler fills (Err included) or by its own clock, so a completion
+#   wakes one frame that spawns nothing; poll_terminal_echo is bounded by the
+#   one-second window after the last keystroke.
+# - egui 0.31: Context::request_repaint is callable from any thread (the hook
+#   listener already does so); request_repaint_after keeps the smaller delay.
+# - No new unwrap/expect/panic, user-facing string, Command::new, or draw-path
+#   I/O; the capture runs on the worker thread.
+
+digest: "a64cc2b0f2114ee8"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app.rs:6073 / src/tmux.rs:485 — during the 1s echo window each capture is the full -S -5000 capture-pane at ~30/s, and set_session_output compares the whole output String on the UI thread each time; no CPU or frame-time measurement while typing into a full scrollback is recorded.
+    person: "入力中の1秒間は画面を毎秒約30回読み直すため、履歴が長いセッションで打ち続けるとCPU使用率が少し上がる可能性があります。まだ計測していません。対応は不要です。"
+  - rust-reviewer/2 · src/app.rs:1614-1619 — if the session is gone, every echo poll in the window fails and re-sets self.notice (up to ~30 times in one second, then stops); gating the poll on an Active session would avoid it.
+    person: "終了したセッションに入力した直後の1秒間、同じエラー表示が何度か上書きされることがあります。表示されるのは同じ内容で、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 2"

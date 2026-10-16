@@ -5732,6 +5732,9 @@ impl OperonApp {
     pub(crate) fn ui_terminal_panel(&mut self, ui: &mut egui::Ui, session: &Session) {
         let palette = self.store.theme.palette();
         let session_id = session.id;
+        if let Some(wait) = self.poll_terminal_echo(session_id, Instant::now()) {
+            ui.ctx().request_repaint_after(wait);
+        }
         let cancellation_pending = self.cancellation_pending(session_id);
         let project = self
             .store
