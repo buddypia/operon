@@ -1,0 +1,80 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: found in the final verification of 159-161. Live restore tests
+# failed with "The current working directory was deleted" (Claude Code) and
+# "No such file or directory (os error 2)" (Codex) — the same symptom change
+# 160 waived as a stale test server. On this Mac the person's own default tmux
+# server, the one Operon launches every agent on, was running from a deleted
+# worktree too (fix/159-…, started 10/14 21:38): a pane created there with
+# `-c /tmp` printed "." for `pwd` and `/bin/pwd` failed. So every terminal
+# Operon opened at that point started its agent in a directory that no longer
+# exists.
+#
+# Cause (root-cause skill), measured on tmux 3.8 with private servers:
+# - a tmux server keeps the working directory of the client that started it;
+# - once that directory is deleted, a pane started there — new-session or
+#   respawn-pane, with an absolute `-c` — runs in the deleted directory
+#   (PWD=.), not in `-c`; tmux master's spawn.c shows no path that does this,
+#   so it is recorded as measured, not explained;
+# - `tmux_command` set no working directory, so a server Operon or `cargo test`
+#   started inherited the caller's — a worktree that cleanup-worktree deletes.
+#   The suite's own `-L operon_suite` server was in the deleted
+#   chore/install-159-160 worktree, and before that in 155's (change 160's
+#   waiver): the second time.
+# - Reproduced: a fresh suite server passes
+#   codex_app_server_restores_a_short_transcript_into_a_resumable_terminal; a
+#   suite server started from a directory that is then deleted fails it.
+#   `cd -- '/tmp' && …` as the pane command lands in /tmp on the same server.
+#
+# Fix: every pane Operon starts — agent and, after review round 1, plain
+# terminal — runs `cd -- <dir> || exit 1;` first, which holds on a server that
+# is already broken; and every tmux client runs from `/`, so a server Operon or
+# the suite starts never holds a deletable directory.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Package and swap into /Applications after the merge."
+
+contract:
+  failing-test-first: "machine passed
+    an_agent_starts_in_its_directory_even_where_tmux_cannot_put_it and
+    a_tmux_server_never_holds_a_directory_that_can_be_deleted failed before
+    the fix; the guard mutated back to `&&` fails the first again"
+  three-gates: "machine passed cargo fmt --check · cargo clippy --locked -D
+    warnings · cargo test --locked tmux (25), terminal (69), session (117;
+    the_stop_gate_reads_the_tree_the_session_is_working_in fails locally on
+    this session's CLAUDE_PROJECT_DIR, as in 160 and 161 — CI decides it)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
+    their bands"
+  live-restore: "machine passed on what this change moves: a suite server
+    started from a directory then deleted fails
+    codex_app_server_restores_a_short_transcript_into_a_resumable_terminal on
+    main and passes here; --ignored serially 5 of 6. The sixth,
+    a_saved_codex_conversation_restores_into_a_resumable_antigravity_terminal,
+    fails intermittently, as an agy-destination test did on main's tmux.rs
+    (change 161): agy's own log says the conversation
+    is not found locally while its file and index line exist, and the same
+    conversation is found when resumed later — agy's lookup, not this change"
+  review: "human passed rust-reviewer approve 0 3, subprocess-safety-reviewer
+    approve 0 4 at 5a829af1078565d0 (round 2), remarks carried in review.yaml"
+  release-binary: "machine waived the bundle is built from main after the
+    merge and swapped into /Applications in the same session"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
