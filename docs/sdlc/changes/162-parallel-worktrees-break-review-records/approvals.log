@@ -2,3 +2,4 @@
 2026-10-16T18:02:04Z auto intent intent.md a1d55c5f368ea3b6 approve evaluator round 1: restates the quoted request; 158's refusal, the review-only refusal and the 161 collision are real
 2026-10-16T18:02:04Z auto spec spec.md c6379b401b7470d7 approve evaluator round 3: LC_ALL=C and invalid-byte arm, comparison pin, number-check rules; Local-first row corrected
 2026-10-16T18:02:04Z auto plan plan.md 049e7bf8f3e85cea approve evaluator round 3: exact-line allowance for the two digest assignments, four pin mutations, per-arm number test, legacy record for 162
+2026-10-16T18:13:22Z auto spec spec.md 9652eb9323712bd2 approve evaluator round 4: wording-only edit naming scripts/run-bounded.sh as a real path; the 20 s bound unchanged

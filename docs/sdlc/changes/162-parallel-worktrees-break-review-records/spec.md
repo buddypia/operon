@@ -84,7 +84,7 @@ which joins the other `scripts/check-*.sh`.
   beside it, and the staleness test accepts either. Every message keeps printing
   `$digest`, so every new record is the normalised one.
 - `scripts/check-change-number.sh`: bash; `git fetch --quiet --prune origin`
-  under `scripts/run-bounded.sh 20` — wider than `worktree-new.mjs`'s
+  under `scripts/run-bounded.sh` with a 20 s bound — wider than `worktree-new.mjs`'s
   `git fetch origin <base>`: every remote branch, with deleted ones pruned, so
   the check sees other sessions' pushed branches; it updates remote-tracking
   refs and writes no file. Numbers from

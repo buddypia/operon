@@ -98,7 +98,8 @@ mkdir -p docs/sdlc/changes/NNN-slug
 cp docs/sdlc/templates/state.yaml docs/sdlc/changes/NNN-slug/state.yaml
 ```
 
-Next free three-digit number, then a hyphenated slug **from the problem, not the
+Next three-digit number free on main and on every branch (`make wt.new` refuses
+a taken one), then a hyphenated slug **from the problem, not the
 solution**: `002-restore-loses-first-turn`, not `002-add-retry-loop`. Fill
 `state.yaml` with the route, the risk, and the autonomy just decided.
 

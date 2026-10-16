@@ -1,0 +1,44 @@
+# Review record for change 162. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: all three reviewers approve with nits, 0 Important. The digest below
+# is the byte-for-byte one main's gate computes until this lands (plan.md,
+# "162's own record"); the new gate accepts it too. Nits are carried, not taken.
+
+digest: "d276b8b6cb5b26c5"
+
+rounds: 1
+
+carried:
+  - subprocess-safety-reviewer/1 · scripts/check-review.sh a failure of the digest sed is silent; with sed missing or crashing the digest is the hash of empty input
+    person: "sed コマンドが壊れている・見つからない特殊な環境では、レビューの照合が正しく働かない恐れがあります。通常の macOS では起きません。後続の変更で塞ぐ予定です。"
+  - durability-reviewer/2 · scripts/check-review.sh the same sed exit status lost in the pipe
+    person: "上と同じ点です。対応は後続の変更で行います。"
+  - subprocess-safety-reviewer/2 · src/tests.rs nothing limits how many lines assign digest= or legacy_digest=
+    person: "将来ゲートを書き換える人が、照合を無効にする一行を足しても今のテストでは気づけません。今の動作には影響しません。後続の変更で塞ぐ予定です。"
+  - subprocess-safety-reviewer/3 · scripts/check-change-number.sh run outside a repository, every read is empty and the number passes without a warning
+    person: "リポジトリの外で番号チェックを動かすと、何も確かめずに通ります。通常は make wt.new からリポジトリ内で動くので影響はありません。"
+  - subprocess-safety-reviewer/4 · scripts/check-change-number.sh the fetch can sit on a credential prompt for 20 s; --prune runs under DRY=1; a detached gc may outlive the bound
+    person: "認証が切れていると、新しい作業場所を作るときに最大 20 秒待ってから警告が出ます。作業は止まりません。"
+  - durability-reviewer/4 · scripts/check-change-number.sh no GIT_TERMINAL_PROMPT=0 on the fetch
+    person: "上と同じ点です。対応は不要です。"
+  - durability-reviewer/1 · scripts/check-change-number.sh a fetch killed at the bound can leave a stale .lock in the shared git directory
+    person: "ネットワークが極端に遅いとき、まれに git の作業が「lock ファイルがある」と止まることがあります。その場合は該当の .lock ファイルを消せば直ります。"
+  - subprocess-safety-reviewer/5 · scripts/check-change-number.sh other remotes are read but only origin/ is stripped; check-then-create has no lock
+    person: "origin 以外のリモートを登録している場合、番号が使用中と誤って判定されることがあります。同時に二つ作業場所を作ると、同じ番号を取れてしまう隙は残ります。"
+  - durability-reviewer/3 · scripts/check-change-number.sh a holder on a remote other than origin is not counted
+    person: "上と同じ点です。このリポジトリは origin だけなので影響はありません。"
+  - subprocess-safety-reviewer/6 · Makefile $(BR) unquoted; worktree-new.mjs called directly skips the check; the line sits in an auto-managed block
+    person: "make wt.new を通さずに作業場所を作ると番号チェックは働きません。案内どおり make wt.new を使えば問題ありません。"
+  - rust-reviewer/1 · src/tests.rs the latin1 arm passes vacuously where ja_JP.UTF-8 is not installed
+    person: "画面には影響しません。日本語ロケールのない環境では一部のテストが空振りしますが、macOS の CI では働きます。"
+  - rust-reviewer/2 · src/tests.rs the number test leaves its temp directory behind when setup panics
+    person: "テストが途中で失敗したときに一時ファイルが残ることがあります。対応は不要です。"
+  - rust-reviewer/3 · src/tests.rs the origin/main change-directory source and a remote-only same-slug holder are not exercised
+    person: "画面には影響しません。番号チェックの一部の経路がテストされていない、というテスト側の抜けです。"
+  - rust-reviewer/4 · src/tests.rs the Makefile assertion compares first occurrences anywhere and does not check that a failure aborts the recipe
+    person: "画面には影響しません。将来 Makefile を書き換えたときに見落とす恐れがある、というテスト側の抜けです。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 6"
+  durability-reviewer: "approve-with-nits 0 4"

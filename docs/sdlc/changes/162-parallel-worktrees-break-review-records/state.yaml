@@ -40,8 +40,8 @@
 
 state:
   route: "security"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 2"
   questions: "0 7"
   autonomy: "paused"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write the three failing tests named in spec.md and watch each fail, then change scripts/check-review.sh."
+resume: "Record the three reviewers in review.yaml at the byte-for-byte digest main's gate computes, commit, push, land, then land 158."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -71,11 +71,11 @@ resume: "Write the three failing tests named in spec.md and watch each fail, the
 # is what says whether the bundle on this machine is behind.
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
   release-binary: "machine waived no src/ file except src/tests.rs changes; the installed app is not made stale"
-  named-tests: "machine pending cargo test --locked a_review_survives_main_moving_the_lines_above_it a_review_recorded_before_change_162_still_counts a_new_change_cannot_take_a_number_already_in_use the_review_gate — all pass"
+  named-tests: "machine passed the three new tests — 3 passed; cargo test --locked the_review_gate — 8 passed"
   lands-158: "human pending change 158 lands after merging this, with no further review round"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 12 of 12 caught; the five gate mutations also caught by the behaviour tests alone, including the invalid-byte arm"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
