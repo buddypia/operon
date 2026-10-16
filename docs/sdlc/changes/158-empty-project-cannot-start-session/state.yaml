@@ -41,7 +41,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Record the rust-reviewer verdict in review.yaml, commit through gate-commit.sh, push, and package after landing."
+resume: "Done; what outlives it is the two carried test and comment points in review.yaml."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,9 +70,9 @@ resume: "Record the rust-reviewer verdict in review.yaml, commit through gate-co
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted 3b707b1 (fmt, clippy, review gate SHIP at 8df20862c69930ad)"
   bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
-  release-binary: "machine pending yes, src/app/screens.rs and src/i18n_tables.rs change; ends with bash scripts/package-macos.sh and the swap"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from the reviewed tree; swapped into /Applications after landing"
   named-tests: "machine passed cargo test --locked an_empty_project_in_the a_project_emptied_by_pinning — 4 passed; cargo test --locked every_ — 81 passed"
   guards-verified-by-mutation: "human passed mutations.py: 8 of 8 caught, including the column saying セッションはまだありません again and the list offering a start under a search"
 
