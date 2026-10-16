@@ -1,6 +1,6 @@
 # Intent: a launch cannot take the person's own arguments or reopen a chosen conversation
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-16
 
 ## Problem

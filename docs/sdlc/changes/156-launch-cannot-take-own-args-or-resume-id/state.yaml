@@ -1,15 +1,15 @@
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "medium"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Get intent, spec and screen approved by an evaluator, then write plan.md."
+resume: "Build per plan.md order of work, step 1: failing tests for requirements 1, 2, 5, 6."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
