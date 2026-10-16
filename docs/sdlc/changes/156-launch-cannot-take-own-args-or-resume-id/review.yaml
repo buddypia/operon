@@ -1,0 +1,40 @@
+# Review record for change 156. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1 (digest 05ffebc0ddf41657): three Important findings — an over-long
+# typed line could push recent-agent-settings.json past its read cap
+# (durability-reviewer/1); options Operon decides, and other spellings of owned
+# ones, could be typed (rust-reviewer/1, subprocess-safety-reviewer/1). Fixed
+# together; see plan.md Departures. Round 2 at the digest below: all three
+# approve. The Antigravity entries of operon_owned_launch_options were read from
+# `agy --help` by the author in this session (the reviewer could not run it).
+
+digest: "61e6600213be405f"
+
+rounds: 2
+
+carried:
+  - durability-reviewer/2 · src/app.rs a resume record keeps the typed native_session_id even if start_session fails; a retry replays the resume of an ID nobody checked exists
+    person: "存在しない会話 ID で起動すると、失敗したセッションが一覧に残り、再試行しても同じエラーになります。そのセッションは閉じて、正しい ID で起動し直してください。"
+  - durability-reviewer/3 · src/agents/settings.rs no test of a pin carrying extra_args rewritten by an older build and read again
+    person: "古いバージョンの Operon に戻して設定を保存すると、追加の引数の記憶が消えることがあります。設定の他の部分は残ります。対応は不要です。"
+  - durability-reviewer/4 · src/agents/settings.rs save_recent_agent_settings ignores WriteOutcome (CommittedButNotSynced is treated as success); pre-existing
+    person: "電源断の直前に保存した起動設定が、まれに次回起動時に戻っていることがあります。以前からの動作で、対応は不要です。"
+  - durability-reviewer/r2-1 · src/app/screens.rs record_current_agent_settings saves a refused line as empty, overwriting the previously remembered good line
+    person: "追加の引数を入力途中の不正な状態のまま欄を離れると、前回覚えていた追加の引数が消えます。正しい形に直せば再び記憶されます。"
+  - rust-reviewer/2 · src/agents.rs, src/app.rs the resume-refusal and conversation-ID messages are each composed in two places
+    person: "画面には影響しません。今後文言を変えるときに片方だけ直す恐れがある、という内部の整理事項です。"
+  - rust-reviewer/3 · src/agents.rs launch_command_resuming repeats the refused-switch label lookup that resume_refusal already does
+    person: "画面には影響しない内部の重複です。対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/agents.rs a valued switch typed without = (trailing --add-dir or -c) takes the request or Codex's positional ID as its value
+    person: "値を取るオプションを「=」なしで最後に書くと、依頼文や Codex の会話 ID がその値として読まれてしまいます。値は必ず --name=value の形で書いてください。"
+  - subprocess-safety-reviewer/3 · src/app/screens.rs apply_pinned_launch and select_project do not clear resume_conversation_input
+    person: "固定した設定で起動画面を開き直すと、前に入力した会話 ID が欄に残っていることがあります。欄に見えているので、不要なら消してから起動してください。"
+  - subprocess-safety-reviewer/4 · src/agents.rs launch_command_resuming's loss check tests membership, not multiplicity
+    person: "通常の入力では起きない内部の確認の甘さで、対応は不要です。"
+  - subprocess-safety-reviewer/r2-1 · src/agents.rs operon_owned_launch_options does not list every conversation-picking option (claude --from-pr, codex resume --last/--all); treat as best-effort
+    person: "追加の引数に、別の会話を開くオプション（--from-pr など）を書くと、CLI がエラーで止まるか、記録と違う会話が開くことがあります。会話を選ぶときは「再開する会話 ID」欄を使ってください。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"
+  durability-reviewer: "approve-with-nits 0 1"

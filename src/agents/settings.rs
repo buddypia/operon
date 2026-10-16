@@ -20,6 +20,10 @@ pub(crate) struct AgentLaunchSettings {
     pub(crate) flags: Vec<String>,
     #[serde(default)]
     pub(crate) custom_command: String,
+    /// The switches typed beside the ticked ones (change 156). A file written
+    /// before the field existed loads it empty.
+    #[serde(default)]
+    pub(crate) extra_args: String,
 }
 
 /// The collection of recent launch options for all agents, plus the last
@@ -127,10 +131,19 @@ pub(crate) fn sanitize_agent_launch_settings(agent: &str, settings: &mut AgentLa
         settings.mode.clear();
         settings.effort.clear();
         settings.flags.clear();
+        settings.extra_args.clear();
         return;
     }
 
     settings.custom_command.clear();
+
+    // A line the gate would refuse now is not one to offer again: the sheet
+    // would open on a launch it cannot make. Refused whole, never cut — the
+    // gate refuses an over-long line for exactly that reason.
+    settings.extra_args = settings.extra_args.trim().to_owned();
+    if typed_launch_arguments(agent, &settings.extra_args).is_err() {
+        settings.extra_args.clear();
+    }
 
     settings.model = settings
         .model

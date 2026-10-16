@@ -1426,6 +1426,12 @@ impl OperonApp {
             } else {
                 String::new()
             },
+            // Only a line the gate accepts is written, the same rule the load
+            // applies, so a save can never hold what the next start drops.
+            extra_args: match typed_launch_arguments(&agent, self.agent_extra_args_input.trim()) {
+                Ok(_) if !is_custom => self.agent_extra_args_input.trim().to_owned(),
+                _ => String::new(),
+            },
         };
         self.recent_agent_settings.last_selected_agent = Some(agent.clone());
         self.recent_agent_settings.agents.insert(agent, settings);
@@ -1449,6 +1455,7 @@ impl OperonApp {
             self.agent_mode_input = settings.mode;
             self.agent_effort_input = settings.effort;
             self.agent_flag_inputs = settings.flags;
+            self.agent_extra_args_input = settings.extra_args;
             if agent == "custom" {
                 self.custom_command = settings.custom_command;
             } else {
@@ -1459,6 +1466,7 @@ impl OperonApp {
             self.agent_mode_input.clear();
             self.agent_effort_input.clear();
             self.agent_flag_inputs.clear();
+            self.agent_extra_args_input.clear();
             self.custom_command.clear();
         }
     }
@@ -1509,6 +1517,7 @@ impl OperonApp {
         self.agent_effort_input = pinned.settings.effort;
         self.agent_flag_inputs = pinned.settings.flags;
         self.custom_command = pinned.settings.custom_command;
+        self.agent_extra_args_input = pinned.settings.extra_args;
         self.agent_account_input = pinned.account.filter(|id| self.accounts.get(*id).is_some());
         // `pending_launch` is read after the form is filled, so the consent
         // covers exactly the pinned combination and nothing an edit makes.
@@ -1522,14 +1531,15 @@ impl OperonApp {
             return false;
         };
         let is_custom = self.selected_agent == "custom";
-        let (model, mode, effort, custom_command) = if is_custom {
-            ("", "", "", self.custom_command.trim())
+        let (model, mode, effort, custom_command, extra_args) = if is_custom {
+            ("", "", "", self.custom_command.trim(), "")
         } else {
             (
                 self.agent_model_input.trim(),
                 self.agent_mode_input.trim(),
                 self.agent_effort_input.trim(),
                 "",
+                self.agent_extra_args_input.trim(),
             )
         };
         let flags_match = if is_custom {
@@ -1546,6 +1556,7 @@ impl OperonApp {
             && pinned.settings.effort == effort
             && flags_match
             && pinned.settings.custom_command == custom_command
+            && pinned.settings.extra_args == extra_args
             && pinned.account == account
             && pinned.acknowledged == self.launch_acknowledged()
     }
@@ -1564,6 +1575,9 @@ impl OperonApp {
         // Consent given for one CLI's combination is not consent for another's,
         // even in the unlikely case the two spell out the same switches.
         self.acknowledged_launch = None;
+        // A conversation ID names one CLI's conversation, and the custom agent
+        // draws no field to see one in (change 156).
+        self.resume_conversation_input.clear();
     }
 
     /// What the launch form is asking to run, in the terms consent is given in.
@@ -1588,15 +1602,24 @@ impl OperonApp {
             } else {
                 String::new()
             },
+            extra_args: if is_custom {
+                String::new()
+            } else {
+                self.agent_extra_args_input.trim().to_owned()
+            },
         }
     }
 
     pub(crate) fn launch_acknowledged(&self) -> bool {
         let is_custom = self.selected_agent == "custom";
-        let (mode, custom_command) = if is_custom {
-            ("", self.custom_command.trim())
+        let (mode, custom_command, extra_args) = if is_custom {
+            ("", self.custom_command.trim(), "")
         } else {
-            (self.agent_mode_input.trim(), "")
+            (
+                self.agent_mode_input.trim(),
+                "",
+                self.agent_extra_args_input.trim(),
+            )
         };
         self.acknowledged_launch
             .as_ref()
@@ -1609,6 +1632,7 @@ impl OperonApp {
                 acknowledged.agent == self.selected_agent
                     && acknowledged.mode.trim() == mode
                     && acknowledged.custom_command.trim() == custom_command
+                    && acknowledged.extra_args.trim() == extra_args
                     && flags_match
             })
     }
@@ -2115,6 +2139,35 @@ impl OperonApp {
                     });
                 }
                 self.ui_launch_options(ui, palette);
+                if self.selected_agent != "custom" {
+                    ui.horizontal(|ui| {
+                        ui.label(tr("追加の引数（任意）"));
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut self.agent_extra_args_input)
+                                .char_limit(LAUNCH_EXTRA_ARGS_MAX_CHARS)
+                                .hint_text(tr("例: --add-dir=../shared --verbose"))
+                                .desired_width(280.0),
+                        );
+                        if response.lost_focus() {
+                            self.persist_recent_agent_settings();
+                        }
+                    });
+                    ui.label(
+                        RichText::new(tr(
+                            "チェックした項目の後ろに付けて起動します。値は --name=value の形で書きます。",
+                        ))
+                        .small()
+                        .weak(),
+                    );
+                    ui.horizontal(|ui| {
+                        ui.label(tr("再開する会話 ID（任意）"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.resume_conversation_input)
+                                .hint_text(tr("空なら新しい会話を始めます"))
+                                .desired_width(280.0),
+                        );
+                    });
+                }
                 let dependency_choices = self
                     .store
                     .sessions
@@ -2185,6 +2238,7 @@ impl OperonApp {
             &self.agent_mode_input,
             &self.agent_flag_inputs,
             &self.custom_command,
+            &self.agent_extra_args_input,
         );
         ui.label(RichText::new(tr("選んだ AI は外部ツールとして実行され、プロジェクトの内容を提供元へ送信することがあります。")).small().weak());
         if agent_requires_visible_terminal(&self.selected_agent) {
@@ -2239,8 +2293,11 @@ impl OperonApp {
             let agent_ready = self.tools.agent_available(&self.selected_agent);
             let custom_command_ready =
                 self.selected_agent != "custom" || !self.custom_command.trim().is_empty();
+            let input_error = self.launch_input_error();
             let reason = if !custom_command_ready {
                 tr("起動コマンドを入力してください")
+            } else if let Some(error) = &input_error {
+                error.as_str()
             } else if !self.tools.tmux {
                 tr("tmux が必要です")
             } else if !agent_ready {

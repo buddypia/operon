@@ -1305,17 +1305,23 @@ pub(crate) const DANGEROUS_ARGUMENT_ALIASES: &[&[&str]] = &[&["--yolo"]];
 /// other three agents, but `command_needs_acknowledgement` has a second caller
 /// now: `carried_launch_is_dangerous`, once per session row per frame, for every
 /// agent.
+///
+/// `extra_args` is the line typed beside the switches (change 156). It is read
+/// the way the custom agent's line is, because it is the same thing: words the
+/// tables did not choose.
 pub(crate) fn launch_needs_acknowledgement(
     agent: &str,
     mode: &str,
     flags: &[String],
     custom_command: &str,
+    extra_args: &str,
 ) -> bool {
     is_dangerous_agent_mode(mode)
         || flags
             .iter()
             .any(|id| agent_flag(agent, id).is_some_and(|flag| flag.dangerous))
         || (agent == "custom" && command_needs_acknowledgement(custom_command))
+        || (agent != "custom" && command_needs_acknowledgement(extra_args))
 }
 
 pub(crate) fn is_safe_agent_option(value: &str) -> bool {
@@ -1325,6 +1331,171 @@ pub(crate) fn is_safe_agent_option(value: &str) -> bool {
         })
 }
 
+/// The arguments typed beside the switches, each one checked (change 156).
+///
+/// A typed token is a switch: it starts with `-`, and a value rides joined as
+/// `--name=value`. A bare word would reach the CLI as a prompt, and a resume —
+/// which carries only switches — would keep `--add-dir` and lose its value. It
+/// is never an option the sheet sets itself, by a field or by a checkbox: a
+/// typed `--allow-dangerously-skip-permissions` beside a ticked
+/// `--dangerously-skip-permissions` is the pair `resolve_agent_flags` exists to
+/// refuse, and typing it must not be the way around that.
+///
+/// A line longer than `LAUNCH_EXTRA_ARGS_MAX_CHARS` is refused whole rather
+/// than cut: a cut lands mid-token, and `--add-dir=/long/path` would become a
+/// different path that nobody typed.
+///
+/// Read in the launch sheet's draw path: one count and one split over a line
+/// the field caps at `LAUNCH_EXTRA_ARGS_MAX_CHARS`, and walks over `&'static`
+/// tables. It allocates only the token list, and a message when there is one.
+pub(crate) fn typed_launch_arguments<'a>(
+    agent: &str,
+    typed: &'a str,
+) -> std::result::Result<Vec<&'a str>, String> {
+    if typed.chars().count() > LAUNCH_EXTRA_ARGS_MAX_CHARS {
+        return Err(tf!(
+            "追加の引数は {max} 文字までです。",
+            max = LAUNCH_EXTRA_ARGS_MAX_CHARS
+        ));
+    }
+    let mut tokens = Vec::new();
+    for token in typed.split_whitespace() {
+        let name = token.split('=').next().unwrap_or(token);
+        if !token.starts_with('-') || name.trim_start_matches('-').is_empty() {
+            return Err(tf!(
+                "追加の引数は - で始まるスイッチだけです（値は --name=value の形で書きます）: {arg}",
+                arg = token
+            ));
+        }
+        // One short option per token, so the name is the whole of it. clap and
+        // commander both read `-mo3` as `-m o3` and `-cr` as `-c -r`, which
+        // would put an owned option out of sight of the checks below.
+        if !is_safe_agent_command(token) {
+            return Err(
+                tr("追加の引数に使えない文字が含まれています。シェル演算子は使えません。").into(),
+            );
+        }
+        if !token.starts_with("--") && name.len() > 2 {
+            return Err(tf!(
+                "短いオプションは 1 つずつ、値は = でつないで書いてください: {arg}",
+                arg = token
+            ));
+        }
+        // Only the long names: the one short shape is Codex's `-c`, which is
+        // its general configuration switch and not a field the sheet owns.
+        let a_field = launch_option_shapes(agent)
+            .iter()
+            .any(|shape| shape.name.starts_with("--") && shape.name == name);
+        let a_checkbox = agent_flag_options(agent)
+            .iter()
+            .any(|flag| flag.args.first() == Some(&name));
+        if a_field || a_checkbox || operon_owned_launch_options(agent).contains(&name) {
+            return Err(tf!(
+                "{arg} はこの画面の項目で指定してください。",
+                arg = name
+            ));
+        }
+        tokens.push(token);
+    }
+    Ok(tokens)
+}
+
+/// Options no shape or switch names that a typed line still must not carry,
+/// because Operon decides them for every launch (change 156): which
+/// conversation runs (Claude's `--session-id` is added by
+/// `command_with_managed_native_session_id`, and a resume is the ID field), that
+/// the CLI stays interactive (a terminal session is driven from the inspector),
+/// and the short spellings of options the sheet owns as fields or switches.
+///
+/// Each name is the CLI's own, read from its `--help`.
+pub(crate) fn operon_owned_launch_options(agent: &str) -> &'static [&'static str] {
+    match agent {
+        "codex" => &["-m", "-s", "-a"],
+        "claude" => &["-c", "--continue", "-r", "-p", "--print", "--fork-session"],
+        "gemini" => &[
+            "-c",
+            "--continue",
+            "-p",
+            "--print",
+            "-i",
+            "--prompt-interactive",
+        ],
+        _ => &[],
+    }
+}
+
+/// Whether a resume refuses this argument — Antigravity's `--new-project`, the
+/// one such option a checkbox can put on a launch.
+fn refused_by_resume(agent: &str, argument: &str) -> bool {
+    launch_option_shapes(agent)
+        .iter()
+        .any(|shape| shape.role == LaunchOptionRole::RefusedByResume && shape.name == argument)
+}
+
+/// Why the ticked switches cannot reopen a conversation, if one cannot.
+pub(crate) fn resume_refusal(agent: &str, flags: &[String]) -> Option<String> {
+    flags
+        .iter()
+        .filter_map(|id| agent_flag(agent, id))
+        .find(|flag| {
+            flag.args
+                .first()
+                .is_some_and(|argument| refused_by_resume(agent, argument))
+        })
+        .map(|flag| {
+            tf!(
+                "「{label}」は会話の再開と同時に指定できません。",
+                label = tr(flag.label)
+            )
+        })
+}
+
+/// The built launch turned into the CLI's own resume of `conversation_id`,
+/// with every option of the launch carried (change 156).
+///
+/// `resume_command_with_launch_options` falls back to the bare resume when the
+/// result would not pass the gates. That is right for reopening a record from
+/// an older build, and wrong here: the person just ticked these options, and a
+/// bare resume would drop a dangerous one silently. So a lost token refuses.
+pub(crate) fn launch_command_resuming(
+    agent: &str,
+    command: &str,
+    conversation_id: &str,
+) -> std::result::Result<String, String> {
+    let Some(provider) = cli_provider_for_agent(agent) else {
+        return Err(tr("このエージェントでは会話を再開できません。").into());
+    };
+    if !is_safe_cli_session_id(conversation_id) {
+        return Err(
+            tr("会話 ID には英数字とハイフンだけを、64 文字以内で入力してください。").into(),
+        );
+    }
+    if let Some(argument) = command
+        .split_whitespace()
+        .skip(1)
+        .find(|argument| refused_by_resume(agent, argument))
+    {
+        let label = agent_flag_options(agent)
+            .iter()
+            .find(|flag| flag.args.first() == Some(&argument))
+            .map_or(argument, |flag| tr(flag.label));
+        return Err(tf!(
+            "「{label}」は会話の再開と同時に指定できません。",
+            label = label
+        ));
+    }
+    let resumed = resume_command_with_launch_options(provider, agent, command, conversation_id);
+    let kept = resumed.split_whitespace().collect::<Vec<_>>();
+    if command
+        .split_whitespace()
+        .skip(1)
+        .any(|argument| !kept.contains(&argument))
+    {
+        return Err(tr("起動オプションを会話の再開に引き継げませんでした。").into());
+    }
+    Ok(resumed)
+}
+
 pub(crate) fn build_agent_launch_command(
     agent: &str,
     custom_command: &str,
@@ -1332,6 +1503,7 @@ pub(crate) fn build_agent_launch_command(
     mode: &str,
     effort: &str,
     flags: &[String],
+    extra_args: &str,
 ) -> std::result::Result<String, String> {
     if agent == "custom" {
         if !flags.is_empty() {
@@ -1370,6 +1542,7 @@ pub(crate) fn build_agent_launch_command(
         ));
     }
     let selected_flags = resolve_agent_flags(agent, mode, flags)?;
+    let typed = typed_launch_arguments(agent, extra_args)?;
     let mut parts = vec![if agent == "gemini" {
         ANTIGRAVITY_COMMAND.to_owned()
     } else {
@@ -1414,6 +1587,7 @@ pub(crate) fn build_agent_launch_command(
     for flag in selected_flags {
         parts.extend(flag.args.iter().map(|argument| (*argument).to_owned()));
     }
+    parts.extend(typed.into_iter().map(str::to_owned));
     Ok(parts.join(" "))
 }
 

@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Landed after CI on the branch; what outlives it is the ten carried points in review.yaml, worth one follow-up change (stale ID after a pinned sheet, valued switch without =)."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted f74bda3 (fmt, clippy, review gate SHIP at 61e6600213be405f)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from the reviewed tree; swapped into /Applications after landing"
+  named-tests: "machine passed cargo test --locked typed_launch_arguments — 6 passed; cargo test --locked resume_id — 4 passed"
+  guards-verified-by-mutation: "human passed mutations.py: 18 of 18 caught, including the claim that typed arguments follow the ticked switches"

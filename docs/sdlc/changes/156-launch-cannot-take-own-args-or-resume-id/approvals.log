@@ -1,0 +1,4 @@
+2026-10-16T13:04:19Z auto intent intent.md 12903b67b7c4a9e9 approve evaluator (a166d194): intent quotes the request, no solution smuggled; Today claims match resume_command_with_launch_options
+2026-10-16T13:04:19Z auto spec spec.md 22510b89949086e7 approve evaluator (a166d194) round 2: catalogue switches refused when typed, select_agent clears the ID, header cut and accepted risks stated; resume seam verified for codex, claude, agy
+2026-10-16T13:04:19Z auto screen screen.md a4831948bc527fbf approve evaluator (a166d194) round 2: two rows inside the existing detail section, no new role, glyph or layout; header example matches LAUNCH_DETAIL_SUMMARY_MAX
+2026-10-16T13:04:19Z auto plan plan.md dab4f0543adec35f approve evaluator (a166d194) round 2: covers the eight spec tests; each new risk and mutation names a test that goes red

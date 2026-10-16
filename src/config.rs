@@ -263,6 +263,14 @@ pub(crate) const PALETTE_RESULT_LIMIT: usize = 12;
 /// already has three numbered steps, and a header that wraps is a header that
 /// pushes the thing it heads off the screen.
 pub(crate) const LAUNCH_DETAIL_SUMMARY_MAX: usize = 3;
+/// How many characters of a typed value — the extra arguments, a conversation
+/// ID — that header shows before `…`. The cap above counts entries, not width,
+/// and one 1 024-character line is one entry.
+pub(crate) const LAUNCH_DETAIL_SUMMARY_VALUE_MAX: usize = 24;
+/// The longest typed argument line a launch takes, remembers, or loads (change
+/// 156). The field stops at it, so what is saved is what loads, and a pasted
+/// page cannot grow `recent-agent-settings.json` past its read cap.
+pub(crate) const LAUNCH_EXTRA_ARGS_MAX_CHARS: usize = 1024;
 /// How many names a worktree creation will try before it gives up: the one
 /// asked for, then that name numbered `-2`, `-3`, and so on. A person racing
 /// several attempts at one task is what the numbering is for; someone who has
