@@ -1,6 +1,6 @@
 # Intent: a project with no sessions says so instead of offering to start one
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-17
 
 ## Problem
@@ -29,9 +29,9 @@ header, recognisable only on hover.
 In every by-project session list, a project that has no sessions shows, in the
 place its sessions would be, an action reading 「セッションを開始」. One click on it
 opens the launch sheet for that project, over the page the person is on, with
-their remembered launch settings — so the next ⌘↩ starts the session. A search
-that hides every session of a project still says 「一致するセッションはありません。」:
-that project has sessions, they are only filtered out.
+their remembered launch settings — so the next ⌘↩ starts the session. Under a
+search, a project with nothing matching says 「一致するセッションはありません。」
+rather than offering a start: what is missing is a match, not a session.
 
 ## Constraints this change inherits
 
