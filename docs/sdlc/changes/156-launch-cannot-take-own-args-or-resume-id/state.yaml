@@ -1,0 +1,19 @@
+state:
+  route: "feature"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Get intent, spec and screen approved by an evaluator, then write plan.md."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: src/agents.rs, src/agents/settings.rs, src/app.rs and src/app/screens.rs change, so it ends with bash scripts/package-macos.sh and the bundle swap"
+  named-tests: "machine pending cargo test --locked typed_launch_arguments and cargo test --locked resume_id"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
