@@ -1,0 +1,41 @@
+# Review record for 161-new-terminal-opens-with-a-stray-ctrl-d.
+#
+# The change: once the placeholder `cat` is dead, `retire_tmux_placeholder`
+# resets the pane and clears its history in one tmux call, so the "^D" its
+# end-of-file echoed is gone before the agent is respawned.
+#
+# Round 1: both reviewers approved, and both found that a failure of this
+# cosmetic step killed a launch that would otherwise have worked, and that on
+# a wait timeout the clear could run against a live `cat`. Round 2 moved the
+# call into `clear_retired_placeholder`, run only after the pane was seen
+# dead, with its result ignored.
+#
+# Verified by rust-reviewer: launch path only, off the frame; no new
+# unwrap/expect/panic outside the test; the ignored result is argued at the
+# function; the test reads scrollback, so dropping either half of the call
+# fails it.
+#
+# Verified by subprocess-safety-reviewer: the clear runs strictly before the
+# respawn; `;` is its own argv element, as in tmux_capture_with_cursor; the
+# target is the hex-only managed name; the 5 s timeout kills and waits the
+# child; the suite stays on its own `-L operon_suite` server.
+
+digest: "604b3040dd18d0f1"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/3 · the stderr-to-anyhow mapping is repeated across tmux.rs
+    person: "コードの書き方の重複についての指摘です。動作には影響しません。対応は不要です。"
+  - rust-reviewer/2/1 · a failed clear is now silent, so a tmux release that changed the call would show only through the new test
+    person: "将来 tmux の仕様が変わった場合だけ関係します。そのときは端末の先頭に「^D」が1行残るだけで、起動は通常どおりです。テストで気づけます。対応は不要です。"
+  - subprocess-safety-reviewer/1/3 · the history clear targets the session by name; a name resolving to another session would clear that session's scrollback
+    person: "Operon が作るセッション名は毎回ランダムな英数字なので、別のセッションの履歴を消すことは実質ありません。対応は不要です。"
+  - subprocess-safety-reviewer/2/1 · no test covers the skipped clear on a live pane or the launch surviving a failed clear
+    person: "失敗時の動きを確かめるテストがまだありません。正常時のテストはあり、失敗しても起動は続く作りです。対応は不要です。"
+  - subprocess-safety-reviewer/1/4b · `send-keys -R` with no keys is verified on tmux 3.8 only
+    person: "確認したのは tmux 3.8 だけです。ほかの版で動かなくても、端末の先頭に「^D」が1行残るだけです。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 1"
+  subprocess-safety-reviewer: "approve 0 1"
