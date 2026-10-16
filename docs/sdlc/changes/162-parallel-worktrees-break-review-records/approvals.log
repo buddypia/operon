@@ -1,0 +1,4 @@
+2026-10-16T18:02:04Z person gate-configuration plan.md 049e7bf8f3e85cea approve user 2026-10-17: 「問題があれば恒久対応して。判断は状況をみて進めて」 — delegated the call; digest narrowed to the change's own hunks, legacy digests still accepted
+2026-10-16T18:02:04Z auto intent intent.md a1d55c5f368ea3b6 approve evaluator round 1: restates the quoted request; 158's refusal, the review-only refusal and the 161 collision are real
+2026-10-16T18:02:04Z auto spec spec.md c6379b401b7470d7 approve evaluator round 3: LC_ALL=C and invalid-byte arm, comparison pin, number-check rules; Local-first row corrected
+2026-10-16T18:02:04Z auto plan plan.md 049e7bf8f3e85cea approve evaluator round 3: exact-line allowance for the two digest assignments, four pin mutations, per-arm number test, legacy record for 162
