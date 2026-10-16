@@ -246,6 +246,13 @@ pub(crate) fn transcript_wrappers(
 /// model's reasoning that actually survives the crossing.
 pub(crate) const RESTORED_REASONING_LABEL: &str = "[Thinking]";
 
+/// The Antigravity record that holds what a tool returned, whose content the
+/// reader marks `[Tool result]`. The row above keeps its literal because
+/// `scripts/check-transcript-vocabulary.sh` reads rows as text;
+/// `antigravity_tool_output_crosses_marked_as_a_tool_result` fails if the two
+/// stop naming the same kind.
+pub(crate) const ANTIGRAVITY_TOOL_RESULT_RECORD: &str = "MODEL/GENERIC";
+
 /// How a fragment whose kind the vocabulary does not know is labelled.
 ///
 /// It is restored rather than dropped: an optional field a reader does not

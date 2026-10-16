@@ -2753,6 +2753,45 @@ pub(crate) fn antigravity_source_keeps_the_model_s_tool_calls_and_its_reasoning(
     .is_none());
 }
 
+/// Change 159. `MODEL/GENERIC` is what agy's tools returned, and the record
+/// carries agy's instructions to its own model along with the output. Claude's
+/// `tool_result` and Codex's `function_call_output` cross under the
+/// `[Tool result]` marker; this one crossed bare, so a restored Claude Code
+/// read agy's "Don't ask for permission." as something it had said itself.
+/// The record below is cut from a real transcript (step 102 of the
+/// conversation the report restored).
+#[test]
+pub(crate) fn antigravity_tool_output_crosses_marked_as_a_tool_result() {
+    let output = "Created At: 2026-10-16T15:58:16+09:00\nThe following changes were made by the replace_file_content tool to: /p/genres.mjs. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.\n[diff_block_start]\n-ground: 'mid',\n+ground: 'light',\n[diff_block_end]";
+    let record = serde_json::json!({
+        "step_index": 102,
+        "source": "MODEL",
+        "type": "GENERIC",
+        "status": "DONE",
+        "content": output,
+    });
+    let (role, text) = transcript_value_turn(&record, CliProvider::Gemini).unwrap();
+    assert_eq!(role, "assistant");
+    assert_eq!(
+        text,
+        format!("[Tool result]\n{output}"),
+        "agy's tool output must say what it is, like every other provider's"
+    );
+
+    // A planner response is the model speaking, and stays unmarked.
+    let spoken = serde_json::json!({
+        "source": "MODEL",
+        "type": "PLANNER_RESPONSE",
+        "content": "直しました。",
+    });
+    assert_eq!(
+        transcript_value_turn(&spoken, CliProvider::Gemini)
+            .unwrap()
+            .1,
+        "直しました。"
+    );
+}
+
 /// A restore names the request it is carrying over. Antigravity's history
 /// index cannot supply one for a conversation it never named, and a managed
 /// `agy` terminal launched without a goal has no stored message either, so
@@ -12415,6 +12454,87 @@ pub(crate) fn starts_an_agent_command_in_a_retainable_tmux_session() {
     let _ = tmux_command().args(["kill-session", "-t", &name]).output();
     assert_eq!(state, TmuxState::Dead);
     assert!(output.contains("operon-smoke-test"));
+}
+/// Change 160. `respawn-pane -k` closes the pane's master and forks the agent
+/// at once, while the placeholder `cat` still holds its terminal: for that
+/// moment a launch needs two ptys, and with one to spare macOS answers
+/// `fork failed: Device not configured` (a restored Codex terminal, reported).
+/// The placeholder has to be gone first, which tmux announces as `pane-died`
+/// — a hook that never fires when `-k` replaces a live process.
+#[test]
+pub(crate) fn an_agent_starts_only_after_its_placeholder_let_go_of_its_terminal() {
+    if !tool_available("tmux") {
+        return;
+    }
+    // `set-hook -g` needs a running server.
+    let keeper = format!("operon-test-{}", Uuid::new_v4().simple());
+    start_empty_tmux_session(&keeper, Path::new("/tmp"), &[]).unwrap();
+    let record = std::env::temp_dir().join(format!("operon-pane-died-{}", Uuid::new_v4()));
+    let hook = format!("run-shell 'echo #{{session_name}} >> {}'", record.display());
+    let _ = tmux_command()
+        .args(["set-hook", "-g", "pane-died[160]", &hook])
+        .output();
+
+    let name = format!("operon-test-{}", Uuid::new_v4().simple());
+    let started = start_tmux_agent_session(&name, Path::new("/tmp"), "sleep 30", &[]);
+    let mut died_first = false;
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        died_first = fs::read_to_string(&record)
+            .unwrap_or_default()
+            .lines()
+            .any(|line| line == name);
+        if died_first {
+            break;
+        }
+    }
+    let state = tmux_state(&name);
+
+    let _ = tmux_command()
+        .args(["set-hook", "-gu", "pane-died[160]"])
+        .output();
+    let _ = tmux_command().args(["kill-session", "-t", &name]).output();
+    let _ = tmux_command()
+        .args(["kill-session", "-t", &keeper])
+        .output();
+    let _ = fs::remove_file(&record);
+    started.unwrap();
+    assert!(
+        died_first,
+        "the agent was forked while the placeholder still held its terminal"
+    );
+    assert_eq!(state, TmuxState::Alive, "the agent itself is running");
+}
+/// Change 161. The end-of-file that retires the placeholder is echoed by the
+/// pane's tty as "^D", and `respawn-pane` keeps the dead pane's cells, so every
+/// agent terminal opened with that line above its own output.
+#[test]
+pub(crate) fn an_agent_terminal_opens_without_its_placeholders_end_of_file() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let name = format!("operon-test-{}", Uuid::new_v4().simple());
+    let started = start_tmux_agent_session(
+        &name,
+        Path::new("/tmp"),
+        "printf 'operon-agent-started\\n'; sleep 30",
+        &[],
+    );
+    let mut output = String::new();
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        output = tmux_capture(&name).unwrap_or_default();
+        if output.contains("operon-agent-started") {
+            break;
+        }
+    }
+    let _ = tmux_command().args(["kill-session", "-t", &name]).output();
+    started.unwrap();
+    assert!(output.contains("operon-agent-started"), "{output}");
+    assert!(
+        !output.contains("^D"),
+        "the placeholder's end-of-file is left on the agent's screen:\n{output}"
+    );
 }
 /// The screen read must come from the live pane, not its scrollback: a real
 /// session scrolls its finished turns up and would otherwise keep reporting
@@ -24364,10 +24484,17 @@ pub(crate) fn parses_tmux_cursor_coordinate_correctly() {
 
 #[test]
 pub(crate) fn parses_tmux_capture_with_cursor_marker() {
-    let raw = format!("line 1\nline 2{OPERON_CURSOR_MARKER}12,34\n");
+    let raw = format!("line 1\nline 2{OPERON_CURSOR_MARKER}12,34,40\n");
     let capture = parse_tmux_capture_with_cursor(&raw);
     assert_eq!(capture.output, "line 1\nline 2");
-    assert_eq!(capture.cursor, Some((12, 34)));
+    assert_eq!(
+        capture.cursor,
+        Some(TerminalCursor {
+            x: 12,
+            y: 34,
+            pane_rows: 40
+        })
+    );
 
     let raw_without = "plain terminal text without marker";
     let capture_without = parse_tmux_capture_with_cursor(raw_without);
@@ -24376,15 +24503,148 @@ pub(crate) fn parses_tmux_capture_with_cursor_marker() {
 }
 
 #[test]
-pub(crate) fn terminal_cursor_rect_clamps_within_bounds() {
-    let terminal_rect =
-        egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(800.0, 600.0));
-    let cell = egui::vec2(9.0, 18.0);
-    let rect = terminal_cursor_rect(terminal_rect, (2, 3), cell);
-    assert_eq!(rect.min.x, 100.0 + 8.0 + 2.0 * 9.0);
-    assert_eq!(rect.min.y, 50.0 + 8.0 + 3.0 * 18.0);
-    assert_eq!(rect.width(), 9.0);
-    assert_eq!(rect.height(), 18.0);
+pub(crate) fn parses_tmux_cursor_line_needs_all_three_fields() {
+    // The capture parser's three-field probe: cursor_x, cursor_y, pane_height.
+    // The two-field reader left `parse_tmux_cursor_coordinate` is `#[cfg(test)]`
+    // and stays so — its only caller is the test's own probe below.
+    assert_eq!(
+        parse_tmux_cursor_line("12,34,40").unwrap(),
+        TerminalCursor {
+            x: 12,
+            y: 34,
+            pane_rows: 40
+        }
+    );
+    // tmux 3.8's pane_height is a plain number, but a hand-built marker can
+    // carry whitespace and a trailing rest line: the parse trims them.
+    assert!(parse_tmux_cursor_line("12,34").is_err());
+    assert!(parse_tmux_cursor_line("").is_err());
+    assert!(parse_tmux_cursor_line("12,a,40").is_err());
+}
+
+#[test]
+pub(crate) fn terminal_cursor_row_maps_pane_rows_into_content_rows() {
+    // 10 rows of scrollback, a 40-row pane grid, and one phantom trailing row
+    // from splitting the capture's trailing newline: 51 entries, 50 content
+    // rows. Pane row 16 lives at content row 50 - 40 + 16.
+    assert_eq!(terminal_cursor_row(51, 40, 16), Some(26));
+    assert_eq!(terminal_cursor_row(41, 40, 0), Some(0));
+    assert_eq!(terminal_cursor_row(41, 40, 39), Some(39));
+
+    // Degenerate captures report nothing rather than a wrong row.
+    assert_eq!(terminal_cursor_row(51, 0, 0), None);
+    assert_eq!(terminal_cursor_row(51, 40, 40), None);
+    assert_eq!(terminal_cursor_row(3, 40, 1), None);
+    assert_eq!(terminal_cursor_row(0, 40, 0), None);
+}
+
+#[test]
+pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+
+    // 60 rows, the last 40 of which the pane's grid claims, and the phantom
+    // trailing row: 61 entries. Pane row 20 sits at content row 60 - 40 + 20
+    // = 40, and a viewport of the last 36 rows shows rows 25..61 — with the
+    // caret inside, which is exactly where the old anchor put the box wrong.
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    assert_eq!(lines.len(), 61);
+    let cursor = TerminalCursor {
+        x: 2,
+        y: 20,
+        pane_rows: 40,
+    };
+    #[derive(Debug)]
+    struct Paned {
+        caret: Option<egui::Rect>,
+        clip: egui::Rect,
+        cell: egui::Vec2,
+    }
+    let mut outcomes = Vec::new();
+    // Two frames, because stick-to-bottom only has a scroll position to keep
+    // on the pass after the one that measured the content. The 'stuck' frame's
+    // jump lands at row 25 (`scroll_to` puts a row a third of the way down the
+    // viewport), rows 13..50 on screen — content row 40 among them, as the
+    // bug's bottom-clamped pane shows the caret's rows.
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let cell = terminal_cell_size(ui);
+            // Viewport as tall as the pane grid's visible window in the bug.
+            let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+            let bottom = TerminalSearchOverlay {
+                matches: &[],
+                current: None,
+                scroll_to: Some(25),
+                palette: &palette,
+            };
+            let mut links = TerminalLinkOverlay {
+                resolved: &HashMap::new(),
+                unresolved: &mut Vec::new(),
+                palette: &palette,
+            };
+            let visible = ui.clip_rect();
+            outcomes.push(Paned {
+                caret: terminal_rows(
+                    ui,
+                    &lines,
+                    viewport,
+                    cell.y,
+                    bottom,
+                    &mut links,
+                    Some(cursor),
+                )
+                .caret,
+                clip: visible,
+                cell,
+            });
+
+            // A search jump to the top scrolls the caret's row below the
+            // visible band (rows 0..36 on screen, the caret on 40): the pane
+            // must report nothing rather than a box not on the caret's row.
+            let jumped = TerminalSearchOverlay {
+                matches: &[],
+                current: None,
+                scroll_to: Some(10),
+                palette: &palette,
+            };
+            let mut links = TerminalLinkOverlay {
+                resolved: &HashMap::new(),
+                unresolved: &mut Vec::new(),
+                palette: &palette,
+            };
+            let visible = ui.clip_rect();
+            outcomes.push(Paned {
+                caret: terminal_rows(
+                    ui,
+                    &lines,
+                    viewport,
+                    cell.y,
+                    jumped,
+                    &mut links,
+                    Some(cursor),
+                )
+                .caret,
+                clip: visible,
+                cell,
+            });
+        });
+    });
+    assert_eq!(outcomes.len(), 2);
+    let stuck = &outcomes[0];
+    let caret = stuck
+        .caret
+        .expect("caret row visible at the bottom-clamped offset");
+    assert!(caret.min.x >= stuck.clip.min.x && caret.max.x <= stuck.clip.max.x);
+    assert!(caret.min.y >= stuck.clip.min.y && caret.max.y <= stuck.clip.max.y);
+    assert_eq!(
+        (caret.width(), caret.height()),
+        (stuck.cell.x, stuck.cell.y)
+    );
+    assert!(!outcomes[1].caret.is_some());
 }
 
 #[test]
@@ -32169,7 +32429,15 @@ pub(crate) fn test_terminal_panel_pointer_event_e2e_cmd_click_and_plain_click() 
 
     // Prepare terminal output with openable target
     let output = "Error located at src/main.rs:10\n";
-    app.set_session_output(session.id, output.into(), Some((0, 0)));
+    app.set_session_output(
+        session.id,
+        output.into(),
+        Some(TerminalCursor {
+            x: 0,
+            y: 0,
+            pane_rows: 40,
+        }),
+    );
 
     // Verify modifiers detection contract
     let cmd_mod = egui::Modifiers {
@@ -35249,7 +35517,15 @@ fn ime_pane_fixture(label: &str) -> (PathBuf, OperonApp, Session) {
     app.page = Page::Sessions;
     app.selected_session = Some(session.id);
     app.show_session_inspector = false;
-    app.set_session_output(session.id, "$ ".into(), Some((2, 0)));
+    app.set_session_output(
+        session.id,
+        "$ ".into(),
+        Some(TerminalCursor {
+            x: 2,
+            y: 0,
+            pane_rows: 40,
+        }),
+    );
     (root, app, session)
 }
 
@@ -35489,7 +35765,15 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
         .map(|line| format!("エージェントの出力 {line}"))
         .collect::<Vec<_>>()
         .join("\n");
-    app.set_session_output(session.id, screenful, Some((0, 0)));
+    app.set_session_output(
+        session.id,
+        screenful,
+        Some(TerminalCursor {
+            x: 0,
+            y: 0,
+            pane_rows: 40,
+        }),
+    );
 
     let context = egui::Context::default();
     let mut pass = |context: &egui::Context| {
@@ -45057,14 +45341,37 @@ pub(crate) fn test_set_session_output_skips_redundant_relayout_and_generation_bu
     app.store.sessions.push(session);
     app.select_session(session_id);
 
-    app.set_session_output(session_id, "line 1\nline 2\n".into(), Some((2, 1)));
+    app.set_session_output(
+        session_id,
+        "line 1\nline 2\n".into(),
+        Some(TerminalCursor {
+            x: 2,
+            y: 1,
+            pane_rows: 2,
+        }),
+    );
     let gen_after_first = app.resolved_paths_generation;
     app.resolved_paths.insert("src/missing.rs".into(), None);
 
     // Second poll with identical output but updated cursor position must update
     // the cursor without re-running layout/search or bumping resolved_paths_generation.
-    app.set_session_output(session_id, "line 1\nline 2\n".into(), Some((6, 1)));
-    assert_eq!(app.terminal_cursors.get(&session_id), Some(&(6, 1)));
+    app.set_session_output(
+        session_id,
+        "line 1\nline 2\n".into(),
+        Some(TerminalCursor {
+            x: 6,
+            y: 1,
+            pane_rows: 2,
+        }),
+    );
+    assert_eq!(
+        app.terminal_cursors.get(&session_id),
+        Some(&TerminalCursor {
+            x: 6,
+            y: 1,
+            pane_rows: 2
+        })
+    );
     assert_eq!(
         app.resolved_paths_generation, gen_after_first,
         "identical session output must not bump resolved_paths_generation on every poll"
@@ -45075,7 +45382,15 @@ pub(crate) fn test_set_session_output_skips_redundant_relayout_and_generation_bu
     );
 
     // When new output arrives, layout and generation must advance as before.
-    app.set_session_output(session_id, "line 1\nline 2\nline 3\n".into(), Some((0, 2)));
+    app.set_session_output(
+        session_id,
+        "line 1\nline 2\nline 3\n".into(),
+        Some(TerminalCursor {
+            x: 0,
+            y: 2,
+            pane_rows: 3,
+        }),
+    );
     assert!(app.resolved_paths_generation > gen_after_first);
     assert!(!app.resolved_paths.contains_key("src/missing.rs"));
 

@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Cleaned up redundant `.tmp/` entry in `.gitignore`.
 
+### Fixed
+- Terminal caret box no longer drifts one row below the running CLI's input row or outside the pane with scrollback: the cursor is tracked from tmux row coordinates, drawn only on rows the pane actually shows, and the IME candidate window follows it.
+
 ## [0.1.0] - 2026-10-05
 
 ### Added

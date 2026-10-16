@@ -418,7 +418,7 @@ pub(crate) struct OperonApp {
     /// it rather than restoring a quote whose terminal may be long gone.
     pub(crate) session_previews: HashMap<Uuid, ConversationPreview>,
     pub(crate) terminal_layouts: HashMap<Uuid, Vec<LayoutJob>>,
-    pub(crate) terminal_cursors: HashMap<Uuid, (u16, u16)>,
+    pub(crate) terminal_cursors: HashMap<Uuid, TerminalCursor>,
     pub(crate) terminal_preedits: HashMap<Uuid, String>,
     pub(crate) terminal_input_queue: HashMap<Uuid, VecDeque<TerminalInput>>,
     pub(crate) terminal_resize_requested: HashMap<Uuid, (u16, u16)>,
@@ -6124,7 +6124,7 @@ impl OperonApp {
         &mut self,
         session_id: Uuid,
         output: String,
-        cursor: Option<(u16, u16)>,
+        cursor: Option<TerminalCursor>,
     ) {
         if let Some(cursor) = cursor {
             self.terminal_cursors.insert(session_id, cursor);

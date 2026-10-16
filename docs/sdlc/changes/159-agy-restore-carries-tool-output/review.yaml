@@ -1,0 +1,25 @@
+# Review record for 159-agy-restore-carries-tool-output.
+#
+# The change: `antigravity_transcript_record` marks a `MODEL/GENERIC` record's
+# content `[Tool result]`, as Claude's `tool_result` and Codex's
+# `function_call_output` already are, so agy's tool output and the harness
+# text riding on it no longer cross as the model's own words.
+#
+# Verified by rust-reviewer against .claude/rules/rust.md, transcripts.md and
+# identifiers.md: no new unwrap/expect/panic, nothing on a draw path, no SQL;
+# the format! builds restore text, not app copy, like its siblings; a
+# MODEL/GENERIC record that also carries thinking or tool_calls still emits
+# them unmarked after the marked content.
+
+digest: "a5a706e38ef0cff5"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · the reader judges the tool-result kind with `kind == ANTIGRAVITY_TOOL_RESULT_RECORD`, and the constant spells MODEL/GENERIC a second time beside the vocabulary row; the round-trip test catches drift both ways, and a tool-output flag on the row would remove the duplication but is larger than this bugfix
+    person: "動作への影響はありません。agy のツール出力を見分ける名前が2か所に書かれていますが、ずれた場合はテストが失敗するので気づけます。将来、表の行に印を持たせる形に整理すれば1か所にまとめられます。対応は不要です。"
+  - rust-reviewer/2 · the `[Tool result]` marker is now written in four places in src/history.rs with no shared constant beside RESTORED_REASONING_LABEL
+    person: "動作への影響はありません。復元した会話に付ける「[Tool result]」の目印が4か所に直書きされています。目印の文言を変える時は4か所とも直す必要がある、というメモです。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 2"
