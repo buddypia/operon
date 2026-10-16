@@ -45210,3 +45210,113 @@ pub(crate) fn test_ensure_initial_prompt_turn_does_not_create_git_checkpoint_on_
 
     let _ = fs::remove_dir_all(&root);
 }
+
+/// A keystroke reaches the screen through two background jobs — `send-keys`,
+/// then the capture that shows its echo — and each delivers its result down a
+/// channel the frame drains. Nothing woke that frame, so each result waited for
+/// whatever repaint was already scheduled, 100ms while any job ran: typing in
+/// the pane showed every character a fifth of a second late (change 154).
+/// Until change 153 a focused pane redrew every frame, which hid it.
+#[test]
+pub(crate) fn a_finished_background_job_wakes_the_frame_that_reads_it() {
+    let mut app = test_app(
+        std::env::temp_dir().join(format!("operon-background-wake-{}.json", Uuid::new_v4())),
+    );
+    let context = egui::Context::default();
+    let (woke, wakes) = mpsc::channel();
+    context.set_request_repaint_callback(move |_| {
+        let _ = woke.send(());
+    });
+    app.repaint = Some(context);
+
+    app.spawn_background(BackgroundKey::HookApply, || {
+        BackgroundResult::HooksApplied {
+            installs: Vec::new(),
+        }
+    });
+
+    assert!(
+        wakes.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "a finished background job left its result for a frame nobody asked for"
+    );
+    app.process_background_results();
+    assert!(!app.background_tasks.contains(&BackgroundKey::HookApply));
+}
+
+/// The other half. After a keystroke the pane read tmux exactly once, the
+/// moment `send-keys` returned, and a CLI that redraws its prompt a few
+/// milliseconds after the byte arrives had not drawn the echo yet. Nothing
+/// looked again until the next keystroke or the two-second session poll, so
+/// a character typed last stayed invisible for up to two seconds (change 154).
+#[test]
+pub(crate) fn typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands() {
+    let (root, mut app, session) = ime_pane_fixture("echo-poll");
+    let context = egui::Context::default();
+    let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    click_at(&context, egui::pos2(450.0, 300.0), |context| {
+        egui::CentralPanel::default().show(context, |ui| {
+            app.ui_terminal_panel(ui, &session);
+        });
+    });
+    let _ = ime_pane_pass(
+        &context,
+        &mut app,
+        &session,
+        vec![egui::Event::Text("a".into())],
+    );
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::TerminalInput(session.id)),
+        "the keystroke never reached send-keys"
+    );
+    // `send-keys` came back and its capture came back, both before the CLI
+    // had drawn the echo. Then a frame passes with no input at all.
+    app.background_tasks
+        .remove(&BackgroundKey::TerminalInput(session.id));
+    app.background_tasks
+        .remove(&BackgroundKey::SessionOutput(session.id));
+    let idle = ime_pane_pass(&context, &mut app, &session, Vec::new());
+    fs::remove_dir_all(&root).ok();
+
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(session.id)),
+        "the pane stopped reading tmux right after a keystroke"
+    );
+    let delay = idle.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    assert!(
+        delay <= Duration::from_millis(100),
+        "the pane will not look again for {delay:?} while its echo is pending"
+    );
+}
+
+/// The schedule `typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands`
+/// relies on, with the clock held still: due at once after a keystroke, then
+/// once per `TERMINAL_ECHO_POLL`, and never again once the window has passed —
+/// an idle pane must not turn into a capture loop.
+#[test]
+pub(crate) fn the_echo_poll_runs_at_frame_rate_only_while_typing() {
+    let typed = Instant::now();
+    assert_eq!(terminal_echo_poll_wait(None, None, typed), None);
+    assert_eq!(
+        terminal_echo_poll_wait(Some(typed), None, typed),
+        Some(Duration::ZERO)
+    );
+    let polled = typed + Duration::from_millis(5);
+    assert_eq!(
+        terminal_echo_poll_wait(
+            Some(typed),
+            Some(polled),
+            polled + Duration::from_millis(10)
+        ),
+        Some(TERMINAL_ECHO_POLL - Duration::from_millis(10))
+    );
+    assert_eq!(
+        terminal_echo_poll_wait(Some(typed), Some(polled), polled + TERMINAL_ECHO_POLL),
+        Some(Duration::ZERO)
+    );
+    assert_eq!(
+        terminal_echo_poll_wait(Some(typed), Some(polled), typed + TERMINAL_ECHO_WINDOW),
+        None
+    );
+}

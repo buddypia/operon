@@ -123,6 +123,14 @@ pub(crate) const FILE_TREE_LIMIT: usize = 12_000;
 /// but laying out even 2000 rows at once costs about 150 ms, so this number
 /// must not grow without keeping that viewport virtualised.
 pub(crate) const TERMINAL_SCROLLBACK_LINES: usize = 5_000;
+/// How often the terminal pane re-reads tmux after a keystroke, and for how
+/// long. `send-keys` returns once the byte is in the pane, before the CLI has
+/// redrawn its prompt, so the capture that follows it can miss the echo; the
+/// pane keeps looking at roughly frame rate for a second after typing rather
+/// than leaving the last character for the two-second session poll
+/// (change 154). Only while typing: an idle pane is not captured any faster.
+pub(crate) const TERMINAL_ECHO_POLL: std::time::Duration = std::time::Duration::from_millis(33);
+pub(crate) const TERMINAL_ECHO_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
 /// Claude Code's local store, and the two directories inside it Operon reads.
 ///
 /// Spelled once for the reason `MANAGED_TMUX_PREFIX` is: five call sites built a

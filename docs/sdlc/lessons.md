@@ -843,3 +843,23 @@ subparameters).
 **Guard.** `renders_terminal_background_colors_and_half_block_banners` and
 `bundled_terminal_fonts_keep_cjk_at_exactly_two_ascii_cells`.
 
+
+---
+
+## 072 — A redraw removed for speed was the only thing reading the results
+
+`spawn_background` sent each finished job's result down a channel and never
+woke egui, so the result waited for whatever repaint was already scheduled —
+100ms while any job ran. A focused terminal pane used to repaint every frame,
+which drained the channel at frame rate and hid it; change 153 removed that
+repaint, and every keystroke's echo then crossed two 100ms waits. The pane also
+read tmux once per keystroke, straight after `send-keys`, before the CLI had
+redrawn, so the last character typed could wait for the two-second poll.
+**The rule:** a background result wakes the frame that reads it; a per-frame
+repaint is never what delivers work, and removing one is checked for what it
+was carrying.
+
+**Guard.** `a_finished_background_job_wakes_the_frame_that_reads_it` (watched
+failing on main: no wake within 5s) and
+`typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands` (watched failing
+on main, and with the keystroke timestamp removed from `queue_terminal_input`).

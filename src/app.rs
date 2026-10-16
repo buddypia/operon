@@ -452,6 +452,18 @@ pub(crate) struct OperonApp {
     pub(crate) background_tasks: HashSet<BackgroundKey>,
     pub(crate) background_sender: Sender<BackgroundResult>,
     pub(crate) background_receiver: Receiver<BackgroundResult>,
+    /// The context a finished background job wakes, bound by the first frame.
+    /// Without it a result waits in `background_receiver` for whatever repaint
+    /// was already scheduled, and a keystroke's echo crosses two such waits
+    /// (change 154). `None` until a frame has run, which is every test.
+    pub(crate) repaint: Option<egui::Context>,
+    /// The session the terminal pane last asked tmux about, and when. The pane
+    /// polls on an interval rather than every frame now that a finished
+    /// capture wakes the frame that would start the next one.
+    pub(crate) last_output_poll: Option<(Uuid, Instant)>,
+    /// When typing last went to a pane, which shortens that interval while a
+    /// person is waiting to see their own keystrokes.
+    pub(crate) last_terminal_input: Option<Instant>,
     pub(crate) command_palette_open: bool,
     pub(crate) command_selection: usize,
     pub(crate) command_palette_needs_focus: bool,
@@ -902,6 +914,9 @@ impl OperonApp {
             background_tasks: HashSet::new(),
             background_sender,
             background_receiver,
+            repaint: None,
+            last_output_poll: None,
+            last_terminal_input: None,
             command_palette_open: false,
             command_selection: 0,
             command_palette_needs_focus: false,
@@ -1201,8 +1216,14 @@ impl OperonApp {
             return;
         }
         let sender = self.background_sender.clone();
+        let repaint = self.repaint.clone();
         thread::spawn(move || {
             let _ = sender.send(job());
+            // The result is only read by a frame, and the next scheduled one
+            // can be 100ms away — two of those per keystroke (change 154).
+            if let Some(repaint) = repaint {
+                repaint.request_repaint();
+            }
         });
     }
 
@@ -6022,7 +6043,36 @@ impl OperonApp {
             .entry(session_id)
             .or_default()
             .extend(input);
+        self.last_terminal_input = Some(Instant::now());
         self.flush_terminal_input(session_id);
+    }
+
+    /// Re-read the pane while its echo may still be on the way, and say how
+    /// long until the next look; `None` once nobody has typed for
+    /// `TERMINAL_ECHO_WINDOW`, or while a capture is in flight — its completion
+    /// wakes the frame that calls this again.
+    pub(crate) fn poll_terminal_echo(
+        &mut self,
+        session_id: Uuid,
+        now: Instant,
+    ) -> Option<Duration> {
+        let last_poll = self
+            .last_output_poll
+            .filter(|(polled, _)| *polled == session_id)
+            .map(|(_, at)| at);
+        let wait = terminal_echo_poll_wait(self.last_terminal_input, last_poll, now)?;
+        if !wait.is_zero() {
+            return Some(wait);
+        }
+        if self
+            .background_tasks
+            .contains(&BackgroundKey::SessionOutput(session_id))
+        {
+            return None;
+        }
+        self.last_output_poll = Some((session_id, now));
+        self.request_session_output(session_id);
+        Some(TERMINAL_ECHO_POLL)
     }
 
     pub(crate) fn flush_terminal_input(&mut self, session_id: Uuid) {
@@ -6099,8 +6149,26 @@ impl OperonApp {
     }
 }
 
+/// How long until the pane should next read tmux for an echo: zero when it is
+/// due, `None` when the last keystroke is `TERMINAL_ECHO_WINDOW` old.
+pub(crate) fn terminal_echo_poll_wait(
+    last_input: Option<Instant>,
+    last_poll: Option<Instant>,
+    now: Instant,
+) -> Option<Duration> {
+    if now.saturating_duration_since(last_input?) >= TERMINAL_ECHO_WINDOW {
+        return None;
+    }
+    Some(last_poll.map_or(Duration::ZERO, |polled| {
+        TERMINAL_ECHO_POLL.saturating_sub(now.saturating_duration_since(polled))
+    }))
+}
+
 impl eframe::App for OperonApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.repaint.is_none() {
+            self.repaint = Some(ctx.clone());
+        }
         self.apply_appearance(ctx);
         let palette = self.store.theme.palette();
         self.ensure_hooks_started(ctx);
