@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Reviewed and committed; push the branch, wait for CI, merge on main, then package and swap the bundle."
+resume: "Landed after CI on the branch; what outlives it is the ten carried points in review.yaml, worth one follow-up change (stale ID after a pinned sheet, valued switch without =)."
 
 contract:
-  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
-  bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: src/agents.rs, src/agents/settings.rs, src/app.rs and src/app/screens.rs change, so it ends with bash scripts/package-macos.sh and the bundle swap"
-  named-tests: "machine passed cargo test --locked typed_launch_arguments and cargo test --locked resume_id"
-  guards-verified-by-mutation: "human passed 14 of 14 mutations caught by mutations.py, including the claim that typed arguments follow the ticked switches"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted f74bda3 (fmt, clippy, review gate SHIP at 61e6600213be405f)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/Operon.app from the reviewed tree; swapped into /Applications after landing"
+  named-tests: "machine passed cargo test --locked typed_launch_arguments — 6 passed; cargo test --locked resume_id — 4 passed"
+  guards-verified-by-mutation: "human passed mutations.py: 18 of 18 caught, including the claim that typed arguments follow the ticked switches"
