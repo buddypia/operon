@@ -2753,6 +2753,45 @@ pub(crate) fn antigravity_source_keeps_the_model_s_tool_calls_and_its_reasoning(
     .is_none());
 }
 
+/// Change 159. `MODEL/GENERIC` is what agy's tools returned, and the record
+/// carries agy's instructions to its own model along with the output. Claude's
+/// `tool_result` and Codex's `function_call_output` cross under the
+/// `[Tool result]` marker; this one crossed bare, so a restored Claude Code
+/// read agy's "Don't ask for permission." as something it had said itself.
+/// The record below is cut from a real transcript (step 102 of the
+/// conversation the report restored).
+#[test]
+pub(crate) fn antigravity_tool_output_crosses_marked_as_a_tool_result() {
+    let output = "Created At: 2026-10-16T15:58:16+09:00\nThe following changes were made by the replace_file_content tool to: /p/genres.mjs. If relevant, proactively run terminal commands to execute this code for the USER. Don't ask for permission.\n[diff_block_start]\n-ground: 'mid',\n+ground: 'light',\n[diff_block_end]";
+    let record = serde_json::json!({
+        "step_index": 102,
+        "source": "MODEL",
+        "type": "GENERIC",
+        "status": "DONE",
+        "content": output,
+    });
+    let (role, text) = transcript_value_turn(&record, CliProvider::Gemini).unwrap();
+    assert_eq!(role, "assistant");
+    assert_eq!(
+        text,
+        format!("[Tool result]\n{output}"),
+        "agy's tool output must say what it is, like every other provider's"
+    );
+
+    // A planner response is the model speaking, and stays unmarked.
+    let spoken = serde_json::json!({
+        "source": "MODEL",
+        "type": "PLANNER_RESPONSE",
+        "content": "直しました。",
+    });
+    assert_eq!(
+        transcript_value_turn(&spoken, CliProvider::Gemini)
+            .unwrap()
+            .1,
+        "直しました。"
+    );
+}
+
 /// A restore names the request it is carrying over. Antigravity's history
 /// index cannot supply one for a conversation it never named, and a managed
 /// `agy` terminal launched without a goal has no stored message either, so
