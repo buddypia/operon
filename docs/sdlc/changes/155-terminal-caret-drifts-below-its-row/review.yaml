@@ -1,0 +1,68 @@
+# Review record for 155-terminal-caret-drifts-below-its-row.
+#
+# The change: three tmux fields (`cursor_x`/`cursor_y`/`pane_height`) are
+# carried through `TerminalCursor` into the poll path, mapped into a buffer row
+# by the pure `terminal_cursor_row`, and the caret box is computed inside
+# `ScrollArea::show_rows` with the same screen coordinates the pre-existing
+# search highlight uses. A row the pane scrolled out reports no caret — the
+# box surfaces only on a cell this frame actually drew.
+#
+# Verified by rust-reviewer against .claude/rules/rust.md across three rounds:
+# - Per-frame work: parse stays at poll time (set_session_output), nothing new
+#   in the draw path; caret/fallback are arithmetic on rects.
+# - No new panic sites: all new error paths `ok_or_else` + `?`; the `#[cfg(test)]`
+#   probe and its caller are consistent across test and non-test builds.
+# - egui 0.31 semantics of `show_rows` verified against the pinned crate's
+#   source: rows start at floor(offset/row_height), child ui at content origin,
+#   so `ui.cursor().top()` is the first visible row's origin and the caret
+#   anchor shares the highlight's reference frame exactly.
+# - Round 1 nits, both acted on: the IME rect/underlay now use
+#   `caret.unwrap_or(fallback)` (composition anchors on the true caret whenever
+#   its row is visible) — round-2 and round-3 spot-verified; and a doc comment on
+#   `terminal_cursor_row` rewritten twice until it matched the actual runners
+#   (`run_command_with_timeout` errors on truncation, so a short capture is
+#   never built; `read_stream_limited` keeps the head).
+# - Round-1 nit 2 (no box on a partially-filled pane) was measured rather than
+#   taken: against a holdaway tmux 3.8 socket a fresh 20-row pane captures
+#   exactly 20 lines and keeps growing with the buffer, so a normal capture
+#   always covers the grid; a short body means a producer that did not build the
+#   capture the recorded path builds, and `None` stays the defensible answer.
+#   The doc comment records the measurement.
+# - Renamed test `parses_tmux_cursor_line_needs_all_three_fields` verified.
+#
+# Verified by durability-reviewer against
+# .claude/skills/durability-invariants/SKILL.md:
+# - No store/migration/packaging touch; `TerminalCursor` is not persisted;
+#   `terminal_cursors` stays one small entry per session, retired at the
+#   pre-existing session teardown beside `terminal_layouts`.
+# -tmux capture range `-S -5000`, byte budget, and stop/retry logic unchanged;
+#   a parse failure degrades to no cursor, not a crash.
+# - Final delta (one doc comment) verified against the actual
+#   run_command_with_output_limit / run_command_with_timeout behavior.
+#
+# Verified by subprocess-safety-reviewer against its agent rubric:
+# - Same tmux_command()/PATH handling as before; the marker arg is pushed as a
+#   `.args()` element, no shell interpolation.
+# - No new `Command::new`/`.spawn`/`.output`/`unsafe`/`set_var` sites anywhere
+#   in the diff (grep over the staged diff, plus keyword sweep).
+# - `parse_tmux_cursor_line` bounded to one line; u16 parse failure degrades to
+#   `cursor: None` with the same fallback as pre-existing parse failures.
+
+digest: "c6c9b8aad11eb86e"
+
+rounds: 3
+
+# The rust-reviewer approved on this digest with two remarks it explicitly
+# marked for the record rather than findings. They ride here because the change
+# went round its ceiling (bugfix allows 2; this needed 3 — the third was one
+# doc-comment wording pass), not because anything blocks.
+carried:
+  - rust-reviewer/1 · the defensive clause's "no row of which is the cursor's row" states the cursor's absence, where the strict fact is non-identifiability — under the hypothesized head-cut, a cursor deep in the grid's bottom rows can sit inside the surviving tail, and the cut's offset is unknowable, which is the true warrant for None
+    person: "説明コメントの文面をさらに厳密にするという記録で、今のコードの動きに影響はありません。やることは何もなく、将来このコメントを読み直して手直しする時に『切れた先頭のオフセットは外から分からない』と述べる形ならより正確、というだけです。"
+  - rust-reviewer/2 · the round-2 probe's shell emitted 80 capture lines for 12 typed rows (login zsh overhead) versus the older "26" figure; the invariant every observation supports is capture >= grid-height, which is the only fact the mapping uses
+    person: "tmux から取れる行数は環境によって前後する、という実測メモです。描画が頼っている事実は『取得行数がグリッドの高さ以上』だけで、そちらは常に成り立っています。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

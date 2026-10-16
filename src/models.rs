@@ -251,10 +251,23 @@ pub(crate) enum TerminalInput {
     Key(String),
 }
 
+/// The cursor tmux reports, in its own grid coordinates.
+///
+/// `y` counts rows from the top of the pane's screen — rows of the pane, not of
+/// the capture: scrollback sits above it and is why the two disagree. Keeping
+/// the pane's row height with the position means the pane can find the caret's
+/// row inside a capture of any length (change 155).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TerminalCursor {
+    pub(crate) x: u16,
+    pub(crate) y: u16,
+    pub(crate) pane_rows: u16,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalCapture {
     pub(crate) output: String,
-    pub(crate) cursor: Option<(u16, u16)>,
+    pub(crate) cursor: Option<TerminalCursor>,
 }
 
 /// How a file changed, and why it is being shown that way.

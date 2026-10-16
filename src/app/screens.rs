@@ -6008,7 +6008,10 @@ impl OperonApp {
                     if self.selected_session.is_none() {
                         self.selected_session = Some(session_id);
                     }
-                    let (terminal_rect, (hovered_target, unresolved)) = {
+                    // Read before the frame: the caret the rows draw is a row of
+                    // the buffer, so the rows themselves have to know it.
+                    let cursor = self.terminal_cursors.get(&session_id).copied();
+                    let (terminal_rect, (hovered_target, unresolved, caret)) = {
                         let lines = self.terminal_layouts.get(&session_id);
                         let terminal = egui::Frame::default()
                             .fill(palette.terminal_bg)
@@ -6034,15 +6037,16 @@ impl OperonApp {
                                                 unresolved: &mut unresolved,
                                                 palette,
                                             },
+                                            cursor,
                                         );
-                                        (hovered, unresolved)
+                                        (hovered.hovered, unresolved, hovered.caret)
                                     }
                                     None => {
                                         ui.label(
                                             RichText::new(tr("ターミナル出力を待っています…"))
                                                 .color(palette.text_muted),
                                         );
-                                        (None, Vec::new())
+                                        (None, Vec::new(), None)
                                     }
                                 }
                             });
@@ -6103,12 +6107,32 @@ impl OperonApp {
                     }
                     self.ui_terminal_path_menu(ui, session_id);
 
-                    let cursor = self
-                        .terminal_cursors
-                        .get(&session_id)
-                        .copied()
-                        .unwrap_or((0, 0));
-                    let cursor_rect = terminal_cursor_rect(terminal_rect, cursor, cell);
+                    // Where a composition parks: on the caret the rows drew
+                    // this frame, and when the caret's row was scrolled out
+                    // of the viewport, clamped inside the pane as before —
+                    // a box off the pane's edge is worse than an approximate
+                    // anchor.
+                    let padded = egui::Rect::from_min_max(
+                        egui::pos2(terminal_rect.min.x + 8.0, terminal_rect.min.y + 8.0),
+                        egui::pos2(terminal_rect.max.x - 8.0, terminal_rect.max.y - 8.0),
+                    );
+                    let fallback = egui::Rect::from_min_size(
+                        egui::pos2(
+                            padded.max.x.min(
+                                terminal_rect.min.x
+                                    + 8.0
+                                    + cursor.as_ref().map_or(0, |cursor| cursor.x) as f32 * cell.x,
+                            ),
+                            padded.max.y.min(
+                                terminal_rect.min.y
+                                    + 8.0
+                                    + cursor.as_ref().map_or(0, |cursor| cursor.y) as f32 * cell.y,
+                            ),
+                        ),
+                        cell,
+                    )
+                    .intersect(padded);
+                    let anchor = caret.unwrap_or(fallback);
                     // A composition belongs to the pane that holds the keyboard,
                     // and to no frame after it lets go. Leaving the pane ends the
                     // composition, but the IME says so in a frame this pane no
@@ -6125,17 +6149,18 @@ impl OperonApp {
                         .unwrap_or_default();
 
                     if session.status == SessionStatus::Active {
+                        // Composition text sits on the same rect the IME claims,
+                        // so the candidate window and the underlay agree even
+                        // when the caret row was scrolled out of the pane.
                         if !preedit.is_empty() {
-                            draw_terminal_preedit(
-                                ui,
-                                terminal_rect,
-                                cursor,
-                                cell,
-                                &preedit,
-                                palette,
-                            );
+                            draw_terminal_preedit(ui, anchor, &preedit, palette);
                         } else if terminal_response.has_focus() {
-                            draw_terminal_cursor(ui, terminal_rect, cursor, cell, palette);
+                            // Only a caret in a row this frame drew gets a box:
+                            // the rows report nothing when the cursor's row was
+                            // scrolled away (change 155).
+                            if let Some(caret) = caret {
+                                draw_terminal_cursor(ui, caret, palette);
+                            }
                         }
                     }
 
@@ -6147,11 +6172,13 @@ impl OperonApp {
                         // focused and disallows it — cancelling any composition —
                         // once nothing claims it. A window command here would ask for
                         // a repaint every frame and bypass that record (change 153).
-                        // `rect` is where egui-winit puts the candidate window.
+                        // `rect` is where egui-winit puts the candidate window:
+                        // on the caret the rows report it inside the
+                        // viewport, clamped inside the pane otherwise.
                         ui.ctx().output_mut(|output| {
                             output.ime = Some(egui::output::IMEOutput {
-                                rect: cursor_rect,
-                                cursor_rect,
+                                rect: anchor,
+                                cursor_rect: anchor,
                             });
                         });
                         ui.memory_mut(|memory| {
