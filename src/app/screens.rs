@@ -4354,19 +4354,18 @@ impl OperonApp {
                             .weak(),
                     );
                     ui.add_space(4.0);
-                    if project_sessions.is_empty() {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(tr("セッションはまだありません。"))
-                                    .small()
-                                    .weak(),
-                            );
-                            if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始"))
-                                .clicked()
-                            {
-                                self.open_project_session_setup(project.id);
-                            }
-                        });
+                    // Under a search, what is missing is a match, not a session.
+                    if project_sessions.is_empty() && !needle.is_empty() {
+                        ui.label(
+                            RichText::new(tr("一致するセッションはありません。"))
+                                .small()
+                                .weak(),
+                        );
+                    } else if project_sessions.is_empty() {
+                        if icon_text_button(ui, ICON_ADD, tr("セッションを開始")).clicked()
+                        {
+                            self.open_project_session_setup(project.id);
+                        }
                     } else {
                         for session in project_sessions {
                             self.session_card(ui, &session);
@@ -4424,16 +4423,17 @@ impl OperonApp {
                         }
                     });
                     ui.add_space(4.0);
-                    if project_sessions.is_empty() {
+                    if project_sessions.is_empty() && !needle.is_empty() {
                         ui.label(
-                            RichText::new(if needle.is_empty() {
-                                tr("セッションはまだありません。")
-                            } else {
-                                tr("一致するセッションはありません。")
-                            })
-                            .small()
-                            .weak(),
+                            RichText::new(tr("一致するセッションはありません。"))
+                                .small()
+                                .weak(),
                         );
+                    } else if project_sessions.is_empty() {
+                        if icon_text_button(ui, ICON_ADD, tr("セッションを開始")).clicked()
+                        {
+                            self.open_project_session_setup(project.id);
+                        }
                     } else {
                         ui.horizontal_wrapped(|ui| {
                             for session in project_sessions {
@@ -5440,10 +5440,15 @@ impl OperonApp {
                     });
                 });
                 if project_sessions.is_empty() {
+                    // Where its sessions would be, an empty project offers the
+                    // first one: the line that only said there were none left
+                    // the way to start in a 24px glyph at the header's far end.
                     if pinned_here == 0 {
                         ui.horizontal(|ui| {
                             ui.add_space(8.0);
-                            ui.label(RichText::new(tr("セッションはまだありません")).small().weak());
+                            if icon_text_button(ui, ICON_ADD, tr("セッションを開始")).clicked() {
+                                self.open_project_session_setup(project.id);
+                            }
                         });
                     }
                     ui.add_space(8.0);

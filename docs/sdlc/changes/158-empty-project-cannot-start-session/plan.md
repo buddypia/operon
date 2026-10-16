@@ -57,4 +57,18 @@ selected the first project would fail.
 
 ## Departures from the plan
 
-None yet.
+- **The history tests reopen the history before the search case.** Clicking
+  「セッションを開始」 selects the empty project, and `select_project` closes the
+  history whenever the project changes — as the history's existing header
+  controls already did. The first run read the search case off the terminal
+  workspace and failed; the tests now set `session_library_open` again. Not a
+  product change: the sheet opens over whatever is on screen.
+- **The click helper returns how many 「セッションを開始」 it saw.** With the
+  history open, the session column draws its own button for the same empty
+  project, so "a button exists" would pass on the column's button even with the
+  history's removed. The history tests assert two, and the rightmost (the
+  history's) is the one clicked; `list-click-does-nothing` and
+  `grid-opens-nothing` in `mutations.py` confirm the click lands there.
+- **`mutations.py`**: 8 of 8 caught, including the claim mutations (the column
+  saying 「セッションはまだありません」 again, and the list offering a start under a
+  search).

@@ -44377,6 +44377,180 @@ pub(crate) fn a_project_emptied_by_pinning_does_not_claim_it_has_no_sessions() {
         !texts.iter().any(|(text, _)| text == "0 件"),
         "the project header counts its pinned sessions"
     );
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text.ends_with("セッションを開始")),
+        "a project whose sessions are pinned above is not offered a first one"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+// --- Change 158: an empty project offers to start a session ---------------
+
+/// `app_with_two_sessions` plus a second project with nothing in it, drawn
+/// after the first, so a click that selected the wrong project shows.
+fn app_with_an_empty_second_project(root: &Path) -> (OperonApp, Uuid) {
+    let (mut app, _first, _second) = app_with_two_sessions(root);
+    let empty = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: empty,
+        path: root.join("empty"),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    (app, empty)
+}
+
+/// Every text the workspace paints, drawn at the screen `click_at` uses, so a
+/// position read here is the position a click there lands on.
+fn workspace_texts_at_click_size(
+    app: &mut OperonApp,
+    context: &egui::Context,
+) -> Vec<(String, egui::Pos2)> {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    text_positions(&context.run(input, &mut draw))
+}
+
+/// Clicks the rightmost 「セッションを開始」 the workspace paints — with the
+/// history open, that is the one in the history rather than the session
+/// column. The painted label is the add glyph, two spaces, then the word.
+/// Returns how many were drawn, so a test of the history can tell its own
+/// from the column's.
+fn click_start_session(app: &mut OperonApp) -> usize {
+    let context = egui::Context::default();
+    let texts = workspace_texts_at_click_size(app, &context);
+    let starts: Vec<egui::Pos2> = texts
+        .iter()
+        .filter(|(text, _)| text.ends_with("セッションを開始"))
+        .map(|(_, pos)| *pos)
+        .collect();
+    let Some(at) = starts.iter().copied().max_by(|a, b| a.x.total_cmp(&b.x)) else {
+        return 0;
+    };
+    click_at(&context, at + egui::vec2(4.0, 4.0), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    });
+    starts.len()
+}
+
+#[test]
+/// Where an empty project's sessions would be, the column offers the first
+/// one instead of saying there is none, and the click opens the launch sheet
+/// for that project.
+pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
+    let root = temporary_directory("empty-project-column");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text == "セッションはまだありません"),
+        "空のプロジェクトがまだ「セッションはまだありません」と言っています"
+    );
+    assert_eq!(
+        click_start_session(&mut app),
+        1,
+        "空のプロジェクトに「セッションを開始」がありません"
+    );
+    assert!(app.launch_sheet_open, "押しても起動シートが開きません");
+    assert_eq!(app.selected_project, Some(empty));
+    // The two strings this change puts in front of a person read in every
+    // language. Through the lookup, not `tr`: the active language is
+    // process-wide and the suite runs in parallel.
+    for (language, start, no_match) in [
+        (Language::En, "Start a session", "No matching sessions."),
+        (Language::Ko, "세션 시작", "일치하는 세션이 없습니다."),
+    ] {
+        assert_eq!(translation_for(language, "セッションを開始"), Some(start));
+        assert_eq!(
+            translation_for(language, "一致するセッションはありません。"),
+            Some(no_match)
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The history's 「プロジェクト別」 view offers the same start under an empty
+/// project, and under a search says the project has no match instead.
+pub(crate) fn an_empty_project_in_the_history_list_starts_a_session() {
+    let root = temporary_directory("empty-project-history-list");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    app.session_library_open = true;
+    app.session_view = SessionView::List;
+    // One in the session column beside it, one in the history.
+    assert_eq!(
+        click_start_session(&mut app),
+        2,
+        "「プロジェクト別」の空のプロジェクトに「セッションを開始」がありません"
+    );
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.selected_project, Some(empty));
+
+    // Choosing another project closes the history, as every way into the
+    // sheet from there does; reopen it to read the search case.
+    app.launch_sheet_open = false;
+    app.session_library_open = true;
+    app.search = "nothing-matches-this".to_owned();
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text == "一致するセッションはありません。"),
+        "検索で隠れたプロジェクトが一致なしと言っていません"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text == "セッションはまだありません。"),
+        "検索で隠れたプロジェクトがセッションなしと言っています"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The history's 「グリッド」 view offers the same start under an empty project,
+/// and keeps its no-match line under a search.
+pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
+    let root = temporary_directory("empty-project-history-grid");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    app.session_library_open = true;
+    app.session_view = SessionView::Grid;
+    assert_eq!(
+        click_start_session(&mut app),
+        2,
+        "「グリッド」の空のプロジェクトに「セッションを開始」がありません"
+    );
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.selected_project, Some(empty));
+
+    // Choosing another project closes the history, as every way into the
+    // sheet from there does; reopen it to read the search case.
+    app.launch_sheet_open = false;
+    app.session_library_open = true;
+    app.search = "nothing-matches-this".to_owned();
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text == "一致するセッションはありません。"),
+        "検索で隠れたプロジェクトが一致なしと言っていません"
+    );
     fs::remove_dir_all(&root).ok();
 }
 

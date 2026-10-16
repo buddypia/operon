@@ -1,0 +1,17 @@
+# Review record for change 158. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer approves with two nits, carried below rather than
+# taken, so the digest the approval names stays the one landed.
+
+digest: "8df20862c69930ad"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app/screens.rs:5443 the new comment narrates the old code; one line saying an empty, unpinned project offers its first session here would do
+    person: "画面には影響しません。コード内の説明文が冗長なだけで、対応は不要です。"
+  - rust-reviewer/2 · src/tests.rs an_empty_project_in_the_history_grid_starts_a_session does not assert the old line or a start button is absent under a search
+    person: "画面には影響しません。グリッド表示で検索中に古い表示が戻っても、今のテストでは気づけない、というテスト側の抜けです。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
