@@ -1386,6 +1386,7 @@ impl OperonApp {
             ProjectTab::PullRequests => self.ui_pull_requests(ui, &project),
             ProjectTab::Files => self.ui_files(ui, &project),
             ProjectTab::AgentSettings => self.ui_agent_settings(ui, &project),
+            ProjectTab::Knowledge => self.ui_knowledge(ui, &project),
         }
     }
 
@@ -4232,9 +4233,17 @@ impl OperonApp {
                 self.search_local_transcripts();
             }
         });
+        self.ui_indexed_session_matches(ui);
         if !self.transcript_matches.is_empty() {
             ui.add_space(8.0);
-            ui.label(RichText::new(tr("履歴の一致")).strong());
+            ui.label(
+                RichText::new(if self.knowledge.session_hits.is_empty() {
+                    tr("履歴の一致")
+                } else {
+                    tr("キーワードで一致")
+                })
+                .strong(),
+            );
             let transcript_matches = self.transcript_matches.clone();
             egui::ScrollArea::vertical()
                 .max_height(220.0)
@@ -4275,10 +4284,14 @@ impl OperonApp {
                         ui.add_space(4.0);
                     }
                 });
-        } else if !self.transcript_search_input.trim().is_empty() {
+        } else if !self.transcript_search_input.trim().is_empty()
+            && self.knowledge.session_hits.is_empty()
+        {
             ui.add_space(4.0);
             ui.label(RichText::new(tr("一致する履歴はありませんでした。")).weak());
-            if self.store.search_engine_mode == SearchEngineMode::Keyword {
+            if !self.knowledge.model_ready()
+                || self.store.search_engine_mode == SearchEngineMode::Keyword
+            {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(tr(
@@ -4920,104 +4933,7 @@ impl OperonApp {
         ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new(tr("履歴検索エンジン")).strong());
-        ui.add_space(SPACE_SM);
-
-        let previous_mode = self.store.search_engine_mode;
-        ui.radio_value(
-            &mut self.store.search_engine_mode,
-            SearchEngineMode::Keyword,
-            tr("キーワード検索のみ (標準・最軽量)"),
-        );
-        ui.label(
-            RichText::new(tr(
-                "完全一致によるテキスト検索。追加ダウンロードやメモリ消費なし。",
-            ))
-            .small()
-            .weak(),
-        );
-
-        ui.add_space(4.0);
-        ui.radio_value(
-            &mut self.store.search_engine_mode,
-            SearchEngineMode::EmbeddedGemma2,
-            tr("内蔵 EmbeddingGemma 2 (オプトイン)"),
-        );
-        ui.label(
-            RichText::new(tr("意味・概念による表記揺れ検索を有効化。"))
-                .small()
-                .weak(),
-        );
-
-        if self.store.search_engine_mode != previous_mode {
-            if self.store.search_engine_mode == SearchEngineMode::EmbeddedGemma2
-                && matches!(self.model_download_state, EmbeddedModelDownloadState::Idle)
-                && is_embedded_model_cached()
-            {
-                self.model_download_state = EmbeddedModelDownloadState::Ready {
-                    cached_bytes: embedded_model_cached_bytes(),
-                };
-            }
-            self.persist();
-        }
-
-        if self.store.search_engine_mode == SearchEngineMode::EmbeddedGemma2 {
-            ui.add_space(4.0);
-            match &self.model_download_state {
-                EmbeddedModelDownloadState::Idle => {
-                    if ui.button(tr("モデルをダウンロード (約 250MB)")).clicked() {
-                        let _ = mark_embedded_model_ready(248 * 1024 * 1024);
-                        self.model_download_state = EmbeddedModelDownloadState::Ready {
-                            cached_bytes: 248 * 1024 * 1024,
-                        };
-                    }
-                }
-                EmbeddedModelDownloadState::Downloading {
-                    progress,
-                    bytes_downloaded,
-                    total_bytes,
-                } => {
-                    let mb_done = bytes_downloaded / (1024 * 1024);
-                    let mb_total = total_bytes / (1024 * 1024);
-                    let pct = (progress * 100.0).round() as u64;
-                    ui.label(
-                        RichText::new(format!(
-                            "モデルを取得しています... {pct}% ({mb_done}MB / {mb_total}MB)"
-                        ))
-                        .small()
-                        .weak(),
-                    );
-                    ui.add(egui::ProgressBar::new(*progress).desired_width(200.0));
-                    if ui.button(tr("キャンセル")).clicked() {
-                        self.model_download_state = EmbeddedModelDownloadState::Idle;
-                    }
-                }
-                EmbeddedModelDownloadState::Ready { cached_bytes } => {
-                    let mb = cached_bytes / (1024 * 1024);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("● 有効 (Metal GPU / キャッシュ済み: {mb}MB)"))
-                                .small()
-                                .weak(),
-                        );
-                        if ui.button(tr("キャッシュを削除")).clicked() {
-                            let _ = delete_embedded_model_cache();
-                            self.model_download_state = EmbeddedModelDownloadState::Idle;
-                        }
-                    });
-                }
-                EmbeddedModelDownloadState::Error(err) => {
-                    ui.label(
-                        RichText::new(format!("ダウンロードエラー: {err}"))
-                            .small()
-                            .color(ui.visuals().error_fg_color),
-                    );
-                    if ui.button(tr("再試行")).clicked() {
-                        self.model_download_state = EmbeddedModelDownloadState::Idle;
-                    }
-                }
-            }
-        }
+        self.ui_model_block(ui);
 
         ui.add_space(18.0);
         ui.horizontal(|ui| {

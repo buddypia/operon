@@ -589,18 +589,16 @@ pub(crate) enum SearchEngineMode {
     EmbeddedGemma2,
 }
 
+/// Where EmbeddingGemma 2 stands on this Mac (change 157). Held by the app and
+/// written only by background results; not persisted — readiness is read off
+/// the model file and its sidecar at launch.
 #[derive(Debug, Clone, PartialEq, Default)]
-#[allow(dead_code)]
-pub(crate) enum EmbeddedModelDownloadState {
+pub(crate) enum ModelState {
     #[default]
-    Idle,
-    Downloading {
-        progress: f32,
-        bytes_downloaded: u64,
-        total_bytes: u64,
-    },
+    Missing,
+    Downloading,
     Ready {
-        cached_bytes: u64,
+        device: Device,
     },
-    Error(String),
+    Failed(String),
 }

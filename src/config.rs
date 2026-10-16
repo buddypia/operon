@@ -398,3 +398,88 @@ pub(crate) const AGENT_ACCOUNTS_FILE_MAX_BYTES: u64 = 64 * 1024;
 pub(crate) const RUN_SCRIPT_RELATIVE_PATH: &str = ".operon/run.sh";
 pub(crate) const CHECKPOINTS_REF_PREFIX: &str = "refs/operon/checkpoints/";
 pub(crate) const PROMPT_TEMPLATES_RELATIVE_DIR: &str = ".operon/prompts";
+/// EmbeddingGemma 2, pinned (change 157). One file at one revision, with the
+/// size and SHA-256 read from the Hugging Face API and re-hashed locally on
+/// 2026-10-16. A download is renamed to `EMBEDDING_MODEL_FILE_NAME` only after
+/// its hash matched, so nothing but these bytes is ever loaded.
+pub(crate) const EMBEDDING_MODEL_REPOSITORY: &str = "ggml-org/embeddinggemma-2-GGUF";
+pub(crate) const EMBEDDING_MODEL_REVISION: &str = "bfcd298762cc34d0357ece5ebdd31791a3a374d8";
+pub(crate) const EMBEDDING_MODEL_FILE_NAME: &str = "embeddinggemma-2-Q8_0.gguf";
+pub(crate) const EMBEDDING_MODEL_BYTES: u64 = 309_855_456;
+pub(crate) const EMBEDDING_MODEL_SHA256: &str =
+    "2188ac1deca4b77dffefd603c2776a9d76d9d74ec01841392982ebb840b09135";
+/// What `meta.model` holds in a knowledge database, so a database built by a
+/// different model is recognised and rebuilt rather than compared with this one.
+pub(crate) const EMBEDDING_MODEL_ID: &str =
+    "ggml-org/embeddinggemma-2-GGUF@bfcd298762cc34d0357ece5ebdd31791a3a374d8/embeddinggemma-2-Q8_0.gguf";
+pub(crate) const EMBEDDING_DIMENSIONS: usize = 768;
+/// The model's context, and the most tokens one locked `embed` call encodes.
+/// Eight texts of 225 tokens took 0.13 s on Metal, so a query waits behind at
+/// most that.
+pub(crate) const EMBEDDING_CONTEXT_TOKENS: usize = 2_048;
+pub(crate) const EMBEDDING_TEXTS_PER_CALL: usize = 8;
+/// A loaded model holds about 400 MB; after this long unused it is dropped.
+/// How often the frame looks for an idle model to unload.
+pub(crate) const EMBEDDING_IDLE_CHECK_SECONDS: u64 = 60;
+/// How long exit waits for a cancelled download's `curl` to be reaped: the
+/// poll that kills it sleeps at most 25 ms, and a finished fetch may still be
+/// hashing its 310 MB.
+pub(crate) const EMBEDDING_DOWNLOAD_EXIT_WAIT_MILLIS: u64 = 3000;
+pub(crate) const EMBEDDING_IDLE_UNLOAD_SECONDS: u64 = 600;
+/// curl's own ceiling on one download, which also bounds an orphan left by a crash.
+pub(crate) const EMBEDDING_DOWNLOAD_SECONDS: u64 = 1_800;
+/// The word after the executable that makes Operon a command-line tool for
+/// agents rather than a window: `Operon knowledge search "…"`.
+pub(crate) const KNOWLEDGE_CLI_SUBCOMMAND: &str = "knowledge";
+/// `Operon knowledge embed-golden <fixture>`, the fidelity check's entry point.
+pub(crate) const KNOWLEDGE_EMBED_GOLDEN_SUBCOMMAND: &str = "embed-golden";
+/// The shipped runtime's vectors stay this close to the reference ones
+/// (spec Req 15); the Metal batch measured 0.9999.
+pub(crate) const EMBEDDING_FIDELITY_MIN_COSINE: f32 = 0.995;
+pub(crate) const KNOWLEDGE_DIRECTORY_NAME: &str = "knowledge";
+/// Where judge CLIs run: outside every project, so no judge run is listed among
+/// a project's conversations and no project hook fires.
+pub(crate) const KNOWLEDGE_JUDGE_DIRECTORY_NAME: &str = "judge";
+pub(crate) const KNOWLEDGE_DATABASE_EXTENSION: &str = "sqlite3";
+pub(crate) const KNOWLEDGE_SCHEMA_VERSION: u32 = 1;
+pub(crate) const KNOWLEDGE_DAILY_JUDGE_CALLS: u32 = 30;
+pub(crate) const KNOWLEDGE_MAX_ENTRIES: usize = 2_000;
+/// Measured 2026-10-16: paraphrases 0.907–0.927, unrelated statements ≤ 0.727.
+pub(crate) const KNOWLEDGE_DEDUPE_COSINE: f32 = 0.85;
+/// Operon's own restore copies a conversation into another CLI's store; within
+/// this of a recorded source, an exchange is that copy, not a recurrence.
+pub(crate) const KNOWLEDGE_COPY_COSINE: f32 = 0.98;
+pub(crate) const KNOWLEDGE_TAU_DAYS: f64 = 30.0;
+pub(crate) const KNOWLEDGE_REMOVE_FRESHNESS: f64 = 0.10;
+pub(crate) const KNOWLEDGE_CANDIDATE_MIN_SCORE: f32 = -0.02;
+pub(crate) const KNOWLEDGE_CANDIDATES_PER_CONVERSATION: usize = 8;
+pub(crate) const KNOWLEDGE_EXCHANGE_MIN_CHARS: usize = 120;
+pub(crate) const KNOWLEDGE_EXCHANGE_MAX_CHARS: usize = 4_000;
+pub(crate) const KNOWLEDGE_EXCHANGES_PER_CONVERSATION: usize = 400;
+/// Measured 2026-10-16, query to entry: right answers 0.746–0.897, the best
+/// wrong one 0.717, an off-topic query's best 0.628.
+pub(crate) const KNOWLEDGE_SEARCH_MIN_COSINE: f32 = 0.70;
+pub(crate) const KNOWLEDGE_SESSION_MIN_COSINE: f32 = 0.70;
+pub(crate) const KNOWLEDGE_SESSIONS_LISTED_PER_RUN: usize = 200;
+pub(crate) const KNOWLEDGE_SESSIONS_PER_RUN: usize = 20;
+pub(crate) const KNOWLEDGE_EMBEDDINGS_PER_RUN: usize = 1_500;
+pub(crate) const KNOWLEDGE_RUN_SECONDS: u64 = 180;
+/// A transcript changed within this long is still being written.
+pub(crate) const KNOWLEDGE_IDLE_SECONDS: u64 = 300;
+pub(crate) const KNOWLEDGE_RUN_FIRST_DELAY_SECONDS: u64 = 30;
+pub(crate) const KNOWLEDGE_RUN_INTERVAL_SECONDS: u64 = 600;
+pub(crate) const KNOWLEDGE_JUDGE_PROMPT_MAX_BYTES: usize = 65_536;
+pub(crate) const KNOWLEDGE_JUDGE_ANSWER_MAX_BYTES: usize = 16 * 1024;
+pub(crate) const KNOWLEDGE_JUDGE_SECONDS: u64 = 120;
+pub(crate) const KNOWLEDGE_JUDGE_PERSON_CHARS: usize = 800;
+pub(crate) const KNOWLEDGE_JUDGE_AGENT_CHARS: usize = 1_600;
+pub(crate) const KNOWLEDGE_JUDGE_MAX_ENTRIES: usize = 5;
+pub(crate) const KNOWLEDGE_TITLE_MAX_CHARS: usize = 40;
+pub(crate) const KNOWLEDGE_BODY_MAX_CHARS: usize = 400;
+/// Three unparseable answers mark a conversation `failed`; it is tried again
+/// after this many days or when its transcript changes.
+pub(crate) const KNOWLEDGE_FAILED_ATTEMPTS: u32 = 3;
+pub(crate) const KNOWLEDGE_FAILED_RETRY_DAYS: u64 = 7;
+pub(crate) const KNOWLEDGE_CLI_DEFAULT_LIMIT: usize = 5;
+/// The directory under the app data directory that holds the model file.
+pub(crate) const EMBEDDING_MODEL_DIRECTORY_NAME: &str = "models";

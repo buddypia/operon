@@ -177,3 +177,72 @@ The tree compiles after every step.
 
 ## Departures from the plan
 
+1. **`Embedder` has no `device()`.** The device is a property of the loaded
+   runtime, not of each call; `detect_device()` reads it (or the backend's
+   device list, without loading the model) for 「使用可能 (GPU (Metal) / 310MB)」.
+2. **`sources` and `sessions` keep their text.** `sources.text` and
+   `sources.recorded_at`, `sessions.text` and `sessions.vector`: a model change
+   re-embeds from what was stored instead of re-reading transcripts that may be
+   gone (the evaluator's "rebuild text source" minor).
+3. **Two more background keys.** `KnowledgeLoad(Uuid)` and `KnowledgeEdit(Uuid)`
+   read and write a project's database off the frame; the plan named only the
+   run and the searches.
+4. **`ModelState::Downloading` carries nothing.** Progress is an `AtomicU64`
+   the download thread writes and the frame reads, so no message per chunk.
+5. **Source dates are relative** (「3日前」) in the detail pane, as the rest of
+   the app shows times.
+6. **The CLI exits 3 mid-rebuild** with 「ナレッジを新しいモデルで作り直しています…」
+   rather than answering from half-rebuilt vectors (the evaluator's minor).
+7. **Every context reserves eight sequences.** llama.cpp 2a66703 aborts the
+   process when `n_seq_max` is 3, 5, 6, or 7; found by the fidelity script's
+   last chunk of six (lesson 073).
+8. **The model is dropped before every exit.** `release_shared_embedder` runs
+   in `on_exit`, after `run_native` returns, and before the CLI's
+   `process::exit`, and refuses later loads: Metal's teardown asserts while a
+   model is loaded (lesson 073).
+9. **Idle unload moved to the frame.** The plan released an idle model at the
+   end of a run, where it had just been used and never qualified. The frame
+   now tries once a minute (`EMBEDDING_IDLE_CHECK_SECONDS`) with `try_lock`, so
+   an embedding in progress is never waited on.
+10. **llama.cpp and ggml logs are switched off before the first init.**
+    `void_logs` came too late for ggml's Metal device lines, which reached the
+    knowledge command's stderr.
+11. **`project_for_directory` prefers the nearest registered directory**, and
+    reads a worktree list only for a project that is its repository's top
+    level: a plain folder nested in another checkout claimed every worktree of
+    that checkout (`knowledge_cli_refuses_an_unknown_or_disabled_project`
+    caught it).
+12. **`CliJudge::command`** builds the child separately, so the test reads its
+    program, arguments, and directory without running an agent CLI.
+13. **The fidelity entry point** is `Operon knowledge embed-golden <fixture>`
+    (`KNOWLEDGE_EMBED_GOLDEN_SUBCOMMAND`), held to
+    `EMBEDDING_FIDELITY_MIN_COSINE` = 0.995, with
+    `embed_golden_fails_when_the_runtime_drifts_from_the_reference`.
+14. **Mutations (step 14), each watched turning its test red:** opt-in check;
+    cursor skip; 120-char floor; drop-exemplar subtraction (survived the
+    median-only assertion — the test now also holds keep above and drop below
+    the −0.02 candidate floor); knowledge-command filter; 0.98 copy check; 0.85
+    dedupe; τ reference term; pinned capacity; daily cap; pause spending an
+    attempt; sidecar mtime; 0700 and 0600 modes; schema refusal; cancel kill;
+    rebuild skipped; search during a rebuild (survived while the stale vectors
+    were zeros — they now sit exactly on the query); JSON-only stdout; idle
+    rule; processed budget; embedding and wall budgets (each guarded twice, in
+    the loop and in `Budget::spend`, so mutated in both); single run key;
+    search and session thresholds; cited references; the n_seq_max and exit
+    release (lesson 073).
+15. **Fidelity, measured 2026-10-17:** 46 golden texts through the shipped
+    runtime on Apple M4 Max (Metal), lowest cosine 0.99987.
+16. **Review round 1 (do-not-approve from all three) moved the code:**
+    `delete_model` unloads without ending the process's use of the model;
+    exit waits for a cancelled download's `curl` to be reaped; every run write
+    goes through `write_if_enabled` and 「ナレッジを削除…」 is one
+    `clear_and_disable` transaction, so a run in flight cannot write a cleared
+    or switched-off project back; a conversation past 400 exchanges keeps its
+    file stamp unrecorded until read to the end; a failed tab load offers
+    「再試行」; a download that does not finish drops the enable it was started
+    for; `prune` cannot wrap its count. Each has a test watched failing with
+    the fix reverted.
+17. **The six live-CLI tests:** two pass; four fail on the step that checks a
+    resumed conversation renders in a native terminal. Two of those four were
+    run on a clean `main` checkout on 2026-10-17 and fail the same way, so the
+    failure is this machine's CLIs, not this change.

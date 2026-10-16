@@ -41,7 +41,7 @@
 state:
   route: "feature"
   stage: "build"
-  status: "in-progress"
+  status: "reviewing"
   attempts: "0 3"
   questions: "6 7"
   autonomy: "supervised"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Stage 3 per plan.md: start at step 1 (the git dependency on buddypia/llama-cpp-rs 48eedeb3) and work down the order; the person approved runtime, screen, and the fork on 2026-10-17."
+resume: "Push the branch, wait for CI, land on main, then package and run the Acceptance list in the installed app."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,11 +70,11 @@ resume: "Stage 3 per plan.md: start at step 1 (the git dependency on buddypia/ll
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh (fmt, clippy, tests kept, review gate at bea49faad9293938)"
+  bands: "machine passed bash scripts/check-bands.sh (21 metrics within their bands, 2026-10-17)"
   release-binary: "machine pending yes, it touches src/ and Cargo.toml, so it ends
     with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed each new guard watched failing; plan.md Departures 14 lists them"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

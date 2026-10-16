@@ -11,6 +11,7 @@ mod glyphs;
 mod history;
 mod i18n;
 mod i18n_tables;
+mod knowledge;
 mod markdown;
 mod models;
 mod prelude;
@@ -33,6 +34,7 @@ pub(crate) use files::*;
 pub(crate) use git::*;
 pub(crate) use glyphs::*;
 pub(crate) use history::*;
+pub(crate) use knowledge::*;
 pub(crate) use markdown::*;
 pub(crate) use models::*;
 pub(crate) use store::*;
@@ -44,6 +46,15 @@ pub(crate) use ui::*;
 pub(crate) use util::*;
 
 fn main() -> eframe::Result<()> {
+    // `Operon knowledge search "…"`, for agents (change 157). Before the PATH
+    // setup and the instance lock: a command-line run opens no window, takes
+    // no lock, and uses the caller's own PATH.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    if arguments.first().map(String::as_str) == Some(KNOWLEDGE_CLI_SUBCOMMAND) {
+        let code = run_cli(&arguments[1..]);
+        release_shared_embedder();
+        std::process::exit(code);
+    }
     configure_command_path();
     let data_file = app_data_file();
     let instance_locks = match acquire_instance_locks(&data_file) {
@@ -85,7 +96,7 @@ fn main() -> eframe::Result<()> {
         }
     };
     let options = native_options();
-    eframe::run_native(
+    let result = eframe::run_native(
         APP_NAME,
         options,
         Box::new(move |_creation| {
@@ -94,7 +105,10 @@ fn main() -> eframe::Result<()> {
                 migration,
             )))
         }),
-    )
+    );
+    // `on_exit` already did this when eframe ran it; a second call is a no-op.
+    release_shared_embedder();
+    result
 }
 
 fn native_options() -> eframe::NativeOptions {

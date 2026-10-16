@@ -1746,6 +1746,46 @@ pub(crate) fn commit_message_agent(tools: &ToolStatus) -> Option<&'static str> {
     .find_map(|(agent, present)| present.then_some(agent))
 }
 
+/// The knowledge judge (change 157): the conversation's own CLI, in its
+/// read-only, non-interactive form, keeping no session of its own where the CLI
+/// can be told not to. Antigravity has no such switch, so each judge call stays
+/// in the person's Antigravity history — under the judge directory, never the
+/// project, which is why `CliJudge` runs it there.
+pub(crate) fn knowledge_judge_command(
+    provider: CliProvider,
+    prompt: &str,
+) -> (String, Vec<String>) {
+    let (program, mut arguments) = match provider {
+        CliProvider::Claude => (
+            "claude",
+            vec![
+                "-p".to_owned(),
+                "--output-format".to_owned(),
+                "text".to_owned(),
+                "--permission-mode".to_owned(),
+                "plan".to_owned(),
+                "--no-session-persistence".to_owned(),
+            ],
+        ),
+        CliProvider::Codex => (
+            "codex",
+            vec![
+                "exec".to_owned(),
+                "--skip-git-repo-check".to_owned(),
+                "-s".to_owned(),
+                "read-only".to_owned(),
+                "--ephemeral".to_owned(),
+            ],
+        ),
+        CliProvider::Gemini => (
+            ANTIGRAVITY_COMMAND,
+            vec!["--print".to_owned(), "--sandbox".to_owned()],
+        ),
+    };
+    arguments.push(prompt.to_owned());
+    (program.to_owned(), arguments)
+}
+
 /// One CLI's own non-interactive, read-only form, plus the prompt.
 ///
 /// Read-only is the point: this button drafts a sentence, and a drafting run
