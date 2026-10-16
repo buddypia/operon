@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Done; main (159) merged into the branch before landing. What outlives it is the two carried test and comment points in review.yaml."
+resume: "Done; main (159, 160) merged into the branch before landing. What outlives it is the two carried test and comment points in review.yaml."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.

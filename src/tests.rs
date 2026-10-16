@@ -12455,6 +12455,56 @@ pub(crate) fn starts_an_agent_command_in_a_retainable_tmux_session() {
     assert_eq!(state, TmuxState::Dead);
     assert!(output.contains("operon-smoke-test"));
 }
+/// Change 160. `respawn-pane -k` closes the pane's master and forks the agent
+/// at once, while the placeholder `cat` still holds its terminal: for that
+/// moment a launch needs two ptys, and with one to spare macOS answers
+/// `fork failed: Device not configured` (a restored Codex terminal, reported).
+/// The placeholder has to be gone first, which tmux announces as `pane-died`
+/// — a hook that never fires when `-k` replaces a live process.
+#[test]
+pub(crate) fn an_agent_starts_only_after_its_placeholder_let_go_of_its_terminal() {
+    if !tool_available("tmux") {
+        return;
+    }
+    // `set-hook -g` needs a running server.
+    let keeper = format!("operon-test-{}", Uuid::new_v4().simple());
+    start_empty_tmux_session(&keeper, Path::new("/tmp"), &[]).unwrap();
+    let record = std::env::temp_dir().join(format!("operon-pane-died-{}", Uuid::new_v4()));
+    let hook = format!("run-shell 'echo #{{session_name}} >> {}'", record.display());
+    let _ = tmux_command()
+        .args(["set-hook", "-g", "pane-died[160]", &hook])
+        .output();
+
+    let name = format!("operon-test-{}", Uuid::new_v4().simple());
+    let started = start_tmux_agent_session(&name, Path::new("/tmp"), "sleep 30", &[]);
+    let mut died_first = false;
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        died_first = fs::read_to_string(&record)
+            .unwrap_or_default()
+            .lines()
+            .any(|line| line == name);
+        if died_first {
+            break;
+        }
+    }
+    let state = tmux_state(&name);
+
+    let _ = tmux_command()
+        .args(["set-hook", "-gu", "pane-died[160]"])
+        .output();
+    let _ = tmux_command().args(["kill-session", "-t", &name]).output();
+    let _ = tmux_command()
+        .args(["kill-session", "-t", &keeper])
+        .output();
+    let _ = fs::remove_file(&record);
+    started.unwrap();
+    assert!(
+        died_first,
+        "the agent was forked while the placeholder still held its terminal"
+    );
+    assert_eq!(state, TmuxState::Alive, "the agent itself is running");
+}
 /// The screen read must come from the live pane, not its scrollback: a real
 /// session scrolls its finished turns up and would otherwise keep reporting
 /// the interrupt hint printed minutes ago.
