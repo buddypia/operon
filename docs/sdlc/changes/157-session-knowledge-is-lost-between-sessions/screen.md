@@ -1,6 +1,6 @@
 # Screen: 157 — ナレッジ tab and the model block in Settings › データ
 
-- **Status**: draft
+- **Status**: approved
 - Structure: one new project tab (a person approves) and a re-drawn block inside
   an existing settings section.
 

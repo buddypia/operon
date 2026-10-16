@@ -1,2 +1,4 @@
 2026-10-16T15:25:40Z auto intent intent.md e20913898848d455 approve evaluator (adee0907): quotes the request and the person's decisions; outcomes observable; store guess corrected in spec
 2026-10-16T15:34:06Z auto spec spec.md a6952c7553241def approve evaluator (adee0907) round 3: self-feeding, privacy, unfinishable conversations, cancellable download, budgets, CI seam and judge pause resolved; runtime dependency left to the person
+2026-10-16T15:46:17Z person screen screen.md c927a9cd8fec4c0a approve the person approved the new ナレッジ tab and the re-drawn model block in Settings › データ ("OK", 2026-10-17 JST) together with the runtime
+2026-10-16T15:50:48Z auto plan plan.md e1207551204895ed approve evaluator (a111d4a3) round 2: compile order, the Req 21 mixed-vector gate, and When-it-runs tests fixed; minors (rebuild text source, CLI mid-rebuild exit) left to Departures

@@ -1,7 +1,7 @@
 # Spec: a per-project knowledge base distilled from agent conversations, embedded with EmbeddingGemma 2
 
 - **Intent**: `./intent.md`
-- **Status**: draft — stays draft until the person chooses the runtime (Flagged concerns)
+- **Status**: approved — the person chose the runtime on 2026-10-17 (plan.md)
 
 ## Requirements
 
