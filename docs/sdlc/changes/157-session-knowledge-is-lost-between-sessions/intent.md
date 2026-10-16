@@ -1,6 +1,6 @@
 # Intent: what a project learned in one agent conversation is lost to every later one
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-16
 
 ## Problem

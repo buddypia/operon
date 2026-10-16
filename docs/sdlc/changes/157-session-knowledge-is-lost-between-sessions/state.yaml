@@ -41,17 +41,17 @@
 state:
   route: "feature"
   stage: "plan"
-  status: "planning"
+  status: "awaiting-user"
   attempts: "0 3"
-  questions: "3 7"
+  questions: "6 7"
   autonomy: "paused"
   risk: "high"
-  readiness: "pending"
+  readiness: "go"
   screen: "pending"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Compare the llama-cpp-2 (GGUF) and ort (ONNX) EmbeddingGemma 2 probes in .tmp against the eg2 reference, then put the runtime choice (a new dependency) to the person."
+resume: "Await the person's choice of runtime (llama-cpp-2 via a public fork recommended, adopted as the working default) and their verdict on screen.md, then write plan.md carrying the evaluator's round-3 minors."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
