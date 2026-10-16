@@ -528,11 +528,19 @@ pub(crate) fn terminal_rows(
     row_height: f32,
     search: TerminalSearchOverlay<'_>,
     links: &mut TerminalLinkOverlay<'_>,
-) -> Option<TerminalTargetKind> {
+    cursor: Option<TerminalCursor>,
+) -> TerminalRowsResult {
     // Terminal rows sit directly on top of each other. Any spacing here would
     // also be counted twice: `show_rows` reserves height per row from it.
     ui.spacing_mut().item_spacing.y = 0.0;
     let cell = terminal_cell_size(ui);
+    // The pane's caret lives in the coordinate system the rows are drawn in,
+    // not in the one the viewport measures from (change 155). The capture is
+    // scrollback taller than the pane's grid, so the grid row has to be
+    // renumbered into a row of the buffer before a rectangle can anchor to it.
+    let caret_row: Option<Option<(usize, u16)>> = cursor.map(|cursor| {
+        terminal_cursor_row(lines.len(), cursor.pane_rows, cursor.y).map(|row| (row, cursor.x))
+    });
     // Named, never auto-numbered. Two sibling `allocate_ui_with_layout` children
     // of one row share a `Ui::id` in egui 0.31 — `new_child` salts every
     // anonymous child with the same constant — so two unnamed scroll areas, this
@@ -555,9 +563,24 @@ pub(crate) fn terminal_rows(
         area = area.vertical_scroll_offset(offset);
     }
     let mut under_pointer = None;
+    let mut caret = None;
     area.show_rows(ui, row_height, lines.len(), |ui, rows| {
         let first = rows.start;
         let top = ui.cursor().top();
+        // The caret is a row of this buffer now, so it anchors exactly where a
+        // highlighted match anchors — and `show_rows` only ever shows rows that
+        // are visible, so a caret the person scrolled away reports none.
+        if let Some(Some((row, column))) = caret_row {
+            if row >= first && row < rows.end {
+                caret = Some(
+                    egui::Rect::from_min_size(
+                        egui::pos2(ui.min_rect().left() + column as f32 * cell.x, top),
+                        cell,
+                    )
+                    .translate(egui::vec2(0.0, (row - first) as f32 * row_height)),
+                );
+            }
+        }
         for (offset, line) in lines[rows.clone()].iter().enumerate() {
             // Only the rows the viewport asked for, so the cost of a search is
             // the size of the pane and never the size of the scrollback.
@@ -598,7 +621,19 @@ pub(crate) fn terminal_rows(
             }
         }
     });
-    under_pointer
+    TerminalRowsResult {
+        hovered: under_pointer,
+        caret,
+    }
+}
+
+/// What `terminal_rows` saw while it drew.
+pub(crate) struct TerminalRowsResult {
+    pub(crate) hovered: Option<TerminalTargetKind>,
+    /// The caret's cell in screen coordinates, when the cursor's row is among
+    /// the rows this frame drew. Scrolled away is nothing — a box that floats
+    /// past the pane's edge is worse than no box.
+    pub(crate) caret: Option<egui::Rect>,
 }
 
 /// What the pane needs to know about a search in progress. Borrowed rather than
@@ -609,6 +644,29 @@ pub(crate) struct TerminalSearchOverlay<'a> {
     pub(crate) current: Option<usize>,
     pub(crate) scroll_to: Option<usize>,
     pub(crate) palette: &'a Palette,
+}
+
+/// A row of the pane's grid, numbered as a row of the capture instead.
+///
+/// The capture's split always leaves one phantom entry after the final newline,
+/// so the rows the buffer shows are `lines.len() - 1`, the last `pane_rows` of
+/// which are the screen. tmux pads the capture to the grid's height — a fresh
+/// 20-row pane captures exactly 20 lines — and a read that hits the output
+/// limit errors out instead of delivering short stdout, so through
+/// `tmux_capture_with_cursor` the mapping always stands: `body - pane + y`.
+/// `#{pane_height}` absent or a cursor at and below the pane reports no row.
+///
+/// Short captures are still defended: whatever producer ever shows the pane
+/// one cut from its head, the rows that survive are the buffer's tail, no row
+/// of which is the cursor's row — so report none rather than a box drawn on
+/// the wrong line (change 155).
+pub(crate) fn terminal_cursor_row(lines_len: usize, pane_rows: u16, y: u16) -> Option<usize> {
+    let pane_rows = usize::from(pane_rows);
+    let body_rows = lines_len.checked_sub(1)?;
+    if pane_rows == 0 || usize::from(y) >= pane_rows || body_rows < pane_rows {
+        return None;
+    }
+    Some(body_rows - pane_rows + usize::from(y))
 }
 
 /// The buffer as the pane shows it. Colour is styling, so copying takes the
@@ -725,39 +783,10 @@ pub(crate) fn terminal_cell_size(ui: &egui::Ui) -> egui::Vec2 {
     ui.fonts(|fonts| egui::vec2(fonts.glyph_width(&font, ' '), fonts.row_height(&font)))
 }
 
-pub(crate) fn terminal_cursor_rect(
-    terminal_rect: egui::Rect,
-    cursor: (u16, u16),
-    cell: egui::Vec2,
-) -> egui::Rect {
-    let padding = 8.0;
-    let min_x = terminal_rect.min.x + padding + (cursor.0 as f32 * cell.x);
-    let min_y = terminal_rect.min.y + padding + (cursor.1 as f32 * cell.y);
-    let max_x = (min_x + cell.x).min(terminal_rect.max.x - padding);
-    let max_y = (min_y + cell.y).min(terminal_rect.max.y - padding);
-    egui::Rect::from_min_max(
-        egui::pos2(min_x.min(max_x), min_y.min(max_y)),
-        egui::pos2(max_x.max(min_x), max_y.max(min_y)),
-    )
-}
-
-pub(crate) fn draw_terminal_cursor(
-    ui: &egui::Ui,
-    terminal_rect: egui::Rect,
-    cursor: (u16, u16),
-    cell: egui::Vec2,
-    palette: &Palette,
-) {
-    let padding = 8.0;
-    let min_x = terminal_rect.min.x + padding + (cursor.0 as f32 * cell.x);
-    let min_y = terminal_rect.min.y + padding + (cursor.1 as f32 * cell.y);
-    if min_x >= terminal_rect.max.x - padding || min_y >= terminal_rect.max.y - padding {
-        return;
-    }
-    let rect = egui::Rect::from_min_size(egui::pos2(min_x, min_y), cell);
+pub(crate) fn draw_terminal_cursor(ui: &egui::Ui, caret: egui::Rect, palette: &Palette) {
     let stroke_color = palette.terminal_fg.gamma_multiply(0.6);
     ui.painter().rect_stroke(
-        rect,
+        caret,
         0.0,
         egui::Stroke::new(1.5, stroke_color),
         egui::StrokeKind::Inside,
@@ -766,29 +795,20 @@ pub(crate) fn draw_terminal_cursor(
 
 pub(crate) fn draw_terminal_preedit(
     ui: &egui::Ui,
-    terminal_rect: egui::Rect,
-    cursor: (u16, u16),
-    cell: egui::Vec2,
+    caret: egui::Rect,
     preedit: &str,
     palette: &Palette,
 ) {
     if preedit.is_empty() {
         return;
     }
-    let padding = 8.0;
-    let pos = egui::pos2(
-        terminal_rect.min.x + padding + (cursor.0 as f32 * cell.x),
-        terminal_rect.min.y + padding + (cursor.1 as f32 * cell.y),
-    );
-    if pos.x >= terminal_rect.max.x - padding || pos.y >= terminal_rect.max.y - padding {
-        return;
-    }
+    let pos = caret.min;
     let font_id = FontId::monospace(MONOSPACE_SIZE);
     let galley = ui
         .painter()
         .layout_no_wrap(preedit.to_string(), font_id, palette.terminal_fg);
     let width = galley.size().x;
-    let preedit_rect = egui::Rect::from_min_size(pos, egui::vec2(width, cell.y));
+    let preedit_rect = egui::Rect::from_min_size(pos, egui::vec2(width, caret.height()));
 
     // Under-layer highlight
     ui.painter()
@@ -798,7 +818,7 @@ pub(crate) fn draw_terminal_preedit(
     ui.painter().galley(pos, galley, palette.terminal_fg);
 
     // High-visibility underline
-    let underline_y = pos.y + cell.y - 1.0;
+    let underline_y = pos.y + caret.height() - 1.0;
     ui.painter().line_segment(
         [
             egui::pos2(pos.x, underline_y),

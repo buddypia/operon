@@ -449,6 +449,9 @@ pub(crate) fn parse_operon_tmux_sessions(output: &str) -> Vec<OrphanedTmuxSessio
 }
 pub(crate) const OPERON_CURSOR_MARKER: &str = "__OPERON_CURSOR__:";
 
+/// Two coordinates, the form only a test's cursor probe asks for. The pane's
+/// marker is `parse_tmux_cursor_line`'s, which carries the grid height too.
+#[cfg(test)]
 pub(crate) fn parse_tmux_cursor_coordinate(text: &str) -> Result<(u16, u16)> {
     let mut parts = text.split(',');
     let x = parts
@@ -464,12 +467,35 @@ pub(crate) fn parse_tmux_cursor_coordinate(text: &str) -> Result<(u16, u16)> {
     Ok((x, y))
 }
 
+/// The three-field marker form: `x,y,pane_height`.
+///
+/// `pane_height` rides along so the pane can translate a row of the pane's grid
+/// into a row of the capture, which is scrollback-taller than the grid (change
+/// 155). Two coordinates cannot say where the grid sits in the capture.
+pub(crate) fn parse_tmux_cursor_line(text: &str) -> Result<TerminalCursor> {
+    let mut parts = text.split(',');
+    let (x, y, pane_rows) = (
+        parts
+            .next()
+            .ok_or_else(|| anyhow!("missing x coordinate"))?,
+        parts
+            .next()
+            .ok_or_else(|| anyhow!("missing y coordinate"))?,
+        parts.next().ok_or_else(|| anyhow!("missing pane height"))?,
+    );
+    Ok(TerminalCursor {
+        x: x.trim().parse::<u16>()?,
+        y: y.trim().parse::<u16>()?,
+        pane_rows: pane_rows.trim().parse::<u16>()?,
+    })
+}
+
 pub(crate) fn parse_tmux_capture_with_cursor(raw: &str) -> TerminalCapture {
     if let Some(pos) = raw.rfind(OPERON_CURSOR_MARKER) {
         let (body, marker_part) = raw.split_at(pos);
         let cursor_str = &marker_part[OPERON_CURSOR_MARKER.len()..];
         let cursor_line = cursor_str.lines().next().unwrap_or("").trim();
-        let cursor = parse_tmux_cursor_coordinate(cursor_line).ok();
+        let cursor = parse_tmux_cursor_line(cursor_line).ok();
         TerminalCapture {
             output: body.to_string(),
             cursor,
@@ -484,7 +510,7 @@ pub(crate) fn parse_tmux_capture_with_cursor(raw: &str) -> TerminalCapture {
 
 pub(crate) fn tmux_capture_with_cursor(name: &str) -> Result<TerminalCapture> {
     let scrollback = format!("-{TERMINAL_SCROLLBACK_LINES}");
-    let marker_arg = format!("{OPERON_CURSOR_MARKER}#{{cursor_x}},#{{cursor_y}}");
+    let marker_arg = format!("{OPERON_CURSOR_MARKER}#{{cursor_x}},#{{cursor_y}},#{{pane_height}}");
     let mut command = tmux_command();
     command.args([
         "capture-pane",
