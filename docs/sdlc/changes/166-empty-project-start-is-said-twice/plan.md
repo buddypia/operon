@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-17
-- **Status**: approved
+- **Status**: departed from (see below)
 
 ## Files that change
 
@@ -49,3 +49,23 @@ glyph cannot survive beside the new one.
 - `bash scripts/package-macos.sh`, swapped in after landing.
 
 ## Departures from the plan
+
+- **The grid's ＋ sits right after the project name, not at the right end.**
+  The first build pinned it right, as the spec said. The grid test then found no
+  ＋ on the empty project's header: the session cards of the project above use
+  a right-to-left layout inside `horizontal_wrapped`, which widens the scroll
+  area to 1120px in a 900px view, so every later project's right-aligned ＋ was
+  laid out off screen. Truncating the path did not help, because the width came
+  from the cards above. The second build put it after the path and
+  「プロジェクトを開く」; review found a long path pushes it off screen there too.
+  Beside the name, nothing variable precedes it. The grid test gives the empty
+  project a path far wider than the view, and `grid-plus-pinned-right` and
+  `grid-plus-after-path` in `mutations.py` each go red. The cards' overflow, and
+  a long path hiding 「プロジェクトを開く」, predate this change and are not
+  touched here; the test reads that glyph on the short-path project.
+- **Every test also hovers the ＋.** The hover text is the only place the ＋
+  says what it does, and the old glyph's 「プロジェクトを開く」 was the mislabel
+  this change removes. `header_add_hover_texts` sets the tooltip delay to zero,
+  rests the pointer on the ＋, and reads the painted tooltip; the three
+  `*-plus-says-open-project` mutations restore that wording and go red.
+- **`mutations.py`**: 12 of 12 caught.
