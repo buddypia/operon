@@ -34,7 +34,7 @@
   "session_owner_scope": "all_bash",
   "trunk_bash_allowlist": {
     "enabled": true,
-    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, and the gates and release scripts that follow it. Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
+    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, and the gates and release scripts that follow it, with quitting and reopening the installed app around the swap (change 173). Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
     "patterns": [
       "make\\s+(?:-C\\s+[\\w./-]+\\s+)?(?:wt\\.new(?:\\s+(?:BR|BASE|DRY)=[\\w./-]+)*|q\\.check|q\\.fast)(?:\\s+\\d*>\\s*(?:&\\d+|/dev/null))*\\s*$",
       "node\\s+(?:-v|(?:\\S*/)?\\.claude/scripts/(?:worktree-new|create-pr/ops)\\.mjs)",
@@ -66,6 +66,8 @@
       "tmux[ \\t]+(?:ls|list-(?:sessions|windows|panes))(?:[ \\t]+-a)?[ \\t]*$",
       "codesign[ \\t]+(?:--verify|-v)(?:[ \\t]+(?:--deep|--strict|-v+|--verbose(?:=\\d)?))*(?:[ \\t]+(?!-)[^\\s]+)+[ \\t]*$",
       "git\\s+fetch(?:\\s+(?:-q|--quiet|-p|--prune))*(?:\\s+origin)?\\s*$",
+      "osascript[ \\t]+-e[ \\t]+tell application \"Operon\" to quit[ \\t]*$",
+      "open[ \\t]+/Applications/Operon\\.app[ \\t]*$",
       "bash\\s+scripts/(?:package-macos|replace-macos-bundle|check-installed-build|check-readiness|check-bands|harness-metrics|run-evals|check-review|pipeline-indicators|ci-verified|check-transcript-vocabulary)\\.sh"
     ]
   }
