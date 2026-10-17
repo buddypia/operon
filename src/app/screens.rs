@@ -5125,126 +5125,135 @@ impl OperonApp {
         if count == 0 {
             return 0;
         }
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = SPACE_XS;
-            ui.label(RichText::new(tr("要対応")).size(11.5).strong().color(ink));
-            ui.label(
-                RichText::new(count.to_string())
-                    .size(11.5)
-                    .color(palette.text_muted),
-            );
-        });
         let mut open = None;
-        // By index: the queue is read while rows borrow the app, and copying
-        // it to iterate would allocate every frame.
-        for index in 0..self.attention_order.len() {
-            let session_id = self.attention_order[index];
-            let Some(session) = sessions.iter().find(|session| session.id == session_id) else {
-                continue;
-            };
-            let title = session_list_title(
-                session,
-                self.session_prompt_turns
-                    .get(&session_id)
-                    .and_then(|turns| turns.first())
-                    .map(|turn| turn.prompt.as_str()),
-            );
-            let project = self
-                .store
-                .projects
-                .iter()
-                .find(|project| project.id == session.project_id)
-                .map(|project| project.name.as_str())
-                .unwrap_or_default();
-            let meta = match session.branch.as_deref() {
-                Some(branch) => format!("{project} · {ICON_BRANCH} {branch}"),
-                None => format!("{project} · {}", agent_short_label(&session.agent)),
-            };
-            let wait = self
-                .attention_wait(session_id, now)
-                .map(attention_wait_label)
-                .unwrap_or_default();
-            let line = self.session_attention_line(session_id);
-            let selected = self.selected_session == Some(session_id);
-            let row = ui.scope_builder(
-                egui::UiBuilder::new()
-                    .id_salt(("pinned-session", session_id))
-                    .sense(egui::Sense::click()),
-                |ui| {
-                    // A selectable label takes the click for itself, and the
-                    // row would then open only from its padding.
-                    ui.style_mut().interaction.selectable_labels = false;
-                    egui::Frame::default()
-                        .fill(if selected {
-                            palette.row_selected
-                        } else {
-                            Color32::TRANSPARENT
-                        })
-                        .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
-                        .inner_margin(egui::Margin::symmetric(6, 5))
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.spacing_mut().item_spacing.y = 2.0;
-                            ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = SPACE_XS + 2.0;
-                                let (dot, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::hover(),
-                                );
-                                ui.painter().circle_filled(dot.center(), 4.0, ink);
-                                let title_width = (ui.available_width() - 56.0).max(40.0);
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(title_width, 20.0),
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| {
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(&title)
-                                                    .strong()
-                                                    .size(13.5)
-                                                    .color(palette.text_strong),
-                                            )
-                                            .truncate(),
+        // A card of its own, like each project below it (change 163).
+        card_frame(palette)
+            .inner_margin(egui::Margin::same(SPACE_SM as i8))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = SPACE_XS;
+                    ui.label(RichText::new(tr("要対応")).size(11.5).strong().color(ink));
+                    ui.label(
+                        RichText::new(count.to_string())
+                            .size(11.5)
+                            .color(palette.text_muted),
+                    );
+                });
+                // By index: the queue is read while rows borrow the app, and copying
+                // it to iterate would allocate every frame.
+                for index in 0..self.attention_order.len() {
+                    let session_id = self.attention_order[index];
+                    let Some(session) = sessions.iter().find(|session| session.id == session_id)
+                    else {
+                        continue;
+                    };
+                    let title = session_list_title(
+                        session,
+                        self.session_prompt_turns
+                            .get(&session_id)
+                            .and_then(|turns| turns.first())
+                            .map(|turn| turn.prompt.as_str()),
+                    );
+                    let project = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|project| project.id == session.project_id)
+                        .map(|project| project.name.as_str())
+                        .unwrap_or_default();
+                    let meta = match session.branch.as_deref() {
+                        Some(branch) => format!("{project} · {ICON_BRANCH} {branch}"),
+                        None => format!("{project} · {}", agent_short_label(&session.agent)),
+                    };
+                    let wait = self
+                        .attention_wait(session_id, now)
+                        .map(attention_wait_label)
+                        .unwrap_or_default();
+                    let line = self.session_attention_line(session_id);
+                    let selected = self.selected_session == Some(session_id);
+                    let row = ui.scope_builder(
+                        egui::UiBuilder::new()
+                            .id_salt(("pinned-session", session_id))
+                            .sense(egui::Sense::click()),
+                        |ui| {
+                            // A selectable label takes the click for itself, and the
+                            // row would then open only from its padding.
+                            ui.style_mut().interaction.selectable_labels = false;
+                            egui::Frame::default()
+                                .fill(if selected {
+                                    palette.row_selected
+                                } else {
+                                    Color32::TRANSPARENT
+                                })
+                                .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
+                                .inner_margin(egui::Margin::symmetric(6, 5))
+                                .show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    ui.spacing_mut().item_spacing.y = 2.0;
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = SPACE_XS + 2.0;
+                                        let (dot, _) = ui.allocate_exact_size(
+                                            egui::vec2(8.0, 8.0),
+                                            egui::Sense::hover(),
                                         );
-                                    },
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.label(RichText::new(wait).size(11.5).color(ink));
-                                    },
-                                );
-                            });
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(meta).size(12.0).color(palette.text_muted),
-                                )
-                                .truncate(),
-                            );
-                            if let Some(line) = line {
-                                let mut job = egui::text::LayoutJob::single_section(
-                                    line.to_owned(),
-                                    egui::TextFormat {
-                                        font_id: egui::FontId::proportional(12.0),
-                                        color: palette.text,
-                                        ..Default::default()
-                                    },
-                                );
-                                job.wrap = egui::text::TextWrapping {
-                                    max_width: ui.available_width(),
-                                    max_rows: 2,
-                                    break_anywhere: true,
-                                    overflow_character: Some('…'),
-                                };
-                                ui.add(egui::Label::new(job));
-                            }
-                        });
-                },
-            );
-            if row.response.clicked() {
-                open = Some(session_id);
-            }
-        }
+                                        ui.painter().circle_filled(dot.center(), 4.0, ink);
+                                        let title_width = (ui.available_width() - 56.0).max(40.0);
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(title_width, 20.0),
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(&title)
+                                                            .strong()
+                                                            .size(13.5)
+                                                            .color(palette.text_strong),
+                                                    )
+                                                    .truncate(),
+                                                );
+                                            },
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(RichText::new(wait).size(11.5).color(ink));
+                                            },
+                                        );
+                                    });
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(meta)
+                                                .size(12.0)
+                                                .color(palette.text_muted),
+                                        )
+                                        .truncate(),
+                                    );
+                                    if let Some(line) = line {
+                                        let mut job = egui::text::LayoutJob::single_section(
+                                            line.to_owned(),
+                                            egui::TextFormat {
+                                                font_id: egui::FontId::proportional(12.0),
+                                                color: palette.text,
+                                                ..Default::default()
+                                            },
+                                        );
+                                        job.wrap = egui::text::TextWrapping {
+                                            max_width: ui.available_width(),
+                                            max_rows: 2,
+                                            break_anywhere: true,
+                                            overflow_character: Some('…'),
+                                        };
+                                        ui.add(egui::Label::new(job));
+                                    }
+                                });
+                        },
+                    );
+                    if row.response.clicked() {
+                        open = Some(session_id);
+                    }
+                }
+            });
         if let Some(session_id) = open {
             self.open_waiting_session(session_id);
         }
@@ -5261,34 +5270,37 @@ impl OperonApp {
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
         let group_counts = self.status_group_counts();
+        // Laid out from the right, and the chips below wrap: a row wider
+        // than the column widened everything drawn after it, and the column
+        // then cut each row's time at its edge (change 163).
         ui.horizontal(|ui| {
-            // The heading is the list's grip: it is dragged to an edge the
-            // way a view's tab is (change 145).
-            let grip = ui
-                .add(
-                    egui::Label::new(
-                        RichText::new(format!(
-                            "{ICON_DRAG_HANDLE} {}",
-                            tr("プロジェクト別セッション")
-                        ))
-                        .strong(),
-                    )
-                    .selectable(false)
-                    .sense(egui::Sense::click_and_drag()),
-                )
-                .on_hover_text(tr("ドラッグして移動"));
-            self.dock_grip(ui, &grip, DockPanel::Sessions);
-            ui.label(
-                RichText::new(tf!("{p0} 件", p0 = sessions.len()))
-                    .small()
-                    .weak(),
-            );
-            // New sessions start from the toolbar and search is ⌘K; what the
-            // magnifier here used to open is the history, and says so.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // New sessions start from the toolbar and search is ⌘K; what
+                // the magnifier here used to open is the history, and says so.
+                // No count here: 「すべて n」 below says it, and the room it
+                // took is what kept the heading whole at the default width.
                 if quiet_button(ui, palette, tr("履歴")).clicked() {
                     self.session_library_open = true;
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // The heading is the list's grip: it is dragged to an
+                    // edge the way a view's tab is (change 145).
+                    let grip = ui
+                        .add(
+                            egui::Label::new(
+                                RichText::new(format!(
+                                    "{ICON_DRAG_HANDLE} {}",
+                                    tr("プロジェクト別セッション")
+                                ))
+                                .strong(),
+                            )
+                            .selectable(false)
+                            .truncate()
+                            .sense(egui::Sense::click_and_drag()),
+                        )
+                        .on_hover_text(tr("ドラッグして移動"));
+                    self.dock_grip(ui, &grip, DockPanel::Sessions);
+                });
             });
         });
         // The four things a person can do about a session, as four independent
@@ -5302,7 +5314,7 @@ impl OperonApp {
         // chip now: two counts of "needs me" side by side, defined differently,
         // is worse than one.
         let filtering = self.status_filter.iter().any(|selected| *selected);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             if ui
                 .selectable_label(
@@ -5370,43 +5382,82 @@ impl OperonApp {
                 if filtering && project_sessions.is_empty() && pinned_here == 0 {
                     continue;
                 }
-                // One line. The full path is what tells two checkouts of the
-                // same name apart, and that is a question asked rarely enough
-                // to live under the pointer rather than on every group.
+                // A project and its sessions are one card (change 163). Space
+                // alone did not group them: the gap between two sessions was
+                // the gap between two projects, so the column read as one list.
+                card_frame(palette)
+                    .inner_margin(egui::Margin::same(SPACE_SM as i8))
+                    .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                // One line, laid out from the right so the ＋ and the count
+                // keep their place and a long name is what gets cut. The full
+                // path is what tells two checkouts of the same name apart, and
+                // that is a question asked rarely enough to live under the
+                // pointer rather than on every group.
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(ICON_PROJECT).color(palette.accent_text));
-                    ui.label(RichText::new(&project.name).small().strong())
-                        .on_hover_ui(|ui| {
-                            ui.label(project.path.display().to_string());
-                        });
-                    ui.label(
-                        RichText::new(tf!("{p0} 件", p0 = project_sessions.len() + pinned_here))
-                            .small()
-                            .weak(),
-                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始")).clicked() {
                             self.open_project_session_setup(project.id);
                         }
+                        ui.label(
+                            RichText::new(tf!("{p0} 件", p0 = project_sessions.len() + pinned_here))
+                                .small()
+                                .weak(),
+                        );
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            ui.label(RichText::new(ICON_PROJECT).color(palette.accent_text));
+                            // The strongest text in its card: the name used to
+                            // be drawn smaller than its own sessions' titles.
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(&project.name)
+                                        .size(15.0)
+                                        .strong()
+                                        .color(palette.text_strong),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_ui(|ui| {
+                                ui.label(&project.name);
+                                ui.label(project.path.display().to_string());
+                            });
+                        });
                     });
                 });
                 if project_sessions.is_empty() {
                     // The header's ＋ is the whole offer: its count says 0 件,
                     // and a second start below it would say the same twice.
-                    ui.add_space(8.0);
-                    continue;
+                    return;
                 }
                 let is_importing = self.background_tasks.iter().any(|key| {
                     matches!(key, BackgroundKey::FullHistoryImport(_))
                 });
-                for candidate in project_sessions {
+                for (index, candidate) in project_sessions.into_iter().enumerate() {
+                    // A hairline between two sessions, none around them: the
+                    // card is the edge of the group.
+                    if index > 0 {
+                        ui.add_space(SPACE_XS);
+                        let (rule, _) = ui.allocate_exact_size(
+                            egui::vec2(ui.available_width(), 1.0),
+                            egui::Sense::hover(),
+                        );
+                        ui.painter().hline(
+                            rule.x_range(),
+                            rule.center().y,
+                            egui::Stroke::new(1.0, palette.border_subtle),
+                        );
+                        ui.add_space(SPACE_XS);
+                    }
                     let is_selected = self.selected_session == Some(candidate.id);
                     let is_unread = self.is_session_unread(candidate.id);
+                    let cancellation_pending = self.cancellation_pending(candidate.id);
                     let mut select_requested = false;
                     let mut unread_requested = false;
                     let mut requested_handoff = None;
                     let mut close_requested = false;
+                    let mut stop_requested = false;
                     let mut worktree_requested = false;
+                    let mut row_choice = None;
                     let status = self.status_view(&candidate);
                     let title = session_list_title(
                         &candidate,
@@ -5436,6 +5487,17 @@ impl OperonApp {
                             }
                         }
                     };
+                    // `···`, a right click on the row, and a right click on
+                    // its title all open this one list.
+                    let row_menu = |ui: &mut egui::Ui,
+                                    choice: &mut Option<SessionRowChoice>,
+                                    handoff_target: &mut Option<String>| {
+                        if let Some(chosen) = session_row_menu(ui, &candidate, cancellation_pending) {
+                            *choice = Some(chosen);
+                        }
+                        render_restore_options(ui, handoff_target);
+                    };
+                    let mut menu_used = false;
                     // The row's `✕` stands where its time does while the
                     // pointer is on the row or the row is open, so a list of
                     // idle sessions reads as names and ages rather than as a
@@ -5448,6 +5510,10 @@ impl OperonApp {
                             .id_salt(("terminal-session-card", candidate.id))
                             .sense(egui::Sense::click()),
                         |ui| {
+                            // A selectable label takes the click for itself:
+                            // the row's second line opened nothing on a click
+                            // and no menu on a right click (change 163).
+                            ui.style_mut().interaction.selectable_labels = false;
                             egui::Frame::default()
                                 .fill(if is_selected {
                                     palette.row_selected
@@ -5460,6 +5526,78 @@ impl OperonApp {
                             ui.set_min_width(ui.available_width());
                             ui.spacing_mut().item_spacing.y = 2.0;
                             ui.horizontal(|ui| {
+                                // The corner first, right to left, so the time
+                                // and the controls keep their width and the
+                                // title is what gets cut (change 163: the time
+                                // used to run past the column's edge).
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.spacing_mut().item_spacing.x = 0.0;
+                                        // The rare actions sit behind the dots,
+                                        // pinned to the far right: the pointer
+                                        // leaving the row for an open menu turns
+                                        // ✕ and ■ back into the time, and a
+                                        // button that moved would carry its menu
+                                        // with it.
+                                        let menu_res = egui::menu::menu_custom_button(
+                                            ui,
+                                            egui::Button::new(
+                                                RichText::new(ICON_MORE)
+                                                    .size(14.0)
+                                                    .color(palette.text_muted),
+                                            )
+                                            .frame(false)
+                                            .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
+                                            |ui| row_menu(ui, &mut row_choice, &mut requested_handoff),
+                                        )
+                                        .response
+                                        .on_hover_text(tr("その他の操作"));
+                                        paint_button_focus(ui, &menu_res, palette);
+                                        if row_active {
+                                            let close_res = ui.add(
+                                                egui::Button::new(
+                                                    RichText::new(ICON_CLOSE).size(15.0),
+                                                )
+                                                .frame(false)
+                                                .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
+                                            );
+                                            paint_button_focus(ui, &close_res, palette);
+                                            if close_res
+                                                .on_hover_text(tr("セッションを削除"))
+                                                .clicked()
+                                            {
+                                                close_requested = true;
+                                            }
+                                            // Stopping a session no longer
+                                            // means opening it first: the
+                                            // header's verb, on its row.
+                                            // Only a running session can stop:
+                                            // ask for the verb, which allocates,
+                                            // only then.
+                                            if let Some(stop) = (candidate.status
+                                                == SessionStatus::Active
+                                                || cancellation_pending)
+                                                .then(|| session_verb(&candidate, cancellation_pending))
+                                                .flatten()
+                                                .filter(|verb| verb.action == SessionVerbAction::Stop)
+                                            {
+                                                if small_icon_button(ui, palette, ICON_STOP, &stop.hint).clicked() {
+                                                    stop_requested = true;
+                                                }
+                                            }
+                                        } else {
+                                            ui.label(
+                                                RichText::new(relative_time(candidate.created_at))
+                                                    .size(11.5)
+                                                    .color(palette.text_faint),
+                                            );
+                                        }
+                                        // A cut title stops short of the time.
+                                        ui.add_space(SPACE_XS);
+                                        ui.with_layout(
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| {
                                 ui.spacing_mut().item_spacing.x = SPACE_XS + 2.0;
                                 // The status as a dot in its own colour. The
                                 // word is on the line below; the dot is what a
@@ -5473,18 +5611,11 @@ impl OperonApp {
                                     4.0,
                                     palette.status(status.tone),
                                 );
-                                // What is left once the corner has its room:
-                                // the time, or `···` and `✕`.
-                                let title_width = (ui.available_width() - 64.0).max(40.0);
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(title_width, 20.0),
-                                    egui::Layout::left_to_right(egui::Align::Center),
-                                    |ui| {
                                 if renaming {
                                     let editor = ui.add(
                                         egui::TextEdit::singleline(&mut self.rename_input)
                                             .hint_text(tr("セッション名"))
-                                            .desired_width(title_width),
+                                            .desired_width(ui.available_width()),
                                     );
                                     if self.rename_needs_focus {
                                         editor.request_focus();
@@ -5531,66 +5662,16 @@ impl OperonApp {
                                     if title.double_clicked() {
                                         rename_requested = true;
                                     }
+                                    // The title takes clicks for its rename,
+                                    // so a right click on it would otherwise
+                                    // open nothing.
+                                    title.context_menu(|ui| {
+                                        menu_used = true;
+                                        row_menu(ui, &mut row_choice, &mut requested_handoff);
+                                    });
                                 }
-                                    },
-                                );
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.spacing_mut().item_spacing.x = 0.0;
-                                        if row_active {
-                                            let close_res = ui.add(
-                                                egui::Button::new(
-                                                    RichText::new(ICON_CLOSE).size(15.0),
-                                                )
-                                                .frame(false)
-                                                .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
-                                            );
-                                            paint_button_focus(ui, &close_res, palette);
-                                            if close_res
-                                                .on_hover_text(tr("セッションを削除"))
-                                                .clicked()
-                                            {
-                                                close_requested = true;
-                                            }
-                                        } else {
-                                            ui.label(
-                                                RichText::new(relative_time(candidate.created_at))
-                                                    .size(11.5)
-                                                    .color(palette.text_faint),
-                                            );
-                                        }
-                                        // The rare actions sit behind the dots so
-                                        // the row's one destructive corner control
-                                        // keeps its neighbours predictable.
-                                        let menu_res = egui::menu::menu_custom_button(
-                                            ui,
-                                            egui::Button::new(
-                                                RichText::new(ICON_MORE)
-                                                    .size(14.0)
-                                                    .color(palette.text_muted),
-                                            )
-                                            .frame(false)
-                                            .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
-                                            |ui| {
-                                                if ui.button("worktree").clicked() {
-                                                    worktree_requested = true;
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button(tr("名前を変更")).clicked() {
-                                                    rename_requested = true;
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button(tr("未読にする")).clicked() {
-                                                    unread_requested = true;
-                                                    ui.close_menu();
-                                                }
-                                                render_restore_options(ui, &mut requested_handoff);
                                             },
-                                        )
-                                        .response
-                                        .on_hover_text(tr("worktree · 名前を変更 · 復元 · 未読にする"));
-                                        paint_button_focus(ui, &menu_res, palette);
+                                        );
                                     },
                                 );
                             });
@@ -5653,25 +5734,21 @@ impl OperonApp {
                     // A double click is easy to miss, and the title it lands on
                     // is small. The same actions are on the card's context menu so
                     // they can be found without knowing the gesture.
-                    let mut menu_used = false;
                     session_card_response.context_menu(|ui| {
                         menu_used = true;
-                        if ui.button(tr("名前を変更")).clicked() {
-                            rename_requested = true;
-                            ui.close_menu();
-                        }
-                        if ui.button("worktree").clicked() {
-                            worktree_requested = true;
-                            ui.close_menu();
-                        }
-                        if ui.button(tr("未読にする")).clicked() {
-                            unread_requested = true;
-                            ui.close_menu();
-                        }
-                        render_restore_options(ui, &mut requested_handoff);
+                        row_menu(ui, &mut row_choice, &mut requested_handoff);
                     });
+                    match row_choice {
+                        Some(SessionRowChoice::Rename) => rename_requested = true,
+                        Some(SessionRowChoice::Worktree) => worktree_requested = true,
+                        Some(SessionRowChoice::MarkUnread) => unread_requested = true,
+                        Some(SessionRowChoice::Stop) => stop_requested = true,
+                        Some(SessionRowChoice::Remove) => close_requested = true,
+                        None => {}
+                    }
                     if session_card_response.clicked()
                         && !close_requested
+                        && !stop_requested
                         && !worktree_requested
                         && !rename_requested
                         && !menu_used
@@ -5696,15 +5773,18 @@ impl OperonApp {
                     if let Some(target) = requested_handoff {
                         self.handoff_managed_session(candidate.id, &target);
                     }
+                    if stop_requested {
+                        self.stop_session(candidate.id);
+                    }
                     if close_requested {
                         self.request_session_removal(candidate.id);
                     }
                     if worktree_requested {
                         self.open_project_worktrees(project.id);
                     }
-                    ui.add_space(4.0);
                 }
-                ui.add_space(6.0);
+                    });
+                ui.add_space(SPACE_SM);
             }
             if sessions.is_empty() {
                 // A person with no sessions is not being filtered, so this
@@ -6941,6 +7021,44 @@ pub(crate) fn is_terminal_cmd_modifier(modifiers: &egui::Modifiers) -> bool {
 /// Whether modifiers include Command (⌘) or Option (⌥) to trigger opening a terminal target.
 pub(crate) fn is_terminal_open_modifier(modifiers: &egui::Modifiers) -> bool {
     is_terminal_cmd_modifier(modifiers) || modifiers.alt
+}
+
+/// What a session row's menu was asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionRowChoice {
+    Rename,
+    Worktree,
+    MarkUnread,
+    Stop,
+    Remove,
+}
+
+/// The one list behind a session row's `···` and its right click, so the two
+/// cannot drift apart. 停止 is there only while the session's state verb is
+/// a stop — running, or a stop still landing — the same verb the terminal
+/// header shows.
+fn session_row_menu(
+    ui: &mut egui::Ui,
+    session: &Session,
+    cancellation_pending: bool,
+) -> Option<SessionRowChoice> {
+    let mut chosen = None;
+    let mut item = |ui: &mut egui::Ui, label: &str, choice| {
+        if ui.button(label).clicked() {
+            chosen = Some(choice);
+            ui.close_menu();
+        }
+    };
+    item(ui, tr("名前を変更"), SessionRowChoice::Rename);
+    item(ui, "worktree", SessionRowChoice::Worktree);
+    item(ui, tr("未読にする"), SessionRowChoice::MarkUnread);
+    if let Some(stop) = session_verb(session, cancellation_pending)
+        .filter(|verb| verb.action == SessionVerbAction::Stop)
+    {
+        item(ui, stop.label, SessionRowChoice::Stop);
+    }
+    item(ui, tr("セッションを削除"), SessionRowChoice::Remove);
+    chosen
 }
 
 /// A one-line label cut short at `max_width` rather than at whatever width is
