@@ -74,8 +74,9 @@ contract:
   ci: "machine passed gh run 38944707430 on 3115670 (test suite, fmt/clippy, bands, bundle, cross-cli all success)"
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh (fmt, clippy, tests kept, review gate at bea49faad9293938)"
   bands: "machine passed bash scripts/check-bands.sh (21 metrics within their bands, 2026-10-17)"
-  release-binary: "machine pending yes, it touches src/ and Cargo.toml, so it ends
-    with bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh at 25b854c (fmt + clippy green, release build signed), then
+    scripts/replace-macos-bundle.sh swapped /Applications/Operon.app after the person agreed to quit it; relaunched on the
+    new binary (OperonSourceCommit 25b854c); `Operon knowledge` answered exit 64 / 2 from the installed binary"
   guards-verified-by-mutation: "human passed each new guard watched failing; plan.md Departures 14 lists them"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
