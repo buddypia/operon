@@ -12576,6 +12576,112 @@ pub(crate) fn an_agent_terminal_opens_without_its_placeholders_end_of_file() {
         "the placeholder's end-of-file is left on the agent's screen:\n{output}"
     );
 }
+/// Change 164. A tmux server keeps the directory it was started from, and once
+/// that is deleted every pane it starts runs there, whatever `-c` says (tmux
+/// 3.8). The person's own server had been started in a worktree that cleanup
+/// later removed, so every agent Operon launched began in a missing directory.
+/// The pane command has to carry its own directory: here the shell running it
+/// stands in a directory that has just been deleted, as such a pane does.
+#[test]
+pub(crate) fn an_agent_starts_in_its_directory_even_where_tmux_cannot_put_it() {
+    let root = std::env::temp_dir().join(format!("operon-pane-cwd-{}", Uuid::new_v4()));
+    // The quote and the space are what the quoting is for.
+    let project = root.join("it's a project");
+    let missing = root.join("gone");
+    fs::create_dir_all(&project).unwrap();
+    let in_a_deleted_directory = |pane_command: String| {
+        let deleted = root.join(format!("deleted-{}", Uuid::new_v4()));
+        fs::create_dir_all(&deleted).unwrap();
+        let mut shell = Command::new("/bin/sh");
+        shell
+            .arg("-c")
+            .arg(format!("rmdir \"$PWD\" && {pane_command}"))
+            .current_dir(&deleted);
+        run_command_with_timeout(&mut shell, Duration::from_secs(5)).unwrap()
+    };
+
+    let ran = in_a_deleted_directory(tmux_pane_command(&project, "/bin/pwd -P"));
+    // An `||` in the command must not run anything once the directory is gone.
+    let refused = in_a_deleted_directory(tmux_pane_command(
+        &missing,
+        "/bin/echo started || /bin/echo started",
+    ));
+    let expected = project.canonicalize().unwrap();
+    fs::remove_dir_all(&root).unwrap();
+
+    assert!(
+        ran.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    let printed = String::from_utf8_lossy(&ran.stdout).trim().to_owned();
+    assert_eq!(Path::new(&printed), expected);
+    assert!(!refused.status.success());
+    assert!(
+        !String::from_utf8_lossy(&refused.stdout).contains("started"),
+        "the command ran although its directory does not exist"
+    );
+}
+
+/// Change 164. A plain terminal goes through the same guard as an agent and is
+/// still the login shell tmux would have started, in its own directory.
+#[test]
+pub(crate) fn a_plain_terminal_is_a_login_shell_in_its_directory() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = std::env::temp_dir().join(format!("operon-plain-terminal-{}", Uuid::new_v4()));
+    let project = root.join("it's a project");
+    fs::create_dir_all(&project).unwrap();
+    let name = format!("operon-test-{}", Uuid::new_v4().simple());
+    let started = start_empty_tmux_session(&name, &project, &[]);
+    let mut reading = String::new();
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        let mut display = tmux_command();
+        display.args([
+            "display-message",
+            "-p",
+            "-t",
+            &name,
+            "#{pane_current_command}|#{pane_current_path}|#{default-shell}",
+        ]);
+        reading = run_command_with_timeout(&mut display, Duration::from_secs(5))
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .unwrap_or_default();
+        let fields = reading.split('|').collect::<Vec<_>>();
+        if let [command, _, shell] = fields[..] {
+            if shell.ends_with(&format!("/{command}")) {
+                break;
+            }
+        }
+    }
+    let state = tmux_state(&name);
+    kill_tmux_session(&name);
+    let expected = project.canonicalize().unwrap();
+    fs::remove_dir_all(&root).unwrap();
+    started.unwrap();
+    assert_eq!(state, TmuxState::Alive);
+    let fields = reading.split('|').collect::<Vec<_>>();
+    let [command, path, shell] = fields[..] else {
+        panic!("unexpected pane reading: {reading}");
+    };
+    assert_eq!(Path::new(path), expected, "{reading}");
+    assert!(
+        shell.ends_with(&format!("/{command}")),
+        "the pane runs {command}, not tmux's default shell {shell}"
+    );
+}
+
+/// Change 164. The tmux server is started by whichever tmux command runs
+/// first, and keeps that command's working directory for as long as it lives.
+/// Run from a worktree, it outlives the worktree: the suite's own server sat in
+/// a deleted worktree twice (changes 160 and 164) and failed every live restore
+/// test after it. Every tmux this crate runs therefore starts from `/`.
+#[test]
+pub(crate) fn a_tmux_server_never_holds_a_directory_that_can_be_deleted() {
+    assert_eq!(tmux_command().get_current_dir(), Some(Path::new("/")));
+}
 /// The screen read must come from the live pane, not its scrollback: a real
 /// session scrolls its finished turns up and would otherwise keep reporting
 /// the interrupt hint printed minutes ago.

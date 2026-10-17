@@ -21,7 +21,7 @@
 # with each other only; 598 messages passed to `tr`/`tf!` had no row in
 # either, so they showed in Japanese on English and Korean screens. Fix: a
 # guard reading the source for every literal `tr`/`tf!` id, and the 598 rows
-# in both tables (no existing row changed). Lesson 074.
+# in both tables (no existing row changed). Lesson 075.
 #
 # Sessions already saved keep their name; renaming them is the person's call.
 
