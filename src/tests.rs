@@ -38175,6 +38175,186 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
     }
 }
 
+/// Change 176. Antigravity reads a hook's answer as protojson: one key it does
+/// not know and the whole answer is dropped, and a PreToolUse answer carrying
+/// `decision` has its `deny_reason` ignored. So a refusal reaches the agent only
+/// as `{allow_tool: false, deny_reason}`, a Stop that must go on only as
+/// `{decision: "continue", reason}`, and everything else as no output at all —
+/// `{}` is an answer too, and wipes the reason a later hook gave. The adapter
+/// answered `{decision: "deny", reason}` and `{systemMessage}`, so a refused
+/// `run_command` arrived with no reason and every Stop and PostToolUse was a
+/// hook error. `executionNum` counts from 0, and a Stop the person cancelled is
+/// not one to argue with.
+#[test]
+pub(crate) fn antigravity_hears_a_guard_only_in_the_shapes_it_reads() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let adapter = repository.join(".cli/lib/cli-adapter-utils.mjs");
+    let script = format!(
+        "const a = await import({:?});\n\
+         const pre = (decision, reason) => ({{ hookSpecificOutput: {{ hookEventName: 'PreToolUse', permissionDecision: decision, permissionDecisionReason: reason }} }});\n\
+         const stop = {{ cli: 'antigravity', eventName: 'Stop' }};\n\
+         console.log(JSON.stringify([\n\
+           a.toAntigravityWire(pre('deny', 'refused'), 'PreToolUse'),\n\
+           a.toAntigravityWire(pre('ask', 'confirm'), 'PreToolUse'),\n\
+           a.toAntigravityWire(pre('allow'), 'PreToolUse'),\n\
+           a.toAntigravityWire({{ systemMessage: 'note' }}, 'PreToolUse'),\n\
+           a.toAntigravityWire({{ decision: 'block', reason: 'ship it' }}, 'Stop'),\n\
+           a.toAntigravityWire({{ systemMessage: 'note' }}, 'Stop'),\n\
+           a.toAntigravityWire({{ systemMessage: 'note' }}, 'PostToolUse'),\n\
+           a.skipsAntigravityRun?.({{ terminationReason: 'USER_CANCELED' }}, stop) ?? null,\n\
+           a.skipsAntigravityRun?.({{ terminationReason: 'MODEL_FINISHED' }}, stop) ?? null,\n\
+           a.normalizePayload({{ executionNum: 0 }}, 'antigravity').stop_hook_active ?? null,\n\
+           a.normalizePayload({{ executionNum: 1 }}, 'antigravity').stop_hook_active ?? null,\n\
+         ]));",
+        adapter.to_str().unwrap()
+    );
+    let mut command = node_in(&repository);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+        .expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let answers: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected = serde_json::json!([
+        { "allow_tool": false, "deny_reason": "refused" },
+        { "decision": "ask", "reason": "confirm" },
+        {},
+        {},
+        { "decision": "continue", "reason": "ship it" },
+        {},
+        {},
+        true,
+        false,
+        false,
+        true,
+    ]);
+    let cases = [
+        "PreToolUse の deny",
+        "PreToolUse の ask",
+        "PreToolUse の allow",
+        "PreToolUse の通知",
+        "Stop の block",
+        "Stop の通知",
+        "PostToolUse の通知",
+        "利用者が取り消した Stop を飛ばすか",
+        "取り消されていない Stop を飛ばすか",
+        "executionNum 0 を再実行とみなすか",
+        "executionNum 1 を再実行とみなすか",
+    ];
+    for (index, case) in cases.iter().enumerate() {
+        assert_eq!(
+            answers[index], expected[index],
+            "Antigravity への {case} の答えが、Antigravity の読む形ではありません"
+        );
+    }
+}
+
+/// Change 176, through the command `.claude/hooks.json` runs: a commit on the
+/// trunk is refused with the guard's own reason in the one place Antigravity
+/// reads it, and a command the guards let through prints nothing.
+#[test]
+pub(crate) fn a_refused_run_command_reaches_antigravity_with_its_reason() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("agy-refusal");
+    let ask = |command_line: &str| {
+        let payload = root.join(".git/agy-payload.json");
+        let call = serde_json::json!({
+            "toolCall": { "name": "run_command", "args": { "CommandLine": command_line, "Cwd": root } },
+            "workspacePaths": [root],
+            "conversationId": "S1",
+            "stepIdx": 1,
+        });
+        fs::write(&payload, call.to_string()).unwrap();
+        let mut command = node_in(&root);
+        command
+            .arg(repository.join(".cli/_cli-dispatch.mjs"))
+            .args([
+                ".cli/hooks/commit-guard.mjs",
+                "antigravity",
+                "PreToolUse",
+                "commit-guard",
+            ])
+            .stdin(std::process::Stdio::from(fs::File::open(&payload).unwrap()));
+        let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+            .expect("node が見つからないか、時間内に終わりませんでした");
+        assert!(output.status.success(), "{}", both_streams(&output));
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    };
+
+    let refused = ask("git commit -m x");
+    let allowed = ask("git status");
+    fs::remove_dir_all(&root).ok();
+
+    let answer: serde_json::Value = serde_json::from_str(&refused).unwrap_or_default();
+    let keys: Vec<_> = answer
+        .as_object()
+        .map(|object| object.keys().cloned().collect())
+        .unwrap_or_default();
+    assert_eq!(
+        keys,
+        ["allow_tool", "deny_reason"],
+        "main への commit の拒否が Antigravity の読む形 {{allow_tool, deny_reason}} ではありません: {refused}"
+    );
+    assert_eq!(answer["allow_tool"], false);
+    assert!(
+        answer["deny_reason"]
+            .as_str()
+            .is_some_and(|reason| !reason.trim().is_empty()),
+        "拒否の理由が空です: {refused}"
+    );
+    assert_eq!(
+        allowed, "",
+        "通した command に答えを書いています。Antigravity は空の答えでも後のフックの理由を消します"
+    );
+}
+
+/// Change 176. Every Antigravity entry runs the trunk checkout's guard and names
+/// itself, the way the Codex entries do. The Stop entry ran
+/// `$(git rev-parse --show-toplevel)` — inside a linked worktree that is the
+/// branch's own `.cli/`, which the branch can stub (sdlc 051's review) — and
+/// carried no hook id.
+#[test]
+pub(crate) fn every_antigravity_entry_runs_the_trunk_copy_of_its_guard() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(repository.join(".claude/hooks.json")).unwrap();
+    let hooks: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let prefix = "node \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir || echo /nonexistent/nogit)\")/.cli/_cli-dispatch.mjs\" .cli/hooks/";
+    fn commands_in(value: &serde_json::Value, into: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(command) = map.get("command").and_then(|c| c.as_str()) {
+                    into.push(command.to_owned());
+                }
+                map.values().for_each(|inner| commands_in(inner, into));
+            }
+            serde_json::Value::Array(items) => {
+                items.iter().for_each(|inner| commands_in(inner, into))
+            }
+            _ => {}
+        }
+    }
+    let mut commands = Vec::new();
+    commands_in(&hooks, &mut commands);
+    assert!(
+        commands.iter().any(|command| command.contains(" Stop")),
+        ".claude/hooks.json に Stop の項目がありません"
+    );
+    for command in &commands {
+        let rest = command.strip_prefix(prefix).unwrap_or_else(|| {
+            panic!(
+                ".claude/hooks.json の項目が main checkout の guard を起動していません: {command}"
+            )
+        });
+        let (module, arguments) = rest.split_once(".mjs ").unwrap();
+        assert_eq!(
+            arguments.split(' ').collect::<Vec<_>>().last().copied(),
+            Some(module),
+            ".claude/hooks.json の項目が自分のフック名を渡していません: {command}"
+        );
+    }
+}
+
 /// Change 135. A session whose project is this repository was asked to fix
 /// another repository, and neither guard would let it: the trunk allowlist
 /// judged a command inside that repository's worktree as trunk work, and the
