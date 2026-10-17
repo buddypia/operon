@@ -4413,11 +4413,25 @@ impl OperonApp {
                         {
                             self.open_project_session_setup(project.id);
                         }
-                        ui.label(
-                            RichText::new(project.path.display().to_string())
-                                .small()
-                                .weak(),
-                        );
+                        // The path gets the row less room for the glyph after
+                        // it, and truncates past that, so a long one cannot
+                        // push 「プロジェクトを開く」 off screen. The button is
+                        // a glyph no wider than a control is tall, plus its
+                        // padding: wider than its 28px minimum, never less.
+                        let glyph_room = CONTROL_HEIGHT
+                            + 2.0 * ui.spacing().button_padding.x
+                            + ui.spacing().item_spacing.x;
+                        ui.scope(|ui| {
+                            ui.set_max_width((ui.available_width() - glyph_room).max(0.0));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(project.path.display().to_string())
+                                        .small()
+                                        .weak(),
+                                )
+                                .truncate(),
+                            );
+                        });
                         if icon_button(ui, palette, ICON_SHOW, tr("プロジェクトを開く")).clicked()
                         {
                             self.select_project(Some(project.id));
@@ -4433,8 +4447,21 @@ impl OperonApp {
                         );
                     } else if !project_sessions.is_empty() {
                         ui.horizontal_wrapped(|ui| {
+                            // A frame places itself at the cursor and never
+                            // wraps, and the right-to-left rows inside a card
+                            // fill whatever width it is offered: unbounded, the
+                            // first card took the whole row and the second
+                            // began past the edge, widening the history. The
+                            // row's own height, so a card is not centred in it
+                            // and slipped half a row down.
+                            let row_height = ui.spacing().interact_size.y;
                             for session in project_sessions {
-                                self.session_grid_node(ui, &session, &session_names);
+                                ui.allocate_ui(
+                                    egui::vec2(Self::SESSION_GRID_CARD_WIDTH, row_height),
+                                    |ui| {
+                                        self.session_grid_node(ui, &session, &session_names);
+                                    },
+                                );
                             }
                         });
                     }
@@ -4443,6 +4470,10 @@ impl OperonApp {
             }
         });
     }
+
+    /// One card in the 「グリッド」, frame included: its content keeps the 205px
+    /// minimum it always had, and as many as fit share a row.
+    pub(crate) const SESSION_GRID_CARD_WIDTH: f32 = 220.0;
 
     fn session_grid_node(
         &mut self,
@@ -4458,13 +4489,20 @@ impl OperonApp {
             ui.set_min_width(205.0);
             ui.horizontal(|ui| {
                 status_chip(ui, &status, 13.5, palette);
-                ui.label(RichText::new(session_title(session)).strong());
-                agent_chip(ui, &session.agent, 12.0, palette);
+                // Laid out from the right first, so a long title truncates
+                // inside the card instead of widening it.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if small_icon_button(ui, palette, ICON_CLOSE, tr("セッションを削除")).clicked()
                     {
                         removal_requested = true;
                     }
+                    agent_chip(ui, &session.agent, 12.0, palette);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(session_title(session)).strong())
+                                .truncate(),
+                        );
+                    });
                 });
             });
             if session.depends_on.is_empty() {

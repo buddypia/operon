@@ -45099,10 +45099,11 @@ pub(crate) fn a_project_emptied_by_pinning_does_not_claim_it_has_no_sessions() {
     let (mut app, first, second) = app_with_two_sessions(&root);
     queue_both_sessions(&mut app, first, second);
     let texts = pinned_layout(&mut app, second);
+    // Every wording of the empty line begins so, with or without its 。.
     assert!(
         !texts
             .iter()
-            .any(|(text, _)| text == "セッションはまだありません"),
+            .any(|(text, _)| text.starts_with("セッションはまだありません")),
         "both sessions are on screen, pinned"
     );
     assert!(
@@ -45196,13 +45197,14 @@ fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
         "空のプロジェクトの下に「セッションを開始」ボタンが残っています"
     );
     let row = project_header_row(&texts, name);
-    if let Some((_, at)) = row.iter().find(|(text, _)| text == ICON_ADD) {
-        click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
-        });
-    }
+    let Some((_, at)) = row.iter().find(|(text, _)| text == ICON_ADD) else {
+        panic!("{name} の見出しに＋が描かれていません: {row:?}");
+    };
+    click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    });
     row.iter().map(|(text, _)| text.clone()).collect()
 }
 
@@ -45274,7 +45276,7 @@ pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
     assert!(
         !texts
             .iter()
-            .any(|(text, _)| text == "セッションはまだありません"),
+            .any(|(text, _)| text.starts_with("セッションはまだありません")),
         "空のプロジェクトがまだ「セッションはまだありません」と言っています"
     );
     assert_header_add_says_start(&mut app, "q");
@@ -45374,8 +45376,6 @@ pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
         1,
         "セッションのあるプロジェクトの見出しに＋がありません"
     );
-    // Read on the short path: the long one pushes this glyph off screen, as it
-    // did before the ＋ arrived.
     assert_eq!(
         full.iter().filter(|(text, _)| text == ICON_SHOW).count(),
         1,
@@ -45387,6 +45387,13 @@ pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
         count_glyph(&row, ICON_ADD),
         1,
         "「グリッド」の空のプロジェクトの見出しに＋がありません"
+    );
+    // Change 170: the long path truncates, so the glyph after it stays on
+    // screen.
+    assert_eq!(
+        count_glyph(&row, ICON_SHOW),
+        1,
+        "長いパスのプロジェクトで「プロジェクトを開く」が画面の外に出ています"
     );
     assert!(app.launch_sheet_open);
     assert_eq!(app.selected_project, Some(empty));
@@ -45402,6 +45409,171 @@ pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
             .iter()
             .any(|(text, _)| text == "一致するセッションはありません。"),
         "検索で隠れたプロジェクトが一致なしと言っていません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+// --- Change 170: the grid stays inside its view ---------------------------
+
+/// Every filled or stroked rectangle a frame painted, for reading where a
+/// group's border lies.
+fn painted_rects(output: &egui::FullOutput) -> Vec<egui::Rect> {
+    fn visit(shape: &egui::epaint::Shape, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::epaint::Shape::Rect(rect) => found.push(rect.rect),
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    visit(child, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        visit(&clipped.shape, &mut found);
+    }
+    found
+}
+
+#[test]
+/// Two sessions in a project and a later project with a long path, in the
+/// 「グリッド」 at the 900px screen the click tests use: both cards are painted
+/// in the history, and nothing the workspace paints ends past the screen's
+/// right edge. Each card used to take the rest of its row, so the second began
+/// past the edge and was not painted, and the history grew to 1120px.
+pub(crate) fn the_session_grid_keeps_every_card_inside_its_view() {
+    let root = temporary_directory("grid-inside-its-view");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    if let Some(project) = app.store.projects.iter_mut().find(|p| p.id == empty) {
+        project.path = root.join("a-worktree-with-a-long-name-".repeat(12));
+    }
+    // A title far wider than a card truncates inside it.
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.name == "second") {
+        session.name = format!("second{}", " and a title that keeps going".repeat(8));
+    }
+    // More cards than one row of the history holds, so some must wrap.
+    let first = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.name == "first")
+        .cloned()
+        .expect("the fixture has a session named first");
+    for name in ["third", "fourth", "fifth", "sixth"] {
+        app.store.sessions.push(Session {
+            id: Uuid::new_v4(),
+            name: name.to_owned(),
+            ..first.clone()
+        });
+    }
+    app.session_library_open = true;
+    app.session_view = SessionView::Grid;
+    let context = egui::Context::default();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    let output = context.run(input, &mut draw);
+    // The history is right of the session column; its own "p" header is the
+    // rightmost one painted.
+    let history_left = drawn_text_rects(&output, |text| text == "p")
+        .into_iter()
+        .map(|rect| rect.min.x)
+        .fold(f32::MIN, f32::max);
+    for title in ["first", "second", "third", "fourth", "fifth", "sixth"] {
+        assert!(
+            drawn_text_rects(&output, |text| text.starts_with(title))
+                .iter()
+                .any(|rect| rect.min.x > history_left),
+            "「グリッド」に {title} のカードが描かれていません"
+        );
+    }
+    // The first row of cards sits right under its header, as it did before
+    // the cards were bounded: a bounded card offered no height used to be
+    // centred in a 28px row and slip half of it down.
+    let p_name = drawn_text_rects(&output, |text| text == "p")
+        .into_iter()
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the project with sessions is drawn in the grid");
+    let first_title = drawn_text_rects(&output, |text| text == "first")
+        .into_iter()
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the first card is drawn in the grid");
+    let first_card = painted_rects(&output)
+        .into_iter()
+        .filter(|rect| {
+            rect.contains(first_title.center())
+                && rect.width() <= OperonApp::SESSION_GRID_CARD_WIDTH + 0.5
+        })
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the first card's frame is painted");
+    // Measured: 19px under the header when the card is offered the row's
+    // height, 28px when it is offered none and centred.
+    let gap = first_card.min.y - p_name.max.y;
+    assert!(
+        (0.0..24.0).contains(&gap),
+        "「グリッド」の最初のカードが見出しから離れています ({gap}px)"
+    );
+    // The cards that do not fit beside the first wrap onto a row below it.
+    let lowest_title = drawn_text_rects(&output, |text| {
+        ["third", "fourth", "fifth", "sixth"].contains(&text)
+    })
+    .into_iter()
+    .filter(|rect| rect.min.x > history_left)
+    .map(|rect| rect.min.y)
+    .fold(f32::MIN, f32::max);
+    assert!(
+        lowest_title > first_card.max.y,
+        "「グリッド」のカードが次の行へ折り返していません"
+    );
+    let long_title = drawn_text_rects(&output, |text| text.starts_with("second and"))
+        .into_iter()
+        .filter(|rect| rect.min.x > history_left)
+        .map(|rect| rect.width())
+        .fold(0.0, f32::max);
+    assert!(
+        long_title > 0.0 && long_title < OperonApp::SESSION_GRID_CARD_WIDTH,
+        "長いタイトルがカードの中で省略されていません (幅 {long_title})"
+    );
+    // The long-path project's 「プロジェクトを開く」 stays inside that project's
+    // own group, not merely on screen: the smallest painted rect around the
+    // project's name is its group's frame.
+    let q_name = drawn_text_rects(&output, |text| text == "q")
+        .into_iter()
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the long-path project is drawn in the grid");
+    let group = painted_rects(&output)
+        .into_iter()
+        .filter(|rect| rect.contains(q_name.center()) && rect.width() > q_name.width() * 4.0)
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the long-path project's group is painted");
+    let open_project = drawn_text_rects(&output, |text| text == ICON_SHOW)
+        .into_iter()
+        .filter(|rect| (rect.center().y - q_name.center().y).abs() < CONTROL_HEIGHT / 2.0)
+        .map(|rect| rect.max.x)
+        .fold(f32::MIN, f32::max);
+    assert!(
+        open_project > q_name.max.x && open_project <= group.max.x + 0.5,
+        "長いパスの「プロジェクトを開く」がグループの枠の外にあります ({open_project} > {})",
+        group.max.x
+    );
+    let past_the_edge: Vec<egui::Rect> = drawn_text_rects(&output, |_| true)
+        .into_iter()
+        .filter(|rect| rect.max.x > 900.5)
+        .collect();
+    assert!(
+        past_the_edge.is_empty(),
+        "画面の右端より外に描かれた文字があります: {past_the_edge:?}"
     );
     fs::remove_dir_all(&root).ok();
 }

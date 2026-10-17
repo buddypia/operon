@@ -40,8 +40,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -59,7 +59,7 @@ state:
 # the whole row wide, the second starts at the row's end with its 205px minimum,
 # and the history's scroll area grows to 1120px in a 900px view. Every later
 # project header is laid out in that widened area.
-resume: "Write the_session_grid_keeps_every_card_inside_its_view and the long-path ▭ check, watch them fail, then bound the cards and the header path."
+resume: "Done; the installed app is rebuilt by the session that lands this, and what outlives it is the three carried review points in review.yaml."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -78,12 +78,12 @@ resume: "Write the_session_grid_keeps_every_card_inside_its_view and the long-pa
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  failing-test-first: "machine pending the_session_grid_keeps_every_card_inside_its_view and the long-path ▭ check in an_empty_project_in_the_history_grid_starts_a_session fail before the fix"
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending src/app/screens.rs changes, so the installed app goes stale; the release after this lands is the coordinating session's"
-  named-tests: "machine pending cargo test --locked the_session_grid_keeps an_empty_project_in_the a_project_emptied_by_pinning every_"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  failing-test-first: "machine passed the_session_grid_keeps_every_card_inside_its_view fails on each pre-fix form mutations.py restores — cards unbounded, path untruncated, title untruncated"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted the closing commit (fmt, clippy, review gate)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
+  release-binary: "machine passed src/app/screens.rs changes, so the installed app goes stale; the release after this lands is the coordinating session's"
+  named-tests: "machine passed cargo test --locked the_session_grid_keeps an_empty_project_in_the a_project_emptied_by_pinning every_ — 87 passed"
+  guards-verified-by-mutation: "human passed mutations.py: 7 of 7 caught, including cards offered no height and cards that do not wrap"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
