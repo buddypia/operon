@@ -938,3 +938,21 @@ suite's language never follows the host's.
 **Guard.** `no_decision_reads_the_text_of_a_notice` (watched failing on the
 folder-drop check in `src/app.rs`); `detected_language` answers Japanese under
 `cfg(test)`, and CI is the run that would show the race.
+
+## 076 — A native runtime measured at the batch sizes that happened to work
+
+Change 157's Metal probe embedded 1, 2, 4, and 8 texts per call and every one
+matched the reference, so the runtime was called measured. The first run of
+`scripts/check-embedding-fidelity.sh` ended on a chunk of six and the process
+died in `GGML_ASSERT(ggml_can_mul_mat)`: llama.cpp 2a66703 aborts when a context
+reserves 3, 5, 6, or 7 sequences. With that fixed it died again at exit, in the
+Metal device's teardown assert, because the shared model was still loaded. An
+abort in C++ is not an `Err`; it takes the window with it. **The rule:** a
+native dependency is measured at every shape the code can hand it — sizes from
+the remainder of a chunked list included — and through process exit, not only
+at the shapes a probe chose.
+
+**Guard.** `the_llama_runtime_is_never_given_a_shape_it_aborts_on` (watched
+failing with `n_seq_max` set from the text count, and with the release after
+`run_native` removed) and `scripts/check-embedding-fidelity.sh`, whose 46 texts
+end on a chunk of six (watched failing: exit 134 twice, then 0).
