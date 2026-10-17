@@ -311,7 +311,7 @@ pub(crate) fn codex_app_server_restores_a_short_transcript_into_a_resumable_term
     if !tool_available("codex") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-codex-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("codex");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let source_path = root.join("source.jsonl");
@@ -369,12 +369,14 @@ pub(crate) fn codex_app_server_restores_a_short_transcript_into_a_resumable_term
         "the destination session must contain every source turn in order; restored={restored:?}"
     );
 
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-history-four",
+    );
+    remove_restored_codex_thread(&imported);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-history-four",
-        ),
+        visible,
         "normal codex resume did not render the restored conversation"
     );
     fs::remove_dir_all(root).unwrap();
@@ -389,7 +391,7 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_codex_t
     if !tool_available("codex") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-agy-source-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("agy-source");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let conversation_id = Uuid::new_v4().to_string();
@@ -433,12 +435,14 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_codex_t
         import_full_cli_history(&project, &source, "codex", &archive_root, Uuid::new_v4()).unwrap();
 
     assert_eq!(imported.imported_records, 4);
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-agy-source-four",
+    );
+    remove_restored_codex_thread(&imported);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-agy-source-four",
-        ),
+        visible,
         "normal codex resume did not render the restored Antigravity conversation"
     );
     fs::remove_dir_all(root).unwrap();
@@ -453,7 +457,7 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_antigravity_t
     if !tool_available(ANTIGRAVITY_COMMAND) || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-codex-source-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("codex-source");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let rollout = root.join("rollout.jsonl");
@@ -529,12 +533,14 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_antigravity_t
         ],
         "the source session's own setup must not become part of the restored conversation"
     );
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-codex-source-four",
+    );
+    remove_restored_conversation_file(&imported.native_session_path);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-codex-source-four",
-        ),
+        visible,
         "normal agy resume did not render the restored Codex conversation"
     );
     fs::remove_dir_all(root).unwrap();
@@ -549,7 +555,7 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_claude_termin
     if !tool_available("claude") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-claude-dest-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("claude-dest");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let rollout = root.join("rollout.jsonl");
@@ -633,7 +639,7 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_claude_
     if !tool_available("claude") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-agy-to-claude-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("agy-to-claude");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let conversation_id = Uuid::new_v4().to_string();
@@ -691,6 +697,38 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_claude_
     fs::remove_dir_all(root).unwrap();
 }
 
+/// A restore into Codex or Antigravity writes its conversation into the
+/// person's real store too; until change 168 every run left one there. The
+/// file goes with the `-wal` and `-shm` SQLite leaves beside it once `agy` has
+/// opened it, and nothing else: Antigravity's history index is appended to by
+/// every running `agy`, and rewriting it to drop a line could drop one of theirs.
+pub(crate) fn remove_restored_conversation_file(path: &Path) {
+    let report = |path: &Path, removed: std::io::Result<()>| match removed {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("could not remove {}: {error}", path.display());
+        }
+        _ => {}
+    };
+    report(path, fs::remove_file(path));
+    for sidecar in ["-wal", "-shm"] {
+        let mut beside = path.as_os_str().to_owned();
+        beside.push(sidecar);
+        let beside = PathBuf::from(beside);
+        report(&beside, fs::remove_file(&beside));
+    }
+}
+
+/// A Codex restore also leaves a row in Codex's thread index, which only
+/// Codex's own `thread/delete` takes out with the rollout.
+pub(crate) fn remove_restored_codex_thread(imported: &ImportedNativeSession) {
+    if let Some(thread) = imported.native_session_id.as_deref() {
+        if let Err(error) = delete_codex_thread(thread) {
+            eprintln!("could not delete Codex thread {thread}: {error}");
+        }
+    }
+    remove_restored_conversation_file(&imported.native_session_path);
+}
+
 /// A restored Claude Code conversation is written into the developer's real
 /// conversation store, so an end-to-end run takes it back out again.
 pub(crate) fn remove_restored_claude_conversation(path: &Path) {
@@ -709,7 +747,7 @@ pub(crate) fn antigravity_restore_writes_a_resumable_conversation_holding_the_so
     if !tool_available(ANTIGRAVITY_COMMAND) || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-antigravity-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("antigravity");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let source_path = root.join("source.jsonl");
@@ -798,15 +836,74 @@ pub(crate) fn antigravity_restore_writes_a_resumable_conversation_holding_the_so
         "the restored conversation must be listed in Antigravity's own history index"
     );
 
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-agy-history-four",
+    );
+    remove_restored_conversation_file(&imported.native_session_path);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-agy-history-four",
-        ),
+        visible,
         "normal agy resume did not render the restored conversation"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+/// Where a live restore test keeps its project: `/tmp`, not `temp_dir()`,
+/// which follows TMPDIR into whatever tree the caller set it to.
+pub(crate) fn live_restore_root(label: &str) -> PathBuf {
+    Path::new("/tmp").join(format!("operon-{label}-e2e-{}", Uuid::new_v4()))
+}
+
+/// The live tests' terminals start one agent CLI at a time. Started together,
+/// two `agy` lost a conversation written a moment earlier more often, and
+/// Claude Code ran past the 90 s wait under the load (change 168).
+static LIVE_TERMINAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Change 168. Claude Code reads the CLAUDE.md of every directory above the
+/// one it starts in, and stops on a dialog when that file imports anything
+/// outside it — which this repository's does. Claude Code's own TMPDIR lies
+/// inside this repository, so a live test run from Claude Code put its
+/// project under this CLAUDE.md and waited on the dialog until it timed out.
+#[test]
+pub(crate) fn a_live_restore_project_is_outside_every_project() {
+    let root = live_restore_root("probe");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .unwrap();
+    let base = root.parent().unwrap().canonicalize().unwrap();
+    assert!(
+        !base.starts_with(&repository),
+        "{} is inside {}",
+        base.display(),
+        repository.display()
+    );
+    let claimed = base
+        .ancestors()
+        .find(|directory| directory.join("CLAUDE.md").exists() || directory.join(".git").exists());
+    assert_eq!(claimed, None, "{} sits inside a project", base.display());
+
+    // And every live test takes its root from there: one that went back to
+    // `temp_dir()` would pass the check above and wait on the dialog again.
+    let source = include_str!("tests.rs");
+    let marker = concat!("#[ignore = ", "\"requires");
+    let live_tests = source.split(marker).skip(1).collect::<Vec<_>>();
+    assert!(
+        live_tests.len() >= 6,
+        "found {} live tests",
+        live_tests.len()
+    );
+    for test in live_tests {
+        let body = test.split_once("\n}\n").map_or(test, |cut| cut.0);
+        let name = body
+            .split_once("fn ")
+            .and_then(|(_, rest)| rest.split_once('('))
+            .map_or("?", |(name, _)| name);
+        assert!(
+            !body.contains("temp_dir()"),
+            "{name} keeps its project under temp_dir(); use live_restore_root"
+        );
+    }
 }
 
 /// Both restores are only finished when the destination CLI's own terminal
@@ -817,6 +914,10 @@ pub(crate) fn restored_conversation_is_visible_in_a_native_terminal(
     agent_command: &str,
     marker: &str,
 ) -> bool {
+    // A test that failed while holding it leaves nothing to protect.
+    let _one_at_a_time = LIVE_TERMINAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let tmux_name = format!("operon-e2e-{}", Uuid::new_v4().simple());
     // Launch exactly the way a managed session does, so anything that would
     // block a real restored terminal blocks this test too.
@@ -11347,6 +11448,46 @@ pub(crate) fn names_a_restored_session_after_its_conversation() {
         "operon のターミナル"
     );
 }
+/// The last request of a long conversation is often a one-word nudge typed in
+/// the person's own language — "계속", "続けて", "go on". Named after that, a
+/// restored session reads as a stray foreign word and says nothing about the
+/// work, so the source CLI's own title, when there is one, names it instead.
+#[test]
+pub(crate) fn a_restored_session_is_named_by_its_conversation_title_not_its_last_nudge() {
+    let source = CliSession {
+        provider: CliProvider::Gemini,
+        native_id: "f5dfbf48-41c9-4f51-94aa-928efe547bb1".into(),
+        id: "f5dfbf48-41c9-4f51-94aa-928efe547bb1".into(),
+        title: Some("インタラクションのあるデザインも作って".into()),
+        last_user_message: Some("계속".into()),
+        branch: None,
+        updated_at: 0,
+        path: PathBuf::from("/tmp/operon-restore-nudge.jsonl"),
+    };
+    assert_eq!(
+        restored_session_name(&source),
+        "インタラクションのあるデザインも作って"
+    );
+
+    // With the title first, a stand-in title would beat the real request: an
+    // Antigravity conversation the history never named lists with no title.
+    let conversation = "c7f2a1d0-1111-4222-8333-944445555666";
+    let listed = antigravity_cli_sessions(
+        Path::new("/nonexistent/operon-agy-store"),
+        Path::new("/nonexistent/operon-agy-history.jsonl"),
+        HashMap::from([(conversation.to_owned(), (0, None))]),
+        10,
+    );
+    let [untitled] = listed.as_slice() else {
+        panic!("one conversation in, one listed: {listed:?}");
+    };
+    assert_eq!(untitled.title, None);
+    let restored = CliSession {
+        last_user_message: Some("ログイン画面を直して".into()),
+        ..untitled.clone()
+    };
+    assert_eq!(restored_session_name(&restored), "ログイン画面を直して");
+}
 
 /// Records saved before titles carried the work cannot be rewritten — the
 /// name is the user's own data — so they are read rather than displayed
@@ -12869,135 +13010,6 @@ pub(crate) fn zero_match_transcript_search_obeys_shared_byte_and_line_budgets() 
     assert!(scan.scanned_files <= 1);
     assert!(scan.scanned_bytes <= byte_limit);
     assert!(scan.scanned_lines <= 1);
-    fs::remove_dir_all(root).unwrap();
-}
-#[test]
-pub(crate) fn in_process_similarity_and_ranking_handles_edge_cases() {
-    let query_words = vec!["auth".to_string(), "token".to_string()];
-    let score_high = compute_in_process_similarity(&query_words, "auth service token fixes");
-    let score_none = compute_in_process_similarity(&query_words, "gardening hydroponic tomatoes");
-    assert!(score_high >= SEMANTIC_HIGH_CONFIDENCE);
-    assert!(score_none < SEMANTIC_NOISE_FLOOR);
-}
-#[test]
-pub(crate) fn rank_transcripts_in_process_handles_edge_cases() {
-    let mut empty: Vec<TranscriptMatch> = Vec::new();
-    assert!(!rank_transcripts_in_process("query", &mut empty));
-
-    let mut single = vec![TranscriptMatch {
-        provider: "Claude".into(),
-        session_id: "s1".into(),
-        title: Some("Title".into()),
-        path: PathBuf::from("/tmp/test.jsonl"),
-        snippet: "Snippet".into(),
-        score: None,
-    }];
-    assert!(!rank_transcripts_in_process("query", &mut single));
-    assert_eq!(single.len(), 1);
-}
-#[test]
-pub(crate) fn embedded_model_cache_lifecycle_and_state() {
-    let _ = delete_embedded_model_cache();
-    assert!(!is_embedded_model_cached());
-
-    let _ = mark_embedded_model_ready(1024 * 1024);
-    assert!(is_embedded_model_cached());
-
-    let _ = delete_embedded_model_cache();
-    assert!(!is_embedded_model_cached());
-}
-#[test]
-pub(crate) fn in_process_semantic_search_ranks_or_falls_back() {
-    let root = std::env::temp_dir().join(format!("operon-semantic-test-{}", Uuid::new_v4()));
-    fs::create_dir_all(&root).unwrap();
-    let auth_file = root.join("auth.jsonl");
-    let ui_file = root.join("ui.jsonl");
-
-    // File 1: about authentication & jwt tokens
-    fs::write(
-        &auth_file,
-        "{\"type\":\"ai-title\",\"aiTitle\":\"Auth service fixes\"}\n{\"type\":\"assistant\",\"message\":{\"content\":\"We resolved token validation errors and jwt refresh issues in the backend.\"}}\n",
-    )
-    .unwrap();
-
-    // File 2: about user interface styling
-    fs::write(
-        &ui_file,
-        "{\"type\":\"ai-title\",\"aiTitle\":\"UI button styles\"}\n{\"type\":\"assistant\",\"message\":{\"content\":\"Updated color palette and rounded corners on primary action buttons.\"}}\n",
-    )
-    .unwrap();
-
-    let roots = vec![("Claude".to_owned(), root.clone(), 1)];
-    let limits = TranscriptSearchLimits {
-        visited_entries: 10,
-        candidates: 10,
-        bytes: 100_000,
-        lines: 100,
-    };
-
-    // 1. Verbatim exact keyword search works in Keyword mode
-    let exact_scan = search_local_transcripts_in_with_mode(
-        &roots,
-        &HashMap::new(),
-        "palette",
-        10,
-        limits,
-        SearchEngineMode::Keyword,
-    );
-    assert_eq!(exact_scan.matches.len(), 1);
-    assert_eq!(exact_scan.matches[0].session_id, "ui");
-    assert!(exact_scan.matches[0].score.is_none());
-
-    // 2. Keyword mode returns 0 for conceptual query
-    let keyword_miss_scan = search_local_transcripts_in_with_mode(
-        &roots,
-        &HashMap::new(),
-        "authentication token",
-        10,
-        limits,
-        SearchEngineMode::Keyword,
-    );
-    assert!(keyword_miss_scan.matches.is_empty());
-
-    // 3. EmbeddedGemma2 mode with cached model finds semantic match
-    let _ = mark_embedded_model_ready(248 * 1024 * 1024);
-    let semantic_scan = search_local_transcripts_in_with_mode(
-        &roots,
-        &HashMap::new(),
-        "authentication token",
-        10,
-        limits,
-        SearchEngineMode::EmbeddedGemma2,
-    );
-    assert!(!semantic_scan.matches.is_empty());
-    assert_eq!(semantic_scan.matches[0].session_id, "auth");
-    assert!(semantic_scan.matches[0].score.is_some());
-
-    // 3b. Adaptive threshold admits "login credentials"
-    let creds_scan = search_local_transcripts_in_with_mode(
-        &roots,
-        &HashMap::new(),
-        "login credentials",
-        10,
-        limits,
-        SearchEngineMode::EmbeddedGemma2,
-    );
-    assert!(!creds_scan.matches.is_empty());
-    assert_eq!(creds_scan.matches[0].session_id, "auth");
-    assert!(creds_scan.matches[0].score.unwrap() >= 0.65);
-
-    // 4. Completely unrelated query does not match anything (filtered by threshold)
-    let unrelated_scan = search_local_transcripts_in_with_mode(
-        &roots,
-        &HashMap::new(),
-        "gardening hydroponic tomatoes",
-        10,
-        limits,
-        SearchEngineMode::EmbeddedGemma2,
-    );
-    assert!(unrelated_scan.matches.is_empty());
-
-    let _ = delete_embedded_model_cache();
     fs::remove_dir_all(root).unwrap();
 }
 #[test]
@@ -24401,14 +24413,151 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         comparisons == 1,
         "記録された digest との比較が {comparisons} 箇所あります — 新しさを決める比較は一つです"
     );
+    // Change 169: each digest is assigned once. A second assignment after the
+    // pinned line leaves every pin above green and decides what is compared.
+    for name in ["digest", "legacy_digest"] {
+        let assigning: Vec<&str> = code
+            .iter()
+            .copied()
+            .filter(|line| shell_line_assigns(line, name))
+            .collect();
+        assert!(
+            assigning.len() == 1,
+            "{name} を代入する行が {} 行あります — 一行だけのはずです:\n{}",
+            assigning.len(),
+            assigning.join("\n")
+        );
+    }
+}
+
+#[test]
+/// The assignment count above sees every form a second assignment can take,
+/// and none of the gate's reads.
+pub(crate) fn the_digest_assignment_count_sees_every_form() {
+    for (line, assigns) in [
+        ("digest=$(true)", true),
+        ("[ -n \"${X:-}\" ] && digest=x", true),
+        ("then digest=x", true),
+        ("export digest=x", true),
+        ("digest+=x", true),
+        ("read -r digest <<< x", true),
+        ("printf -v digest '%s' x", true),
+        ("local digest", true),
+        ("for digest in a b; do :; done", true),
+        ("recorded_digest=$(true)", false),
+        ("legacy_digest=$(true)", false),
+        ("if [ \"$digest\" = \"$empty_digest\" ]; then", false),
+        ("echo \"${digest}\"", false),
+    ] {
+        assert_eq!(
+            shell_line_assigns(line, "digest"),
+            assigns,
+            "{line} の判定が違います"
+        );
+    }
+}
+
+/// A `sed` for the review gate's `PATH` that breaks only the normalising call
+/// — the one whose expression names `@@` — and defers to the real one for
+/// every other, so the rest of the gate runs as it does on a healthy machine.
+fn review_gate_sed_shim(f: &ReviewGateFixture, broken: &str) -> String {
+    let dir = f.root.join("shim");
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("sed");
+    fs::write(
+        &script,
+        format!("#!/bin/bash\ncase \"$*\" in *@@*) {broken} ;; esac\nexec /usr/bin/sed \"$@\"\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+#[test]
+/// When the step that normalises the diff fails or prints nothing, the gate
+/// stops as it does when `git diff` fails, instead of hashing empty input —
+/// whose digest a record could carry and stay fresh for every diff.
+pub(crate) fn the_review_gate_stops_when_normalizing_the_diff_fails() {
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    // sha256 of empty input, which a normaliser that printed nothing yields.
+    let empty = "e3b0c44298fc1c14";
+    for (mode, broken) in [
+        ("fails", "exit 1"),
+        ("prints nothing", "cat >/dev/null; exit 0"),
+    ] {
+        let f = ReviewGateFixture::new();
+        f.append("src/store.rs", "// change\n");
+        f.append(
+            "docs/sdlc/changes/900-fixture/state.yaml",
+            "resume: \"x\"\n",
+        );
+        f.record(empty, all);
+        f.git(&["add", "-A"]);
+        let path = review_gate_sed_shim(&f, broken);
+        let (code, printed) = f.gate_in_env("--index", &[], &[("PATH", &path)]);
+        assert_eq!(
+            code,
+            Some(2),
+            "sed が{mode}のにゲートが止まりません:\n{printed}"
+        );
+        assert!(
+            printed.contains("the current diff could not be normalized"),
+            "sed が{mode}ときの理由が出ません:\n{printed}"
+        );
+        assert!(
+            !printed.contains("SHIP"),
+            "sed が{mode}のに空の digest の記録が通りました:\n{printed}"
+        );
+    }
 }
 
 /// The digest the review gate binds a verdict to (change 162): the diff with
 /// hunk line numbers and blob ids removed, under `LC_ALL=C` so a byte that is
-/// not UTF-8 cannot end what is hashed.
-const REVIEW_DIGEST_LINE: &str = "digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\\.\\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16)";
+/// not UTF-8 cannot end what is hashed. A pipeline that fails stops the gate
+/// (change 169): under `pipefail` the substitution carries its status.
+const REVIEW_DIGEST_LINE: &str = "digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\\.\\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16) || { echo \"the current diff could not be normalized; is sed working?\"; exit 2; }";
 /// The digest as taken before change 162, still accepted.
-const REVIEW_LEGACY_DIGEST_LINE: &str = "legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16)";
+const REVIEW_LEGACY_DIGEST_LINE: &str = "legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16) || { echo \"the current diff could not be hashed\"; exit 2; }";
+
+/// Whether one line of shell code assigns `name` (change 169): `name=` or
+/// `name+=` anywhere, not preceded by a character a longer name could end in —
+/// so `[ c ] && digest=x` and `export digest=x` count, `recorded_digest=` does
+/// not — or `name` as the target of `read`, `mapfile`, `declare` and its
+/// kin, `for … in`, or `printf -v`, within the same command.
+fn shell_line_assigns(line: &str, name: &str) -> bool {
+    let line = line.trim();
+    let mut from = 0;
+    while let Some(at) = line[from..].find(name) {
+        let start = from + at;
+        let end = start + name.len();
+        let continues_a_name = line[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        let rest = &line[end..];
+        if !continues_a_name && (rest.starts_with('=') || rest.starts_with("+=")) {
+            return true;
+        }
+        from = end;
+    }
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.iter().enumerate().any(|(i, word)| {
+        let command = words[i + 1..]
+            .iter()
+            .take_while(|w| !matches!(**w, "|" | "&&" | "||" | ";" | "do"));
+        match *word {
+            "read" | "mapfile" | "readarray" | "declare" | "local" | "typeset" | "for" => {
+                command.into_iter().any(|w| w.trim_end_matches(';') == name)
+            }
+            "printf" => words.get(i + 1) == Some(&"-v") && words.get(i + 2) == Some(&name),
+            _ => false,
+        }
+    })
+}
 /// The one comparison, accepting those two and nothing else.
 const REVIEW_DIGEST_COMPARISON_LINE: &str =
     "&& [ \"$recorded_digest\" != \"$digest\" ] && [ \"$recorded_digest\" != \"$legacy_digest\" ]; then";
@@ -24942,6 +25091,199 @@ pub(crate) fn every_translation_keeps_the_placeholder_names_of_its_message_id() 
             );
         }
     }
+}
+
+/// The tables agreeing with each other says nothing about the code: a message
+/// written with `tr`/`tf!` that no table has a row for is shown in Japanese on
+/// an English or Korean screen, and every other check stays green. So every
+/// literal message id in the source has its row (change 165).
+#[test]
+pub(crate) fn every_message_the_code_shows_has_a_row_in_every_table() {
+    fn literal_after(text: &str, start: usize) -> Option<String> {
+        let rest = text[start..].trim_start();
+        let mut chars = rest.strip_prefix('"')?.chars();
+        let mut value = String::new();
+        loop {
+            match chars.next()? {
+                '"' => return Some(value),
+                '\\' => match chars.next()? {
+                    'n' => value.push('\n'),
+                    't' => value.push('\t'),
+                    '\n' => {
+                        // A line continuation drops the newline and the
+                        // indentation that follows it, as rustc does.
+                        let tail: String = chars.clone().collect();
+                        let skipped = tail.len() - tail.trim_start().len();
+                        chars = rest[rest.len() - tail.len() + skipped..].chars();
+                    }
+                    other => value.push(other),
+                },
+                other => value.push(other),
+            }
+        }
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![root.clone()];
+    let mut sources = Vec::new();
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(&path).unwrap() {
+                files.push(entry.unwrap().path());
+            }
+        } else if path.extension().is_some_and(|extension| extension == "rs")
+            && !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("tests.rs" | "i18n_tables.rs")
+            )
+        {
+            sources.push(path);
+        }
+    }
+    // A `tr` that takes a field rather than a literal reads its id out of a
+    // table; those tables are checked below, and a call taking anything not
+    // named here fails until its table is added (review of 165).
+    const INDIRECT_ARGUMENTS: &[&str] = &[
+        "flag.label",
+        "flag.detail",
+        "conflict.label",
+        "action.label",
+        "action_label(",
+        "kind.label()",
+        "group.message_id()",
+        "group.hint_id()",
+        "$template",
+        "CUSTOM_AGENT_LABEL",
+    ];
+    let catalog: std::collections::BTreeSet<&'static str> = catalog_keys().collect();
+    let mut missing = std::collections::BTreeSet::new();
+    let mut unknown_indirect = Vec::new();
+    let mut seen = 0usize;
+    for path in sources {
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
+        let text = fs::read_to_string(&path).unwrap();
+        for opener in ["tr(", "tf!("] {
+            for (at, _) in text.match_indices(opener) {
+                let boundary = text[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|before| !(before.is_alphanumeric() || before == '_'));
+                let line_start = text[..at].rfind('\n').map_or(0, |index| index + 1);
+                let comment = text[line_start..at].trim_start().starts_with("//");
+                if !boundary || comment {
+                    continue;
+                }
+                let argument = text[at + opener.len()..].trim_start();
+                let Some(id) = literal_after(&text, at + opener.len()) else {
+                    // The definition `fn tr(message: …)` is not a call. A
+                    // covered argument is matched as a whole word, so
+                    // `flag.label_extra` is not taken for `flag.label`; a raw
+                    // string matches nothing and is refused here too.
+                    let covered = INDIRECT_ARGUMENTS.iter().any(|known| {
+                        argument.strip_prefix(known).is_some_and(|rest| {
+                            known.ends_with('(')
+                                || !rest
+                                    .starts_with(|next: char| next.is_alphanumeric() || next == '_')
+                        })
+                    });
+                    if !argument.starts_with("message:") && !covered {
+                        unknown_indirect.push(format!(
+                            "{file}: {}",
+                            argument.lines().next().unwrap_or_default()
+                        ));
+                    }
+                    continue;
+                };
+                seen += 1;
+                if !catalog.contains(id.as_str()) {
+                    missing.insert(format!("{file}: {id}"));
+                }
+            }
+        }
+    }
+    assert!(seen > 900, "tr/tf! の呼び出しを読めていません ({seen} 件)");
+    assert!(
+        unknown_indirect.is_empty(),
+        "表を確かめていない間接の tr/tf! 呼び出しがあります。INDIRECT_ARGUMENTS とその表の検査を足してください:\n{}",
+        unknown_indirect.join("\n")
+    );
+    let indirect = CODEX_FLAGS
+        .iter()
+        .chain(CLAUDE_FLAGS)
+        .chain(ANTIGRAVITY_FLAGS)
+        .flat_map(|flag| [("agents.rs", flag.label), ("agents.rs", flag.detail)])
+        .chain(
+            KEYMAP_ACTIONS
+                .iter()
+                .map(|action| ("keymap.rs", action.label)),
+        )
+        .chain(
+            SessionStatusKind::ALL
+                .iter()
+                .map(|kind| ("widgets.rs", kind.label())),
+        )
+        .chain([("agents.rs", CUSTOM_AGENT_LABEL)])
+        .chain(SessionStatusGroup::GROUPS.iter().flat_map(|group| {
+            [
+                ("widgets.rs", group.message_id()),
+                ("widgets.rs", group.hint_id()),
+            ]
+        }));
+    for (file, id) in indirect {
+        if !catalog.contains(id) {
+            missing.insert(format!("{file}: {id}"));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "翻訳表に行のないメッセージが {} 件あります:\n{}",
+        missing.len(),
+        missing.into_iter().collect::<Vec<_>>().join("\n")
+    );
+}
+
+/// A notice is translated text, so code that decides something by reading it
+/// decides differently on an English or Korean screen: dropping folders lost
+/// the save error that way once its message gained rows (change 165). What
+/// happened travels as a value; the notice is only what a person reads.
+#[test]
+pub(crate) fn no_decision_reads_the_text_of_a_notice() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![root];
+    let mut found = Vec::new();
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(&path).unwrap() {
+                files.push(entry.unwrap().path());
+            }
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs")
+            || path.file_name().is_some_and(|name| name == "tests.rs")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        for (number, line) in text.lines().enumerate() {
+            let reads = ["starts_with(", "contains(", "ends_with(", "strip_prefix("]
+                .iter()
+                .any(|method| line.contains(&format!("notice.{method}")))
+                || line.contains("notice ==")
+                || line.contains("== notice");
+            if reads {
+                found.push(format!(
+                    "{}:{}: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    number + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "通知の文面で分岐しているコードがあります:\n{}",
+        found.join("\n")
+    );
 }
 
 /// Japanese owns no table: the message id is the copy. `translation_for` says
@@ -41696,6 +42038,24 @@ pub(crate) fn session_list_title_prefers_the_first_prompt_over_the_launch_fallba
         session_list_title(&session, Some("別の依頼")),
         session_title(&session)
     );
+
+    // The fallback name was written in the language the screen had then, so
+    // a custom command's "Another command" is still the fallback once the
+    // screen reads Japanese (change 165).
+    session.agent = "custom".into();
+    session.goal = String::new();
+    for written in [
+        CUSTOM_AGENT_LABEL,
+        translation_for(Language::En, CUSTOM_AGENT_LABEL).unwrap(),
+        translation_for(Language::Ko, CUSTOM_AGENT_LABEL).unwrap(),
+    ] {
+        session.name = format!("example-webshop · {written}");
+        assert_eq!(
+            session_list_title(&session, Some("ログインを直す")),
+            "ログインを直す",
+            "{written}"
+        );
+    }
 }
 
 /// Change 088: only the stop of a running session whose agent is idle loses
@@ -42734,7 +43094,8 @@ fn seed_tab_caches(app: &mut OperonApp, project: &Project, root: &Path) {
 }
 
 /// Change 093: six tabs, named for what they hold. スキル and ルール are one
-/// tab; Git is 変更 and エディタ is ファイル.
+/// tab; Git is 変更 and エディタ is ファイル. Change 157 adds ナレッジ last, a
+/// seventh; the name stays because change 093's spec cites it.
 #[test]
 pub(crate) fn the_project_page_has_six_tabs() {
     let labels: Vec<&str> = ProjectTab::all()
@@ -42750,6 +43111,7 @@ pub(crate) fn the_project_page_has_six_tabs() {
             "PR",
             tr("ファイル"),
             tr("エージェント設定"),
+            tr("ナレッジ"),
         ]
     );
 }
@@ -45193,34 +45555,117 @@ fn workspace_texts_at_click_size(
     text_positions(&context.run(input, &mut draw))
 }
 
-/// Clicks the rightmost 「セッションを開始」 the workspace paints — with the
-/// history open, that is the one in the history rather than the session
-/// column. The painted label is the add glyph, two spaces, then the word.
-/// Returns how many were drawn, so a test of the history can tell its own
-/// from the column's.
-fn click_start_session(app: &mut OperonApp) -> usize {
+// --- Change 166: one ＋ per project header starts a session ----------------
+
+/// What is painted on the header row of the rightmost project named `name`,
+/// right of the name — with the history open, the history's copy rather than
+/// the session column's.
+fn project_header_row<'a>(
+    texts: &'a [(String, egui::Pos2)],
+    name: &str,
+) -> Vec<&'a (String, egui::Pos2)> {
+    let Some(header) = texts
+        .iter()
+        .filter(|(text, _)| text == name)
+        .map(|(_, pos)| *pos)
+        .max_by(|a, b| a.x.total_cmp(&b.x))
+    else {
+        return Vec::new();
+    };
+    texts
+        .iter()
+        .filter(|(_, pos)| {
+            pos.x > header.x && (pos.y - header.y).abs() < CONTROL_HEIGHT_SMALL / 2.0
+        })
+        .collect()
+}
+
+/// Asserts no framed 「＋ セッションを開始」 is painted anywhere, then clicks the
+/// ＋ on the header of the rightmost project named `name`. Returns the texts
+/// on that header row, so a test can say what else sits beside the ＋.
+fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
     let context = egui::Context::default();
     let texts = workspace_texts_at_click_size(app, &context);
-    let starts: Vec<egui::Pos2> = texts
+    // The framed button painted its glyph, two spaces, then the word; the
+    // header ＋ paints the glyph alone and says the word only on hover.
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text.ends_with("セッションを開始")),
+        "空のプロジェクトの下に「セッションを開始」ボタンが残っています"
+    );
+    let row = project_header_row(&texts, name);
+    if let Some((_, at)) = row.iter().find(|(text, _)| text == ICON_ADD) {
+        click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        });
+    }
+    row.iter().map(|(text, _)| text.clone()).collect()
+}
+
+/// The texts painted while the pointer rests on the ＋ of the rightmost
+/// project named `name` — its hover text among them, since the ＋ says what it
+/// does only there.
+fn header_add_hover_texts(app: &mut OperonApp, name: &str) -> Vec<String> {
+    let context = egui::Context::default();
+    context.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let texts = workspace_texts_at_click_size(app, &context);
+    let Some(at) = project_header_row(&texts, name)
         .iter()
-        .filter(|(text, _)| text.ends_with("セッションを開始"))
-        .map(|(_, pos)| *pos)
-        .collect();
-    let Some(at) = starts.iter().copied().max_by(|a, b| a.x.total_cmp(&b.x)) else {
-        return 0;
+        .find(|(text, _)| text == ICON_ADD)
+        .map(|(_, pos)| *pos + egui::vec2(4.0, 4.0))
+    else {
+        return Vec::new();
     };
-    click_at(&context, at + egui::vec2(4.0, 4.0), |ctx| {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events: vec![egui::Event::PointerMoved(at)],
+        ..Default::default()
+    };
+    let mut draw = |ctx: &egui::Context| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| app.ui_terminal_workspace(ui));
-    });
-    starts.len()
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    let _ = context.run(input.clone(), &mut draw);
+    text_positions(&context.run(input, &mut draw))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect()
+}
+
+/// The ＋ on `name`'s header says, on hover, that it starts a session — and
+/// not that it opens the project, which the glyph it replaced in
+/// 「プロジェクト別」 said.
+fn assert_header_add_says_start(app: &mut OperonApp, name: &str) {
+    let hover = header_add_hover_texts(app, name);
+    assert!(
+        hover.iter().any(|text| text == "セッションを開始"),
+        "＋に指を置いても「セッションを開始」と出ません"
+    );
+    assert!(
+        !hover.iter().any(|text| text == "プロジェクトを開く"),
+        "＋が「プロジェクトを開く」と名乗っています"
+    );
+}
+
+/// How many times `glyph` is painted in a header row.
+fn count_glyph(row: &[String], glyph: &str) -> usize {
+    row.iter().filter(|text| *text == glyph).count()
 }
 
 #[test]
-/// Where an empty project's sessions would be, the column offers the first
-/// one instead of saying there is none, and the click opens the launch sheet
-/// for that project.
+/// An empty project in the column is its header line alone, and the one ＋ at
+/// the end of it opens the launch sheet for that project.
 pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
     let root = temporary_directory("empty-project-column");
     let (mut app, empty) = app_with_an_empty_second_project(&root);
@@ -45231,10 +45676,12 @@ pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
             .any(|(text, _)| text == "セッションはまだありません"),
         "空のプロジェクトがまだ「セッションはまだありません」と言っています"
     );
+    assert_header_add_says_start(&mut app, "q");
+    let row = click_header_add(&mut app, "q");
     assert_eq!(
-        click_start_session(&mut app),
+        count_glyph(&row, ICON_ADD),
         1,
-        "空のプロジェクトに「セッションを開始」がありません"
+        "空のプロジェクトの見出しに＋がありません"
     );
     assert!(app.launch_sheet_open, "押しても起動シートが開きません");
     assert_eq!(app.selected_project, Some(empty));
@@ -45255,18 +45702,32 @@ pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
 }
 
 #[test]
-/// The history's 「プロジェクト別」 view offers the same start under an empty
-/// project, and under a search says the project has no match instead.
+/// The history's 「プロジェクト別」 view puts the same one ＋ on every project's
+/// header, in place of the glyph that read 「プロジェクトを開く」 and opened the
+/// sheet anyway, and under a search says the project has no match.
 pub(crate) fn an_empty_project_in_the_history_list_starts_a_session() {
     let root = temporary_directory("empty-project-history-list");
     let (mut app, empty) = app_with_an_empty_second_project(&root);
     app.session_library_open = true;
     app.session_view = SessionView::List;
-    // One in the session column beside it, one in the history.
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    let full = project_header_row(&texts, "p");
     assert_eq!(
-        click_start_session(&mut app),
-        2,
-        "「プロジェクト別」の空のプロジェクトに「セッションを開始」がありません"
+        full.iter().filter(|(text, _)| text == ICON_ADD).count(),
+        1,
+        "セッションのあるプロジェクトの見出しに＋がありません"
+    );
+    assert_header_add_says_start(&mut app, "q");
+    let row = click_header_add(&mut app, "q");
+    assert_eq!(
+        count_glyph(&row, ICON_ADD),
+        1,
+        "「プロジェクト別」の空のプロジェクトの見出しに＋がありません"
+    );
+    assert_eq!(
+        count_glyph(&row, ICON_SHOW),
+        0,
+        "「プロジェクトを開く」が＋と並んで残っています"
     );
     assert!(app.launch_sheet_open);
     assert_eq!(app.selected_project, Some(empty));
@@ -45293,17 +45754,38 @@ pub(crate) fn an_empty_project_in_the_history_list_starts_a_session() {
 }
 
 #[test]
-/// The history's 「グリッド」 view offers the same start under an empty project,
-/// and keeps its no-match line under a search.
+/// The history's 「グリッド」 view puts the same one ＋ on every project's
+/// header, beside the glyph that opens the project page, and keeps its
+/// no-match line under a search. The empty project's path is far wider than
+/// the view, so a ＋ laid out after it would not be on screen to click.
 pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
     let root = temporary_directory("empty-project-history-grid");
     let (mut app, empty) = app_with_an_empty_second_project(&root);
+    if let Some(project) = app.store.projects.iter_mut().find(|p| p.id == empty) {
+        project.path = root.join("a-worktree-with-a-long-name-".repeat(12));
+    }
     app.session_library_open = true;
     app.session_view = SessionView::Grid;
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    let full = project_header_row(&texts, "p");
     assert_eq!(
-        click_start_session(&mut app),
-        2,
-        "「グリッド」の空のプロジェクトに「セッションを開始」がありません"
+        full.iter().filter(|(text, _)| text == ICON_ADD).count(),
+        1,
+        "セッションのあるプロジェクトの見出しに＋がありません"
+    );
+    // Read on the short path: the long one pushes this glyph off screen, as it
+    // did before the ＋ arrived.
+    assert_eq!(
+        full.iter().filter(|(text, _)| text == ICON_SHOW).count(),
+        1,
+        "「グリッド」の「プロジェクトを開く」が消えています"
+    );
+    assert_header_add_says_start(&mut app, "q");
+    let row = click_header_add(&mut app, "q");
+    assert_eq!(
+        count_glyph(&row, ICON_ADD),
+        1,
+        "「グリッド」の空のプロジェクトの見出しに＋がありません"
     );
     assert!(app.launch_sheet_open);
     assert_eq!(app.selected_project, Some(empty));
@@ -46959,4 +47441,2034 @@ pub(crate) fn typed_launch_arguments_too_long_are_refused_and_never_saved() {
     assert_eq!(loaded.agents["claude"].extra_args, "");
     assert!(app.launch_input_error().is_some());
     fs::remove_dir_all(temp).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Change 157: the knowledge base. Ranking and search run on the golden
+// EmbeddingGemma 2 vectors in tests/fixtures/embedding-golden.json; texts the
+// fixture does not hold (an index line, a run's bookkeeping) get a stable
+// stand-in vector from `KnowledgeTestEmbedder`, which is only ever used where
+// the assertion is not about meaning.
+
+const HELD_OUT_KEEP: [&str; 5] = [
+    "なぜ Codex の再開が失敗するの？\n\nsession_index.jsonl のタイトルを id として渡していたのが原因です。rollout ファイル名から UUID を取り出して `codex resume <uuid>` に渡すように直しました。",
+    "What timeout should the judge call use?\n\n120 seconds. Claude Code in print mode can take over a minute on a long prompt, and anything longer blocks the next run; a timeout counts as a pause so nothing is lost.",
+    "ポートの一覧が空になる\n\nlsof の出力が -F 形式でないと解析できません。`lsof -nP -iTCP -sTCP:LISTEN -F pcn` を使うようにしました。macOS の lsof は -F の順序が固定です。",
+    "How do we keep a second Operon from corrupting the store?\n\nThe app takes an exclusive flock on the data directory at startup; a second instance fails to acquire it and shows a dialog instead of opening the store.",
+    "フォントが崩れる原因は？\n\negui が日本語のグリフを SF と Hiragino で混ぜていたためです。プロポーショナルの font chain を Sarasa UI J だけにして、ベースラインのずれを直しました。",
+];
+
+const HELD_OUT_DROP: [&str; 5] = [
+    "了解です\n\nはい、それでは次の作業に移ります。何か問題があれば教えてください。進めてよければ続けます。",
+    "Show me the diff\n\nHere is the diff of the working tree: 3 files changed, 12 insertions(+), 4 deletions(-). Let me know if you want me to commit it.",
+    "まだ？\n\nまだ実行中です。もう少し待ってください。終わったらお知らせします。今ビルドの途中で、あと1分ほどかかりそうです。",
+    "Thanks, that's all for today\n\nYou're welcome! Have a great day, and feel free to come back whenever you need help with anything else.",
+    "もう一度やって\n\nもう一度実行しました。結果は前回と同じでした。別の方法を試してみますか？それとも、このまま続けますか？",
+];
+
+/// `(title, body)` of the golden entries.
+const ENTRY_RETRY: (&str, &str) = (
+    "tmux の再起動は3回まで",
+    "tmux セッションが即座に落ちる場合に無限に再起動しないよう、再試行は3回で打ち切る。",
+);
+const ENTRY_RESTORE: (&str, &str) = (
+    "復元で最初のターンが消える原因",
+    "header 行を session_meta として捨てていたため。TRANSCRIPT_VOCABULARY に分類を追加して直した。",
+);
+const ENTRY_RELEASE: (&str, &str) = (
+    "リリース手順",
+    "package-macos.sh で dist を作り、replace-macos-bundle.sh で /Applications を置き換える。",
+);
+const ENTRY_WORDS: (&str, &str) = (
+    "方法と入れ替えの用語",
+    "このドキュメントでの「方法」と「入れ替え」は用語集の定義に従う。",
+);
+const ENTRY_RETRY_PARAPHRASE: (&str, &str) = (
+    "tmux の retry 上限",
+    "tmux セッションの retry 上限は 3 回にした。無限に再起動するのを防ぐため。",
+);
+
+/// Golden vectors where the fixture has them, a stable stand-in elsewhere, and
+/// a count of every text it was asked for.
+struct KnowledgeTestEmbedder {
+    golden: FixtureEmbedder,
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl KnowledgeTestEmbedder {
+    fn new() -> Self {
+        Self {
+            golden: FixtureEmbedder::golden(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn embedded(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+impl Embedder for KnowledgeTestEmbedder {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.calls.fetch_add(texts.len(), Ordering::SeqCst);
+        Ok(texts
+            .iter()
+            .map(|text| {
+                self.golden.vectors.get(text).cloned().unwrap_or_else(|| {
+                    // A unit vector from the text's bytes: stable, and far from
+                    // every other text's.
+                    let digest = sha256_hex(text.as_bytes());
+                    let seed: Vec<f32> = digest
+                        .bytes()
+                        .cycle()
+                        .take(EMBEDDING_DIMENSIONS)
+                        .enumerate()
+                        .map(|(index, byte)| ((byte as f32) * (index as f32 + 1.0)).sin())
+                        .collect();
+                    normalised(&seed)
+                })
+            })
+            .collect())
+    }
+}
+
+/// A judge that answers from a queue and remembers what it was asked.
+struct RecordingJudge {
+    answers: std::sync::Mutex<VecDeque<JudgeOutcome>>,
+    asked: std::sync::Mutex<Vec<(CliProvider, String)>>,
+}
+
+impl RecordingJudge {
+    fn answering(answers: Vec<JudgeOutcome>) -> Self {
+        Self {
+            answers: std::sync::Mutex::new(answers.into()),
+            asked: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn calls(&self) -> usize {
+        self.asked.lock().unwrap().len()
+    }
+}
+
+impl Judge for RecordingJudge {
+    fn judge(&self, provider: CliProvider, prompt: &str) -> JudgeOutcome {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((provider, prompt.to_owned()));
+        self.answers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| JudgeOutcome::Answer("[]".to_owned()))
+    }
+}
+
+fn knowledge_test_limits() -> RunLimits {
+    RunLimits {
+        idle_seconds: 0,
+        ..RunLimits::default()
+    }
+}
+
+/// A Claude Code transcript holding these exchanges ("person\n\nagent").
+fn write_claude_transcript(path: &Path, exchanges: &[&str]) {
+    let mut text = String::new();
+    for exchange in exchanges {
+        let (person, agent) = exchange.split_once("\n\n").unwrap();
+        text.push_str(
+            &serde_json::json!({"type": "user", "message": {"content": person}}).to_string(),
+        );
+        text.push('\n');
+        text.push_str(
+            &serde_json::json!({"type": "assistant", "message": {"content": [{"type": "text", "text": agent}]}})
+                .to_string(),
+        );
+        text.push('\n');
+    }
+    fs::write(path, text).unwrap();
+}
+
+fn claude_session(path: &Path, id: &str) -> CliSession {
+    CliSession {
+        provider: CliProvider::Claude,
+        native_id: id.to_owned(),
+        id: id.to_owned(),
+        title: Some(format!("title {id}")),
+        last_user_message: None,
+        branch: None,
+        updated_at: 0,
+        path: path.to_path_buf(),
+    }
+}
+
+fn enabled_knowledge_database(root: &Path) -> (KnowledgeDatabase, PathBuf) {
+    let path = knowledge_database_path(root, Uuid::new_v4());
+    let database = KnowledgeDatabase::open(&path).unwrap();
+    database.set_enabled(true).unwrap();
+    (database, path)
+}
+
+fn golden_entry(
+    embedder: &dyn Embedder,
+    (title, body): (&str, &str),
+    kind: KnowledgeKind,
+) -> NewEntry {
+    NewEntry {
+        kind,
+        title: title.to_owned(),
+        body: body.to_owned(),
+        vector: embedder
+            .embed(&[document_input(Some(title), body)])
+            .unwrap()
+            .pop()
+            .unwrap(),
+    }
+}
+
+fn test_source(embedder: &dyn Embedder, text: &str) -> NewSource {
+    NewSource {
+        provider: CliProvider::Claude,
+        session_id: "s".to_owned(),
+        transcript_path: PathBuf::from("/nonexistent/s.jsonl"),
+        exchange_index: 0,
+        text: text.to_owned(),
+        vector: embedder
+            .embed(&[classification_input(text)])
+            .unwrap()
+            .pop()
+            .unwrap(),
+    }
+}
+
+fn judged_answer(entries: &[(&str, (&str, &str), usize)]) -> JudgeOutcome {
+    JudgeOutcome::Answer(
+        serde_json::Value::Array(
+            entries
+                .iter()
+                .map(|(kind, (title, body), candidate)| {
+                    serde_json::json!({"kind": kind, "title": title, "body": body, "candidate": candidate})
+                })
+                .collect(),
+        )
+        .to_string(),
+    )
+}
+
+#[test]
+pub(crate) fn embedding_golden_fixture_is_well_formed() {
+    let golden = FixtureEmbedder::golden();
+    assert!(golden.vectors.len() >= 40);
+    let text = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/embedding-golden.json"),
+    )
+    .unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+    for row in parsed["vectors"].as_array().unwrap() {
+        let vector = row["vector"].as_array().unwrap();
+        assert_eq!(vector.len(), EMBEDDING_DIMENSIONS, "{}", row["text"]);
+        let norm: f64 = vector
+            .iter()
+            .map(|value| value.as_f64().unwrap().powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!(
+            (norm - 1.0).abs() < 1e-3,
+            "{} is not unit length",
+            row["text"]
+        );
+    }
+    for exemplar in KEEP_EXEMPLARS.iter().chain(DROP_EXEMPLARS.iter()) {
+        assert!(
+            golden.vectors.contains_key(&classification_input(exemplar)),
+            "exemplar without a golden vector — regenerate the fixture: {exemplar}"
+        );
+    }
+}
+
+#[test]
+pub(crate) fn embedding_inputs_carry_the_model_task_prompts() {
+    assert_eq!(
+        query_input("retry policy"),
+        "task: search result | query: retry policy"
+    );
+    assert_eq!(
+        document_input(Some("リリース手順"), "dist を作る"),
+        "title: リリース手順 | text: dist を作る"
+    );
+    assert_eq!(document_input(None, "x"), "title: none | text: x");
+    assert_eq!(document_input(Some("  "), "x"), "title: none | text: x");
+    assert_eq!(classification_input("a"), "task: classification | query: a");
+    let vector = normalised(&[3.0, 4.0]);
+    assert!((cosine(&vector, &vector) - 1.0).abs() < 1e-6);
+    let blob = vector_to_blob(&vec![0.5; EMBEDDING_DIMENSIONS]);
+    assert_eq!(vector_from_blob(&blob).unwrap().len(), EMBEDDING_DIMENSIONS);
+    assert!(vector_from_blob(&blob[..10]).is_none());
+}
+
+#[test]
+pub(crate) fn local_ranking_puts_labelled_keep_exchanges_above_drop_ones() {
+    let embedder = KnowledgeTestEmbedder::new();
+    let exemplars = Exemplars::embed(&embedder).unwrap();
+    for held_out in HELD_OUT_KEEP.iter().chain(HELD_OUT_DROP.iter()) {
+        assert!(
+            !KEEP_EXEMPLARS.contains(held_out) && !DROP_EXEMPLARS.contains(held_out),
+            "a test exchange must not be an exemplar"
+        );
+    }
+    let score = |text: &str| {
+        let vector = embedder
+            .embed(&[classification_input(text)])
+            .unwrap()
+            .pop()
+            .unwrap();
+        exchange_score(text, &vector, &exemplars)
+    };
+    let mut drops: Vec<f32> = HELD_OUT_DROP.iter().map(|text| score(text)).collect();
+    drops.sort_by(f32::total_cmp);
+    let median_drop = drops[drops.len() / 2];
+    for keep in HELD_OUT_KEEP {
+        assert!(
+            score(keep) > median_drop,
+            "{keep:?} ranks at or below the median drop ({median_drop})"
+        );
+        // The candidate floor is what the ranking feeds: keep passes it.
+        assert!(score(keep) >= KNOWLEDGE_CANDIDATE_MIN_SCORE, "{keep:?}");
+    }
+    // ...and drop does not, which only the drop exemplars' subtraction gives:
+    // every exchange is somewhat like the keep exemplars.
+    for drop in HELD_OUT_DROP {
+        assert!(score(drop) < KNOWLEDGE_CANDIDATE_MIN_SCORE, "{drop:?}");
+    }
+    assert!(structure_bonus("because `x` failed in src/app.rs") > 0.07);
+    assert_eq!(structure_bonus("hello"), 0.0);
+}
+
+#[test]
+pub(crate) fn semantic_search_never_scores_by_word_overlap() {
+    let root = temporary_directory("kn-words");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    for (entry, kind) in [
+        (ENTRY_RELEASE, KnowledgeKind::Procedure),
+        (ENTRY_WORDS, KnowledgeKind::Fact),
+    ] {
+        database
+            .add_or_reinforce(&golden_entry(&embedder, entry, kind), &source, now(), true)
+            .unwrap();
+    }
+    // Shares no word with リリース手順's text and two with the glossary entry.
+    let hits = search_entries(
+        &database,
+        &embedder,
+        "アプリを配布用にビルドして入れ替える方法",
+        5,
+    )
+    .unwrap();
+    assert_eq!(
+        hits.first().map(|hit| hit.entry.title.as_str()),
+        Some(ENTRY_RELEASE.0)
+    );
+    assert!(
+        hits.iter().all(|hit| hit.entry.title != ENTRY_WORDS.0),
+        "the entry sharing words but not meaning is not a result"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_search_ranks_by_meaning_not_words() {
+    let root = temporary_directory("kn-search");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    for (entry, kind) in [
+        (ENTRY_RETRY, KnowledgeKind::Decision),
+        (ENTRY_RESTORE, KnowledgeKind::Cause),
+        (ENTRY_RELEASE, KnowledgeKind::Procedure),
+        (ENTRY_WORDS, KnowledgeKind::Fact),
+    ] {
+        database
+            .add_or_reinforce(&golden_entry(&embedder, entry, kind), &source, now(), true)
+            .unwrap();
+    }
+    for (query, expected) in [
+        (
+            "how many times do we retry a crashed terminal?",
+            ENTRY_RETRY.0,
+        ),
+        ("会話を戻したら冒頭が欠けた", ENTRY_RESTORE.0),
+        ("アプリを配布用にビルドして入れ替える方法", ENTRY_RELEASE.0),
+    ] {
+        let hits = search_entries(&database, &embedder, query, 5).unwrap();
+        assert_eq!(hits.len(), 1, "{query}: {hits:?}");
+        assert_eq!(hits[0].entry.title, expected);
+        assert!(hits[0].similarity >= KNOWLEDGE_SEARCH_MIN_COSINE);
+    }
+    assert!(search_entries(&database, &embedder, "今日の天気は？", 5)
+        .unwrap()
+        .is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn model_is_ready_only_when_size_and_mtime_match_the_verified_sidecar() {
+    let root = temporary_directory("kn-model");
+    let files = ModelFiles {
+        directory: root.clone(),
+    };
+    assert!(!model_is_ready(&files));
+    // A sparse file of the pinned size; its hash is never read here.
+    let model = fs::File::create(files.model()).unwrap();
+    model.set_len(EMBEDDING_MODEL_BYTES).unwrap();
+    drop(model);
+    assert!(
+        !model_is_ready(&files),
+        "a file without a sidecar is not ready"
+    );
+    let metadata = fs::metadata(files.model()).unwrap();
+    let modified = metadata
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let sidecar = VerifiedModel {
+        sha256: EMBEDDING_MODEL_SHA256.to_owned(),
+        bytes: EMBEDDING_MODEL_BYTES,
+        modified_nanos: modified,
+    };
+    fs::write(files.sidecar(), serde_json::to_vec(&sidecar).unwrap()).unwrap();
+    assert!(model_is_ready(&files));
+    // Touched since it was hashed: no longer the file that matched.
+    fs::File::options()
+        .write(true)
+        .open(files.model())
+        .unwrap()
+        .set_modified(SystemTime::now() + Duration::from_secs(5))
+        .unwrap();
+    assert!(!model_is_ready(&files));
+    // The sidecar alone, with the model gone.
+    fs::remove_file(files.model()).unwrap();
+    assert!(!model_is_ready(&files));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn model_download_command_is_fixed_and_resumable() {
+    let files = ModelFiles {
+        directory: PathBuf::from("/models"),
+    };
+    let command = model_download_command(&files);
+    assert_eq!(command.get_program(), "curl");
+    let arguments: Vec<String> = command
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    let joined = arguments.join(" ");
+    for expected in [
+        "--location",
+        "--fail",
+        "--continue-at -",
+        "--max-time 1800",
+        "--output /models/embeddinggemma-2-Q8_0.gguf.part",
+    ] {
+        assert!(
+            joined.contains(expected),
+            "{expected} missing from {joined}"
+        );
+    }
+    assert_eq!(
+        arguments.last().unwrap(),
+        &format!(
+            "https://huggingface.co/{EMBEDDING_MODEL_REPOSITORY}/resolve/{EMBEDDING_MODEL_REVISION}/{EMBEDDING_MODEL_FILE_NAME}"
+        )
+    );
+    assert_eq!(
+        EMBEDDING_MODEL_REVISION.len(),
+        40,
+        "a revision, not a branch"
+    );
+}
+
+#[test]
+pub(crate) fn cancelled_command_is_killed_and_reported() {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let setter = Arc::clone(&cancel);
+    let started = Instant::now();
+    let flag = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        setter.store(true, Ordering::Release);
+    });
+    let result = run_command_cancellable(
+        Command::new("sleep").arg("5"),
+        Duration::from_secs(10),
+        1024,
+        1024,
+        &cancel,
+    );
+    flag.join().unwrap();
+    let error = result.unwrap_err();
+    assert!(
+        error.downcast_ref::<CommandCancelled>().is_some(),
+        "{error}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(100 + 400),
+        "killed {:?} after start",
+        started.elapsed()
+    );
+}
+
+#[test]
+pub(crate) fn output_limited_command_behaves_as_before() {
+    let output = run_command_with_output_limit(
+        Command::new("printf").arg("0123456789"),
+        Duration::from_secs(5),
+        4,
+        1024,
+    )
+    .unwrap();
+    assert!(output.stdout_truncated);
+    assert_eq!(output.output.stdout, b"0123");
+    let whole = run_command_with_output_limit(
+        Command::new("printf").arg("ok"),
+        Duration::from_secs(5),
+        1024,
+        1024,
+    )
+    .unwrap();
+    assert!(!whole.stdout_truncated);
+    assert!(whole.output.status.success());
+    let timed_out = run_command_with_output_limit(
+        Command::new("sleep").arg("5"),
+        Duration::from_millis(50),
+        1024,
+        1024,
+    );
+    assert!(timed_out.is_err());
+}
+
+#[test]
+pub(crate) fn conversation_splits_into_bounded_exchanges() {
+    let long = "x".repeat(KNOWLEDGE_EXCHANGE_MAX_CHARS * 2);
+    let turns = vec![
+        ("assistant", "before any question".to_owned()),
+        ("user", "one".to_owned()),
+        ("assistant", "a".to_owned()),
+        ("assistant", "b".to_owned()),
+        ("user", "two".to_owned()),
+        ("assistant", long),
+    ];
+    let exchanges = split_exchanges(&turns);
+    assert_eq!(exchanges.len(), 2);
+    assert_eq!(exchanges[0].person, "one");
+    assert_eq!(exchanges[0].agent, "a\n\nb");
+    assert_eq!(exchanges[1].index, 1);
+    assert_eq!(
+        exchanges[1].text().chars().count(),
+        KNOWLEDGE_EXCHANGE_MAX_CHARS
+    );
+    assert_eq!(exchanges[0].text(), "one\n\na\n\nb");
+}
+
+#[test]
+pub(crate) fn pipeline_skips_projects_that_did_not_opt_in() {
+    let root = temporary_directory("kn-optin");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let path = knowledge_database_path(&root, Uuid::new_v4());
+    let mut database = KnowledgeDatabase::open(&path).unwrap();
+    let report = run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now(),
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(report, RunReport::default());
+    assert_eq!(judge.calls(), 0);
+    assert_eq!(embedder.embedded(), 0);
+    // A project with no database is not given one by a run.
+    let never = Uuid::new_v4();
+    let results = run_enabled_projects(
+        &root,
+        &[(never, root.clone())],
+        &embedder,
+        &judge,
+        &|_| vec![claude_session(&transcript, "s")],
+        now(),
+        knowledge_test_limits(),
+        &|_, _, _| {},
+    );
+    assert!(results.is_empty());
+    assert!(!knowledge_database_path(&root, never).exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_grown_conversation_is_processed_only_past_its_cursor() {
+    let root = temporary_directory("kn-cursor");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0], HELD_OUT_DROP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![
+        judged_answer(&[("cause", ENTRY_RESTORE, 1)]),
+        judged_answer(&[("procedure", ENTRY_RELEASE, 1)]),
+    ]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let session = claude_session(&transcript, "s");
+    let run = |database: &mut KnowledgeDatabase| {
+        run_project(
+            database,
+            std::slice::from_ref(&session),
+            &embedder,
+            &judge,
+            now(),
+            knowledge_test_limits(),
+            &|_, _| {},
+        )
+        .unwrap()
+    };
+    let first = run(&mut database);
+    assert_eq!(first.added, 1);
+    assert_eq!(
+        database
+            .conversation(CliProvider::Claude, "s")
+            .unwrap()
+            .unwrap()
+            .cursor,
+        2
+    );
+    let asked = judge.asked.lock().unwrap()[0].1.clone();
+    assert!(
+        asked.contains("Codex の再開"),
+        "the keep exchange was a candidate"
+    );
+    // Nothing new: not read again, not judged again.
+    run(&mut database);
+    assert_eq!(judge.calls(), 1);
+    // The conversation grows by one exchange; only that one is ranked.
+    write_claude_transcript(
+        &transcript,
+        &[HELD_OUT_KEEP[0], HELD_OUT_DROP[0], HELD_OUT_KEEP[1]],
+    );
+    fs::File::options()
+        .write(true)
+        .open(&transcript)
+        .unwrap()
+        .set_modified(SystemTime::now() + Duration::from_secs(2))
+        .unwrap();
+    run(&mut database);
+    assert_eq!(judge.calls(), 2);
+    let second = judge.asked.lock().unwrap()[1].1.clone();
+    assert!(second.contains("judge call use"), "{second}");
+    assert!(
+        !second.contains("Codex の再開"),
+        "an exchange before the cursor was offered again"
+    );
+    assert_eq!(
+        database
+            .conversation(CliProvider::Claude, "s")
+            .unwrap()
+            .unwrap()
+            .cursor,
+        3
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn judge_command_is_read_only_ephemeral_and_runs_outside_the_project() {
+    let (program, arguments) = knowledge_judge_command(CliProvider::Claude, "P");
+    assert_eq!(program, "claude");
+    assert_eq!(
+        arguments,
+        [
+            "-p",
+            "--output-format",
+            "text",
+            "--permission-mode",
+            "plan",
+            "--no-session-persistence",
+            "P"
+        ]
+    );
+    let (program, arguments) = knowledge_judge_command(CliProvider::Codex, "P");
+    assert_eq!(program, "codex");
+    assert_eq!(
+        arguments,
+        [
+            "exec",
+            "--skip-git-repo-check",
+            "-s",
+            "read-only",
+            "--ephemeral",
+            "P"
+        ]
+    );
+    let (program, arguments) = knowledge_judge_command(CliProvider::Gemini, "P");
+    assert_eq!(program, ANTIGRAVITY_COMMAND);
+    assert_eq!(arguments, ["--print", "--sandbox", "P"]);
+    // The judge runs inside the knowledge directory, which is inside the app
+    // data directory — never a project's tree.
+    let judge_directory = knowledge_judge_directory(&knowledge_root());
+    assert!(judge_directory.starts_with(app_data_directory()));
+    let judge = CliJudge {
+        directory: judge_directory.clone(),
+    };
+    let command = judge.command(CliProvider::Codex, "P");
+    assert_eq!(command.get_current_dir(), Some(judge_directory.as_path()));
+    assert_eq!(command.get_program(), "codex");
+}
+
+#[test]
+pub(crate) fn judge_prompt_stays_under_its_ceiling() {
+    let huge = "y".repeat(50_000);
+    let candidates: Vec<Candidate> = (0..KNOWLEDGE_CANDIDATES_PER_CONVERSATION)
+        .map(|index| Candidate {
+            exchange: Exchange {
+                index,
+                person: huge.clone(),
+                agent: huge.clone(),
+            },
+            text: String::new(),
+            vector: Vec::new(),
+            score: 0.0,
+        })
+        .collect();
+    let prompt = judge_prompt(&candidates);
+    assert!(
+        prompt.len() <= KNOWLEDGE_JUDGE_PROMPT_MAX_BYTES,
+        "{}",
+        prompt.len()
+    );
+    assert!(prompt.contains("[8]"), "every candidate fits once cut");
+    let first = prompt
+        .split("[1]")
+        .nth(1)
+        .unwrap()
+        .split("[2]")
+        .next()
+        .unwrap();
+    let person = first
+        .split("Person: ")
+        .nth(1)
+        .unwrap()
+        .split('\n')
+        .next()
+        .unwrap();
+    assert_eq!(person.chars().count(), KNOWLEDGE_JUDGE_PERSON_CHARS);
+    let agent = first
+        .split("Agent: ")
+        .nth(1)
+        .unwrap()
+        .split('\n')
+        .next()
+        .unwrap();
+    assert_eq!(agent.chars().count(), KNOWLEDGE_JUDGE_AGENT_CHARS);
+}
+
+#[test]
+pub(crate) fn judge_answer_parses_or_yields_nothing() {
+    let fenced =
+        "```json\n[{\"kind\":\"decision\",\"title\":\"t\",\"body\":\"b\",\"candidate\":2}]\n```";
+    assert_eq!(
+        parse_judge_answer(fenced, 3),
+        Some(vec![JudgedEntry {
+            kind: KnowledgeKind::Decision,
+            title: "t".to_owned(),
+            body: "b".to_owned(),
+            candidate: 1,
+        }])
+    );
+    assert_eq!(parse_judge_answer("[]", 3), Some(Vec::new()));
+    assert_eq!(parse_judge_answer("I could not decide.", 3), None);
+    assert_eq!(parse_judge_answer("[not json]", 3), None);
+    let mixed = r#"[{"kind":"opinion","title":"t","body":"b","candidate":1},
+        {"kind":"fact","title":"t","body":"b","candidate":9},
+        {"kind":"fact","title":"","body":"b","candidate":1},
+        {"kind":"fact","title":"ok","body":"b","candidate":1}]"#;
+    let parsed = parse_judge_answer(mixed, 3).unwrap();
+    assert_eq!(
+        parsed.len(),
+        1,
+        "unknown kind, missing candidate, empty title dropped"
+    );
+    let long_title = "長".repeat(80);
+    let many = serde_json::Value::Array(
+        (0..9)
+            .map(|_| serde_json::json!({"kind":"fact","title": long_title,"body":"b".repeat(900),"candidate":1}))
+            .collect(),
+    )
+    .to_string();
+    let parsed = parse_judge_answer(&many, 1).unwrap();
+    assert_eq!(parsed.len(), KNOWLEDGE_JUDGE_MAX_ENTRIES);
+    assert_eq!(parsed[0].title.chars().count(), KNOWLEDGE_TITLE_MAX_CHARS);
+    assert_eq!(parsed[0].body.chars().count(), KNOWLEDGE_BODY_MAX_CHARS);
+}
+
+#[test]
+pub(crate) fn judge_calls_stop_at_the_daily_cap() {
+    let root = temporary_directory("kn-cap");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let now = now();
+    for _ in 0..KNOWLEDGE_DAILY_JUDGE_CALLS {
+        database.record_judge_call(utc_day(now)).unwrap();
+    }
+    let report = run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now,
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert!(report.capped);
+    assert_eq!(judge.calls(), 0);
+    let row = database
+        .conversation(CliProvider::Claude, "s")
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.cursor, 0, "a capped conversation waits for tomorrow");
+    // The next day the cap is fresh.
+    run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now + 86_400,
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(judge.calls(), 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn exchanges_quoting_knowledge_results_or_copies_are_not_candidates() {
+    let quoting = Exchange {
+        index: 0,
+        person: format!("{} search \"retry\" を実行して", KNOWLEDGE_CLI_SUBCOMMAND),
+        agent: "x".repeat(200),
+    };
+    assert!(!rankable(&quoting));
+    let short = Exchange {
+        index: 0,
+        person: "hi".to_owned(),
+        agent: "hello".to_owned(),
+    };
+    assert!(!rankable(&short));
+    let embedder = KnowledgeTestEmbedder::new();
+    let exemplars = Exemplars::embed(&embedder).unwrap();
+    let (person, agent) = HELD_OUT_KEEP[0].split_once("\n\n").unwrap();
+    let exchange = Exchange {
+        index: 0,
+        person: person.to_owned(),
+        agent: agent.to_owned(),
+    };
+    assert!(rankable(&exchange));
+    let vector = embedder
+        .embed(&[classification_input(&exchange.text())])
+        .unwrap();
+    let ranked = rank_candidates(std::slice::from_ref(&exchange), &vector, &exemplars, &[]);
+    assert_eq!(ranked.len(), 1);
+    // The same exchange already recorded as a source: Operon's own restore
+    // copied it into another CLI's store.
+    let copy = rank_candidates(
+        std::slice::from_ref(&exchange),
+        &vector,
+        &exemplars,
+        &[(1, vector[0].clone())],
+    );
+    assert!(copy.is_empty());
+}
+
+#[test]
+pub(crate) fn a_recurring_entry_reinforces_instead_of_duplicating() {
+    let root = temporary_directory("kn-dedupe");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    let first = database
+        .add_or_reinforce(
+            &golden_entry(&embedder, ENTRY_RETRY, KnowledgeKind::Decision),
+            &source,
+            100,
+            true,
+        )
+        .unwrap();
+    let AddOutcome::Added(id) = first else {
+        panic!("{first:?}");
+    };
+    let again = database
+        .add_or_reinforce(
+            &golden_entry(&embedder, ENTRY_RETRY_PARAPHRASE, KnowledgeKind::Decision),
+            &source,
+            200,
+            true,
+        )
+        .unwrap();
+    assert_eq!(again, AddOutcome::Reinforced(id));
+    let unrelated = database
+        .add_or_reinforce(
+            &golden_entry(&embedder, ENTRY_RELEASE, KnowledgeKind::Procedure),
+            &source,
+            300,
+            true,
+        )
+        .unwrap();
+    assert!(matches!(unrelated, AddOutcome::Added(other) if other != id));
+    let entries = database.entries().unwrap();
+    assert_eq!(entries.len(), 2);
+    let retry = entries.iter().find(|entry| entry.id == id).unwrap();
+    assert_eq!(retry.recurrences, 1);
+    assert_eq!(retry.reinforced_at, 200);
+    assert_eq!(retry.sources.len(), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn freshness_decays_slower_for_used_entries() {
+    let day = 86_400;
+    let unused = freshness(0, 0, 0, 30 * day);
+    let used = freshness(0, 5, 2, 30 * day);
+    assert!((unused - (-1.0_f64).exp()).abs() < 1e-9);
+    assert!(used > unused);
+    assert!((freshness(0, 0, 0, 0) - 1.0).abs() < 1e-9);
+    // 69 days unused at the smallest τ is where removal starts.
+    assert!(freshness(0, 0, 0, 69 * day) < KNOWLEDGE_REMOVE_FRESHNESS + 0.002);
+    assert!(freshness(0, 0, 0, 68 * day) > KNOWLEDGE_REMOVE_FRESHNESS);
+}
+
+#[test]
+pub(crate) fn stale_unpinned_entries_are_removed_and_pinned_ones_kept() {
+    let root = temporary_directory("kn-prune");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    let mut ids = Vec::new();
+    for entry in [ENTRY_RETRY, ENTRY_RESTORE, ENTRY_RELEASE] {
+        let AddOutcome::Added(id) = database
+            .add_or_reinforce(
+                &golden_entry(&embedder, entry, KnowledgeKind::Fact),
+                &source,
+                0,
+                true,
+            )
+            .unwrap()
+        else {
+            panic!("not added");
+        };
+        ids.push(id);
+    }
+    database.set_pinned(ids[0], true).unwrap();
+    database.record_references(&[ids[1]], 60 * 86_400).unwrap();
+    let removed = database.prune(80 * 86_400).unwrap();
+    assert_eq!(removed, 1, "only the unused, unpinned one was stale");
+    let left: Vec<i64> = database
+        .entries()
+        .unwrap()
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(left, vec![ids[0], ids[1]]);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_full_base_of_pinned_entries_stops_adding() {
+    let root = temporary_directory("kn-full");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    let refused = database
+        .add_or_reinforce(
+            &golden_entry(&embedder, ENTRY_RETRY, KnowledgeKind::Fact),
+            &source,
+            0,
+            false,
+        )
+        .unwrap();
+    assert_eq!(refused, AddOutcome::Refused);
+    assert_eq!(database.entry_count().unwrap(), 0);
+    assert!(may_add_entries(KNOWLEDGE_MAX_ENTRIES - 1));
+    assert!(!may_add_entries(KNOWLEDGE_MAX_ENTRIES));
+    let (line, warn) = knowledge_status_line(
+        &KnowledgeSnapshot {
+            enabled: true,
+            last_report: Some(RunReport {
+                full_of_pinned: true,
+                ..RunReport::default()
+            }),
+            ..KnowledgeSnapshot::default()
+        },
+        &ModelState::Ready {
+            device: Device::Metal,
+        },
+        None,
+    );
+    assert!(warn);
+    assert!(line.contains("2000"), "{line}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_files_are_private() {
+    let root = temporary_directory("kn-private");
+    let directory = root.join("knowledge");
+    let path = knowledge_database_path(&directory, Uuid::new_v4());
+    let database = KnowledgeDatabase::open(&path).unwrap();
+    database.set_enabled(true).unwrap();
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&directory), KNOWLEDGE_DIRECTORY_MODE);
+    assert_eq!(mode(&path), KNOWLEDGE_FILE_MODE);
+    let wal = PathBuf::from(format!("{}-wal", path.display()));
+    assert!(wal.exists(), "WAL mode");
+    assert_eq!(mode(&wal), KNOWLEDGE_FILE_MODE);
+    drop(database);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_database_round_trips_and_refuses_a_newer_schema() {
+    let root = temporary_directory("kn-schema");
+    let path = knowledge_database_path(&root, Uuid::new_v4());
+    {
+        let database = KnowledgeDatabase::open(&path).unwrap();
+        assert!(!database.enabled().unwrap(), "opt-in starts off");
+        database.set_enabled(true).unwrap();
+    }
+    let database = KnowledgeDatabase::open(&path).unwrap();
+    assert!(database.enabled().unwrap());
+    assert_eq!(
+        database.meta("schema_version").unwrap().as_deref(),
+        Some(KNOWLEDGE_SCHEMA_VERSION.to_string().as_str())
+    );
+    assert!(database.model_matches().unwrap());
+    database
+        .set_meta(
+            "schema_version",
+            &(KNOWLEDGE_SCHEMA_VERSION + 1).to_string(),
+        )
+        .unwrap();
+    drop(database);
+    let refused = KnowledgeDatabase::open(&path);
+    assert!(refused.is_err());
+    assert!(
+        KnowledgeDatabase::open_existing(&root.join("absent.sqlite3"))
+            .unwrap()
+            .is_none()
+    );
+    assert!(!root.join("absent.sqlite3").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn unfinishable_conversations_are_not_reread_every_run() {
+    let root = temporary_directory("kn-unfinishable");
+    let transcript = root.join("s.jsonl");
+    // One line past the reader's limit: refused as too large.
+    fs::write(&transcript, "\n".repeat(TRANSCRIPT_FILE_LINE_LIMIT + 1)).unwrap();
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![
+        JudgeOutcome::Answer("no".to_owned()),
+        JudgeOutcome::Answer("still no".to_owned()),
+        JudgeOutcome::Answer("never".to_owned()),
+    ]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let session = claude_session(&transcript, "s");
+    let run = |database: &mut KnowledgeDatabase, now: u64| {
+        run_project(
+            database,
+            std::slice::from_ref(&session),
+            &embedder,
+            &judge,
+            now,
+            knowledge_test_limits(),
+            &|_, _| {},
+        )
+        .unwrap()
+    };
+    let start = now();
+    run(&mut database, start);
+    let row = database
+        .conversation(CliProvider::Claude, "s")
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, ConversationState::TooLarge);
+    // Same size and mtime: not read. Readable content of the same length and
+    // the old mtime proves it, because a read would now succeed.
+    let modified = fs::metadata(&transcript).unwrap().modified().unwrap();
+    let size = fs::metadata(&transcript).unwrap().len() as usize;
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let mut padded = fs::read_to_string(&transcript).unwrap();
+    padded.push_str(&"\n".repeat(size - padded.len()));
+    fs::write(&transcript, padded).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&transcript)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    run(&mut database, start);
+    assert_eq!(judge.calls(), 0);
+    // Changed: read, and three unparseable answers mark it failed.
+    fs::File::options()
+        .write(true)
+        .open(&transcript)
+        .unwrap()
+        .set_modified(modified + Duration::from_secs(3))
+        .unwrap();
+    for _ in 0..3 {
+        run(&mut database, start);
+    }
+    assert_eq!(judge.calls(), 3);
+    let row = database
+        .conversation(CliProvider::Claude, "s")
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.state, ConversationState::Failed);
+    run(&mut database, start + 86_400);
+    assert_eq!(judge.calls(), 3, "failed is not retried within seven days");
+    assert_eq!(database.failed_count().unwrap(), 1);
+    run(&mut database, start + 8 * 86_400);
+    assert_eq!(judge.calls(), 4, "tried again after seven days");
+    database.retry_failed().unwrap();
+    assert_eq!(database.failed_count().unwrap(), 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn an_unavailable_judge_pauses_without_spending_attempts() {
+    let root = temporary_directory("kn-pause");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![JudgeOutcome::Pause("not signed in".to_owned())]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let now = now();
+    let report = run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now,
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(report.paused, Some(CliProvider::Claude));
+    let row = database
+        .conversation(CliProvider::Claude, "s")
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.cursor, 0);
+    assert_eq!(row.attempts, 0);
+    assert_eq!(row.state, ConversationState::Pending);
+    assert_eq!(row.paused_at, Some(now));
+    assert_eq!(
+        database.judge_calls_on(utc_day(now)).unwrap(),
+        0,
+        "a pause spends no daily call"
+    );
+    let (line, warn) = knowledge_status_line(
+        &KnowledgeSnapshot {
+            enabled: true,
+            last_report: Some(report),
+            ..KnowledgeSnapshot::default()
+        },
+        &ModelState::Ready {
+            device: Device::Cpu,
+        },
+        None,
+    );
+    assert!(warn && line.contains(CliProvider::Claude.label()), "{line}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_conversation_that_paused_is_tried_after_the_others() {
+    let path = PathBuf::from("/x");
+    let ordered = order_for_run(vec![
+        (claude_session(&path, "paused-late"), Some(200)),
+        (claude_session(&path, "newest"), None),
+        (claude_session(&path, "paused-early"), Some(100)),
+        (claude_session(&path, "older"), None),
+    ]);
+    let ids: Vec<&str> = ordered.iter().map(|session| session.id.as_str()).collect();
+    assert_eq!(ids, ["newest", "older", "paused-early", "paused-late"]);
+}
+
+#[test]
+pub(crate) fn a_conversation_still_being_written_is_left_for_later() {
+    let root = temporary_directory("kn-idle");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let session = claude_session(&transcript, "s");
+    let report = run_project(
+        &mut database,
+        std::slice::from_ref(&session),
+        &embedder,
+        &judge,
+        now(),
+        RunLimits::default(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(report.processed, 0);
+    assert_eq!(embedder.embedded(), 0);
+    let later = run_project(
+        &mut database,
+        std::slice::from_ref(&session),
+        &embedder,
+        &judge,
+        now() + KNOWLEDGE_IDLE_SECONDS,
+        RunLimits::default(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(later.processed, 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_run_stops_at_each_of_its_budgets() {
+    let root = temporary_directory("kn-budget");
+    let first = root.join("a.jsonl");
+    let second = root.join("b.jsonl");
+    write_claude_transcript(&first, &[HELD_OUT_KEEP[0]]);
+    write_claude_transcript(&second, &[HELD_OUT_KEEP[1]]);
+    let sessions = [claude_session(&first, "a"), claude_session(&second, "b")];
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let run = |limits: RunLimits| {
+        let (mut database, _) = enabled_knowledge_database(&root);
+        run_project(
+            &mut database,
+            &sessions,
+            &embedder,
+            &judge,
+            now(),
+            limits,
+            &|_, _| {},
+        )
+        .unwrap()
+    };
+    let by_count = run(RunLimits {
+        processed: 1,
+        ..knowledge_test_limits()
+    });
+    assert_eq!((by_count.processed, by_count.deferred), (1, 1));
+    let by_embeddings = run(RunLimits {
+        embeddings: Exemplars::count() + 2,
+        ..knowledge_test_limits()
+    });
+    assert_eq!((by_embeddings.processed, by_embeddings.deferred), (1, 1));
+    assert!(by_embeddings.embeddings <= Exemplars::count() + 2 + KNOWLEDGE_JUDGE_MAX_ENTRIES);
+    let by_clock = run(RunLimits {
+        wall: Duration::ZERO,
+        ..knowledge_test_limits()
+    });
+    assert_eq!((by_clock.processed, by_clock.deferred), (0, 2));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn enabled_projects_are_processed_one_after_another() {
+    let root = temporary_directory("kn-sequence");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let (first, second, off) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    for (project, enabled) in [(first, true), (second, true), (off, false)] {
+        KnowledgeDatabase::open(&knowledge_database_path(&root, project))
+            .unwrap()
+            .set_enabled(enabled)
+            .unwrap();
+    }
+    let events = std::sync::Mutex::new(Vec::new());
+    let results = run_enabled_projects(
+        &root,
+        &[
+            (first, root.clone()),
+            (off, root.clone()),
+            (second, root.clone()),
+        ],
+        &embedder,
+        &judge,
+        &|_| vec![claude_session(&transcript, "s")],
+        now(),
+        knowledge_test_limits(),
+        &|project, done, _| events.lock().unwrap().push((project, done)),
+    );
+    let order: Vec<Uuid> = results.iter().map(|(project, _)| *project).collect();
+    assert_eq!(
+        order,
+        vec![first, second],
+        "the disabled project is not run"
+    );
+    let events = events.into_inner().unwrap();
+    let last_first = events
+        .iter()
+        .rposition(|(project, _)| *project == first)
+        .unwrap();
+    let first_second = events
+        .iter()
+        .position(|(project, _)| *project == second)
+        .unwrap();
+    assert!(last_first < first_second, "{events:?}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn vectors_from_another_model_are_rebuilt_not_mixed() {
+    let root = temporary_directory("kn-rebuild");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[1]);
+    for entry in [ENTRY_RETRY, ENTRY_RESTORE, ENTRY_RELEASE] {
+        database
+            .add_or_reinforce(
+                &golden_entry(&embedder, entry, KnowledgeKind::Fact),
+                &source,
+                now(),
+                true,
+            )
+            .unwrap();
+    }
+    // As if another model wrote every vector — each exactly where this query
+    // lands, so a search that mixed the two models would answer with every
+    // not-yet-rebuilt entry at similarity 1.
+    let query = "how many times do we retry a crashed terminal?";
+    let stale = embedder
+        .embed(&[query_input(query)])
+        .unwrap()
+        .pop()
+        .unwrap();
+    database
+        .connection_for_tests()
+        .execute(
+            "UPDATE entries SET vector = ?1",
+            rusqlite::params![vector_to_blob(&stale)],
+        )
+        .unwrap();
+    database.set_meta("model", "another-model").unwrap();
+    let half = run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now(),
+        RunLimits {
+            embeddings: 2,
+            ..knowledge_test_limits()
+        },
+        &|_, _| {},
+    )
+    .unwrap();
+    assert!(half.rebuilding.is_some(), "{half:?}");
+    assert!(!database.model_matches().unwrap());
+    assert!(search_entries(&database, &embedder, query, 5)
+        .unwrap()
+        .is_empty());
+    assert_eq!(judge.calls(), 0, "a half-rebuilt base is not added to");
+    let finished = run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now(),
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert!(finished.rebuilding.is_none());
+    assert!(database.model_matches().unwrap());
+    let hits = search_entries(&database, &embedder, query, 5).unwrap();
+    assert_eq!(
+        hits.first().map(|hit| hit.entry.title.as_str()),
+        Some(ENTRY_RETRY.0)
+    );
+    assert_eq!(
+        judge.calls(),
+        1,
+        "judging resumes once the vectors are one model's"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn local_history_search_returns_indexed_sessions_first() {
+    let root = temporary_directory("kn-sessions");
+    let embedder = KnowledgeTestEmbedder::new();
+    let project = Uuid::new_v4();
+    let database = KnowledgeDatabase::open(&knowledge_database_path(&root, project)).unwrap();
+    database.set_enabled(true).unwrap();
+    for (id, title, first) in [
+        (
+            "restore",
+            "restore の first turn 欠落の調査",
+            "Codex から Claude に復元すると最初の発言がなくなる\n\nheader 行の分類を確認します。",
+        ),
+        (
+            "fonts",
+            "UI フォントの調整",
+            "日本語の文字の高さがずれる\n\nfont chain を確認します。",
+        ),
+    ] {
+        database
+            .save_conversation(&ConversationRow {
+                provider: CliProvider::Codex,
+                session_id: id.to_owned(),
+                transcript_path: root.join(format!("{id}.jsonl")),
+                mtime: 1,
+                size: 1,
+                cursor: 0,
+                state: ConversationState::Pending,
+                attempts: 0,
+                processed_at: 0,
+                paused_at: None,
+                title: Some(title.to_owned()),
+                indexed: false,
+            })
+            .unwrap();
+        let text = document_input(Some(title), first);
+        let vector = embedder
+            .embed(std::slice::from_ref(&text))
+            .unwrap()
+            .pop()
+            .unwrap();
+        database
+            .index_conversation(CliProvider::Codex, id, &text, &vector)
+            .unwrap();
+    }
+    drop(database);
+    let hits = search_indexed_sessions(
+        &root,
+        &[
+            (project, "operon".to_owned()),
+            (Uuid::new_v4(), "absent".to_owned()),
+        ],
+        &embedder,
+        "復元で最初のターンが消える",
+        10,
+    )
+    .unwrap();
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].session_id, "restore");
+    assert_eq!(hits[0].project_name, "operon");
+    assert!(hits[0].similarity >= KNOWLEDGE_SESSION_MIN_COSINE);
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn knowledge_cli_fixture(root: &Path) -> (Project, KnowledgeTestEmbedder) {
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.join("repo"),
+        name: "repo".to_owned(),
+        added_at: 0,
+    };
+    fs::create_dir_all(project.path.join("sub")).unwrap();
+    let embedder = KnowledgeTestEmbedder::new();
+    let database = KnowledgeDatabase::open(&knowledge_database_path(
+        &root.join("knowledge"),
+        project.id,
+    ))
+    .unwrap();
+    database.set_enabled(true).unwrap();
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    database
+        .add_or_reinforce(
+            &golden_entry(&embedder, ENTRY_RETRY, KnowledgeKind::Decision),
+            &source,
+            now(),
+            true,
+        )
+        .unwrap();
+    (project, embedder)
+}
+
+#[test]
+pub(crate) fn knowledge_cli_json_is_the_only_stdout() {
+    let root = temporary_directory("kn-cli-json");
+    let (project, embedder) = knowledge_cli_fixture(&root);
+    let arguments: Vec<String> = [
+        "search",
+        "how many times do we retry a crashed terminal?",
+        "--limit",
+        "3",
+        "--json",
+    ]
+    .map(str::to_owned)
+    .to_vec();
+    let outcome = knowledge_cli(
+        &arguments,
+        &project.path.join("sub"),
+        std::slice::from_ref(&project),
+        &root.join("knowledge"),
+        Some(&embedder),
+        now(),
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(outcome.stderr.is_empty());
+    let parsed: serde_json::Value = serde_json::from_str(&outcome.stdout).unwrap();
+    let rows = parsed.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["title"], ENTRY_RETRY.0);
+    assert_eq!(rows[0]["kind"], "decision");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn search_hits_returned_to_an_agent_count_as_references() {
+    let root = temporary_directory("kn-cli-ref");
+    let (project, embedder) = knowledge_cli_fixture(&root);
+    let arguments: Vec<String> = ["search", "how many times do we retry a crashed terminal?"]
+        .map(str::to_owned)
+        .to_vec();
+    for _ in 0..2 {
+        let outcome = knowledge_cli(
+            &arguments,
+            &project.path,
+            std::slice::from_ref(&project),
+            &root.join("knowledge"),
+            Some(&embedder),
+            1_000,
+        );
+        assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+        assert!(outcome.stdout.contains(ENTRY_RETRY.0));
+    }
+    let database = KnowledgeDatabase::open(&knowledge_database_path(
+        &root.join("knowledge"),
+        project.id,
+    ))
+    .unwrap();
+    let entry = database.entries().unwrap().pop().unwrap();
+    assert_eq!(entry.reference_count, 2);
+    assert_eq!(entry.referenced_at, 1_000);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_cli_exits_3_without_the_model() {
+    let root = temporary_directory("kn-cli-model");
+    let (project, _) = knowledge_cli_fixture(&root);
+    let arguments: Vec<String> = ["search", "retry", "--json"].map(str::to_owned).to_vec();
+    let outcome = knowledge_cli(
+        &arguments,
+        &project.path,
+        std::slice::from_ref(&project),
+        &root.join("knowledge"),
+        None,
+        now(),
+    );
+    assert_eq!(outcome.code, 3);
+    assert!(outcome.stdout.is_empty());
+    assert!(outcome.stderr.contains("モデル"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_cli_refuses_an_unknown_or_disabled_project() {
+    let root = temporary_directory("kn-cli-refuse");
+    let (project, embedder) = knowledge_cli_fixture(&root);
+    let arguments: Vec<String> = ["search", "retry"].map(str::to_owned).to_vec();
+    let elsewhere = root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let unknown = knowledge_cli(
+        &arguments,
+        &elsewhere,
+        std::slice::from_ref(&project),
+        &root.join("knowledge"),
+        Some(&embedder),
+        now(),
+    );
+    assert_eq!(unknown.code, 2);
+    assert!(unknown.stdout.is_empty());
+    KnowledgeDatabase::open(&knowledge_database_path(
+        &root.join("knowledge"),
+        project.id,
+    ))
+    .unwrap()
+    .set_enabled(false)
+    .unwrap();
+    let disabled = knowledge_cli(
+        &arguments,
+        &project.path,
+        std::slice::from_ref(&project),
+        &root.join("knowledge"),
+        Some(&embedder),
+        now(),
+    );
+    assert_eq!(disabled.code, 2);
+    assert!(disabled.stderr.contains(&project.name));
+    let usage = knowledge_cli(
+        &[],
+        &project.path,
+        &[],
+        &root.join("knowledge"),
+        None,
+        now(),
+    );
+    assert_eq!(usage.code, 64);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_cli_resolves_the_project_from_a_worktree() {
+    let root = temporary_directory("kn-cli-worktree");
+    let repository = root.join("repo");
+    fs::create_dir_all(&repository).unwrap();
+    let git = |arguments: &[&str]| {
+        let output = run_command_with_timeout(
+            git_command(&repository).args(arguments),
+            Duration::from_secs(20),
+        )
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&[
+        "-c",
+        "user.name=t",
+        "-c",
+        "user.email=t@example.invalid",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "i",
+    ]);
+    let worktree = root.join("wt");
+    git(&[
+        "worktree",
+        "add",
+        "-q",
+        worktree.to_str().unwrap(),
+        "-b",
+        "feature",
+    ]);
+    fs::create_dir_all(worktree.join("deep/er")).unwrap();
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: repository.canonicalize().unwrap(),
+        name: "repo".to_owned(),
+        added_at: 0,
+    };
+    let other = Project {
+        id: Uuid::new_v4(),
+        path: root.join("other"),
+        name: "other".to_owned(),
+        added_at: 0,
+    };
+    let found = project_for_directory(
+        &worktree.join("deep/er").canonicalize().unwrap(),
+        &[other.clone(), project.clone()],
+    );
+    assert_eq!(found.map(|found| found.id), Some(project.id));
+    assert!(project_for_directory(&root.canonicalize().unwrap(), &[other, project]).is_none());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_knowledge_command_line_names_the_subcommand_main_dispatches_on() {
+    let line = knowledge_command_line(Path::new("/Applications/Operon.app/Contents/MacOS/Operon"));
+    assert_eq!(
+        line,
+        format!("/Applications/Operon.app/Contents/MacOS/Operon {KNOWLEDGE_CLI_SUBCOMMAND} search \"…\"")
+    );
+    let spaced = knowledge_command_line(Path::new("/Users/a b/Operon"));
+    assert!(spaced.starts_with("'/Users/a b/Operon' "), "{spaced}");
+    // `src/main.rs` dispatches on exactly this word as the first argument.
+    let main =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/main.rs")).unwrap();
+    assert!(main.contains("Some(KNOWLEDGE_CLI_SUBCOMMAND)"));
+    let second_word = line.split_whitespace().nth(1).unwrap();
+    assert_eq!(second_word, KNOWLEDGE_CLI_SUBCOMMAND);
+}
+
+#[test]
+pub(crate) fn the_knowledge_run_is_scheduled_after_launch_and_every_ten_minutes() {
+    let start = Instant::now();
+    assert_eq!(
+        next_knowledge_run(start, true) - start,
+        Duration::from_secs(KNOWLEDGE_RUN_FIRST_DELAY_SECONDS)
+    );
+    assert_eq!(
+        next_knowledge_run(start, false) - start,
+        Duration::from_secs(KNOWLEDGE_RUN_INTERVAL_SECONDS)
+    );
+    let root = temporary_directory("kn-schedule");
+    let mut app = test_app(root.join("store.json"));
+    assert!(
+        app.knowledge.next_run
+            > Instant::now() + Duration::from_secs(KNOWLEDGE_RUN_FIRST_DELAY_SECONDS - 5)
+    );
+    assert!(
+        app.knowledge.root.starts_with(&root),
+        "a test's store gets a test's knowledge base"
+    );
+    app.knowledge.next_run = Instant::now();
+    app.tick_knowledge();
+    assert!(
+        app.knowledge.next_run
+            > Instant::now() + Duration::from_secs(KNOWLEDGE_RUN_INTERVAL_SECONDS - 5)
+    );
+    assert!(
+        !app.background_tasks.contains(&BackgroundKey::KnowledgeRun),
+        "no run starts without the model"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn starting_a_knowledge_run_while_one_is_running_starts_nothing() {
+    let root = temporary_directory("kn-single");
+    let mut app = test_app(root.join("store.json"));
+    app.knowledge.model = ModelState::Ready {
+        device: Device::Cpu,
+    };
+    app.background_tasks.insert(BackgroundKey::KnowledgeRun);
+    app.start_knowledge_run();
+    thread::sleep(Duration::from_millis(200));
+    assert!(
+        app.background_receiver.try_recv().is_err(),
+        "a second run was started beside the first"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_edits_create_a_database_only_on_enable() {
+    let root = temporary_directory("kn-edit");
+    let project = Uuid::new_v4();
+    let snapshot = apply_knowledge_edit(&root, project, KnowledgeEdit::Disable, now()).unwrap();
+    assert!(!snapshot.enabled);
+    assert!(!knowledge_database_path(&root, project).exists());
+    let snapshot = apply_knowledge_edit(&root, project, KnowledgeEdit::Enable, now()).unwrap();
+    assert!(snapshot.enabled);
+    let snapshot = apply_knowledge_edit(&root, project, KnowledgeEdit::Clear, now()).unwrap();
+    assert!(!snapshot.enabled && snapshot.entries.is_empty());
+    let order = knowledge_order(&[], KnowledgeSort::Freshness, None, now());
+    assert!(order.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn embed_golden_fails_when_the_runtime_drifts_from_the_reference() {
+    let fixture =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/embedding-golden.json");
+    let faithful = KnowledgeTestEmbedder::new();
+    let (code, report) = embed_golden(&fixture, Some(&faithful));
+    assert_eq!(code, 0, "{report}");
+    assert_eq!(
+        report.lines().count(),
+        FixtureEmbedder::golden().vectors.len()
+    );
+    assert!(report
+        .lines()
+        .all(|line| line.starts_with("1.0000") || line.starts_with("0.9999")));
+    /// Every vector nudged off its reference by one swapped component pair.
+    struct Drifting(KnowledgeTestEmbedder);
+    impl Embedder for Drifting {
+        fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Ok(self
+                .0
+                .embed(texts)?
+                .into_iter()
+                .map(|mut vector| {
+                    let (largest, _) = vector
+                        .iter()
+                        .enumerate()
+                        .max_by(|left, right| left.1.abs().total_cmp(&right.1.abs()))
+                        .unwrap();
+                    vector[largest] = 0.0;
+                    normalised(&vector)
+                })
+                .collect())
+        }
+    }
+    let (code, report) = embed_golden(&fixture, Some(&Drifting(KnowledgeTestEmbedder::new())));
+    assert_eq!(code, 1, "{report}");
+    let (code, _) = embed_golden(&fixture, None);
+    assert_eq!(code, 3);
+}
+
+/// Lesson 076, "A native runtime measured at the batch sizes that happened to
+/// work" — named by title as well, since parallel changes renumbered it
+/// three times.
+/// llama.cpp 2a66703 aborts the whole process — no error to return — when a
+/// context reserves 3, 5, 6, or 7 sequences, and at exit while
+/// a model is still loaded. CI has no model to watch either happen, so this
+/// pins the two shapes the fidelity script was watched failing without.
+#[test]
+pub(crate) fn the_llama_runtime_is_never_given_a_shape_it_aborts_on() {
+    let source =
+        |path: &str| fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path)).unwrap();
+    let embed = source("src/knowledge/embed.rs");
+    assert!(EMBEDDING_TEXTS_PER_CALL.is_power_of_two());
+    assert_eq!(embed.matches(".with_n_seq_max(").count(), 1);
+    assert!(
+        embed.contains(".with_n_seq_max(EMBEDDING_TEXTS_PER_CALL as u32)"),
+        "a context reserves every slot, not one per text"
+    );
+    assert!(embed
+        .contains("LlamaBatch::new(EMBEDDING_CONTEXT_TOKENS, EMBEDDING_TEXTS_PER_CALL as i32)"));
+    // Every way out of the process drops the model first.
+    let main = source("src/main.rs");
+    let cli = main.find("run_cli(&arguments[1..])").unwrap();
+    let exit = main.find("std::process::exit(code)").unwrap();
+    assert!(main[cli..exit].contains("release_shared_embedder();"));
+    let window = main.find("eframe::run_native(").unwrap();
+    assert!(main[window..].contains("release_shared_embedder();"));
+    let app = source("src/app.rs");
+    let on_exit = app.find("fn on_exit(").unwrap();
+    assert!(app[on_exit..on_exit + 300].contains("release_shared_embedder();"));
+}
+
+/// Deleting the model unloads it without ending the process's use of it: a
+/// later 「モデルを取得」 has to work without a relaunch.
+#[test]
+pub(crate) fn deleting_the_model_leaves_it_loadable_again() {
+    let root = temporary_directory("kn-delete");
+    let files = ModelFiles {
+        directory: root.clone(),
+    };
+    fs::write(files.model(), b"m").unwrap();
+    fs::write(files.part(), b"p").unwrap();
+    fs::write(files.sidecar(), b"{}").unwrap();
+    delete_model(&files).unwrap();
+    assert!(!files.model().exists() && !files.part().exists() && !files.sidecar().exists());
+    assert!(
+        !embedder_is_shut_down(),
+        "delete must not end loading for the process"
+    );
+    delete_model(&files).unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn exit_waits_for_the_cancelled_download_to_be_reaped() {
+    let root = temporary_directory("kn-exit");
+    let mut app = test_app(root.join("store.json"));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let finished = Arc::new(AtomicBool::new(false));
+    app.knowledge.download = Some(ModelDownloadHandle {
+        cancel: Arc::clone(&cancel),
+        progress: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+        finished: Arc::clone(&finished),
+    });
+    // A download thread that takes 200 ms to reap its child once cancelled.
+    let (seen_cancel, seen_finished) = (Arc::clone(&cancel), Arc::clone(&finished));
+    let worker = thread::spawn(move || {
+        while !seen_cancel.load(Ordering::Acquire) {
+            thread::sleep(Duration::from_millis(5));
+        }
+        thread::sleep(Duration::from_millis(200));
+        seen_finished.store(true, Ordering::Release);
+    });
+    app.stop_model_download_for_exit();
+    assert!(cancel.load(Ordering::Acquire));
+    assert!(
+        finished.load(Ordering::Acquire),
+        "exit returned before the child was reaped"
+    );
+    worker.join().unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// A judge that, while it is being asked, does what a person can do in the
+/// tab at that moment: 「ナレッジを削除…」 on the project being read.
+struct ClearingJudge {
+    root: PathBuf,
+    project: Uuid,
+    answer: JudgeOutcome,
+}
+
+impl Judge for ClearingJudge {
+    fn judge(&self, _provider: CliProvider, _prompt: &str) -> JudgeOutcome {
+        apply_knowledge_edit(&self.root, self.project, KnowledgeEdit::Clear, now()).unwrap();
+        self.answer.clone()
+    }
+}
+
+#[test]
+pub(crate) fn a_project_cleared_during_a_run_is_not_written_back() {
+    let root = temporary_directory("kn-clear-race");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let project = Uuid::new_v4();
+    let path = knowledge_database_path(&root, project);
+    let mut database = KnowledgeDatabase::open(&path).unwrap();
+    database.set_enabled(true).unwrap();
+    let judge = ClearingJudge {
+        root: root.clone(),
+        project,
+        answer: judged_answer(&[("cause", ENTRY_RESTORE, 1)]),
+    };
+    run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now(),
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    let after = KnowledgeDatabase::open(&path).unwrap();
+    assert!(!after.enabled().unwrap());
+    assert!(
+        after.entries().unwrap().is_empty(),
+        "a cleared entry came back"
+    );
+    assert!(
+        after
+            .conversation(CliProvider::Claude, "s")
+            .unwrap()
+            .is_none(),
+        "the cleared conversation row came back"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_conversation_longer_than_one_runs_share_is_finished_by_the_next() {
+    let root = temporary_directory("kn-long");
+    let transcript = root.join("s.jsonl");
+    let short: Vec<String> = (0..KNOWLEDGE_EXCHANGES_PER_CONVERSATION + 5)
+        .map(|index| format!("q{index}\n\na{index}"))
+        .collect();
+    let exchanges: Vec<&str> = short.iter().map(String::as_str).collect();
+    write_claude_transcript(&transcript, &exchanges);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let session = claude_session(&transcript, "s");
+    let cursor = |database: &mut KnowledgeDatabase| {
+        run_project(
+            database,
+            std::slice::from_ref(&session),
+            &embedder,
+            &judge,
+            now(),
+            knowledge_test_limits(),
+            &|_, _| {},
+        )
+        .unwrap();
+        database
+            .conversation(CliProvider::Claude, "s")
+            .unwrap()
+            .unwrap()
+            .cursor
+    };
+    assert_eq!(cursor(&mut database), KNOWLEDGE_EXCHANGES_PER_CONVERSATION);
+    // The file has not changed; the rest is still read.
+    assert_eq!(
+        cursor(&mut database),
+        KNOWLEDGE_EXCHANGES_PER_CONVERSATION + 5
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_download_that_did_not_finish_drops_what_it_was_started_for() {
+    let root = temporary_directory("kn-when-ready");
+    let mut app = test_app(root.join("store.json"));
+    let project = Uuid::new_v4();
+    for outcome in [ModelState::Missing, ModelState::Failed("x".to_owned())] {
+        app.knowledge.enable_when_ready = Some(project);
+        app.knowledge.select_semantic_when_ready = true;
+        app.apply_model_state(BackgroundKey::ModelDownload, outcome);
+        assert_eq!(app.knowledge.enable_when_ready, None);
+        assert!(!app.knowledge.select_semantic_when_ready);
+    }
+    // A later fetch from Settings enables nothing.
+    app.apply_model_state(
+        BackgroundKey::ModelDownload,
+        ModelState::Ready {
+            device: Device::Cpu,
+        },
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::KnowledgeEdit(project)));
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn painted_texts(output: &egui::FullOutput) -> Vec<String> {
+    fn collect(shape: &egui::Shape, texts: &mut Vec<String>) {
+        match shape {
+            egui::Shape::Text(text) => texts.push(text.galley.text().to_owned()),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| collect(shape, texts)),
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        collect(&clipped.shape, &mut texts);
+    }
+    texts
+}
+
+#[test]
+pub(crate) fn a_knowledge_tab_that_failed_to_load_offers_a_retry() {
+    let root = temporary_directory("kn-load-error");
+    let mut app = test_app(root.join("store.json"));
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.clone(),
+        name: "p".to_owned(),
+        added_at: 0,
+    };
+    app.knowledge.views.insert(
+        project.id,
+        KnowledgeView {
+            error: Some("このナレッジは新しい Operon で作られています。".to_owned()),
+            ..KnowledgeView::default()
+        },
+    );
+    let context = egui::Context::default();
+    let mut output = None;
+    for _ in 0..2 {
+        output = Some(context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
+        }));
+    }
+    let texts = painted_texts(output.as_ref().unwrap());
+    assert!(texts.iter().any(|text| text == tr("再試行")), "{texts:?}");
+    assert!(!texts.iter().any(|text| text == tr("読み込み中…")));
+    app.retry_knowledge_load(project.id);
+    assert!(app.knowledge.views[&project.id].error.is_none());
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::KnowledgeLoad(project.id)));
+    fs::remove_dir_all(root).unwrap();
 }

@@ -864,6 +864,8 @@ failing on main: no wake within 5s) and
 `typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands` (watched failing
 on main, and with the keystroke timestamp removed from `queue_terminal_input`).
 
+---
+
 ## 073 — A review was voided by work it never touched
 
 Change 158 was reviewed, its CI green, and its landing refused: two other
@@ -906,3 +908,51 @@ not inherit that command's directory.
 failing on main; a suite server started from a directory then deleted failed
 `codex_app_server_restores_a_short_transcript_into_a_resumable_terminal`
 before the fix and passed after).
+
+---
+
+## 075 — The translation check compared the tables with each other, never with the code
+
+`every_message_id_has_a_row_in_every_table` asserted that the English and Korean
+tables hold the same ids, and `tr` falls back to the Japanese id for an id no
+table knows. So a message added with a row in neither table passed every check
+and showed in Japanese on an English or Korean screen: 598 such messages had
+built up when change 165 looked, plus 23 launch-option labels that reach `tr`
+through a table field. **The rule:** the catalogue is checked against the
+messages the code passes to `tr`/`tf!` — literal ids read from the source, and
+ids held in a table read from that table — not only against itself; a `tr` call
+whose argument is neither is refused until its table is checked too.
+
+**Guard.** `every_message_the_code_shows_has_a_row_in_every_table` (watched
+failing before the rows were added: 611 file/message pairs, then 23 launch
+options; and with `kind.label()` dropped from its list of covered arguments).
+
+Translating those messages broke two things that only worked while they had no
+row. Dropping folders found a save failure by matching the notice against its
+Japanese text, so on an English or Korean screen the error was lost; and a test
+opening a fresh install on CI's English host switched the process-wide language
+for every test beside it, so a Japanese assertion failed at random. **The
+rule:** code decides from values, never from the text of a notice, and the
+suite's language never follows the host's.
+
+**Guard.** `no_decision_reads_the_text_of_a_notice` (watched failing on the
+folder-drop check in `src/app.rs`); `detected_language` answers Japanese under
+`cfg(test)`, and CI is the run that would show the race.
+
+## 076 — A native runtime measured at the batch sizes that happened to work
+
+Change 157's Metal probe embedded 1, 2, 4, and 8 texts per call and every one
+matched the reference, so the runtime was called measured. The first run of
+`scripts/check-embedding-fidelity.sh` ended on a chunk of six and the process
+died in `GGML_ASSERT(ggml_can_mul_mat)`: llama.cpp 2a66703 aborts when a context
+reserves 3, 5, 6, or 7 sequences. With that fixed it died again at exit, in the
+Metal device's teardown assert, because the shared model was still loaded. An
+abort in C++ is not an `Err`; it takes the window with it. **The rule:** a
+native dependency is measured at every shape the code can hand it — sizes from
+the remainder of a chunked list included — and through process exit, not only
+at the shapes a probe chose.
+
+**Guard.** `the_llama_runtime_is_never_given_a_shape_it_aborts_on` (watched
+failing with `n_seq_max` set from the text count, and with the release after
+`run_native` removed) and `scripts/check-embedding-fidelity.sh`, whose 46 texts
+end on a chunk of six (watched failing: exit 134 twice, then 0).

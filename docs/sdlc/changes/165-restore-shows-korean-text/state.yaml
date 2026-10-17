@@ -1,0 +1,87 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: after restoring an Antigravity conversation into Codex CLI and
+# Claude Code, both new sessions were listed as "계속" — a Korean word in a
+# Japanese UI — and the person asked whether i18n was incomplete.
+#
+# Cause 1 (root-cause skill): "계속" is the person's own last request in the
+# source conversation (Antigravity step 66, source USER_EXPLICIT,
+# "<USER_REQUEST>\n계속\n</USER_REQUEST>"), and `restored_session_name`
+# preferred the last request over the source CLI's title. Measured in the
+# store: sessions 1a931767 (claude) and 492764ed (codex) carry
+# `"name": "계속"`. Fix: the title first, then the last request. Review round 1
+# found that `antigravity_cli_sessions` filled an untitled conversation's title
+# with "Antigravity の会話 <ID>", which would now beat the real request, so the
+# stand-in is gone (the history list already falls back to the ID beside the
+# provider label).
+#
+# Cause 2: i18n was incomplete, and no check could see it.
+# `every_message_id_has_a_row_in_every_table` compares the EN and KO tables
+# with each other only; 598 messages passed to `tr`/`tf!` had no row in
+# either, so they showed in Japanese on English and Korean screens. Fix: a
+# guard reading the source for every literal `tr`/`tf!` id, and the 598 rows
+# in both tables (no existing row changed). Lesson 075.
+#
+# Cause 3 (CI on the first push after main merged): the new rows made two
+# hidden language dependencies visible. `add_dropped_folders` matched the save
+# failure notice against its Japanese text; `try_add_project_path` now returns
+# a `ProjectAddition`. And `OperonApp::new()` on a fresh test store set the
+# process-wide language from CI's English host, so
+# project_registration_rolls_back_when_persistence_fails read an English
+# notice; `detected_language` answers Japanese under cfg(test).
+#
+# Round 7 also fixed the carried custom-label nit: a custom command's
+# `<workspace> · <label>` fallback name is recognised in every language.
+#
+# Sessions already saved keep their name; renaming them is the person's call.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Package and swap into /Applications after the merge; sessions already named 계속 keep that name."
+
+contract:
+  failing-test-first: "machine passed
+    a_restored_session_is_named_by_its_conversation_title_not_its_last_nudge
+    failed before the fix (named \"계속\"; with the stand-in title restored it
+    fails on Some(\"Antigravity の会話 …\")) and passes after;
+    every_message_the_code_shows_has_a_row_in_every_table failed with 611
+    file/message pairs before the rows and passes after"
+  guard-mutation: "machine passed dropping データフォルダを表示 from both tables
+    leaves every_message_id_has_a_row_in_every_table green and turns the new
+    guard red naming screens.rs; dropping kind.label() from INDIRECT_ARGUMENTS
+    turns it red naming widgets.rs (review round 2: 23 launch-option labels
+    reached tr through a table field and had no row)"
+  three-gates: "machine passed cargo fmt --check · cargo clippy --locked -D
+    warnings · LANG=en_US.UTF-8 cargo test --locked: 821 passed, 4 failed —
+    test_fast_subprocess (timing, passes alone), the installed usage reader
+    (socket path too long under this session's TMPDIR), and the commit and
+    stop gates (this session's hooks); all four passed in CI on 5c86bc6.
+    CI decides the full suite"
+  notice-guard: "machine passed no_decision_reads_the_text_of_a_notice failed
+    naming src/app.rs:3703 before ProjectAddition and passes after"
+  ignored-restore: "machine waived the restore path itself is untouched — only
+    the display name and a list title change; cargo test -- --ignored not run"
+  review: "human passed rust-reviewer approve 0 3, subprocess-safety-reviewer
+    approve 0 0 at 9f31eea55473b7e6 — the whole change against main bef1b7d
+    (round 7), remarks carried in review.yaml"
+  release-binary: "machine waived the bundle is built from main after the
+    merge and swapped into /Applications in the same session"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

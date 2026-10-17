@@ -214,7 +214,6 @@ pub(crate) struct AntigravityLogScan {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TranscriptFileSearch {
     pub(crate) hit: Option<TranscriptHit>,
-    pub(crate) first_text: Option<String>,
     pub(crate) title: Option<String>,
     pub(crate) bytes_read: u64,
     pub(crate) lines_read: usize,
@@ -1786,10 +1785,10 @@ pub(crate) fn antigravity_cli_sessions(
                 provider: CliProvider::Gemini,
                 native_id: conversation_id.clone(),
                 id: conversation_id.clone(),
-                title: title.or(Some(tf!(
-                    "Antigravity の会話 {conversation_id}",
-                    conversation_id = conversation_id
-                ))),
+                // No stand-in title: a session restored from this one is
+                // named after its title first, and "Antigravity の会話 <ID>"
+                // would beat the real last request (change 165).
+                title,
                 last_user_message: None,
                 branch: None,
                 updated_at,
@@ -2298,16 +2297,7 @@ pub(crate) fn claude_message_text(value: &serde_json::Value) -> Option<String> {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn search_local_transcripts(query: &str, limit: usize) -> TranscriptSearchSnapshot {
-    search_local_transcripts_with_mode(query, limit, SearchEngineMode::Keyword)
-}
-
-pub(crate) fn search_local_transcripts_with_mode(
-    query: &str,
-    limit: usize,
-    mode: SearchEngineMode,
-) -> TranscriptSearchSnapshot {
     let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
         return TranscriptSearchSnapshot::default();
     };
@@ -2331,7 +2321,7 @@ pub(crate) fn search_local_transcripts_with_mode(
             2,
         ),
     ];
-    let mut snapshot = search_local_transcripts_in_with_mode(
+    let mut snapshot = search_local_transcripts_in(
         &roots,
         &title_scan.titles,
         query,
@@ -2341,7 +2331,6 @@ pub(crate) fn search_local_transcripts_with_mode(
             lines: limits.lines.saturating_sub(title_scan.scanned_lines),
             ..limits
         },
-        mode,
     );
     snapshot.truncated |= title_scan.truncated;
     snapshot.unreadable_entries += usize::from(title_scan.unreadable);
@@ -2351,237 +2340,12 @@ pub(crate) fn search_local_transcripts_with_mode(
     snapshot
 }
 
-pub(crate) const SEMANTIC_NOISE_FLOOR: f64 = 0.65;
-pub(crate) const SEMANTIC_HIGH_CONFIDENCE: f64 = 0.72;
-pub(crate) const SEMANTIC_MIN_MARGIN: f64 = 0.035;
-
-pub(crate) fn embedded_model_directory() -> PathBuf {
-    if let Some(proj_dirs) = directories::ProjectDirs::from("local", "operon", "Operon") {
-        proj_dirs
-            .cache_dir()
-            .join("models")
-            .join("embeddinggemma-2-270m")
-    } else if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home)
-            .join("Library")
-            .join("Caches")
-            .join("local.operon")
-            .join("models")
-            .join("embeddinggemma-2-270m")
-    } else {
-        std::env::temp_dir()
-            .join("local.operon")
-            .join("models")
-            .join("embeddinggemma-2-270m")
-    }
-}
-
-pub(crate) fn is_embedded_model_cached() -> bool {
-    let dir = embedded_model_directory();
-    dir.join("model_ready.json").is_file()
-}
-
-pub(crate) fn embedded_model_cached_bytes() -> u64 {
-    let dir = embedded_model_directory();
-    if !dir.is_dir() {
-        return 0;
-    }
-    let mut total = 0;
-    if let Ok(entries) = fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                total += meta.len();
-            }
-        }
-    }
-    total
-}
-
-pub(crate) fn delete_embedded_model_cache() -> std::io::Result<()> {
-    let dir = embedded_model_directory();
-    if dir.exists() {
-        fs::remove_dir_all(&dir)?;
-    }
-    Ok(())
-}
-
-pub(crate) fn mark_embedded_model_ready(bytes: u64) -> std::io::Result<()> {
-    let dir = embedded_model_directory();
-    fs::create_dir_all(&dir)?;
-    let marker = dir.join("model_ready.json");
-    fs::write(
-        marker,
-        format!(r#"{{"bytes":{bytes},"model":"embeddinggemma-2-270m"}}"#),
-    )
-}
-
-pub(crate) fn compute_in_process_similarity(query_words: &[String], text_lower: &str) -> f64 {
-    if query_words.is_empty() || text_lower.is_empty() {
-        return 0.0;
-    }
-    let doc_words: Vec<&str> = text_lower
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|w| !w.is_empty())
-        .collect();
-    if doc_words.is_empty() {
-        return 0.0;
-    }
-
-    let mut word_matches = 0.0;
-    for q in query_words {
-        let mut best_word_match: f64 = 0.0;
-        for d in &doc_words {
-            if q == d {
-                best_word_match = 1.0;
-                break;
-            } else if d.starts_with(q) || q.starts_with(d) {
-                let min_len = q.len().min(d.len());
-                if min_len >= 3 {
-                    let score = (min_len as f64) / (q.len().max(d.len()) as f64);
-                    best_word_match = best_word_match.max(0.75 * score);
-                }
-            } else if (q == "credentials" && (*d == "auth" || *d == "token" || *d == "jwt"))
-                || (q == "authentication" && (*d == "auth" || *d == "token" || *d == "login"))
-                || (q == "login" && (*d == "auth" || *d == "credentials" || *d == "signin"))
-                || (q == "token" && (*d == "jwt" || *d == "auth" || *d == "key"))
-            {
-                best_word_match = best_word_match.max(0.82);
-            }
-        }
-        word_matches += best_word_match;
-    }
-    let coverage = word_matches / (query_words.len() as f64);
-    0.50 + 0.45 * coverage
-}
-
-pub(crate) fn rank_transcripts_in_process(query: &str, matches: &mut [TranscriptMatch]) -> bool {
-    if matches.len() <= 1 {
-        return false;
-    }
-    let rank_count = matches.len().min(24);
-    let query_words: Vec<String> = query
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .filter(|w| !w.is_empty())
-        .collect();
-    if query_words.is_empty() {
-        return false;
-    }
-
-    let mut scored: Vec<(usize, f64)> = matches[..rank_count]
-        .iter()
-        .enumerate()
-        .map(|(idx, m)| {
-            let text = match &m.title {
-                Some(title) => format!("{title}: {}", m.snippet),
-                None => m.snippet.clone(),
-            };
-            let text_lower = text.to_lowercase();
-            let score = compute_in_process_similarity(&query_words, &text_lower);
-            (idx, score)
-        })
-        .collect();
-
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let original = matches[..rank_count].to_vec();
-    for (new_idx, (orig_idx, score)) in scored.into_iter().enumerate() {
-        let mut item = original[orig_idx].clone();
-        item.score = Some(score);
-        matches[new_idx] = item;
-    }
-    true
-}
-
-pub(crate) fn rank_fallback_candidates_in_process(
-    query: &str,
-    candidates: &[(String, String, Option<String>, PathBuf, String)],
-    limit: usize,
-) -> Vec<TranscriptMatch> {
-    if candidates.is_empty() || limit == 0 {
-        return Vec::new();
-    }
-    let rank_count = candidates.len().min(24);
-    let query_words: Vec<String> = query
-        .split_whitespace()
-        .map(str::to_lowercase)
-        .filter(|w| !w.is_empty())
-        .collect();
-    if query_words.is_empty() {
-        return Vec::new();
-    }
-
-    let mut scored: Vec<(usize, f64)> = candidates[..rank_count]
-        .iter()
-        .enumerate()
-        .map(|(idx, (_provider, _session_id, title, _path, text))| {
-            let doc = match title {
-                Some(t) => format!("{t}: {text}"),
-                None => text.clone(),
-            };
-            let doc_lower = doc.to_lowercase();
-            let score = compute_in_process_similarity(&query_words, &doc_lower);
-            (idx, score)
-        })
-        .collect();
-
-    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let min_score = scored
-        .iter()
-        .map(|item| item.1)
-        .fold(f64::INFINITY, f64::min);
-
-    let mut matches = Vec::new();
-    for (idx, score) in scored {
-        let is_relevant = score >= SEMANTIC_HIGH_CONFIDENCE
-            || (score >= SEMANTIC_NOISE_FLOOR && (score - min_score) >= SEMANTIC_MIN_MARGIN);
-        if !is_relevant {
-            continue;
-        }
-        if matches.len() >= limit {
-            break;
-        }
-        if let Some((provider, session_id, title, path, text)) = candidates.get(idx) {
-            let snippet = text.chars().take(360).collect::<String>();
-            matches.push(TranscriptMatch {
-                provider: provider.clone(),
-                session_id: session_id.clone(),
-                title: title.clone(),
-                path: path.clone(),
-                snippet,
-                score: Some(score),
-            });
-        }
-    }
-    matches
-}
-
-#[allow(dead_code)]
 pub(crate) fn search_local_transcripts_in(
     roots: &[(String, PathBuf, usize)],
     codex_titles: &HashMap<String, String>,
     query: &str,
     limit: usize,
     limits: TranscriptSearchLimits,
-) -> TranscriptSearchSnapshot {
-    search_local_transcripts_in_with_mode(
-        roots,
-        codex_titles,
-        query,
-        limit,
-        limits,
-        SearchEngineMode::EmbeddedGemma2,
-    )
-}
-
-pub(crate) fn search_local_transcripts_in_with_mode(
-    roots: &[(String, PathBuf, usize)],
-    codex_titles: &HashMap<String, String>,
-    query: &str,
-    limit: usize,
-    limits: TranscriptSearchLimits,
-    mode: SearchEngineMode,
 ) -> TranscriptSearchSnapshot {
     let words = query
         .split_whitespace()
@@ -2599,7 +2363,6 @@ pub(crate) fn search_local_transcripts_in_with_mode(
     };
     let mut remaining_bytes = limits.bytes;
     let mut remaining_lines = limits.lines;
-    let mut fallback_candidates = Vec::new();
     for (index, (provider, path)) in recent.candidates.iter().enumerate() {
         if snapshot.matches.len() >= limit {
             snapshot.truncated |= index < recent.candidates.len();
@@ -2646,24 +2409,6 @@ pub(crate) fn search_local_transcripts_in_with_mode(
                 snippet: hit.snippet,
                 score: None,
             });
-        } else if fallback_candidates.len() < limits.candidates.min(24) {
-            let candidate_text = match (&title, &file_scan.first_text) {
-                (Some(t), Some(text)) => Some(format!("{t}: {text}")),
-                (Some(t), None) => Some(t.clone()),
-                (None, Some(text)) => Some(text.clone()),
-                (None, None) => None,
-            };
-            if let Some(text) = candidate_text {
-                fallback_candidates.push((provider.clone(), session_id, title, path.clone(), text));
-            }
-        }
-    }
-    if mode == SearchEngineMode::EmbeddedGemma2 && is_embedded_model_cached() {
-        if !snapshot.matches.is_empty() {
-            rank_transcripts_in_process(query, &mut snapshot.matches);
-        } else if !fallback_candidates.is_empty() {
-            snapshot.matches =
-                rank_fallback_candidates_in_process(query, &fallback_candidates, limit);
         }
     }
     snapshot
@@ -2735,7 +2480,6 @@ pub(crate) fn search_transcript_hit_limited(
     let mut line = String::new();
     let mut title = None;
     let mut hit_snippet = None;
-    let mut first_text = None;
     let mut lines_read = 0;
     let mut reached_eof = false;
     let mut unreadable = false;
@@ -2763,12 +2507,6 @@ pub(crate) fn search_transcript_hit_limited(
                 .map(ToOwned::to_owned);
         }
         let text = transcript_text(&value);
-        if first_text.is_none() {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                first_text = Some(trimmed.chars().take(400).collect());
-            }
-        }
         let lowered = text.to_lowercase();
         if hit_snippet.is_none() && words.iter().all(|word| lowered.contains(word)) {
             hit_snippet = Some(transcript_snippet(&text, words));
@@ -2786,7 +2524,6 @@ pub(crate) fn search_transcript_hit_limited(
             snippet,
             title: title.clone(),
         }),
-        first_text,
         title,
         bytes_read,
         lines_read,

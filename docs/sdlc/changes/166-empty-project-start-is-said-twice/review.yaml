@@ -1,0 +1,22 @@
+# Review record for change 166. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer requests changes — the grid ＋ placed after the path
+# is pushed off screen by a long one, and the new hover sentence was read in
+# one view of three. Both taken: the ＋ moved beside the name, the grid test
+# got a long path, every test hovers the ＋, and the sweep went to 12 of 12.
+# Round 2 (digest below): approve with three nits, carried.
+
+digest: "d8d2d10447b4e4fe"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/app/screens.rs:4409 the comment recounts the placements tried; stating that nothing variable-width may precede the ＋ would be harder to misread
+    person: "画面には影響しません。コード内の説明の書き方の問題で、対応は不要です。"
+  - rust-reviewer/2 · src/tests.rs:44748 and :44905 assert セッションはまだありません without the 。, so they cannot fail; and click_header_add returns quietly when no ＋ is found, which only its callers' assertions catch
+    person: "画面には影響しません。古い「まだありません」の表示が戻ってもこの2つの確認では気づけませんが、＋の有無はほかの確認で見ています。対応は不要です。"
+  - rust-reviewer/3 · the grid's ＋ sits beside the name while the other two views put it at the line's right end
+    person: "グリッド表示だけ＋の位置がプロジェクト名のすぐ後ろになります。右端だと画面の外に出てしまうための配置で、操作に支障はありません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
