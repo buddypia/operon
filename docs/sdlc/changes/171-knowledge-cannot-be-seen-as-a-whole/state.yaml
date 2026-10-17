@@ -46,12 +46,12 @@ state:
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Intent and spec are drafted; get them approved by an evaluator, run scripts/check-readiness.sh, and get screen.md approved by the person before plan.md."
+resume: "Intent, spec and screen approved; write plan.md, have an evaluator judge it against spec.md, commit it, then build in the order it gives."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.

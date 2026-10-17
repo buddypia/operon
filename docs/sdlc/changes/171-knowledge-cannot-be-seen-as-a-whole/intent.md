@@ -1,6 +1,6 @@
 # Intent: a project's knowledge can be read one entry at a time, never seen as a whole
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-17
 
 ## Problem

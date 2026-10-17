@@ -1,0 +1,3 @@
+2026-10-17T05:40:00Z auto intent intent.md 6f6cfd1eeffeb4ab approve evaluator (a23ac05f): restates the person's quoted request and the two-part split; outcomes follow from the quote; constraints match the code
+2026-10-17T05:41:00Z person screen screen.md 14fd230502a8a01f approve the person chose 「この配置で進める」 for the map left (560×420) and the group/detail panel right (290px), shape = kind, size = use, opacity = freshness (2026-10-17 JST)
+2026-10-17T05:50:39Z auto spec spec.md 643c9dd21a902913 approve evaluator (a23ac05f) round 3: save race, cascade coverage, per-entry vector fingerprints for reuse/settle/fresh, no-vector entries, off-frame and release timing stated; draw-path and policy rows checked against the code
