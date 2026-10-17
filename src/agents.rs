@@ -751,7 +751,7 @@ pub(crate) fn looks_like_conversation_id(text: &str) -> bool {
 ///
 /// The source CLI's own title comes first: it names the whole conversation,
 /// while the last request of a long one is often a one-word nudge ("계속",
-/// "続けて") that says nothing about the work (change 162).
+/// "続けて") that says nothing about the work (change 165).
 pub(crate) fn restored_session_name(source: &CliSession) -> String {
     conversation_topic_name(
         source.title.as_deref(),

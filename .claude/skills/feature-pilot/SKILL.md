@@ -28,8 +28,10 @@ and the hooks read only the first.
    and continue from `resume` there. Skip the rest of this step.
 2. **Open the worktree.** From the main checkout:
    `make wt.new BR=feature/<NNN-slug>` (`fix/` for a bug), where `NNN` is the next
-   free number under `docs/sdlc/changes/` and the slug names the problem, not
-   the solution. Then `cd .worktrees/feature/<NNN-slug>` and stay there: every
+   number free under `docs/sdlc/changes/` and among every local and remote
+   branch — parallel sessions hold numbers on branches before main shows them,
+   and `make wt.new` refuses a taken one, naming the next free number (change
+   162) — and the slug names the problem, not the solution. Then `cd .worktrees/feature/<NNN-slug>` and stay there: every
    write, every `cargo` run, and the commit happen in that directory, which is
    the arrangement `.claude/hooks/gate-commit.sh` expects. Do not use Claude
    Code's EnterWorktree — it exports `GIT_DIR` and `GIT_WORK_TREE` (lessons 048,
@@ -110,7 +112,13 @@ the earlier sections stay as they were.
 - **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
   for CI with `gh run watch` (in the background; about five minutes). A red run
   is fixed on the branch and pushed again. When `main` has moved, merge it into
-  the branch first: the merge gate wants the branch to contain `main`.
+  the branch first: the merge gate wants the branch to contain `main`. Merge
+  with `git merge --no-commit origin/main`, then run
+  `bash scripts/check-review.sh --against origin/main`: work main took in
+  elsewhere leaves the verdict standing (change 162), but work that touched the
+  reviewed lines makes it stale. Then have the reviewer re-read the landing
+  diff, record the new digest, and stage `review.yaml` in that same merge
+  commit — a commit holding only the record is refused.
 - **Land** from the main checkout with `git merge --no-ff --no-edit <branch>` —
   `.claude/hooks/gate-merge.sh` admits it once CI passed on the branch head —
   then `git push origin main` and

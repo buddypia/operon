@@ -866,13 +866,39 @@ on main, and with the keystroke timestamp removed from `queue_terminal_input`).
 
 ---
 
-## 073 — The translation check compared the tables with each other, never with the code
+## 073 — A review was voided by work it never touched
+
+Change 158 was reviewed, its CI green, and its landing refused: two other
+sessions landed on main meanwhile, 158 took main in as the pipeline asks, and
+the review digest — a hash of the diff byte for byte — moved because the hunk
+line numbers and the whole-file blob ids on each `index` line describe the rest
+of the file, which the other changes had edited. No commit could bring the
+record up to date, since one holding only the record is refused. Change 135 had
+paid the same cost as an extra review round. On the way to the fix, the next
+change number, 161, turned out to be held by another session's branch; four
+numbers on main already name two changes each.
+**The rule:** what binds a verdict describes the change and nothing else
+around it; and anything parallel sessions pick from a shared sequence is
+checked against where in-flight work lives — branches, not main.
+
+**Guard.** `a_review_survives_main_moving_the_lines_above_it` (watched failing
+on main's gate: the digest moved when main added lines above the edit; its
+invalid-byte arm watched failing with `LC_ALL=C` removed),
+`a_review_recorded_before_change_162_still_counts`, the exact-line pins in
+`the_review_gate_has_no_bypass`, and
+`a_new_change_cannot_take_a_number_already_in_use` (watched failing before
+`scripts/check-change-number.sh` existed; on this repository it refuses
+`fix/161-…` and names 163).
+
+---
+
+## 074 — The translation check compared the tables with each other, never with the code
 
 `every_message_id_has_a_row_in_every_table` asserted that the English and Korean
 tables hold the same ids, and `tr` falls back to the Japanese id for an id no
 table knows. So a message added with a row in neither table passed every check
 and showed in Japanese on an English or Korean screen: 598 such messages had
-built up when change 162 looked, plus 23 launch-option labels that reach `tr`
+built up when change 165 looked, plus 23 launch-option labels that reach `tr`
 through a table field. **The rule:** the catalogue is checked against the
 messages the code passes to `tr`/`tf!` — literal ids read from the source, and
 ids held in a table read from that table — not only against itself; a `tr` call

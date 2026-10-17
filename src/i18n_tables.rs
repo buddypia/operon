@@ -522,7 +522,7 @@ pub(crate) const EN_TABLE: Table = &[
     ("セッションを起動しています…", "Starting the session…"),
     ("セッションを選択", "Select a session"),
     ("セッションを開く", "Open session"),
-    ("セッションを開始", "Start session"),
+    ("セッションを開始", "Start a session"),
     ("セッションを開始できませんでした: {error}", "Could not start the session: {error}"),
     ("セッションを開始できませんでした: {error}。失敗状態を保存できなかったため、改めて確認します。", "Could not start the session: {error}. The failure state could not be saved, so Operon will check again."),
     ("セッション一覧", "the session list"),

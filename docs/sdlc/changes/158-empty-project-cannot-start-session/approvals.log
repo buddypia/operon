@@ -1,0 +1,4 @@
+2026-10-16T16:16:22Z auto intent intent.md 860ba9d6efac8c80 approve evaluator round 2: restates the quoted request; a no-match search says 一致する…, not a start offer
+2026-10-16T16:16:22Z auto spec spec.md d5cce2300a57c273 approve evaluator round 2: per-project no-match line stated as new in プロジェクト別; EN and KO rows guarded by translation_for
+2026-10-16T16:16:22Z auto screen screen.md 0beb587a67ddd2be approve evaluator round 1: existing roles only, icon_text_button in the slot of the weak empty line; no new screen or modal
+2026-10-16T16:16:22Z auto plan plan.md 68c75ac7b42d315a approve evaluator round 2: helper draws the workspace with the library open at the click_at size; second empty project catches a wrong selection

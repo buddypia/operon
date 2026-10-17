@@ -1788,7 +1788,7 @@ pub(crate) fn antigravity_cli_sessions(
                 id: conversation_id.clone(),
                 // No stand-in title: a session restored from this one is
                 // named after its title first, and "Antigravity の会話 <ID>"
-                // would beat the real last request (change 162).
+                // would beat the real last request (change 165).
                 title,
                 last_user_message: None,
                 branch: None,

@@ -24277,7 +24277,9 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         "cached) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text --cached \"$base\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
         "commit) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text \"$base\" \"$commit\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
         "*) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text \"$base\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
-        "digest=$(run_diff | shasum -a 256 | cut -c1-16)",
+        REVIEW_DIGEST_LINE,
+        REVIEW_LEGACY_DIGEST_LINE,
+        REVIEW_DIGEST_COMPARISON_LINE,
         "changed=$(run_diff --name-only)",
         // The base is HEAD unless the caller says which commit an amend
         // records against, and it is verified to be a commit: a base that is
@@ -24296,7 +24298,11 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         .iter()
         .filter(|line| {
             line.contains("--relative")
-                || (line.contains("shasum") && !line.contains("digest=$(run_diff"))
+                // Change 162: exactly the two pinned assignments may hash,
+                // not any line that merely contains their prefix.
+                || (line.contains("shasum")
+                    && line.trim() != REVIEW_DIGEST_LINE
+                    && line.trim() != REVIEW_LEGACY_DIGEST_LINE)
                 // Any git diff, however git is configured on the way in: the
                 // digest lines read `git -c … diff`, and a filter that looked
                 // for the literal `git diff` matched nothing at all.
@@ -24318,6 +24324,255 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         "digest を狭められる行があります — EXCLUDE 以外の git diff、二つ目の shasum、\
          --relative のどれかです:\n{}",
         narrowing.join("\n")
+    );
+    // One comparison decides freshness, and it accepts the two digests and
+    // nothing else: a second `!=` elsewhere would be a third digest.
+    let comparisons = code
+        .iter()
+        .filter(|line| line.contains("\"$recorded_digest\" !="))
+        .count();
+    assert!(
+        comparisons == 1,
+        "記録された digest との比較が {comparisons} 箇所あります — 新しさを決める比較は一つです"
+    );
+}
+
+/// The digest the review gate binds a verdict to (change 162): the diff with
+/// hunk line numbers and blob ids removed, under `LC_ALL=C` so a byte that is
+/// not UTF-8 cannot end what is hashed.
+const REVIEW_DIGEST_LINE: &str = "digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\\.\\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16)";
+/// The digest as taken before change 162, still accepted.
+const REVIEW_LEGACY_DIGEST_LINE: &str = "legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16)";
+/// The one comparison, accepting those two and nothing else.
+const REVIEW_DIGEST_COMPARISON_LINE: &str =
+    "&& [ \"$recorded_digest\" != \"$digest\" ] && [ \"$recorded_digest\" != \"$legacy_digest\" ]; then";
+
+// --- Change 162: work landing on main does not void a finished review -----
+
+/// Stages `src/store.rs` as `text` with the fixture's change directory, so the
+/// gate has a change to judge and names the digest of what is staged.
+fn stage_store_as(f: &ReviewGateFixture, text: &str, stamp: &str) {
+    f.write("src/store.rs", text);
+    f.append(
+        "docs/sdlc/changes/900-fixture/state.yaml",
+        &format!("# {stamp}\n"),
+    );
+    f.git(&["add", "-A"]);
+}
+
+/// Commits what is staged, as main moving under a branch would.
+fn land_on_fixture_main(f: &ReviewGateFixture, text: &str, stamp: &str) {
+    stage_store_as(f, text, stamp);
+    f.git(&["commit", "-q", "-m", stamp]);
+}
+
+#[test]
+/// The digest is about the change, not about where in the file it sits: main
+/// gaining lines above a reviewed edit leaves the verdict standing, and
+/// anything that alters the edit or the lines around it still moves it.
+pub(crate) fn a_review_survives_main_moving_the_lines_above_it() {
+    let f = ReviewGateFixture::new();
+    let base: String = (1..=40).map(|n| format!("// line {n}\n")).collect();
+    land_on_fixture_main(&f, &base, "forty lines");
+    stage_store_as(&f, &format!("{base}// reviewed\n"), "edit");
+    let reviewed = f.current_digest();
+
+    // Another session lands five lines at the top of the same file.
+    let moved = format!("// main 1\n// main 2\n// main 3\n// main 4\n// main 5\n{base}");
+    land_on_fixture_main(&f, &moved, "main moved");
+    stage_store_as(&f, &format!("{moved}// reviewed\n"), "edit again");
+    assert_eq!(
+        f.current_digest(),
+        reviewed,
+        "main が上に行を足しただけで判定が古くなりました"
+    );
+
+    // A different edit is a different change.
+    stage_store_as(&f, &format!("{moved}// something else\n"), "other edit");
+    assert_ne!(
+        f.current_digest(),
+        reviewed,
+        "別の変更が同じ digest になりました"
+    );
+
+    // Main editing a line the reviewed hunk shows as context is a reason to
+    // look again.
+    let touched = moved.replace("// line 40\n", "// line 40, edited on main\n");
+    land_on_fixture_main(&f, &touched, "main touched the context");
+    stage_store_as(&f, &format!("{touched}// reviewed\n"), "edit over context");
+    assert_ne!(
+        f.current_digest(),
+        reviewed,
+        "レビューした行のすぐ隣を main が変えても判定が生きています"
+    );
+
+    // A line that is not UTF-8 does not end what is hashed. Under a UTF-8
+    // locale BSD sed stops at the first such line and prints only what came
+    // before it, so without `LC_ALL=C` the edit after it would not count.
+    let digest_under_utf8 = |f: &ReviewGateFixture| {
+        ReviewGateFixture::digest_named_in(
+            &f.gate_in_env("--index", &[], &[("LANG", "ja_JP.UTF-8"), ("LC_ALL", "")])
+                .1,
+        )
+    };
+    fs::write(f.root.join("src/latin1.rs"), b"// caf\xe9\n").unwrap();
+    stage_store_as(&f, &format!("{touched}// first\n"), "after latin1, first");
+    let first = digest_under_utf8(&f);
+    stage_store_as(&f, &format!("{touched}// second\n"), "after latin1, second");
+    assert_ne!(
+        digest_under_utf8(&f),
+        first,
+        "UTF-8 でない行より後ろの変更が digest に入っていません"
+    );
+}
+
+#[test]
+/// A verdict recorded before change 162 carries the digest of the diff byte
+/// for byte. It still counts: a byte-identical diff is the strictest match
+/// there is, and sessions mid-review elsewhere must not be sent back by this.
+pub(crate) fn a_review_recorded_before_change_162_still_counts() {
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    let f = ReviewGateFixture::new();
+    f.append("src/store.rs", "// change\n");
+    f.append(
+        "docs/sdlc/changes/900-fixture/state.yaml",
+        "resume: \"x\"\n",
+    );
+    f.git(&["add", "-A"]);
+    let output = f
+        .command("bash")
+        .args([
+            "-c",
+            "git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text --cached HEAD -- . ':(exclude)docs/sdlc/changes' | shasum -a 256 | cut -c1-16",
+        ])
+        .output()
+        .unwrap();
+    let legacy = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    assert_eq!(legacy.len(), 16, "byte-for-byte digest could not be taken");
+    assert_ne!(
+        f.current_digest(),
+        legacy,
+        "digest がまだ diff をそのまま hash しています — 行番号と blob id で動きます"
+    );
+    f.record(&legacy, all);
+    f.git(&["add", "-A"]);
+    let (code, printed) = f.gate(&[]);
+    assert!(
+        code == Some(0) && printed.contains("✅ SHIP"),
+        "change 162 より前に書かれた判定が通りません (exit {code:?}):\n{printed}"
+    );
+}
+
+#[test]
+/// Change 162. Parallel sessions pick change numbers from what main holds, and
+/// four numbers on main already name two changes each. A new branch may not
+/// take a number another change, branch, or remote branch already holds under
+/// another slug.
+pub(crate) fn a_new_change_cannot_take_a_number_already_in_use() {
+    let root = temporary_directory("change-number");
+    let repo = root.join("repo");
+    let origin = root.join("origin.git");
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    fs::create_dir_all(repo.join("scripts")).unwrap();
+    fs::create_dir_all(repo.join("docs/sdlc/changes/005-alpha")).unwrap();
+    for script in ["scripts/check-change-number.sh", "scripts/run-bounded.sh"] {
+        fs::copy(source.join(script), repo.join(script)).unwrap();
+    }
+    fs::write(repo.join("docs/sdlc/changes/005-alpha/state.yaml"), "x\n").unwrap();
+    let command = |cwd: &Path, program: &str, args: &[&str]| {
+        let mut command = std::process::Command::new(program);
+        forget_inherited_repository(&mut command);
+        let output = command
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_AUTHOR_NAME", "fixture")
+            .env("GIT_AUTHOR_EMAIL", "fixture@operon")
+            .env("GIT_COMMITTER_NAME", "fixture")
+            .env("GIT_COMMITTER_EMAIL", "fixture@operon")
+            .output()
+            .unwrap();
+        (
+            output.status.code(),
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        )
+    };
+    let git = |args: &[&str]| {
+        let (code, printed) = command(&repo, "git", args);
+        assert_eq!(code, Some(0), "git {args:?}: {printed}");
+    };
+    command(&root, "git", &["init", "-q", "--bare", "origin.git"]);
+    git(&["init", "-q", "-b", "main"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "main"]);
+    git(&["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(&["push", "-q", "origin", "main"]);
+    // A local branch, and a branch only another session's clone pushed.
+    git(&["branch", "fix/007-beta"]);
+    git(&["push", "-q", "origin", "main:refs/heads/feature/009-gamma"]);
+    let check = |branch: &str| command(&repo, "bash", &["scripts/check-change-number.sh", branch]);
+
+    let mut wrong = Vec::new();
+    let mut expect = |label: &str, branch: &str, want_code: i32, want: &[&str]| {
+        let (code, printed) = check(branch);
+        if code != Some(want_code) || want.iter().any(|text| !printed.contains(text)) {
+            wrong.push(format!(
+                "{label} ({branch}): expected exit {want_code} with {want:?}, got {code:?}:\n    {}",
+                printed.trim()
+            ));
+        }
+    };
+    expect(
+        "a change directory on main holds it",
+        "fix/005-other",
+        1,
+        &[
+            "変更番号 005 は使用中です",
+            "005-alpha",
+            "次の空き番号は 010 です",
+        ],
+    );
+    expect(
+        "the same change, re-cut as a feature",
+        "feature/007-beta",
+        0,
+        &[],
+    );
+    expect(
+        "a remote branch holds it",
+        "fix/009-delta",
+        1,
+        &["変更番号 009 は使用中です", "feature/009-gamma"],
+    );
+    expect("no number", "chore/install-159-160", 0, &[]);
+    expect("a free number", "feature/010-new", 0, &[]);
+    git(&[
+        "remote",
+        "set-url",
+        "origin",
+        root.join("missing.git").to_str().unwrap(),
+    ]);
+    expect(
+        "origin unreachable: warns, still refuses",
+        "fix/005-other",
+        1,
+        &["origin を取得できませんでした", "変更番号 005 は使用中です"],
+    );
+    fs::remove_dir_all(&root).ok();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+
+    // `make wt.new` asks before it creates anything.
+    let makefile = fs::read_to_string(source.join("Makefile")).unwrap();
+    let asks = makefile.find("bash scripts/check-change-number.sh $(BR)");
+    let creates = makefile.find("node .claude/scripts/worktree-new.mjs");
+    assert!(
+        matches!((asks, creates), (Some(a), Some(c)) if a < c),
+        "make wt.new が worktree を作る前に番号を確かめていません"
     );
 }
 
@@ -24626,7 +24881,7 @@ pub(crate) fn every_translation_keeps_the_placeholder_names_of_its_message_id() 
 /// The tables agreeing with each other says nothing about the code: a message
 /// written with `tr`/`tf!` that no table has a row for is shown in Japanese on
 /// an English or Korean screen, and every other check stays green. So every
-/// literal message id in the source has its row (change 162).
+/// literal message id in the source has its row (change 165).
 #[test]
 pub(crate) fn every_message_the_code_shows_has_a_row_in_every_table() {
     fn literal_after(text: &str, start: usize) -> Option<String> {
@@ -24671,7 +24926,7 @@ pub(crate) fn every_message_the_code_shows_has_a_row_in_every_table() {
     }
     // A `tr` that takes a field rather than a literal reads its id out of a
     // table; those tables are checked below, and a call taking anything not
-    // named here fails until its table is added (review of 162).
+    // named here fails until its table is added (review of 165).
     const INDIRECT_ARGUMENTS: &[&str] = &[
         "flag.label",
         "flag.detail",
@@ -44676,6 +44931,180 @@ pub(crate) fn a_project_emptied_by_pinning_does_not_claim_it_has_no_sessions() {
     assert!(
         !texts.iter().any(|(text, _)| text == "0 件"),
         "the project header counts its pinned sessions"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text.ends_with("セッションを開始")),
+        "a project whose sessions are pinned above is not offered a first one"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+// --- Change 158: an empty project offers to start a session ---------------
+
+/// `app_with_two_sessions` plus a second project with nothing in it, drawn
+/// after the first, so a click that selected the wrong project shows.
+fn app_with_an_empty_second_project(root: &Path) -> (OperonApp, Uuid) {
+    let (mut app, _first, _second) = app_with_two_sessions(root);
+    let empty = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: empty,
+        path: root.join("empty"),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    (app, empty)
+}
+
+/// Every text the workspace paints, drawn at the screen `click_at` uses, so a
+/// position read here is the position a click there lands on.
+fn workspace_texts_at_click_size(
+    app: &mut OperonApp,
+    context: &egui::Context,
+) -> Vec<(String, egui::Pos2)> {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    text_positions(&context.run(input, &mut draw))
+}
+
+/// Clicks the rightmost 「セッションを開始」 the workspace paints — with the
+/// history open, that is the one in the history rather than the session
+/// column. The painted label is the add glyph, two spaces, then the word.
+/// Returns how many were drawn, so a test of the history can tell its own
+/// from the column's.
+fn click_start_session(app: &mut OperonApp) -> usize {
+    let context = egui::Context::default();
+    let texts = workspace_texts_at_click_size(app, &context);
+    let starts: Vec<egui::Pos2> = texts
+        .iter()
+        .filter(|(text, _)| text.ends_with("セッションを開始"))
+        .map(|(_, pos)| *pos)
+        .collect();
+    let Some(at) = starts.iter().copied().max_by(|a, b| a.x.total_cmp(&b.x)) else {
+        return 0;
+    };
+    click_at(&context, at + egui::vec2(4.0, 4.0), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    });
+    starts.len()
+}
+
+#[test]
+/// Where an empty project's sessions would be, the column offers the first
+/// one instead of saying there is none, and the click opens the launch sheet
+/// for that project.
+pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
+    let root = temporary_directory("empty-project-column");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text == "セッションはまだありません"),
+        "空のプロジェクトがまだ「セッションはまだありません」と言っています"
+    );
+    assert_eq!(
+        click_start_session(&mut app),
+        1,
+        "空のプロジェクトに「セッションを開始」がありません"
+    );
+    assert!(app.launch_sheet_open, "押しても起動シートが開きません");
+    assert_eq!(app.selected_project, Some(empty));
+    // The two strings this change puts in front of a person read in every
+    // language. Through the lookup, not `tr`: the active language is
+    // process-wide and the suite runs in parallel.
+    for (language, start, no_match) in [
+        (Language::En, "Start a session", "No matching sessions."),
+        (Language::Ko, "세션 시작", "일치하는 세션이 없습니다."),
+    ] {
+        assert_eq!(translation_for(language, "セッションを開始"), Some(start));
+        assert_eq!(
+            translation_for(language, "一致するセッションはありません。"),
+            Some(no_match)
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The history's 「プロジェクト別」 view offers the same start under an empty
+/// project, and under a search says the project has no match instead.
+pub(crate) fn an_empty_project_in_the_history_list_starts_a_session() {
+    let root = temporary_directory("empty-project-history-list");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    app.session_library_open = true;
+    app.session_view = SessionView::List;
+    // One in the session column beside it, one in the history.
+    assert_eq!(
+        click_start_session(&mut app),
+        2,
+        "「プロジェクト別」の空のプロジェクトに「セッションを開始」がありません"
+    );
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.selected_project, Some(empty));
+
+    // Choosing another project closes the history, as every way into the
+    // sheet from there does; reopen it to read the search case.
+    app.launch_sheet_open = false;
+    app.session_library_open = true;
+    app.search = "nothing-matches-this".to_owned();
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text == "一致するセッションはありません。"),
+        "検索で隠れたプロジェクトが一致なしと言っていません"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text == "セッションはまだありません。"),
+        "検索で隠れたプロジェクトがセッションなしと言っています"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The history's 「グリッド」 view offers the same start under an empty project,
+/// and keeps its no-match line under a search.
+pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
+    let root = temporary_directory("empty-project-history-grid");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    app.session_library_open = true;
+    app.session_view = SessionView::Grid;
+    assert_eq!(
+        click_start_session(&mut app),
+        2,
+        "「グリッド」の空のプロジェクトに「セッションを開始」がありません"
+    );
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.selected_project, Some(empty));
+
+    // Choosing another project closes the history, as every way into the
+    // sheet from there does; reopen it to read the search case.
+    app.launch_sheet_open = false;
+    app.session_library_open = true;
+    app.search = "nothing-matches-this".to_owned();
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text == "一致するセッションはありません。"),
+        "検索で隠れたプロジェクトが一致なしと言っていません"
     );
     fs::remove_dir_all(&root).ok();
 }
