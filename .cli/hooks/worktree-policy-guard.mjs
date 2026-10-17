@@ -234,14 +234,20 @@ export function realPath(abs) {
   }
 }
 
+/** The linked worktree under `.worktrees/` that holds `dir`, or null. */
+function worktreeHolding(dir, projectDir, linked = hasGitEntry) {
+  const root = realPath(projectDir);
+  if (!isInside(dir, root) || !isWorktreeRelPath(relative(root, dir).replace(/\\/g, '/'))) return null;
+  const wtRoot = resolveWorktreeRoot(dir);
+  return wtRoot && linked(wtRoot) && existsSync(dir) ? wtRoot : null;
+}
+
 /** Is this segment worktree work that cannot touch the trunk checkout? (see header) */
 export function isWorktreeSegment(seg, projectDir, linked = hasGitEntry) {
   if (!seg.cwdCertain || !seg.effectiveDir || seg.dirs.includes(null)) return false;
-  const root = realPath(projectDir);
   const dir = realPath(seg.effectiveDir);
-  if (!isInside(dir, root) || !isWorktreeRelPath(relative(root, dir).replace(/\\/g, '/'))) return false;
-  const wtRoot = resolveWorktreeRoot(dir);
-  if (!wtRoot || !linked(wtRoot) || !existsSync(dir)) return false;
+  if (!worktreeHolding(dir, projectDir, linked)) return false;
+  const root = realPath(projectDir);
   const { paths, unresolved } = pathArgs(seg.words, seg.cwd, dir);
   return !unresolved && !paths.some((p) => isTrunkPath(realPath(p), root));
 }
@@ -335,9 +341,18 @@ function queryBranch(projectDir) {
   return safeGit('branch --show-current', projectDir, { timeout: 2000 });
 }
 
-function buildTrunkBashDenyMessage(segment, branch) {
+function buildTrunkBashDenyMessage(segment, branch, worktree) {
+  // Change 173: refused inside a worktree, "on main" read as a wrong cwd and sent sessions
+  // re-entering a directory they were already in. Say which rule judged it.
+  const inWorktree = worktree
+    ? `This shell is in the worktree ${worktree}, but the command was judged as trunk work: one of its ` +
+      `arguments expands (\`$VAR\`, \`~\`, a glob) or resolves into the trunk checkout, so it cannot be shown ` +
+      `to stay in the worktree. Spell the paths out, or put the command in a script inside the worktree and ` +
+      `run \`bash <script>\`.\n`
+    : '';
   return (
     `[Worktree Policy] Command not on the trunk allowlist on ${branch}: ${segment.slice(0, 120)}\n\n` +
+    inWorktree +
     `This project opted in to trunk_bash_allowlist: on the trunk branch only listed commands run; ` +
     `development happens in a worktree.\n` +
     `  → Create worktree: make wt.new BR=feature/<task>, then run the command there ` +
@@ -371,7 +386,9 @@ async function runTrunkBash(data, projectDir) {
     );
   }
   if (segment === null) return HookOutput.passthrough();
-  return HookOutput.deny(buildTrunkBashDenyMessage(segment, branchLabel));
+  const cwd = data?.cwd ? realPath(data.cwd) : null;
+  const worktree = cwd ? worktreeHolding(cwd, projectDir) : null;
+  return HookOutput.deny(buildTrunkBashDenyMessage(segment, branchLabel, worktree));
 }
 
 

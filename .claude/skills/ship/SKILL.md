@@ -41,10 +41,15 @@ other run.
 
 **Quit the running Operon first.** The installed app and a source build take the
 same `flock` on the session index, and the install refuses while Operon runs.
+Agent sessions in its terminals keep running in tmux while it is closed.
 
 ```sh
+osascript -e 'tell application "Operon" to quit'
+pgrep -x Operon
 bash scripts/replace-macos-bundle.sh <repo>/dist/Operon.app /Applications/Operon.app <repo>/dist/Operon.previous.app
 ```
+
+`pgrep` printing nothing is the app gone; run the swap only then.
 
 `<repo>` is the checkout's absolute path, written out: the three arguments must
 be plain paths. `.claude/hooks/guard-bash.sh` lets this one form through after
@@ -56,6 +61,15 @@ on; fix that rather than approving the prompt it falls back to.
 ## 3. Verify the installed build
 
 1. Launch `/Applications/Operon.app` and confirm it reaches the home dashboard.
+
+   ```sh
+   open /Applications/Operon.app
+   bash scripts/check-installed-build.sh
+   ```
+
+   Every command in this file runs from the main checkout:
+   `the_release_runs_from_main_as_the_ship_skill_writes_it` holds the trunk
+   allowlist to them.
 2. Move obsolete backup and `dist` bundles to Trash — Trash, not `rm`, so it stays
    recoverable. Retain a rollback copy only when the user asked for one.
 

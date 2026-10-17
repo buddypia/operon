@@ -1,0 +1,63 @@
+# Review record for 173-the-release-cannot-quit-or-open-operon-on-main.
+#
+# The change: the ship skill names the commands that quit and reopen the
+# installed app, the trunk allowlist admits exactly those two spellings,
+# anchored at both ends, and a test judges every sh line of the skill with this
+# repository's policy on a trunk fixture, plus six near spellings that must
+# stay refused. A refusal made inside a worktree names the worktree and why.
+#
+# Round 1, no Important from either reviewer.
+#
+# Verified by rust-reviewer: the worktreeHolding extraction returns the same
+# result on every path isWorktreeSegment took; the anchored patterns cannot
+# admit a second -e or an embedded newline; the test cannot pass with nothing
+# collected or with a policy that fails open.
+#
+# Verified by subprocess-safety-reviewer: 54 crafted commands from 5 working
+# directories against the changed guard on a trunk fixture holding the real
+# policy — no way past "quit Operon" or "open the installed bundle"; old and
+# new guard side by side gave 0 decision differences; the swap over a live
+# app stays closed by scripts/check-release-preconditions.sh step 4 under the
+# flock; quitting does not stop the tmux sessions (on_exit, src/app.rs).
+# Its nits 2 (the script must stay inside the worktree — the message already
+# says so) and 7 (the test drives one guard, not the whole PreToolUse chain)
+# are left out of carried as the lowest value (REVIEW.md: at most five).
+#
+# rust-reviewer/1/2 and subprocess-safety-reviewer/1/1 are one finding; the
+# follow-up change takes it with subprocess-safety-reviewer/1/4.
+#
+# Re-confirmed under round 1 at this digest: main moved under the branch (163,
+# 172); the merge's only conflict was docs/sdlc/lessons.md, kept as 077 then
+# 078. The approvals were at df5c000e15b3481f (commit df7e4e9); 173's +/- lines
+# against main are byte-identical before and after the merge, so only hunk
+# context moved. Both re-read and re-approve; nothing new raised.
+
+digest: "6cb784ee22f1cf8d"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · the test requires only the quit and open commands to exist; a sh fence renamed to bash, or pgrep / replace-macos-bundle / check-installed-build moved out, stops being judged and the test stays green
+    person: "手順書の書式が変わったときに、テストが一部のコマンドを確かめなくなる可能性があります。今の手順書では起きません。対応は不要です。"
+  - rust-reviewer/1/2 · the worktree explanation says an argument expands or resolves into the trunk, but findDisallowedTrunkSegment also denies for env -S, a GIT_DIR= or GIT_WORK_TREE= assignment, and an uncertain cwd; GIT_DIR=x git log inside a worktree gets advice to spell out paths, which will not help
+    person: "作業用フォルダの中で GIT_DIR を指定したコマンドが止められたとき、AI に出る理由の説明が実際の理由と合いません。AI が同じ失敗を繰り返すおそれがあるので、次の変更で直します。あなたの対応は不要です。"
+  - rust-reviewer/1/3 · realPath(projectDir) is now computed twice per call; the helper could take a precomputed root
+    person: "コマンドの確認ごとに、ごく小さな処理が1回余分に走ります。体感できる差はありません。対応は不要です。"
+  - rust-reviewer/1/4 · fs::copy(...).unwrap() and git_in run after the fixture exists but before discard_worktree_fixture, so a failure there leaks a temp directory
+    person: "テストが途中で失敗した場合だけ、一時フォルダが1つ残ることがあります。セッション終了時に消えます。対応は不要です。"
+  - rust-reviewer/1/5 · commandText discards word boundaries, so osascript -e tell 'application "Operon" to' quit joins to the same text and is allowed; the real argv fails harmlessly
+    person: "引用符の付け方を変えた quit の命令も通りますが、その場合は何も実行されずに終わります。対応は不要です。"
+  - subprocess-safety-reviewer/1/1 · the worktree explanation is attached to every deny in a worktree but only describes expanded or trunk-resolving arguments; wrong for GIT_DIR=x git status, export GIT_DIR=x and env -S ls, so a session told to spell paths out is refused again
+    person: "上の GIT_DIR の説明のずれと同じ内容です。次の変更で直します。あなたの対応は不要です。"
+  - subprocess-safety-reviewer/1/3 · leading assignments and wrappers are stripped before matching, so PATH=/tmp/evil open /Applications/Operon.app is allowed; the same holds for the existing git patterns, and the guard assumes an honest agent
+    person: "PATH を書き換えた形でも通りますが、これは既存の git の許可と同じ前提（AI が故意に回避しない）によるものです。対応は不要です。"
+  - subprocess-safety-reviewer/1/4 · pgrep -x Operon misses a lowercase operon source build, and the doc gives no wait or retry after the asynchronous quit
+    person: "アプリの終了確認で、開発中のビルドを見落とすことと、終了を待たずに進む書き方になっています。差し替え前の別の確認が両方とも止めるので、壊れることはありません。次の変更で手順書を直します。"
+  - subprocess-safety-reviewer/1/5 · the quit is a one-line automated step with no check for unsaved work; an Apple Event quit may end the process without on_exit, so unsaved editor text could be lost (unverified)
+    person: "インストールのためにアプリを終了するとき、エディタで保存していない文章があれば失われる可能性があります（未確認）。差し替えの前に保存しておいてください。"
+  - subprocess-safety-reviewer/1/6 · .claude/settings.json has no permission-allow entries for osascript or open; whether the permission layer still prompts after the hook allows them is unchecked
+    person: "アプリの終了と起動で、確認の画面が出るかどうかはまだ確かめていません。次のインストールで確かめます。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"
+  subprocess-safety-reviewer: "approve-with-nits 0 7"
