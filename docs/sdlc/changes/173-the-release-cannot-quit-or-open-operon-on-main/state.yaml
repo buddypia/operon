@@ -1,0 +1,70 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: the release (.claude/skills/ship/SKILL.md) runs from the main checkout
+# after the merge and says "quit the running Operon" and "launch
+# /Applications/Operon.app" in prose. On main the trunk allowlist refuses
+# `osascript` and `open`, so each install in changes 159-168 quit and reopened
+# Operon from a throwaway worktree (chore/install-*), and the last report
+# handed the gap to the person as a policy question — what AGENTS.md (sdlc 084)
+# says not to do with a recoverable step a guard refuses.
+#
+# Also measured in the same sessions: inside a worktree, a command whose
+# argument expands (`$VAR`, `~`, a glob — e.g. an awk program or a for loop) is
+# judged as trunk work, which is the guard working; but the refusal said only
+# "Command not on the trunk allowlist on main", and the session re-entered the
+# worktree it was already in, about fifteen times.
+#
+# Fix: the ship skill names its commands (`osascript -e 'tell application
+# "Operon" to quit'`, `pgrep -x Operon`, `open /Applications/Operon.app`), the
+# allowlist admits exactly those two new spellings, anchored at both ends, and
+# a test reads every sh line of the skill and judges it with this repository's
+# policy on a trunk fixture, plus six near spellings that must stay refused.
+# The deny message names the worktree and the rule when the shell is in one.
+#
+# Risk: no surface in docs/sdlc/risk.yaml lists .claude/config/ or .cli/hooks/,
+# so by the table this is unclassified. It does widen what a gate permits, so
+# it is recorded as medium and supervised, and the person is told that the
+# table leaves these two paths out — changing risk.yaml is gate configuration
+# (high, paused), so that is theirs to decide.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. After the merge, install from main with the ship skill's
+  quit, pgrep, swap, open lines — the first run of them on main. The refusal
+  text inside a worktree still blames the paths when a GIT_*/CDPATH assignment
+  or env -S was the cause, and the ship skill's pgrep misses a source build and
+  does not wait: both reviewers raised the first, and a follow-up change takes
+  both (review.yaml)."
+
+contract:
+  failing-test-first: "machine passed
+    the_release_runs_from_main_as_the_ship_skill_writes_it failed on the quit
+    command before the allowlist moved, and with the quit pattern's end anchor
+    removed it named the added `-e`; a_command_refused_inside_a_worktree_says_why
+    failed with the explanation removed"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) · the two tests above; the suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
+    their bands"
+  review: "human passed rust-reviewer approve 0 5 and
+    subprocess-safety-reviewer approve 0 7 at df5c000e15b3481f (round 1),
+    remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

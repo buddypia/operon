@@ -956,3 +956,21 @@ at the shapes a probe chose.
 failing with `n_seq_max` set from the text count, and with the release after
 `run_native` removed) and `scripts/check-embedding-fidelity.sh`, whose 46 texts
 end on a chunk of six (watched failing: exit 134 twice, then 0).
+
+## 078 — The release named two steps the trunk refused
+
+The ship skill runs on `main` after the merge and said "quit the running
+Operon" and "launch `/Applications/Operon.app`" in prose. The trunk allowlist
+admitted neither `osascript` nor `open`, so every install from change 159 to 168
+quit and reopened the app from a worktree made for nothing else, and once the
+gap was named as a policy question for the person instead of a gap in the guard
+(sdlc 084). Alongside it, a command refused inside a worktree — because an
+argument expands — was reported "on main", and sessions re-entered a directory
+they were already in. **The rule:** a procedure that runs under a guard states
+its commands, and a test holds the guard to them; a refusal names the rule that
+refused, not only the branch.
+
+**Guard.** `the_release_runs_from_main_as_the_ship_skill_writes_it` (watched
+failing on the quit command, and with the quit pattern unanchored on an added
+`-e`) and `a_command_refused_inside_a_worktree_says_why` (watched failing with
+the explanation removed).

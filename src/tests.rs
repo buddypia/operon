@@ -37529,6 +37529,161 @@ pub(crate) fn a_report_to_a_person_is_written_in_their_words() {
     );
 }
 
+/// Change 173. The release runs from the main checkout after the merge, and the
+/// ship skill said "quit the running Operon" and "launch" without a command the
+/// trunk allowlist admitted: every install in changes 159 to 168 quit and
+/// reopened the app from a throwaway worktree made for nothing else. So the
+/// skill names each command, and each is judged here by this repository's own
+/// policy on a trunk fixture — read out of the skill, not restated.
+#[test]
+pub(crate) fn the_release_runs_from_main_as_the_ship_skill_writes_it() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let skill = fs::read_to_string(repository.join(".claude/skills/ship/SKILL.md")).unwrap();
+    let root = worktree_fixture_repository("ship-on-trunk");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+
+    let mut commands = Vec::new();
+    let mut in_shell = false;
+    for line in skill.lines().map(str::trim) {
+        if line.starts_with("```") {
+            in_shell = line == "```sh";
+        } else if in_shell && !line.is_empty() {
+            commands.push(line.replace("<repo>", project.to_str().unwrap()));
+        }
+    }
+    assert!(
+        commands.iter().any(|c| c.contains("to quit"))
+            && commands.iter().any(|c| c.starts_with("open ")),
+        "ship の手順が Operon の終了と起動をコマンドで書いていません: {commands:?}"
+    );
+    // The same words with something added run more than the release asks for.
+    let beyond = [
+        "osascript -e 'tell application \"Operon\" to quit' -e 'do shell script \"x\"'",
+        "osascript -e 'do shell script \"x\"'",
+        "osascript /tmp/x.scpt",
+        "open /Applications/Operon.app --args x",
+        "open -a Terminal /tmp/x",
+        "open /tmp/x.app",
+    ];
+    let judged = commands
+        .iter()
+        .map(String::as_str)
+        .chain(beyond)
+        .map(|c| serde_json::to_string(c).unwrap())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
+         const out = {{}};\n\
+         for (const command of [{judged}])\n\
+           out[command] = decide(await policy({{ tool_name: 'Bash', tool_input: {{ command }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }}));\n\
+         console.log(JSON.stringify(out));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        project = project.to_str().unwrap(),
+    );
+    let mut command = node_in(&project);
+    command.args(["--input-type=module", "-e", &script]);
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
+    for command in &commands {
+        assert_eq!(
+            verdicts[command.as_str()].as_str(),
+            Some("allow"),
+            "ship の手順のコマンドを main の allowlist が止めます: {command}"
+        );
+    }
+    for command in beyond {
+        assert_eq!(
+            verdicts[command].as_str(),
+            Some("deny"),
+            "main の allowlist が手順にないコマンドまで通しました: {command}"
+        );
+    }
+}
+
+/// Change 173. Inside a worktree a command whose argument expands is judged as
+/// trunk work, and the refusal said only "on main": a session already in its
+/// worktree read that as a wrong directory and re-entered it, again and again.
+/// The refusal still stands; it now names the worktree and the rule.
+#[test]
+pub(crate) fn a_command_refused_inside_a_worktree_says_why() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("trunk-refusal-reason");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+    let worktree = project.join(".worktrees/feature/here");
+    git_in(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/here",
+            worktree.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const ask = async (cwd) => {{\n\
+           const r = await policy({{ tool_name: 'Bash', tool_input: {{ command: 'awk \"{{print $1}}\" x' }}, cwd, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
+           return {{ decision: r?.hookSpecificOutput?.permissionDecision || 'allow', reason: r?.hookSpecificOutput?.permissionDecisionReason || '' }};\n\
+         }};\n\
+         console.log(JSON.stringify({{ worktree: await ask({worktree:?}), trunk: await ask({project:?}) }}));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        worktree = worktree.to_str().unwrap(),
+        project = project.to_str().unwrap(),
+    );
+    let mut command = node_in(&project);
+    command.args(["--input-type=module", "-e", &script]);
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
+    let named = format!("This shell is in the worktree {}", worktree.display());
+    assert_eq!(verdicts["worktree"]["decision"], "deny", "{verdicts}");
+    assert!(
+        verdicts["worktree"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains(&named)),
+        "worktree の中で止めた理由を言っていません: {verdicts}"
+    );
+    assert_eq!(verdicts["trunk"]["decision"], "deny", "{verdicts}");
+    assert!(
+        !verdicts["trunk"]["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("This shell is in the worktree"),
+        "main checkout での拒否を worktree の中だと言っています: {verdicts}"
+    );
+}
+
 /// Change 073. Change 058 established the trunk allowlist and the all-Bash
 /// ownership check. They live in `.claude/config/worktree-policy.json`,
 /// and nothing else in the repository would notice that file losing them:
