@@ -87,6 +87,8 @@ pub(crate) enum BackgroundKey {
     KnowledgeRun,
     KnowledgeLoad(Uuid),
     KnowledgeEdit(Uuid),
+    /// Laying out one project's map (change 171).
+    KnowledgeMap(Uuid),
     KnowledgeSearch,
     KnowledgeSessionSearch,
     ModelDownload,
@@ -290,6 +292,12 @@ pub(crate) enum BackgroundResult {
         key: BackgroundKey,
         project_id: Uuid,
         result: UiResult<KnowledgeSnapshot>,
+    },
+    KnowledgeMapped {
+        project_id: Uuid,
+        /// The snapshot the map was made from: drawn only against it.
+        from: Arc<KnowledgeSnapshot>,
+        result: UiResult<Arc<KnowledgeMap>>,
     },
     KnowledgeSearched {
         project_id: Uuid,
@@ -1435,6 +1443,15 @@ impl OperonApp {
                 } => {
                     self.background_tasks.remove(&key);
                     self.apply_knowledge_snapshot(project_id, result);
+                }
+                BackgroundResult::KnowledgeMapped {
+                    project_id,
+                    from,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::KnowledgeMap(project_id));
+                    self.apply_knowledge_map(project_id, from, result);
                 }
                 BackgroundResult::KnowledgeSearched {
                     project_id,

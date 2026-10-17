@@ -481,5 +481,37 @@ pub(crate) const KNOWLEDGE_BODY_MAX_CHARS: usize = 400;
 pub(crate) const KNOWLEDGE_FAILED_ATTEMPTS: u32 = 3;
 pub(crate) const KNOWLEDGE_FAILED_RETRY_DAYS: u64 = 7;
 pub(crate) const KNOWLEDGE_CLI_DEFAULT_LIMIT: usize = 5;
+/// The knowledge map (change 171): neighbours kept per entry, and lines drawn.
+pub(crate) const KNOWLEDGE_MAP_NEIGHBOURS: usize = 8;
+pub(crate) const KNOWLEDGE_MAP_EDGES_PER_ENTRY: usize = 4;
+/// Measured 2026-10-17 through the shipped runtime on entry-shaped texts (three
+/// topics of four, six unrelated): same-topic pairs 0.664–0.803, median 0.755;
+/// other pairs median 0.664, 95th percentile 0.710. At 0.72 for both, eleven
+/// of twelve topic entries fall in their topic's group and all six unrelated
+/// ones stay ungrouped; at a 0.70 baseline four unrelated ones were absorbed.
+pub(crate) const KNOWLEDGE_MAP_EDGE_MIN_COSINE: f32 = 0.72;
+pub(crate) const KNOWLEDGE_MAP_GROUP_BASELINE: f32 = 0.72;
+pub(crate) const KNOWLEDGE_MAP_MIN_GROUP: usize = 3;
+pub(crate) const KNOWLEDGE_MAP_GROUP_LABEL_CHARS: usize = 16;
+pub(crate) const KNOWLEDGE_MAP_ITERATIONS: usize = 300;
+pub(crate) const KNOWLEDGE_MAP_SETTLE_ITERATIONS: usize = 60;
+/// While settling, a placed entry moves at most this share of the map's extent.
+pub(crate) const KNOWLEDGE_MAP_SETTLE_MAX_SHIFT: f32 = 0.05;
+pub(crate) const KNOWLEDGE_MAP_MAX_LABELS: usize = 60;
+/// Release-build layout time at `KNOWLEDGE_MAX_ENTRIES` (spec Req 9); measured
+/// 0.52 s on 2026-10-17. Only the test reads it.
+#[cfg(test)]
+pub(crate) const KNOWLEDGE_MAP_BUDGET_SECONDS: u64 = 5;
+/// Below this content width the panel goes under the map.
+pub(crate) const KNOWLEDGE_MAP_NARROW_WIDTH: f32 = 700.0;
+pub(crate) const KNOWLEDGE_MAP_HEIGHT: f32 = 420.0;
+pub(crate) const KNOWLEDGE_MAP_NARROW_HEIGHT: f32 = 360.0;
+pub(crate) const KNOWLEDGE_MAP_PANEL_WIDTH: f32 = 290.0;
+pub(crate) const KNOWLEDGE_MAP_MIN_RADIUS: f32 = 3.0;
+pub(crate) const KNOWLEDGE_MAP_MAX_RADIUS: f32 = 9.0;
+pub(crate) const KNOWLEDGE_MAP_MIN_OPACITY: f32 = 0.25;
+pub(crate) const KNOWLEDGE_MAP_DIMMED_OPACITY: f32 = 0.15;
+/// Entry titles appear once the view is this many times closer than the fit.
+pub(crate) const KNOWLEDGE_MAP_LABEL_ZOOM: f32 = 1.8;
 /// The directory under the app data directory that holds the model file.
 pub(crate) const EMBEDDING_MODEL_DIRECTORY_NAME: &str = "models";

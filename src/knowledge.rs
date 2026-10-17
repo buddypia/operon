@@ -12,6 +12,8 @@
 pub(crate) mod embed;
 
 pub(crate) use embed::*;
+pub(crate) mod map;
+pub(crate) use map::*;
 
 use crate::*;
 use rusqlite::{params, OptionalExtension};
@@ -249,7 +251,26 @@ CREATE TABLE IF NOT EXISTS sessions (
     PRIMARY KEY (provider, session_id)
 );
 CREATE TABLE IF NOT EXISTS judge_calls (day INTEGER PRIMARY KEY, count INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS layout (
+    entry_id INTEGER PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+    x REAL NOT NULL,
+    y REAL NOT NULL,
+    vector_hash INTEGER NOT NULL
+);
 ";
+
+/// Where the map put an entry, and the fingerprint of the vector it was placed
+/// by (change 171). Derived data: losing it costs a fresh layout, nothing else.
+/// Additive to schema 1: a 157 build never reads the table, and its `DELETE
+/// FROM entries` still cascades into it, since every connection enables
+/// foreign keys — so the version is not raised.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SavedPosition {
+    pub(crate) entry_id: i64,
+    pub(crate) x: f32,
+    pub(crate) y: f32,
+    pub(crate) vector_hash: u64,
+}
 
 /// Whether a judged entry may be added while `pinned` entries are pinned: a
 /// base whose every slot is pinned only reinforces (Req 15).
@@ -524,6 +545,56 @@ impl KnowledgeDatabase {
 
     pub(crate) fn entry_vectors(&self) -> Result<Vec<(i64, Vec<f32>)>> {
         self.vectors("SELECT id, vector FROM entries")
+    }
+
+    pub(crate) fn saved_layout(&self) -> Result<Vec<SavedPosition>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT entry_id, x, y, vector_hash FROM layout")
+            .map_err(sql_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(SavedPosition {
+                    entry_id: row.get(0)?,
+                    x: row.get::<_, f64>(1)? as f32,
+                    y: row.get::<_, f64>(2)? as f32,
+                    // SQLite integers are signed; the fingerprint's bits are kept.
+                    vector_hash: row.get::<_, i64>(3)? as u64,
+                })
+            })
+            .map_err(sql_error)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(sql_error)
+    }
+
+    /// Replace the saved layout in one write, while the project is still
+    /// enabled. An entry deleted since the layout was computed is skipped: its
+    /// row would violate the foreign key and fail the whole save.
+    pub(crate) fn save_layout(&mut self, positions: &[SavedPosition]) -> Result<Option<()>> {
+        self.write_if_enabled(|database| {
+            database
+                .connection
+                .execute("DELETE FROM layout", [])
+                .map_err(sql_error)?;
+            let mut statement = database
+                .connection
+                .prepare(
+                    "INSERT INTO layout (entry_id, x, y, vector_hash) \
+                     SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM entries WHERE id = ?1)",
+                )
+                .map_err(sql_error)?;
+            for position in positions {
+                statement
+                    .execute(params![
+                        position.entry_id,
+                        f64::from(position.x),
+                        f64::from(position.y),
+                        position.vector_hash as i64
+                    ])
+                    .map_err(sql_error)?;
+            }
+            Ok(())
+        })
     }
 
     fn source_vectors(&self) -> Result<Vec<(i64, Vec<f32>)>> {
@@ -1859,6 +1930,33 @@ pub(crate) fn knowledge_snapshot(
             .meta("last_run_at")?
             .and_then(|value| value.parse().ok()),
     })
+}
+
+/// The map task (change 171): read the vectors and the saved layout, compute
+/// the map for `entries`, and save the positions when the layout ran.
+pub(crate) fn knowledge_map(
+    root: &Path,
+    project_id: Uuid,
+    entries: &[KnowledgeEntry],
+    previous: Option<&KnowledgeMap>,
+    now: u64,
+) -> Result<KnowledgeMap> {
+    let Some(mut database) =
+        KnowledgeDatabase::open_existing(&knowledge_database_path(root, project_id))?
+    else {
+        return Ok(compute_map(entries, &[], &[], previous, now).map);
+    };
+    let vectors = database.entry_vectors()?;
+    let saved = database.saved_layout()?;
+    let outcome = compute_map(entries, &vectors, &saved, previous, now);
+    if let Some(positions) = &outcome.save {
+        // The saved layout is derived data: a save that fails (a run holding
+        // the writer past the busy timeout, a full disk) costs a fresh layout
+        // next time, not the map computed now. The transaction leaves the
+        // previous rows as they were.
+        let _ = database.save_layout(positions);
+    }
+    Ok(outcome.map)
 }
 
 /// The schedule's job: every enabled project, one after another. `progress`

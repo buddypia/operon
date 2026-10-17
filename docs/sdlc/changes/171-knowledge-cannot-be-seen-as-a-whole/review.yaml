@@ -1,0 +1,47 @@
+# Review record for 171-knowledge-cannot-be-seen-as-a-whole.
+#
+# Round 1: rust-reviewer do-not-approve (1 Important): apply_knowledge_map kept
+# the old map on Err while map_for moved to the new snapshot, so an 8-point map
+# could be drawn beside 3 entries and a hover or an edge index past them would
+# panic the frame. Fixed: the map is dropped on Err, and ui_knowledge_map draws
+# only a map whose points match its snapshot's entries one to one
+# (knowledge_map_that_failed_for_fewer_entries_is_not_drawn, watched failing
+# with each half reverted). Its minor 2 and durability-reviewer's minor 1 were
+# the same finding — a failed layout save threw away a computed map — and were
+# taken: the save is now best-effort (derived data). durability-reviewer's
+# minors 2 and 3 were taken too: non-finite points are never saved, and a
+# failed save is shown to leave the previous rows
+# (knowledge_map_save_that_fails_keeps_the_previous_layout).
+#
+# Round 2: both re-read and approve. durability-reviewer raised one more minor —
+# a NaN vector still reached the painter — taken in round 3: a non-finite
+# vector counts as no vector and goes on the outer ring; the test asserts every
+# point is finite, watched failing with the filter disabled.
+#
+# Round 3 (this digest): rust-reviewer and durability-reviewer confirm the
+# delta. subprocess-safety-reviewer, named by the gate for src/knowledge.rs,
+# read the whole staged diff: no Command::new, no unsafe, no PATH handling in
+# shipped code; approves with two minors carried below.
+
+digest: "87489103e37a5370"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/1 · src/knowledge.rs knowledge_map — `let _ = database.save_layout(positions)` leaves no trace; a save that keeps failing (read-only database) re-runs the full layout on every request with nothing saying why.
+    person: "マップの位置の保存が失敗し続けると、開くたびに配置を計算し直します。表示は正しく、対応は不要です。"
+  - rust-reviewer/2 · src/app/knowledge.rs:428-602 — `.map_err(|error| error.to_string())` drops anyhow's context chain (`{error:#}` would keep it); matches the existing tasks.
+    person: "マップを作れなかったときのエラー表示が、原因の一番外側だけになります。動作に影響はなく、対応は不要です。"
+  - rust-reviewer/3 · src/ui/knowledge_map.rs:207, src/app/knowledge.rs:1163 — the label and dimming caches key a map by `Arc::as_ptr`; a freed address could in principle be reused. No reachable path found; a generation counter would remove the doubt.
+    person: "ごくまれに、マップのラベルや薄く表示する点が一瞬古いまま残る可能性があります。実際に起きる経路は見つかっておらず、対応は不要です。"
+  - rust-reviewer/4 · src/ui/knowledge_map.rs, src/app/knowledge.rs — per-frame label Strings in painter.text; place_labels reruns each frame while panning or zooming; the panel clones the open entry each frame; MapView::frame is not clamped to 30× the fitted scale (one ungrouped entry zooms very far until the first scroll).
+    person: "マップを動かしている間は少し余分に計算します。「その他」が1件だけのときに選ぶと大きく拡大されますが、スクロールすると戻ります。対応は不要です。"
+  - subprocess-safety-reviewer/1 · docs/sdlc/changes/171-knowledge-cannot-be-seen-as-a-whole/mutations.py:77 — ROOT is this worktree's absolute path (as the template asks); run after the worktree is removed it fails at read_text.
+    person: "開発用の確認スクリプトは、この作業用フォルダーを削除した後は動きません。アプリには関係なく、対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/knowledge.rs:295 — the first map view of a database made before this change adds the layout table, which needs the writer; during a collection run holding it past 2 s that view shows 「マップを作れませんでした」 until 再試行.
+    person: "このバージョンで初めてマップを開いたとき、ちょうど収集が動いていると「マップを作れませんでした」と出ることがあります。「再試行」を押せば表示されます。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"
+  durability-reviewer: "approve 0 0"

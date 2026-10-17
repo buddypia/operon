@@ -50523,3 +50523,1011 @@ pub(crate) fn a_knowledge_tab_that_failed_to_load_offers_a_retry() {
         .contains(&BackgroundKey::KnowledgeLoad(project.id)));
     fs::remove_dir_all(root).unwrap();
 }
+
+// ---------------------------------------------------------------------------
+// The knowledge map (change 171).
+
+/// A deterministic unit vector near `topic`'s centre: members of one topic sit
+/// at cosine ≈ 0.89, different topics near 0.
+fn map_vector(topic: u64, member: u64) -> Vec<f32> {
+    fn next(state: &mut u64) -> f32 {
+        *state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = *state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        (z >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0
+    }
+    let mut centre = topic.wrapping_mul(7919).wrapping_add(1);
+    let mut noise = topic.wrapping_mul(104_729) ^ member.wrapping_mul(1_299_709) ^ 0xA5A5;
+    let mut vector: Vec<f32> = (0..EMBEDDING_DIMENSIONS)
+        .map(|_| next(&mut centre) + 0.35 * next(&mut noise))
+        .collect();
+    let norm = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    vector.iter_mut().for_each(|value| *value /= norm);
+    vector
+}
+
+fn insert_map_entry(database: &KnowledgeDatabase, title: &str, vector: Vec<f32>, at: u64) -> i64 {
+    let source = NewSource {
+        provider: CliProvider::Claude,
+        session_id: title.to_owned(),
+        transcript_path: PathBuf::from("/nonexistent/s.jsonl"),
+        exchange_index: 0,
+        text: title.to_owned(),
+        vector: vector.clone(),
+    };
+    let entry = NewEntry {
+        kind: KnowledgeKind::Fact,
+        title: title.to_owned(),
+        body: title.to_owned(),
+        vector,
+    };
+    match database
+        .add_or_reinforce(&entry, &source, at, true)
+        .unwrap()
+    {
+        AddOutcome::Added(id) => id,
+        other => panic!("{title}: {other:?}"),
+    }
+}
+
+fn saved_ids(database: &KnowledgeDatabase) -> Vec<i64> {
+    let mut ids: Vec<i64> = database
+        .saved_layout()
+        .unwrap()
+        .iter()
+        .map(|position| position.entry_id)
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+fn position_for(entry_id: i64) -> SavedPosition {
+    SavedPosition {
+        entry_id,
+        x: entry_id as f32 * 1.5,
+        y: -(entry_id as f32),
+        // The high bit set: the fingerprint must survive SQLite's signed integers.
+        vector_hash: u64::MAX - entry_id as u64,
+    }
+}
+
+#[test]
+pub(crate) fn knowledge_map_positions_round_trip_with_their_fingerprint() {
+    let root = temporary_directory("kn-map-roundtrip");
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let ids: Vec<i64> = (0..3)
+        .map(|topic| insert_map_entry(&database, &format!("t{topic}"), map_vector(topic, 0), 0))
+        .collect();
+    let positions: Vec<SavedPosition> = ids.iter().copied().map(position_for).collect();
+    assert_eq!(database.save_layout(&positions).unwrap(), Some(()));
+    let mut saved = database.saved_layout().unwrap();
+    saved.sort_by_key(|position| position.entry_id);
+    assert_eq!(saved, positions);
+    // A save replaces what was there, rather than adding to it.
+    database.save_layout(&positions[..1]).unwrap();
+    assert_eq!(saved_ids(&database), vec![ids[0]]);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_positions_go_with_their_entry() {
+    let root = temporary_directory("kn-map-cascade");
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let day = 86_400;
+    let kept = insert_map_entry(&database, "kept", map_vector(0, 0), 0);
+    let deleted = insert_map_entry(&database, "deleted", map_vector(1, 0), 0);
+    let stale = insert_map_entry(&database, "stale", map_vector(2, 0), 0);
+    let last = insert_map_entry(&database, "last", map_vector(3, 0), 0);
+    database.record_references(&[kept, last], 60 * day).unwrap();
+    let all: Vec<SavedPosition> = [kept, deleted, stale, last]
+        .into_iter()
+        .map(position_for)
+        .collect();
+    database.save_layout(&all).unwrap();
+
+    database.delete_entry(deleted).unwrap();
+    assert_eq!(saved_ids(&database), vec![kept, stale, last]);
+
+    assert_eq!(database.prune(80 * day).unwrap(), 1);
+    assert_eq!(saved_ids(&database), vec![kept, last]);
+
+    // Without AUTOINCREMENT a new entry takes the next rowid after the largest
+    // left, which is a removed entry's id; it must not inherit that place.
+    database.delete_entry(last).unwrap();
+    let reused = insert_map_entry(&database, "reused", map_vector(4, 0), 90 * day);
+    assert!(
+        [deleted, stale, last].contains(&reused),
+        "id {reused} was not reused"
+    );
+    assert_eq!(saved_ids(&database), vec![kept]);
+
+    database.clear().unwrap();
+    assert!(database.saved_layout().unwrap().is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_save_skips_an_entry_deleted_meanwhile() {
+    let root = temporary_directory("kn-map-race");
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let first = insert_map_entry(&database, "first", map_vector(0, 0), 0);
+    let second = insert_map_entry(&database, "second", map_vector(1, 0), 0);
+    let positions = [position_for(first), position_for(second)];
+    // The layout was computed while `second` existed; it is gone by the save.
+    database.delete_entry(second).unwrap();
+    assert_eq!(database.save_layout(&positions).unwrap(), Some(()));
+    assert_eq!(saved_ids(&database), vec![first]);
+    // A switched-off project is not written back.
+    database.set_enabled(false).unwrap();
+    assert_eq!(database.save_layout(&positions).unwrap(), None);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_save_that_fails_keeps_the_previous_layout() {
+    let root = temporary_directory("kn-map-save-fails");
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let first = insert_map_entry(&database, "first", map_vector(0, 0), 0);
+    let second = insert_map_entry(&database, "second", map_vector(1, 0), 0);
+    database
+        .save_layout(&[position_for(first), position_for(second)])
+        .unwrap();
+    // A NaN binds as NULL into a NOT NULL column: the insert after the DELETE
+    // fails, and the transaction puts both rows back.
+    let mut broken = position_for(second);
+    broken.x = f32::NAN;
+    assert!(database
+        .save_layout(&[position_for(first), broken])
+        .is_err());
+    assert_eq!(saved_ids(&database), vec![first, second]);
+
+    // compute_map never offers such a row to save.
+    let entries = vec![
+        map_test_entry(first, "first", 0),
+        map_test_entry(second, "second", 0),
+    ];
+    let mut poisoned = map_vector(1, 0);
+    poisoned[0] = f32::NAN;
+    let outcome = compute_map(
+        &entries,
+        &[(first, map_vector(0, 0)), (second, poisoned)],
+        &[],
+        None,
+        0,
+    );
+    for position in outcome.save.unwrap_or_default() {
+        assert!(
+            position.x.is_finite() && position.y.is_finite(),
+            "{position:?}"
+        );
+    }
+    // Nor draws the poisoned entry anywhere but a finite place.
+    assert!(outcome
+        .map
+        .points
+        .iter()
+        .all(|point| point[0].is_finite() && point[1].is_finite()));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_knowledge_database_from_before_the_map_gains_its_table() {
+    // Additive to schema 1: raising the version would make a 157 build refuse
+    // the whole knowledge base for a table it can ignore.
+    assert_eq!(KNOWLEDGE_SCHEMA_VERSION, 1);
+    let root = temporary_directory("kn-map-upgrade");
+    let (database, path) = enabled_knowledge_database(&root);
+    database
+        .connection_for_tests()
+        .execute_batch("DROP TABLE layout;")
+        .unwrap();
+    drop(database);
+    let reopened = KnowledgeDatabase::open(&path).unwrap();
+    assert!(reopened.enabled().unwrap());
+    assert!(reopened.saved_layout().unwrap().is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn map_test_entry(id: i64, title: &str, uses: u32) -> KnowledgeEntry {
+    KnowledgeEntry {
+        id,
+        kind: KnowledgeKind::Fact,
+        title: title.to_owned(),
+        body: String::new(),
+        created_at: 0,
+        reinforced_at: 0,
+        referenced_at: 0,
+        reference_count: uses,
+        recurrences: 0,
+        pinned: false,
+        sources: Vec::new(),
+    }
+}
+
+/// `topics[t]` entries for topic `t`, ids from 1, plus their vectors.
+fn map_fixture(topics: &[usize]) -> (Vec<KnowledgeEntry>, Vec<(i64, Vec<f32>)>) {
+    let mut entries = Vec::new();
+    let mut vectors = Vec::new();
+    for (topic, count) in topics.iter().enumerate() {
+        for member in 0..*count {
+            let id = entries.len() as i64 + 1;
+            entries.push(map_test_entry(
+                id,
+                &format!("topic {topic} entry {member}"),
+                0,
+            ));
+            vectors.push((id, map_vector(topic as u64, member as u64)));
+        }
+    }
+    (entries, vectors)
+}
+
+fn topic_of(entries: &[KnowledgeEntry], index: usize) -> String {
+    entries[index]
+        .title
+        .split(" entry")
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    (a[0] - b[0]).hypot(a[1] - b[1])
+}
+
+#[test]
+pub(crate) fn knowledge_map_joins_only_near_meanings() {
+    let (entries, vectors) = map_fixture(&[7, 4, 1]);
+    let vectors: Vec<Option<Vec<f32>>> = vectors
+        .into_iter()
+        .map(|(_, vector)| Some(vector))
+        .collect();
+    let neighbours = map_neighbours(&vectors, KNOWLEDGE_MAP_NEIGHBOURS);
+    assert!(neighbours
+        .iter()
+        .all(|list| list.len() <= KNOWLEDGE_MAP_NEIGHBOURS));
+    assert!(neighbours
+        .iter()
+        .all(|list| list.windows(2).all(|pair| pair[0].1 >= pair[1].1)));
+    let edges = map_edges(&neighbours);
+    assert!(!edges.is_empty());
+    for (a, b) in &edges {
+        assert_eq!(
+            topic_of(&entries, *a),
+            topic_of(&entries, *b),
+            "{a}–{b} crosses topics"
+        );
+        let near = |from: usize, to: usize| {
+            neighbours[from]
+                .iter()
+                .take(KNOWLEDGE_MAP_EDGES_PER_ENTRY)
+                .any(|(other, similarity)| {
+                    *other == to && *similarity >= KNOWLEDGE_MAP_EDGE_MIN_COSINE
+                })
+        };
+        assert!(
+            near(*a, *b) || near(*b, *a),
+            "{a}–{b} is not among either's nearest"
+        );
+    }
+    let lone = entries.len() - 1;
+    assert!(edges.iter().all(|(a, b)| *a != lone && *b != lone));
+    // Seven alike entries: each list keeps only four lines of its own.
+    let from_first: usize = edges.iter().filter(|(a, _)| *a == 0).count();
+    assert!(
+        from_first <= KNOWLEDGE_MAP_EDGES_PER_ENTRY + 2,
+        "{from_first}"
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_map_groups_related_entries_and_is_deterministic() {
+    let (entries, vectors) = map_fixture(&[5, 5, 5, 2, 1]);
+    let vectors: Vec<Option<Vec<f32>>> = vectors
+        .into_iter()
+        .map(|(_, vector)| Some(vector))
+        .collect();
+    let neighbours = map_neighbours(&vectors, KNOWLEDGE_MAP_NEIGHBOURS);
+    let groups = map_groups(&neighbours);
+    for topic in 0..3 {
+        let members: Vec<Option<usize>> = (0..5).map(|member| groups[topic * 5 + member]).collect();
+        assert!(
+            members[0].is_some(),
+            "topic {topic} has no group: {groups:?}"
+        );
+        assert!(
+            members.iter().all(|group| *group == members[0]),
+            "topic {topic} split: {groups:?}"
+        );
+    }
+    let firsts: Vec<Option<usize>> = (0..3).map(|topic| groups[topic * 5]).collect();
+    assert_ne!(firsts[0], firsts[1]);
+    assert_ne!(firsts[1], firsts[2]);
+    assert_ne!(firsts[0], firsts[2]);
+    // Two alike entries, and one alone, are not a group.
+    assert_eq!(&groups[15..], &[None, None, None]);
+    assert_eq!(map_groups(&neighbours), groups);
+    let _ = entries;
+}
+
+#[test]
+pub(crate) fn knowledge_map_names_a_group_by_its_most_central_entry() {
+    assert_eq!(
+        map_group_name("tmux の再試行は3回で打ち切る"),
+        "tmux の再試行は3回で打ち切…"
+    );
+    assert_eq!(map_group_name("リリース手順"), "リリース手順");
+    assert_eq!(
+        map_group_name(&"あ".repeat(KNOWLEDGE_MAP_GROUP_LABEL_CHARS)),
+        "あ".repeat(KNOWLEDGE_MAP_GROUP_LABEL_CHARS)
+    );
+    // The topic's centre itself is alike to every member: it is the most central.
+    let (mut entries, mut vectors) = map_fixture(&[5]);
+    let centre: Vec<f32> = {
+        let sum: Vec<f32> = (0..EMBEDDING_DIMENSIONS)
+            .map(|d| vectors.iter().map(|(_, vector)| vector[d]).sum())
+            .collect();
+        normalised(&sum)
+    };
+    entries.push(map_test_entry(6, "the centre of the topic", 0));
+    vectors.push((6, centre.clone()));
+    // A second copy with a higher id loses the tie.
+    entries.push(map_test_entry(7, "a later copy of the centre", 0));
+    vectors.push((7, centre));
+    let outcome = compute_map(&entries, &vectors, &[], None, 0);
+    assert_eq!(outcome.map.groups.len(), 1);
+    assert_eq!(
+        outcome.map.groups[0].name,
+        map_group_name("the centre of the topic")
+    );
+    assert_eq!(outcome.map.groups[0].members[0], 5);
+}
+
+#[test]
+pub(crate) fn knowledge_map_places_related_entries_together() {
+    let (entries, vectors) = map_fixture(&[6, 6, 6]);
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    assert_eq!(map.placement, MapPlacement::Fresh);
+    assert!(map
+        .points
+        .iter()
+        .all(|point| point[0].is_finite() && point[1].is_finite()));
+    let joined: f32 = map
+        .edges
+        .iter()
+        .map(|(a, b)| distance(map.points[*a], map.points[*b]))
+        .sum::<f32>()
+        / map.edges.len() as f32;
+    let mut all = 0.0;
+    let mut pairs = 0.0;
+    for a in 0..map.points.len() {
+        for b in (a + 1)..map.points.len() {
+            all += distance(map.points[a], map.points[b]);
+            pairs += 1.0;
+        }
+    }
+    assert!(
+        joined < 0.5 * all / pairs,
+        "joined {joined}, all {}",
+        all / pairs
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_map_keeps_placed_entries_where_they_were() {
+    let (mut entries, mut vectors) = map_fixture(&[5, 5, 5]);
+    let first = compute_map(&entries, &vectors, &[], None, 0);
+    let saved = first.save.clone().expect("a fresh layout is saved");
+    assert_eq!(saved.len(), entries.len());
+
+    // The same knowledge, read back: drawn where it was, nothing to save.
+    let again = compute_map(&entries, &vectors, &saved, None, 0);
+    assert_eq!(again.map.placement, MapPlacement::Reused);
+    assert_eq!(again.map.points, first.map.points);
+    assert!(again.save.is_none());
+    let lent = compute_map(&entries, &vectors, &saved, Some(&first.map), 0);
+    assert_eq!(lent.map.placement, MapPlacement::Reused);
+    assert_eq!(lent.map.points, first.map.points);
+
+    // Two new entries: the placed ones barely move, the new one joins its topic.
+    entries.push(map_test_entry(16, "topic 0 entry 5", 0));
+    vectors.push((16, map_vector(0, 5)));
+    entries.push(map_test_entry(17, "topic 2 entry 5", 0));
+    vectors.push((17, map_vector(2, 5)));
+    let settled = compute_map(&entries, &vectors, &saved, Some(&first.map), 0);
+    assert_eq!(settled.map.placement, MapPlacement::Settled);
+    let extent = (first.map.max[0] - first.map.min[0]).max(first.map.max[1] - first.map.min[1]);
+    for index in 0..15 {
+        let moved = distance(settled.map.points[index], first.map.points[index]);
+        assert!(
+            moved <= extent * KNOWLEDGE_MAP_SETTLE_MAX_SHIFT + 1e-3,
+            "{index} moved {moved} of {extent}"
+        );
+    }
+    let centre = |topic: usize| {
+        let points: Vec<[f32; 2]> = (0..5)
+            .map(|member| first.map.points[topic * 5 + member])
+            .collect();
+        [
+            points.iter().map(|p| p[0]).sum::<f32>() / 5.0,
+            points.iter().map(|p| p[1]).sum::<f32>() / 5.0,
+        ]
+    };
+    let newcomer = settled.map.points[15];
+    assert!(distance(newcomer, centre(0)) < distance(newcomer, centre(1)));
+    assert!(distance(newcomer, centre(0)) < distance(newcomer, centre(2)));
+
+    // Fifteen newcomers start inside topic 0 and push hard on it: its placed
+    // entries still stay within the bound.
+    let mut crowded = entries[..15].to_vec();
+    let mut crowded_vectors = vectors[..15].to_vec();
+    for member in 0..15 {
+        let id = 100 + member as i64;
+        crowded.push(map_test_entry(
+            id,
+            &format!("topic 0 entry {}", 5 + member),
+            0,
+        ));
+        crowded_vectors.push((id, map_vector(0, 5 + member)));
+    }
+    let pushed = compute_map(&crowded, &crowded_vectors, &saved, Some(&first.map), 0);
+    assert_eq!(pushed.map.placement, MapPlacement::Settled);
+    for index in 0..15 {
+        let moved = distance(pushed.map.points[index], first.map.points[index]);
+        assert!(
+            moved <= extent * KNOWLEDGE_MAP_SETTLE_MAX_SHIFT + 1e-3,
+            "crowded: {index} moved {moved} of {extent}"
+        );
+    }
+
+    // A saved place whose vector has changed since is not a place.
+    let mut changed = vectors.clone();
+    changed[3].1 = map_vector(9, 0);
+    let saved = settled.save.expect("a settle is saved");
+    let rearranged = compute_map(&entries, &changed, &saved, None, 0);
+    assert_eq!(rearranged.map.placement, MapPlacement::Settled);
+}
+
+#[test]
+pub(crate) fn knowledge_map_lays_out_afresh_when_the_vectors_change() {
+    let (entries, vectors) = map_fixture(&[5, 5]);
+    let saved = compute_map(&entries, &vectors, &[], None, 0).save.unwrap();
+    // 157 rebuilt every vector after a model change.
+    let rebuilt: Vec<(i64, Vec<f32>)> = vectors
+        .iter()
+        .map(|(id, _)| (*id, map_vector(20 + (*id as u64 - 1) / 5, *id as u64)))
+        .collect();
+    let after = compute_map(&entries, &rebuilt, &saved, None, 0);
+    assert_eq!(after.map.placement, MapPlacement::Fresh);
+    assert_eq!(
+        after.map.points,
+        compute_map(&entries, &rebuilt, &[], None, 0).map.points
+    );
+    assert!(after.save.is_some());
+}
+
+#[test]
+pub(crate) fn knowledge_map_places_an_entry_without_a_vector() {
+    let (mut entries, vectors) = map_fixture(&[4, 4]);
+    entries.push(map_test_entry(99, "unreadable vector", 0));
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    let lone = entries.len() - 1;
+    assert_eq!(map.points.len(), entries.len());
+    assert!(map.points[lone][0].is_finite() && map.points[lone][1].is_finite());
+    assert_eq!(map.group_of[lone], None);
+    assert!(map.linked[lone].is_empty());
+    let others = &map.points[..lone];
+    let centre = [
+        others.iter().map(|p| p[0]).sum::<f32>() / others.len() as f32,
+        others.iter().map(|p| p[1]).sum::<f32>() / others.len() as f32,
+    ];
+    let farthest = others
+        .iter()
+        .map(|p| distance(*p, centre))
+        .fold(0.0, f32::max);
+    assert!(distance(map.points[lone], centre) > farthest);
+}
+
+#[test]
+pub(crate) fn knowledge_map_parts_identical_vectors() {
+    let entries: Vec<KnowledgeEntry> = (1..=5).map(|id| map_test_entry(id, "same", 0)).collect();
+    let vectors: Vec<(i64, Vec<f32>)> = (1..=5).map(|id| (id, map_vector(0, 0))).collect();
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    assert!(map
+        .points
+        .iter()
+        .all(|p| p[0].is_finite() && p[1].is_finite()));
+    for a in 0..5 {
+        for b in (a + 1)..5 {
+            assert!(
+                distance(map.points[a], map.points[b]) > 0.05,
+                "{a} and {b} on one spot"
+            );
+        }
+    }
+}
+
+#[test]
+pub(crate) fn knowledge_map_hull_encloses_its_group() {
+    let (entries, vectors) = map_fixture(&[6, 6]);
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    assert_eq!(map.groups.len(), 2);
+    for group in &map.groups {
+        assert!(group.hull.len() >= 3);
+        for member in &group.members {
+            let point = map.points[*member];
+            for (index, a) in group.hull.iter().enumerate() {
+                let b = group.hull[(index + 1) % group.hull.len()];
+                let cross = (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+                assert!(cross >= -1e-3, "member {member} outside the hull");
+            }
+        }
+    }
+    assert_eq!(convex_hull(&[[0.0, 0.0], [1.0, 0.0]]).len(), 2);
+}
+
+#[test]
+pub(crate) fn knowledge_map_lays_out_the_largest_base_in_time() {
+    let per_topic = 50;
+    let topics = vec![per_topic; KNOWLEDGE_MAX_ENTRIES / per_topic];
+    let (entries, vectors) = map_fixture(&topics);
+    assert_eq!(entries.len(), KNOWLEDGE_MAX_ENTRIES);
+    let started = std::time::Instant::now();
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    let elapsed = started.elapsed();
+    assert!(map
+        .points
+        .iter()
+        .all(|p| p[0].is_finite() && p[1].is_finite()));
+    assert!(
+        map.groups.len() >= topics.len() / 2,
+        "{} groups",
+        map.groups.len()
+    );
+    println!(
+        "knowledge map: {} entries laid out in {elapsed:?}",
+        entries.len()
+    );
+    // CI runs a debug build: there this holds correctness only (spec Req 9).
+    if !cfg!(debug_assertions) {
+        assert!(
+            elapsed.as_secs() < KNOWLEDGE_MAP_BUDGET_SECONDS,
+            "{elapsed:?}"
+        );
+    }
+}
+
+fn map_test_app(
+    label: &str,
+    topics: &[usize],
+) -> (OperonApp, Project, Arc<KnowledgeSnapshot>, PathBuf) {
+    let root = temporary_directory(label);
+    let mut app = test_app(root.join("store.json"));
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.clone(),
+        name: "p".to_owned(),
+        added_at: 0,
+    };
+    let (mut entries, vectors) = map_fixture(topics);
+    for entry in &mut entries {
+        entry.body = format!("{} の本文", entry.title);
+    }
+    let snapshot = Arc::new(KnowledgeSnapshot {
+        enabled: true,
+        entries,
+        ..KnowledgeSnapshot::default()
+    });
+    let map = Arc::new(compute_map(&snapshot.entries, &vectors, &[], None, 0).map);
+    app.knowledge.views.insert(
+        project.id,
+        KnowledgeView {
+            snapshot: Some(snapshot.clone()),
+            map: Some(map),
+            map_for: Some(snapshot.clone()),
+            ..KnowledgeView::default()
+        },
+    );
+    (app, project, snapshot, root)
+}
+
+fn knowledge_tab_texts(app: &mut OperonApp, project: &Project) -> Vec<String> {
+    let context = egui::Context::default();
+    let mut output = None;
+    for _ in 0..2 {
+        output = Some(context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, project));
+            },
+        ));
+    }
+    painted_texts(output.as_ref().unwrap())
+}
+
+#[test]
+pub(crate) fn knowledge_map_is_computed_off_the_frame() {
+    let (mut app, project, snapshot, root) = map_test_app("kn-map-task", &[3, 3]);
+    let key = BackgroundKey::KnowledgeMap(project.id);
+    // The map belongs to this snapshot: nothing to do.
+    app.request_knowledge_map(project.id);
+    assert!(!app.background_tasks.contains(&key));
+    // A new snapshot: asking returns at once with the layout in flight.
+    let next = Arc::new((*snapshot).clone());
+    app.knowledge.views.get_mut(&project.id).unwrap().snapshot = Some(next);
+    app.request_knowledge_map(project.id);
+    assert!(app.background_tasks.contains(&key));
+    // After a failure nothing is retried at frame rate; 再試行 asks again.
+    app.background_tasks.remove(&key);
+    app.knowledge.views.get_mut(&project.id).unwrap().map_error = Some("e".to_owned());
+    app.request_knowledge_map(project.id);
+    assert!(!app.background_tasks.contains(&key));
+    app.retry_knowledge_map(project.id);
+    assert!(app.background_tasks.contains(&key));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_result_for_an_old_snapshot_is_not_drawn() {
+    let (mut app, project, old, root) = map_test_app("kn-map-stale", &[3, 3]);
+    let current = Arc::new((*old).clone());
+    {
+        let view = app.knowledge.views.get_mut(&project.id).unwrap();
+        view.snapshot = Some(current.clone());
+        view.map = None;
+        view.map_for = None;
+    }
+    let made = Arc::new(KnowledgeMap::default());
+    app.apply_knowledge_map(project.id, old, Ok(made.clone()));
+    let view = &app.knowledge.views[&project.id];
+    assert!(view.map.is_none(), "a map of the old snapshot was kept");
+    assert!(view.map_for.is_none());
+    app.apply_knowledge_map(project.id, current.clone(), Ok(made));
+    let view = &app.knowledge.views[&project.id];
+    assert!(view.map.is_some());
+    assert!(view
+        .map_for
+        .as_ref()
+        .is_some_and(|from| Arc::ptr_eq(from, &current)));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_that_failed_for_fewer_entries_is_not_drawn() {
+    let (mut app, project, snapshot, root) = map_test_app("kn-map-failed", &[4, 4]);
+    app.knowledge.layout_mode = KnowledgeLayoutMode::Map;
+    // Five entries deleted, and the layout for what is left failed.
+    let fewer = Arc::new(KnowledgeSnapshot {
+        entries: snapshot.entries[..3].to_vec(),
+        ..(*snapshot).clone()
+    });
+    app.knowledge.views.get_mut(&project.id).unwrap().snapshot = Some(fewer.clone());
+    app.apply_knowledge_map(project.id, fewer, Err("database is locked".to_owned()));
+    let view = &app.knowledge.views[&project.id];
+    assert!(
+        view.map.is_none(),
+        "the eight-point map stays beside three entries"
+    );
+    assert!(view.map_error.is_some());
+    // And a mismatched pair, however it arose, draws no points rather than
+    // indexing past the entries.
+    let eight = Arc::new(compute_map(&snapshot.entries, &[], &[], None, 0).map);
+    let view = app.knowledge.views.get_mut(&project.id).unwrap();
+    view.map = Some(eight);
+    view.map_error = None;
+    view.map_view.fitted = false;
+    let texts = knowledge_tab_texts(&mut app, &project);
+    assert!(
+        texts.iter().any(|text| text == tr("配置を計算しています…")),
+        "{texts:?}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_point_style_follows_the_entry() {
+    let day = 86_400;
+    let now = 300 * day;
+    let mut entry = map_test_entry(1, "e", 0);
+    entry.referenced_at = now;
+    let fresh = point_style(&entry, now, false);
+    assert_eq!(fresh.radius, KNOWLEDGE_MAP_MIN_RADIUS);
+    assert!((fresh.opacity - 1.0).abs() < 1e-6);
+    assert!(!fresh.fading && !fresh.pinned);
+    entry.reference_count = 4;
+    let used = point_style(&entry, now, false);
+    assert!(used.radius > fresh.radius);
+    entry.reference_count = 10_000;
+    assert_eq!(
+        point_style(&entry, now, false).radius,
+        KNOWLEDGE_MAP_MAX_RADIUS
+    );
+    entry.reference_count = 0;
+    entry.referenced_at = 0;
+    let old = point_style(&entry, now, false);
+    assert!(old.fading);
+    assert_eq!(old.opacity, KNOWLEDGE_MAP_MIN_OPACITY);
+    assert_eq!(
+        point_style(&entry, now, true).opacity,
+        KNOWLEDGE_MAP_DIMMED_OPACITY
+    );
+    entry.pinned = true;
+    assert!(point_style(&entry, now, false).pinned);
+    let shapes: std::collections::BTreeSet<String> = KnowledgeKind::ALL
+        .into_iter()
+        .map(|kind| format!("{:?}", point_shape(kind)))
+        .collect();
+    assert_eq!(
+        shapes.len(),
+        KnowledgeKind::ALL.len(),
+        "two kinds share a shape"
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_map_tooltip_names_the_entry() {
+    let mut entry = map_test_entry(1, "復元で最初のターンが消える", 3);
+    entry.kind = KnowledgeKind::Cause;
+    entry.referenced_at = 100;
+    let (title, line) = point_tooltip(&entry, 100);
+    assert_eq!(title, entry.title);
+    assert_eq!(
+        line,
+        tf!(
+            "{kind} ・ 鮮度 {p0}% ・ 参照 {n}",
+            kind = KnowledgeKind::Cause.label(),
+            p0 = 100,
+            n = 3
+        )
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
+    let (mut app, project, snapshot, root) = map_test_app("kn-map-select", &[3, 3]);
+    let entry = snapshot.entries[4].clone();
+    app.knowledge.layout_mode = KnowledgeLayoutMode::Map;
+    let before = knowledge_tab_texts(&mut app, &project);
+    assert!(
+        before.iter().any(|text| text == tr("グループ")),
+        "{before:?}"
+    );
+    assert!(!before.iter().any(|text| *text == entry.body));
+    // Chosen on the map: a reference, like opening the row.
+    app.open_knowledge_entry(project.id, entry.id);
+    assert_eq!(app.knowledge.open_entry, Some((project.id, entry.id)));
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::KnowledgeEdit(project.id)));
+    let on_map = knowledge_tab_texts(&mut app, &project);
+    assert!(on_map.iter().any(|text| *text == entry.body), "{on_map:?}");
+    // The list shows the same entry open.
+    app.knowledge.layout_mode = KnowledgeLayoutMode::List;
+    let in_list = knowledge_tab_texts(&mut app, &project);
+    assert!(
+        in_list.iter().any(|text| *text == entry.body),
+        "{in_list:?}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_map_dims_what_the_search_did_not_find() {
+    let (mut app, project, snapshot, root) = map_test_app("kn-map-dim", &[3, 3]);
+    let entries = &snapshot.entries;
+    assert!(knowledge_map_dimming(entries, None, None)
+        .iter()
+        .all(|dimmed| !dimmed));
+    let hits = vec![KnowledgeHit {
+        entry: entries[1].clone(),
+        similarity: 0.8,
+    }];
+    let dimmed = knowledge_map_dimming(entries, Some(&hits), None);
+    assert_eq!(dimmed.iter().filter(|dimmed| !**dimmed).count(), 1);
+    assert!(!dimmed[1]);
+    let mut kinds = entries.clone();
+    kinds[2].kind = KnowledgeKind::Pitfall;
+    let by_kind = knowledge_map_dimming(&kinds, None, Some(KnowledgeKind::Pitfall));
+    assert_eq!(by_kind.iter().filter(|dimmed| !**dimmed).count(), 1);
+    assert!(!by_kind[2]);
+    app.knowledge.layout_mode = KnowledgeLayoutMode::Map;
+    app.knowledge.hits = Some((project.id, "q".to_owned(), hits));
+    let texts = knowledge_tab_texts(&mut app, &project);
+    assert!(
+        texts.iter().any(|text| *text == tf!("{n} 件が一致", n = 1)),
+        "{texts:?}"
+    );
+    app.knowledge.hits = Some((project.id, "none".to_owned(), Vec::new()));
+    let texts = knowledge_tab_texts(&mut app, &project);
+    assert!(texts
+        .iter()
+        .any(|text| text == tr("一致するナレッジはありません。")));
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn fitted_view(map: &KnowledgeMap, rect: egui::Rect) -> MapView {
+    let mut view = MapView::default();
+    view.fit(rect, map);
+    view
+}
+
+#[test]
+pub(crate) fn knowledge_map_zoom_keeps_the_point_under_the_pointer() {
+    let (entries, vectors) = map_fixture(&[4, 4]);
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    let rect = egui::Rect::from_min_size(egui::pos2(40.0, 30.0), egui::vec2(560.0, 420.0));
+    let mut view = fitted_view(&map, rect);
+    let pointer = egui::pos2(200.0, 150.0);
+    let under = view.to_map(rect, pointer);
+    view.zoom_at(rect, pointer, 2.5);
+    assert!((view.scale - view.fitted_scale * 2.5).abs() < 1e-3);
+    let after = view.to_map(rect, pointer);
+    assert!((under[0] - after[0]).abs() < 1e-3 && (under[1] - after[1]).abs() < 1e-3);
+    // Zoom stays within bounds.
+    view.zoom_at(rect, pointer, 1_000.0);
+    assert!(view.scale <= view.fitted_scale * 30.0 + 1e-3);
+}
+
+#[test]
+pub(crate) fn knowledge_map_fit_shows_every_point() {
+    let (entries, vectors) = map_fixture(&[5, 5, 5]);
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(560.0, 420.0));
+    let mut view = fitted_view(&map, rect);
+    view.offset += egui::vec2(900.0, -700.0);
+    view.zoom_at(rect, rect.center(), 6.0);
+    view.fit(rect, &map);
+    for point in &map.points {
+        assert!(
+            rect.contains(view.to_screen(rect, *point)),
+            "{point:?} is off the map"
+        );
+    }
+}
+
+#[test]
+pub(crate) fn knowledge_map_refits_when_the_window_narrows() {
+    let (mut app, project, _snapshot, root) = map_test_app("kn-map-resize", &[5, 5, 5]);
+    app.knowledge.layout_mode = KnowledgeLayoutMode::Map;
+    let context = egui::Context::default();
+    let mut draw_at = |app: &mut OperonApp, width: f32| {
+        for _ in 0..2 {
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
+                },
+            );
+        }
+        app.knowledge.views[&project.id].map_view
+    };
+    let wide = draw_at(&mut app, 1300.0);
+    let narrow = draw_at(&mut app, 650.0);
+    assert_ne!(
+        wide.fitted_size, narrow.fitted_size,
+        "the canvas changed size"
+    );
+    let map = app.knowledge.views[&project.id].map.clone().unwrap();
+    let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, narrow.fitted_size);
+    for point in &map.points {
+        assert!(
+            canvas.contains(narrow.to_screen(canvas, *point)),
+            "{point:?} is off the narrowed map"
+        );
+    }
+    // Zoomed in, a resize keeps the zoom and the point at the centre.
+    let mut view = narrow;
+    view.zoom_at(canvas, canvas.center(), 3.0);
+    let centre = view.to_map(canvas, canvas.center());
+    let wider = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 420.0));
+    view.resize(wider, &map);
+    let moved = view.to_map(wider, wider.center());
+    assert!((moved[0] - centre[0]).abs() < 1e-3 && (moved[1] - centre[1]).abs() < 1e-3);
+    assert!((view.scale / view.fitted_scale - 3.0).abs() < 1e-3);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+pub(crate) fn knowledge_map_labels_never_overlap() {
+    let (entries, vectors) = map_fixture(&[30, 30, 30]);
+    let map = compute_map(&entries, &vectors, &[], None, 0).map;
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(560.0, 420.0));
+    let measure = |text: &str| egui::vec2(text.chars().count() as f32 * 6.0, 14.0);
+    let fitted = fitted_view(&map, rect);
+    let far = place_labels(&map, &entries, &fitted, rect, &measure);
+    assert_eq!(
+        far.groups.len(),
+        map.groups.len(),
+        "group names are always shown"
+    );
+    // The topmost group's name has no room above its outline at the fitted
+    // zoom; it goes below rather than past the map's edge.
+    for name in &far.groups {
+        assert!(
+            name.top() >= rect.top(),
+            "{name:?} is cut off by the map's top edge"
+        );
+    }
+    // Two groups side by side, closer than their names are wide: the second
+    // name steps aside rather than overlap the first.
+    let group = |name: &str, x: f32| MapGroup {
+        name: name.to_owned(),
+        members: Vec::new(),
+        hull: vec![[x, 0.5], [x + 0.1, 0.5], [x + 0.05, 0.6]],
+        freshness: 1.0,
+    };
+    let side_by_side = KnowledgeMap {
+        groups: vec![
+            group("a group name that is long", 0.2),
+            group("another long group name", 0.6),
+        ],
+        min: [0.0, 0.0],
+        max: [1.0, 1.0],
+        ..KnowledgeMap::default()
+    };
+    let narrow = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+    let names = place_labels(
+        &side_by_side,
+        &[],
+        &fitted_view(&side_by_side, narrow),
+        narrow,
+        &measure,
+    )
+    .groups;
+    assert_eq!(names.len(), 2);
+    for (index, a) in names.iter().enumerate() {
+        for b in &names[index + 1..] {
+            assert!(!a.intersects(*b), "group names {a:?} and {b:?} overlap");
+        }
+    }
+    assert!(far.entries.is_empty(), "entry titles wait until zoomed in");
+    let mut near = fitted;
+    near.zoom_at(rect, rect.center(), KNOWLEDGE_MAP_LABEL_ZOOM * 1.5);
+    let placed = place_labels(&map, &entries, &near, rect, &measure);
+    assert!(!placed.entries.is_empty());
+    assert!(placed.entries.len() <= KNOWLEDGE_MAP_MAX_LABELS);
+    for (index, (_, a)) in placed.entries.iter().enumerate() {
+        assert!(rect.contains_rect(*a));
+        assert!(placed.groups.iter().all(|group| !group.intersects(*a)));
+        for (_, b) in &placed.entries[index + 1..] {
+            assert!(!a.intersects(*b), "{a:?} overlaps {b:?}");
+        }
+    }
+}
+
+#[test]
+pub(crate) fn knowledge_map_labels_are_placed_only_when_the_view_changes() {
+    let (entries, vectors) = map_fixture(&[4]);
+    let map = Arc::new(compute_map(&entries, &vectors, &[], None, 0).map);
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(560.0, 420.0));
+    let mut view = fitted_view(&map, rect);
+    let mut cache = LabelCache::default();
+    let mut placed = 0;
+    for _ in 0..3 {
+        cache.get_or_place(LabelKey::new(&map, &view, rect), || {
+            placed += 1;
+            LabelPlacement::default()
+        });
+    }
+    assert_eq!(placed, 1, "a still view is placed once");
+    view.offset.x += 5.0;
+    cache.get_or_place(LabelKey::new(&map, &view, rect), || {
+        placed += 1;
+        LabelPlacement::default()
+    });
+    assert_eq!(placed, 2, "a pan places again");
+}
