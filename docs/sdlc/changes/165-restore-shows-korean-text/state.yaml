@@ -23,6 +23,14 @@
 # guard reading the source for every literal `tr`/`tf!` id, and the 598 rows
 # in both tables (no existing row changed). Lesson 075.
 #
+# Cause 3 (CI on the first push after main merged): the new rows made two
+# hidden language dependencies visible. `add_dropped_folders` matched the save
+# failure notice against its Japanese text; `try_add_project_path` now returns
+# a `ProjectAddition`. And `OperonApp::new()` on a fresh test store set the
+# process-wide language from CI's English host, so
+# project_registration_rolls_back_when_persistence_fails read an English
+# notice; `detected_language` answers Japanese under cfg(test).
+#
 # Sessions already saved keep their name; renaming them is the person's call.
 
 state:
@@ -51,13 +59,18 @@ contract:
     turns it red naming widgets.rs (review round 2: 23 launch-option labels
     reached tr through a table field and had no row)"
   three-gates: "machine passed cargo fmt --check · cargo clippy --locked -D
-    warnings · cargo test --locked (translation, message_id, restored_session
-    filters: 9 passed; every_message 5 passed after round 2); the full suite runs in CI on push"
+    warnings · LANG=en_US.UTF-8 cargo test --locked: 821 passed, 4 failed —
+    test_fast_subprocess (timing, passes alone), the installed usage reader
+    (socket path too long under this session's TMPDIR), and the commit and
+    stop gates (this session's hooks); all four passed in CI on 5c86bc6.
+    CI decides the full suite"
+  notice-guard: "machine passed no_decision_reads_the_text_of_a_notice failed
+    naming src/app.rs:3703 before ProjectAddition and passes after"
   ignored-restore: "machine waived the restore path itself is untouched — only
     the display name and a list title change; cargo test -- --ignored not run"
-  review: "human passed rust-reviewer approve 0 0, subprocess-safety-reviewer
-    approve 0 1 at 10b0a067beb033c7 (round 5, after the renumber to 165),
-    remarks carried in review.yaml"
+  review: "human passed rust-reviewer approve 0 2, subprocess-safety-reviewer
+    approve 0 1 at 2067ce9aa224d407 (round 6, after CI found the language
+    dependencies), remarks carried in review.yaml"
   release-binary: "machine waived the bundle is built from main after the
     merge and swapped into /Applications in the same session"
 

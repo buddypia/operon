@@ -21,6 +21,12 @@
 # rides with rust-reviewer's nit 4/2: covered indirect arguments match as a
 # whole word. Raw-string ids already fail loud since round 3.
 #
+# Round 6: CI showed the new rows broke two things that only worked while
+# untranslated — the folder drop read a save failure from the notice's
+# Japanese text, and a fresh-install test set the process-wide language from
+# CI's English host. Now a ProjectAddition value, Japanese under cfg(test),
+# and a guard on notice-text decisions.
+#
 # Verified by rust-reviewer: every non-literal `tr` call is covered by a table
 # the guard reads; the table edit is additions only and sorted; no per-frame
 # work, no new panic site outside tests.
@@ -29,9 +35,9 @@
 # tmux name, a stored value, or a comparison except the carried custom label;
 # the guard spawns no process.
 
-digest: "10b0a067beb033c7"
+digest: "2067ce9aa224d407"
 
-rounds: 5
+rounds: 6
 
 carried:
   - subprocess-safety-reviewer/1/1 · a restored session's goal still holds the source's last request
@@ -40,7 +46,11 @@ carried:
     person: "英語や韓国語の画面で「別のコマンド」から作ったセッションは、表示言語を切り替えると一覧の名前が最初の入力内容に置き換わらず、元の名前のまま出ます。動作に影響はなく、対応は不要です。"
   - rust-reviewer/5/1 · the guard's literal reader does not decode unicode escapes
     person: "画面の動作には影響しません。今後、特殊な書き方のメッセージを足したときにチェックが誤って失敗する可能性があるだけで、対応は不要です。"
+  - rust-reviewer/6/1 · the notice-text guard matches only the spelling that failed
+    person: "画面の動作には影響しません。通知の文面で分岐する書き方が別の形で再発したとき、自動チェックが見逃す可能性があるだけで、対応は不要です。"
+  - rust-reviewer/6/2 · first-launch language detection no longer runs under test
+    person: "画面の動作には影響しません。初回起動時に端末の言語を選ぶ処理は、自動テストでは確かめられないままです。対応は不要です。"
 
 verdicts:
-  rust-reviewer: "approve 0 0"
+  rust-reviewer: "approve 0 2"
   subprocess-safety-reviewer: "approve 0 1"

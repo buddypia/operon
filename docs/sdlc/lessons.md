@@ -926,3 +926,15 @@ whose argument is neither is refused until its table is checked too.
 **Guard.** `every_message_the_code_shows_has_a_row_in_every_table` (watched
 failing before the rows were added: 611 file/message pairs, then 23 launch
 options; and with `kind.label()` dropped from its list of covered arguments).
+
+Translating those messages broke two things that only worked while they had no
+row. Dropping folders found a save failure by matching the notice against its
+Japanese text, so on an English or Korean screen the error was lost; and a test
+opening a fresh install on CI's English host switched the process-wide language
+for every test beside it, so a Japanese assertion failed at random. **The
+rule:** code decides from values, never from the text of a notice, and the
+suite's language never follows the host's.
+
+**Guard.** `no_decision_reads_the_text_of_a_notice` (watched failing on the
+folder-drop check in `src/app.rs`); `detected_language` answers Japanese under
+`cfg(test)`, and CI is the run that would show the race.
