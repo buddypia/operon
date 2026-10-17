@@ -53,3 +53,16 @@ not print SHIP.
 - `make q.fast` passes.
 
 ## Departures from the plan
+
+- **The byte-for-byte digest's refusal says "could not be hashed".** No `sed`
+  runs in that pipeline, so the spec's "is sed working?" would point at the
+  wrong program. The normalising line and the empty-digest check keep the
+  spec's wording.
+- **The empty digest is named once in the gate as `empty_digest`.** The test
+  writes the same sha256-of-empty literal into its record, since it is a fact
+  about sha256 and not a setting either side could change.
+- **A new `the_digest_assignment_count_sees_every_form`** runs the counting
+  rule against each form the spec names, both ways, so the rule is watched on
+  every form rather than only on the four the sweep adds.
+- Measured: `bash scripts/check-review.sh --commit bef1b7d` on this branch reads
+  SHIP at `d8d2d10447b4e4fe`, as on main. `mutations.py`: 8 of 8 caught.

@@ -24441,14 +24441,151 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         comparisons == 1,
         "記録された digest との比較が {comparisons} 箇所あります — 新しさを決める比較は一つです"
     );
+    // Change 169: each digest is assigned once. A second assignment after the
+    // pinned line leaves every pin above green and decides what is compared.
+    for name in ["digest", "legacy_digest"] {
+        let assigning: Vec<&str> = code
+            .iter()
+            .copied()
+            .filter(|line| shell_line_assigns(line, name))
+            .collect();
+        assert!(
+            assigning.len() == 1,
+            "{name} を代入する行が {} 行あります — 一行だけのはずです:\n{}",
+            assigning.len(),
+            assigning.join("\n")
+        );
+    }
+}
+
+#[test]
+/// The assignment count above sees every form a second assignment can take,
+/// and none of the gate's reads.
+pub(crate) fn the_digest_assignment_count_sees_every_form() {
+    for (line, assigns) in [
+        ("digest=$(true)", true),
+        ("[ -n \"${X:-}\" ] && digest=x", true),
+        ("then digest=x", true),
+        ("export digest=x", true),
+        ("digest+=x", true),
+        ("read -r digest <<< x", true),
+        ("printf -v digest '%s' x", true),
+        ("local digest", true),
+        ("for digest in a b; do :; done", true),
+        ("recorded_digest=$(true)", false),
+        ("legacy_digest=$(true)", false),
+        ("if [ \"$digest\" = \"$empty_digest\" ]; then", false),
+        ("echo \"${digest}\"", false),
+    ] {
+        assert_eq!(
+            shell_line_assigns(line, "digest"),
+            assigns,
+            "{line} の判定が違います"
+        );
+    }
+}
+
+/// A `sed` for the review gate's `PATH` that breaks only the normalising call
+/// — the one whose expression names `@@` — and defers to the real one for
+/// every other, so the rest of the gate runs as it does on a healthy machine.
+fn review_gate_sed_shim(f: &ReviewGateFixture, broken: &str) -> String {
+    let dir = f.root.join("shim");
+    fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("sed");
+    fs::write(
+        &script,
+        format!("#!/bin/bash\ncase \"$*\" in *@@*) {broken} ;; esac\nexec /usr/bin/sed \"$@\"\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    format!(
+        "{}:{}",
+        dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+#[test]
+/// When the step that normalises the diff fails or prints nothing, the gate
+/// stops as it does when `git diff` fails, instead of hashing empty input —
+/// whose digest a record could carry and stay fresh for every diff.
+pub(crate) fn the_review_gate_stops_when_normalizing_the_diff_fails() {
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    // sha256 of empty input, which a normaliser that printed nothing yields.
+    let empty = "e3b0c44298fc1c14";
+    for (mode, broken) in [
+        ("fails", "exit 1"),
+        ("prints nothing", "cat >/dev/null; exit 0"),
+    ] {
+        let f = ReviewGateFixture::new();
+        f.append("src/store.rs", "// change\n");
+        f.append(
+            "docs/sdlc/changes/900-fixture/state.yaml",
+            "resume: \"x\"\n",
+        );
+        f.record(empty, all);
+        f.git(&["add", "-A"]);
+        let path = review_gate_sed_shim(&f, broken);
+        let (code, printed) = f.gate_in_env("--index", &[], &[("PATH", &path)]);
+        assert_eq!(
+            code,
+            Some(2),
+            "sed が{mode}のにゲートが止まりません:\n{printed}"
+        );
+        assert!(
+            printed.contains("the current diff could not be normalized"),
+            "sed が{mode}ときの理由が出ません:\n{printed}"
+        );
+        assert!(
+            !printed.contains("SHIP"),
+            "sed が{mode}のに空の digest の記録が通りました:\n{printed}"
+        );
+    }
 }
 
 /// The digest the review gate binds a verdict to (change 162): the diff with
 /// hunk line numbers and blob ids removed, under `LC_ALL=C` so a byte that is
-/// not UTF-8 cannot end what is hashed.
-const REVIEW_DIGEST_LINE: &str = "digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\\.\\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16)";
+/// not UTF-8 cannot end what is hashed. A pipeline that fails stops the gate
+/// (change 169): under `pipefail` the substitution carries its status.
+const REVIEW_DIGEST_LINE: &str = "digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \\+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\\.\\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16) || { echo \"the current diff could not be normalized; is sed working?\"; exit 2; }";
 /// The digest as taken before change 162, still accepted.
-const REVIEW_LEGACY_DIGEST_LINE: &str = "legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16)";
+const REVIEW_LEGACY_DIGEST_LINE: &str = "legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16) || { echo \"the current diff could not be hashed\"; exit 2; }";
+
+/// Whether one line of shell code assigns `name` (change 169): `name=` or
+/// `name+=` anywhere, not preceded by a character a longer name could end in —
+/// so `[ c ] && digest=x` and `export digest=x` count, `recorded_digest=` does
+/// not — or `name` as the target of `read`, `mapfile`, `declare` and its
+/// kin, `for … in`, or `printf -v`, within the same command.
+fn shell_line_assigns(line: &str, name: &str) -> bool {
+    let line = line.trim();
+    let mut from = 0;
+    while let Some(at) = line[from..].find(name) {
+        let start = from + at;
+        let end = start + name.len();
+        let continues_a_name = line[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        let rest = &line[end..];
+        if !continues_a_name && (rest.starts_with('=') || rest.starts_with("+=")) {
+            return true;
+        }
+        from = end;
+    }
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.iter().enumerate().any(|(i, word)| {
+        let command = words[i + 1..]
+            .iter()
+            .take_while(|w| !matches!(**w, "|" | "&&" | "||" | ";" | "do"));
+        match *word {
+            "read" | "mapfile" | "readarray" | "declare" | "local" | "typeset" | "for" => {
+                command.into_iter().any(|w| w.trim_end_matches(';') == name)
+            }
+            "printf" => words.get(i + 1) == Some(&"-v") && words.get(i + 2) == Some(&name),
+            _ => false,
+        }
+    })
+}
 /// The one comparison, accepting those two and nothing else.
 const REVIEW_DIGEST_COMPARISON_LINE: &str =
     "&& [ \"$recorded_digest\" != \"$digest\" ] && [ \"$recorded_digest\" != \"$legacy_digest\" ]; then";
