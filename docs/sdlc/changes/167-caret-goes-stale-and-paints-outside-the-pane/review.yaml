@@ -1,0 +1,86 @@
+# Review record for 167-caret-goes-stale-and-paints-outside-the-pane.
+#
+# The change: two Important defects an adversarial pass found on landed 155.
+# One state defect — `set_session_output` kept the last `TerminalCursor` when
+# a capture came back without a marker line, so a lost-target poll mapped old
+# pane rows onto every new buffer length forever (a wrong caret box parked
+# rows into scrollback, and nothing resent the truth until the session died).
+# One draw defect — the caret box could paint outside the pane: egui 0.31.1
+# `show_rows` serves one spare row past the viewport bottom, and a capture
+# older than a resize carries a column past the pane's current width, both of
+# which reached the outer painter that draws the frame.
+#
+# Fixes, per reviewer round:
+# - src/app.rs: `cursor: None` now removes the stored entry BEFORE the
+#   identical-output early return, so the dedup path cannot bury the clear;
+#   the Err path (tmux failed) still keeps the stored cursor — a failed poll
+#   says nothing, an exit-0 body without a marker says "the pane does not
+#   know".
+# - src/ui/terminal.rs: the caret rect survives (a) `row.checked_sub(first)`
+#   — a caret scrolled above the band (egui's end-of-content clamp can put a
+#   full-screen TUI's cursor there) used to underflow usize and panic the
+#   frame in debug builds — and (b) full containment: y inside the band clip
+#   (the spare row and half cells excluded), x inside the pane's reserved
+#   width measured on the outer ui (the closure clip is bar-reserved, not a
+#   width bound). Sub-pixel slack 0.5px for float noise between the two
+#   measurements.
+# - src/tmux.rs: the rfind-last-wins invariant is now enforced, not just
+#   documented — a marker split whose remainder carries printable text is a
+#   pane echo; cursor becomes None and the capture keeps the full raw text
+#   as body. The genuine marker is the tmux client's last word.
+# - src/tests.rs: six behavior tests added (spare row none; past-width none;
+#   scrolled-above none — all three watched failing first, the last one
+#   panicking on the underflow in a debug build; capture-without-cursor
+#   clears the stored one including the dedup path; pane-echoed marker loses
+#   to the real one; pane-echoed-only reports none), plus the 155-era
+#   harness comment corrected to what the test actually does (one pass,
+#   stick-to-bottom unexercised there).
+# - screen.md: round 2 added the top half-cell rule (also a not-fully-visible
+#   cell, box or nothing); the evaluator approved rounds 1 and 2
+#   (approvals.log digests 73653dd950a2a16a, b7eb15a34bf0af95).
+#
+# Verified by rust-reviewer over three rounds:
+# - Round 1 found the underflow the tightening introduced (blocking) plus two
+#   carry-worthy remarks: the horizontal clip mechanism (closure clip is the
+#   inherited clip minus the scrollbar reserve, not content-measured) and
+#   f32::EPSILON under float noise at pixel scale.
+# - Round 2/3 verified the checked_sub, the comment and the stronger test
+#   bound; round 3's "approve" bound this digest with the one nit below. The
+#   binding was briefly folded into assert messages in violation of the
+#   never-taken-in-its-round rule; the fold was then reverted byte-for-byte so
+#   the verdict binds the tree the reviewer judged. The nit goes to a
+#   follow-up change.
+# - Clear-before-dedup ordering verified against the theme-clear path;
+#   per-frame work unchanged (pane_width hoisted once before the closure).
+#
+# Verified by durability-reviewer over two rounds:
+# - Round 1 shared the underflow finding and asked for the top-clip
+#   tightening to be recorded in the screen contract (done, evaluator round 2).
+# - Round 2 "approve": no persistence/cancellation/migration/budget surface
+#   touched; worst-case flick-off after a lost marker is one poll interval.
+#
+# Verified by subprocess-safety-reviewer over two rounds:
+# - Round 1 found the unenforced echo tail (blocking for this change's own
+#   subject): the fix above made the documented invariant true.
+# - Round 2 "approve 0n 0f": Err never touches terminal_cursors (notice path),
+#   resize forces a recapture, draw-nothing for <=1 poll is the honest shape;
+#   the acknowledged residual (an echo as the very last line with blank
+#   remainder is indistinguishable from the client's marker) is documented in
+#   the parser that it lives in.
+
+digest: "323c1a6c1660de54"
+
+rounds: 3
+
+verdicts:
+  rust-reviewer: "approve 0 1"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
+
+carried:
+  - rust-reviewer/0 · src/tests.rs:25174 — the spare-row loop binds `name` and
+    never reads it; the sibling test's labels are used in assert messages,
+    this one's are not. Prefix `_name` or say the case in the assert.
+    Gate-blind today because the clippy gate command omits `--tests`.
+    person: "画面の見た目や動きには影響しません。変数の名前づけの整理だけの
+    話です。あなたが何かをしていただく必要はありません。"

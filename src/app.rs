@@ -6068,6 +6068,15 @@ impl OperonApp {
     ) {
         if let Some(cursor) = cursor {
             self.terminal_cursors.insert(session_id, cursor);
+        } else {
+            // A capture without the marker line is the pane saying it does not
+            // know where the caret is (tmux exits 0 on the lost-target path
+            // with no marker at all). Keeping the previous one here would map
+            // old pane rows onto every new buffer length — rows of scrollback
+            // get a box forever, exactly the drift change 155 removed. Clear
+            // before the identical-output early return below, so the stale
+            // entry cannot survive on the dedup path either.
+            self.terminal_cursors.remove(&session_id);
         }
         // ANSI parsing is noticeably more expensive than drawing a button.
         // Parse only when tmux has supplied fresh output (or when a theme change

@@ -1,0 +1,65 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Cause (root-cause skill), two named defects found by the adversarial pass
+# over landed change 155, both with demonstrations:
+#
+# 1. A capture whose marker segment is missing leaves the previous cursor in
+#    `terminal_cursors` forever: `set_session_output` (src/app.rs) inserts only
+#    `if let Some(cursor)`, and nothing removes the entry but session teardown.
+#    tmux demonstrably exits 0 with no marker line when the display-message
+#    segment loses its target mid-invocation, so `cursor: None` arrives while
+#    the pane is alive — and the stale `TerminalCursor` then maps old
+#    pane_rows/y onto every new buffer length: the box parks rows into
+#    scrollback indefinitely, the exact wrong-box outcome 155 exists to
+#    prevent. The same path is what lets a pane-echoed marker (rfind takes the
+#    last occurrence; the real one is missing) persist as a spoofed cursor.
+#
+# 2. The caret rect 155 returns is drawn on the outer painter, not the
+#    ScrollArea's clipped child, and the row gate admits egui 0.31.1's spare
+#    row: `rows.end = ceil((offset+vh)/row_height)+1` (egui scroll_area.rs
+#    763-772). A caret whose top sits at or below the pane's inner bottom (one
+#    scroll step past it) paints over the frame padding and into the search
+#    bar row; and with no horizontal clamp, a capture older than a resize
+#    carries a cursor.x beyond the narrowed pane — the box paints past the
+#    frame border. The old `terminal_cursor_rect` clamps were deleted with no
+#    replacement.
+
+state:
+  route: "bugfix"
+  stage: "review"
+  status: "in-progress"
+  attempts: "3 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "conditional"
+  screen: "approved"
+
+resume: "Reviewed: rust 0 Important / 1 carried nit (test binding), durability
+  and subprocess approvals; review.yaml SHIP at digest 323c1a6c1660de54, round
+  3 of the bugfix ceiling 2 with the carried escape. Two ladder events to
+  remember: (1) the caret gate initially dropped `row >= first` and the
+  reviewer caught a reachable usize underflow (fixed: checked_sub + watched
+  test); (2) after the round-3 verdict the dead-binding nit was briefly taken
+  in the same round, moving the digest — the fold was reverted byte-for-byte
+  and the nit was carried per REVIEW.md. Readiness conditional, screen
+  approved round 2. Next: commit (gates green: fmt, clippy -D warnings, review
+  SHIP), push, CI, merge --no-ff to main, cleanup worktree, package + replace
+  /Applications/Operon.app, close."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending this change touches src/ so it makes
+    /Applications/Operon.app stale and ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

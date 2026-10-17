@@ -562,6 +562,11 @@ pub(crate) fn terminal_rows(
         let offset = (line as f32 * row_height - viewport.y / 3.0).max(0.0);
         area = area.vertical_scroll_offset(offset);
     }
+    // The pane's content width, measured on the outer ui: once the scroll
+    // area is inside its closure the clip is measured from the laid-out
+    // content, so it offers no bound against a stale capture that came from a
+    // wider grid.
+    let pane_width = ui.available_width();
     let mut under_pointer = None;
     let mut caret = None;
     area.show_rows(ui, row_height, lines.len(), |ui, rows| {
@@ -571,14 +576,39 @@ pub(crate) fn terminal_rows(
         // highlighted match anchors — and `show_rows` only ever shows rows that
         // are visible, so a caret the person scrolled away reports none.
         if let Some(Some((row, column))) = caret_row {
-            if row >= first && row < rows.end {
-                caret = Some(
-                    egui::Rect::from_min_size(
-                        egui::pos2(ui.min_rect().left() + column as f32 * cell.x, top),
-                        cell,
-                    )
-                    .translate(egui::vec2(0.0, (row - first) as f32 * row_height)),
-                );
+            // A caret scrolled above the viewport has its row before the band's
+            // start (egui's end-of-content clamp can put a full-screen TUI's
+            // cursor there): offset_rows must abort rather than underflow.
+            let rect = row.checked_sub(first).map(|offset_rows| {
+                egui::Rect::from_min_size(
+                    egui::pos2(ui.min_rect().left() + column as f32 * cell.x, top),
+                    cell,
+                )
+                .translate(egui::vec2(0.0, offset_rows as f32 * row_height))
+            });
+            // The box belongs on a cell the viewer can see, all of it. egui
+            // serves one spare row past the viewport's bottom (`show_rows`
+            // adds +1 to the served range), and the band's y clip already
+            // includes the space the scrollbar reserve animates away — so a
+            // caret a half cell below the viewport still passes the clip.
+            // Full containment against that clip is the bound. Horizontally
+            // the clip overlays the pane's whole width (minus the bar
+            // reserve), so the pane's own reserved width, measured on the
+            // outer ui, is what stops a capture from before a resize from
+            // painting past the frame. The tolerance is sub-pixel slack for
+            // float noise between the two measurements: half a pixel, about a
+            // sixteenth of a cell.
+            if let Some(rect) = rect {
+                let clip = ui.clip_rect();
+                let inner_right = ui.min_rect().left() + pane_width;
+                let slack = 0.5;
+                if rect.min.y >= clip.min.y
+                    && rect.max.y <= clip.max.y
+                    && rect.min.x >= clip.min.x
+                    && rect.max.x <= inner_right + slack
+                {
+                    caret = Some(rect);
+                }
             }
         }
         for (offset, line) in lines[rows.clone()].iter().enumerate() {
