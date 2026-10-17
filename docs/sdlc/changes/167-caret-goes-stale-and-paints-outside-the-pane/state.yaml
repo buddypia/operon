@@ -27,33 +27,42 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
-  attempts: "3 3"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "medium"
-  readiness: "conditional"
+  readiness: "go"
   screen: "approved"
 
-resume: "Reviewed: rust 0 Important / 1 carried nit (test binding), durability
-  and subprocess approvals; review.yaml SHIP at digest 323c1a6c1660de54, round
-  3 of the bugfix ceiling 2 with the carried escape. Two ladder events to
-  remember: (1) the caret gate initially dropped `row >= first` and the
-  reviewer caught a reachable usize underflow (fixed: checked_sub + watched
-  test); (2) after the round-3 verdict the dead-binding nit was briefly taken
-  in the same round, moving the digest — the fold was reverted byte-for-byte
-  and the nit was carried per REVIEW.md. Readiness conditional, screen
-  approved round 2. Next: commit (gates green: fmt, clippy -D warnings, review
-  SHIP), push, CI, merge --no-ff to main, cleanup worktree, package + replace
-  /Applications/Operon.app, close."
+resume: "Landed. Branch fix/167-caret-goes-stale-and-paints-outside-the-pane:
+  12f579d (merge of origin/main first), ef1792d (stage-word fix for the
+  state-file guard), e652abb (merge of origin/main again: 164/169/170 landed
+  in between, caret tests re-verified on the recombined tree before pushing),
+  merged into main as cef282c with --no-ff, pushed, CI green on the branch
+  twice (second run after the stage fix; first failed only on that doc).
+  Review: rust 0 Important + 1 carried nit (test binding), durability and
+  subprocess approve; one process slip recorded: the nit was briefly taken in
+  its own round, the fold was reverted byte-for-byte so the verdict binds the
+  judged tree. Worktree cleaned. Remaining ship: package-macos.sh, replace
+  /Applications/Operon.app, quit + relaunch, close."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed fmt --check · clippy --locked -D warnings ·
+    named caret/marker tests green on the branch and after both main merges;
+    full locked suite green in CI (run 39009602036, run 39010483640)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
+    their bands"
   release-binary: "machine pending this change touches src/ so it makes
     /Applications/Operon.app stale and ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed the three fresh caret gates
+    watched failing first: a_caret_scrolled_above_the_viewport_reports_none
+    (debug panic at the underflow), a_pane_echoed_marker_without_the_real_
+    one_reports_none (echo parsed Some), plus the round-1 three (spare-row
+    gate, width gate, clear-on-None dedup path); the indicator and
+    marker-comment guards a_pane_echoed_marker_loses_to_the_real_one and the
+    corrected harness comment are documentation, not behaviour"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
