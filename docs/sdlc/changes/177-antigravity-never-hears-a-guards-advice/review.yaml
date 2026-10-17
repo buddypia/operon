@@ -1,0 +1,26 @@
+# Review record for 177-antigravity-never-hears-a-guards-advice.
+#
+# The change: the seven findings 176 carried. A new test drives runAdapter
+# through five Antigravity turns and pins both the skipsAntigravityRun call and
+# buildCliEmission's empty-answer check; the refusal test asserts
+# commit-guard's own words and removes its fixture before checking; the shapes
+# test gains an allow-with-reason case. The adapter edit is comments: what agy
+# 1.4.0 was measured to do with a PreToolUse advisory and with executionNum on
+# a later turn, and why the USER_CANCELED skip covers every Stop guard.
+#
+# Round 1: both approve-with-nits. The stderr marker compared with ==, so a
+# stray warning could hide a guard that ran; the advisory comment claimed more
+# than the shapes probed and folded a docs claim into the measurement; the
+# refusal test's doc overstated its cleanup. All three fixed. Round 2: both
+# approve, nothing found. subprocess-safety-reviewer's split: comments only, no
+# check removed or narrowed, neutral.
+
+digest: "142d281d14dd3977"
+
+rounds: 2
+
+carried: []
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

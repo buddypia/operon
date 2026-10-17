@@ -38346,7 +38346,9 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
 /// answered `{decision: "deny", reason}` and `{systemMessage}`, so a refused
 /// `run_command` arrived with no reason and every Stop and PostToolUse was a
 /// hook error. `executionNum` counts from 0, and a Stop the person cancelled is
-/// not one to argue with.
+/// not one to argue with. Change 177 measured why advice has no shape at all:
+/// an answer carrying only `reason` denies the call, and an `allow`'s reason
+/// never reaches the agent.
 #[test]
 pub(crate) fn antigravity_hears_a_guard_only_in_the_shapes_it_reads() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -38359,6 +38361,7 @@ pub(crate) fn antigravity_hears_a_guard_only_in_the_shapes_it_reads() {
            a.toAntigravityWire(pre('deny', 'refused'), 'PreToolUse'),\n\
            a.toAntigravityWire(pre('ask', 'confirm'), 'PreToolUse'),\n\
            a.toAntigravityWire(pre('allow'), 'PreToolUse'),\n\
+           a.toAntigravityWire(pre('allow', 'advice'), 'PreToolUse'),\n\
            a.toAntigravityWire({{ systemMessage: 'note' }}, 'PreToolUse'),\n\
            a.toAntigravityWire({{ decision: 'block', reason: 'ship it' }}, 'Stop'),\n\
            a.toAntigravityWire({{ systemMessage: 'note' }}, 'Stop'),\n\
@@ -38383,6 +38386,7 @@ pub(crate) fn antigravity_hears_a_guard_only_in_the_shapes_it_reads() {
         { "decision": "ask", "reason": "confirm" },
         {},
         {},
+        {},
         { "decision": "continue", "reason": "ship it" },
         {},
         {},
@@ -38395,6 +38399,7 @@ pub(crate) fn antigravity_hears_a_guard_only_in_the_shapes_it_reads() {
         "PreToolUse の deny",
         "PreToolUse の ask",
         "PreToolUse の allow",
+        "理由付きの PreToolUse の allow",
         "PreToolUse の通知",
         "Stop の block",
         "Stop の通知",
@@ -38414,7 +38419,9 @@ pub(crate) fn antigravity_hears_a_guard_only_in_the_shapes_it_reads() {
 
 /// Change 176, through the command `.claude/hooks.json` runs: a commit on the
 /// trunk is refused with the guard's own reason in the one place Antigravity
-/// reads it, and a command the guards let through prints nothing.
+/// reads it, and a command the guards let through prints nothing. Change 177:
+/// the adapter's fallback reason is not empty either, so the reason is checked
+/// by the guard's words, and the fixture goes before anything is checked.
 #[test]
 pub(crate) fn a_refused_run_command_reaches_antigravity_with_its_reason() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -38438,15 +38445,17 @@ pub(crate) fn a_refused_run_command_reaches_antigravity_with_its_reason() {
                 "commit-guard",
             ])
             .stdin(std::process::Stdio::from(fs::File::open(&payload).unwrap()));
-        let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
-            .expect("node が見つからないか、時間内に終わりませんでした");
-        assert!(output.status.success(), "{}", both_streams(&output));
-        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+        run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
     };
 
     let refused = ask("git commit -m x");
     let allowed = ask("git status");
     fs::remove_dir_all(&root).ok();
+    let [refused, allowed] = [refused, allowed].map(|output| {
+        let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+        assert!(output.status.success(), "{}", both_streams(&output));
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    });
 
     let answer: serde_json::Value = serde_json::from_str(&refused).unwrap_or_default();
     let keys: Vec<_> = answer
@@ -38462,13 +38471,105 @@ pub(crate) fn a_refused_run_command_reaches_antigravity_with_its_reason() {
     assert!(
         answer["deny_reason"]
             .as_str()
-            .is_some_and(|reason| !reason.trim().is_empty()),
-        "拒否の理由が空です: {refused}"
+            .is_some_and(|reason| reason.contains("direct commit on main")),
+        "拒否の理由が commit-guard 自身の理由ではありません: {refused}"
     );
     assert_eq!(
         allowed, "",
         "通した command に答えを書いています。Antigravity は空の答えでも後のフックの理由を消します"
     );
+}
+
+/// Change 177. The two decisions `runAdapter` makes before and after the guard:
+/// a Stop the person cancelled, and every SessionStart fallback but the first,
+/// run no guard at all — Claude Code's Stop does not run on a user interrupt,
+/// and the guards here are written against that — and an answer with nothing
+/// for Antigravity prints nothing rather than `{}`. Deleting either left change
+/// 176's tests green.
+#[test]
+pub(crate) fn antigravity_runs_a_guard_only_on_turns_it_answers_and_prints_nothing_empty() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let adapter = repository.join(".cli/lib/cli-adapter-utils.mjs");
+    let root = temporary_directory("agy-adapter-turns");
+    let block = serde_json::json!({ "decision": "block", "reason": "not yet" });
+    let notice = serde_json::json!({ "systemMessage": "note" });
+    let context = serde_json::json!({
+        "hookSpecificOutput": { "hookEventName": "SessionStart", "additionalContext": "hello" }
+    });
+    let cases = [
+        (
+            "利用者が取り消した Stop",
+            "Stop",
+            serde_json::json!({ "terminationReason": "USER_CANCELED", "executionNum": 0 }),
+            &block,
+        ),
+        (
+            "取り消されていない Stop",
+            "Stop",
+            serde_json::json!({ "terminationReason": "NO_TOOL_CALL", "executionNum": 0 }),
+            &notice,
+        ),
+        (
+            "PostToolUse",
+            "PostToolUse",
+            serde_json::json!({ "stepIdx": 2, "toolCall": { "name": "run_command", "args": { "CommandLine": "true" } } }),
+            &notice,
+        ),
+        (
+            "2 回目以降の SessionStart",
+            "SessionStart",
+            serde_json::json!({ "invocationNum": 1 }),
+            &context,
+        ),
+        (
+            "最初の SessionStart",
+            "SessionStart",
+            serde_json::json!({ "invocationNum": 0 }),
+            &context,
+        ),
+    ];
+    let outputs: Vec<_> = cases
+        .iter()
+        .enumerate()
+        .map(|(index, (_, event, payload, answer))| {
+            let stdin = root.join(format!("payload-{index}.json"));
+            fs::write(&stdin, payload.to_string()).unwrap();
+            let script = format!(
+                "import {{ writeSync }} from 'node:fs';\n\
+                 const a = await import({:?});\n\
+                 await a.runAdapter(async () => {{ writeSync(2, 'RAN'); return {answer}; }}, {{ cli: 'antigravity', eventName: {event:?}, hookId: 'probe' }});",
+                adapter.to_str().unwrap()
+            );
+            let mut command = node_in(&repository);
+            command
+                .args(["--input-type=module", "-e", &script])
+                .stdin(std::process::Stdio::from(fs::File::open(&stdin).unwrap()));
+            run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+        })
+        .collect();
+    fs::remove_dir_all(&root).ok();
+
+    let expected = [
+        (false, ""),
+        (true, ""),
+        (true, ""),
+        (false, ""),
+        (true, r#"{"injectSteps":[{"ephemeralMessage":"hello"}]}"#),
+    ];
+    for (((case, ..), output), (runs, prints)) in cases.iter().zip(outputs).zip(expected) {
+        let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+        assert!(output.status.success(), "{case}: {}", both_streams(&output));
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).contains("RAN"),
+            runs,
+            "Antigravity の{case}で guard を動かすかどうかが違います"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            prints,
+            "Antigravity の{case}への答えが違います。空の答えも、後のフックの理由を消します"
+        );
+    }
 }
 
 /// Change 176. Every Antigravity entry runs the trunk checkout's guard and names
