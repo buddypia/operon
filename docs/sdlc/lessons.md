@@ -957,6 +957,27 @@ failing with `n_seq_max` set from the text count, and with the release after
 `run_native` removed) and `scripts/check-embedding-fidelity.sh`, whose 46 texts
 end on a chunk of six (watched failing: exit 134 twice, then 0).
 
+## 077 — A restored conversation agy could not open was called agy's flake
+
+Operon wrote an Antigravity conversation with SQLite's rollback journal and
+`user_version` 0. agy stamps `user_version` on every file it opens, and a new
+file is already being read by then: Gemini.app's hub (`agy --hub`) opens each
+conversation as it appears. With a rollback journal that stamp waits on the
+reader, so agy logged `set user_version: database is locked`, then
+`conversation … not found`, and the terminal opened a new, empty conversation.
+Change 168 saw the symptom, found the same conversation later, and wrote
+"rerun it" into `CLAUDE.md`. Measured in change 172 with the hub running: 7 of
+11 fresh restores not found as written before, 0 of 13 written the way agy
+writes its own (WAL, `user_version` 1). **The rule:** a failure blamed on
+another product is a guess until it is reproduced and shown to go away when
+only that product changes — and a file written into another program's store
+matches what that program writes, file header included, not only its tables.
+
+**Guard.** `a_restored_antigravity_conversation_opens_while_another_process_reads_it`
+(watched failing with the old writer: `database is locked`, the error agy
+logged) and the third trap in `.claude/skills/root-cause/SKILL.md`, which loads
+with the bugfix route.
+
 ## 078 — The release named two steps the trunk refused
 
 The ship skill runs on `main` after the merge and said "quit the running

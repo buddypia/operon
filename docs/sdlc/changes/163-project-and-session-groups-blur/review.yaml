@@ -1,0 +1,33 @@
+# Review record for change 163. Shape and parser: docs/sdlc/templates/review.yaml,
+# scripts/check-review.sh.
+#
+# Round 1 (rust-reviewer, approve 0 3, digest 0928362576faf585): no Important.
+# Nit 1 — ■ called session_verb on every active row, allocating through the
+# resume path for a native finished session: fixed, the verb is asked for only
+# when the session is running or a stop is pending. Nit 2 — the SessionRowChoice
+# mapping was exercised only for Stop and Remove, and the row's own right click
+# (not the title's) untested: fixed; the new case found the row's labels were
+# selectable and swallowed both clicks, now turned off inside the row. Nit 3 —
+# the project card's body is not re-indented inside its closure: carried.
+#
+# Round 2 (approve 0 2, digest 904435c30b4d377f): the right-click loop could pass
+# vacuously and worktree was undriven — both fixed in the tests.
+#
+# Round 3 (approve 0 0, digest 663de10bf4051b77): confirm. The reviewer ran
+# fmt --check and the eight new tests three times; the mutation sweep is 17 of 17.
+#
+# Round 4 (approve 0 0, digest d68c93561f864c1e): recombination confirm after
+# merging main (157, 172). The only conflict was both sides appending tests to
+# src/tests.rs; this change's diff against main is the same +598/-240 and +672.
+# main's screens.rs hunks are in other features; fmt, clippy, and 98 named and
+# every_ tests pass on the merged tree.
+digest: "d68c93561f864c1e"
+
+rounds: 4
+
+carried:
+  - rust-reviewer/1-3 · src/app/screens.rs:5441 through the end of the project card closure — the body is not re-indented after being wrapped in card_frame(..).show(ui, |ui| {; rustfmt leaves it alone, but the nesting is misleading in a 300-line closure; extracting the card body into a method would fix both it and the return-instead-of-continue
+    person: "画面や動作には影響しません。コードの字下げが読みにくいという指摘で、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
