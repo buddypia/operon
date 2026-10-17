@@ -45,8 +45,13 @@ resume: "Landed. Branch fix/167-caret-goes-stale-and-paints-outside-the-pane:
   Review: rust 0 Important + 1 carried nit (test binding), durability and
   subprocess approve; one process slip recorded: the nit was briefly taken in
   its own round, the fold was reverted byte-for-byte so the verdict binds the
-  judged tree. Worktree cleaned. Remaining ship: package-macos.sh, replace
-  /Applications/Operon.app, quit + relaunch, close."
+  judged tree. Worktree cleaned. Shipped: app replaced 15:48, relaunched,
+  live capture sane; old bundle trashed (no rollback copy). Docs commits on
+  main: 9470611, a10ffde. main CI on a10ffde failed once on the mutation-
+  sweep cleanup test (load flake, nothing in the diff) and passed on rerun
+  39011230978. Closed at this edit (stage deploy). Remaining, owned by later
+  changes: the carried test-binding nit, and the pre-existing polling-floor
+  timing assertion redesign 152 recorded."
 
 contract:
   three-gates: "machine passed fmt --check · clippy --locked -D warnings ·
@@ -54,8 +59,12 @@ contract:
     full locked suite green in CI (run 39009602036, run 39010483640)"
   bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
     their bands"
-  release-binary: "machine pending this change touches src/ so it makes
-    /Applications/Operon.app stale and ends with bash scripts/package-macos.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/
+    (fmt + clippy green), scripts/replace-macos-bundle.sh swapped
+    /Applications/Operon.app at 15:48; the running app was quit and
+    relaunched on the new binary (live capture reported sane caret
+    coordinates); the obsolete dist bundle was moved to the Trash per the
+    standing no-rollback preference"
   guards-verified-by-mutation: "human passed the three fresh caret gates
     watched failing first: a_caret_scrolled_above_the_viewport_reports_none
     (debug panic at the underflow), a_pane_echoed_marker_without_the_real_
