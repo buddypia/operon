@@ -25,11 +25,20 @@ All in the session column, `ui_terminal_session_tabs`.
    separated by one 1px `palette.border_subtle` horizontal rule spanning the
    row; none is drawn above the first row or below the last.
    Test: `sessions_in_a_project_are_ruled_apart`.
-3. **The row's corner fits.** The corner controls and the time are laid out
-   first, right to left, and the title takes the width left, truncated. The
-   time — or, on the active row, the last corner control — ends inside the
-   block's frame and inside the column (the right edge of the column
-   heading's 「履歴」). Test: `a_session_rows_corner_stays_inside_its_block`.
+3. **The row's corner fits.** Nothing above the projects widens the column:
+   the heading is laid out from the right — 「履歴」, then the grip — and the
+   grip truncates only when 「履歴」 leaves it no room; the heading's 「n 件」
+   goes, since 「すべて n」 directly below says the same, and its room is what
+   keeps 「プロジェクト別セッション」 whole at the default width. The filter
+   chips wrap onto a second line. In each row the corner is laid out first,
+   right to left — `···` at the far right, then the time or, on the active row,
+   ✕ and ■ — then `SPACE_XS`, and the title takes the width left, truncated.
+   In a column dragged to `SIDEBAR_MIN_W`, no row's time runs past its clip,
+   and it ends inside its block; at the default width the heading is whole and
+   carries no count, and a too-long title ends at least `SPACE_XS` before the
+   time. `···` does not move between a resting and an active row.
+   Test: `a_session_rows_corner_stays_inside_its_block` (and the `···`
+   position in `a_session_rows_menus_offer_stop_and_remove`).
 3a. **The project header fits.** The header lays out ＋ first, right to left,
    then the count, and the name takes what is left, truncated with its full
    name and path on hover. With a name far wider than the column, the ＋ and
@@ -43,6 +52,7 @@ All in the session column, `ui_terminal_session_tabs`.
    running, or a stop pending), a `small_icon_button` with `ICON_STOP` stands
    left of `✕`, its hover text the verb's hint
    (「実行中の CLI を停止します（記録は残ります）」, or the pending one).
+   `···` stays rightmost.
    Clicking it calls `stop_session` — the same as the terminal header's 停止.
    A session that is not running shows no such button. The test observes
    `BackgroundKey::SessionStop(id)` in `background_tasks`; the suite's
@@ -57,7 +67,10 @@ All in the session column, `ui_terminal_session_tabs`.
    (a running session then shows the existing inline confirmation). The `···`
    hover text becomes 「その他の操作」, as on the home screen. A right click on
    the title itself — which takes clicks for its double-click rename — opens
-   the same menu as a right click elsewhere on the row.
+   the same menu as a right click elsewhere on the row. The row's labels are
+   not selectable, so a click or right click on its second line reaches the
+   row (today it selects text and opens nothing). The test also chooses
+   未読にする and 名前を変更 from a right click on the second line.
    Test: `a_session_rows_menus_offer_stop_and_remove`.
 
 ## Behaviour

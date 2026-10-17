@@ -12,8 +12,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "full"
@@ -21,20 +21,23 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Insert the eight tests (drafted in .tmp/tests163.rs) into src/tests.rs, watch them fail, then implement plan.md steps 2-8."
+resume: "Closed. Land after CI, then package and swap /Applications/Operon.app."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  failing-test-first: "machine pending the eight tests in spec.md fail on main
-    for their stated reasons before the code changes"
-  guards-verified-by-mutation: "machine pending mutations.py: each mutation in
-    plan.md turns a test red"
-  screen-matches: "human pending a screenshot of the dev build against a copied
-    store matches screen.md"
-  review: "human pending rust-reviewer at the digest of the whole change"
-  release-binary: "machine pending yes — src/app/screens.rs changes; ends with
-    bash scripts/package-macos.sh and the swap after landing"
+  three-gates: "machine passed cargo fmt --check and clippy -D warnings through
+    the commit gate; the named tests and every_ locally; CI decides the suite"
+  bands: "machine passed bash scripts/check-bands.sh: 21 metrics within their bands"
+  failing-test-first: "machine passed seven of the eight failed on main for
+    their stated reasons (no block, no rule, time culled at SIDEBAR_MIN_W, 1 件
+    pushed out, no ■, no 停止/削除 in ···); the rename test passes on main by
+    design — it pins the gesture through the re-layout"
+  guards-verified-by-mutation: "machine passed mutations.py: 13 of 13 caught"
+  screen-matches: "human passed evaluator round 4 judged the dark and light
+    screenshots of the dev build against a copied store to match screen.md"
+  review: "human passed rust-reviewer approve 0 0 at 663de10bf4051b77 (round 3),
+    one remark carried in review.yaml"
+  release-binary: "machine waived src/app/screens.rs changes; the bundle is built
+    from main after the merge and swapped into /Applications in this session"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

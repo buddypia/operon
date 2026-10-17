@@ -86,3 +86,45 @@ The tree compiles after every step.
 - `bash scripts/package-macos.sh`, swapped in after landing.
 
 ## Departures from the plan
+
+- **The clipped time had a second cause, upstream of the row.** With the
+  measurement fixed (a right-aligned galley starts left of its anchor, so the
+  helper reads `galley.rect`), today's code did not clip 「12時間前」 at the
+  default width: right-to-left already placed the time first. The clipping in
+  the person's screenshot came from the heading row and the filter chips, which
+  overflow a narrow column and widen everything drawn after them. The heading
+  is now laid out from the right (履歴, the count, then the grip, truncated) and
+  the chips wrap. `a_session_rows_corner_stays_inside_its_block` drags the
+  column to `SIDEBAR_MIN_W` and reads each text's own clip rect (`Painted::cut`);
+  `chips-not-wrapped` in `mutations.py` turns it red. Today's code fails it
+  with the time culled outright.
+- **`···` is the rightmost control, not the leftmost.** The first build put ■ ✕
+  right of `···`; the menu test then failed: the pointer leaving the row for
+  the open menu turns ■ ✕ back into the time, `···` moved, and its menu with it.
+  `···` is now pinned to the right edge; the menu test asserts it does not move
+  between the resting and the hovered row (`more-moves-with-the-corner`).
+  `screen.md` redrawn to match and re-judged.
+- **The long-name test also asserts the name ends before its count.** The R→L
+  header alone keeps the count and ＋ inside; without truncation the name ran
+  under them, which the first version of the test did not see
+  (`header-name-not-truncated` survived). Today's code fails it with
+  「1 件」 not painted at all — pushed out of the column.
+- **The menus test hovers before it clicks**, as a hand does: a press that
+  arrives with the pointer changes the row's corner in the same frame.
+- **Second judgement of the screenshots (evaluator).** The heading was cut
+  at the default width with room unused, and a cut title ran into the time.
+  The heading's 「n 件」 is gone (「すべて n」 says it), and the title stops
+  `SPACE_XS` short of the corner; the corner test asserts both. With the
+  suite's fonts the heading fits even with its count, so the test asserts the
+  count's absence rather than the width (`heading-count-back`).
+- **Review round 1 (rust-reviewer, approve 0 3).** ■ asks for `session_verb`
+  only for a running session or a stop pending (a native finished session's
+  resume verb allocates); the menus test now also chooses 未読にする and
+  名前を変更 from a right click on the row's second line. That right click
+  opened nothing: the row's labels were selectable and took it. They are not
+  now (`labels-take-the-click`). The third remark — the project card's body
+  is not re-indented inside its closure — is carried in `review.yaml`.
+- **Review round 2 (rust-reviewer, approve 0 2).** Each menu item in the
+  right-click loop is asserted not done before it is chosen, and worktree is
+  driven too (`worktree-and-unread-swapped`).
+- **`mutations.py`**: 17 of 17 caught.

@@ -47043,3 +47043,675 @@ pub(crate) fn typed_launch_arguments_too_long_are_refused_and_never_saved() {
     assert!(app.launch_input_error().is_some());
     fs::remove_dir_all(temp).unwrap();
 }
+
+// --- Change 163: the session column groups by project and stops from the row -
+
+/// Project `p` with `first` (running) and `second` (finished), both started
+/// twelve hours ago so their time reads 「12時間前」 — the width the person saw
+/// cut to 「12時」 — and project `r` with
+/// `third` (finished), which is the open one: the terminal header then says no
+/// 停止 of its own, and nothing painted 「停止」 is the header's.
+fn column_fixture(root: &Path) -> (OperonApp, Uuid, Uuid, Uuid) {
+    let (mut app, first, second) = app_with_two_sessions(root);
+    let started = now().saturating_sub(12 * 3600);
+    for session in &mut app.store.sessions {
+        session.created_at = started;
+        if session.id == second {
+            session.status = SessionStatus::Exited;
+        }
+    }
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        path: root.join("r"),
+        name: "r".to_owned(),
+        added_at: now(),
+    });
+    let third = Uuid::new_v4();
+    let mut session = test_session(third, SessionStatus::Exited);
+    session.project_id = other;
+    session.name = "third".to_owned();
+    session.created_at = started;
+    app.store.sessions.push(session);
+    app.selected_session = Some(third);
+    (app, first, second, third)
+}
+
+/// What one frame painted that the column's grouping is made of.
+#[derive(Default)]
+struct Painted {
+    /// Each text, the rect it covers, and its font size.
+    texts: Vec<(String, egui::Rect, f32)>,
+    /// Rects filled with `raised`: the blocks.
+    blocks: Vec<egui::Rect>,
+    /// Horizontal line segments in `border_subtle`: the rules.
+    rules: Vec<(f32, f32, f32)>,
+    /// Texts that run past the right edge of their clip — cut on screen.
+    cut: Vec<String>,
+}
+
+impl Painted {
+    fn read(output: &egui::FullOutput, palette: &Palette) -> Self {
+        fn collect(
+            shape: &egui::epaint::Shape,
+            clip: egui::Rect,
+            palette: &Palette,
+            out: &mut Painted,
+        ) {
+            match shape {
+                egui::epaint::Shape::Text(text) => {
+                    let size = text
+                        .galley
+                        .job
+                        .sections
+                        .first()
+                        .map_or(0.0, |section| section.format.font_id.size);
+                    // A right-aligned galley starts left of its anchor: its
+                    // own rect says where.
+                    let rect = text.galley.rect.translate(text.pos.to_vec2());
+                    if rect.max.x > clip.max.x + 0.5 {
+                        out.cut.push(text.galley.text().to_owned());
+                    }
+                    out.texts.push((text.galley.text().to_owned(), rect, size));
+                }
+                egui::epaint::Shape::Rect(rect) if rect.fill == palette.raised => {
+                    out.blocks.push(rect.rect);
+                }
+                egui::epaint::Shape::LineSegment { points, stroke }
+                    if stroke.color == palette.border_subtle
+                        && (points[0].y - points[1].y).abs() < 0.5 =>
+                {
+                    out.rules.push((
+                        points[0].x.min(points[1].x),
+                        points[0].x.max(points[1].x),
+                        points[0].y,
+                    ));
+                }
+                egui::epaint::Shape::Vec(children) => {
+                    for child in children {
+                        collect(child, clip, palette, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut painted = Painted::default();
+        for shape in &output.shapes {
+            collect(&shape.shape, shape.clip_rect, palette, &mut painted);
+        }
+        painted
+    }
+
+    /// The column's copy of a text: the leftmost one painted. The terminal
+    /// header repeats the open session's title further right.
+    fn in_column(&self, text: &str) -> Option<(egui::Rect, f32)> {
+        self.texts
+            .iter()
+            .filter(|(painted, _, _)| painted == text)
+            .map(|(_, rect, size)| (*rect, *size))
+            .min_by(|a, b| a.0.min.x.total_cmp(&b.0.min.x))
+    }
+
+    /// The smallest block around a point.
+    fn block_around(&self, point: egui::Pos2) -> Option<egui::Rect> {
+        self.blocks
+            .iter()
+            .filter(|block| block.contains(point))
+            .min_by(|a, b| a.area().total_cmp(&b.area()))
+            .copied()
+    }
+
+    /// Texts on the same line as the column's `title`, right of it.
+    fn on_row_of(&self, title: &str) -> Vec<(String, egui::Rect)> {
+        let Some((anchor, _)) = self.in_column(title) else {
+            return Vec::new();
+        };
+        self.texts
+            .iter()
+            .filter(|(_, rect, _)| {
+                rect.min.x > anchor.min.x
+                    && (rect.center().y - anchor.center().y).abs() < CONTROL_HEIGHT_SMALL / 2.0
+                    // The column ends where its own heading's 「履歴」 does.
+                    && rect.min.x < anchor.min.x + 400.0
+            })
+            .map(|(text, rect, _)| (text.clone(), *rect))
+            .collect()
+    }
+}
+
+/// Two frames with the pointer resting at `at`, read from the second.
+fn column_hovered(app: &mut OperonApp, context: &egui::Context, at: egui::Pos2) -> Painted {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events: vec![egui::Event::PointerMoved(at)],
+        ..Default::default()
+    };
+    let palette = app.store.theme.palette();
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    Painted::read(&context.run(input, &mut draw), palette)
+}
+
+/// One settled frame of the workspace at `click_at`'s screen size.
+fn column_painted(app: &mut OperonApp, context: &egui::Context) -> Painted {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let palette = app.store.theme.palette();
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    Painted::read(&context.run(input, &mut draw), palette)
+}
+
+fn click_in_workspace(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    at: egui::Pos2,
+    button: egui::PointerButton,
+) {
+    let input = |events: Vec<egui::Event>| egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events,
+        ..Default::default()
+    };
+    let press = |pressed| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]
+    };
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input(press(true)), &mut draw);
+    let _ = context.run(input(press(false)), &mut draw);
+}
+
+/// `stop_session` was reached: it spawns this key synchronously. Under the
+/// suite, `tmux_command` speaks to its own `-L operon_suite` server.
+fn stop_was_requested(app: &OperonApp, session_id: Uuid) -> bool {
+    app.background_tasks
+        .contains(&BackgroundKey::SessionStop(session_id))
+}
+
+#[test]
+/// Change 163: a project and its sessions are one framed block, apart from
+/// the next project's, and the project's name outranks every title in it.
+pub(crate) fn each_project_and_its_sessions_share_one_frame() {
+    let root = temporary_directory("column-blocks");
+    let (mut app, _, _, _) = column_fixture(&root);
+    let painted = column_painted(&mut app, &egui::Context::default());
+    let block = |text: &str| {
+        let (rect, _) = painted
+            .in_column(text)
+            .unwrap_or_else(|| panic!("「{text}」が列に描かれていません"));
+        painted.block_around(rect.center())
+    };
+    let p = block("p");
+    assert!(p.is_some(), "プロジェクト p が枠で囲まれていません");
+    assert_eq!(block("first"), p, "first が p の枠の外にあります");
+    assert_eq!(block("second"), p, "second が p の枠の外にあります");
+    let r = block("r");
+    assert!(r.is_some(), "プロジェクト r が枠で囲まれていません");
+    assert_eq!(block("third"), r, "third が r の枠の外にあります");
+    assert!(
+        !p.unwrap().intersects(r.unwrap()),
+        "二つのプロジェクトが同じ枠を共有しています"
+    );
+    let (_, name_size) = painted.in_column("p").unwrap();
+    let (_, title_size) = painted.in_column("first").unwrap();
+    assert_eq!(
+        name_size, 15.0,
+        "プロジェクト名が section の大きさではありません"
+    );
+    assert!(
+        title_size < name_size,
+        "セッション名 ({title_size}) がプロジェクト名 ({name_size}) 以上の大きさです"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: inside a block, one hairline between two sessions, and none
+/// above the first or below the last.
+pub(crate) fn sessions_in_a_project_are_ruled_apart() {
+    let root = temporary_directory("column-rules");
+    let (mut app, _, _, _) = column_fixture(&root);
+    let painted = column_painted(&mut app, &egui::Context::default());
+    let rules_in = |project: &str| {
+        let (name, _) = painted.in_column(project).unwrap();
+        let Some(block) = painted.block_around(name.center()) else {
+            return Vec::new();
+        };
+        painted
+            .rules
+            .iter()
+            .filter(|(left, right, y)| {
+                block.contains(egui::pos2(*left, *y)) && block.contains(egui::pos2(*right, *y))
+            })
+            .map(|(_, _, y)| *y)
+            .collect::<Vec<_>>()
+    };
+    let (first, _) = painted.in_column("first").unwrap();
+    let (second, _) = painted.in_column("second").unwrap();
+    let in_p = rules_in("p");
+    assert_eq!(
+        in_p.len(),
+        1,
+        "p の 2 件の間の区切り線が 1 本ではありません: {in_p:?}"
+    );
+    let (upper, lower) = if first.min.y < second.min.y {
+        (first, second)
+    } else {
+        (second, first)
+    };
+    assert!(
+        in_p[0] > upper.max.y && in_p[0] < lower.min.y,
+        "区切り線が 2 件の間にありません"
+    );
+    assert!(
+        rules_in("r").is_empty(),
+        "1 件だけの r に区切り線があります"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: in a column dragged to its narrowest, the row's time is not
+/// cut and ends inside its block. It used to be cut to 「12時」: the filter
+/// chips overflowed the column and widened everything drawn after them.
+pub(crate) fn a_session_rows_corner_stays_inside_its_block() {
+    let root = temporary_directory("column-corner");
+    let (mut app, _, _, _) = column_fixture(&root);
+    app.dock.sizes = [SIDEBAR_MIN_W; 4];
+    let painted = column_painted(&mut app, &egui::Context::default());
+    assert!(
+        !painted.cut.iter().any(|text| text == "12時間前"),
+        "行の時刻が列の端で切れています: {:?}",
+        painted.cut
+    );
+    for title in ["first", "second"] {
+        let time = painted
+            .on_row_of(title)
+            .into_iter()
+            .find(|(text, _)| text == "12時間前")
+            .unwrap_or_else(|| panic!("{title} の行に「12時間前」がありません"));
+        let (title_rect, _) = painted.in_column(title).unwrap();
+        let block = painted
+            .block_around(title_rect.center())
+            .unwrap_or_else(|| panic!("{title} が枠で囲まれていません"));
+        assert!(
+            time.1.max.x <= block.max.x,
+            "{title} の時刻が枠をはみ出しています"
+        );
+    }
+
+    // At the default width the heading is whole, and a title too long for
+    // its row stops short of the time rather than running into it.
+    app.dock.sizes = DockLayout::default().sizes;
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.name == "first") {
+        session.name = "long-title-".repeat(12);
+    }
+    let painted = column_painted(&mut app, &egui::Context::default());
+    let heading = format!("{ICON_DRAG_HANDLE} プロジェクト別セッション");
+    let (heading_rect, _) = painted
+        .in_column(&heading)
+        .expect("既定の幅で列の見出しが切れています");
+    // The count is said once, by 「すべて n」; beside 「履歴」 it took the room
+    // that kept the heading whole with the bundled fonts.
+    assert!(
+        !painted.texts.iter().any(|(text, rect, _)| {
+            text.ends_with(" 件")
+                && (rect.center().y - heading_rect.center().y).abs() < CONTROL_HEIGHT_SMALL / 2.0
+        }),
+        "列の見出しに件数が残っています"
+    );
+    let (title, _) = painted
+        .texts
+        .iter()
+        .filter(|(text, _, _)| text.starts_with("long-title"))
+        .map(|(_, rect, size)| (*rect, *size))
+        .min_by(|a, b| a.0.min.x.total_cmp(&b.0.min.x))
+        .expect("長いタイトルが描かれていません");
+    let time = painted
+        .texts
+        .iter()
+        .find(|(text, rect, _)| {
+            text == "12時間前"
+                && (rect.center().y - title.center().y).abs() < CONTROL_HEIGHT_SMALL / 2.0
+        })
+        .map(|(_, rect, _)| *rect)
+        .expect("長いタイトルの行に時刻がありません");
+    assert!(
+        time.min.x - title.max.x >= SPACE_XS - 0.5,
+        "長いタイトルが時刻に触れています ({} → {})",
+        title.max.x,
+        time.min.x
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: the open row of a running session carries ■, and pressing it
+/// stops the session the way the terminal header's 停止 does. A finished
+/// session's row has none.
+pub(crate) fn a_running_session_stops_from_its_row() {
+    let root = temporary_directory("column-stop");
+    let (mut app, first, second, _) = column_fixture(&root);
+    app.selected_session = Some(second);
+    let painted = column_painted(&mut app, &egui::Context::default());
+    assert!(
+        !painted
+            .on_row_of("second")
+            .iter()
+            .any(|(text, _)| text == ICON_STOP),
+        "終了したセッションの行に停止ボタンがあります"
+    );
+
+    app.selected_session = Some(first);
+    let context = egui::Context::default();
+    let painted = column_painted(&mut app, &context);
+    let stop = painted
+        .on_row_of("first")
+        .into_iter()
+        .find(|(text, _)| text == ICON_STOP)
+        .map(|(_, rect)| rect.center());
+    assert!(
+        stop.is_some(),
+        "実行中のセッションの行に停止ボタンがありません"
+    );
+    click_in_workspace(
+        &mut app,
+        &context,
+        stop.unwrap(),
+        egui::PointerButton::Primary,
+    );
+    assert!(
+        stop_was_requested(&app, first),
+        "行の停止ボタンで停止されません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: the row's ··· and its right-click menu offer 停止 for a
+/// running session and セッションを削除 for every session, and each does what
+/// it says.
+pub(crate) fn a_session_rows_menus_offer_stop_and_remove() {
+    let root = temporary_directory("column-menus");
+    let (mut app, first, second, _) = column_fixture(&root);
+
+    // ··· on the running row: 停止 and 削除; 停止 stops. The pointer rests
+    // on the row first, as a hand does: the row's corner changes under it.
+    let context = egui::Context::default();
+    let more_on = |painted: &Painted| {
+        painted
+            .on_row_of("first")
+            .into_iter()
+            .find(|(text, _)| text == ICON_MORE)
+            .map(|(_, rect)| rect.center())
+            .expect("first の行に ··· がありません")
+    };
+    let resting = column_painted(&mut app, &context);
+    let (title, _) = resting.in_column("first").unwrap();
+    let painted = column_hovered(&mut app, &context, title.center());
+    let more = more_on(&painted);
+    // The pointer leaves the row for the open menu, and the row's corner
+    // turns back into the time: ··· must not move, or its menu goes with it.
+    assert!(
+        (more_on(&resting).x - more.x).abs() < 0.5,
+        "··· が行の状態で動きます"
+    );
+    click_in_workspace(&mut app, &context, more, egui::PointerButton::Primary);
+    let menu = column_painted(&mut app, &context);
+    assert!(
+        menu.in_column("セッションを削除").is_some(),
+        "··· に「セッションを削除」がありません"
+    );
+    let (stop, _) = menu.in_column("停止").expect("··· に「停止」がありません");
+    click_in_workspace(
+        &mut app,
+        &context,
+        stop.center(),
+        egui::PointerButton::Primary,
+    );
+    assert!(
+        stop_was_requested(&app, first),
+        "··· の「停止」で停止されません"
+    );
+
+    // A right click on the row away from its title opens the same list, and
+    // each of its other items does what it says.
+    let unread: fn(&OperonApp, Uuid) -> bool = |app, id| app.is_session_unread(id);
+    let renaming: fn(&OperonApp, Uuid) -> bool = |app, id| app.renaming_session == Some(id);
+    let worktrees: fn(&OperonApp, Uuid) -> bool =
+        |app, _| app.page == Page::Projects && app.project_tab == ProjectTab::Worktrees;
+    for (item, done) in [
+        ("未読にする", unread),
+        ("名前を変更", renaming),
+        ("worktree", worktrees),
+    ] {
+        let context = egui::Context::default();
+        let painted = column_painted(&mut app, &context);
+        let (title, _) = painted.in_column("first").unwrap();
+        // The row's second line — its agent's name — is not a control.
+        let padding = painted
+            .texts
+            .iter()
+            .filter(|(text, rect, _)| text == "Claude" && rect.min.y > title.max.y)
+            .map(|(_, rect, _)| *rect)
+            .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
+            .expect("first の 2 行目がありません");
+        assert!(!done(&app, first), "「{item}」を選ぶ前から済んでいます");
+        click_in_workspace(
+            &mut app,
+            &context,
+            padding.center(),
+            egui::PointerButton::Secondary,
+        );
+        let menu = column_painted(&mut app, &context);
+        let (at, _) = menu
+            .in_column(item)
+            .unwrap_or_else(|| panic!("行の右クリックに「{item}」がありません"));
+        click_in_workspace(
+            &mut app,
+            &context,
+            at.center(),
+            egui::PointerButton::Primary,
+        );
+        assert!(done(&app, first), "行の右クリックの「{item}」が効きません");
+    }
+    app.cancel_session_rename();
+    app.page = Page::Sessions;
+
+    // Right-click on the finished row: no 停止, and 削除 removes.
+    let context = egui::Context::default();
+    let painted = column_painted(&mut app, &context);
+    let (title, _) = painted.in_column("second").unwrap();
+    click_in_workspace(
+        &mut app,
+        &context,
+        title.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = column_painted(&mut app, &context);
+    assert!(
+        menu.in_column("停止").is_none(),
+        "終了したセッションのメニューに「停止」があります"
+    );
+    let (remove, _) = menu
+        .in_column("セッションを削除")
+        .expect("右クリックのメニューに「セッションを削除」がありません");
+    click_in_workspace(
+        &mut app,
+        &context,
+        remove.center(),
+        egui::PointerButton::Primary,
+    );
+    assert!(
+        app.remove_after_close.contains(&second),
+        "右クリックの「セッションを削除」で削除されません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: the 要対応 queue above the projects is a block of its own,
+/// holding its label and its rows and no project's header.
+pub(crate) fn the_needs_you_queue_is_its_own_block() {
+    let root = temporary_directory("column-queue");
+    let (mut app, first, _, _) = column_fixture(&root);
+    app.attention_since.insert(first, Instant::now());
+    app.attention_order.push(first);
+    let painted = column_painted(&mut app, &egui::Context::default());
+    let (label, _) = painted
+        .in_column("要対応")
+        .expect("「要対応」が列に描かれていません");
+    let queue = painted.block_around(label.center());
+    assert!(queue.is_some(), "要対応の並びが枠で囲まれていません");
+    let (pinned, _) = painted.in_column("first").unwrap();
+    assert_eq!(
+        painted.block_around(pinned.center()),
+        queue,
+        "要対応の行が要対応の枠の外にあります"
+    );
+    for project in ["p", "r"] {
+        let (header, _) = painted.in_column(project).unwrap();
+        assert!(
+            !queue.unwrap().contains(header.center()),
+            "要対応の枠にプロジェクト {project} の見出しが入っています"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: a project name far wider than the column truncates; its count
+/// and its ＋ stay inside the column and inside its block.
+pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
+    let root = temporary_directory("column-long-name");
+    let (mut app, _, _, _) = column_fixture(&root);
+    let long = "r".repeat(200);
+    for project in &mut app.store.projects {
+        if project.name == "r" {
+            project.name = long.clone();
+        }
+    }
+    let painted = column_painted(&mut app, &egui::Context::default());
+    let (history, _) = painted.in_column("履歴").unwrap();
+    let (count, _) = painted
+        .in_column("1 件")
+        .expect("長い名前のプロジェクトの「1 件」が描かれていません");
+    assert!(
+        count.max.x <= history.max.x + 0.5,
+        "「1 件」が列の右端を越えています ({} > {})",
+        count.max.x,
+        history.max.x
+    );
+    let add = painted
+        .texts
+        .iter()
+        .filter(|(text, rect, _)| {
+            text == ICON_ADD
+                && (rect.center().y - count.center().y).abs() < CONTROL_HEIGHT_SMALL / 2.0
+        })
+        .map(|(_, rect, _)| *rect)
+        .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("長い名前のプロジェクトの見出しに＋がありません");
+    assert!(
+        add.max.x <= history.max.x + 0.5,
+        "＋が列の右端を越えています"
+    );
+    let block = painted
+        .block_around(count.center())
+        .expect("長い名前のプロジェクトが枠で囲まれていません");
+    assert!(block.contains(add.center()), "＋が枠の外にあります");
+    // The name is what gets cut: it ends before its count, not under it.
+    let name = painted
+        .texts
+        .iter()
+        .filter(|(text, _, _)| text.starts_with("rrrr"))
+        .map(|(_, rect, _)| *rect)
+        .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("長い名前が描かれていません");
+    assert!(
+        name.max.x <= count.min.x,
+        "長い名前が「1 件」の下まで伸びています ({} > {})",
+        name.max.x,
+        count.min.x
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 163: the title still takes the double click that renames its
+/// session once the row's corner is laid out first.
+pub(crate) fn a_column_title_double_click_renames_its_session() {
+    let root = temporary_directory("column-rename");
+    let (mut app, first, _, _) = column_fixture(&root);
+    let context = egui::Context::default();
+    let painted = column_painted(&mut app, &context);
+    let (title, _) = painted.in_column("first").unwrap();
+    let at = title.center();
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    // Move, press, release, press, release — one pass each, 50ms apart.
+    for (step, pressed) in [None, Some(true), Some(false), Some(true), Some(false)]
+        .into_iter()
+        .enumerate()
+    {
+        let mut events = vec![egui::Event::PointerMoved(at)];
+        if let Some(pressed) = pressed {
+            events.push(egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            });
+        }
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            time: Some(10.0 + step as f64 * 0.05),
+            events,
+            ..Default::default()
+        };
+        let _ = context.run(input, &mut draw);
+    }
+    assert_eq!(
+        app.renaming_session,
+        Some(first),
+        "タイトルのダブルクリックで名前の変更が始まりません"
+    );
+    fs::remove_dir_all(&root).ok();
+}

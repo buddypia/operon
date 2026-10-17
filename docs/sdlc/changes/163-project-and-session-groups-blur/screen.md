@@ -29,29 +29,36 @@ corner offers.
 ## After
 
 ```
-│ ⠿ プロジェクト別セッション 7 件   履歴 │
-│ [すべて 7] 要対応 実行中 待機中 4 終… │
+│ ⠿ プロジェクト別セッション        履歴 │  ← whole; the count is 「すべて 7」's
+│ [すべて 7] 要対応 実行中 待機中 4     │
+│ 終了 3                                │  ← chips wrap instead of widening
+│                                         the column
 │ ───────────────────────────────────── │
 │ ╭───────────────────────────────────╮ │
 │ │ ▭ design-lookbook  3 件      [＋] │ │  ← 15px strong, text_strong
-│ │ ● 계속               ···  12時間前│ │
+│ │ ● 계속                12時間前 ···│ │
 │ │   Codex · 終了 · main             │ │
 │ │ ───────────────────────────────── │ │  ← border_subtle rule
-│ │ ● 계속               ···  12時間前│ │
+│ │ ● 계속                12時間前 ···│ │
 │ │   Claude · 終了 · main            │ │
 │ │ ───────────────────────────────── │ │
-│ │ ● design-lookbook · …  ··· [■][✕]│ │  ← selected (row_selected fill) or hovered, running
+│ │ ● design-lookbook ·…  [■][✕] ···│ │  ← selected (row_selected fill) or hovered, running
 │ │   Antigravity · 待機中 · main     │ │
 │ ╰───────────────────────────────────╯ │
 │ ╭───────────────────────────────────╮ │
 │ │ ▭ EmbeddingGemma2-ultra… 1 件 [＋]│ │  ← long name truncates; hover: full name, path
-│ │ ● EmbeddingGemma2-ul… ···   6日前│ │
+│ │ ● EmbeddingGemma2-ul…   6日前 ···│ │
 │ │   Antigravity · 待機中 · main     │ │
 │ ╰───────────────────────────────────╯ │
 │ ╭───────────────────────────────────╮ │
 │ │ ▭ new-app  0 件              [＋] │ │  ← empty project: header only
 │ ╰───────────────────────────────────╯ │
 ```
+
+`···` is pinned to the far right of every row: when the pointer leaves the
+row for its open menu, ■ ✕ turn back into the time and `···` must not move
+with them. Measured screenshots: `.tmp/shots/after-dark-s.png`,
+`.tmp/shots/after-light-s.png` (dev build, copied store, 1280 × 820).
 
 Frames: fill `raised`, 1px `border_subtle`, radius 10, padding 8, 8 between.
 `[■]` hover: 「実行中の CLI を停止します（記録は残ります）」. `[✕]` hover:
@@ -86,7 +93,7 @@ Stop pending: 「停止中…」 in its place (pressing retries).
 | 停止 pressed | the row's status becomes 停止中…; then 終了 when tmux confirms |
 | 削除 on a running row | the existing inline 「実行中のセッションを削除しますか？…」 under the row |
 | Filter hides every session of a project | no frame for it |
-| Narrow column | title truncates; the time / corner controls stay whole |
+| Narrow column | the heading's grip truncates, the chips wrap, titles truncate; the time / corner controls stay whole |
 | Project name too long | `▭ EmbeddingGemma2-ultra… 1 件 [＋]` — the name truncates, 「n 件」 and ＋ stay inside the block |
 | Session title too long | `● EmbeddingGemma2-ultrafa… ··· 6日前` — the title truncates first |
 | Stop fails | the existing notice from `stop_session` (e.g. 「tmux を実行できませんでした: …」); the row keeps 停止中… so pressing ■ again retries |
