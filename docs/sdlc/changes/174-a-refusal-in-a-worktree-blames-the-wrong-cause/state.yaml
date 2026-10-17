@@ -1,0 +1,68 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: change 173's review — both rust-reviewer/1/2 and
+# subprocess-safety-reviewer/1/1 — found that the explanation 173 added to a
+# refusal inside a worktree blames an expanding or trunk-resolving argument for
+# every refusal. `GIT_DIR=x git status`, `export GIT_DIR=x` and `env -S ls` are
+# refused there for a different rule, one that holds in every directory, so a
+# session told to spell its paths out is refused again: the retry loop 173 set
+# out to remove. subprocess-safety-reviewer/1/4: the ship skill's `pgrep -x
+# Operon` misses a source build (`operon`, which
+# scripts/check-release-preconditions.sh also checks) and does not say the
+# quit is asynchronous.
+#
+# Found while landing 173: the feature-pilot Push step says a verdict goes
+# stale when main's work touched the reviewed lines; 173's went stale because
+# main's lesson 077 landed beside its 078 — hunk context, not its lines — and
+# the merge had been committed before the check, after which a commit holding
+# only the record is refused. The step now says so and names the way out that
+# 173 took (a merge made from main's tip carrying the record).
+#
+# Fix: findDisallowedTrunkSegment returns which rule kept the command from
+# counting as worktree work — refused in every directory, a directory left
+# uncertain by a `cd` joined with other than `&&` (review round 1 found this
+# third cause), or a path that expands or resolves outside the worktree — and
+# the refusal gives that cause's explanation alone. The ship skill lists both
+# pgrep lines and says to repeat them; the Push step gains the two sentences.
+# No allowlist change.
+#
+# Risk: as 173 — .cli/hooks/ and .claude/skills/ are on no surface in
+# docs/sdlc/risk.yaml; recorded medium and supervised.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Three remarks are carried in review.yaml: the Push step's
+  recovery omits noting the sha and re-running CI, the ship skill's pgrep
+  repeat does not end while a source build runs, and a command with two
+  causes is told only one."
+
+contract:
+  failing-test-first: "machine passed
+    a_command_refused_inside_a_worktree_says_why judges one command per cause
+    (`awk` with `$1`, `GIT_DIR=x git status`, `cd <worktree> ; cargo build`)
+    and requires each reason to carry its own explanation and no other's. It
+    failed against 173's guard, and with one explanation joined for every
+    cause (`path の拒否に everywhere の理由まで書いています`)"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) · the guard tests; the suite runs in CI"
+  review: "human passed rust-reviewer approve-with-nits 0 3 at
+    26b5b515b176fd97 (round 2), remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
