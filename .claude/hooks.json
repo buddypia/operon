@@ -58,7 +58,7 @@
     "Stop": [
       {
         "type": "command",
-        "command": "node \"$(git rev-parse --show-toplevel)/.cli/_cli-dispatch.mjs\" .cli/hooks/worktree-shipping-guard.mjs antigravity Stop",
+        "command": "node \"$(dirname \"$(git rev-parse --path-format=absolute --git-common-dir || echo /nonexistent/nogit)\")/.cli/_cli-dispatch.mjs\" .cli/hooks/worktree-shipping-guard.mjs antigravity Stop worktree-shipping-guard",
         "timeout": 10
       }
     ]

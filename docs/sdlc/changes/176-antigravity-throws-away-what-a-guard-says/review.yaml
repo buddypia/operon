@@ -1,0 +1,42 @@
+# Review record for 176-antigravity-throws-away-what-a-guard-says.
+#
+# The change: .cli/lib/cli-adapter-utils.mjs answers Antigravity in the result
+# shapes agy's protojson reads — a refusal as {allow_tool: false, deny_reason},
+# ask kept, nothing for allow, notices and PostToolUse, a Stop block as
+# {decision: "continue", reason}; executionNum > 0 is stop_hook_active and a
+# USER_CANCELED Stop is not run. The Stop entry in .claude/hooks.json runs the
+# trunk checkout's dispatcher and names its hook, as the other entries do.
+#
+# Reviewed on the landing diff, after main's change 175 was merged in: 175 put
+# .cli and .claude/hooks.json on gate-configuration, which adds
+# subprocess-safety-reviewer to the route's rust-reviewer. Its split in
+# approval.md's terms: no relaxation; the deny reason delivered, the dropped
+# automatic `allow`, and the trunk-pinned Stop entry are tightenings; ask, the
+# Stop continue (unreached today: applyStopAdvisoryPolicy downgrades every
+# Stop block while data/registry/harness-budget.json is absent), > 0 and the
+# USER_CANCELED skip are neutral. Both ran the three new tests green; the
+# merge adds to src/tests.rs and removes nothing.
+
+digest: "69407b29ccde6ab0"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · .cli/lib/cli-adapter-utils.mjs:952 and :875 are pinned by no test — delete the skipsAntigravityRun call in runAdapter or the empty-wire check in buildCliEmission and all three tests stay green; add a buildCliEmission PostToolUse case and a USER_CANCELED Stop through the dispatcher
+    person: "Antigravity で、取り消した作業の後にガードが動いてしまう、または別のガードの理由が消える、という戻り方をしても今のテストでは気づけません。いまの動作は正しく、対応は不要です。"
+  - rust-reviewer/1/2 · src/tests.rs:38465 checks only that the reason is non-empty, so the 'Blocked by repository policy.' fallback at cli-adapter-utils.mjs:800 keeps it green if the guard's own reason is lost; assert a guard-specific word
+    person: "ガード自身の理由ではなく、決まり文句の理由に置き換わっても、テストでは気づけません。いまは本来の理由が届いており、対応は不要です。"
+  - rust-reviewer/1/3 · src/tests.rs:38419 removes the fixture after the first ask's assert, so a failing ask leaves its temporary directory behind
+    person: "このテストが失敗したときだけ、一時フォルダが残ります。対応は不要です。"
+  - subprocess-safety-reviewer/1/1 · .cli/lib/cli-adapter-utils.mjs:786 — a PreToolUse advisory (worktree-policy-guard's Tier2 allowWithWarning, commit-guard.mjs:546's systemMessage) no longer reaches Antigravity at all; an omission of advice, not a weakened refusal
+    person: "Antigravity では、作業を止めずに注意だけを伝えるメッセージがエージェントに表示されません。止めるべき操作はこれまでどおり止まり、対応は不要です。"
+  - subprocess-safety-reviewer/1/2 · .cli/lib/cli-adapter-utils.mjs:689 — executionNum > 0 rests on the measurement that it restarts at 0 per stop; if it does not, every later turn reads as stop_hook_active and a future blocking Stop guard on the allowlist is silently disabled
+    person: "将来、作業の終了を止めるガードを Antigravity に追加すると、条件によってはそのガードが黙って効かなくなるおそれがあります。いまはそうしたガードが無く、対応は不要です。"
+  - subprocess-safety-reviewer/1/3 · .cli/lib/cli-adapter-utils.mjs:938 — the USER_CANCELED skip applies to every Antigravity Stop guard; a future blocking one will not run on a cancelled turn, which no plan says
+    person: "Antigravity で作業を取り消したときは、終了時のガードが動きません。いまある終了時のガードは注意を出すだけなので、対応は不要です。"
+  - subprocess-safety-reviewer/1/4 · src/tests.rs:38419 — the ask closure can panic on its assert before fs::remove_dir_all(&root), leaving the fixture (the same as rust-reviewer/1/3); the child runs under run_command_with_timeout, so nothing leaks
+    person: "このテストが失敗したときだけ、一時フォルダが残ります（もう一方の確認役も同じ点を挙げています）。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"
