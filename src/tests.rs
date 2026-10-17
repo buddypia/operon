@@ -311,7 +311,7 @@ pub(crate) fn codex_app_server_restores_a_short_transcript_into_a_resumable_term
     if !tool_available("codex") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-codex-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("codex");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let source_path = root.join("source.jsonl");
@@ -369,12 +369,14 @@ pub(crate) fn codex_app_server_restores_a_short_transcript_into_a_resumable_term
         "the destination session must contain every source turn in order; restored={restored:?}"
     );
 
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-history-four",
+    );
+    remove_restored_codex_thread(&imported);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-history-four",
-        ),
+        visible,
         "normal codex resume did not render the restored conversation"
     );
     fs::remove_dir_all(root).unwrap();
@@ -389,7 +391,7 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_codex_t
     if !tool_available("codex") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-agy-source-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("agy-source");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let conversation_id = Uuid::new_v4().to_string();
@@ -433,12 +435,14 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_codex_t
         import_full_cli_history(&project, &source, "codex", &archive_root, Uuid::new_v4()).unwrap();
 
     assert_eq!(imported.imported_records, 4);
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-agy-source-four",
+    );
+    remove_restored_codex_thread(&imported);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-agy-source-four",
-        ),
+        visible,
         "normal codex resume did not render the restored Antigravity conversation"
     );
     fs::remove_dir_all(root).unwrap();
@@ -453,7 +457,7 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_antigravity_t
     if !tool_available(ANTIGRAVITY_COMMAND) || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-codex-source-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("codex-source");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let rollout = root.join("rollout.jsonl");
@@ -529,12 +533,14 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_antigravity_t
         ],
         "the source session's own setup must not become part of the restored conversation"
     );
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-codex-source-four",
+    );
+    remove_restored_conversation_file(&imported.native_session_path);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-codex-source-four",
-        ),
+        visible,
         "normal agy resume did not render the restored Codex conversation"
     );
     fs::remove_dir_all(root).unwrap();
@@ -549,7 +555,7 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_claude_termin
     if !tool_available("claude") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-claude-dest-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("claude-dest");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let rollout = root.join("rollout.jsonl");
@@ -633,7 +639,7 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_claude_
     if !tool_available("claude") || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-agy-to-claude-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("agy-to-claude");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let conversation_id = Uuid::new_v4().to_string();
@@ -691,6 +697,38 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_claude_
     fs::remove_dir_all(root).unwrap();
 }
 
+/// A restore into Codex or Antigravity writes its conversation into the
+/// person's real store too; until change 168 every run left one there. The
+/// file goes with the `-wal` and `-shm` SQLite leaves beside it once `agy` has
+/// opened it, and nothing else: Antigravity's history index is appended to by
+/// every running `agy`, and rewriting it to drop a line could drop one of theirs.
+pub(crate) fn remove_restored_conversation_file(path: &Path) {
+    let report = |path: &Path, removed: std::io::Result<()>| match removed {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("could not remove {}: {error}", path.display());
+        }
+        _ => {}
+    };
+    report(path, fs::remove_file(path));
+    for sidecar in ["-wal", "-shm"] {
+        let mut beside = path.as_os_str().to_owned();
+        beside.push(sidecar);
+        let beside = PathBuf::from(beside);
+        report(&beside, fs::remove_file(&beside));
+    }
+}
+
+/// A Codex restore also leaves a row in Codex's thread index, which only
+/// Codex's own `thread/delete` takes out with the rollout.
+pub(crate) fn remove_restored_codex_thread(imported: &ImportedNativeSession) {
+    if let Some(thread) = imported.native_session_id.as_deref() {
+        if let Err(error) = delete_codex_thread(thread) {
+            eprintln!("could not delete Codex thread {thread}: {error}");
+        }
+    }
+    remove_restored_conversation_file(&imported.native_session_path);
+}
+
 /// A restored Claude Code conversation is written into the developer's real
 /// conversation store, so an end-to-end run takes it back out again.
 pub(crate) fn remove_restored_claude_conversation(path: &Path) {
@@ -709,7 +747,7 @@ pub(crate) fn antigravity_restore_writes_a_resumable_conversation_holding_the_so
     if !tool_available(ANTIGRAVITY_COMMAND) || !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-antigravity-e2e-{}", Uuid::new_v4()));
+    let root = live_restore_root("antigravity");
     let project_path = root.join("project");
     let archive_root = root.join("archive");
     let source_path = root.join("source.jsonl");
@@ -798,15 +836,74 @@ pub(crate) fn antigravity_restore_writes_a_resumable_conversation_holding_the_so
         "the restored conversation must be listed in Antigravity's own history index"
     );
 
+    let visible = restored_conversation_is_visible_in_a_native_terminal(
+        &project_path,
+        &imported.agent_command,
+        "operon-agy-history-four",
+    );
+    remove_restored_conversation_file(&imported.native_session_path);
     assert!(
-        restored_conversation_is_visible_in_a_native_terminal(
-            &project_path,
-            &imported.agent_command,
-            "operon-agy-history-four",
-        ),
+        visible,
         "normal agy resume did not render the restored conversation"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+/// Where a live restore test keeps its project: `/tmp`, not `temp_dir()`,
+/// which follows TMPDIR into whatever tree the caller set it to.
+pub(crate) fn live_restore_root(label: &str) -> PathBuf {
+    Path::new("/tmp").join(format!("operon-{label}-e2e-{}", Uuid::new_v4()))
+}
+
+/// The live tests' terminals start one agent CLI at a time. Started together,
+/// two `agy` lost a conversation written a moment earlier more often, and
+/// Claude Code ran past the 90 s wait under the load (change 168).
+static LIVE_TERMINAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Change 168. Claude Code reads the CLAUDE.md of every directory above the
+/// one it starts in, and stops on a dialog when that file imports anything
+/// outside it — which this repository's does. Claude Code's own TMPDIR lies
+/// inside this repository, so a live test run from Claude Code put its
+/// project under this CLAUDE.md and waited on the dialog until it timed out.
+#[test]
+pub(crate) fn a_live_restore_project_is_outside_every_project() {
+    let root = live_restore_root("probe");
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .canonicalize()
+        .unwrap();
+    let base = root.parent().unwrap().canonicalize().unwrap();
+    assert!(
+        !base.starts_with(&repository),
+        "{} is inside {}",
+        base.display(),
+        repository.display()
+    );
+    let claimed = base
+        .ancestors()
+        .find(|directory| directory.join("CLAUDE.md").exists() || directory.join(".git").exists());
+    assert_eq!(claimed, None, "{} sits inside a project", base.display());
+
+    // And every live test takes its root from there: one that went back to
+    // `temp_dir()` would pass the check above and wait on the dialog again.
+    let source = include_str!("tests.rs");
+    let marker = concat!("#[ignore = ", "\"requires");
+    let live_tests = source.split(marker).skip(1).collect::<Vec<_>>();
+    assert!(
+        live_tests.len() >= 6,
+        "found {} live tests",
+        live_tests.len()
+    );
+    for test in live_tests {
+        let body = test.split_once("\n}\n").map_or(test, |cut| cut.0);
+        let name = body
+            .split_once("fn ")
+            .and_then(|(_, rest)| rest.split_once('('))
+            .map_or("?", |(name, _)| name);
+        assert!(
+            !body.contains("temp_dir()"),
+            "{name} keeps its project under temp_dir(); use live_restore_root"
+        );
+    }
 }
 
 /// Both restores are only finished when the destination CLI's own terminal
@@ -817,6 +914,10 @@ pub(crate) fn restored_conversation_is_visible_in_a_native_terminal(
     agent_command: &str,
     marker: &str,
 ) -> bool {
+    // A test that failed while holding it leaves nothing to protect.
+    let _one_at_a_time = LIVE_TERMINAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let tmux_name = format!("operon-e2e-{}", Uuid::new_v4().simple());
     // Launch exactly the way a managed session does, so anything that would
     // block a real restored terminal blocks this test too.

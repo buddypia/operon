@@ -95,4 +95,7 @@ each is enforced by a test in `src/tests.rs`:
 Those `6 ignored` tests need a live `codex`, `claude`, or `agy` and cover
 cross-CLI restore end-to-end. Touching `src/history.rs` or the archive path in
 `src/cli.rs` requires running `cargo test --locked -- --ignored` or stating that
-you could not. `bash scripts/harness-metrics.sh` prints the repository metrics JSON.
+you could not. An Antigravity-destination one that fails with `conversation "…"
+not found` in its terminal is `agy` missing a file it later finds (change 168):
+rerun it before suspecting the restore. `bash scripts/harness-metrics.sh` prints
+the repository metrics JSON.

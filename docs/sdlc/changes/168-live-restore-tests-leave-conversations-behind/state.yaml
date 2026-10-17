@@ -1,0 +1,74 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: found in the final verification of 159-161, alongside change 164.
+# The six live restore tests (`cargo test --locked -- --ignored`, which
+# CLAUDE.md requires after touching restore) misreport and leave things behind:
+#
+# 1. Run from Claude Code they fail on Claude Code's "Allow external CLAUDE.md
+#    file imports?" dialog: `std::env::temp_dir()` is Claude Code's TMPDIR,
+#    which links into this repository's `.tmp`, so the test project sits under
+#    the repository and Claude Code reads its CLAUDE.md. Measured: both
+#    Claude-destination tests fail with TMPDIR inside the repository and pass
+#    with it outside.
+# 2. Run together, their terminals start up to three agent CLIs at once. Two
+#    `agy` started together lose a just-written conversation more often (1 of
+#    3 runs failed with both agy tests together), and Claude Code timed out at
+#    90 s under the load.
+# 3. Every run leaves its restored conversations in the person's real stores:
+#    32 index lines and their files in ~/.gemini/antigravity-cli and 24 Codex
+#    rollouts under ~/.codex/sessions, all from test roots. Only the Claude
+#    Code tests removed theirs.
+# 4. `a_saved_codex_conversation_restores_into_a_resumable_antigravity_terminal`
+#    still fails now and then on its own: agy's log says "conversation … not
+#    found locally" while the file and its index line exist, and the same
+#    conversation is found when resumed later. That is agy's lookup; this
+#    change only says so where the next reader of a failure will look.
+#
+# Fix: the live tests' roots go under /tmp, outside any project, and a guard
+# scans every live test for `temp_dir()`; their terminal stage runs one at a
+# time; each removes the conversation it wrote into another CLI's store — for
+# Antigravity the file and its SQLite sidecars, for Codex through Codex's own
+# `thread/delete` (review round 1 found Codex also keeps a row per thread in
+# ~/.codex/state_5.sqlite: 127 from earlier runs); CLAUDE.md names the agy
+# symptom. Antigravity's history index line stays: every running agy appends
+# to that file, and rewriting it could drop one of theirs.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Rebuild and swap after the merge: src/history.rs moved, so
+  the installed build reads as behind although the binary is the same."
+
+contract:
+  failing-test-first: "machine passed
+    a_live_restore_project_is_outside_every_project failed under Claude Code's
+    TMPDIR (the base sat under this repository's .tmp) and, with one root
+    mutated back to temp_dir(), names that test; passes after"
+  three-gates: "machine passed cargo fmt --check · cargo clippy --locked -D
+    warnings · the guard and the harness document tests; the suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
+    their bands"
+  live-restore: "machine passed cargo test --locked -- --ignored as CLAUDE.md
+    asks — Claude Code's TMPDIR, default parallelism — 6/6 in four runs in a
+    row; the last left no new file in ~/.gemini/antigravity-cli/conversations
+    or ~/.codex/sessions and kept Codex's test thread rows at 127"
+  review: "human passed rust-reviewer approve 0 3 at 701877d7f507e2f1
+    (round 2), remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
