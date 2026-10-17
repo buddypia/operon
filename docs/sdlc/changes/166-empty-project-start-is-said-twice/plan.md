@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-17
-- **Status**: departed from (see below)
+- **Status**: done
 
 ## Files that change
 
