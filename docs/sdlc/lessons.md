@@ -888,9 +888,28 @@ invalid-byte arm watched failing with `LC_ALL=C` removed),
 `scripts/check-change-number.sh` existed; on this repository it refuses
 `fix/161-…` and names 163).
 
+## 074 — A tmux server outlived the worktree it was started in
+
+A tmux server keeps the working directory of whichever command started it, and
+on tmux 3.8 a server whose directory is gone starts every pane there, whatever
+`-c` says. `tmux_command` set no directory, so a run from a worktree left a
+server behind in it, and cleanup deleted the worktree. Change 160 met it as the
+suite's own server failing every live restore test, and recorded it as a stale
+server to be stopped rather than a fault to be fixed; change 164 met it again
+on the suite's server, and on the person's own: every agent Operon launched
+began in a missing directory. **The rule:** a symptom waived twice is a cause
+not yet named — and a process that outlives the command that started it must
+not inherit that command's directory.
+
+**Guard.** `a_tmux_server_never_holds_a_directory_that_can_be_deleted` and
+`an_agent_starts_in_its_directory_even_where_tmux_cannot_put_it` (both watched
+failing on main; a suite server started from a directory then deleted failed
+`codex_app_server_restores_a_short_transcript_into_a_resumable_terminal`
+before the fix and passed after).
+
 ---
 
-## 074 — A native runtime measured at the batch sizes that happened to work
+## 075 — A native runtime measured at the batch sizes that happened to work
 
 Change 157's Metal probe embedded 1, 2, 4, and 8 texts per call and every one
 matched the reference, so the runtime was called measured. The first run of
