@@ -1786,10 +1786,10 @@ pub(crate) fn antigravity_cli_sessions(
                 provider: CliProvider::Gemini,
                 native_id: conversation_id.clone(),
                 id: conversation_id.clone(),
-                title: title.or(Some(tf!(
-                    "Antigravity の会話 {conversation_id}",
-                    conversation_id = conversation_id
-                ))),
+                // No stand-in title: a session restored from this one is
+                // named after its title first, and "Antigravity の会話 <ID>"
+                // would beat the real last request (change 162).
+                title,
                 last_user_message: None,
                 branch: None,
                 updated_at,

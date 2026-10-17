@@ -711,13 +711,14 @@ pub(crate) const SESSION_TOPIC_NAME_MAX_CHARS: usize = 34;
 /// "Antigravity で会話全履歴を復元（Codex CLI から）" describes the mechanism, so
 /// every restored session reads the same way in the list — the same failure as
 /// "Untitled". The mechanism is not what tells two sessions apart, so the title
-/// carries the one thing that does: the work itself.
+/// carries the one thing that does: the work itself. `preferred` is tried
+/// before `otherwise`, so argument order is priority order.
 pub(crate) fn conversation_topic_name(
-    message: Option<&str>,
-    title: Option<&str>,
+    preferred: Option<&str>,
+    otherwise: Option<&str>,
     fallback: impl FnOnce() -> String,
 ) -> String {
-    [message, title]
+    [preferred, otherwise]
         .into_iter()
         .flatten()
         .find_map(topic_from_text)
@@ -747,10 +748,14 @@ pub(crate) fn looks_like_conversation_id(text: &str) -> bool {
 }
 
 /// The title for a terminal that carries a restored or resumed conversation.
+///
+/// The source CLI's own title comes first: it names the whole conversation,
+/// while the last request of a long one is often a one-word nudge ("계속",
+/// "続けて") that says nothing about the work (change 162).
 pub(crate) fn restored_session_name(source: &CliSession) -> String {
     conversation_topic_name(
-        source.last_user_message.as_deref(),
         source.title.as_deref(),
+        source.last_user_message.as_deref(),
         || tf!("{p0} から引き継いだ会話", p0 = source.provider.label()),
     )
 }

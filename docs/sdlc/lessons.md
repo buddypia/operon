@@ -863,3 +863,21 @@ was carrying.
 failing on main: no wake within 5s) and
 `typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands` (watched failing
 on main, and with the keystroke timestamp removed from `queue_terminal_input`).
+
+---
+
+## 073 — The translation check compared the tables with each other, never with the code
+
+`every_message_id_has_a_row_in_every_table` asserted that the English and Korean
+tables hold the same ids, and `tr` falls back to the Japanese id for an id no
+table knows. So a message added with a row in neither table passed every check
+and showed in Japanese on an English or Korean screen: 598 such messages had
+built up when change 162 looked, plus 23 launch-option labels that reach `tr`
+through a table field. **The rule:** the catalogue is checked against the
+messages the code passes to `tr`/`tf!` — literal ids read from the source, and
+ids held in a table read from that table — not only against itself; a `tr` call
+whose argument is neither is refused until its table is checked too.
+
+**Guard.** `every_message_the_code_shows_has_a_row_in_every_table` (watched
+failing before the rows were added: 611 file/message pairs, then 23 launch
+options; and with `kind.label()` dropped from its list of covered arguments).
