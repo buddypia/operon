@@ -25397,11 +25397,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
         cell: egui::Vec2,
     }
     let mut outcomes = Vec::new();
-    // Two frames, because stick-to-bottom only has a scroll position to keep
-    // on the pass after the one that measured the content. The 'stuck' frame's
-    // jump lands at row 25 (`scroll_to` puts a row a third of the way down the
-    // viewport), rows 13..50 on screen — content row 40 among them, as the
-    // bug's bottom-clamped pane shows the caret's rows.
+    // One egui pass, two sibling calls sharing it: a scroll jump lands at
+    // row 25 (`scroll_to` puts a row a third of the way down the viewport),
+    // rows 13..50 on screen — content row 40 among them, as the bug's
+    // bottom-clamped pane shows the caret's rows. Stick-to-bottom is not
+    // what this probes: `scroll_to: Some(_)` keeps it off, and the pane
+    // anchors the caret to a row of the buffer either way.
     let _ = ctx.run(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
@@ -25477,6 +25478,293 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
         (stuck.cell.x, stuck.cell.y)
     );
     assert!(!outcomes[1].caret.is_some());
+}
+
+#[test]
+/// A caret whose cell sits on the spare row egui serves below the last fully
+/// visible one draws over the frame padding and past the pane's bottom edge:
+/// the box belongs on a row the pane actually shows, all of it, or nowhere.
+pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+
+    // 61 entries: 60 rows and the phantom trailing row. Pane row 20 is content
+    // row 60 - 40 + 20 = 40. A viewport of 36 rows served at scroll_to r puts
+    // its top at (r - 12): scroll_to 15 serves 3..40, 16 serves 4..41 — the
+    // caret on 40 is then the spare row egui adds past the viewport's bottom,
+    // and 17 serves 5..42 with the caret fully visible.
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    let cursor = TerminalCursor {
+        x: 2,
+        y: 20,
+        pane_rows: 40,
+    };
+    #[derive(Debug)]
+    struct Paned {
+        caret: Option<egui::Rect>,
+        pane: egui::Rect,
+    }
+    let mut outcomes = Vec::new();
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let cell = terminal_cell_size(ui);
+            let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+            for (name, scroll_to) in [("full", 17), ("spare", 16), ("gone", 15)] {
+                let search = TerminalSearchOverlay {
+                    matches: &[],
+                    current: None,
+                    scroll_to: Some(scroll_to),
+                    palette: &palette,
+                };
+                let mut links = TerminalLinkOverlay {
+                    resolved: &HashMap::new(),
+                    unresolved: &mut Vec::new(),
+                    palette: &palette,
+                };
+                outcomes.push(Paned {
+                    caret: terminal_rows(
+                        ui,
+                        &lines,
+                        viewport,
+                        cell.y,
+                        search,
+                        &mut links,
+                        Some(cursor),
+                    )
+                    .caret,
+                    pane: egui::Rect::from_min_size(ui.min_rect().min, viewport),
+                });
+            }
+        });
+    });
+    assert_eq!(outcomes.len(), 3);
+    let caret = &outcomes[0].caret;
+    assert!(
+        caret.is_some_and(|rect| rect.max.y <= outcomes[0].pane.max.y),
+        "a fully visible caret must fit inside the pane: {caret:?}"
+    );
+    assert!(
+        !outcomes[1].caret.is_some(),
+        "the caret on the served-but-unshown spare row must draw nothing"
+    );
+    assert!(
+        !outcomes[2].caret.is_some(),
+        "a caret scrolled away draws nothing"
+    );
+}
+
+#[test]
+/// A capture taken before a resize carries a cursor.x measured on the wider
+/// grid. The box it would draw sits outside the pane's current width — the
+/// pane draws nothing there until the next capture says where the caret is.
+pub(crate) fn a_caret_past_the_pane_width_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    // A real screen: headless defaults give the panel a placeholder width of
+    // 10_000px, and 400 columns then still fit inside the pane.
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(500.0, 700.0),
+        )),
+        ..Default::default()
+    };
+    for (name, x, expected) in [("stale wide", 400, false), ("normal", 2, true)] {
+        let cursor = TerminalCursor {
+            x,
+            y: 20,
+            pane_rows: 40,
+        };
+        let _ = ctx.run(input.clone(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let cell = terminal_cell_size(ui);
+                let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+                let mut links = TerminalLinkOverlay {
+                    resolved: &HashMap::new(),
+                    unresolved: &mut Vec::new(),
+                    palette: &palette,
+                };
+                let search = TerminalSearchOverlay {
+                    matches: &[],
+                    current: None,
+                    // Two full rows of margin above the viewport bottom: the
+                    // probe's point here is the horizontal bound, not the
+                    // vertical one.
+                    scroll_to: Some(18),
+                    palette: &palette,
+                };
+                let caret = terminal_rows(
+                    ui,
+                    &lines,
+                    viewport,
+                    cell.y,
+                    search,
+                    &mut links,
+                    Some(cursor),
+                )
+                .caret;
+                assert_eq!(
+                    caret.is_some(),
+                    expected,
+                    "{name}: caret past the pane width must not draw"
+                );
+                if let Some(rect) = caret {
+                    // The Some arm has to say the bound it claims: the pane's
+                    // own reserved width mirrors production's horizontal gate.
+                    assert!(
+                        rect.max.x <= ui.min_rect().left() + viewport.x + 0.5,
+                        "a caret the pane keeps must be inside the pane: {rect:?}"
+                    );
+                }
+            });
+        });
+    }
+}
+
+#[test]
+/// A caret scrolled ABOVE the viewport (a search jump or drag well past its
+/// row) leaves the served band starting after the caret's row: the rect's
+/// row offset would underflow usize. Change 155's gate checked `row >= first`
+/// before subtracting; the tightened gate checks the pane instead, so the
+/// subtraction has to be checked on its own and report none.
+pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    // A caret in the top grid rows (y=2 -> content row 60-40+2=23) against a
+    // jump to the very bottom: the served band's top clamps to
+    // total_rows - 36 = 25 rows — past the caret — which is also where egui's
+    // end-of-content clamp parks the caret of a full-screen TUI.
+    let cursor = TerminalCursor {
+        x: 2,
+        y: 2,
+        pane_rows: 40,
+    };
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let cell = terminal_cell_size(ui);
+            let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+            let search = TerminalSearchOverlay {
+                matches: &[],
+                current: None,
+                scroll_to: Some(55),
+                palette: &palette,
+            };
+            let mut links = TerminalLinkOverlay {
+                resolved: &HashMap::new(),
+                unresolved: &mut Vec::new(),
+                palette: &palette,
+            };
+            let caret = terminal_rows(
+                ui,
+                &lines,
+                viewport,
+                cell.y,
+                search,
+                &mut links,
+                Some(cursor),
+            )
+            .caret;
+            assert!(!caret.is_some(), "a caret above the viewport draws none");
+        });
+    });
+}
+
+#[test]
+/// `set_session_output` stored a cursor only when one arrived, and nothing
+/// removed it but session teardown: a poll whose marker came back missing
+/// (tmux exits 0 with no marker line) left the previous cursor mapping old
+/// pane rows onto a grown buffer — the box parked rows into scrollback until
+/// the session died. A capture without a cursor is the pane saying it does
+/// not know where the caret is: the stored one has to go.
+pub(crate) fn a_capture_without_a_cursor_clears_the_stored_one() {
+    let root = std::env::temp_dir().join(format!("operon-caret-clear-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let data_file = root.join("store.json");
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(data_file, Store::default(), ToolStatus::default(), None);
+    let known = TerminalCursor {
+        x: 2,
+        y: 16,
+        pane_rows: 36,
+    };
+
+    app.set_session_output(session_id, "line 1\n".into(), Some(known));
+    assert_eq!(app.terminal_cursors.get(&session_id), Some(&known));
+
+    // The dedup path: the output is unchanged, the cursor was lost, and the
+    // stored one must still go — the early return may not bury it.
+    app.set_session_output(session_id, "line 1\n".into(), None);
+    assert!(!app.terminal_cursors.contains_key(&session_id));
+
+    app.set_session_output(session_id, "line 1\nline 2\n".into(), Some(known));
+    assert_eq!(app.terminal_cursors.get(&session_id), Some(&known));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The genuine marker line is the last line the tmux client prints, so a
+/// pane's own echoed `__OPERON_CURSOR__` copy loses to it and stays ordinary
+/// drawn text. rfind is the discipline that holds that — recorded so a
+/// refactor to `find` or a marker-line search that scans the body cannot
+/// quietly flip it.
+pub(crate) fn a_pane_echoed_marker_loses_to_the_real_one() {
+    let body = "agent printed\n__OPERON_CURSOR__:9,9,99\nthen more text\n";
+    let raw = format!("{body}__OPERON_CURSOR__:8,2,20\n");
+    let capture = parse_tmux_capture_with_cursor(&raw);
+    assert_eq!(
+        capture.cursor,
+        Some(TerminalCursor {
+            x: 8,
+            y: 2,
+            pane_rows: 20
+        })
+    );
+    // The pane's own copy is body text: it survives into the output, while
+    // the real marker line is cut off the end.
+    assert!(capture.output.contains("agent printed\n"));
+    assert!(capture.output.contains("__OPERON_CURSOR__:9,9,99\n"));
+    assert!(!capture.output.contains("__OPERON_CURSOR__:8,2,20"));
+}
+
+#[test]
+/// When the genuine marker is missing (tmux loses its target and prints none)
+/// a pane-echoed marker is the LAST occurrence, and rfind lands on it with
+/// body text still after. A cursor cannot ride in from the pane's own
+/// echoing: the split must hold only when nothing printable follows the
+/// marker line — otherwise the capture reports none and the stored cursor
+/// goes.
+pub(crate) fn a_pane_echoed_marker_without_the_real_one_reports_none() {
+    let raw = "pane printed\n__OPERON_CURSOR__:9,9,99\nthen more text\n";
+    let capture = parse_tmux_capture_with_cursor(raw);
+    assert!(capture.cursor.is_none());
+    assert!(capture.output.contains("__OPERON_CURSOR__:9,9,99"));
+    assert!(capture.output.contains("then more text"));
+
+    // A marker with nothing printable after it is still the client's last
+    // word, even with blank padding left by a partial read.
+    let capture = parse_tmux_capture_with_cursor("__OPERON_CURSOR__:7,2,18\n\n");
+    assert_eq!(
+        capture.cursor,
+        Some(TerminalCursor {
+            x: 7,
+            y: 2,
+            pane_rows: 18
+        })
+    );
 }
 
 #[test]
