@@ -236,12 +236,24 @@ run_diff >/dev/null || { echo "the current diff could not be read; is this a git
 # `LC_ALL=C`: under a UTF-8 locale BSD sed stops at the first byte sequence
 # that is not UTF-8 and prints only what came before it, and its status is
 # lost in the pipe — everything after such a line would stop counting.
-digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\.\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16)
+# The `|| exit 2` is change 169: under `pipefail` the substitution's status is
+# the pipeline's, so a `sed` that is missing or fails stops the gate instead of
+# leaving the digest of empty input — which a record could carry and stay
+# fresh for every diff. Capturing the text first would strip its trailing
+# newlines and move every digest already recorded.
+digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\.\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16) || { echo "the current diff could not be normalized; is sed working?"; exit 2; }
 # The digest as it was taken before change 162: the diff byte for byte. A
 # record holding it was written about this exact diff, which is the strictest
 # match there is, so it still counts — sessions mid-review elsewhere when this
 # landed are not sent back. Only the comparison below reads it.
-legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16)
+legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16) || { echo "the current diff could not be hashed"; exit 2; }
+# A normaliser that exits 0 having printed nothing is the same failure: the
+# sha256 of empty input, for a diff that is not empty.
+empty_digest=e3b0c44298fc1c14
+if [ "$digest" = "$empty_digest" ] && [ "$legacy_digest" != "$empty_digest" ]; then
+  echo "the current diff could not be normalized; is sed working?"
+  exit 2
+fi
 changed=$(run_diff --name-only)
 
 # --- which surfaces the diff is on -------------------------------------------
