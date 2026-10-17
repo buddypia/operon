@@ -1,0 +1,51 @@
+# Review record for 175-guard-files-are-on-no-risk-surface.
+#
+# The change: the gate-configuration row in docs/sdlc/risk.yaml grows from the
+# Claude Code hooks to the whole enforcement plane — every agent CLI's hook
+# registration, the .cli guards they run and what those import from
+# .claude/scripts, the trunk allowlist in .claude/config, the scripts a gate
+# delegates its verdict to, and the CI run the merge gate accepts. Tightening
+# only. every_hook_an_agent_cli_runs_is_gate_configuration fails the day a
+# registration names a file no gate path covers.
+#
+# Round 1: both reviewers found the same gap (Important for
+# subprocess-safety-reviewer, argued for rust-reviewer): the test read only the
+# files a hook command names, and the guards import 19 files from
+# .claude/scripts/lib — the Stop guard's verdict among them — while
+# .cli/_cli-dispatch.mjs names .claude/scripts as a hook home. Round 2 follows
+# each reached guard's relative literals transitively, watched failing on those
+# 19 files, and adds .claude/scripts to the row; the walk asserts it imported
+# something, which replaced rust-reviewer's round 1 floor nit, and the doc
+# comment now says it reads JSON registrations only and what it cannot follow.
+#
+# Verified by both reviewers: the row still parses as four positional values
+# for the main-branch judge, the comment lines miss its surface grep, the
+# dynamic import of governance-writer.mjs is reached as a quoted literal, and
+# no backtick template literal names a path in code under .cli, .claude/scripts
+# or .claude/hooks.
+
+digest: "dea45a1ea6928200"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/2/1 · the import walk reads each reached file with unwrap_or_default, so an unreadable or non-UTF-8 guard contributes no imports and its dependencies go unchecked without a message; panic with the path
+    person: "読めないファイルがあると、そのファイルが読み込む先の確認が黙って飛ばされます。いまは該当するファイルがなく、対応は不要です。"
+  - rust-reviewer/2/2 · relative_literals scans only ' and " quotes; a future import(`../x/${y}.mjs`) in a backtick template would be invisible — record the limit in the doc comment
+    person: "将来、別の書き方でファイルを読み込むガードが追加されると、その読み込み先は確認されません。いまはその書き方は使われておらず、対応は不要です。"
+  - rust-reviewer/2/3 · the floor runs.len() > imported && imported > 0 still passes if the $(dirname …) word reading breaks while one .claude/settings.json word resolves
+    person: "確認の仕組みの一部が将来壊れても、テストが成功のまま気づけない場合があります。いまは正しく動いていることを確かめてあり、対応は不要です。"
+  - rust-reviewer/1/1 · the test parses every top-level .dir/settings.json as strict JSON; a local JSONC .vscode/settings.json panics it locally, CI unaffected
+    person: "開発者の手元に、コメントを含む設定ファイル（エディタの設定など）があると、手元でだけこのテストが失敗します。自動テストの環境では起きず、対応は不要です。"
+  - rust-reviewer/1/3 · the suffix-after-/ word rule can match a file the command does not run (../x/Cargo.toml) and silently skips globs and paths relative to a cd
+    person: "まれに、実行されないファイルまで確認の対象になったり、ワイルドカードで書かれた指定を見落としたりします。いまの設定では影響がなく、対応は不要です。"
+  - subprocess-safety-reviewer/1/1 · scripts/check-approvals.sh:160 matches a surface prefix with index($0, prefix) == 1, no / boundary, while check-review.sh, guard-stage.sh and the test require one; errs stricter
+    person: "承認の確認だけが、名前の先頭が同じ別のファイルまで重要ファイルとして扱います。厳しすぎる側に倒れるだけで、対応は不要です。"
+  - subprocess-safety-reviewer/1/2 · the test discovers registrations from the working tree, not the index; an untracked JSONC settings.json or a .cursor/hooks.json fails it locally and passes in CI — use git ls-files
+    person: "リポジトリに含まれていない手元だけのファイルによって、手元でだけテストの結果が変わることがあります。対応は不要です。"
+  - subprocess-safety-reviewer/2/1 · the import walk's fs::read_to_string(...).unwrap_or_default() treats an unreadable reached .mjs as having no imports; panic with the path
+    person: "読めないファイルがあると、そのファイルが読み込む先の確認が黙って飛ばされます（もう一方の確認役も同じ点を挙げています）。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

@@ -21,23 +21,28 @@
 # and a re-transplant would undo this copy's wording. The Stop entry runs the
 # trunk checkout's dispatcher and names its hook, as the others do.
 #
-# Risk: .cli/ and .claude/hooks.json are on no surface in docs/sdlc/risk.yaml;
-# recorded medium and supervised, as 173 and 174.
+# Risk: written when .cli/ and .claude/hooks.json were on no surface (medium,
+# supervised, as 173 and 174). Change 175 landed on main first and put both on
+# gate-configuration, so merging main makes this high and paused: the parts of
+# the diff approval.md files under relaxation, or under a change to what the
+# judge reads, are the person's to approve; the reviewers' split decides which.
 
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
-  autonomy: "supervised"
-  risk: "medium"
+  autonomy: "paused"
+  risk: "high"
   readiness: "go"
   screen: "n/a"
 
-resume: "Review: rust-reviewer on the branch's diff, verdict into review.yaml
-  beside this file, then land. Not reviewed yet — the session that wrote the
-  change does not approve it."
+resume: "Done. What outlives it: seven findings carried in review.yaml
+  for a follow-up change — the adapter's skip and empty-output wiring and the
+  guard's own reason are pinned by no test, PreToolUse advice no longer
+  reaches Antigravity, and a future blocking Stop guard would rest on
+  executionNum restarting at 0 and would not run on a cancelled turn."
 
 contract:
   failing-test-first: "machine passed 0f62b19 adds
@@ -58,7 +63,9 @@ contract:
     src/tests.rs only — /Applications/Operon.app is not made stale"
   guards-verified-by-mutation: "machine passed each new test watched failing
     against main's adapter and hooks.json"
-  review: "human pending rust-reviewer"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer
+    approve-with-nits at 69407b29ccde6ab0, the landing diff with main's 175;
+    gate-configuration approved by the person in approvals.log"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

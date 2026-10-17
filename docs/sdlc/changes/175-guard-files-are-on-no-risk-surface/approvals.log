@@ -1,0 +1,4 @@
+2026-10-17T15:05:38Z person gate-configuration plan.md 8f4bfed69989aa61 approve user 2026-10-18: 「リスク分類もよくわからない。業界標準やベストプラクティスでやって」 — tightening only (paths added to the row), evaluator agreed
+2026-10-17T15:05:38Z auto intent intent.md 6ad80d8726972968 approve evaluator round 1: restates the person's quoted delegation; the claims about what the row lacks hold against the tree
+2026-10-17T15:05:38Z auto spec spec.md 411de83f8be4ad35 approve evaluator round 2: scripts/run-bounded.sh added, check-installed-build.sh's exclusion argued, the word rule reads the dispatcher behind $(dirname …)
+2026-10-17T15:05:38Z auto plan plan.md 8f4bfed69989aa61 approve evaluator round 2: tightening only; matches the revised spec; prefix scope accepted at CODEOWNERS granularity
