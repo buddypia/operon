@@ -27,7 +27,7 @@
 
 state:
   route: "bugfix"
-  stage: "review"
+  stage: "build"
   status: "in-progress"
   attempts: "3 3"
   questions: "0 7"
