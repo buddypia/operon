@@ -274,6 +274,27 @@ Settings.
   (including generated titles) and discovers project-scoped Claude sessions
   launched outside the app — all read locally, nothing uploaded.
 
+### Project knowledge (opt-in)
+
+- Turn a project's Claude Code, Codex, and Antigravity conversations into short
+  notes — decisions, causes and fixes, procedures, cautions, facts — each linked
+  to the conversation it came from. Off until enabled per project under
+  Project › ナレッジ.
+- Meaning is judged on this Mac by [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2),
+  run in-process on the GPU through llama.cpp's Metal backend. The 310 MB model
+  is fetched once from a pinned Hugging Face revision, checked against its
+  SHA-256, and can be removed again from Settings › データ.
+- Exchanges are ranked locally first; only the few worth keeping go to the CLI
+  that held the conversation, for a read-only, ephemeral summary — at most 30
+  calls a day, run outside the project's tree.
+- Notes that recur are reinforced rather than duplicated. Notes nobody reads
+  fade with a 30-day freshness clock and are removed; referenced or pinned
+  notes stay.
+- Search by meaning in the ナレッジ tab, in local history search (whole
+  conversations of opted-in projects), and from agents:
+  `/Applications/Operon.app/Contents/MacOS/Operon knowledge search "query" --json`
+  inside a project returns that project's notes and counts the reference.
+
 ### A UI that keeps its promises
 
 - Three themes ship — ダーク (default), ライト, and ハイコントラスト（ダーク） —
@@ -359,6 +380,12 @@ provider; review each agent's permission and sandbox mode before launch. The
 local shared-session archive contains original transcripts and may include
 sensitive prompts, tool outputs, and code; Operon creates its directories `0700`
 and each snapshot `0600`, so only the account that made them can read them.
+
+Project knowledge, when a project opts in, is stored in Operon's data folder —
+never in the repository — under the same `0700`/`0600` modes. Its one network
+access is the model download from huggingface.co; embedding runs on this Mac.
+The candidate exchanges it asks a CLI to summarise go to that CLI's provider,
+the same one that already had the conversation.
 
 ## Contributing
 

@@ -93,6 +93,12 @@ impl Language {
 /// `defaults`. Detection runs exactly once, from `OperonApp` construction,
 /// where it can tell a brand-new install from a migrated one.
 pub(crate) fn detected_language() -> Language {
+    // The suite runs in Japanese whatever the host speaks. The language is
+    // process-wide, so a test opening a fresh install on an English CI runner
+    // switched every test running beside it to English (change 165).
+    if cfg!(test) {
+        return Language::Ja;
+    }
     detect_system_language()
 }
 

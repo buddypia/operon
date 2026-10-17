@@ -1,0 +1,4 @@
+2026-10-17T03:20:47Z auto intent intent.md 007ca197ea803cce approve evaluator round 1: restates the quoted request, widened only to the two views 158 gave the same button; its one slip (eye glyph, is ICON_SHOW) fixed
+2026-10-17T03:20:47Z auto spec spec.md ce3e28e4dad61e11 approve evaluator round 1: each requirement names its test; small_icon_button in list rows and icon_button in the grid match DESIGN.md Controls
+2026-10-17T03:20:47Z auto screen screen.md 424d0f079302575e approve evaluator round 1: sketches match requirements 1-3; the control moved is what the person's quoted request asks for
+2026-10-17T03:20:47Z auto plan plan.md e69127599103f650 approve evaluator round 1: header ICON_ADD found right of the rightmost name; each test fails today on the framed button or a missing header plus

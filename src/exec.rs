@@ -13,6 +13,38 @@ pub(crate) fn run_command_with_output_limit(
     stdout_limit: usize,
     stderr_limit: usize,
 ) -> Result<LimitedCommandOutput> {
+    run_command_cancellable(
+        command,
+        timeout,
+        stdout_limit,
+        stderr_limit,
+        &AtomicBool::new(false),
+    )
+}
+
+/// The error a cancelled child is reported with, so a caller can tell a
+/// person's 「中止」 from a failure (`error.downcast_ref::<CommandCancelled>()`).
+#[derive(Debug)]
+pub(crate) struct CommandCancelled;
+
+impl std::fmt::Display for CommandCancelled {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(tr("中止しました"))
+    }
+}
+
+impl std::error::Error for CommandCancelled {}
+
+/// `run_command_with_output_limit`, plus a flag another thread sets to kill the
+/// child: the model download's 「中止」 and app exit (change 157). The poll
+/// below never sleeps past 25 ms, so the child dies within that of the flag.
+pub(crate) fn run_command_cancellable(
+    command: &mut Command,
+    timeout: Duration,
+    stdout_limit: usize,
+    stderr_limit: usize,
+    cancel: &AtomicBool,
+) -> Result<LimitedCommandOutput> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     // Every external tool this crate runs arrives here, which makes it the one
     // place a repository pointer inherited from Operon's own environment can be
@@ -40,11 +72,17 @@ pub(crate) fn run_command_with_output_limit(
         thread::spawn(move || read_stream_limited(stderr, stderr_limit, stderr_signal));
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
+    let mut cancelled = false;
     let mut output_limited = false;
     let mut poll_sleep = Duration::from_millis(1);
     let status = loop {
         match child.try_wait()? {
             Some(status) => break status,
+            None if cancel.load(Ordering::Acquire) => {
+                cancelled = true;
+                let _ = child.kill();
+                break child.wait()?;
+            }
             None if stdout_limit_hit.load(Ordering::Acquire) => {
                 output_limited = true;
                 let _ = child.kill();
@@ -65,6 +103,9 @@ pub(crate) fn run_command_with_output_limit(
     };
     let (stdout, stdout_truncated) = stdout_reader.join().unwrap_or_default();
     let (stderr, stderr_truncated) = stderr_reader.join().unwrap_or_default();
+    if cancelled {
+        return Err(anyhow::Error::new(CommandCancelled));
+    }
     if timed_out {
         return Err(anyhow!(tf!(
             "コマンドが {timeout} でタイムアウトしました",
