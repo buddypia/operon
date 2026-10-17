@@ -25449,11 +25449,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
         cell: egui::Vec2,
     }
     let mut outcomes = Vec::new();
-    // Two frames, because stick-to-bottom only has a scroll position to keep
-    // on the pass after the one that measured the content. The 'stuck' frame's
-    // jump lands at row 25 (`scroll_to` puts a row a third of the way down the
-    // viewport), rows 13..50 on screen — content row 40 among them, as the
-    // bug's bottom-clamped pane shows the caret's rows.
+    // One egui pass, two sibling calls sharing it: a scroll jump lands at
+    // row 25 (`scroll_to` puts a row a third of the way down the viewport),
+    // rows 13..50 on screen — content row 40 among them, as the bug's
+    // bottom-clamped pane shows the caret's rows. Stick-to-bottom is not
+    // what this probes: `scroll_to: Some(_)` keeps it off, and the pane
+    // anchors the caret to a row of the buffer either way.
     let _ = ctx.run(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
@@ -25529,6 +25530,293 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
         (stuck.cell.x, stuck.cell.y)
     );
     assert!(!outcomes[1].caret.is_some());
+}
+
+#[test]
+/// A caret whose cell sits on the spare row egui serves below the last fully
+/// visible one draws over the frame padding and past the pane's bottom edge:
+/// the box belongs on a row the pane actually shows, all of it, or nowhere.
+pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+
+    // 61 entries: 60 rows and the phantom trailing row. Pane row 20 is content
+    // row 60 - 40 + 20 = 40. A viewport of 36 rows served at scroll_to r puts
+    // its top at (r - 12): scroll_to 15 serves 3..40, 16 serves 4..41 — the
+    // caret on 40 is then the spare row egui adds past the viewport's bottom,
+    // and 17 serves 5..42 with the caret fully visible.
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    let cursor = TerminalCursor {
+        x: 2,
+        y: 20,
+        pane_rows: 40,
+    };
+    #[derive(Debug)]
+    struct Paned {
+        caret: Option<egui::Rect>,
+        pane: egui::Rect,
+    }
+    let mut outcomes = Vec::new();
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let cell = terminal_cell_size(ui);
+            let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+            for (name, scroll_to) in [("full", 17), ("spare", 16), ("gone", 15)] {
+                let search = TerminalSearchOverlay {
+                    matches: &[],
+                    current: None,
+                    scroll_to: Some(scroll_to),
+                    palette: &palette,
+                };
+                let mut links = TerminalLinkOverlay {
+                    resolved: &HashMap::new(),
+                    unresolved: &mut Vec::new(),
+                    palette: &palette,
+                };
+                outcomes.push(Paned {
+                    caret: terminal_rows(
+                        ui,
+                        &lines,
+                        viewport,
+                        cell.y,
+                        search,
+                        &mut links,
+                        Some(cursor),
+                    )
+                    .caret,
+                    pane: egui::Rect::from_min_size(ui.min_rect().min, viewport),
+                });
+            }
+        });
+    });
+    assert_eq!(outcomes.len(), 3);
+    let caret = &outcomes[0].caret;
+    assert!(
+        caret.is_some_and(|rect| rect.max.y <= outcomes[0].pane.max.y),
+        "a fully visible caret must fit inside the pane: {caret:?}"
+    );
+    assert!(
+        !outcomes[1].caret.is_some(),
+        "the caret on the served-but-unshown spare row must draw nothing"
+    );
+    assert!(
+        !outcomes[2].caret.is_some(),
+        "a caret scrolled away draws nothing"
+    );
+}
+
+#[test]
+/// A capture taken before a resize carries a cursor.x measured on the wider
+/// grid. The box it would draw sits outside the pane's current width — the
+/// pane draws nothing there until the next capture says where the caret is.
+pub(crate) fn a_caret_past_the_pane_width_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    // A real screen: headless defaults give the panel a placeholder width of
+    // 10_000px, and 400 columns then still fit inside the pane.
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(500.0, 700.0),
+        )),
+        ..Default::default()
+    };
+    for (name, x, expected) in [("stale wide", 400, false), ("normal", 2, true)] {
+        let cursor = TerminalCursor {
+            x,
+            y: 20,
+            pane_rows: 40,
+        };
+        let _ = ctx.run(input.clone(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let cell = terminal_cell_size(ui);
+                let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+                let mut links = TerminalLinkOverlay {
+                    resolved: &HashMap::new(),
+                    unresolved: &mut Vec::new(),
+                    palette: &palette,
+                };
+                let search = TerminalSearchOverlay {
+                    matches: &[],
+                    current: None,
+                    // Two full rows of margin above the viewport bottom: the
+                    // probe's point here is the horizontal bound, not the
+                    // vertical one.
+                    scroll_to: Some(18),
+                    palette: &palette,
+                };
+                let caret = terminal_rows(
+                    ui,
+                    &lines,
+                    viewport,
+                    cell.y,
+                    search,
+                    &mut links,
+                    Some(cursor),
+                )
+                .caret;
+                assert_eq!(
+                    caret.is_some(),
+                    expected,
+                    "{name}: caret past the pane width must not draw"
+                );
+                if let Some(rect) = caret {
+                    // The Some arm has to say the bound it claims: the pane's
+                    // own reserved width mirrors production's horizontal gate.
+                    assert!(
+                        rect.max.x <= ui.min_rect().left() + viewport.x + 0.5,
+                        "a caret the pane keeps must be inside the pane: {rect:?}"
+                    );
+                }
+            });
+        });
+    }
+}
+
+#[test]
+/// A caret scrolled ABOVE the viewport (a search jump or drag well past its
+/// row) leaves the served band starting after the caret's row: the rect's
+/// row offset would underflow usize. Change 155's gate checked `row >= first`
+/// before subtracting; the tightened gate checks the pane instead, so the
+/// subtraction has to be checked on its own and report none.
+pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let mut output = String::new();
+    for index in 0..60 {
+        output.push_str(&format!("row {index:02}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    // A caret in the top grid rows (y=2 -> content row 60-40+2=23) against a
+    // jump to the very bottom: the served band's top clamps to
+    // total_rows - 36 = 25 rows — past the caret — which is also where egui's
+    // end-of-content clamp parks the caret of a full-screen TUI.
+    let cursor = TerminalCursor {
+        x: 2,
+        y: 2,
+        pane_rows: 40,
+    };
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let cell = terminal_cell_size(ui);
+            let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
+            let search = TerminalSearchOverlay {
+                matches: &[],
+                current: None,
+                scroll_to: Some(55),
+                palette: &palette,
+            };
+            let mut links = TerminalLinkOverlay {
+                resolved: &HashMap::new(),
+                unresolved: &mut Vec::new(),
+                palette: &palette,
+            };
+            let caret = terminal_rows(
+                ui,
+                &lines,
+                viewport,
+                cell.y,
+                search,
+                &mut links,
+                Some(cursor),
+            )
+            .caret;
+            assert!(!caret.is_some(), "a caret above the viewport draws none");
+        });
+    });
+}
+
+#[test]
+/// `set_session_output` stored a cursor only when one arrived, and nothing
+/// removed it but session teardown: a poll whose marker came back missing
+/// (tmux exits 0 with no marker line) left the previous cursor mapping old
+/// pane rows onto a grown buffer — the box parked rows into scrollback until
+/// the session died. A capture without a cursor is the pane saying it does
+/// not know where the caret is: the stored one has to go.
+pub(crate) fn a_capture_without_a_cursor_clears_the_stored_one() {
+    let root = std::env::temp_dir().join(format!("operon-caret-clear-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let data_file = root.join("store.json");
+    let session_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(data_file, Store::default(), ToolStatus::default(), None);
+    let known = TerminalCursor {
+        x: 2,
+        y: 16,
+        pane_rows: 36,
+    };
+
+    app.set_session_output(session_id, "line 1\n".into(), Some(known));
+    assert_eq!(app.terminal_cursors.get(&session_id), Some(&known));
+
+    // The dedup path: the output is unchanged, the cursor was lost, and the
+    // stored one must still go — the early return may not bury it.
+    app.set_session_output(session_id, "line 1\n".into(), None);
+    assert!(!app.terminal_cursors.contains_key(&session_id));
+
+    app.set_session_output(session_id, "line 1\nline 2\n".into(), Some(known));
+    assert_eq!(app.terminal_cursors.get(&session_id), Some(&known));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The genuine marker line is the last line the tmux client prints, so a
+/// pane's own echoed `__OPERON_CURSOR__` copy loses to it and stays ordinary
+/// drawn text. rfind is the discipline that holds that — recorded so a
+/// refactor to `find` or a marker-line search that scans the body cannot
+/// quietly flip it.
+pub(crate) fn a_pane_echoed_marker_loses_to_the_real_one() {
+    let body = "agent printed\n__OPERON_CURSOR__:9,9,99\nthen more text\n";
+    let raw = format!("{body}__OPERON_CURSOR__:8,2,20\n");
+    let capture = parse_tmux_capture_with_cursor(&raw);
+    assert_eq!(
+        capture.cursor,
+        Some(TerminalCursor {
+            x: 8,
+            y: 2,
+            pane_rows: 20
+        })
+    );
+    // The pane's own copy is body text: it survives into the output, while
+    // the real marker line is cut off the end.
+    assert!(capture.output.contains("agent printed\n"));
+    assert!(capture.output.contains("__OPERON_CURSOR__:9,9,99\n"));
+    assert!(!capture.output.contains("__OPERON_CURSOR__:8,2,20"));
+}
+
+#[test]
+/// When the genuine marker is missing (tmux loses its target and prints none)
+/// a pane-echoed marker is the LAST occurrence, and rfind lands on it with
+/// body text still after. A cursor cannot ride in from the pane's own
+/// echoing: the split must hold only when nothing printable follows the
+/// marker line — otherwise the capture reports none and the stored cursor
+/// goes.
+pub(crate) fn a_pane_echoed_marker_without_the_real_one_reports_none() {
+    let raw = "pane printed\n__OPERON_CURSOR__:9,9,99\nthen more text\n";
+    let capture = parse_tmux_capture_with_cursor(raw);
+    assert!(capture.cursor.is_none());
+    assert!(capture.output.contains("__OPERON_CURSOR__:9,9,99"));
+    assert!(capture.output.contains("then more text"));
+
+    // A marker with nothing printable after it is still the client's last
+    // word, even with blank padding left by a partial read.
+    let capture = parse_tmux_capture_with_cursor("__OPERON_CURSOR__:7,2,18\n\n");
+    assert_eq!(
+        capture.cursor,
+        Some(TerminalCursor {
+            x: 7,
+            y: 2,
+            pane_rows: 18
+        })
+    );
 }
 
 #[test]
@@ -45262,10 +45550,11 @@ pub(crate) fn a_project_emptied_by_pinning_does_not_claim_it_has_no_sessions() {
     let (mut app, first, second) = app_with_two_sessions(&root);
     queue_both_sessions(&mut app, first, second);
     let texts = pinned_layout(&mut app, second);
+    // Every wording of the empty line begins so, with or without its 。.
     assert!(
         !texts
             .iter()
-            .any(|(text, _)| text == "セッションはまだありません"),
+            .any(|(text, _)| text.starts_with("セッションはまだありません")),
         "both sessions are on screen, pinned"
     );
     assert!(
@@ -45359,13 +45648,14 @@ fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
         "空のプロジェクトの下に「セッションを開始」ボタンが残っています"
     );
     let row = project_header_row(&texts, name);
-    if let Some((_, at)) = row.iter().find(|(text, _)| text == ICON_ADD) {
-        click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
-        });
-    }
+    let Some((_, at)) = row.iter().find(|(text, _)| text == ICON_ADD) else {
+        panic!("{name} の見出しに＋が描かれていません: {row:?}");
+    };
+    click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    });
     row.iter().map(|(text, _)| text.clone()).collect()
 }
 
@@ -45437,7 +45727,7 @@ pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
     assert!(
         !texts
             .iter()
-            .any(|(text, _)| text == "セッションはまだありません"),
+            .any(|(text, _)| text.starts_with("セッションはまだありません")),
         "空のプロジェクトがまだ「セッションはまだありません」と言っています"
     );
     assert_header_add_says_start(&mut app, "q");
@@ -45537,8 +45827,6 @@ pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
         1,
         "セッションのあるプロジェクトの見出しに＋がありません"
     );
-    // Read on the short path: the long one pushes this glyph off screen, as it
-    // did before the ＋ arrived.
     assert_eq!(
         full.iter().filter(|(text, _)| text == ICON_SHOW).count(),
         1,
@@ -45550,6 +45838,13 @@ pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
         count_glyph(&row, ICON_ADD),
         1,
         "「グリッド」の空のプロジェクトの見出しに＋がありません"
+    );
+    // Change 170: the long path truncates, so the glyph after it stays on
+    // screen.
+    assert_eq!(
+        count_glyph(&row, ICON_SHOW),
+        1,
+        "長いパスのプロジェクトで「プロジェクトを開く」が画面の外に出ています"
     );
     assert!(app.launch_sheet_open);
     assert_eq!(app.selected_project, Some(empty));
@@ -45565,6 +45860,171 @@ pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
             .iter()
             .any(|(text, _)| text == "一致するセッションはありません。"),
         "検索で隠れたプロジェクトが一致なしと言っていません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+// --- Change 170: the grid stays inside its view ---------------------------
+
+/// Every filled or stroked rectangle a frame painted, for reading where a
+/// group's border lies.
+fn painted_rects(output: &egui::FullOutput) -> Vec<egui::Rect> {
+    fn visit(shape: &egui::epaint::Shape, found: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::epaint::Shape::Rect(rect) => found.push(rect.rect),
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    visit(child, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        visit(&clipped.shape, &mut found);
+    }
+    found
+}
+
+#[test]
+/// Two sessions in a project and a later project with a long path, in the
+/// 「グリッド」 at the 900px screen the click tests use: both cards are painted
+/// in the history, and nothing the workspace paints ends past the screen's
+/// right edge. Each card used to take the rest of its row, so the second began
+/// past the edge and was not painted, and the history grew to 1120px.
+pub(crate) fn the_session_grid_keeps_every_card_inside_its_view() {
+    let root = temporary_directory("grid-inside-its-view");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    if let Some(project) = app.store.projects.iter_mut().find(|p| p.id == empty) {
+        project.path = root.join("a-worktree-with-a-long-name-".repeat(12));
+    }
+    // A title far wider than a card truncates inside it.
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.name == "second") {
+        session.name = format!("second{}", " and a title that keeps going".repeat(8));
+    }
+    // More cards than one row of the history holds, so some must wrap.
+    let first = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.name == "first")
+        .cloned()
+        .expect("the fixture has a session named first");
+    for name in ["third", "fourth", "fifth", "sixth"] {
+        app.store.sessions.push(Session {
+            id: Uuid::new_v4(),
+            name: name.to_owned(),
+            ..first.clone()
+        });
+    }
+    app.session_library_open = true;
+    app.session_view = SessionView::Grid;
+    let context = egui::Context::default();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let mut draw = |ctx: &egui::Context| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    let output = context.run(input, &mut draw);
+    // The history is right of the session column; its own "p" header is the
+    // rightmost one painted.
+    let history_left = drawn_text_rects(&output, |text| text == "p")
+        .into_iter()
+        .map(|rect| rect.min.x)
+        .fold(f32::MIN, f32::max);
+    for title in ["first", "second", "third", "fourth", "fifth", "sixth"] {
+        assert!(
+            drawn_text_rects(&output, |text| text.starts_with(title))
+                .iter()
+                .any(|rect| rect.min.x > history_left),
+            "「グリッド」に {title} のカードが描かれていません"
+        );
+    }
+    // The first row of cards sits right under its header, as it did before
+    // the cards were bounded: a bounded card offered no height used to be
+    // centred in a 28px row and slip half of it down.
+    let p_name = drawn_text_rects(&output, |text| text == "p")
+        .into_iter()
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the project with sessions is drawn in the grid");
+    let first_title = drawn_text_rects(&output, |text| text == "first")
+        .into_iter()
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the first card is drawn in the grid");
+    let first_card = painted_rects(&output)
+        .into_iter()
+        .filter(|rect| {
+            rect.contains(first_title.center())
+                && rect.width() <= OperonApp::SESSION_GRID_CARD_WIDTH + 0.5
+        })
+        .max_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the first card's frame is painted");
+    // Measured: 19px under the header when the card is offered the row's
+    // height, 28px when it is offered none and centred.
+    let gap = first_card.min.y - p_name.max.y;
+    assert!(
+        (0.0..24.0).contains(&gap),
+        "「グリッド」の最初のカードが見出しから離れています ({gap}px)"
+    );
+    // The cards that do not fit beside the first wrap onto a row below it.
+    let lowest_title = drawn_text_rects(&output, |text| {
+        ["third", "fourth", "fifth", "sixth"].contains(&text)
+    })
+    .into_iter()
+    .filter(|rect| rect.min.x > history_left)
+    .map(|rect| rect.min.y)
+    .fold(f32::MIN, f32::max);
+    assert!(
+        lowest_title > first_card.max.y,
+        "「グリッド」のカードが次の行へ折り返していません"
+    );
+    let long_title = drawn_text_rects(&output, |text| text.starts_with("second and"))
+        .into_iter()
+        .filter(|rect| rect.min.x > history_left)
+        .map(|rect| rect.width())
+        .fold(0.0, f32::max);
+    assert!(
+        long_title > 0.0 && long_title < OperonApp::SESSION_GRID_CARD_WIDTH,
+        "長いタイトルがカードの中で省略されていません (幅 {long_title})"
+    );
+    // The long-path project's 「プロジェクトを開く」 stays inside that project's
+    // own group, not merely on screen: the smallest painted rect around the
+    // project's name is its group's frame.
+    let q_name = drawn_text_rects(&output, |text| text == "q")
+        .into_iter()
+        .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
+        .expect("the long-path project is drawn in the grid");
+    let group = painted_rects(&output)
+        .into_iter()
+        .filter(|rect| rect.contains(q_name.center()) && rect.width() > q_name.width() * 4.0)
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the long-path project's group is painted");
+    let open_project = drawn_text_rects(&output, |text| text == ICON_SHOW)
+        .into_iter()
+        .filter(|rect| (rect.center().y - q_name.center().y).abs() < CONTROL_HEIGHT / 2.0)
+        .map(|rect| rect.max.x)
+        .fold(f32::MIN, f32::max);
+    assert!(
+        open_project > q_name.max.x && open_project <= group.max.x + 0.5,
+        "長いパスの「プロジェクトを開く」がグループの枠の外にあります ({open_project} > {})",
+        group.max.x
+    );
+    let past_the_edge: Vec<egui::Rect> = drawn_text_rects(&output, |_| true)
+        .into_iter()
+        .filter(|rect| rect.max.x > 900.5)
+        .collect();
+    assert!(
+        past_the_edge.is_empty(),
+        "画面の右端より外に描かれた文字があります: {past_the_edge:?}"
     );
     fs::remove_dir_all(&root).ok();
 }

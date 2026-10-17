@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Terminal caret box no longer drifts one row below the running CLI's input row or outside the pane with scrollback: the cursor is tracked from tmux row coordinates, drawn only on rows the pane actually shows, and the IME candidate window follows it.
+- Terminal caret box cannot go stale or escape the pane (change 167): a poll whose capture comes back without the marker line clears the stored cursor instead of keeping the last one, the box is gated to cells fully inside the pane (egui's spare row, half cells and columns past the pane's current width draw nothing until the next capture), and a pane-echoed marker line can no longer pose as the genuine cursor report.
 
 ## [0.1.0] - 2026-10-05
 
