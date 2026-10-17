@@ -40,8 +40,8 @@
 
 state:
   route: "security"
-  stage: "plan"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 2"
   questions: "0 7"
   autonomy: "paused"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write the shim test and the amended pins and count, watch them fail, then change the two digest lines."
+resume: "Done; what outlives it is the eleven carried review points in review.yaml, none of which changes what the gate admits."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,12 +70,12 @@ resume: "Write the shim test and the amended pins and count, watch them fail, th
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted 3b20792 (fmt, clippy, review gate SHIP at 42c33ec5bf0ac52f)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
   release-binary: "machine waived touches scripts/check-review.sh and src/tests.rs only; the installed app is not built from either"
-  named-tests: "machine pending cargo test --locked the_review_gate; cargo test --locked a_review_"
-  digest-unchanged: "machine pending the gate on this branch names d8d2d10447b4e4fe for --commit bef1b7d, as main's does"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  named-tests: "machine passed cargo test --locked the_review_gate, the_digest_assignment, a_review_ — 15 passed"
+  digest-unchanged: "machine passed the gate on this branch reads SHIP at d8d2d10447b4e4fe for --commit bef1b7d, as main's does"
+  guards-verified-by-mutation: "human passed mutations.py: 8 of 8 caught, including the refusal sentence weakened to ok"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
