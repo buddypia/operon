@@ -25024,6 +25024,51 @@ pub(crate) fn every_message_the_code_shows_has_a_row_in_every_table() {
     );
 }
 
+/// A notice is translated text, so code that decides something by reading it
+/// decides differently on an English or Korean screen: dropping folders lost
+/// the save error that way once its message gained rows (change 165). What
+/// happened travels as a value; the notice is only what a person reads.
+#[test]
+pub(crate) fn no_decision_reads_the_text_of_a_notice() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![root];
+    let mut found = Vec::new();
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(&path).unwrap() {
+                files.push(entry.unwrap().path());
+            }
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs")
+            || path.file_name().is_some_and(|name| name == "tests.rs")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        for (number, line) in text.lines().enumerate() {
+            let reads = ["starts_with(", "contains(", "ends_with(", "strip_prefix("]
+                .iter()
+                .any(|method| line.contains(&format!("notice.{method}")))
+                || line.contains("notice ==")
+                || line.contains("== notice");
+            if reads {
+                found.push(format!(
+                    "{}:{}: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    number + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "通知の文面で分岐しているコードがあります:\n{}",
+        found.join("\n")
+    );
+}
+
 /// Japanese owns no table: the message id is the copy. `translation_for` says
 /// so with `None` and `tr` falls back to the id, which is the only reason a
 /// table that lags behind the code degrades to Japanese instead of panicking.
