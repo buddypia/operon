@@ -32,7 +32,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "awaiting-user"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
@@ -40,11 +40,10 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Reviewed and committed on the branch; CI on the push. Waiting for
-  the person's gate-configuration line in approvals.log at 142d281d14dd3977
-  (asked 2026-10-18, no answer yet) — check-approvals refuses the landing
-  without it. On their yes: write the person line, land from main, push,
-  cleanup-worktree."
+resume: "Done. Nothing carried: both reviewers approve 0 0 at
+  142d281d14dd3977, and the person approved the gate-configuration edit in
+  approvals.log. CI passed on df8a2a0. No lesson: a green test over a deleted
+  guard is lessons 004 and 009, and the mutants here are that check applied."
 
 contract:
   failing-test-first: "machine passed the code already behaved, so each new
@@ -62,7 +61,8 @@ contract:
   guards-verified-by-mutation: "human passed the four mutants above, each
     restored byte for byte (.tmp/mutate.sh, cmp)"
   review: "human passed rust-reviewer and subprocess-safety-reviewer approve
-    0 0 at 142d281d14dd3977, round 2 of 2; the round-1 nits fixed, none carried"
+    0 0 at 142d281d14dd3977, round 2 of 2; the round-1 nits fixed, none carried;
+    gate-configuration approved by the person in approvals.log"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
