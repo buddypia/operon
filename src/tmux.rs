@@ -6,9 +6,13 @@ pub(crate) use hooks::*;
 
 /// Every tmux this crate runs starts here, so this is the one place the test
 /// build can be kept off the server a person's sessions live on (sdlc 098):
-/// `-L` names a socket of the suite's own, and wins over `$TMUX`.
+/// `-L` names a socket of the suite's own, and wins over `$TMUX`. Whichever
+/// tmux runs first starts the server, which keeps that process's directory for
+/// as long as it lives; from `/` it can never be left in a deleted worktree
+/// (change 164).
 pub(crate) fn tmux_command() -> Command {
     let mut command = Command::new("tmux");
+    command.current_dir("/");
     #[cfg(test)]
     command.args(["-L", "operon_suite"]);
     command.arg("-u");
@@ -393,7 +397,7 @@ pub(crate) fn respawn_tmux_pane(name: &str, cwd: &Path, command: &str) -> Result
     let mut tmux = tmux_command();
     tmux.args(["respawn-pane", "-k", "-t", name, "-c"])
         .arg(cwd)
-        .arg(command);
+        .arg(tmux_pane_command(cwd, command));
     let respawned = run_command_with_timeout(&mut tmux, Duration::from_secs(5))?;
     if !respawned.status.success() {
         return Err(anyhow!(
@@ -402,6 +406,25 @@ pub(crate) fn respawn_tmux_pane(name: &str, cwd: &Path, command: &str) -> Result
     }
     Ok(())
 }
+
+/// The command a pane runs, preceded by changing into its own directory. A
+/// tmux server whose starting directory has since been deleted starts every
+/// pane in that deleted directory, whatever `-c` says (measured on tmux 3.8,
+/// change 164), and an agent there cannot read or write its project. If the
+/// directory is gone the pane exits instead of running `command` elsewhere —
+/// tmux's own fallback is the home directory. `exit` rather than `&&`, so the
+/// guard holds whatever operators `command` contains.
+pub(crate) fn tmux_pane_command(cwd: &Path, command: &str) -> String {
+    format!(
+        "cd -- {} || exit 1; {command}",
+        shell_quote(&cwd.to_string_lossy())
+    )
+}
+
+/// What a plain terminal runs: the login shell tmux would have started, in the
+/// directory it was asked for (see `tmux_pane_command`). tmux sets `$SHELL` in
+/// the pane to its `default-shell`.
+const PLAIN_TERMINAL_COMMAND: &str = "exec \"$SHELL\" -l";
 
 pub(crate) fn start_empty_tmux_session(
     name: &str,
@@ -416,7 +439,8 @@ pub(crate) fn start_empty_tmux_session(
             environment
                 .iter()
                 .flat_map(|(key, value)| ["-e".to_owned(), format!("{key}={value}")]),
-        );
+        )
+        .arg(tmux_pane_command(cwd, PLAIN_TERMINAL_COMMAND));
     let created = run_command_with_timeout(&mut command, Duration::from_secs(5))?;
     if !created.status.success() {
         return Err(anyhow!(String::from_utf8_lossy(&created.stderr).to_string()));

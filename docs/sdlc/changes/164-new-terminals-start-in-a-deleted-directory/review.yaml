@@ -1,0 +1,48 @@
+# Review record for 164-new-terminals-start-in-a-deleted-directory.
+#
+# The change: every pane Operon starts — agent or plain terminal — changes into
+# its own directory before running anything (`tmux_pane_command`), because a
+# tmux server whose starting directory was deleted starts panes there whatever
+# `-c` says; and every tmux client runs from `/`, so a server Operon or the
+# suite starts never holds a directory a worktree cleanup can delete.
+#
+# Round 1: both reviewers asked for plain terminals to get the same guard —
+# they are what "new terminal" means and the person's server was already
+# broken. subprocess-safety-reviewer also found that `cd && command` lets an
+# `||` in the command run it elsewhere. Round 2 routed start_empty_tmux_session
+# through the guard with `exec "$SHELL" -l`, changed the guard to
+# `cd -- <dir> || exit 1; <command>`, and put a quote and a space in the test
+# paths plus a missing-directory case (mutated back to `&&`, it fails).
+#
+# Verified by rust-reviewer: launch paths only, all on background threads; no
+# new unwrap/panic outside tests; borrowed signatures; the tests clean up
+# before asserting.
+#
+# Verified by subprocess-safety-reviewer: every caller hands the guard a
+# simple command; nothing reads pane_current_command or pane_start_command, so
+# the plain terminal's new start command breaks no detection; every `-c` gets
+# an absolute path, so running tmux from `/` changes no resolution; the argv
+# form was declined because handing agent commands to /bin/sh instead of the
+# person's default shell would stop reading ~/.zshenv.
+
+digest: "5a829af1078565d0"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/2 and subprocess-safety-reviewer/1/5 · the current_dir pin restates its line, and nothing but the live tests pins that respawn_tmux_pane calls the guard
+    person: "テストの確かめ方についての記録です。フォルダ移動の仕組みそのものは、実際に削除済みフォルダから動かすテストで確認しています。対応は不要です。"
+  - rust-reviewer/1/3 and subprocess-safety-reviewer/1/3 · a missing directory now stops the launch instead of tmux falling back to the home directory, and non-UTF-8 names cannot be entered
+    person: "プロジェクトのフォルダが消えている場合、エージェントはホームフォルダで勝手に動き出さず、起動しないようになりました。意図した変更です。対応は不要です。"
+  - subprocess-safety-reviewer/1/2 and subprocess-safety-reviewer/2/4 · the path is quoted for POSIX shells; with fish as tmux's default shell a name ending in a backslash breaks it
+    person: "tmux の既定シェルを fish にしていて、しかもフォルダ名が「\」で終わる場合だけの話です。お使いの環境（zsh）には関係ありません。対応は不要です。"
+  - rust-reviewer/2/1 · a default-command set in the person's tmux.conf is no longer used for Operon's plain terminals
+    person: "tmux.conf に default-command を書いている場合だけの話です。この Mac では設定されていません。対応は不要です。"
+  - rust-reviewer/2/2 and subprocess-safety-reviewer/2/1 · a plain terminal whose directory is missing reports tmux's "can't find session" rather than the missing directory
+    person: "フォルダが消えたプロジェクトで普通のターミナルを開いたときだけの話です。エラーの文言が分かりにくくなります。起動しないこと自体は正しい動きです。対応は不要です。"
+  - rust-reviewer/2/3 and subprocess-safety-reviewer/2/2 · the plain-terminal test passes on a healthy server too and does not check login behaviour; $SHELL is relied on being set by tmux
+    person: "テストの確かめ方についての記録です。壊れたサーバーでの動きは別のテストで確認済みです。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 3"
+  subprocess-safety-reviewer: "approve 0 4"
