@@ -1,0 +1,45 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report: change 173 widened the trunk allowlist and found that
+# docs/sdlc/risk.yaml classifies neither .claude/config/ nor .cli/hooks/; it
+# asked the person, who answered on 2026-10-18: 「リスク分類もよくわからない。業界
+# 標準やベストプラクティスでやって」. Measured: the guards all three CLIs register,
+# the policy they read, the other two CLIs' hook registrations, the two scripts
+# the merge and stage gates delegate to, and the CI the merge gate trusts are on
+# no surface.
+#
+# Route modify: an existing classification changes; no behaviour a user sees.
+# risk.yaml is gate configuration (high, paused). The edit only adds paths —
+# tightening, which approval.md hands to the evaluator; the person's instruction
+# is recorded beside it.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Write the failing test, watch it fail, then add the paths to the row."
+
+contract:
+  failing-test-first: "machine pending
+    every_hook_an_agent_cli_runs_is_gate_configuration fails on today's table"
+  three-gates: "machine pending"
+  release-binary: "machine waived touches docs/sdlc/risk.yaml and src/tests.rs
+    only; the installed app is not built from either"
+  review: "human pending"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
