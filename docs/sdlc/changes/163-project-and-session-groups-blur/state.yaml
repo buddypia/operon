@@ -1,0 +1,50 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# The person's words: 「プロジェクト別の区切りやセッションの区切りの見分けが付かない。
+# UI/UXを考慮して直して」 and 「セッションの終了するUIもなくて不便」.
+#
+# Measured on a dev build against a copy of the person's store (1280 × 820):
+# the project name is 12px under 13.5px session titles, the gap between two
+# sessions equals the gap between two projects, nothing frames a group, the
+# row's time is clipped at the column edge, and stop exists only in the open
+# terminal's header.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Closed. Land after CI, then package and swap /Applications/Operon.app."
+
+contract:
+  three-gates: "machine passed cargo fmt --check and clippy -D warnings through
+    the commit gate; the named tests and every_ locally; CI decides the suite"
+  bands: "machine passed bash scripts/check-bands.sh: 21 metrics within their bands"
+  failing-test-first: "machine passed seven of the eight failed on main for
+    their stated reasons (no block, no rule, time culled at SIDEBAR_MIN_W, 1 件
+    pushed out, no ■, no 停止/削除 in ···); the rename test passes on main by
+    design — it pins the gesture through the re-layout"
+  guards-verified-by-mutation: "machine passed mutations.py: 13 of 13 caught"
+  screen-matches: "human passed evaluator round 4 judged the dark and light
+    screenshots of the dev build against a copied store to match screen.md"
+  review: "human passed rust-reviewer approve 0 0 at d68c93561f864c1e (round 4,
+    after merging main),
+    one remark carried in review.yaml"
+  release-binary: "machine waived src/app/screens.rs changes; the bundle is built
+    from main after the merge and swapped into /Applications in this session"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
