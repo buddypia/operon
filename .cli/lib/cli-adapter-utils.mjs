@@ -681,7 +681,9 @@ function deriveSessionId(data, cli) {
  * infinite blocking loops. Antigravity lacks this field and provides only `executionNum` ("The sequence number of the execution
  * attempt" — antigravity-cli-hooks.md §Stop L348). It counts from 0: measured against a live agy session (2026-10-17),
  * the first Stop arrives with `executionNum: 0` and the Stop after one `continue` with `1` — the manual's example
- * payload (`executionNum: 1`) is not the first stop. So `> 0` is stop_hook_active (the executionNum half of DEBT-204; the former
+ * payload (`executionNum: 1`) is not the first stop. It is per turn, not per conversation: re-measured against agy 1.4.0
+ * (2026-10-18), the first Stop of the next turn in the same conversation is `0` again, so a later turn does not read as a
+ * re-entry. So `> 0` is stop_hook_active (the executionNum half of DEBT-204; the former
  * `>= 2` let a blocking guard re-enter the loop twice).
  */
 function deriveAntigravityStopHookActive(data, cli) {
@@ -764,7 +766,11 @@ export function normalizePayload(data, cli) {
  *     blocks too, but the agent receives "denied by pre-tool hook: " with the reason dropped — with `decision`
  *     present `deny_reason` is ignored, so the reason only arrives in this shape. `decision: "allow"` is an
  *     automatic approval that skips the user's permission check, so a Claude `allow` (= "this guard has no
- *     objection") emits nothing. `ask` maps to `{ decision: "ask", reason }`. There is no advisory field.
+ *     objection") emits nothing. `ask` maps to `{ decision: "ask", reason }`. There is no advisory field, and no shape
+ *     tried carries one (measured against agy 1.4.0, 2026-10-18): an answer with only `reason` denies the call ("denied
+ *     by pre-tool hook: <reason>"), and the reason of `{ decision: "allow" }` or `{ allow_tool: true }` never reaches
+ *     the agent. So an `allowWithWarning` reason or a `systemMessage` is dropped. Claude Code's hooks reference sends an
+ *     `allow` reason only to its debug log.
  *   - Stop: `decision` recognizes only `"continue"` (re-enter the loop; any other value allows the stop) — a
  *     Claude `block` maps to `continue`; anything else, including a downgraded `{ systemMessage }` notice from
  *     `applyStopAdvisoryPolicy`, emits nothing.
@@ -925,8 +931,10 @@ export function emit(result, opts = {}) {
  *     model invocation — run only on `invocationNum === 0` (0-indexed first invocation — antigravity-cli-hooks.md
  *     §PreInvocation L267). Absent invocationNum (schema drift) skips: for advisory context injection, no-fire is
  *     safer than duplicate injection per invocation (noise).
- *   - Stop with `terminationReason: "USER_CANCELED"`: agy runs Stop hooks when the user cancels; Claude Code does not.
- *     A Stop guard run there would act on a turn the user abandoned (and consume shared attempt markers).
+ *   - Stop with `terminationReason: "USER_CANCELED"`: agy runs Stop hooks when the user cancels; Claude Code does not
+ *     ("does not run if the stoppage occurred due to a user interrupt" — hooks reference, Stop). A Stop guard run there
+ *     would act on a turn the user abandoned (and consume shared attempt markers). This holds for every Stop guard,
+ *     an allowlisted blocking one included: the person who cancelled has taken the turn back, as under Claude Code.
  *
  * @param {object} raw - raw stdin JSON
  * @param {{ cli: string, eventName?: string }} opts
