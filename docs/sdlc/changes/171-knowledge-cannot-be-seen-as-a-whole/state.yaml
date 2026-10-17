@@ -74,7 +74,8 @@ contract:
   ci: "machine passed gh run 39028346991 on 0d5882b (test suite, fmt/clippy, bands, bundle, cross-cli all success)"
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh (fmt, clippy, tests kept, review gate at 87489103e37a5370)"
   bands: "machine passed bash scripts/check-bands.sh (21 metrics within their bands, 2026-10-17)"
-  release-binary: "machine pending touches src/knowledge.rs, src/app/knowledge.rs, src/ui, src/config.rs: the installed app goes stale, so it ends with bash scripts/package-macos.sh and the swap"
+  release-binary: "machine waived src/knowledge.rs, src/app/knowledge.rs, src/ui change; the bundle is built
+    from main after the merge (it carries 163 too) and swapped into /Applications in this session"
   guards-verified-by-mutation: "human passed mutations.py 23 of 24, the miss fixed and re-swept by hand; Req 9 swept in release; review fixes each watched failing (plan.md Departures)"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
