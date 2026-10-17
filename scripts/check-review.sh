@@ -224,7 +224,24 @@ run_diff() {
 # empty input as readily as a diff, so a git that could not run would otherwise
 # yield a digest — of nothing — and the gate would go on to judge it.
 run_diff >/dev/null || { echo "the current diff could not be read; is this a git repository?"; exit 2; }
-digest=$(run_diff | shasum -a 256 | cut -c1-16)
+# The digest is about the change, not about the rest of the file it sits in
+# (change 162). Two things in a diff describe the rest of the file: the line
+# numbers in a hunk header, and the whole-file blob ids on an `index` line.
+# Both move whenever another session lands anything else in that file, and a
+# branch that takes main in — as it must before landing — then held a verdict
+# about a diff it no longer had, with no commit able to bring it up to date.
+# Every added, removed, and context line, the function text after `@@`, file
+# names, and modes are still hashed. A content line begins with a space, `+`,
+# `-`, or `\`, so only git's own header lines begin with `@@` or `index`.
+# `LC_ALL=C`: under a UTF-8 locale BSD sed stops at the first byte sequence
+# that is not UTF-8 and prints only what came before it, and its status is
+# lost in the pipe — everything after such a line would stop counting.
+digest=$(run_diff | LC_ALL=C sed -E -e 's/^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@/@@/' -e 's/^index [0-9a-f]+\.\.[0-9a-f]+/index/' | shasum -a 256 | cut -c1-16)
+# The digest as it was taken before change 162: the diff byte for byte. A
+# record holding it was written about this exact diff, which is the strictest
+# match there is, so it still counts — sessions mid-review elsewhere when this
+# landed are not sent back. Only the comparison below reads it.
+legacy_digest=$(run_diff | shasum -a 256 | cut -c1-16)
 changed=$(run_diff --name-only)
 
 # --- which surfaces the diff is on -------------------------------------------
@@ -669,7 +686,7 @@ nit は blocking しませんが、Important は直してから commit してく
   # has to be about this diff. A record nobody asked for and nobody touched —
   # a docs commit on a change reviewed earlier — is left alone and not shown.
   if { [ -n "$required" ] || [ "$review_landing_changed" -eq 1 ]; } \
-    && [ "$recorded_digest" != "$digest" ]; then
+    && [ "$recorded_digest" != "$digest" ] && [ "$recorded_digest" != "$legacy_digest" ]; then
     note "❌ BLOCK — ${change} · 判定が古い diff のものです
 判定は diff ${recorded_digest:-（記録なし）} のもの、現在の diff は ${digest}。
 古い承認は無い承認より悪いので、再レビューしてから commit してください。"

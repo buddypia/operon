@@ -195,11 +195,11 @@ The tree compiles after every step.
    rather than answering from half-rebuilt vectors (the evaluator's minor).
 7. **Every context reserves eight sequences.** llama.cpp 2a66703 aborts the
    process when `n_seq_max` is 3, 5, 6, or 7; found by the fidelity script's
-   last chunk of six (lesson 073).
+   last chunk of six (lesson 074).
 8. **The model is dropped before every exit.** `release_shared_embedder` runs
    in `on_exit`, after `run_native` returns, and before the CLI's
    `process::exit`, and refuses later loads: Metal's teardown asserts while a
-   model is loaded (lesson 073).
+   model is loaded (lesson 074).
 9. **Idle unload moved to the frame.** The plan released an idle model at the
    end of a run, where it had just been used and never qualified. The frame
    now tries once a minute (`EMBEDDING_IDLE_CHECK_SECONDS`) with `try_lock`, so
@@ -229,7 +229,7 @@ The tree compiles after every step.
     rule; processed budget; embedding and wall budgets (each guarded twice, in
     the loop and in `Budget::spend`, so mutated in both); single run key;
     search and session thresholds; cited references; the n_seq_max and exit
-    release (lesson 073).
+    release (lesson 074).
 15. **Fidelity, measured 2026-10-17:** 46 golden texts through the shipped
     runtime on Apple M4 Max (Metal), lowest cosine 0.99987.
 16. **Review round 1 (do-not-approve from all three) moved the code:**
