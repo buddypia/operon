@@ -674,7 +674,7 @@ pub(crate) fn session_list_title(session: &Session, first_prompt: Option<&str>) 
         && session
             .name
             .rsplit_once(" · ")
-            .is_some_and(|(_, agent)| agent == agent_choice_copy(&session.agent).0);
+            .is_some_and(|(_, label)| names_agent_in_any_language(&session.agent, label));
     if !launch_fallback {
         return title;
     }
@@ -711,13 +711,14 @@ pub(crate) const SESSION_TOPIC_NAME_MAX_CHARS: usize = 34;
 /// "Antigravity で会話全履歴を復元（Codex CLI から）" describes the mechanism, so
 /// every restored session reads the same way in the list — the same failure as
 /// "Untitled". The mechanism is not what tells two sessions apart, so the title
-/// carries the one thing that does: the work itself.
+/// carries the one thing that does: the work itself. `preferred` is tried
+/// before `otherwise`, so argument order is priority order.
 pub(crate) fn conversation_topic_name(
-    message: Option<&str>,
-    title: Option<&str>,
+    preferred: Option<&str>,
+    otherwise: Option<&str>,
     fallback: impl FnOnce() -> String,
 ) -> String {
-    [message, title]
+    [preferred, otherwise]
         .into_iter()
         .flatten()
         .find_map(topic_from_text)
@@ -747,10 +748,14 @@ pub(crate) fn looks_like_conversation_id(text: &str) -> bool {
 }
 
 /// The title for a terminal that carries a restored or resumed conversation.
+///
+/// The source CLI's own title comes first: it names the whole conversation,
+/// while the last request of a long one is often a one-word nudge ("계속",
+/// "続けて") that says nothing about the work (change 165).
 pub(crate) fn restored_session_name(source: &CliSession) -> String {
     conversation_topic_name(
-        source.last_user_message.as_deref(),
         source.title.as_deref(),
+        source.last_user_message.as_deref(),
         || tf!("{p0} から引き継いだ会話", p0 = source.provider.label()),
     )
 }
@@ -772,6 +777,21 @@ pub(crate) fn plain_terminal_name(workspace: &Path) -> String {
     tf!("{p0} のターミナル", p0 = workspace_display_name(workspace))
 }
 
+/// The message id of a custom command's name in the agent picker.
+pub(crate) const CUSTOM_AGENT_LABEL: &str = "別のコマンド";
+
+/// Whether `label` is how the picker names `agent` in any language. A name
+/// built from the label was written in the language the screen had then.
+fn names_agent_in_any_language(agent: &str, label: &str) -> bool {
+    label == agent_choice_copy(agent).0
+        || (agent == "custom"
+            && Language::all().into_iter().any(|language| {
+                crate::i18n_tables::translation_for(language, CUSTOM_AGENT_LABEL)
+                    .unwrap_or(CUSTOM_AGENT_LABEL)
+                    == label
+            }))
+}
+
 pub(crate) fn agent_choice_copy(agent: &str) -> (&'static str, &'static str) {
     match agent {
         "codex" => ("Codex CLI", tr("OpenAI のコーディングエージェント")),
@@ -780,7 +800,7 @@ pub(crate) fn agent_choice_copy(agent: &str) -> (&'static str, &'static str) {
             "Antigravity",
             tr("Google のコーディングエージェント（agy）"),
         ),
-        "custom" => (tr("別のコマンド"), tr("任意の対応 CLI を指定します")),
+        "custom" => (tr(CUSTOM_AGENT_LABEL), tr("任意の対応 CLI を指定します")),
         _ => (tr("不明な AI"), tr("利用できません")),
     }
 }
