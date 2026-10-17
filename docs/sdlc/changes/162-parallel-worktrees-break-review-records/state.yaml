@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Done; what outlives it is the fourteen carried review points, two of which (a failing sed, a second digest assignment) are worth a follow-up change; lands-158 is settled when 158 lands."
+resume: "Done; what outlives it is twelve carried review points that need nothing — the failing sed and the second digest assignment were closed by change 169."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -74,7 +74,7 @@ contract:
   bands: "machine passed bash scripts/check-bands.sh — 21 metrics within their bands"
   release-binary: "machine waived no src/ file except src/tests.rs changes; the installed app is not made stale"
   named-tests: "machine passed the three new tests — 3 passed; cargo test --locked the_review_gate — 8 passed"
-  lands-158: "human pending change 158 lands after merging this, with no further review round"
+  lands-158: "human passed 158 landed at 0252b26 after this (fc3abcc); its record moved to the normalized digest 03555c43b78c3415 with no further review round"
   guards-verified-by-mutation: "human passed mutations.py 12 of 12 caught; the five gate mutations also caught by the behaviour tests alone, including the invalid-byte arm"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
