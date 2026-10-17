@@ -679,14 +679,14 @@ function deriveSessionId(data, cli) {
  *
  * Claude passes `stop_hook_active=true` on Stop events following resumptions triggered by stop hooks to break
  * infinite blocking loops. Antigravity lacks this field and provides only `executionNum` ("The sequence number of the execution
- * attempt" — antigravity-cli-hooks.md §Stop L348). Given example payload (L366) shows `executionNum: 1` on what appears
- * to be the initial stop, baseline is assumed to be 1, deriving `>= 2` (= re-entry after 1+ continues) as equivalent
- * to stop_hook_active — bounding blocking to at most 2 attempts even if baseline is 0 (prioritizing loop prevention,
- * exact semantics UNVERIFIED — to be finalized via smoke testing, DEBT-204).
+ * attempt" — antigravity-cli-hooks.md §Stop L348). It counts from 0: measured against a live agy session (2026-10-17),
+ * the first Stop arrives with `executionNum: 0` and the Stop after one `continue` with `1` — the manual's example
+ * payload (`executionNum: 1`) is not the first stop. So `> 0` is stop_hook_active (the executionNum half of DEBT-204; the former
+ * `>= 2` let a blocking guard re-enter the loop twice).
  */
 function deriveAntigravityStopHookActive(data, cli) {
   if (cli !== 'antigravity' || typeof data.executionNum !== 'number') return undefined;
-  return data.executionNum >= 2;
+  return data.executionNum > 0;
 }
 
 /**
@@ -755,49 +755,56 @@ export function normalizePayload(data, cli) {
 }
 
 /**
- * Converts main hook Claude format results into Antigravity wire format (per-event decision vocabulary branching).
+ * Converts main hook Claude format results into Antigravity wire format — one result message per event.
  *
- * Antigravity stdout contract (official manual antigravity-cli-hooks.md, finalized 2026-07-11 — source
- * https://antigravity.google/docs/hooks):
- *   - PreToolUse: `{ "decision": "allow"|"deny"|"ask"|"force_ask", "reason": "..." }`
- *   - Stop: `decision` **recognizes only `"continue"` to prevent stopping** — "Set to \"continue\" to prevent the
- *     agent from stopping and re-enter the execution loop. Any other value allows the stop." (§Stop
- *     L358). Emitting Claude/Codex convention `"block"` is treated as "any other value" and allows stopping —
- *     previous implementations ("block honoring UNVERIFIED — emit as-is") effectively disabled all Stop guards.
- *     Corrected by mapping `block` → `continue` (main hooks maintain Claude vocabulary — SSOT unchanged).
- *   - PreInvocation (SessionStart fallback registration): Output is `{ injectSteps: [...] }` — each step is
- *     one of `toolCall`/`userMessage`/`ephemeralMessage` (§PreInvocation L275-281). Converts main hook's
- *     `hookSpecificOutput.additionalContext` into `ephemeralMessage` (transient system message).
- *   - Empty output = passthrough (allow). reason is optional.
+ * Antigravity reads hook stdout with protojson into the event's result message, and **a single key that message
+ * does not have discards the whole result** (`failed to unmarshal result … via protojson`). Measured 2026-10-17
+ * against the agy binary's embedded "Lifecycle Hooks" manual and live sessions; every shape below was observed:
+ *   - PreToolUse: a block is `{ allow_tool: false, deny_reason }`. The manual's `{ decision: "deny", reason }`
+ *     blocks too, but the agent receives "denied by pre-tool hook: " with the reason dropped — with `decision`
+ *     present `deny_reason` is ignored, so the reason only arrives in this shape. `decision: "allow"` is an
+ *     automatic approval that skips the user's permission check, so a Claude `allow` (= "this guard has no
+ *     objection") emits nothing. `ask` maps to `{ decision: "ask", reason }`. There is no advisory field.
+ *   - Stop: `decision` recognizes only `"continue"` (re-enter the loop; any other value allows the stop) — a
+ *     Claude `block` maps to `continue`; anything else, including a downgraded `{ systemMessage }` notice from
+ *     `applyStopAdvisoryPolicy`, emits nothing.
+ *   - PreInvocation (SessionStart fallback registration): `{ injectSteps: [{ ephemeralMessage: "<text>" }] }` from
+ *     `hookSpecificOutput.additionalContext` (a plain string in PreInvocation — §PreInvocation).
+ *   - PostToolUse and every other event: the result message is empty — nothing to carry, so nothing is emitted.
+ * Emitting nothing is also how an empty result must look: agy merges an event's results keeping only the first
+ * one's reason and counts `{}` as a result, so a hook with nothing to say must stay silent or it blanks the reason
+ * of the hook after it. `buildCliEmission` turns `{}` into no output.
  *
  * @param {object} result - Return value of main hook (HookOutput.deny/passthrough/block/context)
- * @param {string} [eventName] - Claude event name passed by dispatcher (for Stop/SessionStart branching)
- * @returns {object} Antigravity wire object
+ * @param {string} [eventName] - Claude event name passed by dispatcher. Without it only the PreToolUse-only
+ *   `permissionDecision` shape is convertible; anything else emits nothing (unknown target message).
+ * @returns {object} Antigravity wire object (`{}` = emit nothing)
  */
 export function toAntigravityWire(result, eventName) {
   if (!result || Object.keys(result).length === 0) return {};
-
   const hso = result.hookSpecificOutput;
-  // SessionStart (→PreInvocation registration) context injection: additionalContext → injectSteps.ephemeralMessage.
+  if (typeof hso?.permissionDecision === 'string') {
+    return !eventName || eventName === 'PreToolUse' ? preToolUseWire(hso) : {};
+  }
+  if (eventName === 'Stop') return result.decision === 'block' ? withReason({ decision: 'continue' }, result.reason) : {};
   if (eventName === 'SessionStart' && typeof hso?.additionalContext === 'string' && hso.additionalContext) {
     return { injectSteps: [{ ephemeralMessage: hso.additionalContext }] };
   }
-  // PreToolUse: Claude permissionDecision (allow|deny|ask) → Antigravity top-level decision.
-  if (hso && typeof hso.permissionDecision === 'string') {
-    const wire = { decision: hso.permissionDecision };
-    const reason = hso.permissionDecisionReason;
-    if (reason) wire.reason = reason;
-    return wire;
+  return {};
+}
+
+/** PreToolUse `permissionDecision` → agy PreToolUse result (see `toAntigravityWire`). */
+function preToolUseWire(hso) {
+  const reason = hso.permissionDecisionReason;
+  if (hso.permissionDecision === 'deny') {
+    return { allow_tool: false, deny_reason: reason || 'Blocked by repository policy.' };
   }
-  if (typeof result.decision === 'string') {
-    // Stop: Antigravity recognizes only "continue" to prevent stopping (contract comment above) — map block → continue.
-    const decision = eventName === 'Stop' && result.decision === 'block' ? 'continue' : result.decision;
-    const wire = { decision };
-    if (result.reason) wire.reason = result.reason;
-    return wire;
-  }
-  // Other shapes — return as-is (harmless even if ignored by Antigravity).
-  return result;
+  if (hso.permissionDecision === 'ask') return withReason({ decision: 'ask' }, reason);
+  return {};
+}
+
+function withReason(wire, reason) {
+  return reason ? { ...wire, reason } : wire;
 }
 
 /**
@@ -851,8 +858,8 @@ export function augmentAntigravityDenyReason(result) {
  * "did not write a continuation prompt to stderr".
  * Therefore, adapter always uses exit 0 + stdout JSON.
  *
- * Antigravity reads top-level `{ decision, reason }` instead of Claude's `hookSpecificOutput.permissionDecision`,
- * so it is emitted after conversion via toAntigravityWire.
+ * Antigravity reads its own per-event result message instead of Claude's `hookSpecificOutput`, so it is emitted
+ * after conversion via toAntigravityWire — and not at all when that conversion has nothing to carry.
  *
  * @param {object} result - Main hook return value (HookOutput.deny/passthrough/block/context)
  * @param {{ cli: 'codex'|'antigravity', eventName?: string }} opts
@@ -912,6 +919,27 @@ export function emit(result, opts = {}) {
 }
 
 /**
+ * Antigravity invocations the adapter must not hand to the main hook at all.
+ *
+ *   - SessionStart: Antigravity registration falls back to PreInvocation (codegen eventNameMap), which fires on every
+ *     model invocation — run only on `invocationNum === 0` (0-indexed first invocation — antigravity-cli-hooks.md
+ *     §PreInvocation L267). Absent invocationNum (schema drift) skips: for advisory context injection, no-fire is
+ *     safer than duplicate injection per invocation (noise).
+ *   - Stop with `terminationReason: "USER_CANCELED"`: agy runs Stop hooks when the user cancels; Claude Code does not.
+ *     A Stop guard run there would act on a turn the user abandoned (and consume shared attempt markers).
+ *
+ * @param {object} raw - raw stdin JSON
+ * @param {{ cli: string, eventName?: string }} opts
+ * @returns {boolean}
+ */
+export function skipsAntigravityRun(raw, opts) {
+  if (opts?.cli !== 'antigravity') return false;
+  if (opts.eventName === 'SessionStart') return raw?.invocationNum !== 0;
+  if (opts.eventName === 'Stop') return raw?.terminationReason === 'USER_CANCELED';
+  return false;
+}
+
+/**
  * Standard entry point for adapters. Calls main hook's run(data) function.
  *
  * @param {Function} runFn - Main hook exported run(data) async function
@@ -921,13 +949,7 @@ export function emit(result, opts = {}) {
 export async function runAdapter(runFn, opts) {
   try {
     const raw = await readStdinJson();
-    // Because Antigravity lacks an official SessionStart event, registration falls back to PreInvocation (codegen
-    // eventNameMap). Since PreInvocation fires on every model invocation, execute only once on `invocationNum === 0`
-    // (0-indexed first invocation — antigravity-cli-hooks.md §PreInvocation L267). Skip if invocationNum is absent
-    // (schema drift) — for advisory context injection hooks, no-fire is safer than duplicate injection per invocation (noise).
-    if (opts.cli === 'antigravity' && opts.eventName === 'SessionStart' && raw.invocationNum !== 0) {
-      process.exit(0);
-    }
+    if (skipsAntigravityRun(raw, opts)) process.exit(0);
     const normalized = normalizePayload(raw, opts.cli);
     normalized.hook_event_name = normalized.hook_event_name || opts.eventName;
     normalized._cli = opts.cli;
