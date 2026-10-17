@@ -41,13 +41,13 @@
 state:
   route: "bugfix"
   stage: "build"
-  status: "awaiting-user"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
   readiness: "conditional"
-  screen: "pending"
+  screen: "approved"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
@@ -59,7 +59,7 @@ state:
 # the whole row wide, the second starts at the row's end with its 205px minimum,
 # and the history's scroll area grows to 1120px in a 900px view. Every later
 # project header is laid out in that widened area.
-resume: "Have a fresh evaluator judge screen.md and log it in approvals.log, set screen approved, then write the failing tests drafted in the coordinating session's notes."
+resume: "Write the_session_grid_keeps_every_card_inside_its_view and the long-path ▭ check, watch them fail, then bound the cards and the header path."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
