@@ -4354,7 +4354,7 @@ impl OperonApp {
                                 .weak(),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if small_icon_button(ui, palette, ICON_SHOW, tr("プロジェクトを開く"))
+                            if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始"))
                                 .clicked()
                             {
                                 self.open_project_session_setup(project.id);
@@ -4374,15 +4374,9 @@ impl OperonApp {
                                 .small()
                                 .weak(),
                         );
-                    } else if project_sessions.is_empty() {
-                        if icon_text_button(ui, ICON_ADD, tr("セッションを開始")).clicked()
-                        {
-                            self.open_project_session_setup(project.id);
-                        }
-                    } else {
-                        for session in project_sessions {
-                            self.session_card(ui, &session);
-                        }
+                    }
+                    for session in project_sessions {
+                        self.session_card(ui, &session);
                     }
                 });
                 ui.add_space(8.0);
@@ -4424,6 +4418,14 @@ impl OperonApp {
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&project.name).strong());
+                        // Beside the name, ahead of the path: pinned right, the
+                        // cards below widen the scroll area past the view and a
+                        // later project's ＋ lands off screen; after the path, a
+                        // long one pushes it there.
+                        if icon_button(ui, palette, ICON_ADD, tr("セッションを開始")).clicked()
+                        {
+                            self.open_project_session_setup(project.id);
+                        }
                         ui.label(
                             RichText::new(project.path.display().to_string())
                                 .small()
@@ -4442,12 +4444,7 @@ impl OperonApp {
                                 .small()
                                 .weak(),
                         );
-                    } else if project_sessions.is_empty() {
-                        if icon_text_button(ui, ICON_ADD, tr("セッションを開始")).clicked()
-                        {
-                            self.open_project_session_setup(project.id);
-                        }
-                    } else {
+                    } else if !project_sessions.is_empty() {
                         ui.horizontal_wrapped(|ui| {
                             for session in project_sessions {
                                 self.session_grid_node(ui, &session, &session_names);
@@ -5356,17 +5353,8 @@ impl OperonApp {
                     });
                 });
                 if project_sessions.is_empty() {
-                    // Where its sessions would be, an empty project offers the
-                    // first one: the line that only said there were none left
-                    // the way to start in a 24px glyph at the header's far end.
-                    if pinned_here == 0 {
-                        ui.horizontal(|ui| {
-                            ui.add_space(8.0);
-                            if icon_text_button(ui, ICON_ADD, tr("セッションを開始")).clicked() {
-                                self.open_project_session_setup(project.id);
-                            }
-                        });
-                    }
+                    // The header's ＋ is the whole offer: its count says 0 件,
+                    // and a second start below it would say the same twice.
                     ui.add_space(8.0);
                     continue;
                 }
