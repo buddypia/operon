@@ -50,11 +50,15 @@ evidence instead of guessing. Do not proceed to a fix from here.
 - **State the cause in one sentence.** If it needs "and maybe", the phase is not
   done.
 
-Two traps this repository has fallen into, both recorded. **A green guard that
+Three traps this repository has fallen into, all recorded. **A green guard that
 checks nothing** (lessons 004, 009): a passing test over the failing area is not
 evidence the area is fine — mutate what it claims to guard and watch it fail. **A
 check whose caller never calls it** (lessons 005, 008): test the whole decision,
-not the helper the decision was supposed to consult.
+not the helper the decision was supposed to consult. **A failure handed to
+someone else** (lessons 074, 077): "a stale server", "the other CLI's lookup" —
+each was this repository's own fault, and blaming it on something else was a
+guess like any other. It needs the same proof: reproduce it, then show the
+failure goes away when only that other thing changes.
 
 ## Phase 2 — the test comes first
 

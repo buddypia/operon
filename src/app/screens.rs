@@ -1386,6 +1386,7 @@ impl OperonApp {
             ProjectTab::PullRequests => self.ui_pull_requests(ui, &project),
             ProjectTab::Files => self.ui_files(ui, &project),
             ProjectTab::AgentSettings => self.ui_agent_settings(ui, &project),
+            ProjectTab::Knowledge => self.ui_knowledge(ui, &project),
         }
     }
 
@@ -4232,9 +4233,17 @@ impl OperonApp {
                 self.search_local_transcripts();
             }
         });
+        self.ui_indexed_session_matches(ui);
         if !self.transcript_matches.is_empty() {
             ui.add_space(8.0);
-            ui.label(RichText::new(tr("履歴の一致")).strong());
+            ui.label(
+                RichText::new(if self.knowledge.session_hits.is_empty() {
+                    tr("履歴の一致")
+                } else {
+                    tr("キーワードで一致")
+                })
+                .strong(),
+            );
             let transcript_matches = self.transcript_matches.clone();
             egui::ScrollArea::vertical()
                 .max_height(220.0)
@@ -4275,10 +4284,14 @@ impl OperonApp {
                         ui.add_space(4.0);
                     }
                 });
-        } else if !self.transcript_search_input.trim().is_empty() {
+        } else if !self.transcript_search_input.trim().is_empty()
+            && self.knowledge.session_hits.is_empty()
+        {
             ui.add_space(4.0);
             ui.label(RichText::new(tr("一致する履歴はありませんでした。")).weak());
-            if self.store.search_engine_mode == SearchEngineMode::Keyword {
+            if !self.knowledge.model_ready()
+                || self.store.search_engine_mode == SearchEngineMode::Keyword
+            {
                 ui.horizontal(|ui| {
                     ui.label(
                         RichText::new(tr(
@@ -4413,11 +4426,25 @@ impl OperonApp {
                         {
                             self.open_project_session_setup(project.id);
                         }
-                        ui.label(
-                            RichText::new(project.path.display().to_string())
-                                .small()
-                                .weak(),
-                        );
+                        // The path gets the row less room for the glyph after
+                        // it, and truncates past that, so a long one cannot
+                        // push 「プロジェクトを開く」 off screen. The button is
+                        // a glyph no wider than a control is tall, plus its
+                        // padding: wider than its 28px minimum, never less.
+                        let glyph_room = CONTROL_HEIGHT
+                            + 2.0 * ui.spacing().button_padding.x
+                            + ui.spacing().item_spacing.x;
+                        ui.scope(|ui| {
+                            ui.set_max_width((ui.available_width() - glyph_room).max(0.0));
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(project.path.display().to_string())
+                                        .small()
+                                        .weak(),
+                                )
+                                .truncate(),
+                            );
+                        });
                         if icon_button(ui, palette, ICON_SHOW, tr("プロジェクトを開く")).clicked()
                         {
                             self.select_project(Some(project.id));
@@ -4433,8 +4460,21 @@ impl OperonApp {
                         );
                     } else if !project_sessions.is_empty() {
                         ui.horizontal_wrapped(|ui| {
+                            // A frame places itself at the cursor and never
+                            // wraps, and the right-to-left rows inside a card
+                            // fill whatever width it is offered: unbounded, the
+                            // first card took the whole row and the second
+                            // began past the edge, widening the history. The
+                            // row's own height, so a card is not centred in it
+                            // and slipped half a row down.
+                            let row_height = ui.spacing().interact_size.y;
                             for session in project_sessions {
-                                self.session_grid_node(ui, &session, &session_names);
+                                ui.allocate_ui(
+                                    egui::vec2(Self::SESSION_GRID_CARD_WIDTH, row_height),
+                                    |ui| {
+                                        self.session_grid_node(ui, &session, &session_names);
+                                    },
+                                );
                             }
                         });
                     }
@@ -4443,6 +4483,10 @@ impl OperonApp {
             }
         });
     }
+
+    /// One card in the 「グリッド」, frame included: its content keeps the 205px
+    /// minimum it always had, and as many as fit share a row.
+    pub(crate) const SESSION_GRID_CARD_WIDTH: f32 = 220.0;
 
     fn session_grid_node(
         &mut self,
@@ -4458,13 +4502,20 @@ impl OperonApp {
             ui.set_min_width(205.0);
             ui.horizontal(|ui| {
                 status_chip(ui, &status, 13.5, palette);
-                ui.label(RichText::new(session_title(session)).strong());
-                agent_chip(ui, &session.agent, 12.0, palette);
+                // Laid out from the right first, so a long title truncates
+                // inside the card instead of widening it.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if small_icon_button(ui, palette, ICON_CLOSE, tr("セッションを削除")).clicked()
                     {
                         removal_requested = true;
                     }
+                    agent_chip(ui, &session.agent, 12.0, palette);
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(session_title(session)).strong())
+                                .truncate(),
+                        );
+                    });
                 });
             });
             if session.depends_on.is_empty() {
@@ -4917,104 +4968,7 @@ impl OperonApp {
         ui.add_space(18.0);
         ui.separator();
         ui.add_space(8.0);
-        ui.label(RichText::new(tr("履歴検索エンジン")).strong());
-        ui.add_space(SPACE_SM);
-
-        let previous_mode = self.store.search_engine_mode;
-        ui.radio_value(
-            &mut self.store.search_engine_mode,
-            SearchEngineMode::Keyword,
-            tr("キーワード検索のみ (標準・最軽量)"),
-        );
-        ui.label(
-            RichText::new(tr(
-                "完全一致によるテキスト検索。追加ダウンロードやメモリ消費なし。",
-            ))
-            .small()
-            .weak(),
-        );
-
-        ui.add_space(4.0);
-        ui.radio_value(
-            &mut self.store.search_engine_mode,
-            SearchEngineMode::EmbeddedGemma2,
-            tr("内蔵 EmbeddingGemma 2 (オプトイン)"),
-        );
-        ui.label(
-            RichText::new(tr("意味・概念による表記揺れ検索を有効化。"))
-                .small()
-                .weak(),
-        );
-
-        if self.store.search_engine_mode != previous_mode {
-            if self.store.search_engine_mode == SearchEngineMode::EmbeddedGemma2
-                && matches!(self.model_download_state, EmbeddedModelDownloadState::Idle)
-                && is_embedded_model_cached()
-            {
-                self.model_download_state = EmbeddedModelDownloadState::Ready {
-                    cached_bytes: embedded_model_cached_bytes(),
-                };
-            }
-            self.persist();
-        }
-
-        if self.store.search_engine_mode == SearchEngineMode::EmbeddedGemma2 {
-            ui.add_space(4.0);
-            match &self.model_download_state {
-                EmbeddedModelDownloadState::Idle => {
-                    if ui.button(tr("モデルをダウンロード (約 250MB)")).clicked() {
-                        let _ = mark_embedded_model_ready(248 * 1024 * 1024);
-                        self.model_download_state = EmbeddedModelDownloadState::Ready {
-                            cached_bytes: 248 * 1024 * 1024,
-                        };
-                    }
-                }
-                EmbeddedModelDownloadState::Downloading {
-                    progress,
-                    bytes_downloaded,
-                    total_bytes,
-                } => {
-                    let mb_done = bytes_downloaded / (1024 * 1024);
-                    let mb_total = total_bytes / (1024 * 1024);
-                    let pct = (progress * 100.0).round() as u64;
-                    ui.label(
-                        RichText::new(format!(
-                            "モデルを取得しています... {pct}% ({mb_done}MB / {mb_total}MB)"
-                        ))
-                        .small()
-                        .weak(),
-                    );
-                    ui.add(egui::ProgressBar::new(*progress).desired_width(200.0));
-                    if ui.button(tr("キャンセル")).clicked() {
-                        self.model_download_state = EmbeddedModelDownloadState::Idle;
-                    }
-                }
-                EmbeddedModelDownloadState::Ready { cached_bytes } => {
-                    let mb = cached_bytes / (1024 * 1024);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("● 有効 (Metal GPU / キャッシュ済み: {mb}MB)"))
-                                .small()
-                                .weak(),
-                        );
-                        if ui.button(tr("キャッシュを削除")).clicked() {
-                            let _ = delete_embedded_model_cache();
-                            self.model_download_state = EmbeddedModelDownloadState::Idle;
-                        }
-                    });
-                }
-                EmbeddedModelDownloadState::Error(err) => {
-                    ui.label(
-                        RichText::new(format!("ダウンロードエラー: {err}"))
-                            .small()
-                            .color(ui.visuals().error_fg_color),
-                    );
-                    if ui.button(tr("再試行")).clicked() {
-                        self.model_download_state = EmbeddedModelDownloadState::Idle;
-                    }
-                }
-            }
-        }
+        self.ui_model_block(ui);
 
         ui.add_space(18.0);
         ui.horizontal(|ui| {

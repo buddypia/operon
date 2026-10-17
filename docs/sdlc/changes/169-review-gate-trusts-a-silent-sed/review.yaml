@@ -1,0 +1,38 @@
+# Review record for change 169. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: all three reviewers approve with nits, 0 Important. Two of them
+# name the same gap — the behavioural test reaches the empty-digest check, and
+# the `|| exit 2` is held by the line pin alone. Carried, not taken.
+
+digest: "42c33ec5bf0ac52f"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tests.rs both shim modes print nothing, so the empty-digest check refuses them and the `||` is watched only by the line pin; a sed that prints a prefix then fails would exercise it
+    person: "今の動作には影響しません。sed が途中まで出力してから失敗する場合の止まり方は、行の固定チェックだけが見ています。"
+  - subprocess-safety-reviewer/1 · src/tests.rs the same: no shim mode prints a prefix then fails; a missing sed and a failing shasum or cut are not driven
+    person: "上と同じ点です。対応は不要です。"
+  - durability-reviewer/1 · src/tests.rs only the --index arm is driven; the hook runs --commit, which reaches the same two lines
+    person: "今の動作には影響しません。コミット時の経路は同じ行を通りますが、テストでは直接は確かめていません。"
+  - durability-reviewer/2 · scripts/check-review.sh a normaliser that exits 0 having printed only a prefix is not caught; its digest is diff-specific, so not the fresh-for-every-diff hole
+    person: "sed が途中までしか出力せずに正常終了する、まれな壊れ方は検出しません。その場合も判定は古い記録と一致しないので、誤って通ることはありません。"
+  - rust-reviewer/2 · src/tests.rs shell_line_assigns misses ${digest:=x}, (( digest = 1 )) and digest[0]=x
+    person: "今の動作には影響しません。将来ゲートを書き換える人が珍しい書き方で二つ目の代入を足すと、テストで気づけない場合があります。"
+  - subprocess-safety-reviewer/2 · src/tests.rs the same forms
+    person: "上と同じ点です。対応は不要です。"
+  - durability-reviewer/3 · src/tests.rs ${digest:=x} is not counted; it does nothing once digest is set
+    person: "上と同じ点です。対応は不要です。"
+  - rust-reviewer/3 · src/tests.rs the forms test exercises only the name digest; legacy_digest has one negative row
+    person: "画面には影響しません。テストの確認の幅の問題で、対応は不要です。"
+  - rust-reviewer/4 · src/tests.rs the shim hard-codes /usr/bin/sed
+    person: "macOS と CI では問題ありません。sed が別の場所にある環境ではこのテストが動きません。"
+  - subprocess-safety-reviewer/3 · scripts/check-review.sh the empty-digest refusal reads the same as the failing-pipeline one
+    person: "sed が失敗したのか何も出さなかったのか、メッセージからは区別できません。どちらも sed を確かめれば直ります。"
+  - durability-reviewer/4 · the fix governs only after landing, since the hook runs main's copy
+    person: "この修正は main に入ってから効きます。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"
+  durability-reviewer: "approve-with-nits 0 4"

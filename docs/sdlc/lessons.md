@@ -938,3 +938,42 @@ suite's language never follows the host's.
 **Guard.** `no_decision_reads_the_text_of_a_notice` (watched failing on the
 folder-drop check in `src/app.rs`); `detected_language` answers Japanese under
 `cfg(test)`, and CI is the run that would show the race.
+
+## 076 — A native runtime measured at the batch sizes that happened to work
+
+Change 157's Metal probe embedded 1, 2, 4, and 8 texts per call and every one
+matched the reference, so the runtime was called measured. The first run of
+`scripts/check-embedding-fidelity.sh` ended on a chunk of six and the process
+died in `GGML_ASSERT(ggml_can_mul_mat)`: llama.cpp 2a66703 aborts when a context
+reserves 3, 5, 6, or 7 sequences. With that fixed it died again at exit, in the
+Metal device's teardown assert, because the shared model was still loaded. An
+abort in C++ is not an `Err`; it takes the window with it. **The rule:** a
+native dependency is measured at every shape the code can hand it — sizes from
+the remainder of a chunked list included — and through process exit, not only
+at the shapes a probe chose.
+
+**Guard.** `the_llama_runtime_is_never_given_a_shape_it_aborts_on` (watched
+failing with `n_seq_max` set from the text count, and with the release after
+`run_native` removed) and `scripts/check-embedding-fidelity.sh`, whose 46 texts
+end on a chunk of six (watched failing: exit 134 twice, then 0).
+
+## 077 — A restored conversation agy could not open was called agy's flake
+
+Operon wrote an Antigravity conversation with SQLite's rollback journal and
+`user_version` 0. agy stamps `user_version` on every file it opens, and a new
+file is already being read by then: Gemini.app's hub (`agy --hub`) opens each
+conversation as it appears. With a rollback journal that stamp waits on the
+reader, so agy logged `set user_version: database is locked`, then
+`conversation … not found`, and the terminal opened a new, empty conversation.
+Change 168 saw the symptom, found the same conversation later, and wrote
+"rerun it" into `CLAUDE.md`. Measured in change 172 with the hub running: 7 of
+11 fresh restores not found as written before, 0 of 13 written the way agy
+writes its own (WAL, `user_version` 1). **The rule:** a failure blamed on
+another product is a guess until it is reproduced and shown to go away when
+only that product changes — and a file written into another program's store
+matches what that program writes, file header included, not only its tables.
+
+**Guard.** `a_restored_antigravity_conversation_opens_while_another_process_reads_it`
+(watched failing with the old writer: `database is locked`, the error agy
+logged) and the third trap in `.claude/skills/root-cause/SKILL.md`, which loads
+with the bugfix route.

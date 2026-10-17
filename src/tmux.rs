@@ -565,15 +565,33 @@ pub(crate) fn parse_tmux_cursor_line(text: &str) -> Result<TerminalCursor> {
 }
 
 pub(crate) fn parse_tmux_capture_with_cursor(raw: &str) -> TerminalCapture {
+    // The marker line is the last thing the tmux client prints: the capture
+    // command interpolates it after the pane body, so the genuine occurrence
+    // always follows any `__OPERON_CURSOR__:` line the running agent printed
+    // into the pane itself, and nothing printable follows it. rfind takes the
+    // last occurrence — but only a split whose remainder is blank is the
+    // genuine marker: a pane-echoed copy with body text after it (what the
+    // lost-marker case leaves behind) reports none, and the clear-on-None
+    // path in the app covers the rest. `find` would trust a spoof outright.
     if let Some(pos) = raw.rfind(OPERON_CURSOR_MARKER) {
         let (body, marker_part) = raw.split_at(pos);
         let cursor_str = &marker_part[OPERON_CURSOR_MARKER.len()..];
-        let cursor_line = cursor_str.lines().next().unwrap_or("").trim();
-        let cursor = parse_tmux_cursor_line(cursor_line).ok();
-        TerminalCapture {
-            output: body.to_string(),
-            cursor,
-        }
+        let mut tail = cursor_str.lines();
+        let cursor_line = tail.next().unwrap_or("").trim();
+        let echo_tail = tail.any(|line| !line.trim().is_empty());
+        // A rejected echo split keeps the capture whole: the pane's copy is
+        // body text, not something the marker's rule may eat.
+        let cursor = if echo_tail {
+            None
+        } else {
+            parse_tmux_cursor_line(cursor_line).ok()
+        };
+        let output = if echo_tail {
+            raw.to_string()
+        } else {
+            body.to_string()
+        };
+        TerminalCapture { output, cursor }
     } else {
         TerminalCapture {
             output: raw.to_string(),

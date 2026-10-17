@@ -15,9 +15,15 @@
 #
 # Round 3 (approve 0 0, digest 663de10bf4051b77): confirm. The reviewer ran
 # fmt --check and the eight new tests three times; the mutation sweep is 17 of 17.
-digest: "663de10bf4051b77"
+#
+# Round 4 (approve 0 0, digest d68c93561f864c1e): recombination confirm after
+# merging main (157, 172). The only conflict was both sides appending tests to
+# src/tests.rs; this change's diff against main is the same +598/-240 and +672.
+# main's screens.rs hunks are in other features; fmt, clippy, and 98 named and
+# every_ tests pass on the merged tree.
+digest: "d68c93561f864c1e"
 
-rounds: 3
+rounds: 4
 
 carried:
   - rust-reviewer/1-3 · src/app/screens.rs:5441 through the end of the project card closure — the body is not re-indented after being wrapped in card_frame(..).show(ui, |ui| {; rustfmt leaves it alone, but the nesting is misleading in a 300-line closure; extracting the card body into a method would fix both it and the return-instead-of-continue

@@ -109,6 +109,9 @@ pub(crate) const ICON_COMMENT: &str = icons::CHAT_TEXT;
 /// marks rather than words, because they sit on a bar that is one row.
 pub(crate) const ICON_PREVIOUS: &str = icons::CARET_UP;
 pub(crate) const ICON_NEXT: &str = icons::CARET_DOWN;
+/// The ナレッジ tab, and a knowledge entry kept by hand (change 157).
+pub(crate) const ICON_KNOWLEDGE: &str = icons::LIGHTBULB;
+pub(crate) const ICON_PIN: &str = icons::PUSH_PIN;
 
 /// The whole vocabulary, so a test can check it rather than trusting that every
 /// name above happens to be spelled the way Phosphor spells it. A glyph missing
@@ -168,6 +171,8 @@ pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[
     ("ICON_TREE_EXTRA", ICON_TREE_EXTRA),
     ("ICON_MORE", ICON_MORE),
     ("ICON_DRAG_HANDLE", ICON_DRAG_HANDLE),
+    ("ICON_KNOWLEDGE", ICON_KNOWLEDGE),
+    ("ICON_PIN", ICON_PIN),
 ];
 
 /// Each CLI's own product mark, so a card names an agent the way its vendor

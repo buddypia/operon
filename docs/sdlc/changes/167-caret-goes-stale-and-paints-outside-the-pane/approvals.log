@@ -1,0 +1,2 @@
+2026-10-17T03:56:45Z auto screen screen.md 73653dd950a2a16a approve evaluator round 1: both invariants terminate in the approved no-box state, no new visual role
+2026-10-17T05:20:59Z auto screen screen.md b7eb15a34bf0af95 approve evaluator round 2: top half-cell is another not-fully-visible instance, no new state; 155 advertised no half-box so removal is strictness, not regression

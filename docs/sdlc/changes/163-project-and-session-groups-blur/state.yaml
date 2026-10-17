@@ -34,7 +34,8 @@ contract:
   guards-verified-by-mutation: "machine passed mutations.py: 13 of 13 caught"
   screen-matches: "human passed evaluator round 4 judged the dark and light
     screenshots of the dev build against a copied store to match screen.md"
-  review: "human passed rust-reviewer approve 0 0 at 663de10bf4051b77 (round 3),
+  review: "human passed rust-reviewer approve 0 0 at d68c93561f864c1e (round 4,
+    after merging main),
     one remark carried in review.yaml"
   release-binary: "machine waived src/app/screens.rs changes; the bundle is built
     from main after the merge and swapped into /Applications in this session"

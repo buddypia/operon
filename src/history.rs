@@ -255,7 +255,9 @@ pub(crate) fn import_full_history_into_antigravity(
     // A conversation Antigravity cannot read back is worse than no restore at
     // all, so drop it again rather than offer an unusable resume identity.
     if let Err(error) = verify_antigravity_conversation(&conversation_path, turns) {
-        let _ = fs::remove_file(&conversation_path);
+        for file in sqlite_file_and_sidecars(&conversation_path) {
+            let _ = fs::remove_file(file);
+        }
         return Err(error);
     }
     append_antigravity_history_entry(
@@ -667,6 +669,9 @@ pub(crate) const ANTIGRAVITY_STEP_STATUS_DONE: u64 = 3;
 /// started from a terminal, which is exactly what a restored conversation is.
 pub(crate) const ANTIGRAVITY_TRAJECTORY_TYPE_CLI: u64 = 4;
 pub(crate) const ANTIGRAVITY_TRAJECTORY_SOURCE_CLI: u64 = 17;
+/// The `user_version` agy 1.4.0 stamps on a trajectory file it opens, and the
+/// header of every file it writes alongside WAL journaling.
+pub(crate) const ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION: i64 = 1;
 
 /// Antigravity's own table definitions, reproduced verbatim so a restored
 /// conversation is indistinguishable from one the CLI created itself. Tables
@@ -938,9 +943,23 @@ pub(crate) fn write_antigravity_conversation(
                 })
         });
     if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        for file in sqlite_file_and_sidecars(&temporary) {
+            let _ = fs::remove_file(file);
+        }
     }
     result
+}
+
+/// A trajectory file is in WAL mode, so `-wal` and `-shm` sit beside it while
+/// it is open and after a read-only reader such as the verification below;
+/// whatever drops the conversation drops those with it.
+pub(crate) fn sqlite_file_and_sidecars(path: &Path) -> [PathBuf; 3] {
+    let beside = |suffix: &str| {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        PathBuf::from(name)
+    };
+    [path.to_path_buf(), beside("-wal"), beside("-shm")]
 }
 
 pub(crate) fn build_antigravity_conversation(
@@ -957,7 +976,15 @@ pub(crate) fn build_antigravity_conversation(
         )
     })?;
     let trajectory_id = Uuid::new_v4().to_string();
-    let transaction = (|| -> rusqlite::Result<()> {
+    let transaction = (|| -> rusqlite::Result<String> {
+        // agy stamps `user_version` on every file it opens. A new conversation
+        // already has readers by then (Gemini.app's hub opens each one as it
+        // appears), and with a rollback journal that write waits on them, so
+        // agy reported the conversation missing (change 172). Arriving stamped
+        // and in WAL, where readers never block a writer, it needs no wait.
+        connection.pragma_update(None, "user_version", ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION)?;
+        let journal =
+            connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0))?;
         connection.execute_batch(ANTIGRAVITY_TRAJECTORY_SCHEMA)?;
         let transaction = connection.transaction()?;
         transaction.execute(
@@ -1007,10 +1034,11 @@ pub(crate) fn build_antigravity_conversation(
                 ],
             )?;
         }
-        transaction.commit()
+        transaction.commit()?;
+        Ok(journal)
     })();
     let closed = connection.close();
-    transaction.map_err(|error| {
+    let journal = transaction.map_err(|error| {
         tf!(
             "復元した会話 {p0} を書き込めません: {error}",
             error = error,
@@ -1023,7 +1051,17 @@ pub(crate) fn build_antigravity_conversation(
             error = error,
             p0 = path.display()
         )
-    })
+    })?;
+    // SQLite answers a journal mode it cannot enter with the one it kept, not
+    // with an error, and a file left in that mode brings the symptom back.
+    if !journal.eq_ignore_ascii_case("wal") {
+        return Err(tf!(
+            "復元した会話 {p0} を Antigravity と同じ WAL 形式にできません（{journal} のままです）。",
+            journal = journal,
+            p0 = path.display()
+        ));
+    }
+    Ok(())
 }
 
 /// Read the committed conversation back the way Antigravity will. A restore is
@@ -2861,6 +2899,23 @@ pub(crate) fn matches_native_session_for_launch(
             .last_user_message
             .as_ref()
             .is_some_and(|message| message.contains(tracking_token))
+}
+
+/// Deletes a Codex thread through Codex's own app server, which takes its
+/// rollout and its row in Codex's thread index together. Removing the rollout
+/// file alone left the row behind. The live restore tests use it to take back
+/// what they restored (change 168).
+#[cfg(test)]
+pub(crate) fn delete_codex_thread(thread_id: &str) -> UiResult<()> {
+    let mut app_server = CodexAppServer::start().map_err(|error| error.to_string())?;
+    let deleted = app_server.initialize().and_then(|()| {
+        app_server.request(
+            "thread/delete",
+            serde_json::json!({ "threadId": thread_id }),
+        )
+    });
+    app_server.stop();
+    deleted.map(|_| ())
 }
 
 impl CodexAppServer {

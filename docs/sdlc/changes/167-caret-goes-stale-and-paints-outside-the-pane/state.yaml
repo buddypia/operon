@@ -1,0 +1,83 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Cause (root-cause skill), two named defects found by the adversarial pass
+# over landed change 155, both with demonstrations:
+#
+# 1. A capture whose marker segment is missing leaves the previous cursor in
+#    `terminal_cursors` forever: `set_session_output` (src/app.rs) inserts only
+#    `if let Some(cursor)`, and nothing removes the entry but session teardown.
+#    tmux demonstrably exits 0 with no marker line when the display-message
+#    segment loses its target mid-invocation, so `cursor: None` arrives while
+#    the pane is alive — and the stale `TerminalCursor` then maps old
+#    pane_rows/y onto every new buffer length: the box parks rows into
+#    scrollback indefinitely, the exact wrong-box outcome 155 exists to
+#    prevent. The same path is what lets a pane-echoed marker (rfind takes the
+#    last occurrence; the real one is missing) persist as a spoofed cursor.
+#
+# 2. The caret rect 155 returns is drawn on the outer painter, not the
+#    ScrollArea's clipped child, and the row gate admits egui 0.31.1's spare
+#    row: `rows.end = ceil((offset+vh)/row_height)+1` (egui scroll_area.rs
+#    763-772). A caret whose top sits at or below the pane's inner bottom (one
+#    scroll step past it) paints over the frame padding and into the search
+#    bar row; and with no horizontal clamp, a capture older than a resize
+#    carries a cursor.x beyond the narrowed pane — the box paints past the
+#    frame border. The old `terminal_cursor_rect` clamps were deleted with no
+#    replacement.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Landed. Branch fix/167-caret-goes-stale-and-paints-outside-the-pane:
+  12f579d (merge of origin/main first), ef1792d (stage-word fix for the
+  state-file guard), e652abb (merge of origin/main again: 164/169/170 landed
+  in between, caret tests re-verified on the recombined tree before pushing),
+  merged into main as cef282c with --no-ff, pushed, CI green on the branch
+  twice (second run after the stage fix; first failed only on that doc).
+  Review: rust 0 Important + 1 carried nit (test binding), durability and
+  subprocess approve; one process slip recorded: the nit was briefly taken in
+  its own round, the fold was reverted byte-for-byte so the verdict binds the
+  judged tree. Worktree cleaned. Shipped: app replaced 15:48, relaunched,
+  live capture sane; old bundle trashed (no rollback copy). Docs commits on
+  main: 9470611, a10ffde. main CI on a10ffde failed once on the mutation-
+  sweep cleanup test (load flake, nothing in the diff) and passed on rerun
+  39011230978. Closed at this edit (stage deploy). Remaining, owned by later
+  changes: the carried test-binding nit, and the pre-existing polling-floor
+  timing assertion redesign 152 recorded."
+
+contract:
+  three-gates: "machine passed fmt --check · clippy --locked -D warnings ·
+    named caret/marker tests green on the branch and after both main merges;
+    full locked suite green in CI (run 39009602036, run 39010483640)"
+  bands: "machine passed bash scripts/check-bands.sh — 21 metrics within
+    their bands"
+  release-binary: "machine passed bash scripts/package-macos.sh wrote dist/
+    (fmt + clippy green), scripts/replace-macos-bundle.sh swapped
+    /Applications/Operon.app at 15:48; the running app was quit and
+    relaunched on the new binary (live capture reported sane caret
+    coordinates); the obsolete dist bundle was moved to the Trash per the
+    standing no-rollback preference"
+  guards-verified-by-mutation: "human passed the three fresh caret gates
+    watched failing first: a_caret_scrolled_above_the_viewport_reports_none
+    (debug panic at the underflow), a_pane_echoed_marker_without_the_real_
+    one_reports_none (echo parsed Some), plus the round-1 three (spare-row
+    gate, width gate, clear-on-None dedup path); the indicator and
+    marker-comment guards a_pane_echoed_marker_loses_to_the_real_one and the
+    corrected harness comment are documentation, not behaviour"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
