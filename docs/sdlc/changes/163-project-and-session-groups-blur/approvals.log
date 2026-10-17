@@ -1,0 +1,4 @@
+2026-10-17T05:04:04Z auto intent intent.md 457a6fb781c1ef36 approve evaluator round 1: restates the person's two quoted requests; time-shown-whole is a defect in the same row
+2026-10-17T05:04:04Z auto spec spec.md bc92ec01a37e3702 approve evaluator round 2: header overflow, queue block, rename gesture and stop observable now each a requirement with its test
+2026-10-17T05:04:04Z auto screen screen.md f658a503bb385a89 approve evaluator round 2: matches the spec; too-long, stop-failure and theme states added; not escalated — no new screen, nothing moved, existing roles
+2026-10-17T05:04:04Z auto plan plan.md 25507e32b8fe1b8a approve evaluator round 2: eight tests each with a failure reason; corner test checks the column edge before the block
