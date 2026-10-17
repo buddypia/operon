@@ -37671,7 +37671,11 @@ pub(crate) fn the_release_runs_from_main_as_the_ship_skill_writes_it() {
 /// Change 173. Inside a worktree a command whose argument expands is judged as
 /// trunk work, and the refusal said only "on main": a session already in its
 /// worktree read that as a wrong directory and re-entered it, again and again.
-/// The refusal still stands; it now names the worktree and the rule.
+/// The refusal still stands; it now names the worktree and why. Change 174:
+/// 173 gave every refusal there one explanation, so a `GIT_DIR=` assignment
+/// (refused in every directory) or a command after `cd …;` (whose directory is
+/// not certain) was told to spell its paths out, which cannot get it through.
+/// Each cause gets its own explanation and none of the others'.
 #[test]
 pub(crate) fn a_command_refused_inside_a_worktree_says_why() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -37698,11 +37702,18 @@ pub(crate) fn a_command_refused_inside_a_worktree_says_why() {
     let script = format!(
         "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
          const {{ run: policy }} = await import({policy:?});\n\
-         const ask = async (cwd) => {{\n\
-           const r = await policy({{ tool_name: 'Bash', tool_input: {{ command: 'awk \"{{print $1}}\" x' }}, cwd, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
+         const ask = async (cwd, command) => {{\n\
+           const r = await policy({{ tool_name: 'Bash', tool_input: {{ command }}, cwd, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
            return {{ decision: r?.hookSpecificOutput?.permissionDecision || 'allow', reason: r?.hookSpecificOutput?.permissionDecisionReason || '' }};\n\
          }};\n\
-         console.log(JSON.stringify({{ worktree: await ask({worktree:?}), trunk: await ask({project:?}) }}));",
+         const here = {worktree:?};\n\
+         const awk = 'awk \"{{print $1}}\" x';\n\
+         console.log(JSON.stringify({{\n\
+           path: await ask(here, awk),\n\
+           everywhere: await ask(here, 'GIT_DIR=x git status'),\n\
+           uncertain: await ask(here, 'cd ' + here + ' ; cargo build'),\n\
+           trunk: await ask({project:?}, awk),\n\
+         }}));",
         policy = repository
             .join(".cli/hooks/worktree-policy-guard.mjs")
             .to_str()
@@ -37719,13 +37730,29 @@ pub(crate) fn a_command_refused_inside_a_worktree_says_why() {
     let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
         .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
     let named = format!("This shell is in the worktree {}", worktree.display());
-    assert_eq!(verdicts["worktree"]["decision"], "deny", "{verdicts}");
-    assert!(
-        verdicts["worktree"]["reason"]
-            .as_str()
-            .is_some_and(|reason| reason.contains(&named)),
-        "worktree の中で止めた理由を言っていません: {verdicts}"
-    );
+    let explanations = [
+        ("path", "spell the paths out"),
+        ("everywhere", "refused in every directory"),
+        ("uncertain", "joined by `;`"),
+    ];
+    for (case, own) in explanations {
+        let reason = verdicts[case]["reason"].as_str().unwrap_or_default();
+        assert_eq!(verdicts[case]["decision"], "deny", "{verdicts}");
+        assert!(
+            reason.contains(&named),
+            "worktree の中で止めた理由を言っていません ({case}): {verdicts}"
+        );
+        assert!(
+            reason.contains(own),
+            "止めた本当の理由を言っていません ({case}): {verdicts}"
+        );
+        for (other, theirs) in explanations {
+            assert!(
+                other == case || !reason.contains(theirs),
+                "{case} の拒否に {other} の理由まで書いています: {verdicts}"
+            );
+        }
+    }
     assert_eq!(verdicts["trunk"]["decision"], "deny", "{verdicts}");
     assert!(
         !verdicts["trunk"]["reason"]

@@ -46,10 +46,12 @@ Agent sessions in its terminals keep running in tmux while it is closed.
 ```sh
 osascript -e 'tell application "Operon" to quit'
 pgrep -x Operon
+pgrep -x operon
 bash scripts/replace-macos-bundle.sh <repo>/dist/Operon.app /Applications/Operon.app <repo>/dist/Operon.previous.app
 ```
 
-`pgrep` printing nothing is the app gone; run the swap only then.
+`osascript` returns before the app exits: repeat both `pgrep` lines until they
+print nothing (the second is a source build), and run the swap only then.
 
 `<repo>` is the checkout's absolute path, written out: the three arguments must
 be plain paths. `.claude/hooks/guard-bash.sh` lets this one form through after

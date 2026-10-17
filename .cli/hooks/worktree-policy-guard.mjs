@@ -304,28 +304,33 @@ function isFetchWithGitOptions(words, text) {
 }
 
 /**
- * Returns the first simple command of `cmd` that is not allowed on trunk, or null if all are.
- * No git calls — the branch decision is made by the caller. Throws ShellParseError.
+ * Returns the first simple command of `cmd` that is not allowed on trunk as `{ raw, cause }`, or
+ * null if all are. `cause` is which rule kept it from counting as worktree work, for the refusal
+ * (change 174): `everywhere`, refused in every directory; `uncertain-cwd`, it follows a `cd`
+ * joined by something other than `&&`; `path`, a directory or argument that expands or resolves
+ * outside the worktree. No git calls — the branch decision is made by the caller. Throws
+ * ShellParseError.
  */
 export function findDisallowedTrunkSegment(cmd, cwd, projectDir, allowlist, linked = hasGitEntry) {
+  const refused = (seg) => ({ raw: seg.raw, cause: seg.cwdCertain ? 'path' : 'uncertain-cwd' });
   for (const seg of walkSegments(cmd, cwd || projectDir)) {
     // Checked before the exemption and before the empty-command skip: a bare `GIT_DIR=x` statement
     // or `env -S '…'` changes or hides what later commands do, wherever it runs.
-    if (seg.opaque || seg.assigns.some((n) => LOCATION_ENV_RE.test(n))) return seg.raw;
+    if (seg.opaque || seg.assigns.some((n) => LOCATION_ENV_RE.test(n))) return { raw: seg.raw, cause: 'everywhere' };
     // The same assignment made by a builtin lasts for every later command (review of 135). Any
     // position, so `builtin export`, `noglob export` and the like are caught too; an `echo export
     // GIT_DIR=x` refused with them costs a retry, not a trunk.
     if (seg.words.some((w) => EXPORTING_RE.test(w)) && seg.words.some((w) => LOCATION_ASSIGN_RE.test(w))) {
-      return seg.raw;
+      return { raw: seg.raw, cause: 'everywhere' };
     }
     if (seg.isCd || seg.words.length === 0) continue;
     if (isWorktreeSegment(seg, projectDir, linked)) continue;
     if (isOtherRepositorySegment(seg, projectDir)) continue;
-    if (seg.redirect) return seg.raw;
+    if (seg.redirect) return refused(seg);
     const words = judgedWords(seg);
     const text = commandText(words);
-    if (isFetchWithGitOptions(words, text)) return seg.raw;
-    if (!allowlist.some((re) => re.test(text))) return seg.raw;
+    if (isFetchWithGitOptions(words, text)) return refused(seg);
+    if (!allowlist.some((re) => re.test(text))) return refused(seg);
   }
   return null;
 }
@@ -341,17 +346,28 @@ function queryBranch(projectDir) {
   return safeGit('branch --show-current', projectDir, { timeout: 2000 });
 }
 
+// Change 173: refused inside a worktree, "on main" read as a wrong cwd and sent sessions re-entering
+// a directory they were already in. Change 174: one explanation for every refusal sent them to fix
+// what was not the cause, so each cause findDisallowedTrunkSegment reports has its own.
+const WORKTREE_REFUSAL_CAUSES = {
+  everywhere:
+    'it assigns or exports `GIT_*`/`CDPATH` or runs `env -S`, which is refused in every directory — drop that part',
+  'uncertain-cwd':
+    'it follows a `cd` joined by `;`, `||`, `|`, `&` or a newline, so the `cd` may have failed and its directory ' +
+    'is not certain — join with `&&`, or use `git -C` / `make -C <worktree>`',
+  path:
+    'a directory or argument expands (`$VAR`, `~`, a glob) or resolves outside the worktree, so it cannot be ' +
+    'shown to stay there — spell the paths out, or put the command in a script inside the worktree and run ' +
+    '`bash <script>`',
+};
+
 function buildTrunkBashDenyMessage(segment, branch, worktree) {
-  // Change 173: refused inside a worktree, "on main" read as a wrong cwd and sent sessions
-  // re-entering a directory they were already in. Say which rule judged it.
   const inWorktree = worktree
-    ? `This shell is in the worktree ${worktree}, but the command was judged as trunk work: one of its ` +
-      `arguments expands (\`$VAR\`, \`~\`, a glob) or resolves into the trunk checkout, so it cannot be shown ` +
-      `to stay in the worktree. Spell the paths out, or put the command in a script inside the worktree and ` +
-      `run \`bash <script>\`.\n`
+    ? `This shell is in the worktree ${worktree}, but the command was judged as trunk work: ` +
+      `${WORKTREE_REFUSAL_CAUSES[segment.cause]}.\n`
     : '';
   return (
-    `[Worktree Policy] Command not on the trunk allowlist on ${branch}: ${segment.slice(0, 120)}\n\n` +
+    `[Worktree Policy] Command not on the trunk allowlist on ${branch}: ${segment.raw.slice(0, 120)}\n\n` +
     inWorktree +
     `This project opted in to trunk_bash_allowlist: on the trunk branch only listed commands run; ` +
     `development happens in a worktree.\n` +

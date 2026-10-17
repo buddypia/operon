@@ -1,0 +1,40 @@
+# Review record for 174-a-refusal-in-a-worktree-blames-the-wrong-cause.
+#
+# The change: a command refused inside a worktree is told the one cause that
+# refused it — refused in every directory, a directory left uncertain by a
+# `cd` joined with other than `&&`, or a path that expands or resolves outside
+# the worktree — instead of one explanation for all. The ship skill checks for
+# a source build too and says the quit is asynchronous; the feature-pilot Push
+# step says a verdict also goes stale when main's work lands beside the
+# reviewed lines, and how the record lands if that merge was already
+# committed.
+#
+# Round 1: rust-reviewer found the explanation still read as a complete list of
+# causes while a third — the uncertain directory after `cd …;` — refused
+# commands it did not name, which is the retry loop the change set out to close
+# (Important), plus two nits. Round 2 returned the cause from
+# findDisallowedTrunkSegment and gave each its own explanation; the test judges
+# one command per cause and requires each reason to hold its own explanation
+# and no other's, watched failing with the three joined.
+#
+# Verified by rust-reviewer: each cause label matches the rule that returned
+# it (cwdCertain is cleared only by a `cd` before a separator other than `&&`
+# and never set back); runTrunkBash is the only caller of the changed return;
+# the recovery in the Push step is judged against main's tip, so its recorded
+# digest covers the whole branch, and reference-transaction judges only the
+# new merge.
+
+digest: "26b5b515b176fd97"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/1 · the feature-pilot recovery does not say to note the commit's sha before git switch, nor to push and wait for CI again on the new branch head, which gate-merge.sh checks
+    person: "作業の取り込み手順の説明で、途中で控えておく値と、もう一度テストの完了を待つことが書かれていません。抜けても取り込みの確認で止まるので、壊れることはありません。対応は不要です。"
+  - rust-reviewer/1/2 · osascript quit "Operon" does not stop a source build named operon, so "repeat until they print nothing" never ends while one runs; say it must be quit by hand
+    person: "開発中のビルドが動いているときは、手順どおりに待っても終わりません。その場合は開発中のビルドを手で終了する必要があります。インストール作業をする AI 向けの説明の話で、あなたの対応は不要です。"
+  - rust-reviewer/2/3 · when the directory is uncertain and a path is also unresolved, only the && advice is given; the retry is refused again with the path text, a second attempt rather than a loop
+    person: "原因が2つ重なったコマンドでは、1回目の説明で1つしか示さないため、AI がもう1回やり直すことがあります。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"

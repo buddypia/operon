@@ -116,9 +116,14 @@ the earlier sections stay as they were.
   with `git merge --no-commit origin/main`, then run
   `bash scripts/check-review.sh --against origin/main`: work main took in
   elsewhere leaves the verdict standing (change 162), but work that touched the
-  reviewed lines makes it stale. Then have the reviewer re-read the landing
-  diff, record the new digest, and stage `review.yaml` in that same merge
-  commit — a commit holding only the record is refused.
+  reviewed lines, or landed beside them, makes it stale — two lessons appended
+  to the end of `docs/sdlc/lessons.md` are enough (change 173). Then have the
+  reviewer re-read the landing diff, record the new digest, and stage
+  `review.yaml` in that same merge commit — a commit holding only the record is
+  refused. If the merge was already committed, the record rides a merge made
+  from main's tip instead: `git switch --detach origin/main`,
+  `git merge --no-ff --no-commit <branch>`, stage the record, commit, then
+  `git switch <branch>` and `git merge --ff-only` that commit.
 - **Land** from the main checkout with `git merge --no-ff --no-edit <branch>` —
   `.claude/hooks/gate-merge.sh` admits it once CI passed on the branch head —
   then `git push origin main` and
