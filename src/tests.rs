@@ -44905,34 +44905,117 @@ fn workspace_texts_at_click_size(
     text_positions(&context.run(input, &mut draw))
 }
 
-/// Clicks the rightmost 「セッションを開始」 the workspace paints — with the
-/// history open, that is the one in the history rather than the session
-/// column. The painted label is the add glyph, two spaces, then the word.
-/// Returns how many were drawn, so a test of the history can tell its own
-/// from the column's.
-fn click_start_session(app: &mut OperonApp) -> usize {
+// --- Change 166: one ＋ per project header starts a session ----------------
+
+/// What is painted on the header row of the rightmost project named `name`,
+/// right of the name — with the history open, the history's copy rather than
+/// the session column's.
+fn project_header_row<'a>(
+    texts: &'a [(String, egui::Pos2)],
+    name: &str,
+) -> Vec<&'a (String, egui::Pos2)> {
+    let Some(header) = texts
+        .iter()
+        .filter(|(text, _)| text == name)
+        .map(|(_, pos)| *pos)
+        .max_by(|a, b| a.x.total_cmp(&b.x))
+    else {
+        return Vec::new();
+    };
+    texts
+        .iter()
+        .filter(|(_, pos)| {
+            pos.x > header.x && (pos.y - header.y).abs() < CONTROL_HEIGHT_SMALL / 2.0
+        })
+        .collect()
+}
+
+/// Asserts no framed 「＋ セッションを開始」 is painted anywhere, then clicks the
+/// ＋ on the header of the rightmost project named `name`. Returns the texts
+/// on that header row, so a test can say what else sits beside the ＋.
+fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
     let context = egui::Context::default();
     let texts = workspace_texts_at_click_size(app, &context);
-    let starts: Vec<egui::Pos2> = texts
+    // The framed button painted its glyph, two spaces, then the word; the
+    // header ＋ paints the glyph alone and says the word only on hover.
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _)| text.ends_with("セッションを開始")),
+        "空のプロジェクトの下に「セッションを開始」ボタンが残っています"
+    );
+    let row = project_header_row(&texts, name);
+    if let Some((_, at)) = row.iter().find(|(text, _)| text == ICON_ADD) {
+        click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        });
+    }
+    row.iter().map(|(text, _)| text.clone()).collect()
+}
+
+/// The texts painted while the pointer rests on the ＋ of the rightmost
+/// project named `name` — its hover text among them, since the ＋ says what it
+/// does only there.
+fn header_add_hover_texts(app: &mut OperonApp, name: &str) -> Vec<String> {
+    let context = egui::Context::default();
+    context.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let texts = workspace_texts_at_click_size(app, &context);
+    let Some(at) = project_header_row(&texts, name)
         .iter()
-        .filter(|(text, _)| text.ends_with("セッションを開始"))
-        .map(|(_, pos)| *pos)
-        .collect();
-    let Some(at) = starts.iter().copied().max_by(|a, b| a.x.total_cmp(&b.x)) else {
-        return 0;
+        .find(|(text, _)| text == ICON_ADD)
+        .map(|(_, pos)| *pos + egui::vec2(4.0, 4.0))
+    else {
+        return Vec::new();
     };
-    click_at(&context, at + egui::vec2(4.0, 4.0), |ctx| {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events: vec![egui::Event::PointerMoved(at)],
+        ..Default::default()
+    };
+    let mut draw = |ctx: &egui::Context| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| app.ui_terminal_workspace(ui));
-    });
-    starts.len()
+    };
+    let _ = context.run(input.clone(), &mut draw);
+    let _ = context.run(input.clone(), &mut draw);
+    text_positions(&context.run(input, &mut draw))
+        .into_iter()
+        .map(|(text, _)| text)
+        .collect()
+}
+
+/// The ＋ on `name`'s header says, on hover, that it starts a session — and
+/// not that it opens the project, which the glyph it replaced in
+/// 「プロジェクト別」 said.
+fn assert_header_add_says_start(app: &mut OperonApp, name: &str) {
+    let hover = header_add_hover_texts(app, name);
+    assert!(
+        hover.iter().any(|text| text == "セッションを開始"),
+        "＋に指を置いても「セッションを開始」と出ません"
+    );
+    assert!(
+        !hover.iter().any(|text| text == "プロジェクトを開く"),
+        "＋が「プロジェクトを開く」と名乗っています"
+    );
+}
+
+/// How many times `glyph` is painted in a header row.
+fn count_glyph(row: &[String], glyph: &str) -> usize {
+    row.iter().filter(|text| *text == glyph).count()
 }
 
 #[test]
-/// Where an empty project's sessions would be, the column offers the first
-/// one instead of saying there is none, and the click opens the launch sheet
-/// for that project.
+/// An empty project in the column is its header line alone, and the one ＋ at
+/// the end of it opens the launch sheet for that project.
 pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
     let root = temporary_directory("empty-project-column");
     let (mut app, empty) = app_with_an_empty_second_project(&root);
@@ -44943,10 +45026,12 @@ pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
             .any(|(text, _)| text == "セッションはまだありません"),
         "空のプロジェクトがまだ「セッションはまだありません」と言っています"
     );
+    assert_header_add_says_start(&mut app, "q");
+    let row = click_header_add(&mut app, "q");
     assert_eq!(
-        click_start_session(&mut app),
+        count_glyph(&row, ICON_ADD),
         1,
-        "空のプロジェクトに「セッションを開始」がありません"
+        "空のプロジェクトの見出しに＋がありません"
     );
     assert!(app.launch_sheet_open, "押しても起動シートが開きません");
     assert_eq!(app.selected_project, Some(empty));
@@ -44967,18 +45052,32 @@ pub(crate) fn an_empty_project_in_the_session_column_starts_a_session() {
 }
 
 #[test]
-/// The history's 「プロジェクト別」 view offers the same start under an empty
-/// project, and under a search says the project has no match instead.
+/// The history's 「プロジェクト別」 view puts the same one ＋ on every project's
+/// header, in place of the glyph that read 「プロジェクトを開く」 and opened the
+/// sheet anyway, and under a search says the project has no match.
 pub(crate) fn an_empty_project_in_the_history_list_starts_a_session() {
     let root = temporary_directory("empty-project-history-list");
     let (mut app, empty) = app_with_an_empty_second_project(&root);
     app.session_library_open = true;
     app.session_view = SessionView::List;
-    // One in the session column beside it, one in the history.
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    let full = project_header_row(&texts, "p");
     assert_eq!(
-        click_start_session(&mut app),
-        2,
-        "「プロジェクト別」の空のプロジェクトに「セッションを開始」がありません"
+        full.iter().filter(|(text, _)| text == ICON_ADD).count(),
+        1,
+        "セッションのあるプロジェクトの見出しに＋がありません"
+    );
+    assert_header_add_says_start(&mut app, "q");
+    let row = click_header_add(&mut app, "q");
+    assert_eq!(
+        count_glyph(&row, ICON_ADD),
+        1,
+        "「プロジェクト別」の空のプロジェクトの見出しに＋がありません"
+    );
+    assert_eq!(
+        count_glyph(&row, ICON_SHOW),
+        0,
+        "「プロジェクトを開く」が＋と並んで残っています"
     );
     assert!(app.launch_sheet_open);
     assert_eq!(app.selected_project, Some(empty));
@@ -45005,17 +45104,38 @@ pub(crate) fn an_empty_project_in_the_history_list_starts_a_session() {
 }
 
 #[test]
-/// The history's 「グリッド」 view offers the same start under an empty project,
-/// and keeps its no-match line under a search.
+/// The history's 「グリッド」 view puts the same one ＋ on every project's
+/// header, beside the glyph that opens the project page, and keeps its
+/// no-match line under a search. The empty project's path is far wider than
+/// the view, so a ＋ laid out after it would not be on screen to click.
 pub(crate) fn an_empty_project_in_the_history_grid_starts_a_session() {
     let root = temporary_directory("empty-project-history-grid");
     let (mut app, empty) = app_with_an_empty_second_project(&root);
+    if let Some(project) = app.store.projects.iter_mut().find(|p| p.id == empty) {
+        project.path = root.join("a-worktree-with-a-long-name-".repeat(12));
+    }
     app.session_library_open = true;
     app.session_view = SessionView::Grid;
+    let texts = workspace_texts_at_click_size(&mut app, &egui::Context::default());
+    let full = project_header_row(&texts, "p");
     assert_eq!(
-        click_start_session(&mut app),
-        2,
-        "「グリッド」の空のプロジェクトに「セッションを開始」がありません"
+        full.iter().filter(|(text, _)| text == ICON_ADD).count(),
+        1,
+        "セッションのあるプロジェクトの見出しに＋がありません"
+    );
+    // Read on the short path: the long one pushes this glyph off screen, as it
+    // did before the ＋ arrived.
+    assert_eq!(
+        full.iter().filter(|(text, _)| text == ICON_SHOW).count(),
+        1,
+        "「グリッド」の「プロジェクトを開く」が消えています"
+    );
+    assert_header_add_says_start(&mut app, "q");
+    let row = click_header_add(&mut app, "q");
+    assert_eq!(
+        count_glyph(&row, ICON_ADD),
+        1,
+        "「グリッド」の空のプロジェクトの見出しに＋がありません"
     );
     assert!(app.launch_sheet_open);
     assert_eq!(app.selected_project, Some(empty));
