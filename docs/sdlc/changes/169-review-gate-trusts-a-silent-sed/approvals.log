@@ -1,0 +1,4 @@
+2026-10-17T05:06:53Z person gate-configuration plan.md dd89c71c4213a0d3 approve user 2026-10-17: 「残タスクもやって」 — the follow-up 162 named; tightening only, evaluator agreed
+2026-10-17T05:06:53Z auto intent intent.md 55a5d0c1b2762eac approve evaluator round 1: restates the request and the two points 162 carried; 158 landed after 162 while 162 still lists it pending
+2026-10-17T05:06:53Z auto spec spec.md a1b5f9812c345dcd approve evaluator round 2: assignment count now catches &&, then, export, += and read/printf -v/declare/mapfile/for targets; recorded_digest excluded
+2026-10-17T05:06:53Z auto plan plan.md dd89c71c4213a0d3 approve evaluator round 2: shim test fails today in both modes; sweep covers the widened count; digests stay byte-identical

@@ -1,0 +1,14 @@
+digest: "ed743ee7bb13a3a5"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/2 · src/tests.rs:45106 and :45279 the two empty-line checks became starts_with; the old equality could not fail, and the edit is outside this change's own test
+    person: "画面には影響しません。以前は何があっても通ってしまっていた2つの確認を、正しく働く形に直しただけです。対応は不要です。"
+  - rust-reviewer/3 · src/tests.rs the first card's gap under its header is checked against 24px with 19px measured, so a change to control height or group margin could trip it for reasons unrelated to cards
+    person: "画面には影響しません。将来ボタンの高さや余白を変えたときに、この確認を合わせて直す必要が出るかもしれません。今は対応不要です。"
+  - rust-reviewer/4 · src/app/screens.rs:4421 the room kept after the path assumes the 「プロジェクトを開く」 glyph is no wider than a control is tall
+    person: "画面には影響しません。長いパスでもボタンがはみ出さないことは確認で見ています。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
