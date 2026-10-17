@@ -1,0 +1,71 @@
+# Review record for 157-session-knowledge-is-lost-between-sessions.
+#
+# Round 1 (digest 2c48ec054e83902c): do-not-approve from all three.
+# - rust-reviewer 5 Important: delete_model set the exit-only SHUTTING_DOWN;
+#   a run in flight wrote a cleared or switched-off project back; conversations
+#   past 400 exchanges were never finished; a failed tab load had no way back;
+#   enable_when_ready survived a cancelled or failed download.
+# - subprocess-safety-reviewer 2 Important: the SHUTTING_DOWN one; on_exit did
+#   not wait for the cancelled curl to be killed, leaving it writing the .part.
+# - durability-reviewer 3 Important: the run/clear race, the 400-exchange tail,
+#   the SHUTTING_DOWN one.
+# Each was fixed with a test watched failing with its fix reverted (plan.md
+# Departures 16). rust-reviewer's prune `total - removed` wrap was raised as a
+# minor but taken: a wrap deletes every unpinned entry, which is data loss.
+#
+# Round 2 (bea49faad9293938): all three re-read the diff and approve; the open
+# minors below are carried to a follow-up change.
+#
+# Round 3 (this digest): CI's full suite refused a raw Command::new("git") in
+# git_top_level (now git_command) and the six-tab expectation (ナレッジ is the
+# seventh). All three re-read the delta and approve; nothing new raised.
+#
+# Re-confirmed under round 3 at this digest: main moved twice under the branch
+# (158-164 from other sessions); 157's own lines changed only where the merges
+# forced it — the lesson a test comment cites, 073 then 075, now named by title
+# too. All three re-read and re-approve. The comment commit recorded its own
+# diff (c01ac97d845b0bb3); this digest is the whole branch against main, set in
+# the merge that took 166 in, as 158 did — 166 moved none of 157's lines.
+#
+# Then 165 landed: its 075 took the number again (157's lesson is now 076, and
+# the test comment and plan.md say so), and src/i18n_tables.rs was resolved as
+# the union of both sides, sorted. rust-reviewer re-read that merge alone and
+# confirmed 157's 152 rows arrive unchanged and only the citation moved
+# (approve 0 0); the round 3 verdicts below stand at this landing digest.
+
+digest: "241db30c30e6ae8e"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/1 · src/app/knowledge.rs:826-842,966 — hits.clone() (up to 50 with bodies and sources), entries.position over 50×2000, and session_hits.clone() every frame; build the row index when results arrive.
+    person: "ナレッジタブで検索結果を表示している間、件数が多いと描画のたびに少し余分な計算をします。体感できるほどではない見込みで、対応は不要です。"
+  - rust-reviewer/2 · src/knowledge/embed.rs:279-285, src/knowledge.rs:1468, src/app/knowledge.rs:274 — curl exits other than 23 all read as network (22 HTTP errors, 28 timeouts too); the judge Pause reason is dropped; delete_model's io::Error has no path.
+    person: "モデル取得の失敗理由が、サーバー側のエラーや時間切れでも「ネットワークに接続できませんでした」と表示されます。判定が止まった理由も詳しく表示されません。動作に影響はなく、対応は不要です。"
+  - rust-reviewer/3 · src/main.rs:~49 — std::env::args() panics on a non-Unicode argument; use args_os lossily.
+    person: "Operon を文字コードの壊れた引数付きで起動すると、起動直後に終了します。通常の起動では起きず、対応は不要です。"
+  - rust-reviewer/4 · src/app/knowledge.rs:376-379 — next_run = now is set right after spawning Enable; a run that starts before the database exists passes it by, and the first collection waits ten minutes.
+    person: "ナレッジを有効にした直後、最初の収集が始まるまで最大10分待つことがあります。「今すぐ更新」で即座に始められます。"
+  - subprocess-safety-reviewer/1 · src/knowledge.rs:1126-1150 — the judge child has no cancel path (claude/codex/agy may outlive exit by up to 120 s), and stdout_truncated is not checked, so an answer cut at the ceiling can be parsed.
+    person: "収集中にアプリを終了すると、判定に使っている CLI が最大2分ほど残ることがあります。その後は自動で終わり、対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/exec.rs:101-104 — only the direct child is killed; a judge CLI whose grandchild inherits the pipes keeps join() from returning.
+    person: "判定に使う CLI が子プロセスを残す作りだと、その回の収集が終わらなくなる可能性があります。今のところ確認された例はなく、対応は不要です。"
+  - subprocess-safety-reviewer/3 · src/knowledge.rs:1050-1075, src/agents.rs:1749-1787 — transcript text in the prompt is untrusted; the read-only judge can still read the filesystem, so an injected instruction could put a secret into a 400-char body that is then searchable; the prompt is visible in ps.
+    person: "会話の中に悪意ある指示が含まれていると、判定役の CLI がこの Mac 上のファイルの一部をナレッジに書き込む可能性があります。外部へは送られません。気になる場合は機密を扱うプロジェクトで収集を有効にしないでください。"
+  - subprocess-safety-reviewer/4 · src/knowledge/embed.rs:503-519 — detect_device does not check SHUTTING_DOWN and may init a backend after exit began (no model is loaded, so no teardown assert).
+    person: "終了の直前にモデルの状態確認が走ると、GPU の初期化が一瞬だけ行われます。影響はなく、対応は不要です。"
+  - subprocess-safety-reviewer/5 · src/tests.rs — no test drives a real kill through run_command_cancellable beyond sleep, CliJudge timeout, or the answer ceiling; also the 3 s exit wait can be outlived by the verifying shasum (short-lived, never writes the .part).
+    person: "判定 CLI の時間切れや出力上限を実際に通す自動確認がまだありません。動作は確認済みの範囲で問題なく、対応は不要です。"
+  - durability-reviewer/1 · src/knowledge/embed.rs:289-295 — the .part is renamed without fsync, and the sidecar binds only size and mtime; a power loss after rename and sidecar can leave unflushed weights marked verified. No fault-injection test for record_verified.
+    person: "モデル取得の直後に電源が落ちると、壊れたモデルが正常なものとして扱われる可能性があります。その場合は設定 › データでモデルを削除して取り直してください。"
+  - durability-reviewer/2 · src/knowledge.rs:291-294 — CREATE TABLE IF NOT EXISTS runs before the newer-schema refusal, so an older Operon can add empty old-named tables to a newer database before refusing it.
+    person: "古い Operon で新しい Operon のナレッジを開くと、拒否する前に空の表が追加されることがあります。中身は失われず、対応は不要です。"
+  - durability-reviewer/3 · src/knowledge.rs:751-755 — removed content stays in free pages and the WAL; no secure_delete, wal_checkpoint(TRUNCATE), or VACUUM, though the UI says it cannot be undone.
+    person: "「ナレッジを削除…」の後も、消した会話の抜粋がしばらくデータファイルの空き領域に残ります。アプリからは見えませんが、ファイルを直接調べれば読める可能性があります。"
+  - durability-reviewer/4 · src/knowledge.rs:794 — a failed COMMIT is not rolled back, leaving the transaction open on that connection; today the run aborts with ? and drops the connection.
+    person: "まれにデータベースへの保存が失敗した場合、その回の収集が途中で止まります。次の回で続きから処理され、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"
+  durability-reviewer: "approve-with-nits 0 5"

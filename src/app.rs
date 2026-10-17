@@ -1,11 +1,13 @@
 use crate::*;
 
 mod keymap;
+pub(crate) mod knowledge;
 pub(crate) mod screens;
 
 // The keyboard is data this module reads and `screens.rs` draws, so it is
 // reachable by symbol name from anywhere the way every other module's is.
 pub(crate) use keymap::*;
+pub(crate) use knowledge::*;
 
 pub(crate) type UiResult<T> = std::result::Result<T, String>;
 
@@ -80,6 +82,15 @@ pub(crate) enum BackgroundKey {
     CheckpointCapture(Uuid, usize),
     Checkpoints(Uuid),
     CheckpointRestore(Uuid),
+    /// One for every project (change 157): enabled projects run one after
+    /// another inside it, so two runs can never overlap.
+    KnowledgeRun,
+    KnowledgeLoad(Uuid),
+    KnowledgeEdit(Uuid),
+    KnowledgeSearch,
+    KnowledgeSessionSearch,
+    ModelDownload,
+    ModelReadiness,
 }
 
 #[derive(Debug)]
@@ -272,6 +283,26 @@ pub(crate) enum BackgroundResult {
         project_id: Uuid,
         result: UiResult<()>,
     },
+    KnowledgeRan {
+        results: Vec<(Uuid, UiResult<KnowledgeSnapshot>)>,
+    },
+    KnowledgeLoaded {
+        key: BackgroundKey,
+        project_id: Uuid,
+        result: UiResult<KnowledgeSnapshot>,
+    },
+    KnowledgeSearched {
+        project_id: Uuid,
+        query: String,
+        result: UiResult<Vec<KnowledgeHit>>,
+    },
+    IndexedSessionsSearched {
+        result: UiResult<Vec<IndexedSessionHit>>,
+    },
+    ModelChecked {
+        key: BackgroundKey,
+        state: ModelState,
+    },
 }
 
 #[derive(Debug)]
@@ -294,6 +325,8 @@ pub(crate) enum ProjectTab {
     /// The skills and the instruction files the agents read, one above the
     /// other (change 093: they were two tabs).
     AgentSettings,
+    /// What this project's agent conversations taught it (change 157).
+    Knowledge,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -403,7 +436,8 @@ pub(crate) struct OperonApp {
     pub(crate) file_search: String,
     pub(crate) transcript_search_input: String,
     pub(crate) transcript_matches: Vec<TranscriptMatch>,
-    pub(crate) model_download_state: EmbeddedModelDownloadState,
+    /// The knowledge base and its model (change 157).
+    pub(crate) knowledge: KnowledgeState,
     pub(crate) cli_sessions: HashMap<Uuid, Vec<CliSession>>,
     pub(crate) handoff_note_input: String,
     pub(crate) handoff_target_inputs: HashMap<String, String>,
@@ -691,6 +725,8 @@ impl OperonApp {
     ) -> Self {
         let mut app = Self::new();
         app._instance_locks = instance_locks;
+        // The real app only: a test's store has no model to look for.
+        app.check_model_readiness();
         app.store_retry_pending = migration.durability_retry_needed;
         if migration.durability_retry_needed {
             app.durability_warning = Some(
@@ -844,6 +880,7 @@ impl OperonApp {
         Self {
             _instance_locks: Vec::new(),
             store,
+            knowledge: KnowledgeState::beside(&data_file),
             data_file,
             page,
             selected_project: None,
@@ -902,13 +939,6 @@ impl OperonApp {
             file_search: String::new(),
             transcript_search_input: String::new(),
             transcript_matches: Vec::new(),
-            model_download_state: if is_embedded_model_cached() {
-                EmbeddedModelDownloadState::Ready {
-                    cached_bytes: embedded_model_cached_bytes(),
-                }
-            } else {
-                EmbeddedModelDownloadState::Idle
-            },
             cli_sessions: HashMap::new(),
             handoff_note_input: String::new(),
             handoff_target_inputs: HashMap::new(),
@@ -1397,6 +1427,36 @@ impl OperonApp {
                         });
                     }
                 }
+                BackgroundResult::KnowledgeRan { results } => self.apply_knowledge_run(results),
+                BackgroundResult::KnowledgeLoaded {
+                    key,
+                    project_id,
+                    result,
+                } => {
+                    self.background_tasks.remove(&key);
+                    self.apply_knowledge_snapshot(project_id, result);
+                }
+                BackgroundResult::KnowledgeSearched {
+                    project_id,
+                    query,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::KnowledgeSearch);
+                    match result {
+                        Ok(hits) => self.knowledge.hits = Some((project_id, query, hits)),
+                        Err(error) => self.notice = Some(error),
+                    }
+                }
+                BackgroundResult::IndexedSessionsSearched { result } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::KnowledgeSessionSearch);
+                    match result {
+                        Ok(hits) => self.knowledge.session_hits = hits,
+                        Err(error) => self.notice = Some(error),
+                    }
+                }
+                BackgroundResult::ModelChecked { key, state } => self.apply_model_state(key, state),
                 BackgroundResult::TranscriptSearch { query, scan } => {
                     self.background_tasks
                         .remove(&BackgroundKey::TranscriptSearch);
@@ -4511,13 +4571,13 @@ impl OperonApp {
             return;
         }
         let search_query = query.clone();
-        let search_mode = self.store.search_engine_mode;
         self.spawn_background(BackgroundKey::TranscriptSearch, move || {
             BackgroundResult::TranscriptSearch {
                 query: search_query.clone(),
-                scan: search_local_transcripts_with_mode(&search_query, 50, search_mode),
+                scan: search_local_transcripts(&search_query, 50),
             }
         });
+        self.search_indexed_sessions_for(&query);
         self.notice = Some(tf!(
             "“{query}” をローカル履歴から検索しています…",
             query = query
@@ -6248,6 +6308,13 @@ pub(crate) fn terminal_echo_poll_wait(
 }
 
 impl eframe::App for OperonApp {
+    /// A model download in flight is killed with the app; its `.part` stays
+    /// for the next 「モデルを取得」 to resume.
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.stop_model_download_for_exit();
+        release_shared_embedder();
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.repaint.is_none() {
             self.repaint = Some(ctx.clone());
@@ -6261,6 +6328,7 @@ impl eframe::App for OperonApp {
         self.handle_terminal_search_keys(ctx);
         self.resolve_terminal_paths();
         self.process_background_results();
+        self.tick_knowledge();
         self.start_ready_queued_sessions();
         self.track_attention(Instant::now());
         self.handle_app_shortcuts(ctx);
@@ -6941,7 +7009,7 @@ impl OperonApp {
 }
 
 impl ProjectTab {
-    pub(crate) fn all() -> [Self; 6] {
+    pub(crate) fn all() -> [Self; 7] {
         [
             Self::Overview,
             Self::Git,
@@ -6949,6 +7017,7 @@ impl ProjectTab {
             Self::PullRequests,
             Self::Files,
             Self::AgentSettings,
+            Self::Knowledge,
         ]
     }
     /// What the tab holds, not the tool behind it: 「変更」 rather than
@@ -6961,6 +7030,7 @@ impl ProjectTab {
             Self::PullRequests => "PR",
             Self::Files => tr("ファイル"),
             Self::AgentSettings => tr("エージェント設定"),
+            Self::Knowledge => tr("ナレッジ"),
         }
     }
 }
@@ -6984,6 +7054,13 @@ impl OperonApp {
                 Some(Ok(requests)) => Some(requests.len()),
                 _ => None,
             },
+            ProjectTab::Knowledge => self
+                .knowledge
+                .views
+                .get(&project_id)
+                .and_then(|view| view.snapshot.as_deref())
+                .filter(|snapshot| snapshot.enabled)
+                .map(|snapshot| snapshot.entries.len()),
             ProjectTab::Overview | ProjectTab::Files | ProjectTab::AgentSettings => None,
         }
     }
