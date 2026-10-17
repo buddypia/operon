@@ -13,6 +13,14 @@
 # field, so 23 launch-option labels stayed Japanese; the guard now refuses an
 # unknown indirect argument and reads the tables behind the known ones.
 #
+# Round 4: no logic change. Main had taken change number 162, so this is
+# 165; main was merged in, the tables re-resolved as main's plus our 619 rows,
+# and comments renumbered. Both reviewers confirmed nothing else moved.
+#
+# Round 5: the round-4 record could not be committed without code, so it
+# rides with rust-reviewer's nit 4/2: covered indirect arguments match as a
+# whole word. Raw-string ids already fail loud since round 3.
+#
 # Verified by rust-reviewer: every non-literal `tr` call is covered by a table
 # the guard reads; the table edit is additions only and sorted; no per-frame
 # work, no new panic site outside tests.
@@ -21,20 +29,18 @@
 # tmux name, a stored value, or a comparison except the carried custom label;
 # the guard spawns no process.
 
-digest: "c57cee749e8483c4"
+digest: "10b0a067beb033c7"
 
-rounds: 3
+rounds: 5
 
 carried:
   - subprocess-safety-reviewer/1/1 · a restored session's goal still holds the source's last request
     person: "復元したセッションの名前は直りますが、詳細に出る「最後の依頼」の欄には元の最後の入力（「계속」など）がそのまま残ります。動作に影響はなく、対応は不要です。"
-  - subprocess-safety-reviewer/2/1 · the auto-name check for a custom command compares against a label that now depends on the display language
+  - subprocess-safety-reviewer/4/1 · the auto-name check for a custom command compares against a label that now depends on the display language
     person: "英語や韓国語の画面で「別のコマンド」から作ったセッションは、表示言語を切り替えると一覧の名前が最初の入力内容に置き換わらず、元の名前のまま出ます。動作に影響はなく、対応は不要です。"
-  - rust-reviewer/3/1 · the guard's literal reader does not decode raw strings or unicode escapes
-    person: "画面の動作には影響しません。将来、特殊な書き方のメッセージを足したときにチェックが誤作動する可能性があるだけで、対応は不要です。"
-  - rust-reviewer/3/2 · the guard recognises covered table fields by their spelling, not their type
-    person: "画面の動作には影響しません。別の表を同じ名前で使った場合にチェックをすり抜ける可能性があるだけで、対応は不要です。"
+  - rust-reviewer/5/1 · the guard's literal reader does not decode unicode escapes
+    person: "画面の動作には影響しません。今後、特殊な書き方のメッセージを足したときにチェックが誤って失敗する可能性があるだけで、対応は不要です。"
 
 verdicts:
-  rust-reviewer: "approve 0 2"
+  rust-reviewer: "approve 0 0"
   subprocess-safety-reviewer: "approve 0 1"

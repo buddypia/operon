@@ -24958,12 +24958,18 @@ pub(crate) fn every_message_the_code_shows_has_a_row_in_every_table() {
                 }
                 let argument = text[at + opener.len()..].trim_start();
                 let Some(id) = literal_after(&text, at + opener.len()) else {
-                    // The definition `fn tr(message: …)` is not a call.
-                    if !argument.starts_with("message:")
-                        && !INDIRECT_ARGUMENTS
-                            .iter()
-                            .any(|known| argument.starts_with(known))
-                    {
+                    // The definition `fn tr(message: …)` is not a call. A
+                    // covered argument is matched as a whole word, so
+                    // `flag.label_extra` is not taken for `flag.label`; a raw
+                    // string matches nothing and is refused here too.
+                    let covered = INDIRECT_ARGUMENTS.iter().any(|known| {
+                        argument.strip_prefix(known).is_some_and(|rest| {
+                            known.ends_with('(')
+                                || !rest
+                                    .starts_with(|next: char| next.is_alphanumeric() || next == '_')
+                        })
+                    });
+                    if !argument.starts_with("message:") && !covered {
                         unknown_indirect.push(format!(
                             "{file}: {}",
                             argument.lines().next().unwrap_or_default()

@@ -55,8 +55,9 @@ contract:
     filters: 9 passed; every_message 5 passed after round 2); the full suite runs in CI on push"
   ignored-restore: "machine waived the restore path itself is untouched — only
     the display name and a list title change; cargo test -- --ignored not run"
-  review: "human passed rust-reviewer approve 0 2, subprocess-safety-reviewer
-    approve 0 1 at c57cee749e8483c4 (round 3), remarks carried in review.yaml"
+  review: "human passed rust-reviewer approve 0 0, subprocess-safety-reviewer
+    approve 0 1 at 10b0a067beb033c7 (round 5, after the renumber to 165),
+    remarks carried in review.yaml"
   release-binary: "machine waived the bundle is built from main after the
     merge and swapped into /Applications in the same session"
 
