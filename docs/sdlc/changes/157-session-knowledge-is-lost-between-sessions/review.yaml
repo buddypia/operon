@@ -26,8 +26,14 @@
 # too. All three re-read and re-approve. The comment commit recorded its own
 # diff (c01ac97d845b0bb3); this digest is the whole branch against main, set in
 # the merge that took 166 in, as 158 did — 166 moved none of 157's lines.
+#
+# Then 165 landed: its 075 took the number again (157's lesson is now 076, and
+# the test comment and plan.md say so), and src/i18n_tables.rs was resolved as
+# the union of both sides, sorted. rust-reviewer re-read that merge alone and
+# confirmed 157's 152 rows arrive unchanged and only the citation moved
+# (approve 0 0); the round 3 verdicts below stand at this landing digest.
 
-digest: "3df2e02eb54c82b9"
+digest: "241db30c30e6ae8e"
 
 rounds: 3
 

@@ -1,0 +1,59 @@
+# Review record for 165-restore-shows-korean-text.
+#
+# The change: a restored session is named after the source CLI's title before
+# its last request, an untitled Antigravity conversation no longer carries a
+# stand-in title, and every message the code passes to `tr`/`tf!` — literal or
+# read from a table — has a row in the English and Korean tables (621 rows
+# added to each, none changed), held by a new guard.
+#
+# Round 1: rust-reviewer found the stand-in title "Antigravity の会話 <ID>"
+# would now beat the real last request; it was removed and the test lists an
+# untitled conversation through the real function.
+# Round 2: rust-reviewer found the guard skipped `tr` calls taking a table
+# field, so 23 launch-option labels stayed Japanese; the guard now refuses an
+# unknown indirect argument and reads the tables behind the known ones.
+#
+# Round 4: no logic change. Main had taken change number 162, so this is
+# 165; main was merged in, the tables re-resolved as main's plus our 619 rows,
+# and comments renumbered. Both reviewers confirmed nothing else moved.
+#
+# Round 5: the round-4 record could not be committed without code, so it
+# rides with rust-reviewer's nit 4/2: covered indirect arguments match as a
+# whole word. Raw-string ids already fail loud since round 3.
+#
+# Round 6: CI showed the new rows broke two things that only worked while
+# untranslated — the folder drop read a save failure from the notice's
+# Japanese text, and a fresh-install test set the process-wide language from
+# CI's English host. Now a ProjectAddition value, Japanese under cfg(test),
+# and a guard on notice-text decisions.
+#
+# Round 7: the earlier digests were each taken against HEAD, one increment
+# at a time; landing judges the whole change against main, so both reviewers
+# judged the whole staged change against main bef1b7d. New in it: the custom
+# command's fallback name is read in any language (subprocess nit 4/1).
+#
+# Verified by rust-reviewer: every non-literal `tr` call is covered by a table
+# the guard reads; the table edit is additions only and sorted; no per-frame
+# work, no new panic site outside tests.
+#
+# Verified by subprocess-safety-reviewer: no translated string reaches argv, a
+# tmux name, a stored value, or a comparison except the carried custom label;
+# the guard spawns no process.
+
+digest: "9f31eea55473b7e6"
+
+rounds: 7
+
+carried:
+  - subprocess-safety-reviewer/1/1 · a restored session's goal still holds the source's last request
+    person: "復元したセッションの名前は直りますが、詳細に出る「最後の依頼」の欄には元の最後の入力（「계속」など）がそのまま残ります。動作に影響はなく、対応は不要です。"
+  - rust-reviewer/7/1 · the guard's literal reader does not decode unicode escapes
+    person: "画面の動作には影響しません。特殊な書き方のメッセージを足したときにチェックが誤って失敗する可能性があるだけで、対応は不要です。"
+  - rust-reviewer/7/2 · the notice-text guard matches only the spelling that failed
+    person: "画面の動作には影響しません。通知の文面で分岐する書き方が別の形で再発したとき、自動チェックが見逃す可能性があるだけで、対応は不要です。"
+  - rust-reviewer/7/3 · first-launch language detection no longer runs under test
+    person: "画面の動作には影響しません。初回起動時に端末の言語を選ぶ処理は、自動テストでは確かめられないままです。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 3"
+  subprocess-safety-reviewer: "approve 0 0"

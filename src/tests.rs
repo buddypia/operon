@@ -11347,6 +11347,46 @@ pub(crate) fn names_a_restored_session_after_its_conversation() {
         "operon のターミナル"
     );
 }
+/// The last request of a long conversation is often a one-word nudge typed in
+/// the person's own language — "계속", "続けて", "go on". Named after that, a
+/// restored session reads as a stray foreign word and says nothing about the
+/// work, so the source CLI's own title, when there is one, names it instead.
+#[test]
+pub(crate) fn a_restored_session_is_named_by_its_conversation_title_not_its_last_nudge() {
+    let source = CliSession {
+        provider: CliProvider::Gemini,
+        native_id: "f5dfbf48-41c9-4f51-94aa-928efe547bb1".into(),
+        id: "f5dfbf48-41c9-4f51-94aa-928efe547bb1".into(),
+        title: Some("インタラクションのあるデザインも作って".into()),
+        last_user_message: Some("계속".into()),
+        branch: None,
+        updated_at: 0,
+        path: PathBuf::from("/tmp/operon-restore-nudge.jsonl"),
+    };
+    assert_eq!(
+        restored_session_name(&source),
+        "インタラクションのあるデザインも作って"
+    );
+
+    // With the title first, a stand-in title would beat the real request: an
+    // Antigravity conversation the history never named lists with no title.
+    let conversation = "c7f2a1d0-1111-4222-8333-944445555666";
+    let listed = antigravity_cli_sessions(
+        Path::new("/nonexistent/operon-agy-store"),
+        Path::new("/nonexistent/operon-agy-history.jsonl"),
+        HashMap::from([(conversation.to_owned(), (0, None))]),
+        10,
+    );
+    let [untitled] = listed.as_slice() else {
+        panic!("one conversation in, one listed: {listed:?}");
+    };
+    assert_eq!(untitled.title, None);
+    let restored = CliSession {
+        last_user_message: Some("ログイン画面を直して".into()),
+        ..untitled.clone()
+    };
+    assert_eq!(restored_session_name(&restored), "ログイン画面を直して");
+}
 
 /// Records saved before titles carried the work cannot be rewritten — the
 /// name is the user's own data — so they are read rather than displayed
@@ -24813,6 +24853,199 @@ pub(crate) fn every_translation_keeps_the_placeholder_names_of_its_message_id() 
             );
         }
     }
+}
+
+/// The tables agreeing with each other says nothing about the code: a message
+/// written with `tr`/`tf!` that no table has a row for is shown in Japanese on
+/// an English or Korean screen, and every other check stays green. So every
+/// literal message id in the source has its row (change 165).
+#[test]
+pub(crate) fn every_message_the_code_shows_has_a_row_in_every_table() {
+    fn literal_after(text: &str, start: usize) -> Option<String> {
+        let rest = text[start..].trim_start();
+        let mut chars = rest.strip_prefix('"')?.chars();
+        let mut value = String::new();
+        loop {
+            match chars.next()? {
+                '"' => return Some(value),
+                '\\' => match chars.next()? {
+                    'n' => value.push('\n'),
+                    't' => value.push('\t'),
+                    '\n' => {
+                        // A line continuation drops the newline and the
+                        // indentation that follows it, as rustc does.
+                        let tail: String = chars.clone().collect();
+                        let skipped = tail.len() - tail.trim_start().len();
+                        chars = rest[rest.len() - tail.len() + skipped..].chars();
+                    }
+                    other => value.push(other),
+                },
+                other => value.push(other),
+            }
+        }
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![root.clone()];
+    let mut sources = Vec::new();
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(&path).unwrap() {
+                files.push(entry.unwrap().path());
+            }
+        } else if path.extension().is_some_and(|extension| extension == "rs")
+            && !matches!(
+                path.file_name().and_then(|name| name.to_str()),
+                Some("tests.rs" | "i18n_tables.rs")
+            )
+        {
+            sources.push(path);
+        }
+    }
+    // A `tr` that takes a field rather than a literal reads its id out of a
+    // table; those tables are checked below, and a call taking anything not
+    // named here fails until its table is added (review of 165).
+    const INDIRECT_ARGUMENTS: &[&str] = &[
+        "flag.label",
+        "flag.detail",
+        "conflict.label",
+        "action.label",
+        "action_label(",
+        "kind.label()",
+        "group.message_id()",
+        "group.hint_id()",
+        "$template",
+        "CUSTOM_AGENT_LABEL",
+    ];
+    let catalog: std::collections::BTreeSet<&'static str> = catalog_keys().collect();
+    let mut missing = std::collections::BTreeSet::new();
+    let mut unknown_indirect = Vec::new();
+    let mut seen = 0usize;
+    for path in sources {
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
+        let text = fs::read_to_string(&path).unwrap();
+        for opener in ["tr(", "tf!("] {
+            for (at, _) in text.match_indices(opener) {
+                let boundary = text[..at]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|before| !(before.is_alphanumeric() || before == '_'));
+                let line_start = text[..at].rfind('\n').map_or(0, |index| index + 1);
+                let comment = text[line_start..at].trim_start().starts_with("//");
+                if !boundary || comment {
+                    continue;
+                }
+                let argument = text[at + opener.len()..].trim_start();
+                let Some(id) = literal_after(&text, at + opener.len()) else {
+                    // The definition `fn tr(message: …)` is not a call. A
+                    // covered argument is matched as a whole word, so
+                    // `flag.label_extra` is not taken for `flag.label`; a raw
+                    // string matches nothing and is refused here too.
+                    let covered = INDIRECT_ARGUMENTS.iter().any(|known| {
+                        argument.strip_prefix(known).is_some_and(|rest| {
+                            known.ends_with('(')
+                                || !rest
+                                    .starts_with(|next: char| next.is_alphanumeric() || next == '_')
+                        })
+                    });
+                    if !argument.starts_with("message:") && !covered {
+                        unknown_indirect.push(format!(
+                            "{file}: {}",
+                            argument.lines().next().unwrap_or_default()
+                        ));
+                    }
+                    continue;
+                };
+                seen += 1;
+                if !catalog.contains(id.as_str()) {
+                    missing.insert(format!("{file}: {id}"));
+                }
+            }
+        }
+    }
+    assert!(seen > 900, "tr/tf! の呼び出しを読めていません ({seen} 件)");
+    assert!(
+        unknown_indirect.is_empty(),
+        "表を確かめていない間接の tr/tf! 呼び出しがあります。INDIRECT_ARGUMENTS とその表の検査を足してください:\n{}",
+        unknown_indirect.join("\n")
+    );
+    let indirect = CODEX_FLAGS
+        .iter()
+        .chain(CLAUDE_FLAGS)
+        .chain(ANTIGRAVITY_FLAGS)
+        .flat_map(|flag| [("agents.rs", flag.label), ("agents.rs", flag.detail)])
+        .chain(
+            KEYMAP_ACTIONS
+                .iter()
+                .map(|action| ("keymap.rs", action.label)),
+        )
+        .chain(
+            SessionStatusKind::ALL
+                .iter()
+                .map(|kind| ("widgets.rs", kind.label())),
+        )
+        .chain([("agents.rs", CUSTOM_AGENT_LABEL)])
+        .chain(SessionStatusGroup::GROUPS.iter().flat_map(|group| {
+            [
+                ("widgets.rs", group.message_id()),
+                ("widgets.rs", group.hint_id()),
+            ]
+        }));
+    for (file, id) in indirect {
+        if !catalog.contains(id) {
+            missing.insert(format!("{file}: {id}"));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "翻訳表に行のないメッセージが {} 件あります:\n{}",
+        missing.len(),
+        missing.into_iter().collect::<Vec<_>>().join("\n")
+    );
+}
+
+/// A notice is translated text, so code that decides something by reading it
+/// decides differently on an English or Korean screen: dropping folders lost
+/// the save error that way once its message gained rows (change 165). What
+/// happened travels as a value; the notice is only what a person reads.
+#[test]
+pub(crate) fn no_decision_reads_the_text_of_a_notice() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = vec![root];
+    let mut found = Vec::new();
+    while let Some(path) = files.pop() {
+        if path.is_dir() {
+            for entry in fs::read_dir(&path).unwrap() {
+                files.push(entry.unwrap().path());
+            }
+            continue;
+        }
+        if path.extension().is_none_or(|extension| extension != "rs")
+            || path.file_name().is_some_and(|name| name == "tests.rs")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        for (number, line) in text.lines().enumerate() {
+            let reads = ["starts_with(", "contains(", "ends_with(", "strip_prefix("]
+                .iter()
+                .any(|method| line.contains(&format!("notice.{method}")))
+                || line.contains("notice ==")
+                || line.contains("== notice");
+            if reads {
+                found.push(format!(
+                    "{}:{}: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    number + 1,
+                    line.trim()
+                ));
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "通知の文面で分岐しているコードがあります:\n{}",
+        found.join("\n")
+    );
 }
 
 /// Japanese owns no table: the message id is the copy. `translation_for` says
@@ -41279,6 +41512,24 @@ pub(crate) fn session_list_title_prefers_the_first_prompt_over_the_launch_fallba
         session_list_title(&session, Some("別の依頼")),
         session_title(&session)
     );
+
+    // The fallback name was written in the language the screen had then, so
+    // a custom command's "Another command" is still the fallback once the
+    // screen reads Japanese (change 165).
+    session.agent = "custom".into();
+    session.goal = String::new();
+    for written in [
+        CUSTOM_AGENT_LABEL,
+        translation_for(Language::En, CUSTOM_AGENT_LABEL).unwrap(),
+        translation_for(Language::Ko, CUSTOM_AGENT_LABEL).unwrap(),
+    ] {
+        session.name = format!("example-webshop · {written}");
+        assert_eq!(
+            session_list_title(&session, Some("ログインを直す")),
+            "ログインを直す",
+            "{written}"
+        );
+    }
 }
 
 /// Change 088: only the stop of a running session whose agent is idle loses
@@ -48443,8 +48694,9 @@ pub(crate) fn embed_golden_fails_when_the_runtime_drifts_from_the_reference() {
     assert_eq!(code, 3);
 }
 
-/// Lesson 075, "A native runtime measured at the batch sizes that happened to
-/// work" — named by title as well, since parallel changes renumbered it twice.
+/// Lesson 076, "A native runtime measured at the batch sizes that happened to
+/// work" — named by title as well, since parallel changes renumbered it
+/// three times.
 /// llama.cpp 2a66703 aborts the whole process — no error to return — when a
 /// context reserves 3, 5, 6, or 7 sequences, and at exit while
 /// a model is still loaded. CI has no model to watch either happen, so this

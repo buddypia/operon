@@ -692,6 +692,16 @@ pub(crate) struct OperonApp {
     pub(crate) cached_prompt_templates: Option<(Option<PathBuf>, Instant, Vec<PromptTemplate>)>,
 }
 
+/// What became of one folder offered as a project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectAddition {
+    Added,
+    /// Not a folder, or already a project; the notice says which.
+    Declined,
+    /// The store could not be written, so nothing was added.
+    NotSaved,
+}
+
 impl OperonApp {
     pub(crate) fn new() -> Self {
         let data_file = app_data_file();
@@ -3659,9 +3669,15 @@ impl OperonApp {
     }
 
     pub(crate) fn add_project_path(&mut self, path: PathBuf) -> bool {
+        self.try_add_project_path(path) == ProjectAddition::Added
+    }
+
+    /// Like `add_project_path`, and says why a folder was not added, so a
+    /// caller never has to read the notice's (translated) text to find out.
+    pub(crate) fn try_add_project_path(&mut self, path: PathBuf) -> ProjectAddition {
         if !path.is_dir() {
             self.notice = Some(tr("既存のフォルダを選んでください。").into());
-            return false;
+            return ProjectAddition::Declined;
         }
         let path = path.canonicalize().unwrap_or(path);
         if let Some(existing) = self
@@ -3674,7 +3690,7 @@ impl OperonApp {
             self.select_project(Some(existing_id));
             self.page = Page::Projects;
             self.notice = Some(tr("そのプロジェクトは追加済みのため、開きました。").into());
-            return false;
+            return ProjectAddition::Declined;
         }
         let name = path
             .file_name()
@@ -3692,14 +3708,14 @@ impl OperonApp {
         self.store.projects.push(project);
         if !self.persist() {
             self.store = previous_store;
-            return false;
+            return ProjectAddition::NotSaved;
         }
         self.select_project(Some(project_id));
         self.project_path_input.clear();
         self.page = Page::Projects;
         self.project_tab = ProjectTab::Overview;
         self.notice = Some(tr("プロジェクトを追加しました。").into());
-        true
+        ProjectAddition::Added
     }
 
     pub(crate) fn add_project(&mut self) {
@@ -3755,14 +3771,10 @@ impl OperonApp {
         let mut added = 0;
         let mut save_error = None;
         for path in folders {
-            if self.add_project_path(path) {
-                added += 1;
-            } else if self
-                .notice
-                .as_deref()
-                .is_some_and(|notice| notice.starts_with("データを保存できませんでした"))
-            {
-                save_error = self.notice.clone();
+            match self.try_add_project_path(path) {
+                ProjectAddition::Added => added += 1,
+                ProjectAddition::NotSaved => save_error = self.notice.clone(),
+                ProjectAddition::Declined => {}
             }
         }
         let duplicates_or_failed = folder_count.saturating_sub(added);
