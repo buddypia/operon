@@ -51,7 +51,8 @@ it for a typo.
   - `src/knowledge.rs` — per-project knowledge base: SQLite store, ranking,
     judge, freshness, search, and the `Operon knowledge search` CLI.
     `src/knowledge/embed.rs` holds the EmbeddingGemma 2 model files, download,
-    and in-process Metal runtime.
+    and in-process Metal runtime. `src/knowledge/map.rs` computes the 2D map:
+    neighbours, groups, layout, hulls.
   - `src/theme.rs` — `Palette` and the three `*_PALETTE` tables.
   - `src/store.rs` — local index: atomic writes, `flock`, migration.
   - `src/models.rs` — persisted types.
@@ -63,7 +64,7 @@ it for a typo.
     `src/util.rs`, `src/prelude.rs` — file classification, markdown parsing,
     settings, platform calls, helpers, shared imports.
   - `src/ui/` — `mod.rs`, `widgets.rs`, `terminal.rs`, `diff.rs`, `files.rs`,
-    `markdown_view.rs`, `syntax.rs`: reusable drawing modules.
+    `markdown_view.rs`, `syntax.rs`, `knowledge_map.rs`: reusable drawing modules.
 - **User-facing text is Japanese; code, comments, and docs stay English.**
   Tool-output match patterns (`can't find session`, `do you trust this folder`)
   stay as emitted. Reach users via `tr("…")` or `tf!("…{name}", name = value)` —
