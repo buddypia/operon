@@ -19,8 +19,14 @@
 # Round 3 (this digest): CI's full suite refused a raw Command::new("git") in
 # git_top_level (now git_command) and the six-tab expectation (ナレッジ is the
 # seventh). All three re-read the delta and approve; nothing new raised.
+#
+# Re-confirmed under round 3 at this digest: main moved twice under the branch
+# (158-164 from other sessions); 157's own lines changed only where the merges
+# forced it — the lesson a test comment cites, 073 then 075, now named by title
+# too. A record-only commit is refused, so the re-confirmation rides with that
+# comment. All three re-read and re-approve.
 
-digest: "a2c119329caf8272"
+digest: "c01ac97d845b0bb3"
 
 rounds: 3
 

@@ -48323,8 +48323,10 @@ pub(crate) fn embed_golden_fails_when_the_runtime_drifts_from_the_reference() {
     assert_eq!(code, 3);
 }
 
-/// Lesson 075. llama.cpp 2a66703 aborts the whole process — no error to
-/// return — when a context reserves 3, 5, 6, or 7 sequences, and at exit while
+/// Lesson 075, "A native runtime measured at the batch sizes that happened to
+/// work" — named by title as well, since parallel changes renumbered it twice.
+/// llama.cpp 2a66703 aborts the whole process — no error to return — when a
+/// context reserves 3, 5, 6, or 7 sequences, and at exit while
 /// a model is still loaded. CI has no model to watch either happen, so this
 /// pins the two shapes the fidelity script was watched failing without.
 #[test]
