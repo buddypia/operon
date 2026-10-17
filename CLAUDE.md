@@ -32,6 +32,7 @@ it for a typo.
        claude_md_maps_every_module_that_exists. Add a module, add its line. -->
   - `src/app.rs` — `OperonApp`: app state, background tasks, top-level UI wiring.
     `src/app/screens.rs` holds toolbar through terminal workspace drawing.
+    `src/app/knowledge.rs` holds the knowledge tab, model block, and run wiring.
   - `src/tests.rs` — inline `#[cfg(test)]` suite; no other module has tests.
   - `src/cli.rs` — discovering/scanning agent-CLI sessions and shared archive.
   - `src/history.rs` — cross-CLI conversation restore and import.
@@ -47,6 +48,10 @@ it for a typo.
     `src/git/setup.rs` handles `.operon/setup.sh` digests, previews, and
     approvals. `src/git/comments.rs` handles diff review notes.
     `src/git/ports.rs` maps listening sockets via `lsof` to worktrees.
+  - `src/knowledge.rs` — per-project knowledge base: SQLite store, ranking,
+    judge, freshness, search, and the `Operon knowledge search` CLI.
+    `src/knowledge/embed.rs` holds the EmbeddingGemma 2 model files, download,
+    and in-process Metal runtime.
   - `src/theme.rs` — `Palette` and the three `*_PALETTE` tables.
   - `src/store.rs` — local index: atomic writes, `flock`, migration.
   - `src/models.rs` — persisted types.
@@ -95,4 +100,7 @@ each is enforced by a test in `src/tests.rs`:
 Those `6 ignored` tests need a live `codex`, `claude`, or `agy` and cover
 cross-CLI restore end-to-end. Touching `src/history.rs` or the archive path in
 `src/cli.rs` requires running `cargo test --locked -- --ignored` or stating that
-you could not. `bash scripts/harness-metrics.sh` prints the repository metrics JSON.
+you could not. An Antigravity-destination one that fails with `conversation "…"
+not found` in its terminal is `agy` missing a file it later finds (change 168):
+rerun it before suspecting the restore. `bash scripts/harness-metrics.sh` prints
+the repository metrics JSON.

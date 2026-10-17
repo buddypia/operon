@@ -18,6 +18,12 @@ eframe = { version = "0.31", default-features = true }
 egui-phosphor = "0.9"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 libc = "0.2"
+# EmbeddingGemma 2, in-process on Metal (change 157). A git revision rather than
+# a crates.io release because 0.1.161 still vendors a llama.cpp from before
+# ggml-org/llama.cpp#30054 added the model. The fork carries only that submodule
+# bump and the two struct fields it added; go back to the crates.io release once
+# one vendors a llama.cpp that has `gemma-embedding2`.
+llama-cpp-2 = { git = "https://github.com/buddypia/llama-cpp-rs", rev = "48eedeb3c5b21ceafc06b4fae953a0d332d1e037", default-features = false, features = ["metal"] }
 rfd = "0.15"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
