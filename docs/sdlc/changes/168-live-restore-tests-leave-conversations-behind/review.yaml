@@ -1,0 +1,40 @@
+# Review record for 168-live-restore-tests-leave-conversations-behind.
+#
+# The change: the six live restore tests keep their projects under /tmp (a
+# guard checks the base and scans every live test for `temp_dir()`), start
+# their terminals one at a time, and take back the conversation each wrote into
+# another CLI's store — Antigravity's file with its SQLite sidecars, Codex's
+# thread through Codex's own `thread/delete`.
+#
+# Round 1: rust-reviewer approved and found that the guard checked only the
+# helper, not that the tests used it; a doc comment had been left on the
+# wrong item; removal failures were silent; and Codex might keep more than the
+# rollout. Round 2 added the source scan (watched failing on one root mutated
+# back), moved the comment, printed failures other than NotFound, and — after
+# measuring 127 test rows in Codex's thread index — deleted threads through
+# the app server, after which a full run left the count unchanged.
+#
+# Verified by rust-reviewer: everything changed is test code or #[cfg(test)];
+# the thread id is the one the app server returned through
+# is_safe_cli_session_id, so only the test's own thread can be named; the
+# app server is stopped whether or not the delete succeeds; poison on the
+# terminal lock is recovered.
+
+digest: "701877d7f507e2f1"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/3 · a live test that fails before its last check still leaves its conversation (and a Codex thread row) behind
+    person: "テストが途中で失敗したときだけ、テスト用の会話が1件残ります。成功したときは何も残りません。対応は不要です。"
+  - rust-reviewer/1/5 · the one-at-a-time lock covers the terminals only, and three clean runs do not prove the agy symptom gone
+    person: "agy への復元テストが、agy 側の都合でまれに失敗することがあります。その場合の見分け方を開発メモに書きました。対応は不要です。"
+  - rust-reviewer/1/6 · Antigravity's history index keeps one line per run
+    person: "agy の入力履歴の一覧に、テスト1回ごとに1行だけ記録が残ります。agy が同時に書き込むファイルなので、安全のため消していません。対応は不要です。"
+  - rust-reviewer/2/1 · a test-only function in src/history.rs makes the installed build read as behind although the shipped binary is the same
+    person: "アプリの中身は変わりませんが、確認ツールが古いと判定するため、アプリを作り直して入れ替えます。こちらで行います。"
+  - rust-reviewer/2/2 and rust-reviewer/2/3 · the thread delete has no timeout and says nothing when there is no thread id
+    person: "テストの後片付けについての細かい点です。普段の利用には関係ありません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 3"

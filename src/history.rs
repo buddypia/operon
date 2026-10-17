@@ -2863,6 +2863,23 @@ pub(crate) fn matches_native_session_for_launch(
             .is_some_and(|message| message.contains(tracking_token))
 }
 
+/// Deletes a Codex thread through Codex's own app server, which takes its
+/// rollout and its row in Codex's thread index together. Removing the rollout
+/// file alone left the row behind. The live restore tests use it to take back
+/// what they restored (change 168).
+#[cfg(test)]
+pub(crate) fn delete_codex_thread(thread_id: &str) -> UiResult<()> {
+    let mut app_server = CodexAppServer::start().map_err(|error| error.to_string())?;
+    let deleted = app_server.initialize().and_then(|()| {
+        app_server.request(
+            "thread/delete",
+            serde_json::json!({ "threadId": thread_id }),
+        )
+    });
+    app_server.stop();
+    deleted.map(|_| ())
+}
+
 impl CodexAppServer {
     fn start() -> Result<Self> {
         // The one child that cannot go through `run_command_with_output_limit`:
