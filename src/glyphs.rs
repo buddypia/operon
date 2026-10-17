@@ -112,6 +112,8 @@ pub(crate) const ICON_NEXT: &str = icons::CARET_DOWN;
 /// The ナレッジ tab, and a knowledge entry kept by hand (change 157).
 pub(crate) const ICON_KNOWLEDGE: &str = icons::LIGHTBULB;
 pub(crate) const ICON_PIN: &str = icons::PUSH_PIN;
+/// 「全体を表示」 on the knowledge map: fit every point in view.
+pub(crate) const ICON_FIT: &str = icons::ARROWS_OUT;
 
 /// The whole vocabulary, so a test can check it rather than trusting that every
 /// name above happens to be spelled the way Phosphor spells it. A glyph missing
@@ -173,6 +175,7 @@ pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[
     ("ICON_DRAG_HANDLE", ICON_DRAG_HANDLE),
     ("ICON_KNOWLEDGE", ICON_KNOWLEDGE),
     ("ICON_PIN", ICON_PIN),
+    ("ICON_FIT", ICON_FIT),
 ];
 
 /// Each CLI's own product mark, so a card names an agent the way its vendor

@@ -40,8 +40,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Build in plan.md order; step 1 (constants and the layout table contracts) is next."
+resume: "Code and review are committed; wait for CI on the branch head, then close state.yaml, land on main, package, and swap the installed app."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,12 +70,12 @@ resume: "Build in plan.md order; step 1 (constants and the layout table contract
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  review: "human pending rust-reviewer and durability-reviewer per routes.yaml feature (full)"
+  review: "human passed rust-reviewer, subprocess-safety-reviewer, durability-reviewer per review.yaml; minors carried there"
   ci: "machine pending gh run on the branch head"
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh (21 metrics within their bands, 2026-10-17)"
   release-binary: "machine pending touches src/knowledge.rs, src/app/knowledge.rs, src/ui, src/config.rs: the installed app goes stale, so it ends with bash scripts/package-macos.sh and the swap"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 23 of 24, the miss fixed and re-swept by hand; Req 9 swept in release; review fixes each watched failing (plan.md Departures)"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

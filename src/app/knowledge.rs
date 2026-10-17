@@ -35,6 +35,23 @@ impl KnowledgeSort {
     }
 }
 
+/// 「表示: 一覧 / マップ」 (change 171). Held until the app quits, as the sort is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum KnowledgeLayoutMode {
+    #[default]
+    List,
+    Map,
+}
+
+/// What the dimming was worked out for: the map, the search, the kind filter.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct MapDimKey {
+    map: usize,
+    query: Option<String>,
+    hits: usize,
+    kind: Option<KnowledgeKind>,
+}
+
 /// One project's tab: the last snapshot, and the order its rows are drawn in,
 /// computed when the snapshot or the sort changes rather than every frame.
 #[derive(Debug, Clone, Default)]
@@ -43,6 +60,20 @@ pub(crate) struct KnowledgeView {
     pub(crate) error: Option<String>,
     pub(crate) order: Vec<usize>,
     pub(crate) order_key: Option<(KnowledgeSort, Option<KnowledgeKind>)>,
+    /// The last finished map and the snapshot it was made from; the map is
+    /// drawn against that snapshot's entries, never the current one's.
+    pub(crate) map: Option<Arc<KnowledgeMap>>,
+    pub(crate) map_for: Option<Arc<KnowledgeSnapshot>>,
+    /// Set by a failed layout; only 「再試行」 clears it, so a failure is not
+    /// retried at frame rate.
+    pub(crate) map_error: Option<String>,
+    pub(crate) map_view: MapView,
+    pub(crate) map_group: Option<MapGroupChoice>,
+    pub(crate) map_labels: LabelCache,
+    pub(crate) map_dimmed: Vec<bool>,
+    pub(crate) map_dimmed_key: Option<MapDimKey>,
+    /// A box to frame on the next frame, once the map's rect is known.
+    pub(crate) map_frame: Option<([f32; 2], [f32; 2])>,
 }
 
 impl KnowledgeView {
@@ -166,6 +197,7 @@ pub(crate) struct KnowledgeState {
     pub(crate) confirm_clear: Option<Uuid>,
     pub(crate) sort: KnowledgeSort,
     pub(crate) kind_filter: Option<KnowledgeKind>,
+    pub(crate) layout_mode: KnowledgeLayoutMode,
     pub(crate) session_hits: Vec<IndexedSessionHit>,
     pub(crate) command_line: String,
 }
@@ -196,6 +228,7 @@ impl KnowledgeState {
             confirm_clear: None,
             sort: KnowledgeSort::default(),
             kind_filter: None,
+            layout_mode: KnowledgeLayoutMode::default(),
             session_hits: Vec::new(),
             command_line: knowledge_command_line(&executable),
         }
@@ -426,6 +459,88 @@ impl OperonApp {
             Err(error) => view.error = Some(error),
         }
         view.order_key = None;
+    }
+
+    /// Ask for the map of the project's current snapshot. Returns before
+    /// spawning — or copying anything — while a layout is in flight, after one
+    /// failed, or when the map already belongs to this snapshot. The snapshot is
+    /// shared, not copied: the task reads it through its `Arc`.
+    pub(crate) fn request_knowledge_map(&mut self, project_id: Uuid) {
+        let key = BackgroundKey::KnowledgeMap(project_id);
+        if self.background_tasks.contains(&key) {
+            return;
+        }
+        let Some(view) = self.knowledge.views.get(&project_id) else {
+            return;
+        };
+        let Some(snapshot) = view.snapshot.clone() else {
+            return;
+        };
+        if view.map_error.is_some()
+            || view
+                .map_for
+                .as_ref()
+                .is_some_and(|from| Arc::ptr_eq(from, &snapshot))
+        {
+            return;
+        }
+        let previous = view.map.clone();
+        let root = self.knowledge.root.clone();
+        self.spawn_background(key, move || BackgroundResult::KnowledgeMapped {
+            project_id,
+            result: knowledge_map(
+                &root,
+                project_id,
+                &snapshot.entries,
+                previous.as_deref(),
+                now(),
+            )
+            .map(Arc::new)
+            .map_err(|error| error.to_string()),
+            from: snapshot,
+        });
+    }
+
+    /// A map made from a snapshot the tab no longer holds is dropped, and
+    /// `map_for` is left as it was, so the next frame asks for the current one.
+    pub(crate) fn apply_knowledge_map(
+        &mut self,
+        project_id: Uuid,
+        from: Arc<KnowledgeSnapshot>,
+        result: UiResult<Arc<KnowledgeMap>>,
+    ) {
+        let Some(view) = self.knowledge.views.get_mut(&project_id) else {
+            return;
+        };
+        if !view
+            .snapshot
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &from))
+        {
+            return;
+        }
+        match result {
+            Ok(map) => {
+                view.map = Some(map);
+                view.map_error = None;
+            }
+            // `map_for` is about to name `from`, and a map is only ever drawn
+            // against the snapshot `map_for` names: the old map's points no
+            // longer line up with these entries, so it goes.
+            Err(error) => {
+                view.map = None;
+                view.map_error = Some(error);
+            }
+        }
+        view.map_for = Some(from);
+    }
+
+    pub(crate) fn retry_knowledge_map(&mut self, project_id: Uuid) {
+        if let Some(view) = self.knowledge.views.get_mut(&project_id) {
+            view.map_error = None;
+            view.map_for = None;
+        }
+        self.request_knowledge_map(project_id);
     }
 
     pub(crate) fn apply_knowledge_run(
@@ -684,12 +799,28 @@ impl OperonApp {
             self.knowledge.hits = None;
         }
         ui.add_space(SPACE_XS);
+        let has_entries = !snapshot.entries.is_empty();
         ui.horizontal(|ui| {
-            ui.label(RichText::new(tr("並び:")).color(palette.text_muted));
-            for sort in KnowledgeSort::ALL {
-                ui.radio_value(&mut self.knowledge.sort, sort, sort.label());
+            if has_entries {
+                ui.label(RichText::new(tr("表示:")).color(palette.text_muted));
+                for (mode, label) in [
+                    (KnowledgeLayoutMode::List, tr("一覧")),
+                    (KnowledgeLayoutMode::Map, tr("マップ")),
+                ] {
+                    let selected = self.knowledge.layout_mode == mode;
+                    if nav_tab(ui, palette, "", label, selected).clicked() {
+                        self.knowledge.layout_mode = mode;
+                    }
+                }
+                ui.add_space(SPACE_LG);
             }
-            ui.add_space(SPACE_LG);
+            if !has_entries || self.knowledge.layout_mode == KnowledgeLayoutMode::List {
+                ui.label(RichText::new(tr("並び:")).color(palette.text_muted));
+                for sort in KnowledgeSort::ALL {
+                    ui.radio_value(&mut self.knowledge.sort, sort, sort.label());
+                }
+                ui.add_space(SPACE_LG);
+            }
             ui.label(RichText::new(tr("種類:")).color(palette.text_muted));
             egui::ComboBox::from_id_salt("knowledge-kind")
                 .selected_text(
@@ -715,6 +846,8 @@ impl OperonApp {
                 RichText::new(tr("まだナレッジはありません。このプロジェクトで会話を続けると、重要なやり取りがここに追加されます。"))
                     .color(palette.text_muted),
             );
+        } else if self.knowledge.layout_mode == KnowledgeLayoutMode::Map {
+            self.ui_knowledge_map(ui, project, &snapshot);
         } else {
             self.ui_knowledge_rows(ui, project, &snapshot);
         }
@@ -931,6 +1064,366 @@ impl OperonApp {
                     }
                 }
             });
+    }
+
+    /// マップ: the map on the left, groups or the chosen entry on the right
+    /// (`screen.md`); below 700px the panel goes under the map.
+    fn ui_knowledge_map(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        snapshot: &KnowledgeSnapshot,
+    ) {
+        let palette = self.store.theme.palette();
+        self.request_knowledge_map(project.id);
+        let Some(view) = self.knowledge.views.get(&project.id) else {
+            return;
+        };
+        let (map, from, error) = (
+            view.map.clone(),
+            view.map_for.clone(),
+            view.map_error.clone(),
+        );
+        ui.add_space(SPACE_SM);
+        if let Some(error) = &error {
+            banner(ui, palette, ICON_ATTENTION, palette.danger, |ui| {
+                ui.label(tf!("マップを作れませんでした: {error}", error = error));
+            });
+            if secondary_button(ui, tr("再試行")).clicked() {
+                self.retry_knowledge_map(project.id);
+            }
+            ui.add_space(SPACE_SM);
+        }
+        let wide = ui.available_width() >= KNOWLEDGE_MAP_NARROW_WIDTH;
+        let size = if wide {
+            egui::vec2(
+                ui.available_width() - KNOWLEDGE_MAP_PANEL_WIDTH - SPACE_MD,
+                KNOWLEDGE_MAP_HEIGHT,
+            )
+        } else {
+            egui::vec2(ui.available_width(), KNOWLEDGE_MAP_NARROW_HEIGHT)
+        };
+        // A map whose points do not match its snapshot's entries one to one is
+        // never drawn: an index into one would miss the other.
+        let paired = match (map, from) {
+            (Some(map), Some(from)) if map.points.len() == from.entries.len() => Some((map, from)),
+            _ => None,
+        };
+        let Some((map, from)) = paired else {
+            let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+            ui.painter().rect(
+                rect,
+                6.0,
+                palette.inset,
+                egui::Stroke::new(1.0, palette.border_subtle),
+                egui::StrokeKind::Inside,
+            );
+            if error.is_none() {
+                let mut inner = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(rect)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                );
+                inner.add_space((rect.width() / 2.0 - 110.0).max(SPACE_SM));
+                inner.add(egui::Spinner::new().size(15.0).color(palette.accent));
+                inner.label(RichText::new(tr("配置を計算しています…")).color(palette.text_muted));
+            }
+            return;
+        };
+        let matched = self.refresh_map_dimming(project.id, &map, &from);
+        if wide {
+            ui.horizontal_top(|ui| {
+                self.ui_knowledge_map_canvas(ui, project, snapshot, &map, &from, size);
+                ui.add_space(SPACE_MD);
+                ui.vertical(|ui| {
+                    ui.set_width(KNOWLEDGE_MAP_PANEL_WIDTH);
+                    egui::ScrollArea::vertical()
+                        .id_salt("knowledge-map-panel")
+                        .max_height(KNOWLEDGE_MAP_HEIGHT)
+                        .show(ui, |ui| {
+                            self.ui_knowledge_map_panel(
+                                ui, project, snapshot, &map, &from, matched,
+                            );
+                        });
+                });
+            });
+        } else {
+            self.ui_knowledge_map_canvas(ui, project, snapshot, &map, &from, size);
+            ui.add_space(SPACE_SM);
+            self.ui_knowledge_map_panel(ui, project, snapshot, &map, &from, matched);
+        }
+        ui.add_space(SPACE_XS);
+        knowledge_map_legend(ui, palette);
+    }
+
+    /// Which points a search or the kind filter leaves out, worked out when the
+    /// map, the hits, or the filter change rather than every frame. Returns how
+    /// many match when something is filtering.
+    fn refresh_map_dimming(
+        &mut self,
+        project_id: Uuid,
+        map: &Arc<KnowledgeMap>,
+        from: &KnowledgeSnapshot,
+    ) -> Option<usize> {
+        let hits = self
+            .knowledge
+            .hits
+            .as_ref()
+            .filter(|(id, _, _)| *id == project_id);
+        let kind = self.knowledge.kind_filter;
+        let view = self.knowledge.views.get_mut(&project_id)?;
+        let pointer = Arc::as_ptr(map) as usize;
+        let current = view.map_dimmed_key.as_ref().is_some_and(|key| {
+            key.map == pointer
+                && key.query.as_deref() == hits.map(|(_, query, _)| query.as_str())
+                && key.hits == hits.map_or(0, |(_, _, hits)| hits.len())
+                && key.kind == kind
+        });
+        if !current {
+            view.map_dimmed = knowledge_map_dimming(
+                &from.entries,
+                hits.map(|(_, _, hits)| hits.as_slice()),
+                kind,
+            );
+            view.map_dimmed_key = Some(MapDimKey {
+                map: pointer,
+                query: hits.map(|(_, query, _)| query.clone()),
+                hits: hits.map_or(0, |(_, _, hits)| hits.len()),
+                kind,
+            });
+        }
+        (hits.is_some() || kind.is_some())
+            .then(|| view.map_dimmed.iter().filter(|dimmed| !**dimmed).count())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn ui_knowledge_map_canvas(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        snapshot: &KnowledgeSnapshot,
+        map: &Arc<KnowledgeMap>,
+        from: &KnowledgeSnapshot,
+        size: egui::Vec2,
+    ) {
+        let palette = self.store.theme.palette();
+        let chosen = self
+            .knowledge
+            .open_entry
+            .filter(|(id, _)| *id == project.id)
+            .and_then(|(_, entry)| map.entry_ids.iter().position(|id| *id == entry));
+        let Some(view) = self.knowledge.views.get_mut(&project.id) else {
+            return;
+        };
+        if let Some((min, max)) = view.map_frame.take() {
+            // The rect is the one this frame allocates: the same size as the last.
+            let rect = egui::Rect::from_min_size(ui.cursor().min, size);
+            if !view.map_view.fitted {
+                view.map_view.fit(rect, map);
+            }
+            view.map_view.frame(rect, min, max);
+        }
+        let focus = MapFocus {
+            dimmed: &view.map_dimmed,
+            chosen,
+            group: view.map_group,
+        };
+        let response = draw_knowledge_map(
+            ui,
+            palette,
+            map,
+            &from.entries,
+            size,
+            &mut view.map_view,
+            &mut view.map_labels,
+            &focus,
+            now(),
+        );
+        if let Some(index) = response.clicked {
+            let entry_id = map.entry_ids[index];
+            if snapshot.entries.iter().any(|entry| entry.id == entry_id) {
+                self.open_knowledge_entry(project.id, entry_id);
+            }
+        } else if response.clicked_empty {
+            self.knowledge.open_entry = None;
+        }
+    }
+
+    /// Open an entry from the map or its panel: the same as opening its row,
+    /// a reference included.
+    pub(crate) fn open_knowledge_entry(&mut self, project_id: Uuid, entry_id: i64) {
+        if self.knowledge.open_entry != Some((project_id, entry_id)) {
+            self.knowledge.open_entry = Some((project_id, entry_id));
+            self.edit_knowledge(project_id, KnowledgeEdit::Reference(entry_id));
+        }
+    }
+
+    fn ui_knowledge_map_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        snapshot: &KnowledgeSnapshot,
+        map: &Arc<KnowledgeMap>,
+        from: &KnowledgeSnapshot,
+        matched: Option<usize>,
+    ) {
+        let palette = self.store.theme.palette();
+        match matched {
+            Some(0) => {
+                ui.label(
+                    RichText::new(tr("一致するナレッジはありません。")).color(palette.text_muted),
+                );
+            }
+            Some(count) => {
+                ui.label(RichText::new(tf!("{n} 件が一致", n = count)).color(palette.text_muted));
+            }
+            None => {}
+        }
+        let open = self
+            .knowledge
+            .open_entry
+            .filter(|(id, _)| *id == project.id)
+            .and_then(|(_, entry)| {
+                snapshot
+                    .entries
+                    .iter()
+                    .find(|candidate| candidate.id == entry)
+            })
+            .cloned();
+        if let Some(entry) = open {
+            if icon_text_button(ui, ICON_BACK, tr("グループ一覧")).clicked() {
+                self.knowledge.open_entry = None;
+            }
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new(entry.kind.label())
+                        .size(12.0)
+                        .strong()
+                        .color(palette.accent_text),
+                );
+                ui.label(RichText::new(&entry.title).color(palette.text_strong));
+            });
+            ui.horizontal(|ui| {
+                freshness_bar(ui, palette, entry.freshness(now()));
+                ui.label(
+                    RichText::new(tf!("参照 {n}", n = entry.reference_count))
+                        .size(12.0)
+                        .color(palette.text_muted),
+                );
+            });
+            self.ui_knowledge_detail(ui, project, &entry);
+            return;
+        }
+        let choice = self
+            .knowledge
+            .views
+            .get(&project.id)
+            .and_then(|view| view.map_group);
+        if let Some(choice) = choice {
+            if icon_text_button(ui, ICON_BACK, tr("グループ一覧")).clicked() {
+                if let Some(view) = self.knowledge.views.get_mut(&project.id) {
+                    view.map_group = None;
+                    view.map_frame = Some((map.min, map.max));
+                }
+            }
+            let members: Vec<usize> = match choice {
+                MapGroupChoice::Group(group) => map
+                    .groups
+                    .get(group)
+                    .map(|group| group.members.clone())
+                    .unwrap_or_default(),
+                MapGroupChoice::Ungrouped => (0..map.points.len())
+                    .filter(|index| map.group_of[*index].is_none())
+                    .collect(),
+            };
+            let name = match choice {
+                MapGroupChoice::Group(group) => map
+                    .groups
+                    .get(group)
+                    .map(|group| group.name.clone())
+                    .unwrap_or_default(),
+                MapGroupChoice::Ungrouped => tr("その他").to_owned(),
+            };
+            ui.label(
+                RichText::new(tf!("{name}  {n} 件", name = name, n = members.len()))
+                    .color(palette.text_strong),
+            );
+            for index in members {
+                let Some(entry) = from.entries.get(index) else {
+                    continue;
+                };
+                if map_panel_row(ui, palette, |ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                    paint_point_shape(
+                        ui.painter(),
+                        rect.center(),
+                        point_shape(entry.kind),
+                        4.5,
+                        palette.accent,
+                    );
+                    ui.add(egui::Label::new(&entry.title).truncate());
+                })
+                .clicked()
+                {
+                    self.open_knowledge_entry(project.id, entry.id);
+                }
+            }
+            return;
+        }
+        ui.label(RichText::new(tr("グループ")).color(palette.text_strong));
+        if map.groups.is_empty() {
+            ui.label(RichText::new(tr("グループはまだありません")).color(palette.text_muted));
+        }
+        let mut chosen = None;
+        for (index, group) in map.groups.iter().enumerate() {
+            if map_panel_row(ui, palette, |ui| {
+                // A fixed-width cell so the counts line up; the name starts at
+                // its left edge (`add_sized` would centre it).
+                let (cell, _) = ui.allocate_exact_size(
+                    egui::vec2((ui.available_width() - 150.0).max(80.0), CONTROL_HEIGHT),
+                    egui::Sense::hover(),
+                );
+                ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(cell)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                )
+                .add(egui::Label::new(&group.name).truncate());
+                ui.label(
+                    RichText::new(tf!("{n} 件", n = group.members.len()))
+                        .size(12.0)
+                        .color(palette.text_muted),
+                );
+                freshness_bar(ui, palette, group.freshness);
+            })
+            .clicked()
+            {
+                chosen = Some(MapGroupChoice::Group(index));
+            }
+        }
+        let ungrouped = map.group_of.iter().filter(|group| group.is_none()).count();
+        if ungrouped > 0
+            && !map.groups.is_empty()
+            && map_panel_row(ui, palette, |ui| {
+                ui.label(
+                    RichText::new(tf!("その他 ({n} 件)", n = ungrouped)).color(palette.text_muted),
+                );
+            })
+            .clicked()
+        {
+            chosen = Some(MapGroupChoice::Ungrouped);
+        }
+        if let Some(choice) = chosen {
+            let members: Vec<[f32; 2]> = (0..map.points.len())
+                .filter(|index| choice.holds(map, *index))
+                .map(|index| map.points[index])
+                .collect();
+            if let Some(view) = self.knowledge.views.get_mut(&project.id) {
+                view.map_group = Some(choice);
+                view.map_frame = Some(map_points_bounds(&members));
+            }
+        }
     }
 
     fn ui_knowledge_detail(
@@ -1180,4 +1673,59 @@ fn freshness_bar(ui: &mut egui::Ui, palette: &Palette, freshness: f64) {
             },
         );
     }
+}
+
+/// Per entry: whether a search or the kind filter leaves it out of the map's
+/// focus. Nothing is dimmed when nothing filters.
+pub(crate) fn knowledge_map_dimming(
+    entries: &[KnowledgeEntry],
+    hits: Option<&[KnowledgeHit]>,
+    kind: Option<KnowledgeKind>,
+) -> Vec<bool> {
+    entries
+        .iter()
+        .map(|entry| {
+            let found = hits.is_none_or(|hits| hits.iter().any(|hit| hit.entry.id == entry.id));
+            let of_kind = kind.is_none_or(|kind| entry.kind == kind);
+            !(found && of_kind)
+        })
+        .collect()
+}
+
+fn map_points_bounds(points: &[[f32; 2]]) -> ([f32; 2], [f32; 2]) {
+    let mut min = [f32::MAX, f32::MAX];
+    let mut max = [f32::MIN, f32::MIN];
+    for point in points {
+        for axis in 0..2 {
+            min[axis] = min[axis].min(point[axis]);
+            max[axis] = max[axis].max(point[axis]);
+        }
+    }
+    if points.is_empty() {
+        return ([0.0, 0.0], [1.0, 1.0]);
+    }
+    (min, max)
+}
+
+/// One clickable row of the map's panel, tinted while the pointer is on it.
+fn map_panel_row(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), CONTROL_HEIGHT),
+        egui::Sense::click(),
+    );
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 4.0, palette.row_selected);
+    }
+    let mut row = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(SPACE_XS, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    row.spacing_mut().item_spacing.x = SPACE_SM;
+    contents(&mut row);
+    response
 }

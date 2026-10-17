@@ -294,6 +294,12 @@ Settings.
   conversations of opted-in projects), and from agents:
   `/Applications/Operon.app/Contents/MacOS/Operon knowledge search "query" --json`
   inside a project returns that project's notes and counts the reference.
+- 表示: マップ lays the notes out in 2D by meaning: near meanings are joined
+  by thin lines, related notes are outlined as a group named after its most
+  central note, a point's size is how often it was referenced and its strength
+  its freshness. Drag to pan, scroll or pinch to zoom; choosing a group or a
+  point opens it beside the map. The layout is computed in the background and
+  remembered, so notes stay where you last saw them as new ones arrive.
 
 ### A UI that keeps its promises
 

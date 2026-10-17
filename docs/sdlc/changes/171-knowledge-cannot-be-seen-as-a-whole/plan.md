@@ -96,4 +96,48 @@ The tree compiles after each step.
 
 ## Departures from the plan
 
-Filled in during implementation.
+- **Names.** `map.rs` names its functions after the map: `map_neighbours`,
+  `map_edges`, `map_groups`, `map_group_name`, `map_label_order`, `simulate`,
+  `convex_hull`. There is no `MapPoint`: points are `Vec<[f32; 2]>` in entry
+  order beside `entry_ids`. `draw_map` is `draw_knowledge_map`, and
+  `place_labels` takes the entries, since titles live there.
+- **Order of tests.** Steps 1–6 were written code-first, the tests after. What
+  "watched failing" was meant to prove is proved instead by the mutation sweep
+  (`mutations.py`): one break per requirement, each turning its test red.
+- **Thresholds (step 3).** Entry-shaped texts through the shipped model: same
+  topic 0.664–0.803 (median 0.755), different topics median 0.664, p95 0.710.
+  0.78 / 0.66 joined almost nothing and grouped everything; both are 0.72, at
+  which 11 of 12 topic entries land in their topic's group and all 6 unrelated
+  entries stay outside every group. The numbers are in `src/config.rs`.
+- **Time (Req 9).** 2 000 entries lay out in 0.52 s in release; the debug build
+  CI runs takes about 18 s, so the test asserts the budget only without
+  `debug_assertions` and checks correctness in both.
+- **Reuse.** `compute_map` takes the previous map and returns it unchanged
+  (`Reused`) when entry ids and vector fingerprints match, so a snapshot reload
+  that changed only counts re-runs nothing. Choosing a group sets `map_frame`,
+  framed on the next frame against that frame's rect. A result for an old
+  snapshot is dropped and `map_for` left as it was, so the next frame asks again.
+- **Step 8 data.** The scratch data folder was seeded with synthetic topic
+  vectors, not real embeddings: the model is a separate download and the
+  scratch HOME had none (the thresholds come from real embeddings, step 3). The
+  release build ran with `HOME` and `TMUX_TMPDIR` pointed at the scratch folder,
+  so no tmux server or data of the person's was touched. A search needs the
+  model; its dimming path is the kind filter's (`knowledge_map_dimming`), which
+  was shown instead.
+- **Found in step 8, fixed.** A group outlined at the map's top edge had its
+  name cut off; two groups' names could overlap; a resized window kept the old
+  framing, cutting the map off in the narrow layout; group names in the panel
+  were centred in their cell. Names now try above, below, right, then left of
+  their outline, and the view refits on resize keeping zoom and centre. Guards:
+  `knowledge_map_labels_never_overlap` (top edge, side-by-side groups) and
+  `knowledge_map_refits_when_the_window_narrows`.
+- **Sweep.** `mutations.py`: 23 of 24 caught on the first run. The one missed
+  was the settle bound (Req 5): two newcomers never pushed a placed entry near
+  5 %, so lifting the bound changed nothing. The test gained a crowded case —
+  fifteen newcomers inside one topic — and the same mutation then failed it
+  (moved 0.47 against a 0.45 bound). Req 9 holds only in release, so it was
+  swept by hand there: 40× `KNOWLEDGE_MAP_ITERATIONS` took 10.5 s and failed the
+  5 s budget; restored, 0.43 s.
+- **Controls row.** `screen.md` drew search, 表示, and 種類 on one row; the
+  build keeps 157's search field on its own row above 表示 and 種類, so the list
+  and the map share one layout and the field keeps its width.
