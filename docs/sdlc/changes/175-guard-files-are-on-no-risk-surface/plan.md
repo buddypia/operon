@@ -41,3 +41,13 @@ shape (four positional values per surface).
 - `bash scripts/check-review.sh --index` names `subprocess-safety-reviewer`.
 
 ## Departures from the plan
+
+- Review round 1 (both reviewers, Important): the test read only what a hook
+  command names, and the guards import 19 files from `.claude/scripts/lib` —
+  the Stop guard's verdict comes from `pre-ship-steps.mjs` — while
+  `.cli/_cli-dispatch.mjs` names `.claude/scripts/` as a hook home beside `.cli/`
+  and `.claude/hooks/`. The test now follows relative paths in each reached
+  guard's source; watched failing on those 19 files. `.claude/scripts` joins
+  the row, which also covers `trunk-ref-guard.mjs`, the shim commit-guard
+  installs (named by a root-relative string, which the test does not follow).
+  Still tightening only.

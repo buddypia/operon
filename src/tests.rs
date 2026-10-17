@@ -20306,6 +20306,168 @@ pub(crate) fn every_risk_surface_names_paths_that_exist() {
     );
 }
 
+/// Change 175. `docs/sdlc/risk.yaml` classified the Claude Code hooks as gate
+/// configuration but not the guards all three agent CLIs register, so change
+/// 173 widened what main permits in a file no row covered and the session had
+/// to pick a tier by judgement. Every JSON hook registration file at the top
+/// level, every repository file a hook command in it names, and every file
+/// those guards reach through a relative path in their source (an import, a
+/// `join(…)`), is under a `gate-configuration` path. The registrations are
+/// found by looking, so a fourth CLI's file is judged the day it lands. What
+/// it cannot read: a glob in a command, a path relative to a `cd`, and what a
+/// shell hook runs — `.claude/hooks` and the scripts the gates call are listed
+/// on the row by hand.
+#[test]
+pub(crate) fn every_hook_an_agent_cli_runs_is_gate_configuration() {
+    fn commands(value: &serde_json::Value, found: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, value) in map {
+                    match value.as_str() {
+                        Some(command) if key == "command" => found.push(command.to_owned()),
+                        _ => commands(value, found),
+                    }
+                }
+            }
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    commands(value, found);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let root = fs::canonicalize(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let gate: Vec<String> = flat_block("docs/sdlc/risk.yaml", "surfaces")
+        .into_iter()
+        .find(|(surface, _)| surface == "gate-configuration")
+        .and_then(|(_, tuple)| {
+            tuple
+                .split_whitespace()
+                .nth(3)
+                .map(|paths| paths.split(',').map(str::to_owned).collect())
+        })
+        .expect("risk.yaml に gate-configuration の行がありません");
+    let covered = |relative: &str| {
+        gate.iter()
+            .any(|path| relative == path || relative.starts_with(&format!("{path}/")))
+    };
+    // A path inside the repository, as the table spells it: `.agents` is a
+    // link to `.claude`, and `/usr/bin/…` or `..` is not a repository file.
+    let repository_file = |candidate: &Path| -> Option<String> {
+        let path = fs::canonicalize(root.join(candidate)).ok()?;
+        let relative = path.strip_prefix(&root).ok()?;
+        path.is_file()
+            .then(|| relative.to_string_lossy().into_owned())
+    };
+
+    let mut registrations = std::collections::BTreeMap::new();
+    for entry in fs::read_dir(&root).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with('.') || name == ".git" {
+            continue;
+        }
+        for file in ["hooks.json", "settings.json"] {
+            let Some(relative) = repository_file(&Path::new(&name).join(file)) else {
+                continue;
+            };
+            let text = fs::read_to_string(root.join(&relative)).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&text)
+                .unwrap_or_else(|error| panic!("{relative} を JSON として読めません: {error}"));
+            let mut found = Vec::new();
+            commands(&value, &mut found);
+            if !found.is_empty() {
+                registrations.insert(relative, found);
+            }
+        }
+    }
+
+    // What a guard imports, or hands to `join(…)`, runs with it: a relative
+    // path in its own source that names a repository file (review of 175 —
+    // the Stop guard imports `.claude/scripts/lib/pre-ship-steps.mjs`).
+    fn relative_literals(source: &str) -> Vec<&str> {
+        let mut found = Vec::new();
+        let mut rest = source;
+        while let Some(start) = rest.find(['\'', '"']) {
+            // Both quotes are ASCII, so the byte is the character.
+            let quote = char::from(rest.as_bytes()[start]);
+            let body = &rest[start + 1..];
+            // A newline ends it too, so an apostrophe in a comment costs one line.
+            let Some(end) = body.find([quote, '\n']) else {
+                break;
+            };
+            let literal = &body[..end];
+            if literal.starts_with("./") || literal.starts_with("../") {
+                found.push(literal);
+            }
+            rest = &body[end + 1..];
+        }
+        found
+    }
+
+    let mut uncovered = std::collections::BTreeSet::new();
+    let mut runs = std::collections::BTreeMap::new();
+    let mut imported = 0;
+    for (registration, found) in &registrations {
+        if !covered(registration) {
+            uncovered.insert(registration.clone());
+        }
+        for command in found {
+            for word in command.split(|c: char| c.is_whitespace() || c == '"' || c == '\'') {
+                let named = std::iter::once(word)
+                    .chain(word.match_indices('/').map(|(at, _)| &word[at + 1..]))
+                    .filter(|candidate| !candidate.is_empty() && !candidate.starts_with('/'))
+                    .find_map(|candidate| repository_file(Path::new(candidate)));
+                if let Some(file) = named {
+                    runs.entry(file).or_insert_with(|| registration.clone());
+                }
+            }
+        }
+    }
+    let mut pending: Vec<String> = runs.keys().cloned().collect();
+    while let Some(file) = pending.pop() {
+        if !matches!(
+            Path::new(&file).extension().and_then(|e| e.to_str()),
+            Some("mjs" | "js" | "cjs")
+        ) {
+            continue;
+        }
+        let source = fs::read_to_string(root.join(&file)).unwrap_or_default();
+        let directory = Path::new(&file).parent().unwrap_or(Path::new(""));
+        for literal in relative_literals(&source) {
+            if let Some(reached) = repository_file(&directory.join(literal)) {
+                if !runs.contains_key(&reached) {
+                    imported += 1;
+                    runs.insert(reached.clone(), file.clone());
+                    pending.push(reached);
+                }
+            }
+        }
+    }
+    for (file, via) in &runs {
+        if !covered(file) {
+            uncovered.insert(format!("{file}（{via} から）"));
+        }
+    }
+    assert!(
+        registrations.len() >= 3,
+        "フックの登録ファイルが {} 件しか見つかりません — 探し方が壊れています: {:?}",
+        registrations.len(),
+        registrations.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        runs.len() > imported && imported > 0,
+        "フックが実行するファイル {} 件、そこから読み込むファイル {imported} 件 — コマンドか import の読み方が壊れています",
+        runs.len() - imported
+    );
+    assert!(
+        uncovered.is_empty(),
+        "docs/sdlc/risk.yaml の gate-configuration に入っていない、フックとして実行されるファイルがあります。\
+         その行の paths に足してください: {uncovered:#?}"
+    );
+}
+
 #[test]
 /// The readiness gate is the only mechanism here whose worth is entirely in its
 /// behaviour: a script that exists, is executable, and accepts everything is

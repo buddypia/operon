@@ -16,24 +16,31 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
-  attempts: "0 3"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
   risk: "high"
   readiness: "go"
   screen: "n/a"
 
-resume: "Write the failing test, watch it fail, then add the paths to the row."
+resume: "Done. Reviewed at round 2; the open nits are carried in review.yaml."
 
 contract:
-  failing-test-first: "machine pending
-    every_hook_an_agent_cli_runs_is_gate_configuration fails on today's table"
-  three-gates: "machine pending"
+  failing-test-first: "machine passed
+    every_hook_an_agent_cli_runs_is_gate_configuration failed on main's table
+    naming .claude/hooks.json, .codex/hooks.json, .cli/_cli-dispatch.mjs and the
+    six .cli/hooks guards from each registration that runs them; after review
+    round 1 it follows the guards' relative imports and failed again on the 19
+    .claude/scripts/lib files they reach; passes with the row extended"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) · the risk, route and review-gate tests (14 passed);
+    the suite runs in CI"
   release-binary: "machine waived touches docs/sdlc/risk.yaml and src/tests.rs
     only; the installed app is not built from either"
-  review: "human pending"
+  review: "human passed rust-reviewer approve-with-nits 0 5 ·
+    subprocess-safety-reviewer approve-with-nits 0 3, round 2"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

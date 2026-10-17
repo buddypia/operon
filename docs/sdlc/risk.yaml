@@ -48,7 +48,17 @@ surfaces:
   # What the gates permit. A change here can switch off every other row. The
   # approval rule and its checker are here because they decide which artifacts a
   # person sees at all (sdlc 082): loosening them is loosening every gate.
-  gate-configuration: "high paused no .claude/settings.json,.claude/hooks,.claude/agents,.githooks,scripts/check-review.sh,scripts/check-release-preconditions.sh,docs/sdlc/routes.yaml,docs/sdlc/risk.yaml,scripts/check-approvals.sh,.claude/skills/sdlc/references/approval.md"
+  #
+  # The whole enforcement plane, as a repository protects its CI and policy
+  # configuration (change 175): what the gates run — every agent CLI's hook
+  # registration, the guards in .cli it names, and what they import from
+  # .claude/scripts (the dispatcher's third hook home), checked by
+  # every_hook_an_agent_cli_runs_is_gate_configuration — the policy they read
+  # (.claude/config: the trunk allowlist), the scripts they delegate a verdict
+  # to (ci-verified, run-bounded, check-readiness), and the CI run they accept
+  # as proof. Directory prefixes, as CODEOWNERS uses them: a few files under
+  # them enforce nothing, and the next guard added beside them is covered.
+  gate-configuration: "high paused no .claude/settings.json,.claude/hooks,.claude/hooks.json,.claude/agents,.claude/config,.claude/scripts,.cli,.codex/hooks.json,.githooks,.github/workflows,scripts/check-review.sh,scripts/check-release-preconditions.sh,scripts/ci-verified.sh,scripts/run-bounded.sh,scripts/check-readiness.sh,docs/sdlc/routes.yaml,docs/sdlc/risk.yaml,scripts/check-approvals.sh,.claude/skills/sdlc/references/approval.md"
 
   # Local-first is a promise a dependency can break on its own.
   dependencies: "high paused no Cargo.toml,Cargo.lock"
