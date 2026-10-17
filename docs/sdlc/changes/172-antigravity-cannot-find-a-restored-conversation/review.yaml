@@ -1,0 +1,34 @@
+# Review record for 172-antigravity-cannot-find-a-restored-conversation.
+#
+# The change: a conversation restored into Antigravity is written the way agy
+# writes its own — WAL journal, user_version 1 — so agy's stamp on open no
+# longer waits on Gemini.app's hub, which reads every new conversation at once;
+# a file SQLite leaves out of WAL fails the restore instead of reaching the
+# store; failure paths remove the file's -wal and -shm with it.
+#
+# Round 1: rust-reviewer found the journal mode SQLite reported was discarded,
+# so a file it could not put in WAL would have restored silently and brought
+# the symptom back (Important), plus three nits. Round 2 returned the mode from
+# the write, refused anything but `wal` through tf! (EN and KO rows added), and
+# pinned it with an in-memory database, watched failing with the check off.
+#
+# Verified by rust-reviewer: the pragmas run in autocommit before the
+# transaction; close() on the private temporary name checkpoints and removes
+# its -wal before the rename; dropping either pragma fails the new test; the
+# read-only verification's sidecars are the ones agy leaves while a
+# conversation is open, and SQLite reinitialises them.
+
+digest: "bfa47004c03ad93c"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/2 · a checkpoint that fails on close would leave the temporary's -wal and -shm in agy's store after the rename
+    person: "まれな失敗のときに、agy の保存場所に一時ファイルが2つ残る可能性があります。会話そのものには影響しません。対応は不要です。"
+  - rust-reviewer/1/3 · the test compares the schema version with the same constant the writer uses, so both would move together
+    person: "テストの書き方についての細かい点です。動作には関係ありません。対応は不要です。"
+  - rust-reviewer/1/4 · on a failed verification the removal of the file and its sidecars does not report its own failure
+    person: "復元の確認に失敗し、さらに後片付けにも失敗した場合だけ、使えない会話ファイルが agy の保存場所に1件残ることがあります。次の復元は新しい名前で書くので影響しません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 3"

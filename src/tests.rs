@@ -699,22 +699,17 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_claude_
 
 /// A restore into Codex or Antigravity writes its conversation into the
 /// person's real store too; until change 168 every run left one there. The
-/// file goes with the `-wal` and `-shm` SQLite leaves beside it once `agy` has
-/// opened it, and nothing else: Antigravity's history index is appended to by
-/// every running `agy`, and rewriting it to drop a line could drop one of theirs.
+/// file goes with the `-wal` and `-shm` SQLite leaves beside it, and nothing
+/// else: Antigravity's history index is appended to by every running `agy`,
+/// and rewriting it to drop a line could drop one of theirs.
 pub(crate) fn remove_restored_conversation_file(path: &Path) {
-    let report = |path: &Path, removed: std::io::Result<()>| match removed {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            eprintln!("could not remove {}: {error}", path.display());
+    for file in sqlite_file_and_sidecars(path) {
+        match fs::remove_file(&file) {
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                eprintln!("could not remove {}: {error}", file.display());
+            }
+            _ => {}
         }
-        _ => {}
-    };
-    report(path, fs::remove_file(path));
-    for sidecar in ["-wal", "-shm"] {
-        let mut beside = path.as_os_str().to_owned();
-        beside.push(sidecar);
-        let beside = PathBuf::from(beside);
-        report(&beside, fs::remove_file(&beside));
     }
 }
 
@@ -1646,6 +1641,63 @@ pub(crate) fn antigravity_restore_refuses_a_conversation_it_cannot_read_back() {
     assert!(verify_antigravity_conversation(&path, &shortened)
         .unwrap_err()
         .contains("多くのターンを含んでいます"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// agy opens a conversation by stamping its schema version, and a new one is
+/// already being read when agy starts: Gemini.app's hub opens each conversation
+/// the moment it appears. Written with a rollback journal, the stamp waited on
+/// that reader, agy logged `set user_version: database is locked`, and the
+/// terminal said the conversation was not found (change 172).
+#[test]
+pub(crate) fn a_restored_antigravity_conversation_opens_while_another_process_reads_it() {
+    let root = std::env::temp_dir().join(format!("operon-agy-reader-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let conversation_id = "33333333-3333-3333-3333-333333333333";
+    let path = root.join(format!("{conversation_id}.db"));
+    let turns = vec![
+        ("user", "最初の依頼".to_owned()),
+        ("assistant", "その返答".to_owned()),
+    ];
+    write_antigravity_conversation(&path, conversation_id, &turns, 1).unwrap();
+    verify_antigravity_conversation(&path, &turns).unwrap();
+
+    let reader =
+        rusqlite::Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .unwrap();
+    reader.execute_batch("BEGIN").unwrap();
+    let steps: i64 = reader
+        .query_row("SELECT count(*) FROM steps", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(steps, 2);
+
+    let agy = rusqlite::Connection::open(&path).unwrap();
+    agy.busy_timeout(Duration::ZERO).unwrap();
+    let (version, journal): (i64, String) = agy
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .and_then(|version| {
+            agy.query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .map(|journal| (version, journal))
+        })
+        .unwrap();
+    agy.pragma_update(None, "user_version", ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION)
+        .expect("a reader must not lock agy out of a restored conversation");
+    assert_eq!(
+        (version, journal.as_str()),
+        (ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION, "wal"),
+        "the file must already be what agy makes of it on open"
+    );
+    drop(agy);
+    drop(reader);
+
+    // SQLite keeps a journal mode it cannot enter and says so only by naming
+    // the one it kept, as an in-memory database does; a restore must not
+    // succeed on a file agy would be locked out of again.
+    assert!(
+        build_antigravity_conversation(Path::new(":memory:"), conversation_id, &turns, 1)
+            .unwrap_err()
+            .contains("WAL")
+    );
     fs::remove_dir_all(root).unwrap();
 }
 
