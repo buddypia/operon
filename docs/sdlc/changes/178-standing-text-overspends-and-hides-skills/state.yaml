@@ -20,11 +20,10 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Done but for the evals. At 4147ea9 eval 004 failed for a reason
-  of its own making: the eval worktree carried this change in flight, so
-  guard-stage.sh refused the agent's edit to src/main.rs (high) as part of a
-  medium change. Closed here so 004 and 006 run against a tree with nothing
-  in flight."
+resume: "Done. The evals were run against main beside this branch and do
+  the same on both: 004 and 006 now fail on main too (plan.md, Departures).
+  Five reviewer nits carried in review.yaml. No lesson: the in-flight
+  contamination was this change's own, and closing it was the fix."
 
 contract:
   failing-test-first: "machine passed on main's root documents
@@ -45,10 +44,11 @@ contract:
     unknown event accepted (PostToolUSe), the flat-shape check, the type check,
     the empty-command check; src/tests.rs restored and cmp-identical
     (.tmp/178/mutate.py)"
-  evals: "human pending at 4147ea9: 005 passed 1/1; 004 failed 0/1, the
-    agent refused by guard-stage.sh because this change was still in flight in
-    the eval worktree (not the cap: it named the module map line it owed); 006
-    infra 0/0. 004 and 006 to run again with the change closed"
+  evals: "human waived no regression against main, which fails the same two:
+    004 0/3 at b4b0e94 and 0/3 at main 029eb90, every run stopping on
+    feature-pilot's DUPLICATE (send_macos_notification exists); 006 0/1 plus
+    2 timeouts here, 0/1 plus 1 timeout on main, the judged runs asking where
+    the badge is used rather than add dead code; 005 passed 1/1 at 4147ea9"
   review: "human passed rust-reviewer approve-with-nits 0 5 at
     7481d73a260fb41b (round 1) and at bdcc165aff5b0090 (round 2, the eval
     fix); five nits carried in review.yaml"

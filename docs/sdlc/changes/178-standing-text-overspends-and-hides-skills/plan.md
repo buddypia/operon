@@ -101,4 +101,12 @@ until step 2.
   add the line a new module owes. So the line now says "a new rule goes in
   this order" and no longer quotes the cap — the form Harness² asks for, a
   check rather than a sentence. 7,347 characters, 7,395 bytes.
-
+- **Evals 004 and 006 fail on main as well.** Rerun with this change closed
+  (b4b0e94) and against main (029eb90) side by side: 004 failed 3 of 3 on
+  each, every agent stopping at feature-pilot's `DUPLICATE` because
+  `send_macos_notification` already exists; 006 failed every judged run on
+  each (1 here, 1 on main) with the rest timing out, the agent asking where
+  the badge would be used rather than commit code nothing calls. Main's single
+  004 pass this morning was the lucky sample. Both prompts ask for code with
+  no caller, which the commit gate and lesson 005 now argue against; fixing
+  the evals is outside this change.
