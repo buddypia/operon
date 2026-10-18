@@ -12,7 +12,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -20,8 +20,11 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Built and verified locally. Next: rust-reviewer on the staged diff,
-  review.yaml, commit, then scripts/run-evals.sh against the commit."
+resume: "Done but for the evals. At 4147ea9 eval 004 failed for a reason
+  of its own making: the eval worktree carried this change in flight, so
+  guard-stage.sh refused the agent's edit to src/main.rs (high) as part of a
+  medium change. Closed here so 004 and 006 run against a tree with nothing
+  in flight."
 
 contract:
   failing-test-first: "machine passed on main's root documents
@@ -42,9 +45,10 @@ contract:
     unknown event accepted (PostToolUSe), the flat-shape check, the type check,
     the empty-command check; src/tests.rs restored and cmp-identical
     (.tmp/178/mutate.py)"
-  evals: "human pending eval 004 failed 0/1 at 5d9278c against main's 1/1,
-    the agent citing the quoted cap; the cap left AGENTS.md's prose (plan.md,
-    Departures). 004, 005, 006 to run against the fixed commit"
+  evals: "human pending at 4147ea9: 005 passed 1/1; 004 failed 0/1, the
+    agent refused by guard-stage.sh because this change was still in flight in
+    the eval worktree (not the cap: it named the module map line it owed); 006
+    infra 0/0. 004 and 006 to run again with the change closed"
   review: "human passed rust-reviewer approve-with-nits 0 5 at
     7481d73a260fb41b (round 1) and at bdcc165aff5b0090 (round 2, the eval
     fix); five nits carried in review.yaml"
