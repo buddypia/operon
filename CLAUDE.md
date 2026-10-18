@@ -4,23 +4,8 @@ Shared agent rules live in `AGENTS.md` and apply here too:
 
 @AGENTS.md
 
-## How work moves through this repository
-
-`.claude/skills/feature-pilot/SKILL.md` is the entry point for anything past a
-one-line fix, and `docs/sdlc/README.md` is the six-stage pipeline it runs. Skip
-it for a typo.
-
-- **Stopping is a state.** Record `awaiting-user`, `blocked`, or `failed` in
-  `state.yaml` rather than stopping silently.
-- **Plan mode is the default.** Interrogate what breaks, what was assumed, and
-  alternatives; commit `plan.md` before editing source files.
-- **A mistake made twice becomes a check.** Conventions go here; scoped rules go
-  in `.claude/skills/` or `.claude/rules/`; checks go in `src/tests.rs` or
-  `evals/`, with an entry in `docs/sdlc/lessons.md` whose **Guard** column names
-  what was watched failing.
-- **`git commit` runs fmt and clippy; CI runs the suite** before merging to
-  `main`. Do not quiet a failing test.
-- `REVIEW.md` is the review policy. `.claude/skills/ship/SKILL.md` is the release.
+**Plan mode is the default.** Interrogate what breaks, what was assumed, and
+alternatives; commit `plan.md` before editing source files.
 
 ## Shape of this codebase
 
@@ -59,7 +44,8 @@ it for a typo.
   - `src/glyphs.rs` — `ICON_*` constants and `ICON_VOCABULARY`.
   - `src/i18n.rs` — `tr`, `tf!` macro, active language, first-launch detection.
   - `src/i18n_tables.rs` — per-language message tables for `tr`.
-  - `src/exec.rs` — `run_command_with_output_limit`, `run_command_with_timeout`.
+  - `src/exec.rs` — `run_command_with_output_limit`, `run_command_with_timeout`:
+    every child process goes through one of them.
   - `src/files.rs`, `src/markdown.rs`, `src/config.rs`, `src/sys.rs`,
     `src/util.rs`, `src/prelude.rs` — file classification, markdown parsing,
     settings, platform calls, helpers, shared imports.
@@ -70,9 +56,6 @@ it for a typo.
   stay as emitted. Reach users via `tr("…")` or `tf!("…{name}", name = value)` —
   never `format!` — with rows in every table in `src/i18n_tables.rs`.
 - `eframe`/`egui` 0.31 immediate-mode GUI on macOS.
-- Route external `Command::new` calls (`tmux`, `git`, `gh`, `bash`, `codex`,
-  `claude`, `agy`) through `run_command_with_output_limit` or
-  `run_command_with_timeout`.
 - Persisted agent kind `"gemini"` launches **Antigravity's `agy`** binary; UI
   labels and `README.md` say "Antigravity".
 
@@ -87,21 +70,3 @@ each is enforced by a test in `src/tests.rs`:
 | `.claude/rules/transcripts.md` | `src/history.rs`, `src/transcript.rs`, `src/cli.rs` | judging another CLI's record kind in a `match`; inferring a terminal's conversation |
 | `.claude/rules/identifiers.md` | `src/config.rs`, `src/tmux.rs`, `src/agents.rs` | one string in two places; a guard restating what it guards |
 | `.claude/rules/rust.md` | any `.rs`, `Cargo.toml` | work in a per-frame draw path; an unargued `unwrap`; a raw `.output()` |
-
-## What the gates do not cover, and how to see the harness move
-
-| Command | Healthy output |
-|---|---|
-| `cargo fmt --check` | nothing |
-| `cargo test --locked` | `test result: ok. N passed; 0 failed; 6 ignored` |
-| `cargo clippy --locked -- -D warnings` | nothing past the compile lines |
-| `bash scripts/check-bands.sh` | `bands: N metrics within their bands` |
-| `bash scripts/check-transcript-vocabulary.sh` | `N kinds observed locally, all classified` |
-
-Those `6 ignored` tests need a live `codex`, `claude`, or `agy` and cover
-cross-CLI restore end-to-end. Touching `src/history.rs` or the archive path in
-`src/cli.rs` requires running `cargo test --locked -- --ignored` or stating that
-you could not. One that fails only sometimes is a bug until it is reproduced:
-change 168 told readers to rerun agy's `conversation "…" not found`, and
-change 172 found Operon's own file caused it. `bash scripts/harness-metrics.sh`
-prints the repository metrics JSON.

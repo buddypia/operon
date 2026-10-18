@@ -149,20 +149,30 @@ was assumed, what the alternative was — before accepting it. The approved plan
 committed as `plan.md`; if the implementation departs from it, the plan is
 updated, not abandoned.
 
-Institutional knowledge has four homes and they are not interchangeable. The
-distinction that matters is *what makes it arrive*:
+Institutional knowledge has several homes and they are not interchangeable. The
+distinction that matters is *what makes it arrive*, and what it costs while it
+waits. Google Research's Harness² measured the order to try them in — a skill, a
+script, a subagent, a hook, and the always-on file last, paid for by a cut — and
+`AGENTS.md` states it where every CLI reads it (change 178):
 
-- `CLAUDE.md` — what a new joiner needs on day one, plus every mistake Claude has
-  made twice. Loaded on every turn, so its size is a tax on every task.
+- `AGENTS.md` and `CLAUDE.md` — what a new joiner needs on day one. Loaded on
+  every turn, so their size is a tax on every task: Codex and Antigravity load
+  `AGENTS.md` alone, and Claude Code loads `CLAUDE.md`, which imports it.
+  `harness_text_every_turn_loads_stays_within_eight_thousand_characters` holds
+  the two under the 8,000 characters Harness² allows Codex, and a mistake made
+  twice becomes a check rather than another sentence here.
 - `.claude/rules/` — arrives because a **file was opened**. Each rule declares a
   `paths:` list and loads when Claude reads a matching file, so the colour system
   is present in `src/theme.rs` and absent in `src/store.rs`. This is where the
   four policies that used to sit in `CLAUDE.md` live now; moving them took
   `always_loaded_bytes` from 12 392 back under its 9 716 baseline.
-- `.claude/skills/` — arrives because a **task was recognised**.
+- `.claude/skills/` — arrives because a **task was recognised**: from the
+  description each CLI lists, and from the line in `AGENTS.md` that says when to
+  read it, which is what is left when a crowded listing drops the description.
   `durability-invariants` is read when persistence changes; `sdlc` when a change
   needs a paper trail; `root-cause` before a bug is fixed; `ship` when a build is
-  released.
+  released. `harness_agents_md_says_when_to_read_every_skill` refuses a skill
+  with no such line.
 - `.claude/agents/` — a scoped reviewer with its own context.
   `durability-reviewer` and `subprocess-safety-reviewer` are the two surfaces
   where a mistake is unrecoverable rather than merely wrong; `rust-reviewer`
@@ -183,7 +193,8 @@ diff. Nothing at this stage compiles.
 ## Stage 4 — Test
 
 Claude checks its own work before a human sees it. The commands, and what healthy
-output looks like, are in `CLAUDE.md`. For a bug fix the order is fixed: write the
+output looks like, are in `.claude/skills/feature-pilot/references/rust-build-chain.md`
+§4, read at the verify step. For a bug fix the order is fixed: write the
 failing test first, confirm it fails for the stated reason, then fix the code
 without touching the test.
 
@@ -204,7 +215,7 @@ runs them over the tree before it builds the application (sdlc 096).
 `evals/` is the regression suite for the steering itself. Each eval is a real
 prompt plus a deterministic check, seeded from a mistake that actually happened;
 `scripts/run-evals.sh` runs each one against a throwaway worktree. When the
-suite, `CLAUDE.md`, or `.claude/` changes, the evals are what says whether the
+suite, `CLAUDE.md`, `AGENTS.md`, or `.claude/` changes, the evals are what says whether the
 change helped — measured over repeated runs with an interval, because one run is
 one sample (sdlc 103). `evals/README.md` says how to read a measured run and how
 to improve the steering against the suite without fitting it to the suite.
