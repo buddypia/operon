@@ -73,3 +73,15 @@ Read with `CLAUDE.md` open for the module map and conventions.
   (copy, badge placement, key hints, and empty states) before review.
 - Run `cargo test --locked -- --ignored` when restore or archive paths change,
   and `bash scripts/check-bands.sh` when steering/reference text changes.
+
+| Command | Healthy output |
+|---|---|
+| `cargo fmt --check` | nothing |
+| `cargo test --locked` | `test result: ok. N passed; 0 failed; 6 ignored` |
+| `cargo clippy --locked -- -D warnings` | nothing past the compile lines |
+| `bash scripts/check-bands.sh` | `bands: N metrics within their bands` |
+| `bash scripts/check-transcript-vocabulary.sh` | `N kinds observed locally, all classified` |
+
+The `6 ignored` need a live `codex`, `claude`, or `agy` and cover cross-CLI
+restore end to end. `bash scripts/harness-metrics.sh` prints the repository
+metrics JSON.

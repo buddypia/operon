@@ -41,7 +41,9 @@ evidence instead of guessing. Do not proceed to a fix from here.
 - **Read the whole failure.** The assertion message, the panic location, the
   clippy span. Not the first line of it.
 - **Reproduce, and say how reliably.** Every run, or one in ten? A flake and a
-  bug need different work.
+  bug need different work. A test that fails only sometimes is a bug until it
+  is reproduced: change 168 told readers to rerun agy's
+  `conversation "…" not found`, and change 172 found Operon's own file caused it.
 - **Check what changed.** `git diff`, `git log -3`, and whether the behaviour
   ever worked. `git stash` is a legitimate diagnostic.
 - **Find the code that decides.** The branch, the `match` arm, or the comparison

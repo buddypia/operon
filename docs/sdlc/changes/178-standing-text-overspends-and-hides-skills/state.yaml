@@ -1,0 +1,67 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Applies Google Research's Harness² rules for always-on text to this
+# repository's harness: the 8,000-character budget, a When-line in AGENTS.md
+# for every skill, the hooks-file shape check, and the placement order.
+#
+# Risk: docs/sdlc/bands.yaml is the harness surface (medium, supervised). No
+# paused surface is edited: the hook files are read by the new test, not
+# changed.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. The first merge was refused: the round-2 verdict was bound
+  to 4147ea9's own diff, a merge is judged on the whole diff against main,
+  and a review.yaml cannot land on its own. rust-reviewer re-verdicted the
+  whole diff (c0afa2a7b3e6574b) on 2026-10-19: no Important, six nits
+  carried. It lands from feature/178-… as one commit squashed from
+  fix/178-… (869a2f6), so verdict and code share a commit. Evals match
+  main (plan.md, Departures). No lesson: the gate caught it."
+
+contract:
+  failing-test-first: "machine passed on main's root documents
+    harness_text_every_turn_loads_stays_within_eight_thousand_characters failed
+    at 9133 characters, harness_agents_md_says_when_to_read_every_skill for all
+    six skills, one_skill_is_the_entry_point_and_the_root_documents_name_it on
+    the missing sentence in AGENTS.md, and
+    every_document_that_names_the_gates_names_the_same_three on the build
+    reference; all pass after (18 named harness tests green)"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) clean; the suite runs in CI on the push"
+  bands: "machine passed bash scripts/check-bands.sh: 21 metrics within their
+    bands; always_loaded_bytes re-based to 7395 (7347 characters)"
+  release-binary: "machine passed no: src/tests.rs and documents only —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed every_hook_file_has_the_shape_its_cli_dispatches
+    failed with each check removed in turn, on the mutant that check owns: an
+    unknown event accepted (PostToolUSe), the flat-shape check, the type check,
+    the empty-command check; src/tests.rs restored and cmp-identical
+    (.tmp/178/mutate.py)"
+  evals: "human waived no regression against main, which fails the same two:
+    004 0/3 at b4b0e94 and 0/3 at main 029eb90, every run stopping on
+    feature-pilot's DUPLICATE (send_macos_notification exists); 006 0/1 plus
+    2 timeouts here, 0/1 plus 1 timeout on main, the judged runs asking where
+    the badge is used rather than add dead code; 005 passed 1/1 at 4147ea9"
+  review: "human passed rust-reviewer approve-with-nits 0 5 at
+    7481d73a260fb41b (round 1) and at bdcc165aff5b0090 (round 2, the eval
+    fix), then approve-with-nits 0 6 at c0afa2a7b3e6574b, the whole diff
+    against main read as one; six nits carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
