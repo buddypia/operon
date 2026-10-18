@@ -11,16 +11,17 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "medium"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 
-resume: "Intent written; evaluator review of intent.md next, then spec.md."
+resume: "Spec and plan approved at round 2. Build step 1: the tests first,
+  watched failing on main's root documents."
 
 contract:
   failing-test-first: "machine pending the budget and When-line tests fail on

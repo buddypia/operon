@@ -1,1 +1,3 @@
 2026-10-18T09:23:56Z auto intent intent.md f9370adfd88eb9e0 approve evaluator round 2: the cap is stated as Codex's and applied to Claude Code's load by analogy; the counts, the unnamed skills, and the adapter's Stop note hold against the tree
+2026-10-18T09:36:31Z auto spec spec.md 70988612dfdacbfc approve evaluator round 2: requirement 2 fails for all six on main, each mutant refused for its own reason, the budgets row names the six files
+2026-10-18T09:36:31Z auto plan plan.md f750ff794f2033ab approve evaluator round 2: no paused surface edited; checks removed one at a time against their owning mutants; the measured section states its limits
