@@ -13,10 +13,18 @@
 # tests failed in the reviewer's own sandbox run of the full suite (four again
 # on rerun); the diff adds tests and edits documents only, and CI runs the
 # suite on the push.
+#
+# Round 2, caused by an Important from the evals rather than the reviewer: eval
+# 004 failed 0/1 at 5d9278c against main's 1/1, the agent declining to add a
+# module partly because the always-on files are "capped". The cap left
+# AGENTS.md's prose (the test still enforces it). The reviewer's round-2
+# Important — plan.md backticked a path that does not exist — was fixed;
+# re-verdict approve-with-nits 0 5 at bdcc165aff5b0090, the five round-1 nits
+# still carried. The commit's own diff is against 5d9278c.
 
-digest: "7481d73a260fb41b"
+digest: "bdcc165aff5b0090"
 
-rounds: 1
+rounds: 2
 
 carried:
   - rust-reviewer/1/1 · src/tests.rs:21390 the sanity assert that the Claude Code event list was read can never fail: claude_code_hook_events also adds hook_events(CliProvider::Claude), which already holds PreToolUse, PostToolUse and Stop; assert an event only the registry has (SessionEnd, Notification)

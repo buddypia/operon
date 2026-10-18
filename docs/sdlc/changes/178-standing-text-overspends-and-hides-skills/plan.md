@@ -90,3 +90,15 @@ until step 2.
 - No screen to look at: the app is not rebuilt.
 
 ## Departures from the plan
+
+- **Eval 004 regressed, and the cap left the prose.** Against the first
+  commit (5d9278c) eval 004 failed 0 of 1 where main (029eb90) passed 1 of 1:
+  asked for an empty notify module, the agent declined, and one of its
+  reasons was that the module map line would grow "an instruction file whose
+  character count is capped". The placement line had said "with `CLAUDE.md`
+  it stays under 8,000 characters". The number is the test's to enforce, and
+  its failure message says what to cut; in prose it read as a reason not to
+  add the line a new module owes. So the line now says "a new rule goes in
+  this order" and no longer quotes the cap — the form Harness² asks for, a
+  check rather than a sentence. 7,347 characters, 7,395 bytes.
+

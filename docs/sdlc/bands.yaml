@@ -32,14 +32,14 @@ metrics:
   #
   # Re-based by change 178, cut first and read after, as steering_bytes below
   # was: duplicates of AGENTS.md left CLAUDE.md, the gate table moved to the
-  # feature-pilot build reference, and the reading fell from 9183 to 7451 with
+  # feature-pilot build reference, and the reading fell from 9183 to 7395 with
   # six When-lines added. The old tiers sat above a ceiling that now exists:
   # `harness_text_every_turn_loads_stays_within_eight_thousand_characters`
   # refuses more than 8000 characters, the cap Harness² measured for Codex. So
   # propose is that ceiling, and warn and diagnose sit under it. This band counts
   # bytes and the test characters; bytes are never fewer, so the band warns
   # before the test refuses.
-  always_loaded_bytes: "max 7451 7700 7850 8000"
+  always_loaded_bytes: "max 7395 7700 7850 8000"
   #
   # steering_bytes was re-based on 2026-09-19 by change 030, and the order of
   # operations is the whole argument for it. This file's own rule is that
