@@ -1,0 +1,34 @@
+# Review record for 178-standing-text-overspends-and-hides-skills.
+#
+# The change: Harness²'s rules for always-on text become tests. CLAUDE.md with
+# the AGENTS.md it imports is held under 8,000 characters (9,133 → 7,401), every
+# skill is named in AGENTS.md by when to read it, and the three hooks files are
+# checked against the shape their CLI dispatches, with one mutant per check.
+# Text that left the root documents moved to the build reference, the
+# root-cause skill, and docs/sdlc/README.md; the always_loaded_bytes band was
+# re-based under the new ceiling.
+#
+# Round 1, rust-reviewer: no Important. Verified the digest, the new and edited
+# tests, cargo fmt, and the bands. Seven unrelated hook, gate, and subprocess
+# tests failed in the reviewer's own sandbox run of the full suite (four again
+# on rerun); the diff adds tests and edits documents only, and CI runs the
+# suite on the push.
+
+digest: "7481d73a260fb41b"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · src/tests.rs:21390 the sanity assert that the Claude Code event list was read can never fail: claude_code_hook_events also adds hook_events(CliProvider::Claude), which already holds PreToolUse, PostToolUse and Stop; assert an event only the registry has (SessionEnd, Notification)
+    person: "設定ファイルの検査が、一覧を読めなかったときにその理由を正しく伝えない場合があります。いまは正しく読めていて、対応は不要です。"
+  - rust-reviewer/1/2 · src/tests.rs:21280 two Antigravity branches have no mutant — a group that is not an event object, and a top-level object with no groups; deleting either leaves all ten mutants passing
+    person: "Antigravity の設定ファイルが壊れたときの確認のうち二つが、まだ試されていません。いまのファイルは正しく、対応は不要です。"
+  - rust-reviewer/1/3 · src/tests.rs:21193 the When-line test accepts any line holding the skill path and the word "when "; "Read …/sdlc/SKILL.md when needed" would pass without naming a situation — require a line starting "When " or "when …, read"
+    person: "「いつ読むか」を書いた行の確認がやや甘く、状況を書かない雑な書き方でも通ってしまいます。いまは全部の行が状況を書いていて、対応は不要です。"
+  - rust-reviewer/1/4 · src/tests.rs:20949 the doc comment of one_skill_is_the_entry_point_and_the_root_documents_name_it still says both root documents name the entry; now only AGENTS.md carries the sentence and CLAUDE.md reaches it through the import
+    person: "テストの説明文が古いままです。動きには影響がなく、対応は不要です。"
+  - rust-reviewer/1/5 · AGENTS.md:1 two instructions lost their home: "Do not quiet a failing test" (old CLAUDE.md) is in no file now, and "Quit the running app before manual verification" survives only in the ship skill, read after a landed src/ change; carry the first in root-cause or the build reference §4, the second in the ship line or the build reference
+    person: "「失敗したテストを黙らせない」と「手で確かめる前にアプリを終了する」の二つの注意書きが、毎回読まれる場所から消えました。前者はコミット時の検査が失われたテストを拒むので、すぐに困ることはありません。後で書き足す予定で、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"

@@ -11,8 +11,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -20,18 +20,30 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Spec and plan approved at round 2. Build step 1: the tests first,
-  watched failing on main's root documents."
+resume: "Built and verified locally. Next: rust-reviewer on the staged diff,
+  review.yaml, commit, then scripts/run-evals.sh against the commit."
 
 contract:
-  failing-test-first: "machine pending the budget and When-line tests fail on
-    main's tree; the hooks-shape test fails on its own mutant fixtures"
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending touches src/tests.rs and documents only —
+  failing-test-first: "machine passed on main's root documents
+    harness_text_every_turn_loads_stays_within_eight_thousand_characters failed
+    at 9133 characters, harness_agents_md_says_when_to_read_every_skill for all
+    six skills, one_skill_is_the_entry_point_and_the_root_documents_name_it on
+    the missing sentence in AGENTS.md, and
+    every_document_that_names_the_gates_names_the_same_three on the build
+    reference; all pass after (18 named harness tests green)"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) clean; the suite runs in CI on the push"
+  bands: "machine passed bash scripts/check-bands.sh: 21 metrics within their
+    bands; always_loaded_bytes re-based to 7451 (7401 characters)"
+  release-binary: "machine passed no: src/tests.rs and documents only —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed every_hook_file_has_the_shape_its_cli_dispatches
+    failed with each check removed in turn, on the mutant that check owns: an
+    unknown event accepted (PostToolUSe), the flat-shape check, the type check,
+    the empty-command check; src/tests.rs restored and cmp-identical
+    (.tmp/178/mutate.py)"
   evals: "human pending scripts/run-evals.sh over the committed steering"
+  review: "human pending rust-reviewer (route modify, craft)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

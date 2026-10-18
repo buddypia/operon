@@ -15478,10 +15478,13 @@ pub(crate) fn every_document_that_names_the_gates_names_the_same_three() {
         "cargo clippy --locked -- -D warnings",
     ];
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // `CLAUDE.md` left this list with change 178: it imports `AGENTS.md`, and
+    // the table of commands and their healthy output moved to the build
+    // reference, which is read at the verify step.
     for relative in [
         "AGENTS.md",
         "CONTRIBUTING.md",
-        "CLAUDE.md",
+        ".claude/skills/feature-pilot/references/rust-build-chain.md",
         ".claude/skills/ship/SKILL.md",
         ".claude/hooks/gate-commit.sh",
         ".github/workflows/ci.yml",
@@ -20960,19 +20963,22 @@ pub(crate) fn one_skill_is_the_entry_point_and_the_root_documents_name_it() {
         "description の frontmatter に \"{SKILL_ENTRY_CLAIM}\" を含む skill はちょうど 1 つのはずです: {claimants:?}"
     );
     let entry = format!(".claude/skills/{}/SKILL.md", claimants[0]);
-    let claude = fs::read_to_string(root.join("CLAUDE.md"))
-        .unwrap_or_else(|error| panic!("CLAUDE.md が読めません: {error}"))
-        .replace('\n', " ");
+    let claude_text = fs::read_to_string(root.join("CLAUDE.md"))
+        .unwrap_or_else(|error| panic!("CLAUDE.md が読めません: {error}"));
+    let claude = claude_text.replace('\n', " ");
     let agents = fs::read_to_string(root.join("AGENTS.md"))
         .unwrap_or_else(|error| panic!("AGENTS.md が読めません: {error}"))
         .replace('\n', " ");
+    // Change 178: the sentence lives in `AGENTS.md`, the one file Codex and
+    // Antigravity load, and reaches Claude Code through the import — one copy
+    // where there were two.
     assert!(
-        claude.contains(&format!("`{entry}` is the entry point")),
-        "CLAUDE.md に \"`{entry}` is the entry point\" という一文がありません"
+        claude_text.lines().any(|line| line.trim() == "@AGENTS.md"),
+        "CLAUDE.md が @AGENTS.md を読み込んでいません — 入口の一文が Claude Code に届きません"
     );
     assert!(
-        agents.contains(&format!("`{entry}`")),
-        "AGENTS.md がバッククォートで囲んだ `{entry}` を挙げていません"
+        agents.contains(&format!("`{entry}` is the entry point")),
+        "AGENTS.md に \"`{entry}` is the entry point\" という一文がありません — Codex と Antigravity が読むのはこのファイルだけです"
     );
     for (name, _) in &skills {
         let other = format!("`.claude/skills/{name}/SKILL.md` is the entry");
@@ -21100,6 +21106,376 @@ pub(crate) fn every_skill_loads_under_codex_and_antigravity() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// What Claude Code loads on every turn is `CLAUDE.md` with the `AGENTS.md` it
+/// imports; Codex and Antigravity load `AGENTS.md` alone, so one sum bounds all
+/// three. Harness² caps Codex's `AGENTS.md` at this many characters
+/// (`always_on_max` in its Codex substrate): every token of it competes with the
+/// agent's own output budget, and the costliest failure it measured was a run
+/// that reasoned until the budget was gone and produced nothing.
+const ALWAYS_ON_CHARACTER_CAP: usize = 8_000;
+
+#[test]
+/// Change 178. Harness² rejects a harness whose always-on text is over its cap
+/// before any run, and its prompt names what pays for it: always-on prose is the
+/// expensive form, so knowledge goes to a skill, a script, a subagent, or a hook
+/// first, and text added here is paid for by a cut. `CLAUDE.md` with its import
+/// was 9,133 characters when this was written, and nothing said so. The import
+/// is checked too — without it the sum describes nothing Claude Code loads —
+/// and so is the line that states the order, since the message below points at
+/// it.
+pub(crate) fn harness_text_every_turn_loads_stays_within_eight_thousand_characters() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let read = |name: &str| {
+        fs::read_to_string(root.join(name))
+            .unwrap_or_else(|error| panic!("{name} が読めません: {error}"))
+    };
+    let claude = read("CLAUDE.md");
+    let agents = read("AGENTS.md");
+    assert!(
+        claude.lines().any(|line| line.trim() == "@AGENTS.md"),
+        "CLAUDE.md が @AGENTS.md を読み込んでいません — 毎ターンの文字数が数えられません"
+    );
+    let characters = claude.chars().count() + agents.chars().count();
+    assert!(
+        characters <= ALWAYS_ON_CHARACTER_CAP,
+        "CLAUDE.md と AGENTS.md は毎ターン読み込まれ、合計 {characters} 文字で上限 \
+         {ALWAYS_ON_CHARACTER_CAP} 文字を超えています。足した分は削って払ってください — \
+         手順は skill (AGENTS.md に When の行)、決まった操作は script、大きな入力から\
+         小さな答えを返す調査は subagent、文章で守られない規則は hook かテストへ"
+    );
+    let in_order = agents.lines().any(|line| {
+        let Some((_, order)) = line.split_once("in this order") else {
+            return false;
+        };
+        let mut from = 0;
+        ["skill", "script", "subagent", "hook", "this file last"]
+            .iter()
+            .all(|step| match order[from..].find(step) {
+                Some(at) => {
+                    from += at + step.len();
+                    true
+                }
+                None => false,
+            })
+    });
+    assert!(
+        in_order,
+        "AGENTS.md に、知識を置く順番 (skill, script, subagent, hook, 最後にこのファイル) の行がありません"
+    );
+}
+
+#[test]
+/// Change 178. Harness²'s trigger line: a skill is named in the always-on text by
+/// the situation it handles — "When <the situation>, read <its SKILL.md>" — and
+/// its validator discards a harness with a skill nobody names. `AGENTS.md` is
+/// the one file all three CLIs load, so the line goes there.
+///
+/// Measured before it was written (change 178's plan): in one-skill fixtures
+/// Codex, Antigravity, and Claude Code each opened a skill from its description
+/// alone, so here the line is not what makes a skill exist. It is what survives
+/// a crowded listing: the Claude Code session that wrote this listed
+/// durability-invariants, root-cause, and sdlc by name with no description —
+/// the three skills this file did not name.
+pub(crate) fn harness_agents_md_says_when_to_read_every_skill() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let agents = fs::read_to_string(root.join("AGENTS.md"))
+        .unwrap_or_else(|error| panic!("AGENTS.md が読めません: {error}"));
+    let skills = skill_documents(&root);
+    assert!(!skills.is_empty(), ".claude/skills/ に skill がありません");
+    let unnamed: Vec<String> = skills
+        .iter()
+        .filter(|(name, _)| {
+            let path = format!("`.claude/skills/{name}/SKILL.md`");
+            !agents
+                .lines()
+                .any(|line| line.contains(&path) && line.to_lowercase().contains("when "))
+        })
+        .map(|(name, _)| {
+            format!(
+                "{name}: AGENTS.md に .claude/skills/{name}/SKILL.md をいつ読むかを書いた行がありません — \
+                 名前を呼ばれない skill は開かれません"
+            )
+        })
+        .collect();
+    assert!(unnamed.is_empty(), "{}", unnamed.join("\n"));
+}
+
+/// The events Codex CLI dispatches from `.codex/hooks.json`, as Harness²
+/// validates them for codex-cli 0.144.6 (`hook_events` in its Codex substrate).
+/// The one hook vocabulary this repository did not already record.
+const CODEX_HOOK_EVENTS: [&str; 10] = [
+    "PermissionRequest",
+    "PostCompact",
+    "PostToolUse",
+    "PreCompact",
+    "PreToolUse",
+    "SessionStart",
+    "Stop",
+    "SubagentStart",
+    "SubagentStop",
+    "UserPromptSubmit",
+];
+
+/// Which CLI reads a hooks file, and so which shape it must have.
+#[derive(Clone, Copy)]
+enum HookFile {
+    Claude,
+    Codex,
+    Antigravity,
+}
+
+/// The Claude Code events this repository records in
+/// `.cli/lib/hook-registry.mjs`'s `VALID_EVENT_TYPES`, joined with those
+/// `hook_events` registers — read, not restated.
+fn claude_code_hook_events(root: &Path) -> Vec<String> {
+    let registry = fs::read_to_string(root.join(".cli/lib/hook-registry.mjs"))
+        .unwrap_or_else(|error| panic!(".cli/lib/hook-registry.mjs が読めません: {error}"));
+    let set = registry
+        .split_once("VALID_EVENT_TYPES = new Set([")
+        .and_then(|(_, rest)| rest.split_once("])"))
+        .map(|(set, _)| set)
+        .expect(".cli/lib/hook-registry.mjs に VALID_EVENT_TYPES がありません");
+    let mut events: Vec<String> = set
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .flat_map(|line| line.split('\'').skip(1).step_by(2))
+        .map(str::to_owned)
+        .chain(
+            hook_events(CliProvider::Claude)
+                .iter()
+                .map(|(event, _)| (*event).to_owned()),
+        )
+        .collect();
+    events.sort();
+    events.dedup();
+    events
+}
+
+/// Every way `text` departs from the shape the CLI behind `file` dispatches.
+/// Empty means the CLI would read every registration in it.
+fn hook_shape_problems(file: HookFile, text: &str, claude_events: &[String]) -> Vec<String> {
+    use serde_json::Value;
+    let document: Value = match serde_json::from_str(text) {
+        Ok(document) => document,
+        Err(error) => return vec![format!("JSON として読めません: {error}")],
+    };
+    let mut tables = Vec::new();
+    match file {
+        HookFile::Claude | HookFile::Codex => {
+            match document.get("hooks").and_then(Value::as_object) {
+                Some(events) if !events.is_empty() => tables.push(("hooks", events)),
+                _ => {
+                    return vec!["最上位に中身のある \"hooks\" オブジェクトがありません".to_owned()]
+                }
+            }
+        }
+        HookFile::Antigravity => match document.as_object() {
+            Some(groups) if !groups.is_empty() => {
+                for (group, events) in groups {
+                    match events.as_object() {
+                        Some(events) => tables.push((group.as_str(), events)),
+                        None => {
+                            return vec![format!("{group} がイベントのオブジェクトではありません")]
+                        }
+                    }
+                }
+            }
+            _ => return vec!["最上位に hook のまとまりがありません".to_owned()],
+        },
+    }
+    // (event, grouped by matcher)
+    let known: Vec<(String, bool)> = match file {
+        HookFile::Claude => claude_events
+            .iter()
+            .map(|event| (event.clone(), true))
+            .collect(),
+        HookFile::Codex => CODEX_HOOK_EVENTS
+            .iter()
+            .copied()
+            .chain(
+                hook_events(CliProvider::Codex)
+                    .iter()
+                    .map(|(event, _)| *event),
+            )
+            .map(|event| (event.to_owned(), true))
+            .collect(),
+        HookFile::Antigravity => hook_events(CliProvider::Gemini)
+            .iter()
+            .map(|(event, grouped)| ((*event).to_owned(), *grouped))
+            .collect(),
+    };
+
+    let mut problems = Vec::new();
+    for (table, events) in tables {
+        for (event, entries) in events {
+            if matches!(file, HookFile::Antigravity) && event == "enabled" {
+                if !entries.is_boolean() {
+                    problems.push(format!("{table}: enabled が真偽値ではありません"));
+                }
+                continue;
+            }
+            let Some(grouped) = known
+                .iter()
+                .find(|(name, _)| name == event)
+                .map(|(_, grouped)| *grouped)
+            else {
+                let names: Vec<&str> = known.iter().map(|(name, _)| name.as_str()).collect();
+                problems.push(format!(
+                    "{table}: 未知のイベント {event} — 読まれるのは {}",
+                    names.join(", ")
+                ));
+                continue;
+            };
+            let Some(entries) = entries.as_array() else {
+                problems.push(format!("{table}: {event} の値が配列ではありません"));
+                continue;
+            };
+            for (index, entry) in entries.iter().enumerate() {
+                let handlers: Vec<&Value> = if grouped {
+                    match entry.get("hooks").and_then(Value::as_array) {
+                        Some(handlers) => handlers.iter().collect(),
+                        None => {
+                            problems.push(format!(
+                                "{table}: {event}[{index}] に hooks の配列がありません — \
+                                 {event} は matcher と hooks でまとめる形です"
+                            ));
+                            continue;
+                        }
+                    }
+                } else if entry.get("hooks").is_some() || entry.get("matcher").is_some() {
+                    problems.push(format!(
+                        "{table}: {event}[{index}] — {event} はまとめずに handler を並べる形です"
+                    ));
+                    continue;
+                } else {
+                    vec![entry]
+                };
+                for handler in handlers {
+                    if handler.get("type").and_then(Value::as_str) != Some("command") {
+                        problems.push(format!(
+                            "{table}: {event}[{index}] の type が \"command\" ではありません"
+                        ));
+                    } else if handler
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_none_or(|command| command.trim().is_empty())
+                    {
+                        problems.push(format!("{table}: {event}[{index}] の command が空です"));
+                    }
+                }
+            }
+        }
+    }
+    problems
+}
+
+#[test]
+/// Change 178. Harness² validates a hooks file against the schema its framework
+/// dispatches, because a malformed one never fires rather than erroring — and
+/// the vendored adapter here records that case: an Antigravity registration
+/// that wrapped `Stop` like a tool event "likely" left the whole file ignored
+/// (`.cli/lib/cli-adapter-utils.mjs`). The other hook tests check which scripts
+/// a registration runs; this one checks the CLI would read it at all, and
+/// refuses one mutant of each shape it accepts, so a checker that stops
+/// checking fails as well.
+pub(crate) fn every_hook_file_has_the_shape_its_cli_dispatches() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let claude_events = claude_code_hook_events(&root);
+    assert!(
+        ["PreToolUse", "PostToolUse", "Stop"]
+            .iter()
+            .all(|event| claude_events.iter().any(|known| known == event)),
+        "Claude Code のイベント一覧が読めていません: {claude_events:?}"
+    );
+
+    let mut problems = Vec::new();
+    for (relative, file) in [
+        (".claude/settings.json", HookFile::Claude),
+        (".codex/hooks.json", HookFile::Codex),
+        (".claude/hooks.json", HookFile::Antigravity),
+    ] {
+        let text = fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("{relative} が読めません: {error}"));
+        problems.extend(
+            hook_shape_problems(file, &text, &claude_events)
+                .into_iter()
+                .map(|problem| format!("{relative}: {problem}")),
+        );
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+
+    let command = serde_json::json!({"type": "command", "command": "true"});
+    let group = |event: &str| serde_json::json!({"hooks": {event: [{"matcher": "Bash", "hooks": [command.clone()]}]}});
+    // (what, file, its text, the message only the check that owns it produces)
+    let mutants = [
+        ("JSON でない", HookFile::Codex, "{".to_owned(), "JSON として読めません"),
+        (
+            "空の hooks",
+            HookFile::Codex,
+            serde_json::json!({"hooks": {}}).to_string(),
+            "中身のある \"hooks\"",
+        ),
+        (
+            "綴りを誤ったイベント",
+            HookFile::Codex,
+            group("PostToolUSe").to_string(),
+            "未知のイベント PostToolUSe",
+        ),
+        (
+            "配列でないイベント",
+            HookFile::Codex,
+            serde_json::json!({"hooks": {"PreToolUse": {"hooks": [command.clone()]}}}).to_string(),
+            "値が配列ではありません",
+        ),
+        (
+            "hooks の無い項目",
+            HookFile::Claude,
+            serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash"}]}}).to_string(),
+            "hooks の配列がありません",
+        ),
+        (
+            "command でない type",
+            HookFile::Codex,
+            serde_json::json!({"hooks": {"Stop": [{"hooks": [{"type": "prompt", "command": "x"}]}]}})
+                .to_string(),
+            "\"command\" ではありません",
+        ),
+        (
+            "空の command",
+            HookFile::Claude,
+            serde_json::json!({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": " "}]}]}})
+                .to_string(),
+            "command が空です",
+        ),
+        (
+            "まとめた Antigravity の Stop",
+            HookFile::Antigravity,
+            serde_json::json!({"g": {"Stop": [{"matcher": "", "hooks": [command.clone()]}]}})
+                .to_string(),
+            "まとめずに handler を並べる形です",
+        ),
+        (
+            "並べた Antigravity の PreToolUse",
+            HookFile::Antigravity,
+            serde_json::json!({"g": {"PreToolUse": [command.clone()]}}).to_string(),
+            "matcher と hooks でまとめる形です",
+        ),
+        (
+            "真偽値でない enabled",
+            HookFile::Antigravity,
+            serde_json::json!({"g": {"enabled": "yes", "Stop": [command.clone()]}}).to_string(),
+            "enabled が真偽値ではありません",
+        ),
+    ];
+    for (what, file, text, expected) in mutants {
+        let found = hook_shape_problems(file, &text, &claude_events);
+        assert!(
+            found.iter().any(|problem| problem.contains(expected)),
+            "変異 {what} を「{expected}」で拒んでいません — 検査が検査していません: {found:?}"
+        );
+    }
 }
 
 #[test]
