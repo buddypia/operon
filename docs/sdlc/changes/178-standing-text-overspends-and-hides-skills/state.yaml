@@ -1,0 +1,42 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Applies Google Research's Harness² rules for always-on text to this
+# repository's harness: the 8,000-character budget, a When-line in AGENTS.md
+# for every skill, the hooks-file shape check, and the placement order.
+#
+# Risk: docs/sdlc/bands.yaml is the harness surface (medium, supervised). No
+# paused surface is edited: the hook files are read by the new test, not
+# changed.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Intent written; evaluator review of intent.md next, then spec.md."
+
+contract:
+  failing-test-first: "machine pending the budget and When-line tests fail on
+    main's tree; the hooks-shape test fails on its own mutant fixtures"
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending touches src/tests.rs and documents only —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  evals: "human pending scripts/run-evals.sh over the committed steering"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
