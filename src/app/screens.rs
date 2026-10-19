@@ -2605,7 +2605,7 @@ impl OperonApp {
                     if handoff.full_history {
                         tr("会話全履歴を復元")
                     } else {
-                        tr("従来の handoff")
+                        tr("Handoff バンドルで引き継ぎ")
                     },
                     handoff.source_provider.label(),
                     agent_choice_copy(&handoff.target_agent).0,
@@ -2626,13 +2626,17 @@ impl OperonApp {
             }
             if !cli_sessions.is_empty() {
                 ui.label(
-                    RichText::new(tf!("{ICON_RESUME} 元の CLI で再開 · {ICON_RESTORE} 同じ CLI にも別の CLI にも全履歴を復元（トークン消費なし）", ICON_RESTORE = ICON_RESTORE, ICON_RESUME = ICON_RESUME))
+                    RichText::new(tf!(
+                        "{ICON_RESUME} 元の CLI で再開 · {ICON_RESTORE} コンパクトな Handoff バンドルで別 CLI または新規セッションへ引き継ぎ",
+                        ICON_RESTORE = ICON_RESTORE,
+                        ICON_RESUME = ICON_RESUME
+                    ))
                     .size(12.0)
                     .color(palette.text),
                 );
                 ui.add(
                     egui::TextEdit::multiline(&mut self.handoff_note_input)
-                        .hint_text(tr("復元メモ（任意）"))
+                        .hint_text(tr("Handoff メモ（任意）"))
                         .desired_rows(2)
                         .desired_width(f32::INFINITY),
                 );
@@ -2744,15 +2748,15 @@ impl OperonApp {
                         // The picker beside it already names the destination, so
                         // the button says what happens rather than repeating it.
                         if is_safe_cli_session_id(&cli_session.id)
-                            && icon_text_button(ui, ICON_RESTORE, tr("会話全履歴を復元"))
+                            && icon_text_button(ui, ICON_RESTORE, tr("Handoff バンドルで引き継ぐ"))
                                 .on_hover_text(if target == cli_session.provider.agent() {
                                     tf!(
-                                        "同じ {p0} に会話を複製します（トークン消費なし）",
+                                        "同じ {p0} にコンパクトな Handoff バンドルで新しい会話を開始します",
                                         p0 = cli_session.provider.label()
                                     )
                                 } else {
                                     tf!(
-                                        "{p0} へ全履歴を移植します（トークン消費なし）",
+                                        "{p0} へコンパクトな Handoff バンドルで引き継ぎます",
                                         p0 = agent_choice_copy(&target).0
                                     )
                                 })
@@ -5474,10 +5478,16 @@ impl OperonApp {
                             ui.separator();
                             for agent in FULL_HISTORY_RESTORE_TARGETS.iter().copied() {
                                 if agent != candidate.agent.as_str() {
-                                    let button = egui::Button::new(tf!("{p0} へ履歴を復元", p0 = agent_choice_copy(agent).0));
+                                    let button = egui::Button::new(tf!(
+                                        "{p0} へ Handoff",
+                                        p0 = agent_choice_copy(agent).0
+                                    ));
                                     if ui
                                         .add_enabled(!is_importing, button)
-                                        .on_hover_text(tf!("{p0} へ全履歴を復元します", p0 = agent_choice_copy(agent).0))
+                                        .on_hover_text(tf!(
+                                            "{p0} へコンパクトな Handoff バンドルで引き継ぎます",
+                                            p0 = agent_choice_copy(agent).0
+                                        ))
                                         .clicked()
                                     {
                                         *handoff_target = Some(agent.to_owned());

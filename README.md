@@ -231,7 +231,7 @@ Settings.
   you are reading and the app says it reloaded; with unsaved edits, a bar offers
   the reload and the diff rather than choosing for you.
 
-### Cross-CLI conversation restore
+### Cross-CLI session handoff
 
 - Resume a discovered or managed Codex, Claude Code, or Antigravity session in
   a managed tmux terminal using the provider's own resume identity, preserving
@@ -259,17 +259,16 @@ Settings.
   travel with it, minus the ones that contradict a resume. The verb's hover text
   names what is coming, and takes the danger mark when one of them is a choice
   that needed acknowledging the first time.
-- Restore any conversation from Claude Code, Codex CLI, or Antigravity into
-  any of the three — either of the other two, or the same CLI again, which
-  forks it into a second conversation without disturbing the first.
-- Restores extract turns by rule from the transcript files the CLIs already
-  saved locally. No model runs, no tokens are spent, and nothing is
-  summarized or paraphrased; the source bytes stay in a local verbatim
-  archive, and a readable rendering is written alongside as
-  `restored-conversation.md`.
-- A restore is the one job long enough to wait on, so it holds a modal window
-  naming the source conversation, the destination, and the elapsed time —
-  sendable to the background at any point.
+- Hand off any conversation from Claude Code, Codex CLI, or Antigravity into
+  any of the three — either of the other two, or a fresh session in the same CLI
+  without disturbing the first.
+- Handoffs extract the initial request and recent User / Assistant turns by rule
+  from the transcript files the CLIs already saved locally, without mutating the
+  destination CLI's internal store. The source bytes stay in a local verbatim
+  archive alongside `handoff-bundle.md` and `manifest.json`, and the destination
+  CLI starts a fresh native session with that compact Handoff bundle.
+- A handoff holds a modal window naming the source conversation, the destination,
+  and the elapsed time — sendable to the background at any point.
 - Local history search covers recent Codex and Claude JSONL transcripts
   (including generated titles) and discovers project-scoped Claude sessions
   launched outside the app — all read locally, nothing uploaded.

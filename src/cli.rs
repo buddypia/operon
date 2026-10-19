@@ -88,8 +88,8 @@ pub(crate) struct CliSession {
     pub(crate) path: PathBuf,
 }
 
-/// A real destination-provider session created by a full-history import.
-/// The destination CLI owns this ID and can resume it normally.
+/// A cross-CLI handoff bundle prepared from a local source transcript snapshot.
+/// The destination CLI launches a fresh native session with `handoff_bundle`.
 #[derive(Debug, Clone)]
 pub(crate) struct ImportedNativeSession {
     pub(crate) managed_session_id: Uuid,
@@ -97,8 +97,9 @@ pub(crate) struct ImportedNativeSession {
     pub(crate) native_session_id: Option<String>,
     pub(crate) native_session_path: PathBuf,
     pub(crate) archive_path: PathBuf,
+    pub(crate) handoff_bundle: String,
     pub(crate) imported_records: usize,
-    /// What became of every record in the source, so the restore can say what
+    /// What became of every record in the source, so the handoff can say what
     /// it carried and what it left behind instead of only naming a total.
     pub(crate) classification: RestoreClassification,
     pub(crate) agent_command: String,

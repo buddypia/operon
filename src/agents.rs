@@ -521,7 +521,7 @@ pub(crate) fn restore_progress_title(progress: &RestoreProgress) -> String {
         )
     } else {
         tf!(
-            "{p0} の会話を {p1} に復元しています…",
+            "{p0} の会話を {p1} に Handoff しています…",
             p0 = progress.source.label(),
             p1 = progress.destination.label()
         )

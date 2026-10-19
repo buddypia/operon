@@ -4934,10 +4934,11 @@ impl OperonApp {
                 source: source.clone(),
                 target: target.clone(),
                 note: note.clone(),
-                result: import_full_cli_history(
+                result: import_full_cli_history_with_note(
                     &project,
                     &source,
                     &target,
+                    &note,
                     &archive_root,
                     import_id,
                 ),
@@ -4967,6 +4968,22 @@ impl OperonApp {
     ) {
         let id = imported.managed_session_id;
         let tmux_name = managed_tmux_name(id);
+        let uses_handoff_bundle = !imported.handoff_bundle.is_empty();
+        let goal = if uses_handoff_bundle {
+            goal_with_native_tracking_token(target, imported.handoff_bundle.clone(), id)
+        } else {
+            source.last_user_message.clone().unwrap_or_else(|| {
+                tf!(
+                    "{p0} の会話全履歴を復元しました。",
+                    p0 = source.provider.label()
+                )
+            })
+        };
+        let native_session_path = if uses_handoff_bundle {
+            None
+        } else {
+            Some(imported.native_session_path.clone())
+        };
         let previous_store = self.store.clone();
         self.store.cli_handoffs.push(CliHandoff {
             id: Uuid::new_v4(),
@@ -4977,7 +4994,7 @@ impl OperonApp {
             target_agent: target.to_owned(),
             note: note.to_owned(),
             created_at: now(),
-            full_history: true,
+            full_history: !uses_handoff_bundle,
             archive_path: Some(imported.archive_path.clone()),
             destination_session_id: imported.native_session_id.clone(),
         });
@@ -4985,12 +5002,7 @@ impl OperonApp {
             id,
             project_id: project.id,
             name: restored_session_name(source),
-            goal: source.last_user_message.clone().unwrap_or_else(|| {
-                tf!(
-                    "{p0} の会話全履歴を復元しました。",
-                    p0 = source.provider.label()
-                )
-            }),
+            goal,
             agent: target.to_owned(),
             tmux_name,
             created_at: now(),
@@ -5000,7 +5012,7 @@ impl OperonApp {
             branch: source.branch.clone(),
             agent_command: imported.agent_command.clone(),
             native_session_id: imported.native_session_id.clone(),
-            native_session_path: Some(imported.native_session_path.clone()),
+            native_session_path,
             origin: Some(SessionOrigin::Restored {
                 from: source.provider,
             }),
@@ -5015,20 +5027,12 @@ impl OperonApp {
             return;
         }
         self.handoff_note_input.clear();
-        // "そのまま" is what this used to claim. A restore projects the source
-        // — it carries conversation and reasoning and leaves the CLI's own
-        // bookkeeping behind — so the notice reports what it carried instead of
-        // asserting a fidelity nothing checks.
         self.notice = Some(tf!(
-            "{source} の会話 {source_conversation} から {records} 件の会話ターンを復元し、{destination} の会話 {destination_conversation} を作成しました。{breakdown}復元先セッションを起動しています…",
+            "{source} の会話 {source_conversation} から Handoff バンドル（直近 {records} ターン）を作成し、{destination} の新規セッションを起動しています…{breakdown}",
             source = source.provider.label(),
             source_conversation = source.native_id,
             records = imported.imported_records,
             destination = imported.provider.label(),
-            destination_conversation = imported
-                .native_session_id
-                .as_deref()
-                .unwrap_or(tr("（不明）")),
             breakdown = restore_classification_notice(&imported.classification),
         ));
         self.start_session(id);

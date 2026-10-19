@@ -1,0 +1,65 @@
+# Review record for 179-cross-cli-handoff-synthesizes-full-history.
+#
+# The change: replaces cross-CLI full conversation history synthesis into
+# destination CLI internal stores (Claude JSONL, Codex app-server JSON-RPC /
+# rollout JSONL, Antigravity state.vscdb + .pb) with a bounded compact Handoff
+# bundle (handoff-bundle.md + manifest.json under shared-sessions/<import_id>/),
+# and launches a fresh native session in the destination CLI with the compact
+# bundle as its initial interactive prompt.
+#
+# rust-reviewer: approve 0 0
+# - Module boundaries & constants: New handoff bundle limits and filenames
+#   (HANDOFF_BUNDLE_MAX_TURNS = 8, HANDOFF_BUNDLE_TURN_MAX_CHARS = 1_200,
+#   HANDOFF_BUNDLE_MAX_BYTES = 6_000, HANDOFF_BUNDLE_FILE_NAME =
+#   "handoff-bundle.md") live in src/config.rs and are re-exported cleanly.
+#   Legacy destination-store format helpers in src/history.rs are isolated under
+#   #[cfg(test)] so existing format-verification tests remain intact without
+#   dead-code warnings or production exposure.
+# - UTF-8 & string slicing safety: compact_handoff_turn_text uses
+#   truncate_chars and build_compact_handoff_bundle uses truncate_utf8_bytes,
+#   walking back with text.is_char_boundary(end) before slicing &text[..end].
+# - Error handling & panics: No .unwrap() or .expect() in production paths;
+#   errors return UiResult<T> with actionable Japanese messages.
+# - Egui frame discipline: No I/O, subprocess calls, or unbounded allocations
+#   occur in ui_restore_modal, ui_cli_sessions, or render_restore_options.
+# - Test coverage: Unit tests in src/tests.rs verify all requirements and 5 of 5
+#   mutants in mutations.py are caught.
+#
+# subprocess-safety-reviewer: approve 0 0
+# - Subprocess elimination in handoff import: import_full_cli_history_with_note
+#   performs zero subprocess spawns (Command::new is not called; the legacy
+#   codex app-server JSON-RPC synthesis is removed from the production path).
+# - Argument & shell-quoting safety: import_full_cli_history_with_note builds
+#   the destination command via build_default_agent_command and
+#   command_with_managed_native_session_id, which only appends --session-id
+#   <Uuid> for claude and leaves codex and agy as bare commands. The multi-line
+#   handoff_bundle is stored in Session.goal and passed through shell_quote on
+#   session launch, never interpolated into raw CLI flags or shell strings.
+#
+# durability-reviewer: approve 0 0
+# - Zero third-party CLI store mutation: import_full_cli_history_with_note reads
+#   the source transcript via bounded read_transcript_conversation, snapshots
+#   the source file into shared-sessions/<import_id>/, and writes
+#   handoff-bundle.md and manifest.json via write_file_atomically. It never
+#   writes to ~/.claude, ~/.codex, or Antigravity's state.vscdb / .pb store.
+# - Store persistence & rollback before launch: finish_full_history_import
+#   captures previous_store before recording CliHandoff (full_history: false)
+#   and Session (native_session_path: None), rolling back on persist() failure
+#   before start_session(id) can spawn tmux.
+#
+# ui-consistency-reviewer: approve 0 0
+# - Localization completeness: Every added/updated user-facing string in
+#   src/agents.rs, src/app.rs, src/app/screens.rs, and src/ui/widgets.rs is
+#   wrapped in tr(...) or tf!(...) and has matching English and Korean entries
+#   in src/i18n_tables.rs in sorted UTF-8 byte order.
+# - Documentation parity: README.md, README.ja.md, and README.ko.md are updated
+#   consistently to describe the compact Handoff bundle.
+
+digest: "9fcacd1016f464c6"
+
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"

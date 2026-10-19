@@ -261,6 +261,7 @@ pub(crate) fn full_history_restore_persists_a_resumable_session_before_launching
         // fail before it can invoke the real CLI. The durable record must
         // still preserve the normal native-resume command.
         agent_command: format!("codex resume {native_session_id}"),
+        handoff_bundle: String::new(),
     };
     let data_file = root.join("store.json");
     let mut app = test_app(data_file.clone());
@@ -301,6 +302,253 @@ pub(crate) fn full_history_restore_persists_a_resumable_session_before_launching
             .find(|session| session.id == managed_session_id)
             .map(|session| &session.status),
         Some(&SessionStatus::Failed)
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn compact_handoff_bundle_bounds_turns_and_bytes_and_strips_tool_spam() {
+    let source = CliSession {
+        provider: CliProvider::Codex,
+        native_id: "01a0145d-133c-7b71-b598-cb620a8c9dc8".into(),
+        id: "01a0145d-133c-7b71-b598-cb620a8c9dc8".into(),
+        title: Some("Investigate handoff".into()),
+        last_user_message: Some("latest user turn".into()),
+        branch: Some("feature/handoff".into()),
+        updated_at: now(),
+        path: PathBuf::from("/tmp/rollout.jsonl"),
+    };
+    let mut turns: Vec<(&'static str, String)> =
+        vec![("user", "Initial goal: keep handoff compact".into())];
+    for idx in 1..=12 {
+        turns.push((
+            if idx % 2 == 0 { "assistant" } else { "user" },
+            format!("turn-{idx:02} {}", "x".repeat(900)),
+        ));
+    }
+    turns.push((
+        "assistant",
+        "[Tool call: shell]\n{\"cmd\":\"ls\"}\n\nChecked repository layout.".into(),
+    ));
+    turns.push(("user", "[Tool result]\nfile1.rs\nfile2.rs".into()));
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &source,
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "Please finish the tests.",
+    );
+
+    assert!(
+        bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES,
+        "bundle byte length {} exceeded HANDOFF_BUNDLE_MAX_BYTES ({HANDOFF_BUNDLE_MAX_BYTES})",
+        bundle.len()
+    );
+    assert!(
+        (1..=HANDOFF_BUNDLE_MAX_TURNS).contains(&included),
+        "included turns {included} must be bounded by 1..={HANDOFF_BUNDLE_MAX_TURNS}"
+    );
+    assert!(bundle.contains("Initial goal: keep handoff compact"));
+    assert!(bundle.contains("Please finish the tests."));
+    assert!(bundle.contains("turn-12"));
+    assert!(!bundle.contains("[Tool call:"));
+    assert!(!bundle.contains("[Tool result]"));
+    assert!(!bundle.contains("turn-01 "));
+}
+
+#[test]
+pub(crate) fn compact_handoff_bundle_peels_nested_envelopes_and_preserves_display_goal() {
+    let first_source = CliSession {
+        provider: CliProvider::Claude,
+        native_id: "11111111-1111-1111-1111-111111111111".into(),
+        id: "11111111-1111-1111-1111-111111111111".into(),
+        title: Some("First session".into()),
+        last_user_message: Some("Real user request".into()),
+        branch: None,
+        updated_at: now(),
+        path: PathBuf::from("/tmp/claude.jsonl"),
+    };
+    let first_turns = vec![
+        ("user", "Real user request".to_owned()),
+        ("assistant", "First assistant answer".to_owned()),
+    ];
+    let (first_bundle, _) = build_compact_handoff_bundle(
+        &first_source,
+        CliProvider::Codex,
+        &first_turns,
+        Path::new("/tmp/archive-1.jsonl"),
+        "Carry on",
+    );
+    let tracked = goal_with_native_tracking_token("codex", first_bundle.clone(), Uuid::new_v4());
+
+    assert_eq!(session_display_goal(&tracked), "Real user request");
+
+    let second_source = CliSession {
+        provider: CliProvider::Codex,
+        native_id: "22222222-2222-2222-2222-222222222222".into(),
+        id: "22222222-2222-2222-2222-222222222222".into(),
+        title: Some("Second session".into()),
+        last_user_message: Some("Second user turn".into()),
+        branch: None,
+        updated_at: now(),
+        path: PathBuf::from("/tmp/codex.jsonl"),
+    };
+    let second_turns = vec![
+        ("user", tracked),
+        ("assistant", "Second assistant answer".to_owned()),
+    ];
+    let (second_bundle, _) = build_compact_handoff_bundle(
+        &second_source,
+        CliProvider::Gemini,
+        &second_turns,
+        Path::new("/tmp/archive-2.jsonl"),
+        "Final step",
+    );
+
+    assert_eq!(
+        second_bundle
+            .matches("Continue this coding task in a new CLI session.")
+            .count(),
+        1,
+        "re-handing off a session must not nest handoff bundle envelopes"
+    );
+    assert!(second_bundle.contains("Real user request"));
+    assert!(second_bundle.contains("Final step"));
+    assert!(!second_bundle.contains(NATIVE_TRACKING_TOKEN_PREAMBLES[0]));
+}
+
+#[test]
+pub(crate) fn import_full_cli_history_writes_handoff_bundle_and_manifest_without_touching_destination_store(
+) {
+    let root = std::env::temp_dir().join(format!("operon-handoff-bundle-{}", Uuid::new_v4()));
+    let project_path = root.join("project");
+    let archive_root = root.join("shared-sessions");
+    let source_path = root.join("source.jsonl");
+    fs::create_dir_all(&project_path).unwrap();
+    fs::write(
+        &source_path,
+        concat!(
+            r#"{"type":"user","message":{"content":"initial request from claude"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":"assistant reply from claude"}}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+    let source = CliSession {
+        provider: CliProvider::Claude,
+        native_id: "11111111-1111-1111-1111-111111111111".into(),
+        id: "11111111-1111-1111-1111-111111111111".into(),
+        title: Some("Claude source".into()),
+        last_user_message: Some("initial request from claude".into()),
+        branch: Some("main".into()),
+        updated_at: now(),
+        path: source_path,
+    };
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: project_path,
+        name: "handoff-bundle-test".into(),
+        added_at: now(),
+    };
+
+    let imported = import_full_cli_history_with_note(
+        &project,
+        &source,
+        "codex",
+        "Focus on src/history.rs",
+        &archive_root,
+        Uuid::new_v4(),
+    )
+    .unwrap();
+
+    assert_eq!(imported.provider, CliProvider::Codex);
+    assert_eq!(imported.native_session_id, None);
+    assert_eq!(imported.agent_command, "codex");
+    assert_eq!(imported.imported_records, 2);
+    assert!(imported
+        .native_session_path
+        .ends_with(HANDOFF_BUNDLE_FILE_NAME));
+    assert!(imported.native_session_path.is_file());
+    assert!(imported.archive_path.is_file());
+    let bundle_on_disk = fs::read_to_string(&imported.native_session_path).unwrap();
+    assert_eq!(bundle_on_disk, imported.handoff_bundle);
+    assert!(bundle_on_disk.contains("initial request from claude"));
+    assert!(bundle_on_disk.contains("assistant reply from claude"));
+    assert!(bundle_on_disk.contains("Focus on src/history.rs"));
+
+    let manifest_path = imported
+        .native_session_path
+        .parent()
+        .unwrap()
+        .join("manifest.json");
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["restore"], "compact handoff bundle");
+    assert_eq!(manifest["included_turns"], 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bundle_prompt() {
+    let root = std::env::temp_dir().join(format!("operon-handoff-finish-{}", Uuid::new_v4()));
+    let project_path = root.join("missing-project");
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: project_path,
+        name: "handoff-finish".into(),
+        added_at: now(),
+    };
+    let source = CliSession {
+        provider: CliProvider::Codex,
+        native_id: "11111111-1111-1111-1111-111111111111".into(),
+        id: "11111111-1111-1111-1111-111111111111".into(),
+        title: Some("Codex task".into()),
+        last_user_message: Some("Check handoff".into()),
+        branch: None,
+        updated_at: now(),
+        path: root.join("source.jsonl"),
+    };
+    let managed_session_id = Uuid::new_v4();
+    let native_session_id = "33333333-3333-3333-3333-333333333333".to_owned();
+    let handoff_bundle = "Continue this coding task in a new CLI session.\n\nTask to continue:\nCheck handoff\n\nLatest terminal context from the source session:\n- Source CLI: Codex CLI (`11111111`)\n\nHandoff instructions from the user:\nContinue in Claude\n".to_owned();
+    let imported = ImportedNativeSession {
+        managed_session_id,
+        provider: CliProvider::Claude,
+        native_session_id: Some(native_session_id.clone()),
+        native_session_path: root.join(HANDOFF_BUNDLE_FILE_NAME),
+        archive_path: root.join("source-codex.jsonl"),
+        imported_records: 2,
+        classification: RestoreClassification::default(),
+        agent_command: format!("claude --session-id {native_session_id}"),
+        handoff_bundle,
+    };
+    let data_file = root.join("store.json");
+    let mut app = test_app(data_file.clone());
+    app.store.projects.push(project.clone());
+
+    app.finish_full_history_import(&project, &source, "claude", "Continue in Claude", imported);
+
+    let persisted = load_store(&data_file).unwrap();
+    let session = persisted
+        .sessions
+        .iter()
+        .find(|session| session.id == managed_session_id)
+        .expect("handoff session must be persisted before launch");
+    assert_eq!(session.native_session_path, None);
+    assert_eq!(
+        session.agent_command,
+        format!("claude --session-id {native_session_id}")
+    );
+    assert_eq!(session_display_goal(&session.goal), "Check handoff");
+    assert_eq!(persisted.cli_handoffs.len(), 1);
+    assert!(!persisted.cli_handoffs[0].full_history);
+
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(managed_session_id),
+        Duration::from_secs(15),
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -349,36 +597,19 @@ pub(crate) fn codex_app_server_restores_a_short_transcript_into_a_resumable_term
 
     let imported =
         import_full_cli_history(&project, &source, "codex", &archive_root, Uuid::new_v4()).unwrap();
-    let restored = fs::read_to_string(&imported.native_session_path)
-        .unwrap()
-        .lines()
-        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-        .filter_map(|value| transcript_value_turn(&value, CliProvider::Codex))
-        .map(|(role, text)| (role.to_owned(), text))
-        .collect::<Vec<_>>();
-    let expected = vec![
-        ("user".to_owned(), "operon-history-one".to_owned()),
-        ("assistant".to_owned(), "operon-history-two".to_owned()),
-        ("user".to_owned(), "operon-history-three".to_owned()),
-        ("assistant".to_owned(), "operon-history-four".to_owned()),
-    ];
-    assert!(
-        restored
-            .windows(expected.len())
-            .any(|window| window == expected),
-        "the destination session must contain every source turn in order; restored={restored:?}"
-    );
+    assert!(imported.handoff_bundle.contains("operon-history-one"));
+    assert!(imported.handoff_bundle.contains("operon-history-two"));
+    assert!(imported.handoff_bundle.contains("operon-history-three"));
+    assert!(imported.handoff_bundle.contains("operon-history-four"));
 
     let visible = restored_conversation_is_visible_in_a_native_terminal(
         &project_path,
         &imported.agent_command,
+        &imported.handoff_bundle,
         "operon-history-four",
     );
     remove_restored_codex_thread(&imported);
-    assert!(
-        visible,
-        "normal codex resume did not render the restored conversation"
-    );
+    assert!(visible, "codex did not render the compact Handoff bundle");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -438,12 +669,13 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_codex_t
     let visible = restored_conversation_is_visible_in_a_native_terminal(
         &project_path,
         &imported.agent_command,
+        &imported.handoff_bundle,
         "operon-agy-source-four",
     );
     remove_restored_codex_thread(&imported);
     assert!(
         visible,
-        "normal codex resume did not render the restored Antigravity conversation"
+        "codex did not render the Antigravity compact Handoff bundle"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -507,48 +739,32 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_antigravity_t
         import_full_cli_history(&project, &source, "gemini", &archive_root, Uuid::new_v4())
             .unwrap();
 
-    assert_eq!(imported.imported_records, 5);
-    let connection = rusqlite::Connection::open(&imported.native_session_path).unwrap();
-    let steps = connection
-        .prepare("SELECT step_payload FROM steps ORDER BY idx")
-        .unwrap()
-        .query_map([], |row| row.get::<_, Vec<u8>>(0))
-        .unwrap()
-        .map(|payload| antigravity_step_turn(&payload.unwrap()).unwrap())
-        .collect::<Vec<_>>();
-    drop(connection);
-    assert_eq!(
-        steps,
-        vec![
-            ("user", "operon-codex-source-one".to_owned()),
-            // A `function_call` is a response item of its own, and
-            // `codex_conversation_message` carries it deliberately: a restored
-            // delegated task that lost its tool calls lost its reasoning. This
-            // expectation said four turns for as long as that has been true,
-            // and `#[ignore]` is why nobody saw it.
-            ("assistant", "[Tool call: shell]\n{}".to_owned()),
-            ("assistant", "operon-codex-source-two".to_owned()),
-            ("user", "operon-codex-source-three".to_owned()),
-            ("assistant", "operon-codex-source-four".to_owned()),
-        ],
-        "the source session's own setup must not become part of the restored conversation"
-    );
+    assert_eq!(imported.imported_records, 4);
+    assert!(imported.handoff_bundle.contains("operon-codex-source-one"));
+    assert!(imported.handoff_bundle.contains("operon-codex-source-two"));
+    assert!(imported
+        .handoff_bundle
+        .contains("operon-codex-source-three"));
+    assert!(imported.handoff_bundle.contains("operon-codex-source-four"));
+    assert!(!imported.handoff_bundle.contains("system prompt"));
+    assert!(!imported.handoff_bundle.contains("<environment_context>"));
+    assert!(!imported.handoff_bundle.contains("[Tool call: shell]"));
     let visible = restored_conversation_is_visible_in_a_native_terminal(
         &project_path,
         &imported.agent_command,
+        &imported.handoff_bundle,
         "operon-codex-source-four",
     );
     remove_restored_conversation_file(&imported.native_session_path);
     assert!(
         visible,
-        "normal agy resume did not render the restored Codex conversation"
+        "agy did not render the Codex compact Handoff bundle"
     );
     fs::remove_dir_all(root).unwrap();
 }
 
-/// Operon writes Claude Code's conversation file itself, so the only
-/// real proof is Claude Code reopening that conversation and rendering the
-/// source turns — with no model turn anywhere in the restore.
+/// Operon writes a compact Handoff bundle for Claude Code and launches a
+/// fresh session with that bundle.
 #[test]
 #[ignore = "requires a local Claude Code CLI and tmux"]
 pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_claude_terminal() {
@@ -600,32 +816,29 @@ pub(crate) fn a_saved_codex_conversation_restores_into_a_resumable_claude_termin
             .unwrap();
 
     assert_eq!(imported.imported_records, 4);
-    let restored = fs::read_to_string(&imported.native_session_path)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
-        .filter_map(|record| transcript_value_turn(&record, CliProvider::Claude))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        restored,
-        vec![
-            ("user", "operon-codex-to-claude-one".to_owned()),
-            ("assistant", "operon-codex-to-claude-two".to_owned()),
-            ("user", "operon-codex-to-claude-three".to_owned()),
-            ("assistant", "operon-codex-to-claude-four".to_owned()),
-        ],
-        "the source session's own setup must not become part of the restored conversation"
-    );
+    assert!(imported
+        .handoff_bundle
+        .contains("operon-codex-to-claude-one"));
+    assert!(imported
+        .handoff_bundle
+        .contains("operon-codex-to-claude-two"));
+    assert!(imported
+        .handoff_bundle
+        .contains("operon-codex-to-claude-three"));
+    assert!(imported
+        .handoff_bundle
+        .contains("operon-codex-to-claude-four"));
+    assert!(!imported.handoff_bundle.contains("<environment_context>"));
     let visible = restored_conversation_is_visible_in_a_native_terminal(
         &project_path,
         &imported.agent_command,
+        &imported.handoff_bundle,
         "operon-codex-to-claude-four",
     );
-    // The conversation lives in Claude Code's own store, not under `root`.
     remove_restored_claude_conversation(&imported.native_session_path);
     assert!(
         visible,
-        "normal claude resume did not render the restored Codex conversation"
+        "claude did not render the Codex compact Handoff bundle"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -687,21 +900,17 @@ pub(crate) fn a_saved_antigravity_conversation_restores_into_a_resumable_claude_
     let visible = restored_conversation_is_visible_in_a_native_terminal(
         &project_path,
         &imported.agent_command,
+        &imported.handoff_bundle,
         "operon-agy-to-claude-four",
     );
     remove_restored_claude_conversation(&imported.native_session_path);
     assert!(
         visible,
-        "normal claude resume did not render the restored Antigravity conversation"
+        "claude did not render the Antigravity compact Handoff bundle"
     );
     fs::remove_dir_all(root).unwrap();
 }
 
-/// A restore into Codex or Antigravity writes its conversation into the
-/// person's real store too; until change 168 every run left one there. The
-/// file goes with the `-wal` and `-shm` SQLite leaves beside it, and nothing
-/// else: Antigravity's history index is appended to by every running `agy`,
-/// and rewriting it to drop a line could drop one of theirs.
 pub(crate) fn remove_restored_conversation_file(path: &Path) {
     for file in sqlite_file_and_sidecars(path) {
         match fs::remove_file(&file) {
@@ -713,19 +922,10 @@ pub(crate) fn remove_restored_conversation_file(path: &Path) {
     }
 }
 
-/// A Codex restore also leaves a row in Codex's thread index, which only
-/// Codex's own `thread/delete` takes out with the rollout.
 pub(crate) fn remove_restored_codex_thread(imported: &ImportedNativeSession) {
-    if let Some(thread) = imported.native_session_id.as_deref() {
-        if let Err(error) = delete_codex_thread(thread) {
-            eprintln!("could not delete Codex thread {thread}: {error}");
-        }
-    }
     remove_restored_conversation_file(&imported.native_session_path);
 }
 
-/// A restored Claude Code conversation is written into the developer's real
-/// conversation store, so an end-to-end run takes it back out again.
 pub(crate) fn remove_restored_claude_conversation(path: &Path) {
     let _ = fs::remove_file(path);
     if let Some(directory) = path.parent() {
@@ -733,9 +933,6 @@ pub(crate) fn remove_restored_claude_conversation(path: &Path) {
     }
 }
 
-/// Operon writes Antigravity's conversation store itself, so the only
-/// real proof is Antigravity reopening that conversation and rendering the
-/// source turns — with no model turn anywhere in the restore.
 #[test]
 #[ignore = "requires a local Antigravity CLI and tmux; writes one conversation into the local agy store"]
 pub(crate) fn antigravity_restore_writes_a_resumable_conversation_holding_the_source_history() {
@@ -786,61 +983,22 @@ pub(crate) fn antigravity_restore_writes_a_resumable_conversation_holding_the_so
     assert_eq!(imported.imported_records, 4);
     assert!(
         imported.native_session_path.is_file(),
-        "Antigravity must own a durable conversation at {}",
+        "Handoff bundle must be written at {}",
         imported.native_session_path.display()
     );
-    let native_session_id = imported.native_session_id.clone().unwrap();
-    assert_eq!(
-        imported.agent_command,
-        CliProvider::Gemini.native_resume_command(&native_session_id)
-    );
-    let document = fs::read_to_string(
-        imported
-            .archive_path
-            .parent()
-            .unwrap()
-            .join("restored-conversation.md"),
-    )
-    .unwrap();
+    assert_eq!(imported.agent_command, ANTIGRAVITY_COMMAND);
+    let document = fs::read_to_string(&imported.native_session_path).unwrap();
     assert!(document.contains("operon-agy-history-one"));
     assert!(document.contains("operon-agy-history-four"));
-
-    // The restored conversation must be exactly the source conversation:
-    // nothing generated, nothing summarized, nothing extra.
-    let connection = rusqlite::Connection::open(&imported.native_session_path).unwrap();
-    let steps = connection
-        .prepare("SELECT step_payload FROM steps ORDER BY idx")
-        .unwrap()
-        .query_map([], |row| row.get::<_, Vec<u8>>(0))
-        .unwrap()
-        .map(|payload| antigravity_step_turn(&payload.unwrap()).unwrap())
-        .collect::<Vec<_>>();
-    drop(connection);
-    assert_eq!(
-        steps,
-        vec![
-            ("user", "operon-agy-history-one".to_owned()),
-            ("assistant", "operon-agy-history-two".to_owned()),
-            ("user", "/goal operon-agy-history-three".to_owned()),
-            ("assistant", "operon-agy-history-four".to_owned()),
-        ]
-    );
-    let index = fs::read_to_string(antigravity_history_index_path().unwrap()).unwrap();
-    assert!(
-        index.contains(&native_session_id),
-        "the restored conversation must be listed in Antigravity's own history index"
-    );
 
     let visible = restored_conversation_is_visible_in_a_native_terminal(
         &project_path,
         &imported.agent_command,
+        &imported.handoff_bundle,
         "operon-agy-history-four",
     );
     remove_restored_conversation_file(&imported.native_session_path);
-    assert!(
-        visible,
-        "normal agy resume did not render the restored conversation"
-    );
+    assert!(visible, "agy did not render the compact Handoff bundle");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -907,6 +1065,7 @@ pub(crate) fn a_live_restore_project_is_outside_every_project() {
 pub(crate) fn restored_conversation_is_visible_in_a_native_terminal(
     project: &Path,
     agent_command: &str,
+    goal: &str,
     marker: &str,
 ) -> bool {
     // A test that failed while holding it leaves nothing to protect.
@@ -919,7 +1078,7 @@ pub(crate) fn restored_conversation_is_visible_in_a_native_terminal(
     start_tmux_agent_session(
         &tmux_name,
         project,
-        &agent_shell_command(agent_command, ""),
+        &agent_shell_command(agent_command, goal),
         &[],
     )
     .unwrap();
