@@ -1,0 +1,4 @@
+2026-10-19T04:01:13Z auto intent intent.md 623af7c9d0f8ef7f approve Restates user's explicit request to abolish full-history import and switch to a compact Handoff bundle while preserving store.json compatibility and local transcript snapshot invariants
+2026-10-19T04:01:13Z auto screen screen.md 5eca4ba4113ef072 approve Keeps existing layout geometry and palette roles across ui_cli_sessions, render_restore_options, and ui_restore_modal while updating copy and states to match spec.md
+2026-10-19T04:01:13Z auto spec spec.md 016ba6b2898d036c approve Traces every outcome and constraint from intent.md into concrete requirements, bounded constants, envelope-peeling rules, UI states matching screen.md, and complete policy conformance rows
+2026-10-19T04:01:13Z auto plan plan.md b0f3c7aa50d6888b approve Covers all files and requirements in spec.md in a 5-step sequence with concrete risk mitigations and completion proofs without touching any paused risk surface

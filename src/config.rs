@@ -34,11 +34,14 @@ pub(crate) const AGENTS: &[&str] = &["codex", "claude", "gemini", "custom"];
 /// `gemini` is retained as the persisted agent ID for backward compatibility.
 /// New sessions use Antigravity's current CLI executable.
 pub(crate) const ANTIGRAVITY_COMMAND: &str = "agy";
-/// Full-history restore destinations, in the order the picker offers them.
-/// Each one can create a real conversation that already holds the restored
-/// turns, so every supported CLI is both a source and a destination and any
-/// conversation can move to any other CLI.
+/// Cross-CLI handoff destinations, in the order the picker offers them.
+/// Each destination receives a compact handoff bundle derived from the archived
+/// source transcript and launches a fresh native session with that bundle.
 pub(crate) const FULL_HISTORY_RESTORE_TARGETS: &[&str] = &["codex", "claude", "gemini"];
+pub(crate) const HANDOFF_BUNDLE_MAX_TURNS: usize = 8;
+pub(crate) const HANDOFF_BUNDLE_TURN_MAX_CHARS: usize = 1_200;
+pub(crate) const HANDOFF_BUNDLE_MAX_BYTES: usize = 6_000;
+pub(crate) const HANDOFF_BUNDLE_FILE_NAME: &str = "handoff-bundle.md";
 /// Bumped to 5 when `SessionStatus::Lost` joined the vocabulary a saved session
 /// can carry. A build that predates it cannot read a record holding one, and the
 /// guard in `parse_store_contents` is what says so rather than letting an older
@@ -156,11 +159,10 @@ pub(crate) const TRANSCRIPT_SEARCH_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_SEARCH_LINE_LIMIT: usize = 500_000;
 pub(crate) const TRANSCRIPT_FILE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_FILE_LINE_LIMIT: usize = 100_000;
-pub(crate) const HISTORY_IMPORT_MAX_ITEMS_PER_REQUEST: usize = 64;
-pub(crate) const HISTORY_IMPORT_MAX_REQUEST_BYTES: usize = 768 * 1024;
 /// Antigravity's local history index keeps one line per submitted turn, so a
 /// restored conversation needs an index line too. Keep its title short: the
 /// index is a shared append-only file owned by `agy`.
+#[cfg(test)]
 pub(crate) const ANTIGRAVITY_HISTORY_TITLE_MAX_CHARS: usize = 200;
 /// `agy` writes a plain JSONL transcript of every conversation under this name.
 /// It is the readable record a restore reads, unlike the global history index.

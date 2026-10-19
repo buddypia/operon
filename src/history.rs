@@ -1,5 +1,6 @@
 use crate::*;
 
+#[cfg(test)]
 pub(crate) fn import_full_cli_history(
     project: &Project,
     source: &CliSession,
@@ -7,23 +8,34 @@ pub(crate) fn import_full_cli_history(
     archive_root: &Path,
     import_id: Uuid,
 ) -> UiResult<ImportedNativeSession> {
+    import_full_cli_history_with_note(project, source, target, "", archive_root, import_id)
+}
+
+pub(crate) fn import_full_cli_history_with_note(
+    project: &Project,
+    source: &CliSession,
+    target: &str,
+    note: &str,
+    archive_root: &Path,
+    import_id: Uuid,
+) -> UiResult<ImportedNativeSession> {
     let destination = full_history_restore_destination(target)?;
     let source_transcript = full_history_restore_transcript(source)?;
     let archive_path = snapshot_native_transcript(&source_transcript, archive_root, import_id)
         .map_err(|error| error.to_string())?;
-    // Read the snapshot once, here. Every destination restores this exact
-    // projection, and the verification each one runs compares against the same
-    // list, so a destination cannot disagree with the reader about what the
-    // conversation was.
     let (turns, classification) = read_transcript_conversation(&archive_path, source.provider)?;
     if turns.is_empty() {
         return Err(tr("選択した元履歴には、復元できる記録がありません。").into());
     }
+    let archive_directory = archive_path.parent().ok_or_else(|| {
+        tr("共有セッションのスナップショットに親ディレクトリがありません。").to_owned()
+    })?;
+    let (handoff_bundle, included_turns) =
+        build_compact_handoff_bundle(source, destination, &turns, &archive_path, note);
+    let bundle_path = archive_directory.join(HANDOFF_BUNDLE_FILE_NAME);
+    write_file_atomically(&bundle_path, handoff_bundle.as_bytes())
+        .map_err(|error| error.to_string())?;
     let manifest = serde_json::json!({
-        // 5, because `unclassified_kinds` stopped being `{kind, count}`: a
-        // count that did not say whether the record crossed was the whole of
-        // change 061's second defect, and a reader of an old manifest must be
-        // able to tell that its counts cannot answer that question.
         "schema_version": 5,
         "source_provider": source.provider.label(),
         "source_session_id": source.native_id,
@@ -31,13 +43,9 @@ pub(crate) fn import_full_cli_history(
         "project": project.path,
         "created_at": now(),
         "destination_provider": destination.label(),
-        "restore": match destination {
-            CliProvider::Codex => "Codex app-server thread/inject_items",
-            CliProvider::Gemini => tr("元ファイルから書き出した Antigravity の会話ストア"),
-            CliProvider::Claude => tr("元ファイルから書き出した Claude Code の会話ファイル"),
-        },
-        // What the restore did with every source record. Written beside the
-        // snapshot so the accounting survives the notice being dismissed.
+        "restore": "compact handoff bundle",
+        "handoff_bundle_path": bundle_path,
+        "included_turns": included_turns,
         "classification": {
             "records": classification.records,
             "restored": classification.restored,
@@ -57,41 +65,152 @@ pub(crate) fn import_full_cli_history(
                 .collect::<Vec<_>>(),
         },
     });
-    let manifest_path = archive_path
-        .parent()
-        .ok_or_else(|| {
-            tr("共有セッションのスナップショットに親ディレクトリがありません。").to_owned()
-        })?
-        .join("manifest.json");
+    let manifest_path = archive_directory.join("manifest.json");
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     write_file_atomically(&manifest_path, &manifest_bytes).map_err(|error| error.to_string())?;
 
-    let mut imported = match destination {
-        CliProvider::Codex => {
-            import_full_history_into_codex(project, &turns, &archive_path, import_id)
-        }
-        CliProvider::Gemini => import_full_history_into_antigravity(
-            project,
-            source.provider,
-            &turns,
-            &archive_path,
-            import_id,
-        ),
-        CliProvider::Claude => import_full_history_into_claude(
-            project,
-            source.provider,
-            &turns,
-            &archive_path,
-            import_id,
-        ),
-    }?;
-    imported.classification = classification;
-    Ok(imported)
+    let (agent_command, native_session_id) = command_with_managed_native_session_id(
+        destination.agent(),
+        destination.executable().to_owned(),
+        import_id,
+    );
+    Ok(ImportedNativeSession {
+        managed_session_id: import_id,
+        provider: destination,
+        native_session_id,
+        native_session_path: bundle_path,
+        archive_path,
+        handoff_bundle,
+        imported_records: included_turns,
+        classification,
+        agent_command,
+    })
 }
 
-/// Only providers with a way to create a real conversation that already holds
-/// the restored history are offered. Every supported CLI now has one, so the
-/// restriction only rejects agents Operon cannot restore into at all.
+pub(crate) fn compact_handoff_turn_text(role: &str, text: &str) -> Option<String> {
+    let base = if role == "user" {
+        original_task_from_session_goal(text)
+    } else {
+        text.trim().to_owned()
+    };
+    let chunks = base
+        .split("\n\n")
+        .filter(|chunk| {
+            let trimmed = chunk.trim_start();
+            !trimmed.is_empty()
+                && !trimmed.starts_with("[Tool call:")
+                && !trimmed.starts_with("[Tool result]")
+                && !trimmed.starts_with(RESTORED_REASONING_LABEL)
+        })
+        .collect::<Vec<_>>();
+    let joined = chunks.join("\n\n");
+    nonempty_transcript_text(&joined)
+        .map(|cleaned| truncate_chars(cleaned.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS))
+}
+
+pub(crate) fn build_compact_handoff_bundle(
+    source: &CliSession,
+    destination: CliProvider,
+    turns: &[(&'static str, String)],
+    archive_path: &Path,
+    note: &str,
+) -> (String, usize) {
+    let mut filtered_turns = turns
+        .iter()
+        .filter_map(|(role, text)| {
+            compact_handoff_turn_text(role, text).map(|clean| (*role, clean))
+        })
+        .collect::<Vec<_>>();
+    if filtered_turns.is_empty() {
+        if let Some((role, text)) = turns.last() {
+            filtered_turns.push((
+                *role,
+                truncate_chars(text.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS),
+            ));
+        }
+    }
+    let task_raw = filtered_turns
+        .iter()
+        .find(|(role, _)| *role == "user")
+        .map(|(_, text)| text.as_str())
+        .or(source.title.as_deref())
+        .or(source.last_user_message.as_deref())
+        .or_else(|| turns.first().map(|(_, text)| text.as_str()))
+        .unwrap_or("Continue the previous CLI session.");
+    let task = truncate_chars(
+        original_task_from_session_goal(task_raw).trim(),
+        HANDOFF_BUNDLE_TURN_MAX_CHARS,
+    );
+    let task = if task.is_empty() {
+        "Continue the previous CLI session.".to_owned()
+    } else {
+        task
+    };
+    let total_turns = turns.len().max(1);
+    let tail_start = filtered_turns
+        .len()
+        .saturating_sub(HANDOFF_BUNDLE_MAX_TURNS);
+    let tail = &filtered_turns[tail_start..];
+    let trimmed_note = truncate_chars(note.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS);
+
+    let render_with_slice = |slice: &[(&'static str, String)]| -> String {
+        let mut bundle = format!(
+            "Continue this coding task in a new CLI session.\n\n\
+             Task to continue:\n\
+             {task}\n\n\
+             Latest terminal context from the source session:\n\
+             - Source CLI: {source_label} (`{source_id}`)\n\
+             - Destination CLI: {dest_label}\n\
+             - Full transcript snapshot: `{archive}`\n\n\
+             Recent conversation excerpt ({included} of {total_turns} turns):",
+            source_label = source.provider.label(),
+            source_id = source.native_id,
+            dest_label = destination.label(),
+            archive = archive_path.display(),
+            included = slice.len(),
+        );
+        for (role, text) in slice {
+            let heading = if *role == "user" { "User" } else { "Assistant" };
+            bundle.push_str(&format!("\n### {heading}\n{text}\n"));
+        }
+        if !trimmed_note.is_empty() {
+            bundle.push_str(&format!(
+                "\nHandoff instructions from the user:\n{trimmed_note}\n"
+            ));
+        }
+        bundle
+    };
+
+    if tail.is_empty() {
+        let bundle = render_with_slice(&[]);
+        return (truncate_utf8_bytes(&bundle, HANDOFF_BUNDLE_MAX_BYTES), 0);
+    }
+
+    for start in 0..tail.len() {
+        let slice = &tail[start..];
+        let candidate = render_with_slice(slice);
+        if candidate.len() <= HANDOFF_BUNDLE_MAX_BYTES {
+            return (candidate, slice.len());
+        }
+    }
+
+    let last_only = &tail[tail.len() - 1..];
+    let candidate = render_with_slice(last_only);
+    (truncate_utf8_bytes(&candidate, HANDOFF_BUNDLE_MAX_BYTES), 1)
+}
+
+fn truncate_utf8_bytes(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
+}
+
+/// Only providers that support a compact handoff bundle are offered.
 pub(crate) fn full_history_restore_destination(target: &str) -> UiResult<CliProvider> {
     match target {
         "codex" => Ok(CliProvider::Codex),
@@ -101,7 +220,7 @@ pub(crate) fn full_history_restore_destination(target: &str) -> UiResult<CliProv
     }
 }
 
-/// Every supported CLI already stores its conversations locally, so a restore
+/// Every supported CLI already stores its conversations locally, so a handoff
 /// reads those files instead of replaying the conversation through a model.
 /// Codex and Claude keep one JSONL per conversation and the discovered session
 /// already points at it; Antigravity's `history.jsonl` is only a global index
@@ -133,13 +252,13 @@ pub(crate) fn is_antigravity_conversation_transcript(path: &Path) -> bool {
         .is_some_and(|name| name == ANTIGRAVITY_TRANSCRIPT_FILE_NAME)
 }
 
-/// Name the request a restore is carrying over. A discovered Claude or Codex
+/// Name the request a handoff is carrying over. A discovered Claude or Codex
 /// session already knows it, because their per-conversation JSONL is what the
 /// scan reads. Antigravity's does not: its `history.jsonl` is a global index
 /// that only names a conversation from its second turn on, and a managed `agy`
 /// terminal launched without a goal has no stored message either. Both cases
 /// leave the source without a message, so read the last request back from the
-/// same transcript the restore itself reads.
+/// same transcript the handoff itself reads.
 pub(crate) fn restore_source_last_user_message(
     source: &CliSession,
     transcript: &Path,
@@ -153,7 +272,7 @@ pub(crate) fn restore_source_last_user_message(
 
 /// The last thing the person said in a conversation, read from its provider's
 /// own transcript. Bounded by the same per-file budgets as every other
-/// transcript read, so an oversized log cannot turn a restore into an unbounded
+/// transcript read, so an oversized log cannot turn a handoff into an unbounded
 /// scan.
 pub(crate) fn transcript_last_user_message(
     transcript: &Path,
@@ -178,152 +297,6 @@ pub(crate) fn transcript_last_user_message(
         }
     }
     last
-}
-
-pub(crate) fn import_full_history_into_codex(
-    project: &Project,
-    turns: &[(&'static str, String)],
-    archive_path: &Path,
-    import_id: Uuid,
-) -> UiResult<ImportedNativeSession> {
-    let mut app_server = CodexAppServer::start().map_err(|error| error.to_string())?;
-    let result = (|| -> UiResult<(String, PathBuf, usize)> {
-        app_server.initialize()?;
-        let (native_session_id, native_session_path) = app_server.start_thread(&project.path)?;
-        let imported_records = app_server.inject_turns(turns)?;
-        if imported_records == 0 {
-            return Err(tr("選択した元履歴には、復元できる記録がありません。").into());
-        }
-        let native_session_path = wait_for_codex_session_file(&native_session_path)?;
-        verify_codex_imported_transcript(&native_session_path, turns)?;
-        Ok((native_session_id, native_session_path, imported_records))
-    })();
-    // The app server owns the rollout writer while it runs. Stop it before
-    // adding the UI history so the file has exactly one writer at a time.
-    app_server.stop();
-    let (native_session_id, native_session_path, imported_records) = result?;
-    let replayable = add_codex_replayable_history(&native_session_path, turns).and_then(|ui_records| {
-            if ui_records != imported_records {
-                return Err(tf!("モデルから見えるターンを {imported_records} 件復元しましたが、再生可能なターンは {ui_records} 件でした", imported_records = imported_records, ui_records = ui_records));
-            }
-            verify_codex_replayable_history(&native_session_path, turns)
-        });
-    if let Err(error) = replayable {
-        return Err(tf!("Codex はスレッド {native_session_id} に復元履歴を受け入れましたが、Operon が再生可能にできなかったため、再開可能なセッションとしては提供しません: {error}", error = error, native_session_id = native_session_id));
-    }
-    Ok(ImportedNativeSession {
-        managed_session_id: import_id,
-        provider: CliProvider::Codex,
-        agent_command: CliProvider::Codex.native_resume_command(&native_session_id),
-        native_session_id: Some(native_session_id),
-        native_session_path,
-        archive_path: archive_path.to_path_buf(),
-        imported_records,
-        classification: RestoreClassification::default(),
-    })
-}
-
-/// Antigravity keeps every conversation in its own local SQLite trajectory
-/// store and offers no import flag. A conversation it can reopen is, however,
-/// just a row set in that store, so Operon writes one: the restored turns
-/// are the conversation itself, not a prompt describing it. Nothing is sent to
-/// a model, so the restore costs no tokens and cannot paraphrase, summarize, or
-/// act on the history it is restoring.
-pub(crate) fn import_full_history_into_antigravity(
-    project: &Project,
-    source_provider: CliProvider,
-    turns: &[(&'static str, String)],
-    archive_path: &Path,
-    import_id: Uuid,
-) -> UiResult<ImportedNativeSession> {
-    let archive_directory = archive_path.parent().ok_or_else(|| {
-        tr("共有セッションのスナップショットに親ディレクトリがありません。").to_owned()
-    })?;
-    if turns.is_empty() {
-        return Err(tr("選択した元履歴には、復元できる記録がありません。").into());
-    }
-    let document = render_restored_conversation(turns, source_provider);
-    write_file_atomically(
-        &archive_directory.join("restored-conversation.md"),
-        document.as_bytes(),
-    )
-    .map_err(|error| error.to_string())?;
-    let conversation_id = Uuid::new_v4().to_string();
-    let conversation_path = antigravity_conversation_path(&conversation_id)?;
-    let history_index = antigravity_history_index_path()?;
-    write_antigravity_conversation(&conversation_path, &conversation_id, turns, now())?;
-    // A conversation Antigravity cannot read back is worse than no restore at
-    // all, so drop it again rather than offer an unusable resume identity.
-    if let Err(error) = verify_antigravity_conversation(&conversation_path, turns) {
-        for file in sqlite_file_and_sidecars(&conversation_path) {
-            let _ = fs::remove_file(file);
-        }
-        return Err(error);
-    }
-    append_antigravity_history_entry(
-        &history_index,
-        &project.path,
-        &conversation_id,
-        turns,
-        now(),
-    )?;
-    Ok(ImportedNativeSession {
-        managed_session_id: import_id,
-        provider: CliProvider::Gemini,
-        agent_command: CliProvider::Gemini.native_resume_command(&conversation_id),
-        native_session_id: Some(conversation_id),
-        native_session_path: conversation_path,
-        archive_path: archive_path.to_path_buf(),
-        imported_records: turns.len(),
-        classification: RestoreClassification::default(),
-    })
-}
-
-/// Claude Code keeps one JSONL per conversation under its own projects
-/// directory and reopens whatever it finds there, so a restore writes that
-/// file: the restored turns become the conversation itself. Checked against
-/// Claude Code 2.1.234 — a conversation written this way is offered by
-/// `claude --resume`, replayed on screen, and handed to the model as real
-/// context, so nothing is summarized and the restore costs no tokens.
-pub(crate) fn import_full_history_into_claude(
-    project: &Project,
-    source_provider: CliProvider,
-    turns: &[(&'static str, String)],
-    archive_path: &Path,
-    import_id: Uuid,
-) -> UiResult<ImportedNativeSession> {
-    let archive_directory = archive_path.parent().ok_or_else(|| {
-        tr("共有セッションのスナップショットに親ディレクトリがありません。").to_owned()
-    })?;
-    if turns.is_empty() {
-        return Err(tr("選択した元履歴には、復元できる記録がありません。").into());
-    }
-    let document = render_restored_conversation(turns, source_provider);
-    write_file_atomically(
-        &archive_directory.join("restored-conversation.md"),
-        document.as_bytes(),
-    )
-    .map_err(|error| error.to_string())?;
-    let session_id = Uuid::new_v4().to_string();
-    let workspace = claude_conversation_workspace(&project.path);
-    let conversation_path = claude_conversation_path(&workspace, &session_id)?;
-    write_claude_conversation(&conversation_path, &session_id, &workspace, turns, now())?;
-    // A conversation Claude Code cannot read back is worse than no restore at
-    // all, so drop it again rather than offer an unusable resume identity.
-    if let Err(error) = verify_claude_conversation(&conversation_path, &session_id, turns) {
-        let _ = fs::remove_file(&conversation_path);
-        return Err(error);
-    }
-    Ok(ImportedNativeSession {
-        managed_session_id: import_id,
-        provider: CliProvider::Claude,
-        agent_command: CliProvider::Claude.native_resume_command(&session_id),
-        native_session_id: Some(session_id),
-        native_session_path: conversation_path,
-        archive_path: archive_path.to_path_buf(),
-        imported_records: turns.len(),
-        classification: RestoreClassification::default(),
-    })
 }
 
 /// What a restore did with every record in the source transcript.
@@ -630,54 +603,60 @@ pub(crate) fn read_transcript_conversation_turns(
     read_transcript_conversation(transcript, provider).map(|(turns, _)| turns)
 }
 
-/// Render the restored conversation as one readable document. Antigravity has
-/// to receive the history as conversation text, so the rendering has to stay
-/// unambiguous about who said what.
-pub(crate) fn render_restored_conversation(
-    turns: &[(&'static str, String)],
-    provider: CliProvider,
-) -> String {
-    let mut document = tf!(
-        "# 復元された会話全履歴（{p0} / {p1} 件のターン）\n",
-        p0 = provider.label(),
-        p1 = turns.len()
-    );
-    for (index, (role, text)) in turns.iter().enumerate() {
-        let speaker = if *role == "user" {
-            tr("ユーザー")
-        } else {
-            tr("アシスタント")
-        };
-        document.push_str(&tf!(
-            "\n## ターン {p0} — {speaker}\n\n{text}\n",
-            p0 = index + 1,
-            speaker = speaker,
-            text = text
-        ));
+#[cfg(test)]
+pub(crate) use legacy_store_synthesis::*;
+#[cfg(test)]
+mod legacy_store_synthesis {
+    use super::*;
+
+    /// Render the restored conversation as one readable document. Antigravity has
+    /// to receive the history as conversation text, so the rendering has to stay
+    /// unambiguous about who said what.
+    pub(crate) fn render_restored_conversation(
+        turns: &[(&'static str, String)],
+        provider: CliProvider,
+    ) -> String {
+        let mut document = tf!(
+            "# 復元された会話全履歴（{p0} / {p1} 件のターン）\n",
+            p0 = provider.label(),
+            p1 = turns.len()
+        );
+        for (index, (role, text)) in turns.iter().enumerate() {
+            let speaker = if *role == "user" {
+                tr("ユーザー")
+            } else {
+                tr("アシスタント")
+            };
+            document.push_str(&tf!(
+                "\n## ターン {p0} — {speaker}\n\n{text}\n",
+                p0 = index + 1,
+                speaker = speaker,
+                text = text
+            ));
+        }
+        document
     }
-    document
-}
 
-/// Antigravity records a step's origin here: a real user message and a model
-/// response are distinguished by this field, not by the step type alone.
-pub(crate) const ANTIGRAVITY_STEP_SOURCE_MODEL: u64 = 2;
-pub(crate) const ANTIGRAVITY_STEP_SOURCE_USER: u64 = 4;
-pub(crate) const ANTIGRAVITY_STEP_TYPE_USER_INPUT: u64 = 14;
-pub(crate) const ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE: u64 = 15;
-pub(crate) const ANTIGRAVITY_STEP_STATUS_DONE: u64 = 3;
-/// `trajectory_type` 4 / `source` 17 is what the CLI writes for a conversation
-/// started from a terminal, which is exactly what a restored conversation is.
-pub(crate) const ANTIGRAVITY_TRAJECTORY_TYPE_CLI: u64 = 4;
-pub(crate) const ANTIGRAVITY_TRAJECTORY_SOURCE_CLI: u64 = 17;
-/// The `user_version` agy 1.4.0 stamps on a trajectory file it opens, and the
-/// header of every file it writes alongside WAL journaling.
-pub(crate) const ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION: i64 = 1;
+    /// Antigravity records a step's origin here: a real user message and a model
+    /// response are distinguished by this field, not by the step type alone.
+    pub(crate) const ANTIGRAVITY_STEP_SOURCE_MODEL: u64 = 2;
+    pub(crate) const ANTIGRAVITY_STEP_SOURCE_USER: u64 = 4;
+    pub(crate) const ANTIGRAVITY_STEP_TYPE_USER_INPUT: u64 = 14;
+    pub(crate) const ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE: u64 = 15;
+    pub(crate) const ANTIGRAVITY_STEP_STATUS_DONE: u64 = 3;
+    /// `trajectory_type` 4 / `source` 17 is what the CLI writes for a conversation
+    /// started from a terminal, which is exactly what a restored conversation is.
+    pub(crate) const ANTIGRAVITY_TRAJECTORY_TYPE_CLI: u64 = 4;
+    pub(crate) const ANTIGRAVITY_TRAJECTORY_SOURCE_CLI: u64 = 17;
+    /// The `user_version` agy 1.4.0 stamps on a trajectory file it opens, and the
+    /// header of every file it writes alongside WAL journaling.
+    pub(crate) const ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION: i64 = 1;
 
-/// Antigravity's own table definitions, reproduced verbatim so a restored
-/// conversation is indistinguishable from one the CLI created itself. Tables
-/// the CLI recreates on demand are still declared: an unexpected missing table
-/// would otherwise surface as a query error inside the destination CLI.
-pub(crate) const ANTIGRAVITY_TRAJECTORY_SCHEMA: &str = "\
+    /// Antigravity's own table definitions, reproduced verbatim so a restored
+    /// conversation is indistinguishable from one the CLI created itself. Tables
+    /// the CLI recreates on demand are still declared: an unexpected missing table
+    /// would otherwise surface as a query error inside the destination CLI.
+    pub(crate) const ANTIGRAVITY_TRAJECTORY_SCHEMA: &str = "\
 CREATE TABLE `trajectory_meta` (`trajectory_id` text,`cascade_id` text,`trajectory_type` integer,`source` integer,PRIMARY KEY (`trajectory_id`));
 CREATE TABLE `steps` (`idx` integer,`step_type` integer NOT NULL DEFAULT 0,`status` integer NOT NULL DEFAULT 0,`has_subtrajectory` numeric NOT NULL DEFAULT false,`metadata` blob,`error_details` blob,`permissions` blob,`task_details` blob,`render_info` blob,`step_payload` blob,`step_format` integer NOT NULL DEFAULT 0,PRIMARY KEY (`idx`));
 CREATE INDEX `idx_steps_status` ON `steps`(`status`);
@@ -689,305 +668,309 @@ CREATE TABLE `trajectory_metadata_blob` (`id` text DEFAULT \"main\",`data` blob,
 CREATE TABLE `battle_mode_infos` (`idx` integer,`data` blob,PRIMARY KEY (`idx`));
 ";
 
-pub(crate) fn proto_push_varint(value: u64, out: &mut Vec<u8>) {
-    let mut value = value;
-    loop {
-        let byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value == 0 {
-            out.push(byte);
-            return;
+    pub(crate) fn proto_push_varint(value: u64, out: &mut Vec<u8>) {
+        let mut value = value;
+        loop {
+            let byte = (value & 0x7f) as u8;
+            value >>= 7;
+            if value == 0 {
+                out.push(byte);
+                return;
+            }
+            out.push(byte | 0x80);
         }
-        out.push(byte | 0x80);
     }
-}
 
-pub(crate) fn proto_push_varint_field(field: u32, value: u64, out: &mut Vec<u8>) {
-    proto_push_varint(u64::from(field) << 3, out);
-    proto_push_varint(value, out);
-}
-
-pub(crate) fn proto_push_bytes_field(field: u32, value: &[u8], out: &mut Vec<u8>) {
-    proto_push_varint((u64::from(field) << 3) | 2, out);
-    proto_push_varint(value.len() as u64, out);
-    out.extend_from_slice(value);
-}
-
-/// Antigravity timestamps are seconds plus nanoseconds; a restored step has no
-/// sub-second precision to preserve, so only the seconds field is written.
-pub(crate) fn proto_timestamp(seconds: u64) -> Vec<u8> {
-    let mut out = Vec::new();
-    proto_push_varint_field(1, seconds, &mut out);
-    out
-}
-
-/// The step metadata Antigravity reads back when it reopens a conversation:
-/// when the step happened, where it came from, and which trajectory position it
-/// occupies. Field numbers come from the steps the CLI writes itself.
-pub(crate) fn antigravity_step_metadata(
-    created_at: u64,
-    source: u64,
-    trajectory_id: &str,
-    conversation_id: &str,
-    index: usize,
-) -> Vec<u8> {
-    let mut step_id = Vec::new();
-    proto_push_bytes_field(1, trajectory_id.as_bytes(), &mut step_id);
-    // Protobuf omits a zero-valued scalar, and so does Antigravity's own
-    // first step. Writing it explicitly would still decode, but keeping the
-    // encoding identical avoids a needless difference from real steps.
-    if index > 0 {
-        proto_push_varint_field(2, index as u64, &mut step_id);
+    pub(crate) fn proto_push_varint_field(field: u32, value: u64, out: &mut Vec<u8>) {
+        proto_push_varint(u64::from(field) << 3, out);
+        proto_push_varint(value, out);
     }
-    proto_push_bytes_field(4, conversation_id.as_bytes(), &mut step_id);
 
-    let mut status_entry = Vec::new();
-    proto_push_varint_field(1, ANTIGRAVITY_STEP_STATUS_DONE, &mut status_entry);
-    proto_push_bytes_field(2, &proto_timestamp(created_at), &mut status_entry);
-    let mut status_history = Vec::new();
-    proto_push_bytes_field(1, &status_entry, &mut status_history);
-
-    let mut metadata = Vec::new();
-    proto_push_bytes_field(1, &proto_timestamp(created_at), &mut metadata);
-    proto_push_varint_field(3, source, &mut metadata);
-    if source == ANTIGRAVITY_STEP_SOURCE_MODEL {
-        proto_push_bytes_field(8, &proto_timestamp(created_at), &mut metadata);
+    pub(crate) fn proto_push_bytes_field(field: u32, value: &[u8], out: &mut Vec<u8>) {
+        proto_push_varint((u64::from(field) << 3) | 2, out);
+        proto_push_varint(value.len() as u64, out);
+        out.extend_from_slice(value);
     }
-    proto_push_bytes_field(20, &step_id, &mut metadata);
-    proto_push_bytes_field(26, &status_history, &mut metadata);
-    proto_push_bytes_field(32, &proto_timestamp(created_at), &mut metadata);
-    metadata
-}
 
-/// Encode one restored turn as the step payload Antigravity stores. A user turn
-/// carries its text twice (plain and structured) exactly as the CLI writes it,
-/// because the terminal renders one copy and the model context reads the other.
-pub(crate) fn antigravity_step_payload(
-    role: &str,
-    text: &str,
-    metadata: &[u8],
-    index: usize,
-) -> (u64, Vec<u8>) {
-    let mut payload = Vec::new();
-    if role == "user" {
+    /// Antigravity timestamps are seconds plus nanoseconds; a restored step has no
+    /// sub-second precision to preserve, so only the seconds field is written.
+    pub(crate) fn proto_timestamp(seconds: u64) -> Vec<u8> {
+        let mut out = Vec::new();
+        proto_push_varint_field(1, seconds, &mut out);
+        out
+    }
+
+    /// The step metadata Antigravity reads back when it reopens a conversation:
+    /// when the step happened, where it came from, and which trajectory position it
+    /// occupies. Field numbers come from the steps the CLI writes itself.
+    pub(crate) fn antigravity_step_metadata(
+        created_at: u64,
+        source: u64,
+        trajectory_id: &str,
+        conversation_id: &str,
+        index: usize,
+    ) -> Vec<u8> {
+        let mut step_id = Vec::new();
+        proto_push_bytes_field(1, trajectory_id.as_bytes(), &mut step_id);
+        // Protobuf omits a zero-valued scalar, and so does Antigravity's own
+        // first step. Writing it explicitly would still decode, but keeping the
+        // encoding identical avoids a needless difference from real steps.
+        if index > 0 {
+            proto_push_varint_field(2, index as u64, &mut step_id);
+        }
+        proto_push_bytes_field(4, conversation_id.as_bytes(), &mut step_id);
+
+        let mut status_entry = Vec::new();
+        proto_push_varint_field(1, ANTIGRAVITY_STEP_STATUS_DONE, &mut status_entry);
+        proto_push_bytes_field(2, &proto_timestamp(created_at), &mut status_entry);
+        let mut status_history = Vec::new();
+        proto_push_bytes_field(1, &status_entry, &mut status_history);
+
+        let mut metadata = Vec::new();
+        proto_push_bytes_field(1, &proto_timestamp(created_at), &mut metadata);
+        proto_push_varint_field(3, source, &mut metadata);
+        if source == ANTIGRAVITY_STEP_SOURCE_MODEL {
+            proto_push_bytes_field(8, &proto_timestamp(created_at), &mut metadata);
+        }
+        proto_push_bytes_field(20, &step_id, &mut metadata);
+        proto_push_bytes_field(26, &status_history, &mut metadata);
+        proto_push_bytes_field(32, &proto_timestamp(created_at), &mut metadata);
+        metadata
+    }
+
+    /// Encode one restored turn as the step payload Antigravity stores. A user turn
+    /// carries its text twice (plain and structured) exactly as the CLI writes it,
+    /// because the terminal renders one copy and the model context reads the other.
+    pub(crate) fn antigravity_step_payload(
+        role: &str,
+        text: &str,
+        metadata: &[u8],
+        index: usize,
+    ) -> (u64, Vec<u8>) {
+        let mut payload = Vec::new();
+        if role == "user" {
+            let mut inner = Vec::new();
+            proto_push_bytes_field(2, text.as_bytes(), &mut inner);
+            let mut structured = Vec::new();
+            proto_push_bytes_field(1, text.as_bytes(), &mut structured);
+            proto_push_bytes_field(3, &structured, &mut inner);
+            proto_push_bytes_field(4, b"", &mut inner);
+            proto_push_varint_field(1, ANTIGRAVITY_STEP_TYPE_USER_INPUT, &mut payload);
+            proto_push_varint_field(4, ANTIGRAVITY_STEP_STATUS_DONE, &mut payload);
+            proto_push_bytes_field(5, metadata, &mut payload);
+            proto_push_bytes_field(19, &inner, &mut payload);
+            return (ANTIGRAVITY_STEP_TYPE_USER_INPUT, payload);
+        }
         let mut inner = Vec::new();
-        proto_push_bytes_field(2, text.as_bytes(), &mut inner);
-        let mut structured = Vec::new();
-        proto_push_bytes_field(1, text.as_bytes(), &mut structured);
-        proto_push_bytes_field(3, &structured, &mut inner);
-        proto_push_bytes_field(4, b"", &mut inner);
-        proto_push_varint_field(1, ANTIGRAVITY_STEP_TYPE_USER_INPUT, &mut payload);
+        proto_push_bytes_field(1, text.as_bytes(), &mut inner);
+        // Antigravity labels each response with a per-response identifier. It is
+        // opaque, so derive a stable one from the step position rather than
+        // inventing an identity that looks like it came from the provider.
+        proto_push_bytes_field(6, format!("operon-restored-{index}").as_bytes(), &mut inner);
+        proto_push_bytes_field(8, text.as_bytes(), &mut inner);
+        proto_push_varint_field(12, 2, &mut inner);
+        proto_push_varint_field(1, ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE, &mut payload);
         proto_push_varint_field(4, ANTIGRAVITY_STEP_STATUS_DONE, &mut payload);
         proto_push_bytes_field(5, metadata, &mut payload);
-        proto_push_bytes_field(19, &inner, &mut payload);
-        return (ANTIGRAVITY_STEP_TYPE_USER_INPUT, payload);
+        proto_push_bytes_field(20, &inner, &mut payload);
+        (ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE, payload)
     }
-    let mut inner = Vec::new();
-    proto_push_bytes_field(1, text.as_bytes(), &mut inner);
-    // Antigravity labels each response with a per-response identifier. It is
-    // opaque, so derive a stable one from the step position rather than
-    // inventing an identity that looks like it came from the provider.
-    proto_push_bytes_field(6, format!("operon-restored-{index}").as_bytes(), &mut inner);
-    proto_push_bytes_field(8, text.as_bytes(), &mut inner);
-    proto_push_varint_field(12, 2, &mut inner);
-    proto_push_varint_field(1, ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE, &mut payload);
-    proto_push_varint_field(4, ANTIGRAVITY_STEP_STATUS_DONE, &mut payload);
-    proto_push_bytes_field(5, metadata, &mut payload);
-    proto_push_bytes_field(20, &inner, &mut payload);
-    (ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE, payload)
-}
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ProtoValue<'a> {
-    Varint(u64),
-    Bytes(&'a [u8]),
-    Fixed64,
-    Fixed32,
-}
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub(crate) enum ProtoValue<'a> {
+        Varint(u64),
+        Bytes(&'a [u8]),
+        Fixed64,
+        Fixed32,
+    }
 
-/// Decode a protobuf message far enough to read a restored step back. This
-/// exists for verification: a step Operon cannot decode from the persisted
-/// bytes is a step the destination CLI may not be able to decode either.
-pub(crate) fn proto_fields(mut bytes: &[u8]) -> Option<Vec<(u32, ProtoValue<'_>)>> {
-    let mut fields = Vec::new();
-    while !bytes.is_empty() {
-        let (key, rest) = proto_read_varint(bytes)?;
-        let field = u32::try_from(key >> 3).ok()?;
-        if field == 0 {
-            return None;
+    /// Decode a protobuf message far enough to read a restored step back. This
+    /// exists for verification: a step Operon cannot decode from the persisted
+    /// bytes is a step the destination CLI may not be able to decode either.
+    pub(crate) fn proto_fields(mut bytes: &[u8]) -> Option<Vec<(u32, ProtoValue<'_>)>> {
+        let mut fields = Vec::new();
+        while !bytes.is_empty() {
+            let (key, rest) = proto_read_varint(bytes)?;
+            let field = u32::try_from(key >> 3).ok()?;
+            if field == 0 {
+                return None;
+            }
+            bytes = match key & 7 {
+                0 => {
+                    let (value, rest) = proto_read_varint(rest)?;
+                    fields.push((field, ProtoValue::Varint(value)));
+                    rest
+                }
+                1 => {
+                    fields.push((field, ProtoValue::Fixed64));
+                    rest.get(8..)?
+                }
+                2 => {
+                    let (length, rest) = proto_read_varint(rest)?;
+                    let length = usize::try_from(length).ok()?;
+                    fields.push((field, ProtoValue::Bytes(rest.get(..length)?)));
+                    rest.get(length..)?
+                }
+                5 => {
+                    fields.push((field, ProtoValue::Fixed32));
+                    rest.get(4..)?
+                }
+                _ => return None,
+            };
         }
-        bytes = match key & 7 {
-            0 => {
-                let (value, rest) = proto_read_varint(rest)?;
-                fields.push((field, ProtoValue::Varint(value)));
-                rest
+        Some(fields)
+    }
+
+    pub(crate) fn proto_read_varint(bytes: &[u8]) -> Option<(u64, &[u8])> {
+        let mut value = 0_u64;
+        for (index, byte) in bytes.iter().take(10).enumerate() {
+            value |= u64::from(byte & 0x7f).checked_shl(7 * index as u32)?;
+            if byte & 0x80 == 0 {
+                return Some((value, &bytes[index + 1..]));
             }
-            1 => {
-                fields.push((field, ProtoValue::Fixed64));
-                rest.get(8..)?
-            }
-            2 => {
-                let (length, rest) = proto_read_varint(rest)?;
-                let length = usize::try_from(length).ok()?;
-                fields.push((field, ProtoValue::Bytes(rest.get(..length)?)));
-                rest.get(length..)?
-            }
-            5 => {
-                fields.push((field, ProtoValue::Fixed32));
-                rest.get(4..)?
-            }
+        }
+        None
+    }
+
+    pub(crate) fn proto_varint_value(fields: &[(u32, ProtoValue<'_>)], field: u32) -> Option<u64> {
+        fields.iter().rev().find_map(|(number, value)| match value {
+            ProtoValue::Varint(value) if *number == field => Some(*value),
+            _ => None,
+        })
+    }
+
+    pub(crate) fn proto_bytes_value<'a>(
+        fields: &[(u32, ProtoValue<'a>)],
+        field: u32,
+    ) -> Option<&'a [u8]> {
+        fields.iter().rev().find_map(|(number, value)| match value {
+            ProtoValue::Bytes(value) if *number == field => Some(*value),
+            _ => None,
+        })
+    }
+
+    /// Read one restored turn back out of a persisted step payload.
+    pub(crate) fn antigravity_step_turn(payload: &[u8]) -> Option<(&'static str, String)> {
+        let fields = proto_fields(payload)?;
+        let (role, message_field, text_field) = match proto_varint_value(&fields, 1)? {
+            ANTIGRAVITY_STEP_TYPE_USER_INPUT => ("user", 19, 2),
+            ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE => ("assistant", 20, 1),
             _ => return None,
         };
+        let message = proto_fields(proto_bytes_value(&fields, message_field)?)?;
+        let text = proto_bytes_value(&message, text_field)?;
+        Some((role, String::from_utf8(text.to_vec()).ok()?))
     }
-    Some(fields)
-}
 
-pub(crate) fn proto_read_varint(bytes: &[u8]) -> Option<(u64, &[u8])> {
-    let mut value = 0_u64;
-    for (index, byte) in bytes.iter().take(10).enumerate() {
-        value |= u64::from(byte & 0x7f).checked_shl(7 * index as u32)?;
-        if byte & 0x80 == 0 {
-            return Some((value, &bytes[index + 1..]));
+    /// Write the restored conversation into Antigravity's own conversation store.
+    /// The file is built under a temporary name and renamed into place, so `agy`
+    /// never observes a half-written conversation at a resumable path.
+    pub(crate) fn write_antigravity_conversation(
+        path: &Path,
+        conversation_id: &str,
+        turns: &[(&'static str, String)],
+        created_at: u64,
+    ) -> UiResult<()> {
+        let directory = path.parent().ok_or_else(|| {
+            tr("Antigravity の会話ストアに親ディレクトリがありません。").to_owned()
+        })?;
+        fs::create_dir_all(directory).map_err(|error| {
+            tf!(
+                "Antigravity の会話ストア {p0} を作成できません: {error}",
+                error = error,
+                p0 = directory.display()
+            )
+        })?;
+        if path.exists() {
+            return Err(tf!(
+                "Antigravity には既に {p0} に会話があります。",
+                p0 = path.display()
+            ));
         }
-    }
-    None
-}
-
-pub(crate) fn proto_varint_value(fields: &[(u32, ProtoValue<'_>)], field: u32) -> Option<u64> {
-    fields.iter().rev().find_map(|(number, value)| match value {
-        ProtoValue::Varint(value) if *number == field => Some(*value),
-        _ => None,
-    })
-}
-
-pub(crate) fn proto_bytes_value<'a>(
-    fields: &[(u32, ProtoValue<'a>)],
-    field: u32,
-) -> Option<&'a [u8]> {
-    fields.iter().rev().find_map(|(number, value)| match value {
-        ProtoValue::Bytes(value) if *number == field => Some(*value),
-        _ => None,
-    })
-}
-
-/// Read one restored turn back out of a persisted step payload.
-pub(crate) fn antigravity_step_turn(payload: &[u8]) -> Option<(&'static str, String)> {
-    let fields = proto_fields(payload)?;
-    let (role, message_field, text_field) = match proto_varint_value(&fields, 1)? {
-        ANTIGRAVITY_STEP_TYPE_USER_INPUT => ("user", 19, 2),
-        ANTIGRAVITY_STEP_TYPE_PLANNER_RESPONSE => ("assistant", 20, 1),
-        _ => return None,
-    };
-    let message = proto_fields(proto_bytes_value(&fields, message_field)?)?;
-    let text = proto_bytes_value(&message, text_field)?;
-    Some((role, String::from_utf8(text.to_vec()).ok()?))
-}
-
-/// Write the restored conversation into Antigravity's own conversation store.
-/// The file is built under a temporary name and renamed into place, so `agy`
-/// never observes a half-written conversation at a resumable path.
-pub(crate) fn write_antigravity_conversation(
-    path: &Path,
-    conversation_id: &str,
-    turns: &[(&'static str, String)],
-    created_at: u64,
-) -> UiResult<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| tr("Antigravity の会話ストアに親ディレクトリがありません。").to_owned())?;
-    fs::create_dir_all(directory).map_err(|error| {
-        tf!(
-            "Antigravity の会話ストア {p0} を作成できません: {error}",
-            error = error,
-            p0 = directory.display()
-        )
-    })?;
-    if path.exists() {
-        return Err(tf!(
-            "Antigravity には既に {p0} に会話があります。",
-            p0 = path.display()
-        ));
-    }
-    let temporary = directory.join(format!(".{conversation_id}.db.tmp-{}", Uuid::new_v4()));
-    let result = build_antigravity_conversation(&temporary, conversation_id, turns, created_at)
-        .and_then(|()| {
-            let file = fs::File::open(&temporary).map_err(|error| {
-                tf!(
-                    "復元した会話 {p0} を開き直せません: {error}",
-                    error = error,
-                    p0 = temporary.display()
-                )
-            })?;
-            file.sync_all().map_err(|error| {
-                tf!(
-                    "復元した会話 {p0} を書き出せません: {error}",
-                    error = error,
-                    p0 = temporary.display()
-                )
-            })?;
-            fs::rename(&temporary, path).map_err(|error| {
-                tf!(
-                    "復元した会話 {p0} を確定できません: {error}",
-                    error = error,
-                    p0 = path.display()
-                )
-            })?;
-            fs::File::open(directory)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|error| {
+        let temporary = directory.join(format!(".{conversation_id}.db.tmp-{}", Uuid::new_v4()));
+        let result = build_antigravity_conversation(&temporary, conversation_id, turns, created_at)
+            .and_then(|()| {
+                let file = fs::File::open(&temporary).map_err(|error| {
                     tf!(
-                        "Antigravity の会話ストア {p0} を書き出せません: {error}",
+                        "復元した会話 {p0} を開き直せません: {error}",
                         error = error,
-                        p0 = directory.display()
+                        p0 = temporary.display()
                     )
-                })
-        });
-    if result.is_err() {
-        for file in sqlite_file_and_sidecars(&temporary) {
-            let _ = fs::remove_file(file);
+                })?;
+                file.sync_all().map_err(|error| {
+                    tf!(
+                        "復元した会話 {p0} を書き出せません: {error}",
+                        error = error,
+                        p0 = temporary.display()
+                    )
+                })?;
+                fs::rename(&temporary, path).map_err(|error| {
+                    tf!(
+                        "復元した会話 {p0} を確定できません: {error}",
+                        error = error,
+                        p0 = path.display()
+                    )
+                })?;
+                fs::File::open(directory)
+                    .and_then(|directory| directory.sync_all())
+                    .map_err(|error| {
+                        tf!(
+                            "Antigravity の会話ストア {p0} を書き出せません: {error}",
+                            error = error,
+                            p0 = directory.display()
+                        )
+                    })
+            });
+        if result.is_err() {
+            for file in sqlite_file_and_sidecars(&temporary) {
+                let _ = fs::remove_file(file);
+            }
         }
+        result
     }
-    result
-}
 
-/// A trajectory file is in WAL mode, so `-wal` and `-shm` sit beside it while
-/// it is open and after a read-only reader such as the verification below;
-/// whatever drops the conversation drops those with it.
-pub(crate) fn sqlite_file_and_sidecars(path: &Path) -> [PathBuf; 3] {
-    let beside = |suffix: &str| {
-        let mut name = path.as_os_str().to_owned();
-        name.push(suffix);
-        PathBuf::from(name)
-    };
-    [path.to_path_buf(), beside("-wal"), beside("-shm")]
-}
+    /// A trajectory file is in WAL mode, so `-wal` and `-shm` sit beside it while
+    /// it is open and after a read-only reader such as the verification below;
+    /// whatever drops the conversation drops those with it.
+    pub(crate) fn sqlite_file_and_sidecars(path: &Path) -> [PathBuf; 3] {
+        let beside = |suffix: &str| {
+            let mut name = path.as_os_str().to_owned();
+            name.push(suffix);
+            PathBuf::from(name)
+        };
+        [path.to_path_buf(), beside("-wal"), beside("-shm")]
+    }
 
-pub(crate) fn build_antigravity_conversation(
-    path: &Path,
-    conversation_id: &str,
-    turns: &[(&'static str, String)],
-    created_at: u64,
-) -> UiResult<()> {
-    let mut connection = rusqlite::Connection::open(path).map_err(|error| {
-        tf!(
-            "復元した会話 {p0} を作成できません: {error}",
-            error = error,
-            p0 = path.display()
-        )
-    })?;
-    let trajectory_id = Uuid::new_v4().to_string();
-    let transaction = (|| -> rusqlite::Result<String> {
-        // agy stamps `user_version` on every file it opens. A new conversation
-        // already has readers by then (Gemini.app's hub opens each one as it
-        // appears), and with a rollback journal that write waits on them, so
-        // agy reported the conversation missing (change 172). Arriving stamped
-        // and in WAL, where readers never block a writer, it needs no wait.
-        connection.pragma_update(None, "user_version", ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION)?;
-        let journal =
-            connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0))?;
-        connection.execute_batch(ANTIGRAVITY_TRAJECTORY_SCHEMA)?;
-        let transaction = connection.transaction()?;
-        transaction.execute(
+    pub(crate) fn build_antigravity_conversation(
+        path: &Path,
+        conversation_id: &str,
+        turns: &[(&'static str, String)],
+        created_at: u64,
+    ) -> UiResult<()> {
+        let mut connection = rusqlite::Connection::open(path).map_err(|error| {
+            tf!(
+                "復元した会話 {p0} を作成できません: {error}",
+                error = error,
+                p0 = path.display()
+            )
+        })?;
+        let trajectory_id = Uuid::new_v4().to_string();
+        let transaction = (|| -> rusqlite::Result<String> {
+            // agy stamps `user_version` on every file it opens. A new conversation
+            // already has readers by then (Gemini.app's hub opens each one as it
+            // appears), and with a rollback journal that write waits on them, so
+            // agy reported the conversation missing (change 172). Arriving stamped
+            // and in WAL, where readers never block a writer, it needs no wait.
+            connection.pragma_update(
+                None,
+                "user_version",
+                ANTIGRAVITY_TRAJECTORY_SCHEMA_VERSION,
+            )?;
+            let journal = connection
+                .query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0))?;
+            connection.execute_batch(ANTIGRAVITY_TRAJECTORY_SCHEMA)?;
+            let transaction = connection.transaction()?;
+            transaction.execute(
             "INSERT INTO trajectory_meta (trajectory_id, cascade_id, trajectory_type, source) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![
                 trajectory_id,
@@ -996,34 +979,34 @@ pub(crate) fn build_antigravity_conversation(
                 ANTIGRAVITY_TRAJECTORY_SOURCE_CLI as i64
             ],
         )?;
-        let mut trajectory_blob = Vec::new();
-        proto_push_bytes_field(2, &proto_timestamp(created_at), &mut trajectory_blob);
-        proto_push_bytes_field(3, trajectory_id.as_bytes(), &mut trajectory_blob);
-        proto_push_bytes_field(6, conversation_id.as_bytes(), &mut trajectory_blob);
-        proto_push_bytes_field(18, b"default-cli-project", &mut trajectory_blob);
-        transaction.execute(
-            "INSERT INTO trajectory_metadata_blob (id, data) VALUES ('main', ?1)",
-            rusqlite::params![trajectory_blob],
-        )?;
-        for (index, (role, text)) in turns.iter().enumerate() {
-            let source = if *role == "user" {
-                ANTIGRAVITY_STEP_SOURCE_USER
-            } else {
-                ANTIGRAVITY_STEP_SOURCE_MODEL
-            };
-            // Keep the recorded order monotonic without pretending to know how
-            // long each original turn took, and without dating any step in the
-            // future: the conversation ends when it was restored.
-            let step_time = created_at.saturating_sub((turns.len() - 1 - index) as u64);
-            let metadata = antigravity_step_metadata(
-                step_time,
-                source,
-                &trajectory_id,
-                conversation_id,
-                index,
-            );
-            let (step_type, payload) = antigravity_step_payload(role, text, &metadata, index);
+            let mut trajectory_blob = Vec::new();
+            proto_push_bytes_field(2, &proto_timestamp(created_at), &mut trajectory_blob);
+            proto_push_bytes_field(3, trajectory_id.as_bytes(), &mut trajectory_blob);
+            proto_push_bytes_field(6, conversation_id.as_bytes(), &mut trajectory_blob);
+            proto_push_bytes_field(18, b"default-cli-project", &mut trajectory_blob);
             transaction.execute(
+                "INSERT INTO trajectory_metadata_blob (id, data) VALUES ('main', ?1)",
+                rusqlite::params![trajectory_blob],
+            )?;
+            for (index, (role, text)) in turns.iter().enumerate() {
+                let source = if *role == "user" {
+                    ANTIGRAVITY_STEP_SOURCE_USER
+                } else {
+                    ANTIGRAVITY_STEP_SOURCE_MODEL
+                };
+                // Keep the recorded order monotonic without pretending to know how
+                // long each original turn took, and without dating any step in the
+                // future: the conversation ends when it was restored.
+                let step_time = created_at.saturating_sub((turns.len() - 1 - index) as u64);
+                let metadata = antigravity_step_metadata(
+                    step_time,
+                    source,
+                    &trajectory_id,
+                    conversation_id,
+                    index,
+                );
+                let (step_type, payload) = antigravity_step_payload(role, text, &metadata, index);
+                transaction.execute(
                 "INSERT INTO steps (idx, step_type, status, has_subtrajectory, metadata, step_payload, step_format) VALUES (?1, ?2, ?3, 0, ?4, ?5, 0)",
                 rusqlite::params![
                     index as i64,
@@ -1033,170 +1016,172 @@ pub(crate) fn build_antigravity_conversation(
                     payload
                 ],
             )?;
-        }
-        transaction.commit()?;
-        Ok(journal)
-    })();
-    let closed = connection.close();
-    let journal = transaction.map_err(|error| {
-        tf!(
-            "復元した会話 {p0} を書き込めません: {error}",
-            error = error,
-            p0 = path.display()
-        )
-    })?;
-    closed.map_err(|(_, error)| {
-        tf!(
-            "復元した会話 {p0} を閉じられません: {error}",
-            error = error,
-            p0 = path.display()
-        )
-    })?;
-    // SQLite answers a journal mode it cannot enter with the one it kept, not
-    // with an error, and a file left in that mode brings the symptom back.
-    if !journal.eq_ignore_ascii_case("wal") {
-        return Err(tf!(
-            "復元した会話 {p0} を Antigravity と同じ WAL 形式にできません（{journal} のままです）。",
-            journal = journal,
-            p0 = path.display()
-        ));
-    }
-    Ok(())
-}
-
-/// Read the committed conversation back the way Antigravity will. A restore is
-/// only complete when the destination CLI's own file holds every source turn in
-/// order, so anything less fails the restore instead of exposing a resume ID.
-pub(crate) fn verify_antigravity_conversation(
-    path: &Path,
-    turns: &[(&'static str, String)],
-) -> UiResult<()> {
-    let connection =
-        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|error| {
-                tf!(
-                    "復元した会話 {p0} を開き直せません: {error}",
-                    error = error,
-                    p0 = path.display()
-                )
-            })?;
-    let mut statement = connection
-        .prepare("SELECT idx, step_payload FROM steps ORDER BY idx")
-        .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
-    let mut rows = statement
-        .query([])
-        .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
-    let mut restored = 0_usize;
-    while let Some(row) = rows
-        .next()
-        .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?
-    {
-        let index: i64 = row
-            .get(0)
-            .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
-        let payload: Vec<u8> = row
-            .get(1)
-            .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
-        let Some(expected) = turns.get(restored) else {
-            return Err(
-                tr("復元した Antigravity の会話が、元よりも多くのターンを含んでいます。").into(),
-            );
-        };
-        if index != restored as i64 {
-            return Err(tf!(
-                "復元した Antigravity の会話が、ステップ {index} で順序どおりではありません。",
-                index = index
-            ));
-        }
-        let Some((role, text)) = antigravity_step_turn(&payload) else {
-            return Err(tf!(
-                "Antigravity のステップ {index} を、書き込み後に読み戻せませんでした。",
-                index = index
-            ));
-        };
-        if role != expected.0 || text != expected.1 {
-            return Err(tf!(
-                "復元した Antigravity の会話は、ステップ {index} の内容が元と異なります。",
-                index = index
-            ));
-        }
-        restored += 1;
-    }
-    if restored != turns.len() {
-        return Err(tf!(
-            "Antigravity の会話に、{p0} 件中 {restored} 件のターンを復元しました。",
-            p0 = turns.len(),
-            restored = restored
-        ));
-    }
-    Ok(())
-}
-
-/// Antigravity lists a conversation in its own resume picker from this index,
-/// and Operon discovers Antigravity sessions the same way. Append one entry
-/// so the restored conversation is reachable from both, not just from the
-/// resume command Operon stored.
-pub(crate) fn append_antigravity_history_entry(
-    path: &Path,
-    project: &Path,
-    conversation_id: &str,
-    turns: &[(&'static str, String)],
-    created_at: u64,
-) -> UiResult<()> {
-    let display = turns
-        .iter()
-        .find(|(role, _)| *role == "user")
-        .map(|(_, text)| text.as_str())
-        .unwrap_or(tr("復元された会話"));
-    let mut line = serde_json::to_vec(&serde_json::json!({
-        "display": truncate_chars(display.trim(), ANTIGRAVITY_HISTORY_TITLE_MAX_CHARS),
-        "timestamp": created_at.saturating_mul(1_000),
-        "workspace": project,
-        "conversationId": conversation_id,
-    }))
-    .map_err(|error| {
-        tf!(
-            "Antigravity の履歴エントリのエンコード: {error}",
-            error = error
-        )
-    })?;
-    line.push(b'\n');
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| {
+            }
+            transaction.commit()?;
+            Ok(journal)
+        })();
+        let closed = connection.close();
+        let journal = transaction.map_err(|error| {
             tf!(
-                "Antigravity の履歴ディレクトリ {p0} を作成できません: {error}",
-                error = error,
-                p0 = parent.display()
-            )
-        })?;
-    }
-    // `agy` owns this file and appends to it from its own processes. A single
-    // short append is the only safe way to add an entry from outside.
-    let mut file = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(path)
-        .map_err(|error| {
-            tf!(
-                "Antigravity の履歴インデックス {p0} を開けません: {error}",
+                "復元した会話 {p0} を書き込めません: {error}",
                 error = error,
                 p0 = path.display()
             )
         })?;
-    file.write_all(&line).map_err(|error| {
-        tf!(
-            "{p0} への復元会話の記録: {error}",
-            error = error,
+        closed.map_err(|(_, error)| {
+            tf!(
+                "復元した会話 {p0} を閉じられません: {error}",
+                error = error,
+                p0 = path.display()
+            )
+        })?;
+        // SQLite answers a journal mode it cannot enter with the one it kept, not
+        // with an error, and a file left in that mode brings the symptom back.
+        if !journal.eq_ignore_ascii_case("wal") {
+            return Err(tf!(
+            "復元した会話 {p0} を Antigravity と同じ WAL 形式にできません（{journal} のままです）。",
+            journal = journal,
             p0 = path.display()
-        )
-    })?;
-    file.sync_all().map_err(|error| {
-        tf!(
-            "Antigravity の履歴インデックス {p0} を書き出せません: {error}",
-            error = error,
-            p0 = path.display()
-        )
-    })
+        ));
+        }
+        Ok(())
+    }
+
+    /// Read the committed conversation back the way Antigravity will. A restore is
+    /// only complete when the destination CLI's own file holds every source turn in
+    /// order, so anything less fails the restore instead of exposing a resume ID.
+    pub(crate) fn verify_antigravity_conversation(
+        path: &Path,
+        turns: &[(&'static str, String)],
+    ) -> UiResult<()> {
+        let connection =
+            rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(|error| {
+                    tf!(
+                        "復元した会話 {p0} を開き直せません: {error}",
+                        error = error,
+                        p0 = path.display()
+                    )
+                })?;
+        let mut statement = connection
+            .prepare("SELECT idx, step_payload FROM steps ORDER BY idx")
+            .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
+        let mut rows = statement
+            .query([])
+            .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
+        let mut restored = 0_usize;
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?
+        {
+            let index: i64 = row
+                .get(0)
+                .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
+            let payload: Vec<u8> = row
+                .get(1)
+                .map_err(|error| tf!("復元した会話を読み取れません: {error}", error = error))?;
+            let Some(expected) = turns.get(restored) else {
+                return Err(tr(
+                    "復元した Antigravity の会話が、元よりも多くのターンを含んでいます。",
+                )
+                .into());
+            };
+            if index != restored as i64 {
+                return Err(tf!(
+                    "復元した Antigravity の会話が、ステップ {index} で順序どおりではありません。",
+                    index = index
+                ));
+            }
+            let Some((role, text)) = antigravity_step_turn(&payload) else {
+                return Err(tf!(
+                    "Antigravity のステップ {index} を、書き込み後に読み戻せませんでした。",
+                    index = index
+                ));
+            };
+            if role != expected.0 || text != expected.1 {
+                return Err(tf!(
+                    "復元した Antigravity の会話は、ステップ {index} の内容が元と異なります。",
+                    index = index
+                ));
+            }
+            restored += 1;
+        }
+        if restored != turns.len() {
+            return Err(tf!(
+                "Antigravity の会話に、{p0} 件中 {restored} 件のターンを復元しました。",
+                p0 = turns.len(),
+                restored = restored
+            ));
+        }
+        Ok(())
+    }
+
+    /// Antigravity lists a conversation in its own resume picker from this index,
+    /// and Operon discovers Antigravity sessions the same way. Append one entry
+    /// so the restored conversation is reachable from both, not just from the
+    /// resume command Operon stored.
+    pub(crate) fn append_antigravity_history_entry(
+        path: &Path,
+        project: &Path,
+        conversation_id: &str,
+        turns: &[(&'static str, String)],
+        created_at: u64,
+    ) -> UiResult<()> {
+        let display = turns
+            .iter()
+            .find(|(role, _)| *role == "user")
+            .map(|(_, text)| text.as_str())
+            .unwrap_or(tr("復元された会話"));
+        let mut line = serde_json::to_vec(&serde_json::json!({
+            "display": truncate_chars(display.trim(), ANTIGRAVITY_HISTORY_TITLE_MAX_CHARS),
+            "timestamp": created_at.saturating_mul(1_000),
+            "workspace": project,
+            "conversationId": conversation_id,
+        }))
+        .map_err(|error| {
+            tf!(
+                "Antigravity の履歴エントリのエンコード: {error}",
+                error = error
+            )
+        })?;
+        line.push(b'\n');
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                tf!(
+                    "Antigravity の履歴ディレクトリ {p0} を作成できません: {error}",
+                    error = error,
+                    p0 = parent.display()
+                )
+            })?;
+        }
+        // `agy` owns this file and appends to it from its own processes. A single
+        // short append is the only safe way to add an entry from outside.
+        let mut file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)
+            .map_err(|error| {
+                tf!(
+                    "Antigravity の履歴インデックス {p0} を開けません: {error}",
+                    error = error,
+                    p0 = path.display()
+                )
+            })?;
+        file.write_all(&line).map_err(|error| {
+            tf!(
+                "{p0} への復元会話の記録: {error}",
+                error = error,
+                p0 = path.display()
+            )
+        })?;
+        file.sync_all().map_err(|error| {
+            tf!(
+                "Antigravity の履歴インデックス {p0} を書き出せません: {error}",
+                error = error,
+                p0 = path.display()
+            )
+        })
+    }
 }
 
 pub(crate) fn antigravity_store_directory() -> UiResult<PathBuf> {
@@ -1209,15 +1194,6 @@ pub(crate) fn antigravity_store_directory() -> UiResult<PathBuf> {
 
 pub(crate) fn antigravity_history_index_path() -> UiResult<PathBuf> {
     Ok(antigravity_store_directory()?.join("history.jsonl"))
-}
-
-pub(crate) fn antigravity_conversation_path(conversation_id: &str) -> UiResult<PathBuf> {
-    if !is_safe_cli_session_id(conversation_id) {
-        return Err(tr("Antigravity が安全でない会話 ID を返しました。").into());
-    }
-    Ok(antigravity_store_directory()?
-        .join("conversations")
-        .join(format!("{conversation_id}.db")))
 }
 
 /// `agy` writes a plain JSONL transcript of every conversation next to its
@@ -1246,738 +1222,744 @@ pub(crate) fn antigravity_conversation_transcript_in(
         .join(ANTIGRAVITY_TRANSCRIPT_FILE_NAME)
 }
 
-pub(crate) fn claude_conversation_path(workspace: &Path, session_id: &str) -> UiResult<PathBuf> {
-    if !is_safe_cli_session_id(session_id) {
-        return Err(tr("復元した Claude Code の会話 ID が安全ではありません。").into());
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-        tr("ホームディレクトリを取得できないため、Claude Code の会話ストアを特定できません。")
-            .to_owned()
-    })?;
-    Ok(home
-        .join(CLAUDE_STORE_DIRECTORY)
-        .join(CLAUDE_PROJECTS_DIRECTORY)
-        .join(encode_claude_project_path(workspace))
-        .join(format!("{session_id}.jsonl")))
-}
+#[cfg(test)]
+pub(crate) use legacy_claude_codex_synthesis::*;
+#[cfg(test)]
+mod legacy_claude_codex_synthesis {
+    use super::*;
 
-/// Write the restored turns as the conversation file Claude Code owns. It is
-/// built under a temporary name and renamed into place, so `claude --resume`
-/// never sees a half-written conversation at a resumable path, and an existing
-/// conversation is never overwritten.
-pub(crate) fn write_claude_conversation(
-    path: &Path,
-    session_id: &str,
-    workspace: &Path,
-    turns: &[(&'static str, String)],
-    created_at: u64,
-) -> UiResult<()> {
-    let directory = path
-        .parent()
-        .ok_or_else(|| tr("Claude Code の会話ストアに親ディレクトリがありません。").to_owned())?;
-    fs::create_dir_all(directory).map_err(|error| {
-        tf!(
-            "Claude Code の会話ストア {p0} を作成できません: {error}",
-            error = error,
-            p0 = directory.display()
-        )
-    })?;
-    if path.exists() {
-        return Err(tf!(
-            "Claude Code には既に {p0} に会話があります。",
-            p0 = path.display()
-        ));
-    }
-    let records = build_claude_conversation(session_id, workspace, turns, created_at)?;
-    write_file_atomically(path, &records)
-        .map(|_| ())
-        .map_err(|error| {
-            tf!(
-                "復元した会話 {p0} を確定できません: {error}",
-                error = error,
-                p0 = path.display()
-            )
-        })
-}
-
-/// One JSONL record per turn, in the shape Claude Code writes and reads back: a
-/// `parentUuid` chain through the conversation, the conversation's own ID, and
-/// the working directory it belongs to. Nothing Claude Code did not observe is
-/// invented — no model name, token usage, or request ID is attached to a turn
-/// another CLI produced.
-pub(crate) fn build_claude_conversation(
-    session_id: &str,
-    workspace: &Path,
-    turns: &[(&'static str, String)],
-    created_at: u64,
-) -> UiResult<Vec<u8>> {
-    let mut records = Vec::new();
-    let mut parent: Option<String> = None;
-    for (index, (role, text)) in turns.iter().enumerate() {
-        let uuid = Uuid::new_v4().to_string();
-        let message = if *role == "user" {
-            serde_json::json!({ "role": "user", "content": text })
-        } else {
-            serde_json::json!({
-                "role": "assistant",
-                "content": [{ "type": "text", "text": text }],
-            })
-        };
-        // Keep the recorded order monotonic without pretending to know how long
-        // each original turn took, and without dating any record in the future:
-        // the conversation ends when it was restored.
-        let recorded_at = created_at.saturating_sub((turns.len() - 1 - index) as u64);
-        serde_json::to_writer(
-            &mut records,
-            &serde_json::json!({
-                "parentUuid": parent,
-                "isSidechain": false,
-                "type": role,
-                "message": message,
-                "uuid": uuid,
-                "timestamp": utc_timestamp_millis(recorded_at),
-                "userType": "external",
-                "cwd": workspace,
-                "sessionId": session_id,
-            }),
-        )
-        .map_err(|error| {
-            tf!(
-                "復元した Claude Code の会話のエンコード: {error}",
-                error = error
-            )
-        })?;
-        records.push(b'\n');
-        parent = Some(uuid);
-    }
-    Ok(records)
-}
-
-/// Read the committed conversation back the way Claude Code will: one JSON
-/// record per line, chained by `parentUuid`, every record belonging to this
-/// conversation. The stored text is compared as written rather than through the
-/// source-side reader, so a turn that happens to quote another CLI's plumbing
-/// tags is still restored verbatim instead of failing the restore.
-pub(crate) fn verify_claude_conversation(
-    path: &Path,
-    session_id: &str,
-    turns: &[(&'static str, String)],
-) -> UiResult<()> {
-    let file = fs::File::open(path).map_err(|error| {
-        tf!(
-            "復元した会話 {p0} を開き直せません: {error}",
-            error = error,
-            p0 = path.display()
-        )
-    })?;
-    let mut restored = 0_usize;
-    let mut parent: Option<String> = None;
-    for line in BufReader::new(file).lines() {
-        let line = line.map_err(|error| {
-            tf!(
-                "復元した会話 {p0} を読み取れません: {error}",
-                error = error,
-                p0 = path.display()
-            )
-        })?;
-        if line.trim().is_empty() {
-            continue;
+    pub(crate) fn antigravity_conversation_path(conversation_id: &str) -> UiResult<PathBuf> {
+        if !is_safe_cli_session_id(conversation_id) {
+            return Err(tr("Antigravity が安全でない会話 ID を返しました。").into());
         }
-        let record = serde_json::from_str::<serde_json::Value>(&line).map_err(|error| {
+        Ok(antigravity_store_directory()?
+            .join("conversations")
+            .join(format!("{conversation_id}.db")))
+    }
+
+    /// Write the restored turns as the conversation file Claude Code owns. It is
+    /// built under a temporary name and renamed into place, so `claude --resume`
+    /// never sees a half-written conversation at a resumable path, and an existing
+    /// conversation is never overwritten.
+    pub(crate) fn write_claude_conversation(
+        path: &Path,
+        session_id: &str,
+        workspace: &Path,
+        turns: &[(&'static str, String)],
+        created_at: u64,
+    ) -> UiResult<()> {
+        let directory = path.parent().ok_or_else(|| {
+            tr("Claude Code の会話ストアに親ディレクトリがありません。").to_owned()
+        })?;
+        fs::create_dir_all(directory).map_err(|error| {
             tf!(
-                "Claude Code のレコード {restored} を読み戻せませんでした: {error}",
+                "Claude Code の会話ストア {p0} を作成できません: {error}",
                 error = error,
-                restored = restored
+                p0 = directory.display()
             )
         })?;
-        let Some(expected) = turns.get(restored) else {
-            return Err(
-                tr("復元した Claude Code の会話が、元よりも多くのターンを含んでいます。").into(),
-            );
-        };
-        let field = |name: &str| {
-            record
-                .get(name)
-                .and_then(|value| value.as_str())
-                .map(str::to_owned)
-        };
-        if field("sessionId").as_deref() != Some(session_id) {
+        if path.exists() {
             return Err(tf!(
-                "Claude Code のレコード {restored} が、別の会話に書き込まれました。",
-                restored = restored
+                "Claude Code には既に {p0} に会話があります。",
+                p0 = path.display()
             ));
         }
-        if field("parentUuid") != parent {
-            return Err(tf!(
+        let records = build_claude_conversation(session_id, workspace, turns, created_at)?;
+        write_file_atomically(path, &records)
+            .map(|_| ())
+            .map_err(|error| {
+                tf!(
+                    "復元した会話 {p0} を確定できません: {error}",
+                    error = error,
+                    p0 = path.display()
+                )
+            })
+    }
+
+    /// One JSONL record per turn, in the shape Claude Code writes and reads back: a
+    /// `parentUuid` chain through the conversation, the conversation's own ID, and
+    /// the working directory it belongs to. Nothing Claude Code did not observe is
+    /// invented — no model name, token usage, or request ID is attached to a turn
+    /// another CLI produced.
+    pub(crate) fn build_claude_conversation(
+        session_id: &str,
+        workspace: &Path,
+        turns: &[(&'static str, String)],
+        created_at: u64,
+    ) -> UiResult<Vec<u8>> {
+        let mut records = Vec::new();
+        let mut parent: Option<String> = None;
+        for (index, (role, text)) in turns.iter().enumerate() {
+            let uuid = Uuid::new_v4().to_string();
+            let message = if *role == "user" {
+                serde_json::json!({ "role": "user", "content": text })
+            } else {
+                serde_json::json!({
+                    "role": "assistant",
+                    "content": [{ "type": "text", "text": text }],
+                })
+            };
+            // Keep the recorded order monotonic without pretending to know how long
+            // each original turn took, and without dating any record in the future:
+            // the conversation ends when it was restored.
+            let recorded_at = created_at.saturating_sub((turns.len() - 1 - index) as u64);
+            serde_json::to_writer(
+                &mut records,
+                &serde_json::json!({
+                    "parentUuid": parent,
+                    "isSidechain": false,
+                    "type": role,
+                    "message": message,
+                    "uuid": uuid,
+                    "timestamp": utc_timestamp_millis(recorded_at),
+                    "userType": "external",
+                    "cwd": workspace,
+                    "sessionId": session_id,
+                }),
+            )
+            .map_err(|error| {
+                tf!(
+                    "復元した Claude Code の会話のエンコード: {error}",
+                    error = error
+                )
+            })?;
+            records.push(b'\n');
+            parent = Some(uuid);
+        }
+        Ok(records)
+    }
+
+    /// Read the committed conversation back the way Claude Code will: one JSON
+    /// record per line, chained by `parentUuid`, every record belonging to this
+    /// conversation. The stored text is compared as written rather than through the
+    /// source-side reader, so a turn that happens to quote another CLI's plumbing
+    /// tags is still restored verbatim instead of failing the restore.
+    pub(crate) fn verify_claude_conversation(
+        path: &Path,
+        session_id: &str,
+        turns: &[(&'static str, String)],
+    ) -> UiResult<()> {
+        let file = fs::File::open(path).map_err(|error| {
+            tf!(
+                "復元した会話 {p0} を開き直せません: {error}",
+                error = error,
+                p0 = path.display()
+            )
+        })?;
+        let mut restored = 0_usize;
+        let mut parent: Option<String> = None;
+        for line in BufReader::new(file).lines() {
+            let line = line.map_err(|error| {
+                tf!(
+                    "復元した会話 {p0} を読み取れません: {error}",
+                    error = error,
+                    p0 = path.display()
+                )
+            })?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let record = serde_json::from_str::<serde_json::Value>(&line).map_err(|error| {
+                tf!(
+                    "Claude Code のレコード {restored} を読み戻せませんでした: {error}",
+                    error = error,
+                    restored = restored
+                )
+            })?;
+            let Some(expected) = turns.get(restored) else {
+                return Err(tr(
+                    "復元した Claude Code の会話が、元よりも多くのターンを含んでいます。",
+                )
+                .into());
+            };
+            let field = |name: &str| {
+                record
+                    .get(name)
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned)
+            };
+            if field("sessionId").as_deref() != Some(session_id) {
+                return Err(tf!(
+                    "Claude Code のレコード {restored} が、別の会話に書き込まれました。",
+                    restored = restored
+                ));
+            }
+            if field("parentUuid") != parent {
+                return Err(tf!(
                 "復元した Claude Code の会話が、レコード {restored} で順序どおりではありません。",
                 restored = restored
             ));
+            }
+            let role = field("type");
+            let text = record
+                .get("message")
+                .and_then(|message| message.get("content"))
+                .and_then(transcript_message_content_text);
+            if role.as_deref() != Some(expected.0) || text.as_deref() != Some(expected.1.as_str()) {
+                return Err(tf!(
+                    "復元した Claude Code の会話は、レコード {restored} の内容が元と異なります。",
+                    restored = restored
+                ));
+            }
+            parent = field("uuid");
+            if parent.is_none() {
+                return Err(tf!(
+                    "Claude Code のレコード {restored} が、連鎖元の識別子なしで書き込まれました。",
+                    restored = restored
+                ));
+            }
+            restored += 1;
         }
-        let role = field("type");
-        let text = record
-            .get("message")
-            .and_then(|message| message.get("content"))
-            .and_then(transcript_message_content_text);
-        if role.as_deref() != Some(expected.0) || text.as_deref() != Some(expected.1.as_str()) {
+        if restored != turns.len() {
             return Err(tf!(
-                "復元した Claude Code の会話は、レコード {restored} の内容が元と異なります。",
+                "Claude Code の会話に、{p0} 件中 {restored} 件のターンを復元しました。",
+                p0 = turns.len(),
                 restored = restored
             ));
         }
-        parent = field("uuid");
-        if parent.is_none() {
-            return Err(tf!(
-                "Claude Code のレコード {restored} が、連鎖元の識別子なしで書き込まれました。",
-                restored = restored
-            ));
-        }
-        restored += 1;
+        Ok(())
     }
-    if restored != turns.len() {
-        return Err(tf!(
-            "Claude Code の会話に、{p0} 件中 {restored} 件のターンを復元しました。",
-            p0 = turns.len(),
-            restored = restored
-        ));
-    }
-    Ok(())
-}
 
-/// `thread/start` returns the eventual transcript path before Codex has
-/// necessarily flushed its JSONL file. History injection itself is accepted by
-/// the app server in that interval, so wait only after injection before
-/// treating the path as resumable.
-pub(crate) fn wait_for_codex_session_file(path: &Path) -> UiResult<PathBuf> {
-    for delay_ms in NATIVE_RESOLUTION_DELAYS_MS {
-        if delay_ms > 0 {
-            thread::sleep(Duration::from_millis(delay_ms));
+    /// `thread/start` returns the eventual transcript path before Codex has
+    /// necessarily flushed its JSONL file. History injection itself is accepted by
+    /// the app server in that interval, so wait only after injection before
+    /// treating the path as resumable.
+    pub(crate) fn wait_for_codex_session_file(path: &Path) -> UiResult<PathBuf> {
+        for delay_ms in NATIVE_RESOLUTION_DELAYS_MS {
+            if delay_ms > 0 {
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
+            if path.is_file() {
+                return Ok(path.to_path_buf());
+            }
         }
-        if path.is_file() {
-            return Ok(path.to_path_buf());
-        }
-    }
-    Err(
-        tr("Codex app-server が、履歴復元後に永続セッションファイルを書き出しませんでした。")
-            .into(),
-    )
-}
-
-/// Read back one item Operon injected, exactly as it was written by
-/// `codex_import_item`.
-///
-/// Deliberately not the source reader: this is Operon's own record coming back
-/// out of Codex, so what it must prove is that the bytes survived unchanged —
-/// not what a Codex conversation item means. Running the source reader over it
-/// would let a change in how sources are interpreted quietly redefine what
-/// "verified" means.
-fn codex_persisted_import_item(value: &serde_json::Value) -> Option<(&'static str, String)> {
-    let payload = value.get("payload")?;
-    let role = match payload.get("role")?.as_str()? {
-        "user" => "user",
-        "assistant" => "assistant",
-        _ => return None,
-    };
-    let text = payload.pointer("/content/0/text")?.as_str()?;
-    Some((role, text.to_owned()))
-}
-
-/// `thread/inject_items` acknowledging a request is not sufficient evidence
-/// that its contents survived to Codex's durable JSONL. Codex preserves the
-/// caller-supplied `operon-import-N` IDs, so compare every projected turn with
-/// the persisted destination before offering its resume ID.
-pub(crate) fn verify_codex_imported_transcript(
-    destination: &Path,
-    turns: &[(&'static str, String)],
-) -> UiResult<()> {
-    let destination_file = fs::File::open(destination).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} を開けません: {error}",
-            error = error,
-            p0 = destination.display()
+        Err(
+            tr("Codex app-server が、履歴復元後に永続セッションファイルを書き出しませんでした。")
+                .into(),
         )
-    })?;
-    let mut actual = HashMap::<usize, (String, String)>::new();
-    for line in BufReader::new(destination_file).lines() {
-        let line = line.map_err(|error| {
+    }
+
+    /// Read back one item Operon injected, exactly as it was written by
+    /// `codex_import_item`.
+    ///
+    /// Deliberately not the source reader: this is Operon's own record coming back
+    /// out of Codex, so what it must prove is that the bytes survived unchanged —
+    /// not what a Codex conversation item means. Running the source reader over it
+    /// would let a change in how sources are interpreted quietly redefine what
+    /// "verified" means.
+    fn codex_persisted_import_item(value: &serde_json::Value) -> Option<(&'static str, String)> {
+        let payload = value.get("payload")?;
+        let role = match payload.get("role")?.as_str()? {
+            "user" => "user",
+            "assistant" => "assistant",
+            _ => return None,
+        };
+        let text = payload.pointer("/content/0/text")?.as_str()?;
+        Some((role, text.to_owned()))
+    }
+
+    /// `thread/inject_items` acknowledging a request is not sufficient evidence
+    /// that its contents survived to Codex's durable JSONL. Codex preserves the
+    /// caller-supplied `operon-import-N` IDs, so compare every projected turn with
+    /// the persisted destination before offering its resume ID.
+    pub(crate) fn verify_codex_imported_transcript(
+        destination: &Path,
+        turns: &[(&'static str, String)],
+    ) -> UiResult<()> {
+        let destination_file = fs::File::open(destination).map_err(|error| {
             tf!(
-                "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                "Codex の復元先履歴 {p0} を開けません: {error}",
                 error = error,
                 p0 = destination.display()
             )
         })?;
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        let Some(index) = value
-            .pointer("/payload/id")
-            .and_then(|id| id.as_str())
-            .and_then(|id| id.strip_prefix("operon-import-"))
-            .and_then(|index| index.parse::<usize>().ok())
-        else {
-            continue;
-        };
-        let Some((role, text)) = codex_persisted_import_item(&value) else {
-            return Err(tf!(
-                "Codex が、取り込みターン operon-import-{index} を不正な形式で保存しました。",
-                index = index
-            ));
-        };
-        if actual.insert(index, (role.to_owned(), text)).is_some() {
-            return Err(tf!(
-                "Codex が、取り込みターン operon-import-{index} を重複して保存しました。",
-                index = index
-            ));
+        let mut actual = HashMap::<usize, (String, String)>::new();
+        for line in BufReader::new(destination_file).lines() {
+            let line = line.map_err(|error| {
+                tf!(
+                    "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                    error = error,
+                    p0 = destination.display()
+                )
+            })?;
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            let Some(index) = value
+                .pointer("/payload/id")
+                .and_then(|id| id.as_str())
+                .and_then(|id| id.strip_prefix("operon-import-"))
+                .and_then(|index| index.parse::<usize>().ok())
+            else {
+                continue;
+            };
+            let Some((role, text)) = codex_persisted_import_item(&value) else {
+                return Err(tf!(
+                    "Codex が、取り込みターン operon-import-{index} を不正な形式で保存しました。",
+                    index = index
+                ));
+            };
+            if actual.insert(index, (role.to_owned(), text)).is_some() {
+                return Err(tf!(
+                    "Codex が、取り込みターン operon-import-{index} を重複して保存しました。",
+                    index = index
+                ));
+            }
         }
-    }
 
-    for (imported_index, (expected_role, expected_text)) in turns.iter().enumerate() {
-        let Some((actual_role, actual_text)) = actual.remove(&imported_index) else {
-            return Err(tf!(
+        for (imported_index, (expected_role, expected_text)) in turns.iter().enumerate() {
+            let Some((actual_role, actual_text)) = actual.remove(&imported_index) else {
+                return Err(tf!(
                 "Codex が、取り込みターン operon-import-{imported_index} を永続化しませんでした。",
                 imported_index = imported_index
             ));
-        };
-        if &actual_role != expected_role || &actual_text != expected_text {
-            return Err(tf!("Codex が、取り込みターン operon-import-{imported_index} に異なる内容を保存しました。", imported_index = imported_index));
-        }
-    }
-    if !actual.is_empty() {
-        return Err(tf!(
-            "Codex が、想定外の取り込みターンを {p0} 件保存しました。",
-            p0 = actual.len()
-        ));
-    }
-    Ok(())
-}
-
-/// `thread/inject_items` restores the thread's model-visible history only.
-/// Codex's own terminal replays a resumed conversation from the rollout's
-/// `event_msg` records, so a thread that holds nothing else reopens looking
-/// empty even though the model can see every restored turn. Append the matching
-/// replay records so `codex resume` shows the conversation it restored.
-///
-/// This runs only after the app server has exited, which makes Operon the
-/// single writer of a rollout file no CLI has opened yet. The rewrite is atomic
-/// so a failure can never leave Codex with a half-written record.
-///
-/// The appended records continue the file's numbering from its highest
-/// ordinal, through `codex_rollout_metadata`. A rollout Codex numbered and
-/// Operon did not is a thread Codex refuses to resume at all, and a turn record
-/// with no ordinal is one Codex cannot project: `rollout_ordinal` is `NOT NULL`
-/// in both `thread_turns` and `thread_items`. So a file that numbers nothing
-/// has the appended records numbered from zero.
-pub(crate) fn add_codex_replayable_history(
-    rollout: &Path,
-    turns: &[(&'static str, String)],
-) -> UiResult<usize> {
-    let existing = fs::File::open(rollout).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} を開けません: {error}",
-            error = error,
-            p0 = rollout.display()
-        )
-    })?;
-    let complete = match existing.metadata() {
-        Ok(metadata) if metadata.len() == 0 => false,
-        Ok(_) => codex_rollout_ends_with_newline(rollout)?,
-        Err(error) => {
-            return Err(tf!(
-                "Codex の復元先履歴 {p0} を読み取れません: {error}",
-                error = error,
-                p0 = rollout.display()
-            ))
-        }
-    };
-    if !complete {
-        return Err(tr(
-            "Codex の復元先履歴が不完全なレコードで終わっているため、追記を中止します。",
-        )
-        .into());
-    }
-    let (mut next_ordinal, session_id) = codex_rollout_metadata(rollout)?;
-    let parent = rollout
-        .parent()
-        .ok_or_else(|| tr("Codex の復元先履歴に親ディレクトリがありません。").to_owned())?;
-    let temporary = parent.join(format!(".operon-rollout.tmp-{}", Uuid::new_v4()));
-    let written = (|| -> UiResult<usize> {
-        let mut writer = BufWriter::new(
-            OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)
-                .map_err(|error| format!("creating {}: {error}", temporary.display()))?,
-        );
-        let mut reader = BufReader::new(existing);
-        std::io::copy(&mut reader, &mut writer)
-            .map_err(|error| format!("copying {}: {error}", rollout.display()))?;
-        let base_sec = now();
-        let mut records = 0;
-        for (turn_index, (role, text)) in turns.iter().enumerate() {
-            let turn_sec = base_sec.saturating_add(turn_index as u64);
-            let events =
-                codex_replay_turn_events(&session_id, role, text, &mut next_ordinal, turn_sec)
-                    .map_err(|error| {
-                        tf!("Codex の再生レコードのエンコード: {error}", error = error)
-                    })?;
-            for event in events {
-                writer
-                    .write_all(event.as_bytes())
-                    .and_then(|_| writer.write_all(b"\n"))
-                    .map_err(|error| format!("writing {}: {error}", temporary.display()))?;
+            };
+            if &actual_role != expected_role || &actual_text != expected_text {
+                return Err(tf!("Codex が、取り込みターン operon-import-{imported_index} に異なる内容を保存しました。", imported_index = imported_index));
             }
-            records += 1;
         }
-        let file = writer
-            .into_inner()
-            .map_err(|error| format!("flushing {}: {error}", temporary.display()))?;
-        file.sync_all()
-            .map_err(|error| format!("synchronizing {}: {error}", temporary.display()))?;
-        drop(file);
-        fs::rename(&temporary, rollout)
-            .map_err(|error| format!("committing {}: {error}", rollout.display()))?;
-        let _ = fs::File::open(parent).and_then(|directory| directory.sync_all());
-        Ok(records)
-    })();
-    if written.is_err() {
-        let _ = fs::remove_file(&temporary);
+        if !actual.is_empty() {
+            return Err(tf!(
+                "Codex が、想定外の取り込みターンを {p0} 件保存しました。",
+                p0 = actual.len()
+            ));
+        }
+        Ok(())
     }
-    written
-}
 
-pub(crate) fn codex_rollout_metadata(rollout: &Path) -> UiResult<(Option<u64>, String)> {
-    let file = fs::File::open(rollout).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} を開けません: {error}",
-            error = error,
-            p0 = rollout.display()
-        )
-    })?;
-    let mut next_ordinal: Option<u64> = None;
-    let mut session_id: Option<String> = None;
-    for line in BufReader::new(file).lines() {
-        let line = line.map_err(|error| {
+    /// `thread/inject_items` restores the thread's model-visible history only.
+    /// Codex's own terminal replays a resumed conversation from the rollout's
+    /// `event_msg` records, so a thread that holds nothing else reopens looking
+    /// empty even though the model can see every restored turn. Append the matching
+    /// replay records so `codex resume` shows the conversation it restored.
+    ///
+    /// This runs only after the app server has exited, which makes Operon the
+    /// single writer of a rollout file no CLI has opened yet. The rewrite is atomic
+    /// so a failure can never leave Codex with a half-written record.
+    ///
+    /// The appended records continue the file's numbering from its highest
+    /// ordinal, through `codex_rollout_metadata`. A rollout Codex numbered and
+    /// Operon did not is a thread Codex refuses to resume at all, and a turn record
+    /// with no ordinal is one Codex cannot project: `rollout_ordinal` is `NOT NULL`
+    /// in both `thread_turns` and `thread_items`. So a file that numbers nothing
+    /// has the appended records numbered from zero.
+    pub(crate) fn add_codex_replayable_history(
+        rollout: &Path,
+        turns: &[(&'static str, String)],
+    ) -> UiResult<usize> {
+        let existing = fs::File::open(rollout).map_err(|error| {
             tf!(
-                "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                "Codex の復元先履歴 {p0} を開けません: {error}",
                 error = error,
                 p0 = rollout.display()
             )
         })?;
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
-            if let Some(ord) = value.get("ordinal").and_then(|v| v.as_u64()) {
-                next_ordinal = Some(
-                    next_ordinal
-                        .map_or(ord.saturating_add(1), |cur| cur.max(ord.saturating_add(1))),
-                );
-            } else if next_ordinal.is_none()
-                && value.get("history_mode").and_then(|v| v.as_str()) == Some("paginated")
-            {
-                next_ordinal = Some(0);
+        let complete = match existing.metadata() {
+            Ok(metadata) if metadata.len() == 0 => false,
+            Ok(_) => codex_rollout_ends_with_newline(rollout)?,
+            Err(error) => {
+                return Err(tf!(
+                    "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                    error = error,
+                    p0 = rollout.display()
+                ))
             }
-            if session_id.is_none()
-                && value.get("type").and_then(|v| v.as_str()) == Some("session_meta")
-            {
-                if let Some(payload) = value.get("payload") {
-                    if let Some(id) = payload
-                        .get("session_id")
-                        .or_else(|| payload.get("id"))
-                        .and_then(|v| v.as_str())
-                    {
-                        session_id = Some(id.to_owned());
+        };
+        if !complete {
+            return Err(tr(
+                "Codex の復元先履歴が不完全なレコードで終わっているため、追記を中止します。",
+            )
+            .into());
+        }
+        let (mut next_ordinal, session_id) = codex_rollout_metadata(rollout)?;
+        let parent = rollout
+            .parent()
+            .ok_or_else(|| tr("Codex の復元先履歴に親ディレクトリがありません。").to_owned())?;
+        let temporary = parent.join(format!(".operon-rollout.tmp-{}", Uuid::new_v4()));
+        let written = (|| -> UiResult<usize> {
+            let mut writer = BufWriter::new(
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&temporary)
+                    .map_err(|error| format!("creating {}: {error}", temporary.display()))?,
+            );
+            let mut reader = BufReader::new(existing);
+            std::io::copy(&mut reader, &mut writer)
+                .map_err(|error| format!("copying {}: {error}", rollout.display()))?;
+            let base_sec = now();
+            let mut records = 0;
+            for (turn_index, (role, text)) in turns.iter().enumerate() {
+                let turn_sec = base_sec.saturating_add(turn_index as u64);
+                let events =
+                    codex_replay_turn_events(&session_id, role, text, &mut next_ordinal, turn_sec)
+                        .map_err(|error| {
+                            tf!("Codex の再生レコードのエンコード: {error}", error = error)
+                        })?;
+                for event in events {
+                    writer
+                        .write_all(event.as_bytes())
+                        .and_then(|_| writer.write_all(b"\n"))
+                        .map_err(|error| format!("writing {}: {error}", temporary.display()))?;
+                }
+                records += 1;
+            }
+            let file = writer
+                .into_inner()
+                .map_err(|error| format!("flushing {}: {error}", temporary.display()))?;
+            file.sync_all()
+                .map_err(|error| format!("synchronizing {}: {error}", temporary.display()))?;
+            drop(file);
+            fs::rename(&temporary, rollout)
+                .map_err(|error| format!("committing {}: {error}", rollout.display()))?;
+            let _ = fs::File::open(parent).and_then(|directory| directory.sync_all());
+            Ok(records)
+        })();
+        if written.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        written
+    }
+
+    pub(crate) fn codex_rollout_metadata(rollout: &Path) -> UiResult<(Option<u64>, String)> {
+        let file = fs::File::open(rollout).map_err(|error| {
+            tf!(
+                "Codex の復元先履歴 {p0} を開けません: {error}",
+                error = error,
+                p0 = rollout.display()
+            )
+        })?;
+        let mut next_ordinal: Option<u64> = None;
+        let mut session_id: Option<String> = None;
+        for line in BufReader::new(file).lines() {
+            let line = line.map_err(|error| {
+                tf!(
+                    "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                    error = error,
+                    p0 = rollout.display()
+                )
+            })?;
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(ord) = value.get("ordinal").and_then(|v| v.as_u64()) {
+                    next_ordinal = Some(
+                        next_ordinal
+                            .map_or(ord.saturating_add(1), |cur| cur.max(ord.saturating_add(1))),
+                    );
+                } else if next_ordinal.is_none()
+                    && value.get("history_mode").and_then(|v| v.as_str()) == Some("paginated")
+                {
+                    next_ordinal = Some(0);
+                }
+                if session_id.is_none()
+                    && value.get("type").and_then(|v| v.as_str()) == Some("session_meta")
+                {
+                    if let Some(payload) = value.get("payload") {
+                        if let Some(id) = payload
+                            .get("session_id")
+                            .or_else(|| payload.get("id"))
+                            .and_then(|v| v.as_str())
+                        {
+                            session_id = Some(id.to_owned());
+                        }
                     }
                 }
             }
         }
+        // In Codex CLI v0.154.0+, the SQLite projection engine requires `rollout_ordinal`
+        // (declared NOT NULL on thread_turns and thread_items). If no ordinals were present
+        // in the existing file, initialize next_ordinal to Some(0) so all appended turns
+        // are indexed and rendered by `codex resume`.
+        let next_ordinal = Some(next_ordinal.unwrap_or(0));
+        let session_id = session_id
+            .or_else(|| {
+                rollout
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .and_then(crate::cli::codex_session_id)
+            })
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        Ok((next_ordinal, session_id))
     }
-    // In Codex CLI v0.154.0+, the SQLite projection engine requires `rollout_ordinal`
-    // (declared NOT NULL on thread_turns and thread_items). If no ordinals were present
-    // in the existing file, initialize next_ordinal to Some(0) so all appended turns
-    // are indexed and rendered by `codex resume`.
-    let next_ordinal = Some(next_ordinal.unwrap_or(0));
-    let session_id = session_id
-        .or_else(|| {
-            rollout
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .and_then(crate::cli::codex_session_id)
-        })
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
-    Ok((next_ordinal, session_id))
-}
 
-pub(crate) fn codex_rollout_ends_with_newline(rollout: &Path) -> UiResult<bool> {
-    let mut file = fs::File::open(rollout).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} を開けません: {error}",
-            error = error,
-            p0 = rollout.display()
-        )
-    })?;
-    file.seek(SeekFrom::End(-1)).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} の末尾を読み取れません: {error}",
-            error = error,
-            p0 = rollout.display()
-        )
-    })?;
-    let mut last = [0_u8; 1];
-    file.read_exact(&mut last).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} の末尾を読み取れません: {error}",
-            error = error,
-            p0 = rollout.display()
-        )
-    })?;
-    Ok(last[0] == b'\n')
-}
-
-pub(crate) fn codex_replay_turn_events(
-    session_id: &str,
-    role: &str,
-    text: &str,
-    next_ordinal: &mut Option<u64>,
-    now_sec: u64,
-) -> Result<Vec<String>> {
-    let now_ms = now_sec.saturating_mul(1000);
-    let iso_ts = utc_timestamp_millis(now_sec);
-    let turn_id = Uuid::new_v4().to_string();
-
-    let make_event =
-        |payload: serde_json::Value, next_ordinal: &mut Option<u64>| -> Result<String> {
-            let mut event = serde_json::json!({
-                "timestamp": iso_ts,
-                "type": "event_msg",
-                "payload": payload,
-            });
-            if let Some(ordinal) = next_ordinal.as_mut() {
-                event
-                    .as_object_mut()
-                    .expect("event_msg is a JSON object")
-                    .insert("ordinal".to_owned(), serde_json::json!(*ordinal));
-                *ordinal = ordinal.saturating_add(1);
-            }
-            Ok(serde_json::to_string(&event)?)
-        };
-
-    let mut events = Vec::with_capacity(3);
-
-    events.push(make_event(
-        serde_json::json!({
-            "type": "task_started",
-            "turn_id": turn_id,
-            "started_at": now_sec,
-            "model_context_window": 258400,
-            "collaboration_mode_kind": "default",
-        }),
-        next_ordinal,
-    )?);
-
-    let item = if role == "user" {
-        serde_json::json!({
-            "type": "UserMessage",
-            "id": Uuid::new_v4().to_string(),
-            "content": [{
-                "type": "text",
-                "text": text,
-            }],
-            "text_elements": [],
-        })
-    } else {
-        serde_json::json!({
-            "type": "AgentMessage",
-            "id": format!("msg_{}", Uuid::new_v4().simple()),
-            "content": [{
-                "type": "Text",
-                "text": text,
-            }],
-            "phase": "final_answer",
-        })
-    };
-
-    events.push(make_event(
-        serde_json::json!({
-            "type": "item_completed",
-            "thread_id": session_id,
-            "turn_id": turn_id,
-            "item": item,
-            "started_at_ms": now_ms,
-            "completed_at_ms": now_ms,
-        }),
-        next_ordinal,
-    )?);
-
-    let last_agent_message = if role == "assistant" { text } else { "" };
-    events.push(make_event(
-        serde_json::json!({
-            "type": "task_complete",
-            "turn_id": turn_id,
-            "last_agent_message": last_agent_message,
-            "started_at": now_sec,
-            "completed_at": now_sec,
-            "duration_ms": 100,
-            "time_to_first_token_ms": 50,
-        }),
-        next_ordinal,
-    )?);
-
-    Ok(events)
-}
-
-#[cfg(test)]
-pub(crate) fn codex_replay_event(role: &str, text: &str, ordinal: Option<u64>) -> Result<String> {
-    let mut ord = ordinal;
-    let events = codex_replay_turn_events("test-thread", role, text, &mut ord, now())?;
-    Ok(events.into_iter().nth(1).unwrap_or_default())
-}
-
-/// A restore is only complete when the destination can replay it. Compare the
-/// replay records Codex now holds against the source turns before the resume ID
-/// is offered to the user.
-pub(crate) fn verify_codex_replayable_history(
-    rollout: &Path,
-    expected: &[(&'static str, String)],
-) -> UiResult<()> {
-    let rollout_file = fs::File::open(rollout).map_err(|error| {
-        tf!(
-            "Codex の復元先履歴 {p0} を開けません: {error}",
-            error = error,
-            p0 = rollout.display()
-        )
-    })?;
-    let mut replayed = Vec::new();
-    let mut saw_ordinal = false;
-    let mut last_ordinal: Option<u64> = None;
-    for line in BufReader::new(rollout_file).lines() {
-        let line = line.map_err(|error| {
+    pub(crate) fn codex_rollout_ends_with_newline(rollout: &Path) -> UiResult<bool> {
+        let mut file = fs::File::open(rollout).map_err(|error| {
             tf!(
-                "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                "Codex の復元先履歴 {p0} を開けません: {error}",
                 error = error,
                 p0 = rollout.display()
             )
         })?;
-        // A line Operon cannot read is a line Codex cannot read either, so it
-        // counts as a record with no number rather than being passed over —
-        // passed over, a trailing one left the record before it standing as
-        // the file's last and a numbered rollout ending in it verified.
-        let value = serde_json::from_str::<serde_json::Value>(&line).ok();
-        let ord = value
-            .as_ref()
-            .and_then(|value| value.get("ordinal"))
-            .and_then(|value| value.as_u64());
-        if ord.is_some() {
-            saw_ordinal = true;
-        } else if saw_ordinal {
-            return Err(tf!(
-                "Codex の復元先履歴 {p0} に、ordinal のないレコードが含まれています。",
+        file.seek(SeekFrom::End(-1)).map_err(|error| {
+            tf!(
+                "Codex の復元先履歴 {p0} の末尾を読み取れません: {error}",
+                error = error,
                 p0 = rollout.display()
-            ));
-        }
-        if let Some(ord) = ord {
-            if let Some(last) = last_ordinal {
-                if ord != last.saturating_add(1) {
-                    return Err(tf!(
+            )
+        })?;
+        let mut last = [0_u8; 1];
+        file.read_exact(&mut last).map_err(|error| {
+            tf!(
+                "Codex の復元先履歴 {p0} の末尾を読み取れません: {error}",
+                error = error,
+                p0 = rollout.display()
+            )
+        })?;
+        Ok(last[0] == b'\n')
+    }
+
+    pub(crate) fn codex_replay_turn_events(
+        session_id: &str,
+        role: &str,
+        text: &str,
+        next_ordinal: &mut Option<u64>,
+        now_sec: u64,
+    ) -> Result<Vec<String>> {
+        let now_ms = now_sec.saturating_mul(1000);
+        let iso_ts = utc_timestamp_millis(now_sec);
+        let turn_id = Uuid::new_v4().to_string();
+
+        let make_event =
+            |payload: serde_json::Value, next_ordinal: &mut Option<u64>| -> Result<String> {
+                let mut event = serde_json::json!({
+                    "timestamp": iso_ts,
+                    "type": "event_msg",
+                    "payload": payload,
+                });
+                if let Some(ordinal) = next_ordinal.as_mut() {
+                    event
+                        .as_object_mut()
+                        .expect("event_msg is a JSON object")
+                        .insert("ordinal".to_owned(), serde_json::json!(*ordinal));
+                    *ordinal = ordinal.saturating_add(1);
+                }
+                Ok(serde_json::to_string(&event)?)
+            };
+
+        let mut events = Vec::with_capacity(3);
+
+        events.push(make_event(
+            serde_json::json!({
+                "type": "task_started",
+                "turn_id": turn_id,
+                "started_at": now_sec,
+                "model_context_window": 258400,
+                "collaboration_mode_kind": "default",
+            }),
+            next_ordinal,
+        )?);
+
+        let item = if role == "user" {
+            serde_json::json!({
+                "type": "UserMessage",
+                "id": Uuid::new_v4().to_string(),
+                "content": [{
+                    "type": "text",
+                    "text": text,
+                }],
+                "text_elements": [],
+            })
+        } else {
+            serde_json::json!({
+                "type": "AgentMessage",
+                "id": format!("msg_{}", Uuid::new_v4().simple()),
+                "content": [{
+                    "type": "Text",
+                    "text": text,
+                }],
+                "phase": "final_answer",
+            })
+        };
+
+        events.push(make_event(
+            serde_json::json!({
+                "type": "item_completed",
+                "thread_id": session_id,
+                "turn_id": turn_id,
+                "item": item,
+                "started_at_ms": now_ms,
+                "completed_at_ms": now_ms,
+            }),
+            next_ordinal,
+        )?);
+
+        let last_agent_message = if role == "assistant" { text } else { "" };
+        events.push(make_event(
+            serde_json::json!({
+                "type": "task_complete",
+                "turn_id": turn_id,
+                "last_agent_message": last_agent_message,
+                "started_at": now_sec,
+                "completed_at": now_sec,
+                "duration_ms": 100,
+                "time_to_first_token_ms": 50,
+            }),
+            next_ordinal,
+        )?);
+
+        Ok(events)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn codex_replay_event(
+        role: &str,
+        text: &str,
+        ordinal: Option<u64>,
+    ) -> Result<String> {
+        let mut ord = ordinal;
+        let events = codex_replay_turn_events("test-thread", role, text, &mut ord, now())?;
+        Ok(events.into_iter().nth(1).unwrap_or_default())
+    }
+
+    /// A restore is only complete when the destination can replay it. Compare the
+    /// replay records Codex now holds against the source turns before the resume ID
+    /// is offered to the user.
+    pub(crate) fn verify_codex_replayable_history(
+        rollout: &Path,
+        expected: &[(&'static str, String)],
+    ) -> UiResult<()> {
+        let rollout_file = fs::File::open(rollout).map_err(|error| {
+            tf!(
+                "Codex の復元先履歴 {p0} を開けません: {error}",
+                error = error,
+                p0 = rollout.display()
+            )
+        })?;
+        let mut replayed = Vec::new();
+        let mut saw_ordinal = false;
+        let mut last_ordinal: Option<u64> = None;
+        for line in BufReader::new(rollout_file).lines() {
+            let line = line.map_err(|error| {
+                tf!(
+                    "Codex の復元先履歴 {p0} を読み取れません: {error}",
+                    error = error,
+                    p0 = rollout.display()
+                )
+            })?;
+            // A line Operon cannot read is a line Codex cannot read either, so it
+            // counts as a record with no number rather than being passed over —
+            // passed over, a trailing one left the record before it standing as
+            // the file's last and a numbered rollout ending in it verified.
+            let value = serde_json::from_str::<serde_json::Value>(&line).ok();
+            let ord = value
+                .as_ref()
+                .and_then(|value| value.get("ordinal"))
+                .and_then(|value| value.as_u64());
+            if ord.is_some() {
+                saw_ordinal = true;
+            } else if saw_ordinal {
+                return Err(tf!(
+                    "Codex の復元先履歴 {p0} に、ordinal のないレコードが含まれています。",
+                    p0 = rollout.display()
+                ));
+            }
+            if let Some(ord) = ord {
+                if let Some(last) = last_ordinal {
+                    if ord != last.saturating_add(1) {
+                        return Err(tf!(
                         "Codex の復元先履歴 {p0} の ordinal が連続していません（{last} の次が {ord}）。",
                         p0 = rollout.display(),
                         last = last,
                         ord = ord
                     ));
+                    }
                 }
+                last_ordinal = Some(ord);
             }
-            last_ordinal = Some(ord);
-        }
-        let Some(value) = value else {
-            continue;
-        };
-        if value.get("type").and_then(|value| value.as_str()) != Some("event_msg") {
-            continue;
-        }
-        let Some(payload) = value.get("payload") else {
-            continue;
-        };
-        let payload_type = payload.get("type").and_then(|value| value.as_str());
-        let turn = match payload_type {
-            Some("user_message") => payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(|m| ("user", m.to_owned())),
-            Some("agent_message") => payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .map(|m| ("assistant", m.to_owned())),
-            Some("item_completed") => {
-                let item = payload.get("item");
-                let item_type = item.and_then(|i| i.get("type")).and_then(|v| v.as_str());
-                let text = item
-                    .and_then(|i| i.get("content"))
-                    .and_then(|c| c.as_array())
-                    .and_then(|arr| {
-                        arr.iter()
-                            .find_map(|elem| elem.get("text").and_then(|t| t.as_str()))
-                    });
-                match (item_type, text) {
-                    (Some("UserMessage"), Some(text)) => Some(("user", text.to_owned())),
-                    (Some("AgentMessage"), Some(text)) => Some(("assistant", text.to_owned())),
-                    _ => None,
+            let Some(value) = value else {
+                continue;
+            };
+            if value.get("type").and_then(|value| value.as_str()) != Some("event_msg") {
+                continue;
+            }
+            let Some(payload) = value.get("payload") else {
+                continue;
+            };
+            let payload_type = payload.get("type").and_then(|value| value.as_str());
+            let turn = match payload_type {
+                Some("user_message") => payload
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .map(|m| ("user", m.to_owned())),
+                Some("agent_message") => payload
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .map(|m| ("assistant", m.to_owned())),
+                Some("item_completed") => {
+                    let item = payload.get("item");
+                    let item_type = item.and_then(|i| i.get("type")).and_then(|v| v.as_str());
+                    let text = item
+                        .and_then(|i| i.get("content"))
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| {
+                            arr.iter()
+                                .find_map(|elem| elem.get("text").and_then(|t| t.as_str()))
+                        });
+                    match (item_type, text) {
+                        (Some("UserMessage"), Some(text)) => Some(("user", text.to_owned())),
+                        (Some("AgentMessage"), Some(text)) => Some(("assistant", text.to_owned())),
+                        _ => None,
+                    }
                 }
+                _ => None,
+            };
+            if let Some(turn) = turn {
+                replayed.push(turn);
             }
-            _ => None,
-        };
-        if let Some(turn) = turn {
-            replayed.push(turn);
         }
-    }
-    if replayed.len() != expected.len() {
-        return Err(tf!(
-            "Codex が再生できる復元ターンは {p0} 件のみで、期待される {p1} 件と一致しません。",
-            p0 = replayed.len(),
-            p1 = expected.len()
-        ));
-    }
-    for (index, ((expected_role, expected_text), (role, text))) in
-        expected.iter().zip(replayed.iter()).enumerate()
-    {
-        if expected_role != role || expected_text != text {
+        if replayed.len() != expected.len() {
             return Err(tf!(
-                "Codex は、復元ターン {p0} を元と異なる形で再生します。",
-                p0 = index + 1
+                "Codex が再生できる復元ターンは {p0} 件のみで、期待される {p1} 件と一致しません。",
+                p0 = replayed.len(),
+                p1 = expected.len()
             ));
         }
+        for (index, ((expected_role, expected_text), (role, text))) in
+            expected.iter().zip(replayed.iter()).enumerate()
+        {
+            if expected_role != role || expected_text != text {
+                return Err(tf!(
+                    "Codex は、復元ターン {p0} を元と異なる形で再生します。",
+                    p0 = index + 1
+                ));
+            }
+        }
+        Ok(())
     }
-    Ok(())
-}
 
-/// Codex timestamps its rollout records in RFC 3339 UTC with milliseconds.
-/// Restored replay records have to use the same shape or Codex cannot read the
-/// record it is being asked to replay.
-pub(crate) fn utc_timestamp_millis(seconds: u64) -> String {
-    let days = (seconds / 86_400) as i64;
-    let time_of_day = seconds % 86_400;
-    let (year, month, day) = civil_date_from_unix_days(days);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000Z",
-        time_of_day / 3_600,
-        (time_of_day % 3_600) / 60,
-        time_of_day % 60,
-    )
-}
+    /// Codex timestamps its rollout records in RFC 3339 UTC with milliseconds.
+    /// Restored replay records have to use the same shape or Codex cannot read the
+    /// record it is being asked to replay.
+    pub(crate) fn utc_timestamp_millis(seconds: u64) -> String {
+        let days = (seconds / 86_400) as i64;
+        let time_of_day = seconds % 86_400;
+        let (year, month, day) = civil_date_from_unix_days(days);
+        format!(
+            "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.000Z",
+            time_of_day / 3_600,
+            (time_of_day % 3_600) / 60,
+            time_of_day % 60,
+        )
+    }
 
-/// Howard Hinnant's `civil_from_days`, which converts a day count since the
-/// Unix epoch into a proleptic Gregorian date without a date dependency.
-pub(crate) fn civil_date_from_unix_days(days: i64) -> (i64, u32, u32) {
-    let shifted = days + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let year = year_of_era + era * 400;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let shifted_month = (5 * day_of_year + 2) / 153;
-    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
-    let month = if shifted_month < 10 {
-        shifted_month + 3
-    } else {
-        shifted_month - 9
-    } as u32;
-    (year + i64::from(month <= 2), month, day)
+    /// Howard Hinnant's `civil_from_days`, which converts a day count since the
+    /// Unix epoch into a proleptic Gregorian date without a date dependency.
+    pub(crate) fn civil_date_from_unix_days(days: i64) -> (i64, u32, u32) {
+        let shifted = days + 719_468;
+        let era = shifted.div_euclid(146_097);
+        let day_of_era = shifted.rem_euclid(146_097);
+        let year_of_era =
+            (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+        let year = year_of_era + era * 400;
+        let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+        let shifted_month = (5 * day_of_year + 2) / 153;
+        let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
+        let month = if shifted_month < 10 {
+            shifted_month + 3
+        } else {
+            shifted_month - 9
+        } as u32;
+        (year + i64::from(month <= 2), month, day)
+    }
 }
 
 /// Read an RFC 3339 UTC instant of the shape agent transcripts record
@@ -2019,14 +2001,6 @@ pub(crate) fn unix_days_from_civil(year: i64, month: u32, day: u32) -> i64 {
         (153 * (i64::from(month) + if month > 2 { -3 } else { 9 }) + 2) / 5 + i64::from(day) - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     era * 146_097 + day_of_era - 719_468
-}
-
-pub(crate) struct CodexAppServer {
-    pub(crate) child: Child,
-    pub(crate) stdin: ChildStdin,
-    pub(crate) stdout: BufReader<ChildStdout>,
-    pub(crate) next_request_id: u64,
-    pub(crate) thread_id: Option<String>,
 }
 
 /// What one transcript record contributed to the restore. Four outcomes, not
@@ -2324,6 +2298,7 @@ pub(crate) fn antigravity_user_request_text(content: &str) -> String {
 /// One projected turn as the item Codex's app server accepts. The
 /// `operon-import-N` id is preserved by Codex, which is what lets the
 /// verification pass match a persisted item back to the turn it came from.
+#[cfg(test)]
 pub(crate) fn codex_import_item(role: &str, text: &str, index: usize) -> serde_json::Value {
     let content_type = if role == "user" {
         "input_text"
@@ -2899,204 +2874,4 @@ pub(crate) fn matches_native_session_for_launch(
             .last_user_message
             .as_ref()
             .is_some_and(|message| message.contains(tracking_token))
-}
-
-/// Deletes a Codex thread through Codex's own app server, which takes its
-/// rollout and its row in Codex's thread index together. Removing the rollout
-/// file alone left the row behind. The live restore tests use it to take back
-/// what they restored (change 168).
-#[cfg(test)]
-pub(crate) fn delete_codex_thread(thread_id: &str) -> UiResult<()> {
-    let mut app_server = CodexAppServer::start().map_err(|error| error.to_string())?;
-    let deleted = app_server.initialize().and_then(|()| {
-        app_server.request(
-            "thread/delete",
-            serde_json::json!({ "threadId": thread_id }),
-        )
-    });
-    app_server.stop();
-    deleted.map(|_| ())
-}
-
-impl CodexAppServer {
-    fn start() -> Result<Self> {
-        // The one child that cannot go through `run_command_with_output_limit`:
-        // it is long-lived and spoken to over stdio, while that function pipes
-        // and reads to completion. So it drops INHERITED_REPOSITORY_POINTERS
-        // itself. Codex reads git state for its own context, and a `GIT_DIR`
-        // inherited from whatever launched Operon would point it at a
-        // repository that is not the one being restored into.
-        let mut command = Command::new("codex");
-        command
-            .args(["app-server", "--stdio"])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        for pointer in INHERITED_REPOSITORY_POINTERS {
-            command.env_remove(pointer);
-        }
-        let mut child = command
-            .spawn()
-            .context(tr("履歴復元のための Codex app-server の起動"))?;
-        let stdin = child
-            .stdin
-            .take()
-            .context(tr("Codex app-server の標準入力を開く処理"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .context(tr("Codex app-server の標準出力を開く処理"))?;
-        Ok(Self {
-            child,
-            stdin,
-            stdout: BufReader::new(stdout),
-            next_request_id: 1,
-            thread_id: None,
-        })
-    }
-
-    fn initialize(&mut self) -> UiResult<()> {
-        self.request(
-            "initialize",
-            serde_json::json!({
-                "clientInfo": {"name": "xirp-copy", "version": env!("CARGO_PKG_VERSION")}
-            }),
-        )?;
-        Ok(())
-    }
-
-    fn start_thread(&mut self, cwd: &Path) -> UiResult<(String, PathBuf)> {
-        let response = self.request(
-            "thread/start",
-            serde_json::json!({
-                "cwd": cwd,
-                "ephemeral": false,
-                "serviceName": "xirp-copy"
-            }),
-        )?;
-        let thread = response.get("thread").ok_or_else(|| {
-            tr("Codex app-server が、新しいスレッドを返しませんでした。").to_owned()
-        })?;
-        let id = thread
-            .get("id")
-            .and_then(|value| value.as_str())
-            .filter(|id| is_safe_cli_session_id(id))
-            .ok_or_else(|| {
-                tr("Codex app-server が、安全でないスレッド ID を返しました。").to_owned()
-            })?
-            .to_owned();
-        let path = thread
-            .get("path")
-            .and_then(|value| value.as_str())
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .ok_or_else(|| {
-                tr("Codex app-server が、永続セッションのパスを返しませんでした。").to_owned()
-            })?;
-        self.thread_id = Some(id.clone());
-        Ok((id, path))
-    }
-
-    /// Send the projected turns to the thread, in batches the app server will
-    /// accept. It receives the same list every other destination writes and the
-    /// same list `verify_codex_imported_transcript` checks against, so the
-    /// injection and its verification cannot read the source differently.
-    fn inject_turns(&mut self, turns: &[(&'static str, String)]) -> UiResult<usize> {
-        let mut records = 0;
-        let mut batch = Vec::<serde_json::Value>::new();
-        let mut batch_bytes = 0_usize;
-        for (role, text) in turns {
-            let item = codex_import_item(role, text, records);
-            let item_bytes = serde_json::to_vec(&item)
-                .map_err(|error| tf!("履歴レコードのエンコード: {error}", error = error))?
-                .len();
-            if !batch.is_empty()
-                && (batch.len() >= HISTORY_IMPORT_MAX_ITEMS_PER_REQUEST
-                    || batch_bytes.saturating_add(item_bytes) > HISTORY_IMPORT_MAX_REQUEST_BYTES)
-            {
-                self.inject_items(&batch)?;
-                batch.clear();
-                batch_bytes = 0;
-            }
-            batch_bytes = batch_bytes.saturating_add(item_bytes);
-            batch.push(item);
-            records += 1;
-        }
-        if !batch.is_empty() {
-            self.inject_items(&batch)?;
-        }
-        Ok(records)
-    }
-
-    fn inject_items(&mut self, items: &[serde_json::Value]) -> UiResult<()> {
-        let thread_id = self
-            .thread_id
-            .as_deref()
-            .ok_or_else(|| tr("Codex app-server に、復元先スレッドがありません。").to_owned())?;
-        self.request(
-            "thread/inject_items",
-            serde_json::json!({"threadId": thread_id, "items": items}),
-        )?;
-        Ok(())
-    }
-
-    fn request(&mut self, method: &str, params: serde_json::Value) -> UiResult<serde_json::Value> {
-        let id = self.next_request_id;
-        self.next_request_id += 1;
-        let request = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": method,
-            "params": params,
-        });
-        let encoded = serde_json::to_string(&request).map_err(|error| {
-            tf!(
-                "Codex app-server へのリクエストのエンコード: {error}",
-                error = error
-            )
-        })?;
-        self.stdin
-            .write_all(encoded.as_bytes())
-            .and_then(|_| self.stdin.write_all(b"\n"))
-            .and_then(|_| self.stdin.flush())
-            .map_err(|error| {
-                tf!(
-                    "Codex app-server へのリクエストの書き込み: {error}",
-                    error = error
-                )
-            })?;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            let read = self.stdout.read_line(&mut line).map_err(|error| {
-                tf!(
-                    "Codex app-server からの応答の読み取り: {error}",
-                    error = error
-                )
-            })?;
-            if read == 0 {
-                return Err(tr("Codex app-server が、履歴復元を完了する前に停止しました。").into());
-            }
-            let value = serde_json::from_str::<serde_json::Value>(&line)
-                .map_err(|error| tf!("Codex app-server の応答の解析: {error}", error = error))?;
-            if value.get("id").and_then(|value| value.as_u64()) != Some(id) {
-                continue;
-            }
-            if let Some(error) = value.get("error") {
-                return Err(tf!(
-                    "Codex app-server が履歴復元を拒否しました: {error}",
-                    error = error
-                ));
-            }
-            return value
-                .get("result")
-                .cloned()
-                .ok_or_else(|| tr("Codex app-server が結果を返しませんでした。").into());
-        }
-    }
-
-    fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }

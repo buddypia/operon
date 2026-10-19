@@ -13,13 +13,13 @@ pub(crate) use std::{
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fs,
     fs::OpenOptions,
-    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, Read, Write},
     os::{
         fd::AsRawFd,
         unix::fs::{OpenOptionsExt, PermissionsExt},
     },
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio},
+    process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
@@ -32,3 +32,5 @@ pub(crate) use uuid::Uuid;
 
 pub(crate) use crate::i18n::{detected_language, set_active_language, tr, Language};
 pub(crate) use crate::tf;
+#[cfg(test)]
+pub(crate) use std::io::{BufWriter, Seek, SeekFrom};

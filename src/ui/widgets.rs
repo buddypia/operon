@@ -374,7 +374,10 @@ pub(crate) fn restore_progress_footer(
 ) -> (egui::Response, egui::Response) {
     let status = ui.add(
         egui::Label::new(
-            RichText::new(tf!("ローカル履歴ファイルから抽出しています · 経過 {elapsed_seconds} 秒 · モデルは実行しないためトークンは消費しません", elapsed_seconds = elapsed_seconds))
+            RichText::new(tf!(
+                "ローカル履歴をスナップショットし、コンパクトな Handoff バンドルを組み立てています · 経過 {elapsed_seconds} 秒",
+                elapsed_seconds = elapsed_seconds
+            ))
             .size(11.5)
             .color(palette.text_muted),
         )
