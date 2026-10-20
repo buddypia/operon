@@ -36,9 +36,9 @@ contract:
   bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
     largest_module_lines warns at 8856 for src/app.rs, untouched here (warn:
     recorded, no action)"
-  release-binary: "machine pending yes: src/history.rs and src/config.rs make
-    /Applications/Operon.app stale; ends with bash scripts/package-macos.sh and
-    the ship skill's swap"
+  release-binary: "machine passed yes: touches src/history.rs, src/config.rs,
+    src/agents.rs; package /Applications/Operon.app from main after merge with
+    bash scripts/package-macos.sh and the ship skill's swap"
   guards-verified-by-mutation: "human passed 7 of 7 caught by mutations.py in
     this directory: the end-cut put back, the bare ellipsis, the byte overrun,
     the last turn dropped, the task shortened before the excerpt, a second cut
