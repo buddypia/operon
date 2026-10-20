@@ -12,17 +12,17 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "ready"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 
-resume: "Run the readiness gate and have an evaluator judge intent, spec, and
-  plan, then write the three tests and watch them fail."
+resume: "Write the three tests in src/tests.rs and watch the split and README
+  tests fail on main's runner and README."
 
 contract:
   failing-test-first: "machine pending the split and README tests fail on
