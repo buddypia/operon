@@ -1,0 +1,55 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): every landing in change 180
+# stopped on a permission prompt for
+# `git commit -q -m "…" && git log --oneline -1 && git push -q 2>&1 | tail -2; sleep 10; gh run list …`
+# — the publishing gate's "this push is not a plain push of one branch to
+# origin". The person (2026-10-20): "上記作業するたびに許可を求められてすごく
+# 面倒臭い", then "恒久対応して今後ともこのようなコマンド操作に都度許可を求めない
+# ようにしてくれ".
+#
+# Named cause: `.claude/hooks/guard-bash.sh` sorts a push into two outcomes,
+# plain (exit 0) and everything else (`ask`). "Everything else" mixes two kinds:
+# a push whose destination or refspec is a decision (force, `+`/`:` refspec,
+# `--mirror`, `--delete`, `--all`, another remote), and a push that goes where a
+# plain one goes but is written so the guard cannot see that — joined to other
+# commands, piped, `-q`, or with the remote and branch left implicit. The second
+# kind has nothing for a person to decide; the session can rewrite it into the
+# plain form itself, so asking hands a recoverable step to a person (sdlc 084).
+#
+# Risk: `.claude/hooks` is gate-configuration (high, paused). Admitting `-q` and
+# answering the second kind with `deny` instead of `ask` takes a person out of a
+# loop, which approval.md sends to a person; the person's message is that
+# decision, quoted in approvals.log.
+
+state:
+  route: "bugfix"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Commit plan.md and this file, then step 2 of plan.md: the failing cases in a_plain_push_to_origin_is_not_asked_about."
+
+contract:
+  failing-test-first: "machine pending the new allowed and denied cases in
+    a_plain_push_to_origin_is_not_asked_about fail on the unedited hook"
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  release-binary: "machine passed no: .claude/hooks, src/tests.rs and docs only —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  lesson-recorded: "machine pending entry 080 in docs/sdlc/lessons.md with its Guard"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
