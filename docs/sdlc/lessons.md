@@ -1080,3 +1080,23 @@ ellipsis), `a_long_handoff_shortens_the_excerpt_before_the_task`, and
 `a_handoff_of_a_shortened_task_marks_it_once` (found in review; watched failing
 with a cut ending on spaces) — swept by
 `docs/sdlc/changes/185-a-long-handoff-loses-the-persons-instruction/mutations.py`.
+
+## 083 — A cut through a marker the cut did not look for
+
+Change 185 marked every handoff cut and made a cut strip an earlier marker
+first, but only a marker at the very end of the text. A marker with text after
+it — an earlier handoff pasted or quoted into a turn — was cut through when the
+limit landed inside it, and the bundle carried `[shortened by Op` as the
+source's words. Change 185's review had named the byte cut through a trailing
+marker instead; the first plan for 187 took that on trust and its test passed
+on the unfixed code, because the byte cut reserves the marker's room and cannot
+reach a trailing one. **The rule:** a cut that must not split a token checks
+every occurrence the cut can reach, not the one position it expected; and a
+reported defect is reproduced before it is planned against.
+
+**Guard.** `a_handoff_cut_never_splits_a_marker_inside_the_text` (watched
+failing on main's character cut at a turn of 1,115 characters) and
+`a_handoff_byte_cut_never_splits_a_marker_inside_the_text` (watched failing on
+main's byte cut at instructions of 705 characters), each asserting it reached
+the case — swept by
+`docs/sdlc/changes/187-a-handoff-cut-twice-keeps-a-marker-fragment/mutations.py`.

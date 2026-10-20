@@ -1,0 +1,25 @@
+# Review record for 187-a-handoff-cut-twice-keeps-a-marker-fragment.
+#
+# The change: both handoff cuts in src/history.rs go through
+# cut_outside_marker, so a HANDOFF_SHORTENED_MARKER with text after it — an
+# earlier handoff pasted or quoted into a turn — is never cut through, and the
+# byte cut strips a trailing marker as the character cut already did. Two
+# tests watched failing on main; lesson 083; mutations 4 of 4.
+#
+# Round 1, rust-reviewer (approve-with-nits 0 2): no Important. Boundaries,
+# limits, a marker at index 0, repeated markers, and an end past the text all
+# checked. The two nits are carried: the mutation sweep already shows both
+# tests fail when either cut splits a marker, so their reach is measured there.
+
+digest: "b811a63ab24e6e6c"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · src/history.rs cut_outside_marker — a turn that begins with a pasted marker is cut back to nothing and shows the marker alone
+    person: "引き継ぐ会話の一部が、以前の引き継ぎ文の注記そのものから始まっている場合に限り、その部分が注記だけになることがあります。作業内容は全文の記録に残っており、対応は不要です。"
+  - rust-reviewer/1/2 · src/tests.rs a_handoff_cut_never_splits_a_marker_inside_the_text and a_handoff_byte_cut_never_splits_a_marker_inside_the_text — the check that the case was reached is computed or loose rather than observed in the bundle
+    person: "追加した検査の一部は、将来の変更で意図した状況を作れなくなっても気づきにくい書き方です。今は正しく働いており、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

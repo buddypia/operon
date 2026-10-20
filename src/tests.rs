@@ -458,6 +458,79 @@ pub(crate) fn a_handoff_of_a_shortened_task_marks_it_once() {
 }
 
 #[test]
+/// Change 187. A turn that holds Operon's marker with text after it — an
+/// earlier handoff pasted or quoted — is cut to its character limit through
+/// that marker when the limit lands inside it. The cut steps back to before
+/// the marker, so the bundle never carries a fragment of one.
+pub(crate) fn a_handoff_cut_never_splits_a_marker_inside_the_text() {
+    let fragment = &HANDOFF_SHORTENED_MARKER[..4];
+    let mut reached = 0;
+    for lead in 1_100..1_200 {
+        let quoted = format!(
+            "{}\n{HANDOFF_SHORTENED_MARKER}\nその後。",
+            "け".repeat(lead)
+        );
+        let (bundle, _) = build_compact_handoff_bundle(
+            &long_japanese_handoff_source(),
+            CliProvider::Claude,
+            &[("user", "直す。".to_owned()), ("assistant", quoted)],
+            Path::new("/tmp/archive.jsonl"),
+            "",
+        );
+        assert_eq!(
+            bundle.matches(fragment).count(),
+            bundle.matches(HANDOFF_SHORTENED_MARKER).count(),
+            "a turn of {lead} characters before a quoted marker: the cut went through it:\n{bundle}"
+        );
+        if lead + 1 < HANDOFF_BUNDLE_TURN_MAX_CHARS
+            && lead + 1 + HANDOFF_SHORTENED_MARKER.len() > HANDOFF_BUNDLE_TURN_MAX_CHARS
+        {
+            reached += 1;
+        }
+    }
+    assert!(
+        reached > 0,
+        "no length put the cut inside the quoted marker; the test checked nothing"
+    );
+}
+
+#[test]
+/// Change 187. The byte cut that fits the last turn into the bundle steps back
+/// out of a marker inside the turn too.
+pub(crate) fn a_handoff_byte_cut_never_splits_a_marker_inside_the_text() {
+    let fragment = &HANDOFF_SHORTENED_MARKER[..4];
+    let before = "け".repeat(500);
+    let quoted = format!("{before}\n{HANDOFF_SHORTENED_MARKER}\n{}", "こ".repeat(600));
+    let mut reached = 0;
+    for length in 300..=1_200 {
+        let note = format!("{}テストも足してください。", "く".repeat(length));
+        let (bundle, _) = build_compact_handoff_bundle(
+            &long_japanese_handoff_source(),
+            CliProvider::Claude,
+            &[
+                ("user", format!("集計を直す。{}", "さ".repeat(600))),
+                ("assistant", quoted.clone()),
+            ],
+            Path::new("/tmp/archive.jsonl"),
+            &note,
+        );
+        assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+        assert_eq!(
+            bundle.matches(fragment).count(),
+            bundle.matches(HANDOFF_SHORTENED_MARKER).count(),
+            "instructions of {length} characters: the byte cut went through a quoted marker:\n{bundle}"
+        );
+        if bundle.contains(&before) && !bundle.contains("こ") {
+            reached += 1;
+        }
+    }
+    assert!(
+        reached > 0,
+        "no instruction length cut the turn near its quoted marker; the test checked nothing"
+    );
+}
+
+#[test]
 /// Change 185. When the task and the instructions fit and the last turn does
 /// not, the turn is what gives way, shortened and marked, rather than dropped
 /// or cut through the instructions after it.

@@ -1,0 +1,54 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# A handoff text an earlier handoff had already shortened, cut again by bytes
+# to fit the bundle, could be cut inside the old marker, leaving a fragment
+# such as "[shortened by Op" in the task and the session name. Carried by the
+# subprocess-safety-reviewer in change 185 (finding 2/1); Harness² prints its
+# own cuts as its own (core/context.py), and a fragment is neither.
+#
+# Risk: src/history.rs is the foreign-store surface (medium, supervised);
+# src/tests.rs matches nothing higher.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Reviewed; commit, push, land with git merge --no-ff, then package
+  /Applications/Operon.app from main."
+
+contract:
+  failing-test-first: "machine passed a_handoff_cut_never_splits_a_marker_inside_the_text
+    failed on main's character cut (a turn of 1,115 characters) and
+    a_handoff_byte_cut_never_splits_a_marker_inside_the_text on main's byte
+    cut (instructions of 705 characters)"
+  three-gates: "machine passed make q.fast clean; cargo test --locked handoff,
+    every_lesson_ and harness_documents_only_name_paths_that_exist 21 ok;
+    --ignored not run: restore and the shared archive do not move"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here"
+  release-binary: "machine passed yes: touches src/history.rs; package
+    /Applications/Operon.app from main after merge with
+    bash scripts/package-macos.sh and the ship skill's swap"
+  guards-verified-by-mutation: "human passed mutations.py: 4 of 4 caught — the
+    character cut and the byte cut each bypassing cut_outside_marker, the
+    helper never stepping back, and lesson 083's Guard claiming no watched
+    failure"
+  review: "human passed round 1 at b811a63ab24e6e6c: rust-reviewer
+    approve-with-nits 0 2, both carried"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

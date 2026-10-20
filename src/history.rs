@@ -338,7 +338,11 @@ fn shorten_for_handoff(text: &str, max_chars: usize) -> String {
     if !shortened && body.chars().count() <= max_chars {
         return text.to_owned();
     }
-    let kept: String = body.chars().take(max_chars).collect();
+    let end = body
+        .char_indices()
+        .nth(max_chars)
+        .map_or(body.len(), |(at, _)| at);
+    let kept = &body[..cut_outside_marker(body, end)];
     format!("{}\n{HANDOFF_SHORTENED_MARKER}", kept.trim_end())
 }
 
@@ -351,11 +355,31 @@ fn shorten_to_bytes(text: &str, max_bytes: usize) -> String {
     let Some(room) = max_bytes.checked_sub(HANDOFF_SHORTENED_MARKER.len() + 1) else {
         return String::new();
     };
-    let mut end = room;
-    while end > 0 && !text.is_char_boundary(end) {
+    let body = text
+        .strip_suffix(HANDOFF_SHORTENED_MARKER)
+        .map_or(text, str::trim_end);
+    let mut end = room.min(body.len());
+    while end > 0 && !body.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}\n{HANDOFF_SHORTENED_MARKER}", text[..end].trim_end())
+    let kept = &body[..cut_outside_marker(body, end)];
+    format!("{}\n{HANDOFF_SHORTENED_MARKER}", kept.trim_end())
+}
+
+/// `end`, or the start of a `HANDOFF_SHORTENED_MARKER` that a cut at `end`
+/// would split. A marker with text after it — an earlier handoff pasted or
+/// quoted into a turn — is otherwise cut through, and its first bytes read as
+/// the source's words (change 187). `end` is a char boundary; so is the
+/// result, since the marker is ASCII.
+fn cut_outside_marker(text: &str, end: usize) -> usize {
+    let mut from = end.saturating_sub(HANDOFF_SHORTENED_MARKER.len() - 1);
+    while !text.is_char_boundary(from) {
+        from -= 1;
+    }
+    match text[from..].find(HANDOFF_SHORTENED_MARKER) {
+        Some(at) if from + at < end => from + at,
+        _ => end,
+    }
 }
 
 pub(crate) fn build_compact_handoff_bundle(
