@@ -11,25 +11,28 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 
-resume: "Run the readiness gate and have an evaluator judge intent, spec, and
-  plan, then write the test and its mutants."
+resume: "Reviewed and closed; commit, push, and land with git merge --no-ff."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast: fmt and clippy clean; cargo test
+    every_lesson_ 2 passed"
+  bands: "machine passed bash scripts/check-bands.sh: 1 of 21 at warn,
+    largest_module_lines 8856 from src/app.rs, which this change does not touch"
   release-binary: "machine passed no: src/tests.rs and documents —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  review: "human pending the reviewers check-review.sh names for the diff"
+  guards-verified-by-mutation: "human passed mutations.py: 11 of 11 caught, one
+    per check, the threshold both ways, the script both ways, and the header claim"
+  review: "human passed review.yaml: rust-reviewer approve, subprocess-safety-reviewer
+    approve-with-nits after the timeout fix"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
