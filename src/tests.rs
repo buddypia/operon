@@ -16421,6 +16421,278 @@ pub(crate) fn every_lesson_cited_by_number_is_a_lesson_that_exists() {
     );
 }
 
+/// The first lesson written after the ledger began requiring its guard to have
+/// been seen failing. Entries before it were compressed by changes 030, 097,
+/// and 147 and many no longer say so; they are not rewritten.
+const FIRST_LESSON_WITH_WATCHED_GUARD: u32 = 81;
+
+/// What keeps each entry of `lessons.md` out of the ledger, one line per
+/// problem, each naming its entry. Whether a guard's name is held by this
+/// repository is not asked here: `scripts/pipeline-indicators.sh` with
+/// `--lessons` owns that rule, and a second copy would drift from it (lesson
+/// 004).
+fn lesson_admission_problems(lessons: &str) -> Vec<String> {
+    let mut entries: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut inside = false;
+    for line in lessons.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            inside = heading.starts_with(|c: char| c.is_ascii_digit());
+            if inside {
+                entries.push((heading, Vec::new()));
+            }
+        } else if inside {
+            if let Some((_, body)) = entries.last_mut() {
+                body.push(line);
+            }
+        }
+    }
+    if entries.is_empty() {
+        return vec![
+            "lessons.md: 教訓の見出しを 1 つも読めません — 検査が何も見ていません".to_owned(),
+        ];
+    }
+
+    let mut problems = Vec::new();
+    let mut previous = 0;
+    for (heading, body) in entries {
+        let (number, rest) = heading.split_once(' ').unwrap_or((heading, ""));
+        let expected = previous + 1;
+        match number.parse::<u32>() {
+            Ok(written) if number.len() == 3 && written == expected => previous = written,
+            parsed => {
+                problems.push(format!(
+                    "{heading}: 番号が {expected:03} ではありません — 新しい教訓は末尾に連番で足します"
+                ));
+                previous = parsed.unwrap_or(expected);
+            }
+        }
+        let title = rest.trim_start().strip_prefix('—').map_or("", str::trim);
+        if title.is_empty() {
+            problems.push(format!(
+                "{heading}: 見出しに題がありません — どの場面の教訓か分かりません"
+            ));
+        }
+        // A Guard paragraph runs to the blank line or rule that ends it; an
+        // entry may hold more than one, and any of them may say it was seen.
+        // Narrower than the script, which reads on to the next heading for
+        // guard names: "watched failing" belongs in a Guard paragraph itself.
+        // The rule is read outside them, so a Guard quoting "**The rule:**"
+        // cannot stand in for an entry's own.
+        let mut guard = Vec::new();
+        let mut account = Vec::new();
+        let mut collecting = false;
+        for line in &body {
+            if line.starts_with("**Guard.**") {
+                collecting = true;
+            } else if line.trim().is_empty() || line.trim() == "---" {
+                collecting = false;
+            }
+            if collecting {
+                guard.push(*line);
+            } else {
+                account.push(*line);
+            }
+        }
+        let account = account.join("\n");
+        if !account.contains("**The rule:**") && !account.contains("**The rule.**") {
+            problems.push(format!(
+                "{heading}: The rule がありません — 何を守る教訓か分かりません"
+            ));
+        }
+        if guard.is_empty() {
+            problems.push(format!(
+                "{heading}: Guard がありません — 教訓を守るものがありません"
+            ));
+        } else if previous >= FIRST_LESSON_WITH_WATCHED_GUARD
+            && !guard
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("watched failing")
+        {
+            problems.push(format!(
+                "{heading}: Guard が watched failing と言っていません — 失敗するところを見ていない guard は推測です"
+            ));
+        }
+    }
+    problems
+}
+
+/// A lessons file of 082 entries that pass, each handed to `edit` to be
+/// changed, or dropped when it returns `None`.
+fn fixture_lessons(edit: impl Fn(u32, String) -> Option<String>) -> String {
+    let mut text = String::from("# Lessons\n\n---\n\n");
+    for number in 1..=82 {
+        let entry = format!(
+            "## {number:03} — Fixture lesson {number}\n\nA mistake. **The rule:** a rule.\n\n**Guard.** `a_fixture_guard` (watched\nfailing on its mutant).\n\n---\n\n"
+        );
+        if let Some(entry) = edit(number, entry) {
+            text.push_str(&entry);
+        }
+    }
+    text
+}
+
+/// Runs `scripts/pipeline-indicators.sh` with `--lessons` from `root`; exit
+/// code and all output. Bounded: the real tree takes about 15 seconds, so a
+/// stalled loop fails here with its message instead of holding CI to the job
+/// timeout.
+fn run_lesson_indicators(root: &Path) -> (i32, String) {
+    let mut command = Command::new("/bin/bash");
+    command
+        .arg(root.join("scripts/pipeline-indicators.sh"))
+        .arg("--lessons")
+        .current_dir(root);
+    forget_inherited_repository(&mut command);
+    let output =
+        run_command_with_timeout(&mut command, Duration::from_secs(120)).unwrap_or_else(|error| {
+            panic!("pipeline-indicators.sh --lessons を実行できません: {error:#}")
+        });
+    let mut printed = String::from_utf8_lossy(&output.stdout).into_owned();
+    printed.push_str(&String::from_utf8_lossy(&output.stderr));
+    (output.status.code().unwrap_or(-1), printed)
+}
+
+#[test]
+/// Harness² admits a lesson to its library only with the situation it applies
+/// to, the lesson, and the evidence it rests on, and refuses the entry before
+/// it is stored otherwise. `lessons.md` said the same in prose — an entry with
+/// no guard is unfinished work, a guard nobody watched fail is a guess — and
+/// `pipeline-indicators.sh --lessons` counted the entries whose guard exists,
+/// but only when somebody ran it. A test renamed away, or an entry appended in
+/// a hurry, read as finished until then.
+///
+/// The suite asks the script rather than restating its rule, so the count it
+/// prints and this verdict on guard names cannot disagree; the script is
+/// shown to refuse on a fixture repository, since on this tree it passes.
+pub(crate) fn every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let (code, printed) = run_lesson_indicators(&root);
+    assert_eq!(
+        code, 0,
+        "lessons.md: pipeline-indicators.sh --lessons が失敗しました — Guard が指すテストか eval が無い教訓があります:\n{printed}"
+    );
+    let lessons = fs::read_to_string(root.join("docs/sdlc/lessons.md"))
+        .expect("docs/sdlc/lessons.md を読めません — 教訓の受け入れ検査が何も見ていません");
+    let problems = lesson_admission_problems(&lessons);
+    assert!(
+        problems.is_empty(),
+        "教訓が受け入れ条件を満たしていません:\n{}",
+        problems.join("\n")
+    );
+    // The header is where an agent appending an entry learns what is refused,
+    // so it states the threshold this function reads.
+    let header = lessons.split("\n## ").next().unwrap_or_default();
+    let threshold = format!("from entry {FIRST_LESSON_WITH_WATCHED_GUARD:03} on");
+    assert!(
+        header.contains("`every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran`")
+            && header.contains(&threshold),
+        "lessons.md の冒頭が、この検査と「{threshold}」を書いていません — 教訓を足す人が何を拒まれるか分かりません"
+    );
+
+    let passing = fixture_lessons(|_, entry| Some(entry));
+    assert_eq!(
+        lesson_admission_problems(&passing),
+        Vec::<String>::new(),
+        "変異の土台が通りません — 各変異が自分の理由で拒まれたか分かりません"
+    );
+    let unseen = "(watched\nfailing on its mutant)";
+    let edited = |at: u32, from: &'static str, to: &'static str| {
+        fixture_lessons(move |number, entry| {
+            Some(if number == at {
+                entry.replace(from, to)
+            } else {
+                entry
+            })
+        })
+    };
+    let mutants = [
+        (
+            "rule のない教訓",
+            edited(40, "**The rule:** a rule.", "No rule."),
+            "040 — Fixture lesson 40: The rule がありません",
+        ),
+        (
+            "Guard の中にだけある rule",
+            edited(
+                42,
+                "**The rule:** a rule.\n\n**Guard.**",
+                "No rule.\n\n**Guard.** Quotes **The rule:** as text.",
+            ),
+            "042 — Fixture lesson 42: The rule がありません",
+        ),
+        (
+            "Guard のない教訓",
+            edited(41, "**Guard.**", "Nothing guards it:"),
+            "041 — Fixture lesson 41: Guard がありません",
+        ),
+        (
+            "081 以降で watched failing と言わない Guard",
+            edited(82, unseen, "(seen passing)"),
+            "082 — Fixture lesson 82: Guard が watched failing と言っていません",
+        ),
+        (
+            "飛んだ番号",
+            fixture_lessons(|number, entry| (number != 50).then_some(entry)),
+            "051 — Fixture lesson 51: 番号が 050 ではありません",
+        ),
+        (
+            "題のない見出し",
+            edited(30, "030 — Fixture lesson 30", "030"),
+            "030: 見出しに題がありません",
+        ),
+        ("空のファイル", String::new(), "1 つも読めません"),
+    ];
+    for (what, text, expected) in mutants {
+        let found = lesson_admission_problems(&text);
+        assert!(
+            found.iter().any(|problem| problem.contains(expected)),
+            "変異 {what} を見逃しました — 検査が検査していません: {found:?}"
+        );
+    }
+    assert_eq!(
+        lesson_admission_problems(&edited(80, unseen, "(seen passing)")),
+        Vec::<String>::new(),
+        "080 の Guard に watched failing を求めています — 圧縮済みの教訓は書き直しません"
+    );
+
+    let fixture = temporary_directory("lessons");
+    fs::create_dir_all(fixture.join("scripts")).unwrap();
+    fs::create_dir_all(fixture.join("docs/sdlc")).unwrap();
+    fs::create_dir_all(fixture.join("src")).unwrap();
+    fs::copy(
+        root.join("scripts/pipeline-indicators.sh"),
+        fixture.join("scripts/pipeline-indicators.sh"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("docs/sdlc/lessons.md"),
+        "# Lessons\n\n## 001 — A fixture lesson\n\nA mistake. **The rule:** a rule.\n\n**Guard.** `a_fixture_guard` (watched failing).\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("src/tests.rs"),
+        "fn another_fixture_test() {}\n",
+    )
+    .unwrap();
+    let (refused, refusal) = run_lesson_indicators(&fixture);
+    fs::write(fixture.join("src/tests.rs"), "fn a_fixture_guard() {}\n").unwrap();
+    let (admitted, admission) = run_lesson_indicators(&fixture);
+    // Removed before asserting, so a failing mutant run leaves nothing behind.
+    fs::remove_dir_all(&fixture).unwrap();
+    assert!(
+        refused == 1
+            && refusal.contains("no guard found for:")
+            && refusal.contains("## 001 — A fixture lesson"),
+        "変異 リポジトリに無い Guard を見逃しました — 検査が検査していません (exit {refused}):\n{refusal}"
+    );
+    assert_eq!(
+        admitted, 0,
+        "リポジトリにある Guard を拒みました — 検査が何を探しているか分かりません:\n{admission}"
+    );
+}
+
 #[test]
 /// `CLAUDE.md`'s module map is the index an agent navigates this crate by, and
 /// it is the one document nothing else can check: no compiler error, no clippy

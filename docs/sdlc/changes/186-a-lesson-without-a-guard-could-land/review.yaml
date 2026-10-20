@@ -1,0 +1,58 @@
+# Review record for 186-a-lesson-without-a-guard-could-land.
+#
+# The change: every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran
+# refuses a lessons.md entry with no title, no rule, no guard, a guard naming
+# nothing this repository holds (asked of pipeline-indicators.sh --lessons, not
+# restated), a number out of sequence, and from 081 on a Guard that does not
+# say watched failing. Harness²'s library admits an entry only with its cue,
+# lesson, and evidence; this is that admission, run by the suite.
+#
+# Round 1, rust-reviewer (approve, 4 nits) and subprocess-safety-reviewer
+# (changes requested, 1 Important): the script ran through a raw .output()
+# with no bound, against .claude/rules/rust.md. Fixed: run_command_with_timeout
+# at 120 seconds and forget_inherited_repository. Nits taken in the same round:
+# the fixture is removed before its asserts, the refusal assert requires the
+# script's "no guard found for:", a comment says the Guard paragraph is
+# narrower than the script's scan, and the doc comment no longer claims more
+# agreement than holds. Mutation sweep re-run after the fix: 11 of 11 caught.
+#
+# Round 2 at d2387581ea0b8014: rust-reviewer approves with no findings;
+# subprocess-safety-reviewer approves the fix with two nits.
+#
+# After round 2, CI's harness_documents_only_name_paths_that_exist refused a
+# doc comment that put `--lessons` inside the backticks of a script path. The
+# fix touches comments and one panic message only: the flag moved out of the
+# backticks, the long line was rewrapped (nit 2/2), and the message now prints
+# the error rather than naming a timeout (nit 2/1). Both nits are therefore
+# fixed, not carried.
+#
+# Round 3 at 08b3603c3e3773b4, on that delta: both reviewers approve with no
+# findings.
+#
+# The merge gate then refused: round 3's digest was taken against the previous
+# commit and covered only that delta, while the merge judges the whole branch
+# against main. Both reviewers read the whole branch diff in one piece at
+# 596b11442ae69611 and approve with no findings.
+#
+# A verdict may not land without code, so carried nit 1/3 was taken: the rule
+# is read only outside Guard paragraphs, with a mutant at entry 042 (sweep 12
+# of 12). Round 5 at 210b8722546d2b11, the whole branch against main: both
+# approve with no findings.
+#
+# The commit gate judges each commit against its parent and the merge gate the
+# whole branch against main, so a branch whose code landed in three commits
+# could not carry one record both accept. The same content was put on
+# fix/186-a-lesson-without-a-guard-could-land as one commit, whose diff is the
+# 210b8722546d2b11 both reviewers read.
+
+digest: "210b8722546d2b11"
+
+rounds: 5
+
+carried:
+  - rust-reviewer/1/4 · src/tests.rs every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran — about 15 seconds, almost all in the script's per-entry grep over src/tests.rs
+    person: "追加した検査は 1 回あたり 15 秒ほどかかり、CI が少し長くなります。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
