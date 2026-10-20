@@ -1,0 +1,1 @@
+2026-10-20T20:50:37Z auto plan plan.md 7bf75a948b200123 approve evaluator: cause verified on main (shorten_to_bytes cuts the whole text and can split an earlier marker); fix mirrors shorten_for_handoff; test needs a Japanese task and note to reach the cut inside the marker; foreign-store is supervised, not paused
