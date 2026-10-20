@@ -1,0 +1,33 @@
+# Review record for 188-an-eval-answer-or-a-lost-run-goes-unnoticed.
+#
+# The change: no_eval_prompt_is_pasted_into_the_steering also refuses a
+# steering document holding a setup or check line of 20 characters or more
+# that is not a comment, with a mutant rule proving it reads them; and
+# scripts/run-evals.sh refuses the rate and exits 1 when one (eval, run) pair
+# is recorded twice — two eval files sharing an id. One fixture test watched
+# failing on main; mutations 7 of 7.
+#
+# Round 1, rust-reviewer (approve-with-nits 0 5): no Important. The awk count,
+# the refusal's count and split, infra and unstable rows, the exit order,
+# summary.md, the trimmed-line filter, and the mutant's path all checked. The
+# five nits are carried: taking one moves the digest (REVIEW.md), and each is
+# a follow-up change.
+
+digest: "87c0ddf548da65a1"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · scripts/run-evals.sh report awk — on a refusal the merged per-eval line, any split or every-run-failed warning, and the headroom warning are still printed, all read from the merged counts
+    person: "二つの eval が同じ番号を持っているとき、結果の要約は全体の合格率を出さずに失敗しますが、まとめて数えた eval ごとの件数と注意書きは残ります。最初の行が番号の重複を伝えているので、対応は不要です。"
+  - rust-reviewer/1/2 · scripts/run-evals.sh — the duplicate id is refused only after the whole suite ran, and the second file's runs overwrite the first's transcript and check log
+    person: "番号が重複していると、すべての eval を実行し終えてから失敗するため、その分の時間と費用がかかり、片方の記録はもう片方に上書きされます。重複する番号を付けない限り起きず、対応は不要です。"
+  - rust-reviewer/1/3 · src/tests.rs no_eval_prompt_is_pasted_into_the_steering compared > prompts — one long setup or check line satisfies it, so a reader that loses most sections still passes
+    person: "追加した検査は、将来の変更で eval の大部分を読めなくなっても気づきにくい書き方です。今はすべて読めていることを確認しており、対応は不要です。"
+  - rust-reviewer/1/4 · src/tests.rs no_eval_prompt_is_pasted_into_the_steering mutant — find runs twice with unwrap_or_default on the second, and the mutant quotes a check line only, so dropping setup from the comparison is not caught
+    person: "追加した検査の自己確認は、eval の準備手順側の比較を外しても気づけません。今は準備手順も比較されており、対応は不要です。"
+  - rust-reviewer/1/5 · src/tests.rs eval_section_lines and eval_text_in_the_steering — only the first fenced block per section is read, a check line wrapped over two lines in a rule is not matched, and a shared idiom of 20 characters or more would be reported as pasted
+    person: "AI 向けの手引きに eval の答えが書き写されていないかの検査は、一行そのままの書き写しだけを見つけます。改行して書き写されたものは見逃し、ありふれた長い一行が誤って指摘されることもあります。今の手引きには該当がなく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"

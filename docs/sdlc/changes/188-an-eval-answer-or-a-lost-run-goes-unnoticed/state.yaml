@@ -5,15 +5,15 @@
 # hit, and checks that the runs it counted are the runs it scheduled before it
 # reports a rate. Here the suite keeps an eval's setup and check out of the
 # steering as it already keeps the prompt, and the runner refuses a rate over
-# duplicated or missing runs.
+# a run recorded twice.
 #
 # Risk: src/tests.rs, scripts/run-evals.sh, and evals/README.md match no
 # surface in docs/sdlc/risk.yaml.
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -21,16 +21,23 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Intent, spec, and plan approved (spec and plan on a second
-  reading); readiness Go. Write the runner fixture test (plan step 1)."
+resume: "Reviewed: rust-reviewer approve-with-nits 0 5, all carried. Commit,
+  push, and land with git merge --no-ff once CI passes."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast clean; cargo test --locked eval
+    13 ok; --ignored not run: restore and the shared archive do not move"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here"
   release-binary: "machine passed no: src/tests.rs, a script, and documents —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  review: "human pending the reviewers check-review.sh names for the diff"
+  guards-verified-by-mutation: "human passed mutations.py: 7 of 7 caught — the
+    duplicate count removed, a rate printed beside a refusal, the exit on a
+    refusal removed, the refusal no longer naming the shared id, the steering
+    test reading only the prompt, the line threshold past every check, and a
+    pasted line not reported"
+  review: "human passed review.yaml: rust-reviewer approve-with-nits 0 5 on
+    87c0ddf548da65a1, five nits carried"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

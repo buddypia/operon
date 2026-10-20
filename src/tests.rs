@@ -46231,10 +46231,52 @@ pub(crate) fn every_eval_declares_a_split_and_both_splits_are_used() {
     );
 }
 
+/// How long a line of an eval's setup or check must be, once trimmed, to count
+/// as that eval's text rather than shell grammar every script shares (`set -e`,
+/// `fi`). Measured on 2026-10-21: 145 lines reach it and none is in the
+/// steering (change 188).
+const EVAL_ANSWER_LINE_MIN_CHARS: usize = 20;
+
+/// Every line of an eval in `evals` found in a steering document: the prompt
+/// whole, and the setup and check where a line is long enough to be the eval's
+/// own. The count is how many lines were compared, so a reader that finds
+/// nothing to compare cannot pass for one that found no leak.
+fn eval_text_in_the_steering(
+    evals: &[(String, String)],
+    steering: &[(String, String)],
+) -> (usize, Vec<String>) {
+    let mut compared = 0;
+    let mut pasted = Vec::new();
+    for (name, text) in evals {
+        for section in ["Prompt", "Setup", "Check"] {
+            for line in eval_section_lines(text, section) {
+                if section != "Prompt"
+                    && (line.chars().count() < EVAL_ANSWER_LINE_MIN_CHARS || line.starts_with('#'))
+                {
+                    continue;
+                }
+                compared += 1;
+                for (document, body) in steering {
+                    if body.contains(&line) {
+                        pasted.push(format!(
+                            "{name} の {section}「{line}」が {document} にあります"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    (compared, pasted)
+}
+
 #[test]
 /// Change 103: pasting a failed eval's prompt into the steering raises the score
 /// and teaches nothing that reaches a person's next request — the overfitting the
 /// hillclimb procedure in evals/README.md forbids. This is that rule as a check.
+///
+/// Change 188: the setup and the check too. Harness² scans what an agent reads
+/// for the grader's text and refuses on a hit — "a leak, not a false positive to
+/// widen" — and a check line in a skill tells the agent what passes.
 pub(crate) fn no_eval_prompt_is_pasted_into_the_steering() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut documents: Vec<PathBuf> = ["CLAUDE.md", "AGENTS.md", "REVIEW.md"]
@@ -46252,9 +46294,17 @@ pub(crate) fn no_eval_prompt_is_pasted_into_the_steering() {
             }
         }
     }
-    let steering: Vec<(PathBuf, String)> = documents
+    let mut steering: Vec<(String, String)> = documents
         .into_iter()
-        .filter_map(|path| fs::read_to_string(&path).ok().map(|text| (path, text)))
+        .filter_map(|path| {
+            let text = fs::read_to_string(&path).ok()?;
+            let name = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            Some((name, text))
+        })
         .collect();
     assert!(
         steering.len() > 3,
@@ -46262,23 +46312,44 @@ pub(crate) fn no_eval_prompt_is_pasted_into_the_steering() {
         steering.len()
     );
 
-    let mut pasted = Vec::new();
-    let mut prompts = 0;
-    for (name, text) in eval_documents() {
-        for line in eval_section_lines(&text, "Prompt") {
-            prompts += 1;
-            for (path, body) in &steering {
-                if body.contains(&line) {
-                    pasted.push(format!(
-                        "{name} の prompt「{line}」が {} にあります",
-                        path.strip_prefix(&root).unwrap_or(path).display()
-                    ));
-                }
-            }
-        }
-    }
+    let evals = eval_documents();
+    let prompts: usize = evals
+        .iter()
+        .map(|(_, text)| eval_section_lines(text, "Prompt").len())
+        .sum();
     assert!(prompts > 0, "eval の prompt が一行も読めていません");
+    let (compared, pasted) = eval_text_in_the_steering(&evals, &steering);
+    assert!(
+        compared > prompts,
+        "eval の setup と check が一行も読めていません"
+    );
     assert!(pasted.is_empty(), "{}", pasted.join("\n"));
+
+    // A rule that quotes one check line is refused, naming the eval.
+    let (name, text) = evals
+        .iter()
+        .find(|(_, text)| {
+            eval_section_lines(text, "Check").iter().any(|line| {
+                line.chars().count() >= EVAL_ANSWER_LINE_MIN_CHARS && !line.starts_with('#')
+            })
+        })
+        .expect("長い check 行を持つ eval がありません");
+    let quoted = eval_section_lines(text, "Check")
+        .into_iter()
+        .find(|line| line.chars().count() >= EVAL_ANSWER_LINE_MIN_CHARS && !line.starts_with('#'))
+        .unwrap_or_default();
+    steering.push((
+        "mutant-rule.md".to_owned(),
+        format!("When closing a change, run:\n\n    {quoted}\n"),
+    ));
+    let (_, caught) = eval_text_in_the_steering(&evals, &steering);
+    assert!(
+        caught
+            .iter()
+            .any(|leak| leak.starts_with(&format!("{name} の Check"))
+                && leak.ends_with("mutant-rule.md にあります")),
+        "変異 check 行を写した rule を見逃しました — 検査が検査していません: {caught:?}"
+    );
 }
 
 /// Stand-in for an agent CLI in the runner tests. A keyword in the prompt picks
@@ -46539,6 +46610,38 @@ pub(crate) fn the_eval_runner_names_an_eval_whose_runs_split() {
         "summary.md に split の行がありません:\n{summary}"
     );
     fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 188. Harness² checks that the runs it counted are the runs it
+/// scheduled before it reports a rate, duplicates first, because a duplicate
+/// can make the counts come out right. Two eval files that share an id each
+/// pass the id test, and the summary merged them into one eval with twice the
+/// runs: here both pass, and the runner refuses the rate and fails.
+pub(crate) fn the_eval_runner_refuses_a_rate_over_runs_it_did_not_schedule() {
+    let root = eval_runner_fixture(
+        "eval-runner-duplicate",
+        &[
+            ("001-first", "train", "DO-WORK please", "test -f answer.txt"),
+            ("001-second", "test", "DO-WORK please", "test -f answer.txt"),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &[]);
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(
+        code, 1,
+        "同じ id の eval が二つあるのに exit 1 ではありません:\n{printed}"
+    );
+    assert!(
+        printed.contains(
+            "refused: eval 001 run 1 was recorded 2 times — two eval files share id 001; no rate is printed\n"
+        ),
+        "重複した run を名指ししていません:\n{printed}"
+    );
+    assert!(
+        !printed.lines().any(|line| line.starts_with("evals: ")),
+        "重複した run の上に率を出しています:\n{printed}"
+    );
 }
 
 #[test]

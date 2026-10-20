@@ -296,11 +296,18 @@ if [ "$keep" -eq 0 ]; then rmdir "$worktrees" 2>/dev/null; fi
 # reads disagreement between replicate runs as its first signal: where every
 # run did the same thing the steering already decides it, and where they split
 # it leaves the decision to chance — the cheapest thing to pin (change 184).
+#
+# Before any rate, one row per eval per run. Two eval files that share an id
+# each pass the id test, and their runs merged into one line with twice the
+# runs. Harness² checks that the runs it counted are the runs it scheduled,
+# duplicates first, because a duplicate can make the counts come out right; a
+# duplicate here refuses the rate rather than print one (change 188).
 
 awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
   NR == 1 { next }
   {
     if (!($1 in seen)) { seen[$1] = 1; order[++ids] = $1 }
+    if (++recorded[$1 SUBSEP $2] == 2) { twice[++duplicates] = $1 SUBSEP $2 }
     count[$1 SUBSEP $3]++
     total[$3]++
     if ($4 == "yes") peeked++
@@ -324,7 +331,12 @@ awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
     judged = passed + total["fail"]
     tail = sprintf(" against %s · %d run%s per eval", base, runs, runs == 1 ? "" : "s")
     if (costed) tail = tail sprintf(" · cost $%.2f", cost)
-    if (judged == 0) {
+    if (duplicates) {
+      for (i = 1; i <= duplicates; i++) {
+        split(twice[i], key, SUBSEP)
+        printf "refused: eval %s run %s was recorded %d times — two eval files share id %s; no rate is printed\n", key[1], key[2], recorded[twice[i]], key[1]
+      }
+    } else if (judged == 0) {
       print "evals: nothing was judged" tail
     } else {
       z = 1.96
@@ -366,6 +378,9 @@ cat "$results/summary.txt"
 echo "results: $results/summary.md"
 
 if awk -F '\t' 'NR > 1 && $3 != "pass" { bad = 1 } END { exit !bad }' "$results/results.tsv"; then
+  exit 1
+fi
+if grep '^refused:' "$results/summary.txt" >/dev/null; then
   exit 1
 fi
 exit 0
