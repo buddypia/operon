@@ -358,6 +358,178 @@ pub(crate) fn compact_handoff_bundle_bounds_turns_and_bytes_and_strips_tool_spam
     assert!(!bundle.contains("turn-01 "));
 }
 
+fn long_japanese_handoff_source() -> CliSession {
+    CliSession {
+        provider: CliProvider::Codex,
+        native_id: "33333333-3333-3333-3333-333333333333".into(),
+        id: "33333333-3333-3333-3333-333333333333".into(),
+        title: None,
+        last_user_message: None,
+        branch: None,
+        updated_at: now(),
+        path: PathBuf::from("/tmp/rollout.jsonl"),
+    }
+}
+
+#[test]
+/// Change 185. The person's handoff instructions are the last section of the
+/// bundle, and a bundle over its byte budget was cut from the end, so a long
+/// Japanese task — three bytes a character — took the instructions with it,
+/// and the new session started without the one thing the person typed for it.
+pub(crate) fn a_long_handoff_keeps_the_persons_instruction_whole() {
+    let task = format!("請求書の集計を直す。{}", "あ".repeat(1_400));
+    let turns = vec![
+        ("user", task),
+        ("assistant", format!("調べました。{}", "い".repeat(1_400))),
+    ];
+    let note = format!("{}最後に、結論を先に書いてください。", "う".repeat(900));
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        &note,
+    );
+
+    assert!(
+        bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES,
+        "bundle byte length {} exceeded HANDOFF_BUNDLE_MAX_BYTES ({HANDOFF_BUNDLE_MAX_BYTES})",
+        bundle.len()
+    );
+    assert!(
+        bundle.contains(&note),
+        "the person's handoff instructions were cut:\n{bundle}"
+    );
+    assert!(bundle.contains("請求書の集計を直す。"));
+
+    // The marker is for the session reading the bundle. The person reads the
+    // session's name, which showed a long task ending in `…` before and still
+    // does.
+    let display = session_display_goal(&bundle);
+    assert!(display.starts_with("請求書の集計を直す。"), "{display}");
+    assert!(
+        display.ends_with('…') && !display.contains(HANDOFF_SHORTENED_MARKER),
+        "the session name shows Operon's marker to the person: {display}"
+    );
+}
+
+#[test]
+/// Change 185, found in its review. A task Operon already shortened ends in
+/// the marker, so handing that session off again cut the text through the old
+/// marker and added a new one, and a fragment like `[shortened by Operon to fi`
+/// reached the next session and the session's name.
+pub(crate) fn a_handoff_of_a_shortened_task_marks_it_once() {
+    // The first cut ends on spaces, which it trims, so the shortened task is
+    // under the limit by those spaces and a second cut reaches into its marker.
+    let task = format!(
+        "集計を直す。{}{}{}",
+        "さ".repeat(1_189),
+        " ".repeat(10),
+        "し".repeat(300)
+    );
+    let (first, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Codex,
+        &[("user", task)],
+        Path::new("/tmp/archive-1.jsonl"),
+        "",
+    );
+    let tracked = goal_with_native_tracking_token("codex", first, Uuid::new_v4());
+    let (second, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &[("user", tracked)],
+        Path::new("/tmp/archive-2.jsonl"),
+        "",
+    );
+
+    let fragment = &HANDOFF_SHORTENED_MARKER[..4];
+    assert_eq!(
+        second.matches(fragment).count(),
+        second.matches(HANDOFF_SHORTENED_MARKER).count(),
+        "a cut went through an earlier marker:\n{second}"
+    );
+    let display = session_display_goal(&second);
+    assert!(
+        display.ends_with('…') && !display.contains('['),
+        "the session name shows a broken marker: {display}"
+    );
+}
+
+#[test]
+/// Change 185. When the task and the instructions fit and the last turn does
+/// not, the turn is what gives way, shortened and marked, rather than dropped
+/// or cut through the instructions after it.
+pub(crate) fn a_long_handoff_shortens_the_excerpt_before_the_task() {
+    let task = format!("インポーターを直す。{}", "か".repeat(600));
+    let turns = vec![
+        ("user", task.clone()),
+        ("assistant", format!("途中経過。{}", "き".repeat(1_500))),
+    ];
+    let note = format!("{}テストも足してください。", "く".repeat(300));
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        &note,
+    );
+
+    assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+    assert_eq!(included, 1, "{bundle}");
+    assert!(bundle.contains("途中経過。"), "{bundle}");
+    assert!(
+        bundle.contains(&task),
+        "the task was shortened first:\n{bundle}"
+    );
+    assert!(bundle.contains(&note), "{bundle}");
+    assert!(bundle.contains(HANDOFF_SHORTENED_MARKER), "{bundle}");
+}
+
+#[test]
+/// Change 185. Harness² marks every cut it makes in what an agent reads as its
+/// own, because an agent handed a sentence that stops mid-word diagnoses the
+/// source as broken. The bundle shortened turns with a bare `…`, so the session
+/// receiving it could not tell Operon's cut from the source's text, nor where
+/// the rest was.
+pub(crate) fn a_handoff_says_where_operon_shortened_the_text() {
+    let long_turn = format!("調査の続き。{}", "え".repeat(2_000));
+    let turns = vec![
+        ("user", "Fix the importer.".to_owned()),
+        ("assistant", long_turn),
+    ];
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "",
+    );
+
+    assert_eq!(included, 2, "{bundle}");
+    assert!(
+        bundle.contains(HANDOFF_SHORTENED_MARKER),
+        "a shortened turn does not say Operon shortened it:\n{bundle}"
+    );
+    assert_eq!(
+        bundle.matches(HANDOFF_SHORTENED_MARKER).count(),
+        1,
+        "a turn that fit was marked as shortened:\n{bundle}"
+    );
+    assert!(
+        !bundle.contains("…"),
+        "a bare ellipsis is still how a cut is shown:\n{bundle}"
+    );
+    assert!(
+        HANDOFF_SHORTENED_MARKER.contains("Operon")
+            && HANDOFF_SHORTENED_MARKER.contains("transcript snapshot"),
+        "the marker must say who cut it and where the rest is: {HANDOFF_SHORTENED_MARKER}"
+    );
+}
+
 #[test]
 pub(crate) fn compact_handoff_bundle_peels_nested_envelopes_and_preserves_display_goal() {
     let first_source = CliSession {

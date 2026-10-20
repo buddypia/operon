@@ -1,0 +1,37 @@
+# Review record for 185-a-long-handoff-loses-the-persons-instruction.
+#
+# The change: the compact handoff bundle is no longer cut from its end, where
+# the person's handoff instructions sit; the excerpt gives way first, then the
+# task, and the instructions only when they alone are past the budget. Every
+# cut is marked HANDOFF_SHORTENED_MARKER, saying Operon cut it and where the
+# whole text is, instead of a bare ellipsis; the session name maps the marker
+# back to the ellipsis a person always saw. Lesson 082.
+#
+# Round 1, rust-reviewer (approve-with-nits 0 2) and subprocess-safety-reviewer
+# (approve-with-nits 0 1): no Important. Both found the same defect this change
+# introduced: a second handoff of a shortened task cut through the old marker
+# and left a fragment in the bundle and the session name. Taken although
+# graded a nit, because the person reads it in the session name: reproduced by
+# a_handoff_of_a_shortened_task_marks_it_once (watched failing with a first
+# cut ending on spaces), fixed in shorten_for_handoff, mutation 7 of 7.
+#
+# Round 2 at 3c512ce505fc05eb: rust-reviewer approves the fix, one nit
+# standing; subprocess-safety-reviewer approves the fix and finds the same
+# shape in the byte fallback, carried below for a follow-up — this is the
+# route's last round.
+#
+# Also run: cargo test --locked -- --ignored, 6 of 6 live-CLI restore tests ok.
+
+digest: "3c512ce505fc05eb"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/2 · src/history.rs build_compact_handoff_bundle last rung — when the instructions alone are past the budget, the task is rendered empty and nothing tells the receiving session why
+    person: "引き継ぎメモそのものが非常に長いときに限り、引き継ぎ先のタスク欄が空になり、メモだけが渡ります。メモを短くして引き継ぎ直せば解消し、普段の長さのメモでは起きません。"
+  - subprocess-safety-reviewer/2/1 · src/history.rs shorten_to_bytes — a text that already ends in the marker and is cut again by bytes can be cut inside the old marker, leaving a fragment in the bundle and the session name
+    person: "一度短縮された文章を、別の CLI へさらに引き継いだうえで容量いっぱいまで詰めるという、まれな場合に限り、「[shortened by Op」のような切れた注記がタスク本文やセッション名に残ることがあります。作業内容に影響はなく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve-with-nits 0 1"
