@@ -34,8 +34,9 @@ contract:
     --ignored not run: restore and the shared archive do not move"
   bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
     largest_module_lines warns at 8856 for src/app.rs, untouched here"
-  release-binary: "machine pending yes: touches src/history.rs; package
-    /Applications/Operon.app from main after merge"
+  release-binary: "machine passed yes: touches src/history.rs; package
+    /Applications/Operon.app from main after merge with
+    bash scripts/package-macos.sh and the ship skill's swap"
   guards-verified-by-mutation: "human passed mutations.py: 4 of 4 caught — the
     character cut and the byte cut each bypassing cut_outside_marker, the
     helper never stepping back, and lesson 083's Guard claiming no watched
