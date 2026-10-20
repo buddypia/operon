@@ -1,4 +1,4 @@
-# Plan: a handoff text cut twice by bytes keeps its marker whole
+# Plan: a handoff cut never splits a marker inside the text
 
 - **Spec**: none — route `bugfix`; the cause below is the intent
 - **Approved**: 2026-10-21
@@ -6,41 +6,44 @@
 
 ## The cause
 
-`shorten_to_bytes` in `src/history.rs` cuts `text` at `max_bytes` less the
-room for `HANDOFF_SHORTENED_MARKER`, then appends the marker. A text that an
-earlier handoff already shortened ends in that marker, and the byte cut is
-taken from the whole text: when the room lands inside the old marker, the
-result keeps its first bytes — `[shortened by Op` — before the new one. The
-bundle reaches this cut for the task when the task and the person's
-instructions together are over `HANDOFF_BUNDLE_MAX_BYTES`, so a re-handoff of
-a shortened task with long instructions shows the fragment in the task and in
-the session name (`session_display_goal` maps only a trailing marker to `…`).
-`shorten_for_handoff` already strips an earlier marker before it cuts (change
-185); the byte form does not. Carried in change 185's review as
-subprocess-safety-reviewer finding 2/1.
+Both cuts in `src/history.rs` — `shorten_for_handoff` (characters, for every
+turn, the task, and the note) and `shorten_to_bytes` (bytes, to fit the
+bundle) — strip only a marker at the very end of the text before they cut. A
+`HANDOFF_SHORTENED_MARKER` with text after it — an earlier handoff a person
+pasted or an agent quoted into a turn — is cut through whenever the limit lands
+inside it, and the bundle carries its first bytes, `[shortened by Op`, as if
+they were the source's words. Watched failing on main's code:
+`a_handoff_cut_never_splits_a_marker_inside_the_text` (a turn of 1,115
+characters before a quoted marker) and
+`a_handoff_byte_cut_never_splits_a_marker_inside_the_text` (instructions of
+705 characters). Change 185's review carried the byte form as
+subprocess-safety-reviewer finding 2/1, for a text ending in the marker; that
+case cannot happen, because `shorten_to_bytes` reserves the marker's room and
+so cuts before a trailing marker — measured across 901 instruction lengths
+before this plan was revised.
 
 ## Files that change
 
 | File | Change |
 |---|---|
-| `src/history.rs` | `shorten_to_bytes` cuts the body of a text an earlier cut marked |
-| `src/tests.rs` | `a_handoff_cut_twice_by_bytes_keeps_its_marker_whole` |
+| `src/history.rs` | `cut_outside_marker`: a cut that would split a marker steps back to the marker's start; both cuts go through it |
+| `src/tests.rs` | the two tests above |
 | `docs/sdlc/lessons.md` | entry 083 |
 
 ## Order of work
 
-1. The test: a task already ending in the marker, handed off with
-   instructions of every length from 300 to 1,200 characters, so that for some
-   of them the bundle shortens the task by bytes with the room landing inside
-   the old marker. For each bundle, the marker's first four bytes occur exactly
-   as often as the whole marker, and the bundle is within its budget; the test
-   also asserts that at least one length took the byte cut, so it cannot pass
-   by never reaching it. Watched failing on today's `shorten_to_bytes`.
-2. The fix: strip a trailing marker and the whitespace before it, cut the
-   body on a char boundary within the room, and append one marker — the same
-   rule `shorten_for_handoff` follows.
-3. The test passes, and so does every `handoff` test.
-4. Mutations: put the whole-text cut back; drop the char-boundary walk.
+1. The tests, each watched failing on main's code with its own message, each
+   asserting it reached the case so it cannot pass by never cutting near a
+   marker.
+2. `cut_outside_marker(text, end)`: when a marker starts before `end` and ends
+   after it, return its start; otherwise `end`. `shorten_for_handoff` takes its
+   character limit as a byte index and passes it through; `shorten_to_bytes`
+   strips a trailing marker as `shorten_for_handoff` does, then cuts on a char
+   boundary and passes the cut through. Neither result ever exceeds its limit:
+   stepping back only shortens.
+3. Both tests pass, and so does every `handoff` test.
+4. Mutations: either cut bypassing `cut_outside_marker`; the helper returning
+   `end` unchanged.
 5. Lesson 083, `make q.fast`, `bash scripts/check-bands.sh`. Restore and the
    shared archive do not move, so `cargo test --locked -- --ignored` is not
    needed, and is said so.
@@ -49,8 +52,9 @@ subprocess-safety-reviewer finding 2/1.
 
 | Risk | How it shows up | What catches it |
 |---|---|---|
-| The body is shorter than the room, so nothing needs cutting but the text is still over budget | a marker on a text that was not shortened further | the body-fits case returns body plus one marker, which is what the text already was |
-| The cut moves off a char boundary in Japanese | a panic on slicing | the char-boundary walk, the Japanese task in the test, and mutation 2 |
+| The step back lands off a char boundary | a panic on slicing | the marker is ASCII and starts on a boundary; the Japanese text around it in both tests |
+| A marker at the very start of the text | the cut steps back to 0 and the turn is empty | an empty byte cut already falls through to the next rung; the char cut keeps the marker after it |
+| The search costs a scan per cut | slower handoff building | it scans from one marker length before the cut, a few kilobytes at most, once per handoff, off the draw path |
 
 ## Proof of completion
 
@@ -61,4 +65,8 @@ subprocess-safety-reviewer finding 2/1.
 
 ## Departures from the plan
 
-None yet.
+- The first approved version named a byte cut through a trailing marker as
+  the cause. Its test passed on main's code across every length it tried, and
+  the arithmetic says why: the byte cut reserves the marker's room. Probing
+  found the real case, a marker with text after it, in both cuts; this
+  revision is the evaluator's second reading.

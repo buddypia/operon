@@ -12,8 +12,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -21,18 +21,27 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Plan approved by the evaluator; readiness Conditional Go (no
-  intent or spec, as the bugfix route expects). Write the failing test."
+resume: "Reviewed; commit, push, land with git merge --no-ff, then package
+  /Applications/Operon.app from main."
 
 contract:
-  failing-test-first: "machine pending the new test fails on main's
-    shorten_to_bytes"
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending touches src/history.rs; package from main
-    after merge"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  review: "human pending the reviewers check-review.sh names for the diff"
+  failing-test-first: "machine passed a_handoff_cut_never_splits_a_marker_inside_the_text
+    failed on main's character cut (a turn of 1,115 characters) and
+    a_handoff_byte_cut_never_splits_a_marker_inside_the_text on main's byte
+    cut (instructions of 705 characters)"
+  three-gates: "machine passed make q.fast clean; cargo test --locked handoff,
+    every_lesson_ and harness_documents_only_name_paths_that_exist 21 ok;
+    --ignored not run: restore and the shared archive do not move"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here"
+  release-binary: "machine pending yes: touches src/history.rs; package
+    /Applications/Operon.app from main after merge"
+  guards-verified-by-mutation: "human passed mutations.py: 4 of 4 caught — the
+    character cut and the byte cut each bypassing cut_outside_marker, the
+    helper never stepping back, and lesson 083's Guard claiming no watched
+    failure"
+  review: "human passed round 1 at b811a63ab24e6e6c: rust-reviewer
+    approve-with-nits 0 2, both carried"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
