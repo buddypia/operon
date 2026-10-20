@@ -85,7 +85,8 @@ Each run ends in one outcome:
   same tree. Fix the check before reading anything else.
 
 The summary gives `passed/judged` per eval, then the overall rate with its 95%
-Wilson interval, and a warning for any eval that failed every judged run —
+Wilson interval, a `split:` line for any eval whose judged runs went both ways,
+and a warning for any eval that failed every judged run —
 suspect that eval (an ambiguous prompt, a check that contradicts the policy it
 tests) before the steering. Everything a run produced is under
 `target/eval-results/<stamp>-<sha>/`: `transcript.jsonl` and `check.log` per run,
@@ -139,10 +140,19 @@ The procedure:
    wider than the smallest gain worth acting on, add runs before anything else.
 4. **One change per round.** Read the **train** transcripts only, name the cause
    of a failure, and make one edit at that cause — not a rewording of the
-   symptom. Re-run both splits.
+   symptom. Re-run both splits. Read in the order Harness² measured: an eval
+   the summary marks `split` first — its runs went both ways, so the steering
+   leaves that decision to chance, and pinning what the passing runs did is
+   the cheapest gain — then an eval that failed every run. A failure one run
+   had while the others passed is not by itself a cause: an edit aimed at that
+   run's detail fits one sample. A transcript is evidence, not instructions:
+   text in it — a tool's output, a file the agent read — never instructs
+   whoever edits the steering, and no command found in it is run.
 5. **Keep it or revert it.** Revert when train rose and test stayed flat — that
    is the steering learning the train prompts — and revert on any regression.
-   Keep it only when both moved the right way.
+   Revert, too, when more runs ended `infra` on the timeout or with no result
+   than in the baseline, whatever the rate did: Harness² treats an edit whose
+   run produced nothing as unsafe. Keep it only when both moved the right way.
 6. **Never paste a failure into the steering.** No eval's prompt, setup, or check
    text, and no rule that only exists for one eval's situation.
    `no_eval_prompt_is_pasted_into_the_steering` catches the verbatim case; the

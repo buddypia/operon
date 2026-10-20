@@ -291,6 +291,11 @@ if [ "$keep" -eq 0 ]; then rmdir "$worktrees" 2>/dev/null; fi
 # The rate counts pass and fail only. A 95% Wilson interval rather than a bare
 # percentage, because seven evals run three times is twenty-one samples, and a
 # gain inside the interval is not a gain.
+#
+# An eval whose judged runs went both ways is named on a `split:` line. Harness²
+# reads disagreement between replicate runs as its first signal: where every
+# run did the same thing the steering already decides it, and where they split
+# it leaves the decision to chance — the cheapest thing to pin (change 184).
 
 awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
   NR == 1 { next }
@@ -313,6 +318,7 @@ awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
       if (extra != "") line = line "  (" substr(extra, 3) ")"
       print line
       if (j > 0 && p == 0) always[++failing] = id
+      if (p > 0 && p < j) { divided[++splits] = id; divided_p[splits] = p; divided_j[splits] = j }
     }
     passed = total["pass"] + 0
     judged = passed + total["fail"]
@@ -331,6 +337,8 @@ awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
       printf "evals: %d/%d passed (%.1f%%, 95%% CI %.1f-%.1f%%)%s\n", passed, judged, 100 * rate, 100 * low, 100 * high, tail
     }
     printf "infra %d, unstable %d, peeked %d\n", total["infra"], total["unstable"], peeked
+    for (i = 1; i <= splits; i++)
+      printf "split: eval %s passed %d of %d judged runs — the steering leaves this to chance; read a passing and a failing transcript side by side before any other failure\n", divided[i], divided_p[i], divided_j[i]
     for (i = 1; i <= failing; i++)
       printf "warning: eval %s failed every judged run — suspect the eval before the steering\n", always[i]
     if (judged > 0 && runs >= 3 && passed / judged >= 0.95)
