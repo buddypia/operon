@@ -1,0 +1,45 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# The person's words: 「プロジェクト別のセッション内の配置も移動できるようにしたい。」
+#
+# Read on main (174c451): the column's heading 「プロジェクト別セッション」 is
+# already a grip that moves the whole column to another edge (change 145).
+# Inside it, projects are sorted by name and each project's sessions newest
+# first, and nothing lets a person change either.
+#
+# Decided without asking (recoverable by a revert): both levels move — a
+# project's card among the projects, a session's row among its own project's
+# rows; a session never moves to another project (its terminal runs in that
+# project's folder). The order is kept beside the store in its own file, not
+# in the store, which docs/sdlc/risk.yaml holds at paused.
+
+state:
+  route: "feature"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Write spec.md and screen.md, then run the readiness gate."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: src/app.rs, src/app/screens.rs and
+    src/ui/session_tree.rs change, so /Applications/Operon.app goes stale and
+    the change ends with bash scripts/package-macos.sh and the ship swap"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
