@@ -16,8 +16,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "reviewing"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -28,10 +28,11 @@ state:
 # Review requested 2026-10-20 at digest b246930aa88be2a1 from rust-reviewer,
 # durability-reviewer and subprocess-safety-reviewer; the screen evaluator
 # judges .tmp/181/arranged-dark.png against screen.md.
-resume: "Commit, push, wait for CI, merge on main, then package and ship."
+resume: "Done: the session column's projects and rows are dragged into an order kept in session-order.json; ten review findings are carried in review.yaml."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh at 5fb0279;
+    CI run 39441320505 green on the pushed branch"
   failing-test-first: "machine passed the nine change_181 tests failed against
     stubs for the reasons plan.md step 1 gives (departures)"
   named-tests: "machine passed change_181 9 of 9; every_ and the four 163/166
@@ -44,7 +45,7 @@ contract:
   review: "human passed rust-reviewer, durability-reviewer and
     subprocess-safety-reviewer approve-with-nits at b246930aa88be2a1, ten
     findings carried in review.yaml"
-  release-binary: "machine pending yes: src/app.rs, src/app/screens.rs and
+  release-binary: "machine passed yes: src/app.rs, src/app/screens.rs and
     src/ui/session_tree.rs change, so /Applications/Operon.app goes stale and
     the change ends with bash scripts/package-macos.sh and the ship swap"
   guards-verified-by-mutation: "human passed mutations.py: 17 of 17 caught,
