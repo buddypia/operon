@@ -995,3 +995,20 @@ refused, not only the branch.
 failing on the quit command, and with the quit pattern unanchored on an added
 `-e`) and `a_command_refused_inside_a_worktree_says_why` (watched failing with
 the explanation removed).
+
+## 079 — A notice set one line before a call that sets its own
+
+Change 179 wrote the handoff's notice ("… から Handoff バンドル … を作成し …
+起動しています…") and then called `start_session`, which replaces the notice
+with the generic `セッションを起動しています…` as soon as it spawns the launch.
+The person never saw the handoff's sentence. Both of 179's tests of
+`finish_full_history_import` checked the session it recorded and never read
+the notice, so the sentence was reviewed, translated, and shipped without once
+reaching the screen. Change 180 found it when its reuse notice failed the same
+way. **The rule:** a message is tested where the person reads it, after the
+whole action that produces it, not at the line that assigns it.
+
+**Guard.** `finish_full_history_import_says_when_a_bundle_was_reused`, which
+reads the notice after `start_session` for both the reused and the fresh
+bundle (watched failing under the `handoff-notice-hidden-by-the-launch`
+mutation in `docs/sdlc/changes/180-a-handoff-is-rebuilt-and-cannot-pick-its-model/mutations.py`).

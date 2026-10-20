@@ -38,6 +38,23 @@ pub(crate) struct RecentAgentSettings {
     /// opens with, untouched by the edits one launch makes.
     #[serde(default)]
     pub(crate) pinned: Option<PinnedLaunch>,
+    /// What each handoff destination starts with, keyed by agent (change 180).
+    /// A file written before the field existed loads it empty, which keeps the
+    /// destination CLI's own defaults.
+    #[serde(default)]
+    pub(crate) handoff: HashMap<String, HandoffLaunchSettings>,
+}
+
+/// The model and reasoning depth one handoff destination starts with. Kept
+/// apart from `AgentLaunchSettings`: a continuation is often meant to run on a
+/// different model from everyday launches, and a handoff takes no mode or
+/// switches.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct HandoffLaunchSettings {
+    #[serde(default)]
+    pub(crate) model: String,
+    #[serde(default)]
+    pub(crate) effort: String,
 }
 
 /// One whole launch combination a person chose to start every session with.
@@ -78,11 +95,17 @@ pub(crate) fn load_recent_agent_settings(data_file: &Path) -> RecentAgentSetting
         sanitize_agent_launch_settings(agent, launch_settings);
     }
     settings.pinned = settings.pinned.take().and_then(sanitize_pinned_launch);
+    settings
+        .handoff
+        .retain(|agent, _| FULL_HISTORY_RESTORE_TARGETS.contains(&agent.as_str()));
+    for (agent, launch) in settings.handoff.iter_mut() {
+        sanitize_handoff_launch_settings(agent, launch);
+    }
 
     settings
 }
 
-const MAX_FIELD_STRING_LEN: usize = 1024;
+pub(crate) const MAX_FIELD_STRING_LEN: usize = 1024;
 const MAX_CUSTOM_COMMAND_LEN: usize = 4096;
 
 /// Atomically write recent agent settings to disk.
@@ -197,4 +220,43 @@ pub(crate) fn sanitize_agent_launch_settings(agent: &str, settings: &mut AgentLa
     }
 
     settings.flags = sanitized_flags;
+}
+
+/// A model the launch gate would refuse, or one longer than a field holds, is
+/// dropped whole rather than cut: a cut name is a model nobody chose. An effort
+/// the destination does not list is dropped too.
+pub(crate) fn sanitize_handoff_launch_settings(agent: &str, settings: &mut HandoffLaunchSettings) {
+    let model = settings.model.trim();
+    settings.model = if model.chars().count() <= MAX_FIELD_STRING_LEN && is_safe_agent_option(model)
+    {
+        model.to_owned()
+    } else {
+        String::new()
+    };
+    let effort = settings.effort.trim();
+    settings.effort = if agent_effort_options(agent).contains(&effort) {
+        effort.to_owned()
+    } else {
+        String::new()
+    };
+}
+
+/// The chosen options as the session menu names them, or `None` when both are
+/// left to the CLI.
+pub(crate) fn handoff_launch_summary(settings: &HandoffLaunchSettings) -> Option<String> {
+    let chosen = [settings.model.trim(), settings.effort.trim()]
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    (!chosen.is_empty()).then(|| chosen.join(" · "))
+}
+
+/// The session menu's entry for one destination. The options are set in the
+/// history tab, so the menu says which ones it will use rather than hiding them.
+pub(crate) fn handoff_menu_label(agent: &str, settings: Option<&HandoffLaunchSettings>) -> String {
+    let name = agent_choice_copy(agent).0;
+    match settings.and_then(handoff_launch_summary) {
+        Some(launch) => tf!("{p0} へ Handoff（{launch}）", p0 = name, launch = launch),
+        None => tf!("{p0} へ Handoff", p0 = name),
+    }
 }

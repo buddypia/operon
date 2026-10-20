@@ -8,7 +8,28 @@ pub(crate) fn import_full_cli_history(
     archive_root: &Path,
     import_id: Uuid,
 ) -> UiResult<ImportedNativeSession> {
-    import_full_cli_history_with_note(project, source, target, "", archive_root, import_id)
+    import_full_cli_history_with_note(
+        project,
+        source,
+        target,
+        "",
+        &HandoffLaunchSettings::default(),
+        archive_root,
+        import_id,
+    )
+}
+
+/// Sweep, reuse lookup, and the rewrite of a reused archive run one at a time,
+/// so a sweep cannot delete an archive between a handoff choosing it and the
+/// handoff marking it used (change 180). The guarded value is `()`: a panic
+/// while it was held leaves nothing half-written behind the lock, so a poisoned
+/// lock is taken as it stands.
+static HANDOFF_ARCHIVES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock_handoff_archives() -> std::sync::MutexGuard<'static, ()> {
+    HANDOFF_ARCHIVES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 pub(crate) fn import_full_cli_history_with_note(
@@ -16,14 +37,65 @@ pub(crate) fn import_full_cli_history_with_note(
     source: &CliSession,
     target: &str,
     note: &str,
+    launch: &HandoffLaunchSettings,
     archive_root: &Path,
     import_id: Uuid,
 ) -> UiResult<ImportedNativeSession> {
     let destination = full_history_restore_destination(target)?;
+    // Built before anything is copied: a refused option costs no archive.
+    let destination_command = build_agent_launch_command(
+        destination.agent(),
+        "",
+        launch.model.trim(),
+        "",
+        launch.effort.trim(),
+        &[],
+        "",
+    )?;
     let source_transcript = full_history_restore_transcript(source)?;
-    let archive_path = snapshot_native_transcript(&source_transcript, archive_root, import_id)
-        .map_err(|error| error.to_string())?;
-    let (turns, classification) = read_transcript_conversation(&archive_path, source.provider)?;
+    let _archives = lock_handoff_archives();
+    let now = now();
+    sweep_expired_handoff_archives_locked(archive_root, now);
+    // Taken before the copy. A turn appended while the copy runs leaves this
+    // fingerprint behind the source, so the next handoff snapshots again
+    // rather than reusing a copy that may hold less than the source does.
+    let fingerprint = transcript_fingerprint(&source_transcript);
+    let reused = fingerprint
+        .and_then(|fingerprint| {
+            reusable_handoff_archive(archive_root, source, &source_transcript, fingerprint, now)
+        })
+        .and_then(|archive| {
+            // A manifest whose snapshot is gone or holds nothing to carry is not
+            // an archive worth failing a handoff over: take a fresh one.
+            read_transcript_conversation(&archive.snapshot, source.provider)
+                .ok()
+                .filter(|(turns, _)| !turns.is_empty())
+                .map(|conversation| (archive, conversation))
+        });
+    let (archive_path, note, created_at, reused_bundle_created_at, (turns, classification)) =
+        match reused {
+            Some((archive, conversation)) => {
+                let note = if note.trim().is_empty() {
+                    archive.note
+                } else {
+                    note.to_owned()
+                };
+                (
+                    archive.snapshot,
+                    note,
+                    archive.created_at,
+                    Some(archive.created_at),
+                    conversation,
+                )
+            }
+            None => {
+                let archive_path =
+                    snapshot_native_transcript(&source_transcript, archive_root, import_id)
+                        .map_err(|error| error.to_string())?;
+                let conversation = read_transcript_conversation(&archive_path, source.provider)?;
+                (archive_path, note.to_owned(), now, None, conversation)
+            }
+        };
     if turns.is_empty() {
         return Err(tr("選択した元履歴には、復元できる記録がありません。").into());
     }
@@ -31,20 +103,26 @@ pub(crate) fn import_full_cli_history_with_note(
         tr("共有セッションのスナップショットに親ディレクトリがありません。").to_owned()
     })?;
     let (handoff_bundle, included_turns) =
-        build_compact_handoff_bundle(source, destination, &turns, &archive_path, note);
+        build_compact_handoff_bundle(source, destination, &turns, &archive_path, &note);
     let bundle_path = archive_directory.join(HANDOFF_BUNDLE_FILE_NAME);
     write_file_atomically(&bundle_path, handoff_bundle.as_bytes())
         .map_err(|error| error.to_string())?;
     let manifest = serde_json::json!({
-        "schema_version": 5,
+        "schema_version": HANDOFF_MANIFEST_SCHEMA_VERSION,
         "source_provider": source.provider.label(),
         "source_session_id": source.native_id,
         "source_path": source_transcript,
+        "source_fingerprint": fingerprint.map(|fingerprint| serde_json::json!({
+            "bytes": fingerprint.bytes,
+            "modified_ns": fingerprint.modified_ns,
+        })),
         "project": project.path,
-        "created_at": now(),
+        "created_at": created_at,
+        "last_used_at": now,
         "destination_provider": destination.label(),
-        "restore": "compact handoff bundle",
+        "restore": HANDOFF_ARCHIVE_RESTORE_KIND,
         "handoff_bundle_path": bundle_path,
+        "note": note,
         "included_turns": included_turns,
         "classification": {
             "records": classification.records,
@@ -65,15 +143,12 @@ pub(crate) fn import_full_cli_history_with_note(
                 .collect::<Vec<_>>(),
         },
     });
-    let manifest_path = archive_directory.join("manifest.json");
+    let manifest_path = archive_directory.join(HANDOFF_MANIFEST_FILE_NAME);
     let manifest_bytes = serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?;
     write_file_atomically(&manifest_path, &manifest_bytes).map_err(|error| error.to_string())?;
 
-    let (agent_command, native_session_id) = command_with_managed_native_session_id(
-        destination.agent(),
-        destination.executable().to_owned(),
-        import_id,
-    );
+    let (agent_command, native_session_id) =
+        command_with_managed_native_session_id(destination.agent(), destination_command, import_id);
     Ok(ImportedNativeSession {
         managed_session_id: import_id,
         provider: destination,
@@ -84,7 +159,149 @@ pub(crate) fn import_full_cli_history_with_note(
         imported_records: included_turns,
         classification,
         agent_command,
+        reused_bundle_created_at,
     })
+}
+
+/// What a source transcript looked like when it was snapshotted. Every CLI
+/// here appends to its transcript, so a conversation that moved on changes
+/// both its length and its modification time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TranscriptFingerprint {
+    pub(crate) bytes: u64,
+    pub(crate) modified_ns: u64,
+}
+
+pub(crate) fn transcript_fingerprint(path: &Path) -> Option<TranscriptFingerprint> {
+    let metadata = fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some(TranscriptFingerprint {
+        bytes: metadata.len(),
+        modified_ns: u64::try_from(modified.as_nanos()).ok()?,
+    })
+}
+
+/// An earlier handoff's archive that the same, unchanged conversation can be
+/// handed off from again.
+struct ReusableHandoffArchive {
+    snapshot: PathBuf,
+    note: String,
+    created_at: u64,
+}
+
+/// The archive directories one pass may look at: UUID-named entries directly
+/// under the root that are directories themselves. A symlink is not one, so
+/// nothing a link points at is ever read as an archive or deleted as one.
+fn handoff_archive_directories(archive_root: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(archive_root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .take(HANDOFF_ARCHIVE_SCAN_MAX_ENTRIES)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| Uuid::parse_str(name).is_ok())
+        })
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .collect()
+}
+
+/// A manifest larger than `HANDOFF_MANIFEST_MAX_BYTES`, or one that does not
+/// parse, is no manifest: its archive is neither reused nor deleted.
+fn read_handoff_manifest(directory: &Path) -> Option<serde_json::Value> {
+    let file = fs::File::open(directory.join(HANDOFF_MANIFEST_FILE_NAME)).ok()?;
+    let mut bytes = Vec::new();
+    file.take(HANDOFF_MANIFEST_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > HANDOFF_MANIFEST_MAX_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// When a handoff last used this archive. A version-5 manifest has no
+/// `last_used_at`, so its creation stands in.
+fn handoff_archive_last_used(manifest: &serde_json::Value) -> Option<u64> {
+    manifest["last_used_at"]
+        .as_u64()
+        .or_else(|| manifest["created_at"].as_u64())
+}
+
+fn handoff_archive_expired(manifest: &serde_json::Value, now: u64) -> bool {
+    handoff_archive_last_used(manifest)
+        .is_some_and(|used| used.saturating_add(HANDOFF_ARCHIVE_TTL_SECONDS) <= now)
+}
+
+fn reusable_handoff_archive(
+    archive_root: &Path,
+    source: &CliSession,
+    transcript: &Path,
+    fingerprint: TranscriptFingerprint,
+    now: u64,
+) -> Option<ReusableHandoffArchive> {
+    let transcript = transcript.to_str()?;
+    handoff_archive_directories(archive_root)
+        .into_iter()
+        .filter_map(|directory| {
+            let manifest = read_handoff_manifest(&directory)?;
+            let recorded = &manifest["source_fingerprint"];
+            let matches = manifest["schema_version"]
+                .as_u64()
+                .is_some_and(|version| version >= HANDOFF_MANIFEST_SCHEMA_VERSION)
+                && manifest["restore"] == HANDOFF_ARCHIVE_RESTORE_KIND
+                && manifest["source_provider"] == source.provider.label()
+                && manifest["source_session_id"] == source.native_id.as_str()
+                && manifest["source_path"] == transcript
+                && recorded["bytes"].as_u64() == Some(fingerprint.bytes)
+                && recorded["modified_ns"].as_u64() == Some(fingerprint.modified_ns)
+                && !handoff_archive_expired(&manifest, now);
+            if !matches {
+                return None;
+            }
+            let snapshot = directory.join(SHARED_SESSION_SNAPSHOT_FILE_NAME);
+            if !fs::symlink_metadata(&snapshot).is_ok_and(|metadata| metadata.is_file()) {
+                return None;
+            }
+            Some((
+                handoff_archive_last_used(&manifest).unwrap_or_default(),
+                ReusableHandoffArchive {
+                    snapshot,
+                    note: manifest["note"].as_str().unwrap_or_default().to_owned(),
+                    created_at: manifest["created_at"].as_u64().unwrap_or(now),
+                },
+            ))
+        })
+        .max_by_key(|(last_used, _)| *last_used)
+        .map(|(_, archive)| archive)
+}
+
+/// Deletes every handoff archive a handoff has not used for
+/// `HANDOFF_ARCHIVE_TTL_SECONDS`, and nothing else: an archive the earlier
+/// full-history restore wrote names another restore kind, and may be the only
+/// copy of a conversation its source CLI has since cleaned up. Returns how many
+/// were removed. One that cannot be removed now is left for the next sweep;
+/// expiry never fails the handoff it runs inside.
+pub(crate) fn sweep_expired_handoff_archives(archive_root: &Path, now: u64) -> usize {
+    let _archives = lock_handoff_archives();
+    sweep_expired_handoff_archives_locked(archive_root, now)
+}
+
+fn sweep_expired_handoff_archives_locked(archive_root: &Path, now: u64) -> usize {
+    handoff_archive_directories(archive_root)
+        .into_iter()
+        .filter(|directory| {
+            read_handoff_manifest(directory).is_some_and(|manifest| {
+                manifest["restore"] == HANDOFF_ARCHIVE_RESTORE_KIND
+                    && handoff_archive_expired(&manifest, now)
+            })
+        })
+        .filter(|directory| fs::remove_dir_all(directory).is_ok())
+        .count()
 }
 
 pub(crate) fn compact_handoff_turn_text(role: &str, text: &str) -> Option<String> {
