@@ -16,20 +16,28 @@
 
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Write spec.md and screen.md, then run the readiness gate."
+resume: "Follow plan.md's order of work from step 1: the nine failing tests."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
   bands: "machine pending bash scripts/check-bands.sh"
+  failing-test-first: "machine pending the nine change_181 tests, each watched
+    failing on main for the reason plan.md step 1 gives"
+  named-tests: "machine pending cargo test --locked change_181, every_, and the
+    four 163/166 column tests by name"
+  screen-matches: "human pending a dev-build screenshot against a copied store
+    judged against screen.md"
+  review: "human pending the route's reviewers in review.yaml, checked by
+    scripts/check-review.sh"
   release-binary: "machine pending yes: src/app.rs, src/app/screens.rs and
     src/ui/session_tree.rs change, so /Applications/Operon.app goes stale and
     the change ends with bash scripts/package-macos.sh and the ship swap"

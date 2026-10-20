@@ -1,1 +1,4 @@
 2026-10-20T09:12:25Z auto intent intent.md ca67470cbe4add77 approve evaluator round 1: restates the quoted request; sort orders and the column grip checked against ui_terminal_session_tabs
+2026-10-20T09:40:50Z auto spec spec.md 6fdc64de834237cc approve evaluator round 1: nine requirements cover every intent outcome; drag design checked against egui 0.31.1 hit_test and interaction; side file off the paused store
+2026-10-20T09:40:50Z auto screen screen.md b825ea7008b811c5 approve evaluator round 1: no new screen, nothing re-laid out; real strings at the column's width; states covered
+2026-10-20T09:43:43Z auto plan plan.md e674e4d4e30824fd approve evaluator round 2: the four 163/166 column tests named and run by name; failure reasons true on main; no paused surface
