@@ -12,8 +12,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -21,16 +21,22 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Intent, spec, and plan approved by the evaluator and committed. Next:
-  the failing runner tests, then scripts/run-evals.sh, then the README."
+resume: "Built and reviewed: the conditions line and the coverage warning in
+  scripts/run-evals.sh, two runner tests, the README. Next: push, CI, merge."
 
 contract:
-  three-gates: "machine pending"
-  bands: "machine pending"
+  three-gates: "machine passed make q.fast clean; cargo test --locked eval
+    14 ok; --ignored not run: restore and the shared archive do not move"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here"
   release-binary: "machine passed no: src/tests.rs, a script, and a document —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending"
-  review: "human pending"
+  guards-verified-by-mutation: "human passed mutations.py: 7 of 7 caught — the
+    conditions line removed, the model printed as default, the recheck hidden,
+    the coverage warning removed, the headroom warning beside it, the boundary
+    at exactly half, and the warning's scheduled count printed as the judged"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer
+    approve-with-nits 0 2 each, recorded in review.yaml"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

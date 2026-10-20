@@ -46852,6 +46852,22 @@ pub(crate) fn the_eval_runner_passes_the_model_and_effort_through() {
     assert!(given.contains("--effort\neffort-y\n"), "{given}");
     assert!(given.starts_with("-p\nDO-WORK please\n"), "{given}");
 
+    // Change 189: Harness² records the configuration an experiment ran under,
+    // and a summary that does not cannot be compared with another.
+    let timeout = eval_timeout_field("60");
+    let named = format!(
+        "conditions: agent stub-agent.sh · model model-x · effort effort-y · split both · recheck off · timeout {timeout}\n"
+    );
+    assert!(
+        printed.contains(&named),
+        "`{named}` がありません:\n{printed}"
+    );
+    let summary = fs::read_to_string(eval_results_directory(&printed).join("summary.md")).unwrap();
+    assert!(
+        summary.contains(&named),
+        "summary.md に条件の行がありません:\n{summary}"
+    );
+
     let (code, printed) = run_eval_runner(&root, &stub, &["--keep"]);
     assert_eq!(code, 0, "{printed}");
     let worktree = kept_eval_worktree(&printed);
@@ -46861,6 +46877,87 @@ pub(crate) fn the_eval_runner_passes_the_model_and_effort_through() {
         !plain.contains("--model") && !plain.contains("--effort"),
         "{plain}"
     );
+    let unnamed = format!(
+        "conditions: agent stub-agent.sh · model default · effort default · split both · recheck off · timeout {timeout}\n"
+    );
+    assert!(
+        printed.contains(&unnamed),
+        "`{unnamed}` がありません:\n{printed}"
+    );
+
+    let (code, printed) = run_eval_runner(&root, &stub, &["--split", "train", "--recheck"]);
+    assert_eq!(code, 0, "{printed}");
+    let selected = format!(
+        "conditions: agent stub-agent.sh · model default · effort default · split train · recheck on · timeout {timeout}\n"
+    );
+    assert!(
+        printed.contains(&selected),
+        "`{selected}` がありません:\n{printed}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// The `timeout` field the runner prints for `EVAL_TIMEOUT=seconds`, read from
+/// the same `PATH` check the runner makes: bounded only when `timeout` or
+/// `gtimeout` exists.
+fn eval_timeout_field(seconds: &str) -> String {
+    let bounded = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1",
+        ])
+        .status()
+        .unwrap()
+        .success();
+    if bounded {
+        format!("{seconds}s")
+    } else {
+        "none".to_owned()
+    }
+}
+
+#[test]
+/// Change 189: Harness² warns when the rows behind a figure are not the rows it
+/// meant to read. A rate over the few runs that were judged, beside a majority
+/// that ended infra, read as a suite with no headroom and sent the next session
+/// to write harder evals.
+pub(crate) fn the_eval_runner_warns_when_most_runs_were_not_judged() {
+    let root = eval_runner_fixture(
+        "eval-runner-thin",
+        &[
+            ("001-work", "train", "DO-WORK please", "test -f answer.txt"),
+            ("002-crash", "train", "CRASH please", "test -f answer.txt"),
+            ("003-crash", "test", "CRASH please", "test -f answer.txt"),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &["--runs", "3"]);
+    assert_eq!(
+        code, 1,
+        "infra の run があるのに exit 1 ではありません:\n{printed}"
+    );
+    let thin = "warning: only 3 of 9 runs were judged — fix the infra and unstable runs before reading the rate\n";
+    assert!(printed.contains(thin), "`{thin}` がありません:\n{printed}");
+    assert!(
+        !printed.contains("no headroom"),
+        "判定された run が半分に満たないのに headroom の警告が出ています:\n{printed}"
+    );
+    fs::remove_dir_all(&root).ok();
+
+    // Exactly half judged is not thin, and the headroom warning stands.
+    let root = eval_runner_fixture(
+        "eval-runner-half",
+        &[
+            ("001-work", "train", "DO-WORK please", "test -f answer.txt"),
+            ("002-crash", "train", "CRASH please", "test -f answer.txt"),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &["--runs", "3"]);
+    assert_eq!(code, 1, "{printed}");
+    assert!(
+        !printed.contains("runs were judged"),
+        "半分が判定された run で警告が出ています:\n{printed}"
+    );
+    assert!(printed.contains("no headroom"), "{printed}");
     fs::remove_dir_all(&root).ok();
 }
 
