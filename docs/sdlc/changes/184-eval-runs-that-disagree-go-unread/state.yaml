@@ -1,0 +1,44 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Applies what change 178 left of Google Research's Harness² to this
+# repository's harness: replicate eval runs that split are what a hillclimb
+# reads first, and a subagent definition Claude Code would drop or rename
+# fails the suite.
+#
+# Risk: scripts/run-evals.sh, evals/README.md, and src/tests.rs match no
+# surface in docs/sdlc/risk.yaml. .claude/agents (gate-configuration, paused)
+# is read by the new test, not edited.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Run the readiness gate and have an evaluator judge intent, spec, and
+  plan, then write the three tests and watch them fail."
+
+contract:
+  failing-test-first: "machine pending the split and README tests fail on
+    main's runner and README"
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine passed no: src/tests.rs, a script, and documents —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  review: "human pending rust-reviewer verdict on the diff"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
