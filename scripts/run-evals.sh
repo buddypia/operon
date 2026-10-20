@@ -158,6 +158,13 @@ agent_options=(--permission-mode acceptEdits --output-format stream-json --verbo
 if [ -n "$model" ]; then agent_options+=(--model "$model"); fi
 if [ -n "$effort" ]; then agent_options+=(--effort "$effort"); fi
 
+# What the runs were made under, printed on every summary. Harness² records an
+# experiment's configuration and refuses to judge it under another; here two
+# summaries are only comparable when this line matches (change 189).
+conditions="agent $(basename "$agent") · model ${model:-default} · effort ${effort:-default}"
+conditions="$conditions · split ${split:-both} · recheck $([ "$recheck" -eq 1 ] && echo on || echo off)"
+conditions="$conditions · timeout $([ -n "$bound" ] && echo "${limit}s" || echo none)"
+
 # --- run ----------------------------------------------------------------------
 
 export CARGO_TARGET_DIR="$repo_root/target/eval"
@@ -302,10 +309,16 @@ if [ "$keep" -eq 0 ]; then rmdir "$worktrees" 2>/dev/null; fi
 # runs. Harness² checks that the runs it counted are the runs it scheduled,
 # duplicates first, because a duplicate can make the counts come out right; a
 # duplicate here refuses the rate rather than print one (change 188).
+#
+# A rate over fewer than half the runs it recorded speaks for the minority of
+# the suite. Harness² warns when the rows behind a figure are not the rows it
+# meant to read; here that warning takes the headroom warning's place, since a
+# suite mostly unjudged is not a suite too easy (change 189).
 
-awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
+awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" -v conditions="$conditions" '
   NR == 1 { next }
   {
+    scheduled++
     if (!($1 in seen)) { seen[$1] = 1; order[++ids] = $1 }
     if (++recorded[$1 SUBSEP $2] == 2) { twice[++duplicates] = $1 SUBSEP $2 }
     count[$1 SUBSEP $3]++
@@ -348,12 +361,16 @@ awk -F '\t' -v base="$base" -v runs="$runs" -v results="$results" '
       high = centre + half; if (high > 1) high = 1
       printf "evals: %d/%d passed (%.1f%%, 95%% CI %.1f-%.1f%%)%s\n", passed, judged, 100 * rate, 100 * low, 100 * high, tail
     }
+    print "conditions: " conditions
     printf "infra %d, unstable %d, peeked %d\n", total["infra"], total["unstable"], peeked
     for (i = 1; i <= splits; i++)
       printf "split: eval %s passed %d of %d judged runs — the steering leaves this to chance; read a passing and a failing transcript side by side before any other failure\n", divided[i], divided_p[i], divided_j[i]
     for (i = 1; i <= failing; i++)
       printf "warning: eval %s failed every judged run — suspect the eval before the steering\n", always[i]
-    if (judged > 0 && runs >= 3 && passed / judged >= 0.95)
+    thin = judged > 0 && judged * 2 < scheduled
+    if (thin)
+      printf "warning: only %d of %d runs were judged — fix the infra and unstable runs before reading the rate\n", judged, scheduled
+    if (!thin && judged > 0 && runs >= 3 && passed / judged >= 0.95)
       print "warning: 95% or more passed — no headroom left to show a gain; the suite needs harder cases from docs/sdlc/lessons.md"
   }
 ' "$results/results.tsv" > "$results/summary.txt"
