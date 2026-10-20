@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-20
-- **Status**: approved
+- **Status**: done
 
 This is the plan produced in plan mode and accepted before any file was edited.
 If the implementation departs from it, update this file — an abandoned plan is

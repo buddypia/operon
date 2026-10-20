@@ -34,9 +34,16 @@
 # - Permissions: 0700 directories and 0600 snapshots unchanged; no new kind of
 #   file or directory.
 
-digest: "7956e4011403b2ed"
+#
+# Round 2: the close added lesson 079 to docs/sdlc/lessons.md and nothing else
+# outside the change directory. rust-reviewer checked its claims against the
+# index and 174c451 (179's tests never read app.notice; start_session sets its
+# own notice; the named test and mutation exist); durability-reviewer found no
+# persistence surface in it. Both verdicts stand with the same carried nits.
 
-rounds: 1
+digest: "d39910657bbf88f7"
+
+rounds: 2
 
 carried:
   - rust-reviewer/1/1 · src/app/screens.rs ui_handoff_launch_options: `changed |= response.lost_focus()` saves the settings file on the UI thread on every focus loss even when the text did not change; compare against the value at focus gain, or track response.changed() and save on lost_focus
