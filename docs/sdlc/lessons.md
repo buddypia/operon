@@ -7,6 +7,13 @@ The part that matters is **Guard**. An entry with no guard is unfinished work:
 every guard is a test in `src/tests.rs` or an eval in `evals/`, because those
 run without being remembered.
 
+The suite holds every entry to that (change 186):
+`every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran` refuses an entry
+with no title, no **The rule**, or no **Guard**, a guard naming no test or eval
+this repository holds, or a number out of sequence; and from entry 081 on, a
+Guard that does not say it was watched failing. Append new entries last, with
+the next number.
+
 Two forms live here. Recent entries (069–070) carry the full account; entries
 001 to 068 are compressed to the rule and the guard (changes 030, 097, and 147).
 **No guard was removed by the compression**: `scripts/pipeline-indicators.sh`

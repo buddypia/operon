@@ -1,0 +1,44 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Harness² admits a lesson to its library only with its situation, lesson,
+# and evidence. Here the suite refuses a lesson with no rule, no guard, or a
+# guard the repository does not hold, and from 081 a guard nobody watched
+# fail.
+#
+# Risk: src/tests.rs and docs/sdlc/lessons.md match no surface in
+# docs/sdlc/risk.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Reviewed and closed; commit, push, and land with git merge --no-ff."
+
+contract:
+  three-gates: "machine passed make q.fast: fmt and clippy clean; cargo test
+    every_lesson_ 2 passed"
+  bands: "machine passed bash scripts/check-bands.sh: 1 of 21 at warn,
+    largest_module_lines 8856 from src/app.rs, which this change does not touch"
+  release-binary: "machine passed no: src/tests.rs and documents —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed mutations.py: 12 of 12 caught, one
+    per check, the threshold both ways, the script both ways, and the header claim"
+  review: "human passed review.yaml: rust-reviewer approve, subprocess-safety-reviewer
+    approve-with-nits after the timeout fix"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
