@@ -666,6 +666,12 @@ pub(crate) struct OperonApp {
     pub(crate) dock: DockLayout,
     /// The panel being dragged by its grip, if any.
     pub(crate) dock_drag: Option<DockPanel>,
+    /// The order the person dragged the session column into, as read from
+    /// and written to `session-order.json` (change 181).
+    pub(crate) session_arrangement: SessionArrangement,
+    /// The project or session being dragged inside the session column, if
+    /// any. In memory, as `dock_drag` is.
+    pub(crate) column_drag: Option<ColumnDrag>,
     /// The rect the session workspace was last drawn into; a dock move is
     /// judged against it (change 146).
     pub(crate) dock_area: Option<egui::Rect>,
@@ -884,6 +890,7 @@ impl OperonApp {
         // about the machine's CLI configuration.
         let hooks_enabled = load_hook_settings(&data_file).enabled;
         let setup_trust = load_setup_trust(&data_file);
+        let session_arrangement = load_session_arrangement(&data_file);
         let diff_annotations = DiffAnnotations {
             comments: rescued_comments.comments,
             ..DiffAnnotations::default()
@@ -1035,6 +1042,8 @@ impl OperonApp {
             show_session_inspector: true,
             dock: DockLayout::default(),
             dock_drag: None,
+            session_arrangement,
+            column_drag: None,
             dock_area: None,
             session_file_filter: String::new(),
             session_filter_results: None,

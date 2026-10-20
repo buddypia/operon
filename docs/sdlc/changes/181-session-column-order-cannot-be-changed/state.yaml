@@ -1,0 +1,61 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# The person's words: 「プロジェクト別のセッション内の配置も移動できるようにしたい。」
+#
+# Read on main (174c451): the column's heading 「プロジェクト別セッション」 is
+# already a grip that moves the whole column to another edge (change 145).
+# Inside it, projects are sorted by name and each project's sessions newest
+# first, and nothing lets a person change either.
+#
+# Decided without asking (recoverable by a revert): both levels move — a
+# project's card among the projects, a session's row among its own project's
+# rows; a session never moves to another project (its terminal runs in that
+# project's folder). The order is kept beside the store in its own file, not
+# in the store, which docs/sdlc/risk.yaml holds at paused.
+
+state:
+  route: "feature"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+# Review requested 2026-10-20 at digest b246930aa88be2a1 from rust-reviewer,
+# durability-reviewer and subprocess-safety-reviewer; the screen evaluator
+# judges .tmp/181/arranged-dark.png against screen.md.
+resume: "Done: the session column's projects and rows are dragged into an order kept in session-order.json; ten review findings are carried in review.yaml."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh at 5fb0279;
+    CI run 39441320505 green on the pushed branch"
+  failing-test-first: "machine passed the nine change_181 tests failed against
+    stubs for the reasons plan.md step 1 gives (departures)"
+  named-tests: "machine passed change_181 9 of 9; every_ and the four 163/166
+    column tests 106 passed; column/dock/pinned/rename filters 61 passed"
+  screen-matches: "human passed evaluator approved .tmp/181/arranged-dark.png
+    (dev build, synthetic store, scratch HOME and TMUX_TMPDIR) against
+    screen.md's After; the drag line and hovers by their tests"
+  bands: "machine passed bash scripts/check-bands.sh: 21 metrics within
+    their bands"
+  review: "human passed rust-reviewer, durability-reviewer and
+    subprocess-safety-reviewer approve-with-nits at b246930aa88be2a1, ten
+    findings carried in review.yaml"
+  release-binary: "machine passed yes: src/app.rs, src/app/screens.rs and
+    src/ui/session_tree.rs change, so /Applications/Operon.app goes stale and
+    the change ends with bash scripts/package-macos.sh and the ship swap"
+  guards-verified-by-mutation: "human passed mutations.py: 17 of 17 caught,
+    including both hover sentences and the drop line"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

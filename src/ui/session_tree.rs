@@ -105,6 +105,191 @@ impl DockPanel {
     }
 }
 
+/// The order a person dragged the session column into (change 181): the
+/// projects, and every project's sessions. What it does not list — added
+/// since the last move — is drawn ahead of what it lists, in the column's own
+/// order, so a new project or session is never lost at the bottom.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SessionArrangement {
+    #[serde(default)]
+    pub(crate) projects: Vec<Uuid>,
+    #[serde(default)]
+    pub(crate) sessions: Vec<Uuid>,
+}
+
+pub(crate) fn session_arrangement_path(data_file: &Path) -> PathBuf {
+    data_file
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(SESSION_ARRANGEMENT_FILE_NAME)
+}
+
+/// A file that is missing, unreadable, unparsable, or past its ceiling is no
+/// arrangement: the column falls back to its own order, and the next move
+/// writes the file again. The ceiling is counted on the open handle, not read
+/// off its metadata, and a file past it is not half-read.
+pub(crate) fn load_session_arrangement(data_file: &Path) -> SessionArrangement {
+    let Ok(file) = fs::File::open(session_arrangement_path(data_file)) else {
+        return SessionArrangement::default();
+    };
+    let mut raw = Vec::new();
+    match file
+        .take(SESSION_ARRANGEMENT_FILE_MAX_BYTES + 1)
+        .read_to_end(&mut raw)
+    {
+        Ok(read) if read as u64 <= SESSION_ARRANGEMENT_FILE_MAX_BYTES => {}
+        _ => return SessionArrangement::default(),
+    }
+    serde_json::from_slice(&raw).unwrap_or_default()
+}
+
+/// Compact rather than pretty: the file is a list of ids nobody reads by
+/// hand, and the ceiling counts its bytes. A write that committed but whose
+/// folder was not synced has landed, and is not reported as a failure.
+pub(crate) fn save_session_arrangement(
+    data_file: &Path,
+    arrangement: &SessionArrangement,
+) -> Result<()> {
+    let mut encoded = serde_json::to_vec(arrangement)?;
+    encoded.push(b'\n');
+    write_file_atomically(&session_arrangement_path(data_file), &encoded)?;
+    Ok(())
+}
+
+/// Sorts `items`, already in the column's own order, into `listed`'s: what
+/// it does not list first and as it was, then what it lists, in its order.
+/// A stable sort keyed by a position lookup, so it allocates nothing and may
+/// run every frame.
+pub(crate) fn arrange_by<T>(listed: &[Uuid], items: &mut [T], id: impl Fn(&T) -> Uuid) {
+    items.sort_by_key(|item| {
+        let id = id(item);
+        listed
+            .iter()
+            .position(|listed| *listed == id)
+            .map_or((false, 0), |at| (true, at))
+    });
+}
+
+/// The column's projects: by name, case aside, then as arranged.
+pub(crate) fn sort_column_projects<P: std::borrow::Borrow<Project>>(
+    projects: &mut [P],
+    arrangement: &SessionArrangement,
+) {
+    projects.sort_by_key(|project| project.borrow().name.to_lowercase());
+    arrange_by(&arrangement.projects, projects, |project| {
+        project.borrow().id
+    });
+}
+
+/// One project's sessions in the column: newest first, then as arranged.
+pub(crate) fn sort_column_sessions<S: std::borrow::Borrow<Session>>(
+    sessions: &mut [S],
+    arrangement: &SessionArrangement,
+) {
+    sessions.sort_by_key(|session| Reverse(session.borrow().created_at));
+    arrange_by(&arrangement.sessions, sessions, |session| {
+        session.borrow().id
+    });
+}
+
+/// Whether a release at `slot` among the `visible` rows puts `moved`
+/// somewhere else on screen: not into either gap beside where it sits.
+pub(crate) fn slot_moves(visible: &[Uuid], moved: Uuid, slot: usize) -> bool {
+    visible
+        .iter()
+        .position(|id| *id == moved)
+        .is_some_and(|at| slot != at && slot != at + 1)
+}
+
+/// Moves `moved` within `order` — one level of the column, every item of it,
+/// drawn or not — to `slot` among the `visible` ones: before `visible[slot]`,
+/// or after the last of them. What is not drawn keeps its place relative to
+/// the rest. Whether anything moved.
+pub(crate) fn place(order: &mut Vec<Uuid>, moved: Uuid, visible: &[Uuid], slot: usize) -> bool {
+    if !slot_moves(visible, moved, slot) {
+        return false;
+    }
+    let (anchor, after) = match visible.get(slot) {
+        Some(anchor) => (*anchor, false),
+        // `slot_moves` found `moved` among them, so there is a last.
+        None => match visible.last() {
+            Some(last) => (*last, true),
+            None => return false,
+        },
+    };
+    let Some(from) = order.iter().position(|id| *id == moved) else {
+        return false;
+    };
+    order.remove(from);
+    let Some(at) = order.iter().position(|id| *id == anchor) else {
+        order.insert(from, moved);
+        return false;
+    };
+    order.insert(if after { at + 1 } else { at }, moved);
+    true
+}
+
+/// Where a release at height `y` lands among rows drawn top to bottom: the
+/// index of the first row whose middle is below it, or past the last.
+pub(crate) fn drop_slot(y: f32, rects: &[egui::Rect]) -> usize {
+    rects
+        .iter()
+        .position(|rect| y < rect.center().y)
+        .unwrap_or(rects.len())
+}
+
+/// The height of the line that marks `slot` among `rects`: halfway across
+/// the gap between two rows, or `gap / 2` outside the first or the last.
+pub(crate) fn slot_line_y(rects: &[egui::Rect], slot: usize, gap: f32) -> Option<f32> {
+    let above = slot.checked_sub(1).and_then(|index| rects.get(index));
+    match (above, rects.get(slot)) {
+        (Some(above), Some(below)) => Some((above.bottom() + below.top()) / 2.0),
+        (None, Some(below)) => Some(below.top() - gap / 2.0),
+        (Some(above), None) => Some(above.bottom() + gap / 2.0),
+        (None, None) => None,
+    }
+}
+
+/// What is being dragged inside the session column: a project's card, or a
+/// session's row, which stays among its own project's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ColumnDrag {
+    Project(Uuid),
+    Session { project: Uuid, session: Uuid },
+}
+
+impl ColumnDrag {
+    /// The project or session being moved.
+    pub(crate) fn moved(self) -> Uuid {
+        match self {
+            Self::Project(project) => project,
+            Self::Session { session, .. } => session,
+        }
+    }
+}
+
+/// The items of the dragged level, as this frame drew them: what a release
+/// can land among. Filled only while a drag is held.
+#[derive(Debug, Default)]
+pub(crate) struct ColumnTargets {
+    pub(crate) ids: Vec<Uuid>,
+    pub(crate) rects: Vec<egui::Rect>,
+}
+
+impl ColumnTargets {
+    pub(crate) fn push(&mut self, id: Uuid, rect: egui::Rect) {
+        self.ids.push(id);
+        self.rects.push(rect);
+    }
+
+    /// The slot a release at `pointer` would put `moved` in, when that moves
+    /// it at all.
+    pub(crate) fn slot(&self, moved: Uuid, pointer: Option<egui::Pos2>) -> Option<usize> {
+        let slot = drop_slot(pointer?.y, &self.rects);
+        slot_moves(&self.ids, moved, slot).then_some(slot)
+    }
+}
+
 /// Where each panel of the session workspace is docked, which view each edge
 /// is showing, and how big each edge is.
 ///

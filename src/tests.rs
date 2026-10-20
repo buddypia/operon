@@ -53283,3 +53283,725 @@ pub(crate) fn knowledge_map_labels_are_placed_only_when_the_view_changes() {
     });
     assert_eq!(placed, 2, "a pan places again");
 }
+
+// ── Change 181: the person arranges the session column ──────────────────────
+
+/// Change 181: two projects, 「alpha」 with three finished Codex sessions made
+/// three, two, and one hour ago, and 「beta」 with one. Drawn in the column's
+/// own order, alpha comes first and its rows read 三番目, 二番目, 一番目.
+#[cfg(test)]
+struct ArrangedColumn {
+    data_file: PathBuf,
+    app: OperonApp,
+    alpha: Uuid,
+    beta: Uuid,
+    first: Uuid,
+    second: Uuid,
+    third: Uuid,
+}
+
+#[cfg(test)]
+impl ArrangedColumn {
+    fn new(label: &str) -> Self {
+        let root = temporary_directory(label);
+        Self::with_data_file(&root, root.join("store.json"))
+    }
+
+    fn with_data_file(root: &Path, data_file: PathBuf) -> Self {
+        let mut app = test_app(data_file.clone());
+        let mut project = |name: &str| {
+            let path = root.join(name);
+            fs::create_dir_all(&path).unwrap();
+            let project = Project {
+                id: Uuid::new_v4(),
+                path,
+                name: name.into(),
+                added_at: 0,
+            };
+            let id = project.id;
+            app.store.projects.push(project);
+            id
+        };
+        let (beta, alpha) = (project("beta"), project("alpha"));
+        let mut session = |project_id: Uuid, name: &str, hours_ago: u64| {
+            let mut session = test_session(Uuid::new_v4(), SessionStatus::Exited);
+            session.project_id = project_id;
+            session.name = name.into();
+            session.agent = "codex".into();
+            session.created_at = now().saturating_sub(hours_ago * 3600);
+            let id = session.id;
+            app.store.sessions.push(session);
+            id
+        };
+        let first = session(alpha, "一番目", 3);
+        let second = session(alpha, "二番目", 2);
+        let third = session(alpha, "三番目", 1);
+        session(beta, "ベータの一件", 1);
+        Self {
+            data_file,
+            app,
+            alpha,
+            beta,
+            first,
+            second,
+            third,
+        }
+    }
+
+    /// The same store, opened again from the same data folder.
+    fn reopened(&self) -> OperonApp {
+        let mut app = test_app(self.data_file.clone());
+        app.store = self.app.store.clone();
+        app
+    }
+}
+
+/// One frame of the session column alone, 300px wide.
+#[cfg(test)]
+fn column_181_output(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(300.0, height),
+        )),
+        events,
+        ..Default::default()
+    };
+    context.run(input, |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_session_tabs(ui));
+    })
+}
+
+#[cfg(test)]
+fn column_181_frame(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Pos2)> {
+    text_positions(&column_181_output(app, context, height, events))
+}
+
+/// The heights of the 2px `accent` lines a frame painted: where a release
+/// would land.
+#[cfg(test)]
+fn column_181_drop_lines(output: &egui::FullOutput, palette: &Palette) -> Vec<f32> {
+    fn collect(shape: &egui::epaint::Shape, palette: &Palette, out: &mut Vec<f32>) {
+        match shape {
+            egui::epaint::Shape::LineSegment { points, stroke }
+                if stroke.color == palette.accent && stroke.width == 2.0 =>
+            {
+                out.push(points[0].y);
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect(child, palette, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut lines = Vec::new();
+    for shape in &output.shapes {
+        collect(&shape.shape, palette, &mut lines);
+    }
+    lines
+}
+
+/// Two frames with no input, read from the second.
+#[cfg(test)]
+fn column_181_settled(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+) -> Vec<(String, egui::Pos2)> {
+    column_181_frame(app, context, height, Vec::new());
+    column_181_frame(app, context, height, Vec::new())
+}
+
+#[cfg(test)]
+fn column_181_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+/// Press at `from` and move to `to` in four steps, the button still held.
+#[cfg(test)]
+fn column_181_hold(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    from: egui::Pos2,
+    to: egui::Pos2,
+) {
+    column_181_frame(
+        app,
+        context,
+        height,
+        vec![
+            egui::Event::PointerMoved(from),
+            column_181_button(from, true),
+        ],
+    );
+    for step in 1..=4 {
+        let pos = from + (to - from) * (step as f32 / 4.0);
+        column_181_frame(app, context, height, vec![egui::Event::PointerMoved(pos)]);
+    }
+}
+
+/// A whole drag, as a person does it: press, move, release.
+#[cfg(test)]
+fn column_181_drag(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    from: egui::Pos2,
+    to: egui::Pos2,
+) {
+    column_181_hold(app, context, height, from, to);
+    column_181_frame(app, context, height, vec![column_181_button(to, false)]);
+}
+
+/// Where the column painted `text`, panicking with what it painted instead.
+#[cfg(test)]
+fn column_181_at(texts: &[(String, egui::Pos2)], text: &str) -> egui::Pos2 {
+    texts
+        .iter()
+        .find(|(painted, _)| painted == text)
+        .map(|(_, pos)| *pos)
+        .unwrap_or_else(|| panic!("「{text}」が列に描かれていません"))
+}
+
+/// The y of each text, in the order `texts` names them, top to bottom.
+#[cfg(test)]
+fn column_181_order(texts: &[(String, egui::Pos2)], names: &[&str]) -> Vec<String> {
+    let mut found = names
+        .iter()
+        .map(|name| (column_181_at(texts, name).y, (*name).to_owned()))
+        .collect::<Vec<_>>();
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found.into_iter().map(|(_, name)| name).collect()
+}
+
+/// Inside a title, clear of its edge.
+#[cfg(test)]
+fn column_181_grip(texts: &[(String, egui::Pos2)], text: &str) -> egui::Pos2 {
+    column_181_at(texts, text) + egui::vec2(6.0, 6.0)
+}
+
+const ALPHA_ROWS_181: [&str; 3] = ["一番目", "二番目", "三番目"];
+
+/// Change 181, requirement 1: with nothing moved, the column is today's —
+/// projects by name, case aside, and sessions newest first. What an
+/// arrangement does not list leads, in that order; what it lists follows.
+#[test]
+pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
+    let project = |name: &str| Project {
+        id: Uuid::new_v4(),
+        path: PathBuf::from("/tmp"),
+        name: name.into(),
+        added_at: 0,
+    };
+    let mut projects = vec![project("beta"), project("Alpha"), project("gamma")];
+    let names = |projects: &[Project]| {
+        projects
+            .iter()
+            .map(|project| project.name.clone())
+            .collect::<Vec<_>>()
+    };
+    sort_column_projects(&mut projects, &SessionArrangement::default());
+    assert_eq!(names(&projects), ["Alpha", "beta", "gamma"]);
+    let arrangement = SessionArrangement {
+        projects: vec![projects[2].id, projects[0].id],
+        sessions: Vec::new(),
+    };
+    sort_column_projects(&mut projects, &arrangement);
+    assert_eq!(
+        names(&projects),
+        ["beta", "gamma", "Alpha"],
+        "an unlisted project leads; the listed ones follow in their order"
+    );
+
+    let session = |created_at: u64| {
+        let mut session = test_session(Uuid::new_v4(), SessionStatus::Exited);
+        session.created_at = created_at;
+        session
+    };
+    let (one, two, three) = (session(1), session(2), session(3));
+    let mut sessions = vec![&one, &two, &three];
+    let ids = |sessions: &[&Session]| sessions.iter().map(|s| s.id).collect::<Vec<_>>();
+    sort_column_sessions(&mut sessions, &SessionArrangement::default());
+    assert_eq!(ids(&sessions), [three.id, two.id, one.id], "newest first");
+    let arrangement = SessionArrangement {
+        projects: Vec::new(),
+        sessions: vec![one.id, three.id],
+    };
+    sort_column_sessions(&mut sessions, &arrangement);
+    assert_eq!(ids(&sessions), [two.id, one.id, three.id]);
+
+    // And the column draws by it: today's order with no file, the
+    // arrangement's with one.
+    let mut column = ArrangedColumn::new("column-181-order");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &["beta", "alpha"]),
+        ["alpha", "beta"]
+    );
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["三番目", "二番目", "一番目"]
+    );
+    column.app.session_arrangement = SessionArrangement {
+        projects: vec![column.beta, column.alpha],
+        sessions: vec![column.second, column.first, column.third],
+    };
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &["beta", "alpha"]),
+        ["beta", "alpha"]
+    );
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["二番目", "一番目", "三番目"]
+    );
+}
+
+/// Change 181, requirement 2: a release lands before the drawn row it is
+/// above, or after the last; rows not drawn keep their places; a release in
+/// either gap beside the row is no move. The first move from no arrangement
+/// lists the whole level, so the rows not moved do not jump above it.
+#[test]
+pub(crate) fn test_change_181_place_moves_relative_to_visible_neighbours() {
+    let [a, hidden, b, c] = [(); 4].map(|_| Uuid::new_v4());
+    let mut order = vec![a, hidden, b, c];
+    let visible = [a, b, c];
+    assert!(place(&mut order, c, &visible, 0));
+    assert_eq!(order, [c, a, hidden, b]);
+    let mut order = vec![a, hidden, b, c];
+    assert!(place(&mut order, a, &visible, 3));
+    assert_eq!(order, [hidden, b, c, a], "after the last drawn row");
+    for slot in [1, 2] {
+        let mut order = vec![a, hidden, b, c];
+        assert!(
+            !place(&mut order, b, &visible, slot),
+            "slot {slot} is a gap beside b: no move"
+        );
+        assert_eq!(order, [a, hidden, b, c]);
+    }
+    let mut order = vec![a, hidden, b, c];
+    assert!(
+        !place(&mut order, hidden, &visible, 0),
+        "a row not drawn is not dragged"
+    );
+    assert!(!slot_moves(&visible, b, 1) && !slot_moves(&visible, b, 2));
+    assert!(slot_moves(&visible, b, 0) && slot_moves(&visible, b, 3));
+
+    let rect = |y: f32| egui::Rect::from_center_size(egui::pos2(0.0, y), egui::vec2(10.0, 10.0));
+    let rects = [rect(10.0), rect(30.0), rect(50.0)];
+    assert_eq!(drop_slot(5.0, &rects), 0);
+    assert_eq!(drop_slot(25.0, &rects), 1);
+    assert_eq!(drop_slot(60.0, &rects), 3);
+
+    let mut column = ArrangedColumn::new("column-181-place");
+    assert_eq!(
+        column.app.session_arrangement,
+        SessionArrangement::default()
+    );
+    let drawn = [column.third, column.second, column.first];
+    column.app.finish_column_drag(
+        ColumnDrag::Session {
+            project: column.alpha,
+            session: column.first,
+        },
+        &drawn,
+        0,
+    );
+    let mut alpha = column
+        .app
+        .store
+        .sessions
+        .iter()
+        .filter(|session| session.project_id == column.alpha)
+        .collect::<Vec<_>>();
+    sort_column_sessions(&mut alpha, &column.app.session_arrangement);
+    assert_eq!(
+        alpha.iter().map(|session| session.id).collect::<Vec<_>>(),
+        [column.first, column.third, column.second]
+    );
+}
+
+/// Change 181, requirement 3: a session row dragged within its project stays
+/// where it is released, across a restart; released over another project it
+/// moves nothing; a click on a row still opens it.
+#[test]
+pub(crate) fn test_change_181_session_row_drag_reorders_within_its_project() {
+    let mut column = ArrangedColumn::new("column-181-session-drag");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    column_181_hold(&mut column.app, &context, 700.0, from, to);
+    // Held there, one 2px accent line, in the gap above the first row and
+    // below the project's name.
+    let palette = column.app.store.theme.palette();
+    let held = column_181_output(&mut column.app, &context, 700.0, Vec::new());
+    let lines = column_181_drop_lines(&held, palette);
+    let (alpha, third) = (
+        column_181_at(&texts, "alpha"),
+        column_181_at(&texts, "三番目"),
+    );
+    assert!(
+        lines.len() == 1 && lines[0] > alpha.y && lines[0] < third.y,
+        "the line marks the gap above 三番目: {lines:?} between {} and {}",
+        alpha.y,
+        third.y
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(to, false)],
+    );
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"],
+        "the dragged row is drawn where it was released"
+    );
+    assert!(session_arrangement_path(&column.data_file).exists());
+    let held = column_181_output(&mut column.app, &context, 700.0, Vec::new());
+    assert!(
+        column_181_drop_lines(&held, palette).is_empty(),
+        "no line once the drag is over"
+    );
+
+    let mut reopened = column.reopened();
+    let texts = column_181_settled(&mut reopened, &egui::Context::default(), 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"],
+        "the order survives a restart"
+    );
+
+    // Over beta's card, below every alpha row: were it a target, the top row
+    // would go last. A session never changes project, and nothing moves.
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "ベータの一件") + egui::vec2(6.0, 2.0);
+    column_181_drag(&mut column.app, &context, 700.0, from, to);
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"]
+    );
+    assert!(column.app.column_drag.is_none());
+
+    // A click on the row's second line still opens the terminal.
+    let title = column_181_at(&texts, "二番目");
+    let line = texts
+        .iter()
+        .filter(|(text, pos)| text == "Codex" && pos.y > title.y)
+        .map(|(_, pos)| *pos)
+        .min_by(|a, b| a.y.total_cmp(&b.y))
+        .expect("二番目 の二行目");
+    let at = line + egui::vec2(4.0, 4.0);
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![egui::Event::PointerMoved(at), column_181_button(at, true)],
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(at, false)],
+    );
+    assert_eq!(column.app.selected_session, Some(column.second));
+}
+
+/// Change 181, requirement 4: a project dragged by its name stays where it is
+/// released, across a restart, and its ＋ still starts a session.
+#[test]
+pub(crate) fn test_change_181_project_name_drag_reorders_the_column() {
+    let mut column = ArrangedColumn::new("column-181-project-drag");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "beta");
+    let to = column_181_at(&texts, "alpha") - egui::vec2(0.0, 4.0);
+    column_181_drag(&mut column.app, &context, 700.0, from, to);
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &["alpha", "beta"]),
+        ["beta", "alpha"],
+        "the dragged project is drawn where it was released"
+    );
+    let mut reopened = column.reopened();
+    let reopened_texts = column_181_settled(&mut reopened, &egui::Context::default(), 700.0);
+    assert_eq!(
+        column_181_order(&reopened_texts, &["alpha", "beta"]),
+        ["beta", "alpha"],
+        "the order survives a restart"
+    );
+
+    let beta = column_181_at(&texts, "beta");
+    let add = texts
+        .iter()
+        .filter(|(text, pos)| text == ICON_ADD && (pos.y - beta.y).abs() < CONTROL_HEIGHT_SMALL)
+        .map(|(_, pos)| *pos)
+        .next()
+        .expect("beta の見出しの＋");
+    let at = add + egui::vec2(4.0, 4.0);
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![egui::Event::PointerMoved(at), column_181_button(at, true)],
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(at, false)],
+    );
+    assert!(
+        column.app.launch_sheet_open,
+        "＋ が新しいセッションを開きません"
+    );
+    assert_eq!(column.app.selected_project, Some(column.beta));
+}
+
+/// Change 181, requirement 5: Escape with the button held, a release where
+/// the drag began, and a release the window never saw all move nothing and
+/// write nothing.
+#[test]
+pub(crate) fn test_change_181_escape_or_a_release_in_place_moves_nothing() {
+    let mut column = ArrangedColumn::new("column-181-abandon");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    column_181_hold(&mut column.app, &context, 700.0, from, to);
+    assert_eq!(
+        column.app.column_drag,
+        Some(ColumnDrag::Session {
+            project: column.alpha,
+            session: column.first,
+        }),
+        "a press and a move on a row start a drag"
+    );
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    column_181_frame(&mut column.app, &context, 700.0, vec![escape]);
+    assert!(column.app.column_drag.is_none(), "Escape ends the drag");
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(to, false)],
+    );
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["三番目", "二番目", "一番目"]
+    );
+
+    // Out and back: released on its own row.
+    let from = column_181_grip(&texts, "一番目");
+    column_181_hold(
+        &mut column.app,
+        &context,
+        700.0,
+        from,
+        from + egui::vec2(0.0, 12.0),
+    );
+    assert!(column.app.column_drag.is_some());
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![egui::Event::PointerMoved(from)],
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(from, false)],
+    );
+    assert!(column.app.column_drag.is_none(), "a release ends the drag");
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["三番目", "二番目", "一番目"]
+    );
+    assert!(
+        !session_arrangement_path(&column.data_file).exists(),
+        "nothing moved, so nothing is written"
+    );
+
+    // Focus left mid-drag: no button down, and no release seen.
+    column.app.column_drag = Some(ColumnDrag::Project(column.beta));
+    column_181_frame(&mut column.app, &context, 700.0, Vec::new());
+    assert!(column.app.column_drag.is_none());
+    assert!(!session_arrangement_path(&column.data_file).exists());
+}
+
+/// Change 181, requirement 6: the arrangement round-trips beside the store,
+/// through the app's own start; a missing, broken, or over-ceiling file reads
+/// as none; a save lists only what the store still holds.
+#[test]
+pub(crate) fn test_change_181_arrangement_file_is_bounded_and_fails_towards_default() {
+    let root = temporary_directory("column-181-file");
+    let data_file = root.join("store.json");
+    let path = session_arrangement_path(&data_file);
+    assert_eq!(path, root.join(SESSION_ARRANGEMENT_FILE_NAME));
+    assert_eq!(
+        load_session_arrangement(&data_file),
+        SessionArrangement::default()
+    );
+
+    let arrangement = SessionArrangement {
+        projects: vec![Uuid::new_v4()],
+        sessions: vec![Uuid::new_v4(), Uuid::new_v4()],
+    };
+    save_session_arrangement(&data_file, &arrangement).unwrap();
+    assert_eq!(load_session_arrangement(&data_file), arrangement);
+    assert_eq!(test_app(data_file.clone()).session_arrangement, arrangement);
+
+    fs::write(&path, "not json").unwrap();
+    assert_eq!(
+        load_session_arrangement(&data_file),
+        SessionArrangement::default()
+    );
+
+    // At the ceiling it is read; one byte past it, it is not, though it parses.
+    let body = serde_json::to_string(&arrangement).unwrap();
+    let limit = SESSION_ARRANGEMENT_FILE_MAX_BYTES as usize;
+    let padded = |len: usize| format!("{body}{}", " ".repeat(len - body.len()));
+    fs::write(&path, padded(limit)).unwrap();
+    assert_eq!(load_session_arrangement(&data_file), arrangement);
+    fs::write(&path, padded(limit + 1)).unwrap();
+    assert_eq!(
+        load_session_arrangement(&data_file),
+        SessionArrangement::default()
+    );
+
+    // A save drops what the store no longer holds.
+    let mut column = ArrangedColumn::new("column-181-prune");
+    let gone = Uuid::new_v4();
+    column.app.session_arrangement.sessions.push(gone);
+    column.app.session_arrangement.projects.push(gone);
+    column.app.finish_column_drag(
+        ColumnDrag::Project(column.beta),
+        &[column.alpha, column.beta],
+        0,
+    );
+    let saved = load_session_arrangement(&column.data_file);
+    assert_eq!(saved.projects, [column.beta, column.alpha]);
+    assert!(!saved.sessions.contains(&gone) && !saved.projects.contains(&gone));
+}
+
+/// Change 181, requirement 7: when the file cannot be written the move holds
+/// and the person is told.
+#[test]
+pub(crate) fn test_change_181_save_failure_is_said() {
+    let root = temporary_directory("column-181-save-failure");
+    let blocker = root.join("blocker");
+    fs::write(&blocker, "a file where the data folder should be").unwrap();
+    let mut column = ArrangedColumn::with_data_file(&root, blocker.join("store.json"));
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    column_181_drag(&mut column.app, &context, 700.0, from, to);
+    let notice = column.app.notice.clone().unwrap_or_default();
+    assert!(
+        notice.starts_with("並び順を保存できませんでした: "),
+        "notice: {notice:?}"
+    );
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"],
+        "the move holds for this run"
+    );
+}
+
+/// Change 181, requirement 8: a drag held at the column's bottom edge scrolls
+/// it, so a row can be taken past what is on screen.
+#[test]
+pub(crate) fn test_change_181_drag_near_the_edge_scrolls_the_column() {
+    let mut column = ArrangedColumn::new("column-181-edge-scroll");
+    let context = egui::Context::default();
+    let height = 260.0;
+    let texts = column_181_settled(&mut column.app, &context, height);
+    let before = column_181_at(&texts, "二番目").y;
+    let from = column_181_grip(&texts, "三番目");
+    let edge = egui::pos2(from.x, height - 4.0);
+    column_181_hold(&mut column.app, &context, height, from, edge);
+    for _ in 0..10 {
+        column_181_frame(&mut column.app, &context, height, Vec::new());
+    }
+    let texts = column_181_frame(&mut column.app, &context, height, Vec::new());
+    let after = column_181_at(&texts, "二番目").y;
+    assert!(
+        after < before - COLUMN_DRAG_SCROLL_STEP,
+        "held at the edge, the column scrolls: {before} → {after}"
+    );
+}
+
+/// Change 181, requirement 9: the row's hover and the project name's hover
+/// say that they can be dragged.
+#[test]
+pub(crate) fn test_change_181_hovers_say_rows_and_projects_can_be_dragged() {
+    let mut column = ArrangedColumn::new("column-181-hovers");
+    let context = egui::Context::default();
+    context.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let hover = |app: &mut OperonApp, at: egui::Pos2| {
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            texts = column_181_frame(app, &context, 700.0, vec![egui::Event::PointerMoved(at)]);
+        }
+        texts.into_iter().map(|(text, _)| text).collect::<Vec<_>>()
+    };
+    // The row's second line, clear of the title, which has a hover of its own.
+    let title = column_181_at(&texts, "二番目");
+    let line = texts
+        .iter()
+        .filter(|(text, pos)| text == "Codex" && pos.y > title.y)
+        .map(|(_, pos)| *pos)
+        .min_by(|a, b| a.y.total_cmp(&b.y))
+        .expect("二番目 の二行目");
+    let row = hover(&mut column.app, line + egui::vec2(4.0, 4.0));
+    assert!(
+        row.iter().any(|text| text
+            == "クリックでターミナル表示 · ダブルクリックで名前を変更 · ドラッグで並べ替え"),
+        "row hover: {row:?}"
+    );
+    let name = hover(&mut column.app, column_181_grip(&texts, "beta"));
+    assert!(
+        name.iter().any(|text| text == "ドラッグで並べ替え"),
+        "project hover: {name:?}"
+    );
+}

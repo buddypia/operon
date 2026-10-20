@@ -57,6 +57,11 @@ Settings.
   `⌘K` also finds a session by what its agent last said, and among equal
   matches a waiting session comes first. The side panel (files, conversation,
   changes) opens on the right of the terminal; `⌥⌘B` folds it and opens it.
+- Below them, the session list is arranged by hand: drag a project by its
+  name to move its card, or a session's row to move it among its own
+  project's sessions. The order is kept in `session-order.json`, in the same
+  folder as the local index, and a project or session added later appears at
+  the top.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
   The launch button sits at its bottom right, and `⌘↩` presses it. A project's
