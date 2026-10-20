@@ -1,0 +1,42 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Harness² records the configuration an experiment ran under and refuses to
+# judge it under another, and its report warns when the rows behind a figure
+# are not the rows it meant to read. Here every eval summary names its
+# conditions on one line, and a summary where fewer than half the runs were
+# judged says so in place of the headroom warning.
+#
+# Risk: src/tests.rs, scripts/run-evals.sh, and evals/README.md match no
+# surface in docs/sdlc/risk.yaml.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Intent, spec, and plan approved by the evaluator and committed. Next:
+  the failing runner tests, then scripts/run-evals.sh, then the README."
+
+contract:
+  three-gates: "machine pending"
+  bands: "machine pending"
+  release-binary: "machine passed no: src/tests.rs, a script, and a document —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human pending"
+  review: "human pending"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
