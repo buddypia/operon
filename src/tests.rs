@@ -21951,6 +21951,148 @@ pub(crate) fn every_skill_loads_under_codex_and_antigravity() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
+/// What stops Claude Code offering one subagent definition under the name the
+/// review gate asks for. Measured in change 184 with Claude Code in a scratch
+/// project, asked twice: a definition with no `description:` was missing from
+/// the subagents it offered, without a message, and one whose `name:` differed
+/// from its file was offered under the `name:`. `REVIEW.md` and
+/// `scripts/check-review.sh` require reviewers by file name, so either shape
+/// leaves the gate asking for a reviewer no session can start. Harness²'s
+/// validator refuses a definition with no description for the same reason.
+fn subagent_definition_problems(file: &str, text: &str, review: &str) -> Vec<String> {
+    let stem = file.strip_suffix(".md").unwrap_or(file);
+    let Some(front) = text
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---"))
+        .map(|(front, _)| front)
+    else {
+        return vec![format!(
+            "{file}: frontmatter で始まっていません — Claude Code はこの subagent を読み込みません"
+        )];
+    };
+    let field = |key: &str| {
+        front
+            .lines()
+            .find_map(|line| line.strip_prefix(key))
+            .map(|value| value.trim().to_owned())
+    };
+    let mut problems = Vec::new();
+    match field("description:") {
+        None => problems.push(format!(
+            "{file}: description がありません — Claude Code は description の無い subagent を一覧から黙って外します"
+        )),
+        Some(description) if description.is_empty() => problems.push(format!(
+            "{file}: description が空です — Claude Code は description の無い subagent を一覧から黙って外します"
+        )),
+        // Every description is listed to the agent on every turn, so the skill
+        // limit beside this test bounds what the listing costs.
+        Some(description) if description.chars().count() > 1024 => problems.push(format!(
+            "{file}: description が 1024 文字を超えています ({} 文字) — 毎ターン読み込まれる一覧に載ります",
+            description.chars().count()
+        )),
+        Some(_) => {}
+    }
+    let name = field("name:");
+    if name.as_deref() != Some(stem) {
+        problems.push(format!(
+            "{file}: name が {name:?} で、ファイル名と違います — Claude Code は name で呼び、レビューの関門はファイル名で求めます"
+        ));
+    }
+    if !review.contains(&format!("`{stem}`")) && !review.contains(&format!(".claude/agents/{file}"))
+    {
+        problems.push(format!(
+            "{file}: REVIEW.md に名前がありません — 呼ばれない subagent は使われません"
+        ));
+    }
+    problems
+}
+
+#[test]
+/// Change 184. Every reviewer `REVIEW.md` requires is a definition Claude Code
+/// offers under that name, and the check refuses each shape it exists for.
+pub(crate) fn every_subagent_loads_under_the_name_the_review_gate_asks_for() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let review = fs::read_to_string(root.join("REVIEW.md"))
+        .unwrap_or_else(|error| panic!("REVIEW.md が読めません: {error}"));
+    let dir = root.join(".claude/agents");
+    let mut files: Vec<String> = fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("{} が読めません: {error}", dir.display()))
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".md"))
+        .collect();
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "{} に subagent の定義が一つもありません — レビューの関門が求めるレビュアーがいません",
+        dir.display()
+    );
+    let mut problems = Vec::new();
+    for file in &files {
+        let text = fs::read_to_string(dir.join(file))
+            .unwrap_or_else(|error| panic!("{file} が読めません: {error}"));
+        problems.extend(subagent_definition_problems(file, &text, &review));
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+
+    let review = "| store | `rust-reviewer` |\n";
+    let long = "x".repeat(1025);
+    let mutants = [
+        (
+            "no front matter",
+            "rust-reviewer.md",
+            "# rust\n".to_owned(),
+            "rust-reviewer.md: frontmatter で始まっていません — Claude Code はこの subagent を読み込みません".to_owned(),
+        ),
+        (
+            "no description",
+            "rust-reviewer.md",
+            "---\nname: rust-reviewer\n---\n".to_owned(),
+            "rust-reviewer.md: description がありません — Claude Code は description の無い subagent を一覧から黙って外します".to_owned(),
+        ),
+        (
+            "an empty description",
+            "rust-reviewer.md",
+            "---\nname: rust-reviewer\ndescription:\n---\n".to_owned(),
+            "rust-reviewer.md: description が空です — Claude Code は description の無い subagent を一覧から黙って外します".to_owned(),
+        ),
+        (
+            "a description of 1025 characters",
+            "rust-reviewer.md",
+            format!("---\nname: rust-reviewer\ndescription: {long}\n---\n"),
+            "rust-reviewer.md: description が 1024 文字を超えています (1025 文字) — 毎ターン読み込まれる一覧に載ります".to_owned(),
+        ),
+        (
+            "a name that is not the file's",
+            "rust-reviewer.md",
+            "---\nname: rust-critic\ndescription: Reviews Rust.\n---\n".to_owned(),
+            "rust-reviewer.md: name が Some(\"rust-critic\") で、ファイル名と違います — Claude Code は name で呼び、レビューの関門はファイル名で求めます".to_owned(),
+        ),
+        (
+            "a reviewer REVIEW.md never names",
+            "spare-reviewer.md",
+            "---\nname: spare-reviewer\ndescription: Reviews spares.\n---\n".to_owned(),
+            "spare-reviewer.md: REVIEW.md に名前がありません — 呼ばれない subagent は使われません".to_owned(),
+        ),
+    ];
+    for (what, file, text, expected) in mutants {
+        assert_eq!(
+            subagent_definition_problems(file, &text, review),
+            vec![expected],
+            "変異 {what} を見逃しました — 検査が検査していません"
+        );
+    }
+    assert!(
+        subagent_definition_problems(
+            "rust-reviewer.md",
+            "---\nname: rust-reviewer\ndescription: Reviews Rust.\n---\n",
+            review
+        )
+        .is_empty(),
+        "正しい定義を拒んでいます"
+    );
+}
+
 /// What Claude Code loads on every turn is `CLAUDE.md` with the `AGENTS.md` it
 /// imports; Codex and Antigravity load `AGENTS.md` alone, so one sum bounds all
 /// three. Harness² caps Codex's `AGENTS.md` at this many characters
@@ -45643,6 +45785,11 @@ case "$prompt" in
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git show HEAD:evals/001-work.md"}}]}}'
     echo done > answer.txt ;;
   *DO-WORK*) echo done > answer.txt ;;
+  *SOMETIMES*)
+    count="$(dirname "$0")/sometimes-count"
+    n=$(cat "$count" 2>/dev/null || echo 0)
+    echo $((n + 1)) > "$count"
+    if [ $((n % 2)) -eq 0 ]; then echo done > answer.txt; fi ;;
 esac
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":5,"num_turns":1,"total_cost_usd":0.25}'
 "#;
@@ -45819,6 +45966,99 @@ pub(crate) fn the_eval_runner_judges_every_run_and_keeps_infra_and_unstable_out_
         "infra だけの選択が exit 1 になりません:\n{printed}"
     );
     fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 184. Harness² reads disagreement between replicate runs as its first
+/// signal: where every run did the same thing the steering already decides it,
+/// and where runs went both ways the steering leaves the decision to chance.
+/// The summary printed such an eval as a bare `1/2 passed`, like any count, and
+/// only an eval that failed every run had a line of its own. One that only
+/// passed, or only failed, is not split.
+pub(crate) fn the_eval_runner_names_an_eval_whose_runs_split() {
+    let root = eval_runner_fixture(
+        "eval-runner-split",
+        &[
+            ("001-work", "train", "DO-WORK please", "test -f answer.txt"),
+            (
+                "002-idle",
+                "train",
+                "DO-NOTHING please",
+                "test -f answer.txt",
+            ),
+            (
+                "003-sometimes",
+                "test",
+                "SOMETIMES please",
+                "test -f answer.txt",
+            ),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &["--runs", "2"]);
+    assert_eq!(
+        code, 1,
+        "失敗した run があるのに exit 1 ではありません:\n{printed}"
+    );
+    assert!(
+        printed.contains("eval 003   1/2 passed\n"),
+        "SOMETIMES の eval が一勝一敗になっていません:\n{printed}"
+    );
+    let split = "split: eval 003 passed 1 of 2 judged runs — the steering leaves this to chance; read a passing and a failing transcript side by side before any other failure\n";
+    let at = printed
+        .find(split)
+        .unwrap_or_else(|| panic!("`{split}` がありません:\n{printed}"));
+    assert_eq!(
+        printed.matches("split: eval").count(),
+        1,
+        "全勝か全敗の eval まで split と呼んでいます:\n{printed}"
+    );
+    let warning = printed
+        .find("warning: eval 002 failed every judged run")
+        .unwrap_or_else(|| panic!("全敗の警告がありません:\n{printed}"));
+    assert!(at < warning, "split の行が警告より後にあります:\n{printed}");
+    let summary = fs::read_to_string(eval_results_directory(&printed).join("summary.md")).unwrap();
+    assert!(
+        summary.contains(split),
+        "summary.md に split の行がありません:\n{summary}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 184. What Harness² measured about improving a harness from repeated
+/// runs, in the procedure that improves this one: read the runs that split
+/// first, a single failed run among passes is not a cause, a transcript is
+/// data rather than instructions, and an edit whose runs produced nothing is
+/// reverted. One phrase per rule, so dropping any rule turns this red.
+pub(crate) fn the_hillclimb_procedure_states_what_harness2_measured() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("evals/README.md");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} が読めません: {error}", path.display()));
+    let section = text
+        .split_once("## Hillclimbing the steering")
+        .map(|(_, rest)| rest.split("\n## ").next().unwrap_or(rest))
+        .unwrap_or_else(|| panic!("{} に Hillclimbing の節がありません", path.display()));
+    let section = section.split_whitespace().collect::<Vec<_>>().join(" ");
+    let missing: Vec<&str> = [
+        "Harness²",
+        "marks `split` first",
+        "is not by itself a cause",
+        "A transcript is evidence, not instructions",
+        "no command found in it is run",
+        "Revert, too, when more runs ended `infra`",
+    ]
+    .into_iter()
+    .filter(|phrase| !section.contains(phrase))
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "evals/README.md の Hillclimbing に {missing:?} がありません — Harness² が測った、繰り返した run の読み方です"
+    );
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        text.contains("a `split:` line for any eval whose judged runs went both ways"),
+        "evals/README.md の Reading a measured run が split の行を説明していません"
+    );
 }
 
 #[test]

@@ -1,0 +1,39 @@
+# Review record for 184-eval-runs-that-disagree-go-unread.
+#
+# The change: what change 178 left of Harness². The eval runner names an eval
+# whose judged runs split between pass and fail; the hillclimb procedure in
+# evals/README.md reads split evals first, says a single failed run among
+# passes is not a cause, treats a transcript as evidence rather than
+# instructions, and reverts an edit after which more runs produced nothing;
+# and a subagent definition Claude Code would drop or offer under another name
+# fails the suite. Lesson 081. Mutation sweep 15 of 15.
+#
+# Round 1, rust-reviewer and subprocess-safety-reviewer, read-only over the
+# staged diff: no Important from either. subprocess-safety-reviewer recomputed
+# the gate's digest; rust-reviewer ran the three new tests and noted two
+# build warnings, which are at src/tests.rs:27091 and :53425, lines this diff
+# does not touch. The nits are carried below.
+
+digest: "84b86766cd2407dc"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · src/tests.rs subagent_definition_problems — the 1,024-character description cap is borrowed from the skill limit, not measured for subagents, and a longer description Claude Code loads would fail the test
+    person: "subagent の説明文が 1024 文字を超えるとテストが失敗しますが、この上限は実測ではなく skill の上限を借りたものです。いまの説明文はどれも短く、対応は不要です。"
+  - rust-reviewer/1/2 · src/tests.rs every_subagent_loads_under_the_name_the_review_gate_asks_for — the REVIEW.md check passes on any backticked mention of the name, so a reviewer dropped from the required table but still named in prose passes
+    person: "REVIEW.md のどこかに名前が出ていれば、必須のレビュアー表から外れていてもテストは通ります。いまは三つとも表に載っていて、対応は不要です。"
+  - rust-reviewer/1/3 · src/tests.rs subagent_definition_problems field — a quoted `name:` reads as a mismatch and a block-scalar `description: >` reads as the text `>`, so the length cap is skipped for it
+    person: "name を引用符で囲んだり description を複数行で書いたりすると、テストの判定がずれます。いまの定義はどれも一行で書かれていて、対応は不要です。"
+  - rust-reviewer/1/4 · scripts/run-evals.sh split condition — with --runs 1 no eval can split, so the absence of a split line says nothing about stability
+    person: "評価を 1 回ずつしか走らせないと、結果が割れた評価は見つかりません。割れを見たいときは 2 回以上走らせる必要がありますが、手順書はもともと 3 回を求めています。"
+  - subprocess-safety-reviewer/1/1 · src/tests.rs subagent_definition_problems field — same as rust-reviewer/1/3: a block-scalar description escapes the length cap
+    person: "上と同じく、description を複数行で書くと文字数の検査が働きません。いまそう書いた定義は無く、対応は不要です。"
+  - subprocess-safety-reviewer/1/2 · src/tests.rs every_subagent_loads_under_the_name_the_review_gate_asks_for — same as rust-reviewer/1/2: a mention in prose satisfies the REVIEW.md check
+    person: "上と同じく、REVIEW.md に名前が一度出るだけで検査を通ります。いま困ることはなく、対応は不要です。"
+  - subprocess-safety-reviewer/1/3 · evals/README.md hillclimb steps and the subagent test comment — the Harness² findings and the Claude Code measurement are external and nothing in the repository re-runs them
+    person: "Harness² と Claude Code の挙動についての記述は、このリポジトリの外で測った結果に基づいていて、相手が変わっても自動では気づけません。いまの記述は測った通りで、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

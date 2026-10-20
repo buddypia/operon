@@ -1031,3 +1031,23 @@ failing on the unedited hook; five mutations each red — `-q` dropped, the
 rewritable shape admitting `--force`, the split removed, one unreadable push no
 longer making the line a question, and the refusal no longer naming
 `git push origin <branch>`).
+
+## 081 — The gate asked for a reviewer by a name Claude Code does not use
+
+`scripts/check-review.sh` admits a reviewer when `.claude/agents/<name>.md`
+exists. Claude Code does not offer that file under its name: measured in change
+184, a definition with no `description:` is left out of the subagents a session
+can start, without a message, and one whose `name:` differs from its file is
+offered under the `name:`. Either edit leaves the gate asking for a verdict no
+session can produce, and nothing said so. In the same change, the eval summary
+printed an eval whose repeated runs went both ways as a bare count, though
+Harness² measured that split as the cheapest thing to fix. **The rule:** a gate
+that names a thing another program loads checks the shape that program loads
+it by, measured rather than taken from the file listing; and a repeated
+measurement says where its runs disagreed, not only how often they passed.
+
+**Guard.** `every_subagent_loads_under_the_name_the_review_gate_asks_for` (six
+mutants, each refused for its own reason, and each check watched failing when
+removed), `the_eval_runner_names_an_eval_whose_runs_split`, and
+`the_hillclimb_procedure_states_what_harness2_measured` — swept by
+`docs/sdlc/changes/184-eval-runs-that-disagree-go-unread/mutations.py`.

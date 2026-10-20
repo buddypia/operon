@@ -12,8 +12,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -21,18 +21,29 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Write the three tests in src/tests.rs and watch the split and README
-  tests fail on main's runner and README."
+resume: "Done. Seven reviewer nits carried in review.yaml, none needing
+  action; lesson 081 holds the guard. Land once CI passes on the branch."
 
 contract:
-  failing-test-first: "machine pending the split and README tests fail on
-    main's runner and README"
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  failing-test-first: "machine passed the_eval_runner_names_an_eval_whose_runs_split
+    failed on main's runner (eval 003 1/2, no split line) and
+    the_hillclimb_procedure_states_what_harness2_measured on main's README
+    (all six phrases missing); both pass after, with the eight runner tests"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) clean; the suite runs in CI on the push"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, which this change does
+    not touch (warn: recorded, no action); always-on text unchanged at 7347
+    characters"
   release-binary: "machine passed no: src/tests.rs, a script, and documents —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  review: "human pending rust-reviewer verdict on the diff"
+  guards-verified-by-mutation: "human passed 15 of 15 caught by mutations.py in
+    this directory: each of the six subagent checks removed in turn, the split
+    condition widened both ways and its line dropped, and every sentence the
+    change adds to evals/README.md weakened; tree restored (git diff unchanged)"
+  review: "human passed rust-reviewer approve-with-nits 0 4 and
+    subprocess-safety-reviewer approve-with-nits 0 3 at 84b86766cd2407dc;
+    seven nits carried in review.yaml"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

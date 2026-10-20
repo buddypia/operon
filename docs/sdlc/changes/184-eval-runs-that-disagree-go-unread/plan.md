@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-21
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -54,4 +54,19 @@ No paused surface is edited: `.claude/agents/` is read, not written.
 
 ## Departures from the plan
 
-None yet.
+- The empty-description mutant has its own message, `description が空です`,
+  rather than sharing `description がありません` with the missing one: the spec
+  asks each mutant to be refused for its own reason, and one message for two
+  checks could not show which of them refused.
+- The 1,024-character limit is argued as a budget, not as Claude Code
+  behaviour: every description is listed to the agent each turn, and the limit
+  is the one the skill check beside it already uses. Nothing was measured
+  about a longer one.
+- The README test reads the revert rule with its verb (`Revert, too, when more
+  runs ended`): the first sweep design showed that weakening the verb alone
+  would leave the bare phrase in place. It also reads the sentence added to
+  "Reading a measured run", so every sentence this change adds is swept.
+- `split` is an `awk` builtin, so the runner's array is named `divided`; the
+  first build of step 2 failed four runner tests on that before it was renamed.
+- Lesson 081 names the latent defect the subagent check closes: the review gate
+  trusts a file name that Claude Code does not key on.
