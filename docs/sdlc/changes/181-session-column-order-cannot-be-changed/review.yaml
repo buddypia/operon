@@ -1,0 +1,67 @@
+# Review record for 181-session-column-order-cannot-be-changed.
+#
+# The change: the session column's project cards and each project's session
+# rows can be dragged into an order of the person's own, kept beside the store
+# in session-order.json (bounded read, atomic write); with no file the column
+# reads exactly as before.
+#
+# Requested 2026-10-20 at b246930aa88be2a1. The first named teammates went
+# silent; three background agents of the same types reviewed the same digest,
+# and only their verdicts are recorded.
+#
+# rust-reviewer: approve-with-nits 0 4
+# - No panic site, no format!-built SQL, no per-frame Command::new, std::fs
+#   call or parse; the file write happens once, on the release frame. egui
+#   0.31.1 behaviour read in the registry source (scroll sign at
+#   scroll_area.rs:848, Escape abort at interaction.rs:137).
+# - place / slot_moves checked with hidden rows: anchor and moved item never
+#   coincide; a hidden row keeps its relative position.
+#
+# durability-reviewer: approve-with-nits 0 4
+# - Store untouched (no schema, migration, sidecar or lock change); write via
+#   write_file_atomically (same-dir temp, sync, rename, dir sync); read ceiling
+#   counted on the open handle with take(MAX + 1), exact ceiling and one past
+#   tested; unwritable folder reaches notice; the instance flock keeps one
+#   writer; CommittedButNotSynced maps to Ok.
+#
+# subprocess-safety-reviewer: approve-with-nits 0 2
+# - No Command::new, .output(), .spawn(), thread::, unsafe, set_var, flock or
+#   libc line added; main.rs, tmux.rs, exec.rs, sys.rs, Cargo.* untouched; no
+#   user string reaches a path; the drag path calls neither tmux nor stop or
+#   remove.
+#
+# All ten findings are nits and are carried below (REVIEW.md: a nit is never
+# taken in the round it is raised). rust-reviewer/1 and durability-reviewer/4
+# are the same finding, as are the second half of rust-reviewer/3 and
+# durability-reviewer/2; each is kept under both names.
+
+digest: "b246930aa88be2a1"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/ui/session_tree.rs:~165 (arrange_by): sort_by_key calls the key closure on every comparison and each call does a linear position scan over listed, so roughly n·log n·m per project per frame; build a HashMap<Uuid, usize> once per frame (or sort_by_cached_key) to bound it, at the price of the "allocates nothing" claim.
+    person: "セッションが数千件規模に増えると、列の描画が毎回少し重くなる可能性があります。普段の件数では体感できる遅れはなく、対応は不要です。"
+  - rust-reviewer/2 · src/app/screens.rs:~5395 (edge scroll): COLUMN_DRAG_SCROLL_STEP is a fixed 12 px per frame, so the speed follows the frame rate (about 720 px/s at 60 Hz, 1440 px/s at 120 Hz), and request_repaint() keeps firing while the pointer is held in the edge zone after the column reached its end; scale by stable_dt and skip the repaint when the offset did not change. The test exercises only the bottom edge.
+    person: "ドラッグ中に列の端で自動スクロールする速さが、画面の更新頻度（60Hz と 120Hz など）で変わります。端まで行き切った後も押したままだと再描画が続きます。対応は不要です。"
+  - rust-reviewer/3 · src/app/screens.rs:~6898 (save failure notice): save_session_arrangement returns a bare io::Error with no path or action context, so the person sees 「並び順を保存できませんでした: Permission denied (os error 13)」 with no hint which file; add context naming session-order.json. A file that fails to parse or exceeds the ceiling is also silently read as no arrangement.
+    person: "並び順を保存できなかったときのお知らせに、どのファイルで失敗したかが出ません。データフォルダに書き込めない時だけ起きる表示上の不足で、対応は不要です。"
+  - rust-reviewer/4 · src/app/screens.rs:~5361 (Escape handling): the Escape key is not consumed, so another Escape handler in the same frame — the rename editor's key_pressed(Escape) — also fires; an Escape pressed to abandon a drag could also cancel an unrelated open rename.
+    person: "名前の変更欄を開いたままセッションをドラッグして Esc で取り消すと、名前の変更も一緒に取り消されます。その時は名前を入力し直すだけで済み、対応は不要です。"
+  - durability-reviewer/1 · src/ui/session_tree.rs:155: CommittedButNotSynced is dropped without a trace, where the skill says to keep a persistent warning and retry; the rename commits, the directory sync fails, power is cut before metadata flush, and the order reverts. Acceptable for a cosmetic file (save_setup_trust does the same), but the Ok mapping is untested; record the choice in the plan, or return the WriteOutcome and show it in notice.
+    person: "並べ替えた直後に電源が落ちるなど、ごくまれな場合に並び順が一つ前に戻ることがあります。セッション自体は失われず、並べ直せば元どおりです。対応は不要です。"
+  - durability-reviewer/2 · src/ui/session_tree.rs:141: an over-ceiling or unparsable file silently reads as the default, and the next drag overwrites it; the file is damaged or grown past 1 MiB → next start shows the default order with no message → the first drag erases the evidence. Say it once in notice or log it, or state in the plan that it is deliberate.
+    person: "並び順のファイルが壊れていた場合、何も言わずに元の並び（名前順・新しい順）で表示します。もう一度並べ替えれば保存し直されます。対応は不要です。"
+  - durability-reviewer/3 · src/config.rs:317 and src/app/screens.rs:6900: nothing keeps the writer under the reader's ceiling; a store with more than about 27,000 ids would write a file that load then rejects (save succeeds → restart → over 1 MiB → order silently lost). README.md describes the file but not the 1 MiB ceiling.
+    person: "セッションが約2万7千件を超えると、並び順が保存されても次回の起動で読み込まれず、元の並びに戻ります。現実的な件数では起きず、対応は不要です。"
+  - durability-reviewer/4 · src/ui/session_tree.rs:163: arrange_by does a linear position scan per item inside a sort key on every frame; arrangement.sessions holds the sessions of all projects, so each project's sort costs roughly n_project × N_total; a HashMap index built only when the arrangement changes would remove it.
+    person: "セッションが数千件規模に増えると、列の描画が毎回少し重くなる可能性があります。普段の件数では体感できる遅れはなく、対応は不要です。"
+  - subprocess-safety-reviewer/1 · src/tests.rs, test_change_181_session_row_drag_reorders_within_its_project: the closing click calls open_session_in_terminal → refresh_session_output → request_session_output, which spawns a detached thread running tmux_capture_with_cursor; under cfg(test) it stays on the suite's own -L operon_suite server and is read-only, and the test never waits for it. No fix needed; note that the thread is intentional if the test should be hermetic.
+    person: "テストの一つが、確認用の tmux に読み取りだけの問い合わせを送ります。普段の tmux やセッションには触れず、対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/tests.rs and src/app/screens.rs:~5576-5870: no test releases a drag over the ■ or ✕ buttons; the code path is safe (egui counts a click only on the widget where the press began), but the test rows are Exited so ■ is never drawn, and ✕ appears only on a hovered or selected row; a test dragging a row onto its own ✕ asserting session_removal_confirmation stays unset would close the gap if egui's click rules change.
+    person: "行をドラッグして停止（■）や削除（✕）ボタンの上で離しても、停止や削除は起きません。今は仕組み上安全ですが、それを確かめるテストがまだありません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  durability-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

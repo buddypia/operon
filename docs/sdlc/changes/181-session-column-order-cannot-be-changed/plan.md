@@ -90,3 +90,31 @@ renders `ui_terminal_session_tabs` alone in a 300px-wide `CentralPanel`, as
   project dragged to the top stays; Escape mid-drag moves nothing.
 
 ## Departures from the plan
+
+- **Two helpers the file list did not name.** `ColumnTargets` (the ids and
+  rects of the dragged level as drawn, with `slot`) and `slot_line_y` (where
+  the line goes) in `src/ui/session_tree.rs`, and `ui_column_drop` beside
+  `finish_column_drag` in `src/app/screens.rs`, so the session and project
+  levels share one drop path.
+- **Step 1, watched failing.** With stubs, all nine failed on their asserts
+  for the stated reasons (arrangement ignored, `place` false, row and name
+  not draggable, no drag state after a press and move, file never read, no
+  notice, no scroll, hover without 「ドラッグで並べ替え」).
+- **Tests sharpened after the first sweep plan.** Requirement 5's "released
+  in place" moves out and back with the button held instead of pressing twice.
+  Requirement 3's cross-project release drags the top row, so a missing
+  card check would send it last and be seen; the same test now also asserts
+  the screen's one 2px `accent` line in the gap above the first row while
+  held, and none after.
+- **Sweep.** `mutations.py`: 17 of 17 caught (one per requirement, the line,
+  and both hover sentences).
+- **Screenshot.** `osascript` may not send keys on this machine, so the dev
+  build was given a temporary start on the sessions page (reverted, checked
+  by `grep`), run with `HOME` and `TMUX_TMPDIR` in a scratch folder against a
+  synthetic store and `session-order.json`: `.tmp/181/arranged-dark.png`.
+  The drag line cannot be shown without synthesising pointer input on the
+  person's machine; its evidence is requirement 3's painted-shape assertion.
+- **Found while building.** The row now takes a press-and-drag for itself, so
+  dragging on a row no longer scrolls the column the way egui's drag-to-scroll
+  did; the wheel and the trackpad scroll as before, and a drag held at the
+  column's edge scrolls it (requirement 8).

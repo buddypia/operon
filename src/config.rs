@@ -306,6 +306,20 @@ pub(crate) const DIFF_COMMENTS_FILE_NAME: &str = "diff-comments.json";
 pub(crate) const RECENT_AGENT_SETTINGS_FILE_NAME: &str = "recent-agent-settings.json";
 /// Maximum byte ceiling for reading recent agent settings file.
 pub(crate) const RECENT_AGENT_SETTINGS_FILE_MAX_BYTES: u64 = 64 * 1024;
+/// Where the order a person dragged the session column into lives: beside
+/// the store rather than in it, because the store is a paused surface and
+/// this is a per-machine arrangement rather than work anybody would miss.
+pub(crate) const SESSION_ARRANGEMENT_FILE_NAME: &str = "session-order.json";
+/// The most of `session-order.json` that is read. An id is 39 bytes of
+/// compact JSON, so this is some 27 000 of them, and every save lists only
+/// what the store still holds.
+pub(crate) const SESSION_ARRANGEMENT_FILE_MAX_BYTES: u64 = 1024 * 1024;
+/// How close to the session column's top or bottom edge a drag is held for
+/// the column to scroll towards that edge.
+pub(crate) const COLUMN_DRAG_EDGE: f32 = 32.0;
+/// How far the session column scrolls per frame while a drag is held at its
+/// edge.
+pub(crate) const COLUMN_DRAG_SCROLL_STEP: f32 = 12.0;
 /// How tall a note is in the review pane, in multiples of one monospace line.
 /// The pane's rows are no longer all one height, and this is the other one.
 pub(crate) const DIFF_COMMENT_ROW_LINES: f32 = 5.0;
