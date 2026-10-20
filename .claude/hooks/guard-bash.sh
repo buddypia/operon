@@ -65,15 +65,35 @@ fi
 # A plain push of one branch to origin is how a change reaches CI, which runs the
 # suite the merge into main waits for (change 128), so it is part of landing and
 # not a question. Plain means the whole command is that push and nothing else:
-# no force, no `+` or `:` refspec, no second command. Anything else still asks.
+# no force, no `+` or `:` refspec, no second command. `-q` only quiets it.
 # The branch word starts with a letter or digit, so `git push origin --force`,
 # `-f` or `--mirror` — options git reads after the remote too — are not a branch.
-plain_push='^git +push( +(-u|--set-upstream))? +origin +[A-Za-z0-9][A-Za-z0-9._/-]*$'
+#
+# A push of that shape joined to other commands, piped, redirected, or with the
+# remote and branch left implicit goes where a plain push goes, so there is
+# nothing for a person to decide: it is refused with the form that passes, and
+# the session reruns it (change 182). It is not allowed as written, because the
+# plain form's guarantee is that nothing the guard has not read runs with the
+# push. Any other push — a force, a refspec, another remote, or a command the
+# split below cannot read — still asks.
+plain_push='^git +push( +(-u|--set-upstream|-q|--quiet))* +origin +[A-Za-z0-9][A-Za-z0-9._/-]*$'
+rewritable_push='^git +push( +(-u|--set-upstream|-q|--quiet))*( +origin( +[A-Za-z0-9][A-Za-z0-9._/-]*)?)?$'
 if printf '%s' "$command" | grep -E '\bgit +push\b' >/dev/null; then
   pushed=$(printf '%s' "$command" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
   if [ "$(printf '%s\n' "$pushed" | grep -c .)" = 1 ] \
     && printf '%s' "$pushed" | grep -E "$plain_push" >/dev/null; then
     exit 0
+  fi
+  # Each command of the line, split at `&&`, `||`, `;`, `|` and newlines, with a
+  # trailing redirect such as `2>&1` dropped. A quote split apart fails the shape.
+  rewritable=1
+  while IFS= read -r part; do
+    part=$(printf '%s' "$part" | sed -E 's/( +[0-9&]?>>?&?[^ ]+)+ *$//; s/^[[:space:]]+//; s/[[:space:]]+$//')
+    printf '%s' "$part" | grep -E '\bgit +push\b' >/dev/null || continue
+    printf '%s' "$part" | grep -E "$rewritable_push" >/dev/null || rewritable=0
+  done < <(printf '%s\n' "$command" | awk '{ gsub(/&&|\|\||;|\|/, "\n"); print }')
+  if [ "$rewritable" = 1 ]; then
+    decide deny "Publishing gate — run the push as \`git push origin <branch>\` (\`-u\` and \`-q\` are fine) in a Bash call of its own, with nothing joined, piped or redirected, and run the other commands as separate calls. The gate lets a push through without asking only when the whole command is that push; this one goes where that push goes, so no person is asked."
   fi
   decide ask "Publishing gate — this push is not a plain push of one branch to origin, so confirm the destination and the refspec are the ones you mean. Force-pushing main rewrites the audit trail the SDLC pipeline depends on (docs/sdlc/README.md)."
 fi

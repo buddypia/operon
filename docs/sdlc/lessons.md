@@ -1012,3 +1012,22 @@ whole action that produces it, not at the line that assigns it.
 reads the notice after `start_session` for both the reused and the fresh
 bundle (watched failing under the `handoff-notice-hidden-by-the-launch`
 mutation in `docs/sdlc/changes/180-a-handoff-is-rebuilt-and-cannot-pick-its-model/mutations.py`).
+
+## 080 — A push the session could rewrite was put to a person
+
+The publishing gate (change 128) let a push through only when the whole command
+was `git push [-u] origin <branch>`, and asked about everything else. Everything
+else held two kinds: a push whose destination or refspec is a decision, and a
+push that goes exactly where a plain one goes but was joined to `git commit`
+with `&&`, piped through `tail`, given `-q`, or left its remote and branch
+implicit. Every landing in change 180 stopped on a prompt of the second kind,
+and the person could only answer yes. **The rule:** a gate that asks sorts what
+it cannot admit into a decision, which it asks about, and a shape the session
+can rewrite, which it refuses with the form that passes — `ask` is for the
+first only (sdlc 084).
+
+**Guard.** `a_plain_push_to_origin_is_not_asked_about` (its denied list watched
+failing on the unedited hook; five mutations each red — `-q` dropped, the
+rewritable shape admitting `--force`, the split removed, one unreadable push no
+longer making the line a question, and the refusal no longer naming
+`git push origin <branch>`).

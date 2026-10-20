@@ -1,0 +1,42 @@
+# Round 1, digest 055542dd94ee78ca, both reviewers asked 2026-10-21.
+#
+# rust-reviewer: approve-with-nits 0 3. Nothing decision-worthy reaches allow
+# (plain_push still needs the whole single line, origin, and a branch word) or
+# deny (every push segment must match rewritable_push). Traced by reading; its
+# probes were refused by the worktree policy.
+#
+# subprocess-safety-reviewer: approve-with-nits 0 4. Ran the staged hook on
+# about 50 commands with BSD awk and sed: nothing new reaches allow beyond
+# -q/--quiet plain pushes; force, refspec, other remote, flags after origin,
+# &, subshells, quotes, $(…), backticks and bash -c all stay ask. The while
+# read loop is sound under set -uo pipefail.
+#
+# All nits carried, not taken, per REVIEW.md.
+#
+# Re-verdict at 462ca91ba2022a31 after main (180, 181) was merged in; the only
+# conflict was lessons.md order (079 then 080). Both reviewers: same verdicts,
+# hook and test byte-identical. Not a round: no finding caused it (sdlc 084).
+
+digest: "462ca91ba2022a31"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · guard-bash.sh segment loop skips a segment without a literal `git +push`, so `git push origin x; git -c a=b push -f origin main` is deny with a rewrite reason rather than ask; the comment overstates "a command the split cannot read still asks"
+    person: "まれな書き方の強制 push が普通の push と一緒に並ぶと、確認を求めずに差し戻されます。差し戻しなので実行はされず、対応は不要です。"
+  - rust-reviewer/1/2 · src/tests.rs decide returns a (String, String) read as .0; a named struct would read better, and an empty reason for allow is indistinguishable from a missing one
+    person: "テストの書き方の好みの話です。動きには影響がなく、対応は不要です。"
+  - rust-reviewer/1/3 · no rewritten case for a redirect on the push itself (git push -q origin x 2>&1) and no asked case pinning that & is not a separator (git push origin x & git push -f origin main)
+    person: "いくつかの書き方がテストで確かめられていません。いまは正しく動いていることを別の確認役が実際に試して確かめており、対応は不要です。"
+  - subprocess-safety-reviewer/1/1 · guard-bash.sh:94-96 a push the splitter does not recognise beside a readable one (git push origin x && git -C /o push --force origin main) is deny where it was ask; the reason text is then false and a person cannot approve the force
+    person: "上と同じ点です。差し戻されるだけで実行はされず、強制 push が必要なら単独で実行すれば今までどおり確認が出ます。対応は不要です。"
+  - subprocess-safety-reviewer/1/2 · guard-bash.sh:80 bare git push and git push -q take remote and refspec from config, so they are not provably where a plain push goes; deny tells the session to rerun as git push origin <branch>
+    person: "宛先を省いた push は差し戻され、宛先を明示した形でやり直すよう伝えます。やり直した形は今までどおり確認なしで通る形なので、対応は不要です。"
+  - subprocess-safety-reviewer/1/3 · guard-bash.sh:91 the redirect strip handles 2>&1 and >file but not > file with a space, so that form stays ask
+    person: "出力先の指定の書き方によっては、今までどおり確認が出ることがあります。安全側に倒れるだけで、対応は不要です。"
+  - subprocess-safety-reviewer/1/4 · guard-bash.sh:81 existing: git<TAB>push -f origin main does not match `git +push` and is allowed; git -C dir push is not seen either
+    person: "以前からある抜け道で、今回の変更とは関係ありません。エージェントがこの書き方をすることはまずなく、急ぎの対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"

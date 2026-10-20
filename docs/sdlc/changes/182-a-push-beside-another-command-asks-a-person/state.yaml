@@ -1,0 +1,64 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route): every landing in change 180
+# stopped on a permission prompt for
+# `git commit -q -m "…" && git log --oneline -1 && git push -q 2>&1 | tail -2; sleep 10; gh run list …`
+# — the publishing gate's "this push is not a plain push of one branch to
+# origin". The person (2026-10-20): "上記作業するたびに許可を求められてすごく
+# 面倒臭い", then "恒久対応して今後ともこのようなコマンド操作に都度許可を求めない
+# ようにしてくれ".
+#
+# Named cause: `.claude/hooks/guard-bash.sh` sorts a push into two outcomes,
+# plain (exit 0) and everything else (`ask`). "Everything else" mixes two kinds:
+# a push whose destination or refspec is a decision (force, `+`/`:` refspec,
+# `--mirror`, `--delete`, `--all`, another remote), and a push that goes where a
+# plain one goes but is written so the guard cannot see that — joined to other
+# commands, piped, `-q`, or with the remote and branch left implicit. The second
+# kind has nothing for a person to decide; the session can rewrite it into the
+# plain form itself, so asking hands a recoverable step to a person (sdlc 084).
+#
+# Risk: `.claude/hooks` is gate-configuration (high, paused). Admitting `-q` and
+# answering the second kind with `deny` instead of `ask` takes a person out of a
+# loop, which approval.md sends to a person; the person's message is that
+# decision, quoted in approvals.log.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Done. Carried: a push the split cannot read beside a readable one is denied rather than asked, and git -C dir push / git<TAB>push never reach the gate — the second predates this change and is the one worth a follow-up."
+
+contract:
+  failing-test-first: "machine passed a_plain_push_to_origin_is_not_asked_about
+    failed on the unedited hook at its first new case (git push -q origin
+    feature/x asked), and passes on the edited one"
+  three-gates: "machine passed cargo fmt --check silent and cargo clippy --locked
+    -D warnings clean in the worktree, re-run by gate-commit.sh on the commit;
+    the named test passes; the whole suite runs in CI on the push"
+  release-binary: "machine passed no: .claude/hooks, src/tests.rs and docs only —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed mutations.py in this directory: 5
+    of 5 caught — -q dropped, the rewritable shape admitting --force, the split
+    removed, one unreadable push no longer asking, and the refusal no longer
+    naming git push origin <branch> (the claim)"
+  review: "human passed rust-reviewer approve-with-nits 0 3 and
+    subprocess-safety-reviewer approve-with-nits 0 4 at 055542dd94ee78ca, round 1;
+    nits carried with person lines in review.yaml"
+  lesson-recorded: "machine passed entry 080 in docs/sdlc/lessons.md with its Guard"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
