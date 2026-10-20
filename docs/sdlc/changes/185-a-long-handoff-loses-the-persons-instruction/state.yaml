@@ -1,0 +1,46 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# A handoff bundle over its byte budget was cut from the end, which is where
+# the person's handoff instructions sit, and every cut it made was a bare `…`
+# the receiving session could not tell from the source's own text. Harness²
+# marks each cut in what an agent reads as its own (core/context.py).
+#
+# Risk: src/history.rs is the foreign-store surface (medium, supervised);
+# src/config.rs and src/tests.rs match nothing higher.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Commit plan.md, then make build_compact_handoff_bundle keep the
+  note whole and mark every cut with HANDOFF_SHORTENED_MARKER."
+
+contract:
+  failing-test-first: "machine passed a_long_handoff_keeps_the_persons_instruction_whole
+    failed on main's builder (the person's handoff instructions were cut) and
+    a_handoff_says_where_operon_shortened_the_text on the bare ellipsis (a
+    shortened turn does not say Operon shortened it)"
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: src/history.rs and src/config.rs make
+    /Applications/Operon.app stale; ends with bash scripts/package-macos.sh and
+    the ship skill's swap"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  review: "human pending the reviewers check-review.sh names for the diff"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
