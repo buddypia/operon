@@ -322,7 +322,40 @@ pub(crate) fn compact_handoff_turn_text(role: &str, text: &str) -> Option<String
         .collect::<Vec<_>>();
     let joined = chunks.join("\n\n");
     nonempty_transcript_text(&joined)
-        .map(|cleaned| truncate_chars(cleaned.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS))
+        .map(|cleaned| shorten_for_handoff(cleaned.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS))
+}
+
+/// `text` cut to `max_chars`, saying the cut is Operon's and where the rest is.
+/// A bare `…` reads to the session receiving the bundle as the source's own
+/// words stopping mid-thought (change 185).
+fn shorten_for_handoff(text: &str, max_chars: usize) -> String {
+    // A text an earlier handoff shortened is cut from its body, so the new cut
+    // cannot land inside the old marker and leave a fragment of it behind.
+    let (body, shortened) = match text.strip_suffix(HANDOFF_SHORTENED_MARKER) {
+        Some(body) => (body.trim_end(), true),
+        None => (text, false),
+    };
+    if !shortened && body.chars().count() <= max_chars {
+        return text.to_owned();
+    }
+    let kept: String = body.chars().take(max_chars).collect();
+    format!("{}\n{HANDOFF_SHORTENED_MARKER}", kept.trim_end())
+}
+
+/// `text` within `max_bytes`, marker included, cut on a char boundary. Empty
+/// when not even the marker fits.
+fn shorten_to_bytes(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let Some(room) = max_bytes.checked_sub(HANDOFF_SHORTENED_MARKER.len() + 1) else {
+        return String::new();
+    };
+    let mut end = room;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n{HANDOFF_SHORTENED_MARKER}", text[..end].trim_end())
 }
 
 pub(crate) fn build_compact_handoff_bundle(
@@ -342,7 +375,7 @@ pub(crate) fn build_compact_handoff_bundle(
         if let Some((role, text)) = turns.last() {
             filtered_turns.push((
                 *role,
-                truncate_chars(text.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS),
+                shorten_for_handoff(text.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS),
             ));
         }
     }
@@ -354,7 +387,7 @@ pub(crate) fn build_compact_handoff_bundle(
         .or(source.last_user_message.as_deref())
         .or_else(|| turns.first().map(|(_, text)| text.as_str()))
         .unwrap_or("Continue the previous CLI session.");
-    let task = truncate_chars(
+    let task = shorten_for_handoff(
         original_task_from_session_goal(task_raw).trim(),
         HANDOFF_BUNDLE_TURN_MAX_CHARS,
     );
@@ -368,9 +401,9 @@ pub(crate) fn build_compact_handoff_bundle(
         .len()
         .saturating_sub(HANDOFF_BUNDLE_MAX_TURNS);
     let tail = &filtered_turns[tail_start..];
-    let trimmed_note = truncate_chars(note.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS);
+    let trimmed_note = shorten_for_handoff(note.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS);
 
-    let render_with_slice = |slice: &[(&'static str, String)]| -> String {
+    let render = |task: &str, slice: &[(&'static str, String)], note: &str| -> String {
         let mut bundle = format!(
             "Continue this coding task in a new CLI session.\n\n\
              Task to continue:\n\
@@ -390,41 +423,41 @@ pub(crate) fn build_compact_handoff_bundle(
             let heading = if *role == "user" { "User" } else { "Assistant" };
             bundle.push_str(&format!("\n### {heading}\n{text}\n"));
         }
-        if !trimmed_note.is_empty() {
-            bundle.push_str(&format!(
-                "\nHandoff instructions from the user:\n{trimmed_note}\n"
-            ));
+        if !note.is_empty() {
+            bundle.push_str(&format!("\nHandoff instructions from the user:\n{note}\n"));
         }
         bundle
     };
 
-    if tail.is_empty() {
-        let bundle = render_with_slice(&[]);
-        return (truncate_utf8_bytes(&bundle, HANDOFF_BUNDLE_MAX_BYTES), 0);
-    }
-
+    // The person's instructions come last in the bundle, so it is never cut
+    // from its end: what gives way first is the excerpt, then the task, and
+    // the instructions only when they alone are past the budget (change 185).
     for start in 0..tail.len() {
         let slice = &tail[start..];
-        let candidate = render_with_slice(slice);
+        let candidate = render(&task, slice, &trimmed_note);
         if candidate.len() <= HANDOFF_BUNDLE_MAX_BYTES {
             return (candidate, slice.len());
         }
     }
-
-    let last_only = &tail[tail.len() - 1..];
-    let candidate = render_with_slice(last_only);
-    (truncate_utf8_bytes(&candidate, HANDOFF_BUNDLE_MAX_BYTES), 1)
-}
-
-fn truncate_utf8_bytes(text: &str, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text.to_owned();
+    if let Some((role, text)) = tail.last() {
+        let room = HANDOFF_BUNDLE_MAX_BYTES
+            .saturating_sub(render(&task, &[(role, String::new())], &trimmed_note).len());
+        let shortened = shorten_to_bytes(text, room);
+        if !shortened.is_empty() {
+            return (render(&task, &[(role, shortened)], &trimmed_note), 1);
+        }
     }
-    let mut end = max_bytes;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
+    let bare = render(&task, &[], &trimmed_note);
+    if bare.len() <= HANDOFF_BUNDLE_MAX_BYTES {
+        return (bare, 0);
     }
-    text[..end].to_owned()
+    let room = HANDOFF_BUNDLE_MAX_BYTES.saturating_sub(render("", &[], &trimmed_note).len());
+    let shortened_task = shorten_to_bytes(&task, room);
+    if !shortened_task.is_empty() {
+        return (render(&shortened_task, &[], &trimmed_note), 0);
+    }
+    let room = HANDOFF_BUNDLE_MAX_BYTES.saturating_sub(render("", &[], "").len());
+    (render("", &[], &shorten_to_bytes(&trimmed_note, room)), 0)
 }
 
 /// Only providers that support a compact handoff bundle are offered.

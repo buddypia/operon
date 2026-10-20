@@ -1051,3 +1051,25 @@ mutants, each refused for its own reason, and each check watched failing when
 removed), `the_eval_runner_names_an_eval_whose_runs_split`, and
 `the_hillclimb_procedure_states_what_harness2_measured` — swept by
 `docs/sdlc/changes/184-eval-runs-that-disagree-go-unread/mutations.py`.
+
+## 082 — A handoff over its budget was cut through the person's instruction
+
+The compact handoff bundle (changes 179, 180) puts the person's handoff
+instructions last and, when even one turn left it over 6,000 bytes, kept the
+first 6,000 bytes. A Japanese task, turn, and note are three bytes a character
+and each was allowed 1,200 characters, so a long handoff opened the new session
+without the one sentence the person typed for it. Every shortened turn ended in
+a bare `…`, which the receiving session reads as the source's words stopping,
+with nothing saying where the rest was. Harness² prints each cut it makes in
+what an agent reads as its own (`harness2/core/context.py`). **The rule:** a
+budget gives way in order of what matters least, and is never met by cutting
+from the end of a text whose end matters; and every cut handed to an agent says
+who cut it and where the whole is.
+
+**Guard.** `a_long_handoff_keeps_the_persons_instruction_whole` (watched
+failing on the old builder: the instructions were cut),
+`a_handoff_says_where_operon_shortened_the_text` (watched failing on the bare
+ellipsis), `a_long_handoff_shortens_the_excerpt_before_the_task`, and
+`a_handoff_of_a_shortened_task_marks_it_once` (found in review; watched failing
+with a cut ending on spaces) — swept by
+`docs/sdlc/changes/185-a-long-handoff-loses-the-persons-instruction/mutations.py`.

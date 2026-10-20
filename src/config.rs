@@ -41,6 +41,11 @@ pub(crate) const FULL_HISTORY_RESTORE_TARGETS: &[&str] = &["codex", "claude", "g
 pub(crate) const HANDOFF_BUNDLE_MAX_TURNS: usize = 8;
 pub(crate) const HANDOFF_BUNDLE_TURN_MAX_CHARS: usize = 1_200;
 pub(crate) const HANDOFF_BUNDLE_MAX_BYTES: usize = 6_000;
+/// What a handoff bundle prints where Operon cut text to fit its budget. The
+/// session reading the bundle has to tell Operon's cut from the source's own
+/// words, and know the whole text is in the archived transcript (change 185).
+pub(crate) const HANDOFF_SHORTENED_MARKER: &str =
+    "[shortened by Operon to fit the handoff; the full text is in the transcript snapshot]";
 pub(crate) const HANDOFF_BUNDLE_FILE_NAME: &str = "handoff-bundle.md";
 /// The files a handoff archive holds besides its bundle, and the restore kind
 /// its manifest names. The import writes them; the reuse lookup and the expiry
