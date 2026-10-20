@@ -45992,7 +45992,10 @@ pub(crate) fn ci_runs_on_the_branches_the_merge_gate_asks_about() {
 }
 
 /// A push of one branch to origin is how a change reaches CI, so it is not a
-/// question for a person. Everything else a push can be still is.
+/// question for a person. A push that goes there too but is joined to other
+/// commands, piped, or leaves the remote and branch implicit is the session's to
+/// rewrite, so it is refused with the form that passes rather than asked about
+/// (change 182). A push whose destination or refspec is a decision still asks.
 #[test]
 pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
     let hook = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".claude/hooks/guard-bash.sh");
@@ -46013,13 +46016,19 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
         let output = child.wait_with_output().unwrap();
         let printed = String::from_utf8_lossy(&output.stdout).to_string();
         if printed.trim().is_empty() {
-            "allow".to_owned()
+            ("allow".to_owned(), String::new())
         } else {
             let decision: serde_json::Value = serde_json::from_str(&printed).unwrap();
-            decision["hookSpecificOutput"]["permissionDecision"]
-                .as_str()
-                .unwrap_or("missing")
-                .to_owned()
+            let field = |name: &str| {
+                decision["hookSpecificOutput"][name]
+                    .as_str()
+                    .unwrap_or("missing")
+                    .to_owned()
+            };
+            (
+                field("permissionDecision"),
+                field("permissionDecisionReason"),
+            )
         }
     };
     for plain in [
@@ -46027,15 +46036,34 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
         "git push -u origin feature/127-x",
         "git push --set-upstream origin fix/1",
         "git push origin main",
+        "git push -q origin feature/x",
+        "git push --quiet -u origin fix/1",
     ] {
         assert_eq!(
-            decide(plain),
+            decide(plain).0,
             "allow",
             "素の push に確認を求めました: {plain}"
         );
     }
-    for asked in [
+    for rewritten in [
         "git push",
+        "git push -q",
+        "git push origin",
+        "git push origin feature/x && rm -rf target",
+        "git push origin feature/x\ngit push origin main",
+        "git commit -q -m x && git push -q 2>&1 | tail -2; sleep 10; gh run list",
+    ] {
+        let (decision, reason) = decide(rewritten);
+        assert_eq!(
+            decision, "deny",
+            "書き直せば通る push を人に確認しました: {rewritten}"
+        );
+        assert!(
+            reason.contains("`git push origin <branch>`"),
+            "通る形を言わずに push を拒みました: {rewritten}: {reason}"
+        );
+    }
+    for asked in [
         "git push --force origin main",
         "git push -f origin feature/x",
         "git push origin +main",
@@ -46049,11 +46077,15 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
         "git push origin --delete",
         "git push -u origin --all",
         "git push origin --force-with-lease",
-        "git push origin feature/x && rm -rf target",
-        "git push origin feature/x\ngit push origin main",
+        // A decision joined to other commands is still a decision.
+        "git commit -m x && git push --force origin main",
+        "git push -q origin feature/x && git push -f origin main",
+        "git push -q upstream main 2>&1 | tail -2",
+        "bash -c \"git push origin x\"",
+        "git push origin x &",
     ] {
         assert_eq!(
-            decide(asked),
+            decide(asked).0,
             "ask",
             "素でない push を確認なしで通しました: {asked}"
         );

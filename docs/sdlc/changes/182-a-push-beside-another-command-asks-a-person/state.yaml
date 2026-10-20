@@ -25,25 +25,34 @@
 
 state:
   route: "bugfix"
-  stage: "plan"
-  status: "planning"
-  attempts: "0 3"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
   risk: "high"
   readiness: "pending"
   screen: "n/a"
 
-resume: "Commit plan.md and this file, then step 2 of plan.md: the failing cases in a_plain_push_to_origin_is_not_asked_about."
+resume: "Done. Carried: a push the split cannot read beside a readable one is denied rather than asked, and git -C dir push / git<TAB>push never reach the gate — the second predates this change and is the one worth a follow-up."
 
 contract:
-  failing-test-first: "machine pending the new allowed and denied cases in
-    a_plain_push_to_origin_is_not_asked_about fail on the unedited hook"
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  failing-test-first: "machine passed a_plain_push_to_origin_is_not_asked_about
+    failed on the unedited hook at its first new case (git push -q origin
+    feature/x asked), and passes on the edited one"
+  three-gates: "machine passed cargo fmt --check silent and cargo clippy --locked
+    -D warnings clean in the worktree, re-run by gate-commit.sh on the commit;
+    the named test passes; the whole suite runs in CI on the push"
   release-binary: "machine passed no: .claude/hooks, src/tests.rs and docs only —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  lesson-recorded: "machine pending entry 080 in docs/sdlc/lessons.md with its Guard"
+  guards-verified-by-mutation: "human passed mutations.py in this directory: 5
+    of 5 caught — -q dropped, the rewritable shape admitting --force, the split
+    removed, one unreadable push no longer asking, and the refusal no longer
+    naming git push origin <branch> (the claim)"
+  review: "human passed rust-reviewer approve-with-nits 0 3 and
+    subprocess-safety-reviewer approve-with-nits 0 4 at 055542dd94ee78ca, round 1;
+    nits carried with person lines in review.yaml"
+  lesson-recorded: "machine passed entry 080 in docs/sdlc/lessons.md with its Guard"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

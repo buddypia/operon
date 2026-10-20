@@ -2,7 +2,7 @@
 
 - **Spec**: none — bugfix route; the bug report in `./state.yaml` is the intent.
 - **Approved**: 2026-10-20
-- **Status**: approved
+- **Status**: done
 
 ## The rule
 
