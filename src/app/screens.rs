@@ -1450,6 +1450,93 @@ impl OperonApp {
         }
     }
 
+    /// Saves the handoff options as they stand. Unlike
+    /// `persist_recent_agent_settings` it records nothing from the launch
+    /// sheet: a handoff is not a launch, and the sheet may be half filled in.
+    pub(crate) fn persist_handoff_launch_settings(&self) {
+        if let Err(error) = save_recent_agent_settings(&self.data_file, &self.recent_agent_settings)
+        {
+            eprintln!("Operon: failed to save recent agent settings: {error}");
+        }
+    }
+
+    /// The model and reasoning depth the card's chosen destination starts with
+    /// (change 180). Keyed by destination rather than by card: every card handing
+    /// off to Codex CLI uses Codex CLI's options, and so does the session menu.
+    pub(crate) fn ui_handoff_launch_options(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        card_id: &str,
+        target: &str,
+    ) {
+        let efforts = agent_effort_options(target);
+        // Inserted once per destination, so a frame after the first allocates
+        // nothing here.
+        if !self.recent_agent_settings.handoff.contains_key(target) {
+            self.recent_agent_settings
+                .handoff
+                .insert(target.to_owned(), HandoffLaunchSettings::default());
+        }
+        let Some(launch) = self.recent_agent_settings.handoff.get_mut(target) else {
+            return;
+        };
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(tr("モデル（任意）"))
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+            let response = ui
+                .add(
+                    egui::TextEdit::singleline(&mut launch.model)
+                        .char_limit(MAX_FIELD_STRING_LEN)
+                        .hint_text(tr("既定のモデルを使う"))
+                        .desired_width(170.0),
+                )
+                .on_hover_ui(|ui| {
+                    let name = agent_choice_copy(target).0;
+                    ui.label(tf!(
+                        "{p0} への Handoff で使うモデル。空欄なら {p0} の既定のモデルです。",
+                        p0 = name
+                    ));
+                });
+            changed |= response.lost_focus();
+            if !efforts.is_empty() {
+                ui.label(
+                    RichText::new(tr("推論の深さ"))
+                        .size(12.0)
+                        .color(palette.text_muted),
+                );
+                egui::ComboBox::from_id_salt(("handoff-effort", card_id))
+                    .selected_text(if launch.effort.is_empty() {
+                        tr("既定（CLI に任せる）")
+                    } else {
+                        &launch.effort
+                    })
+                    .width(200.0)
+                    .show_ui(ui, |ui| {
+                        changed |= ui
+                            .selectable_value(
+                                &mut launch.effort,
+                                String::new(),
+                                tr("既定（CLI に任せる）"),
+                            )
+                            .changed();
+                        for effort in efforts {
+                            changed |= ui
+                                .selectable_value(&mut launch.effort, (*effort).to_owned(), *effort)
+                                .changed();
+                        }
+                    });
+            }
+        });
+        if changed {
+            self.persist_handoff_launch_settings();
+        }
+    }
+
     pub(crate) fn apply_agent_launch_settings(&mut self, agent: &str) {
         if let Some(settings) = self.recent_agent_settings.agents.get(agent).cloned() {
             self.agent_model_input = settings.model;
@@ -2713,7 +2800,7 @@ impl OperonApp {
                                 .color(palette.text),
                         );
                     }
-                    ui.horizontal(|ui| {
+                    let target = ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(tr("復元先"))
                                 .size(12.0)
@@ -2764,9 +2851,12 @@ impl OperonApp {
                         {
                             self.handoff_cli_session(project, &cli_session, &target);
                         }
-                        self.handoff_target_inputs
-                            .insert(cli_session.id.clone(), target);
-                    });
+                        target
+                    })
+                    .inner;
+                    self.ui_handoff_launch_options(ui, palette, &cli_session.id, &target);
+                    self.handoff_target_inputs
+                        .insert(cli_session.id.clone(), target);
                 });
                 ui.add_space(4.0);
             }
@@ -5436,6 +5526,9 @@ impl OperonApp {
                 let is_importing = self.background_tasks.iter().any(|key| {
                     matches!(key, BackgroundKey::FullHistoryImport(_))
                 });
+                // A copy, because the row menus outlive borrows of `self` that
+                // the rows take mutably. At most one entry per destination.
+                let handoff_launches = self.recent_agent_settings.handoff.clone();
                 for (index, candidate) in project_sessions.into_iter().enumerate() {
                     // A hairline between two sessions, none around them: the
                     // card is the edge of the group.
@@ -5478,9 +5571,9 @@ impl OperonApp {
                             ui.separator();
                             for agent in FULL_HISTORY_RESTORE_TARGETS.iter().copied() {
                                 if agent != candidate.agent.as_str() {
-                                    let button = egui::Button::new(tf!(
-                                        "{p0} へ Handoff",
-                                        p0 = agent_choice_copy(agent).0
+                                    let button = egui::Button::new(handoff_menu_label(
+                                        agent,
+                                        handoff_launches.get(agent),
                                     ));
                                     if ui
                                         .add_enabled(!is_importing, button)

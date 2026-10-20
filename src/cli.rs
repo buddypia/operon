@@ -103,6 +103,9 @@ pub(crate) struct ImportedNativeSession {
     /// it carried and what it left behind instead of only naming a total.
     pub(crate) classification: RestoreClassification,
     pub(crate) agent_command: String,
+    /// When the archive this handoff reused was first written, or `None` when
+    /// the handoff took a fresh snapshot (change 180).
+    pub(crate) reused_bundle_created_at: Option<u64>,
 }
 
 /// A local-only pointer to a native CLI conversation. Operon deliberately
@@ -1475,7 +1478,7 @@ pub(crate) fn snapshot_native_transcript(
             p0 = import_directory.display()
         )
     })?;
-    let destination = import_directory.join("source.jsonl");
+    let destination = import_directory.join(SHARED_SESSION_SNAPSHOT_FILE_NAME);
     let temporary = import_directory.join(format!(".source.jsonl.tmp-{}", Uuid::new_v4()));
     let mut destination_file = OpenOptions::new()
         .write(true)

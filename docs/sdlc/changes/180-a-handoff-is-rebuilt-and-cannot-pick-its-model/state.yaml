@@ -40,8 +40,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "deploy"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Build plan.md step by step from step 1, watching each named test fail before its code."
+resume: "Commit from the worktree, push the branch, and merge on main once CI passes."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -71,11 +71,12 @@ resume: "Build plan.md step by step from step 1, watching each named test fail b
 # is what says whether the bundle on this machine is behind.
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh: exit 0, one warn largest_module_lines (src/app.rs 8847 over 8800), recorded with no action"
   release-binary: "machine pending touches src/history.rs, src/cli.rs, src/agents/settings.rs, src/app.rs, src/app/screens.rs, src/config.rs, src/i18n_tables.rs; package /Applications/Operon.app from main after merge"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  named-tests: "machine pending cargo test --locked for the eleven tests spec.md Acceptance names"
-  live-restore: "machine pending cargo test --locked -- --ignored, since the shared-session archive moved"
+  guards-verified-by-mutation: "human passed 16 of 16 caught by docs/sdlc/changes/180-a-handoff-is-rebuilt-and-cannot-pick-its-model/mutations.py"
+  named-tests: "machine passed cargo test --locked for the eleven tests spec.md Acceptance names plus the card draw test, the existing handoff, archive-permission, i18n, and policy tests: ok"
+  live-restore: "machine passed cargo test --locked -- --ignored: 6 passed, 0 failed on 2026-10-20 with codex, claude, agy, and tmux on PATH"
+  review: "human passed rust-reviewer, durability-reviewer approve-with-nits 0 4, 0 3 at 7956e4011403b2ed; seven nits carried"
   screen-observed: "human pending the history card, session menu, and reuse notice compared with screen.md in the running app"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_

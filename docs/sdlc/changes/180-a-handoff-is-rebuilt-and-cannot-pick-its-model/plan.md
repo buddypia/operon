@@ -83,4 +83,34 @@ worse than no plan, because the next reader trusts it.
 
 ## Departures from the plan
 
-None yet.
+- **Order of steps 1–3.** `src/history.rs`, `src/agents/settings.rs`, and
+  `src/cli.rs` were written before their tests rather than after them. The
+  tests were then written against the spec, not the code, and each one was
+  watched failing by breaking the code it guards. That is step 8's sweep in
+  `mutations.py`, with one or more mutations per requirement, so each
+  requirement still has a guard someone has seen go red.
+- **The handoff notice was never shown.** Test 9 found that `start_session`
+  overwrites the notice with the generic `セッションを起動しています…` as soon as it
+  spawns the launch. So change 179's creation notice never reached the screen,
+  and the reuse notice would not have either. `finish_full_history_import` now
+  sets the handoff's notice after `start_session` whenever the launch is under
+  way (its `SessionStart` task exists), and leaves a refusal `start_session`
+  made before launching. This adds one mutation,
+  `handoff-notice-hidden-by-the-launch`.
+- **Test 6 ages its archives after creating them all.** Every handoff sweeps
+  before it looks for an archive to reuse. An archive aged before the next
+  handoff was therefore already gone when the explicit sweep ran, and the first
+  version of the test counted zero removals for that reason.
+- **One more assertion in the gone-snapshot test.** It now replaces a snapshot
+  with a symlink and expects a fresh one instead of a reuse. Without it the
+  lookup's regular-file check had no guard of its own: a missing file already
+  falls back through the failed read.
+- **A twelfth test draws the card.** The plan had the card checked only by eye
+  in the running app. A headless frame is enough to prove the caller draws it
+  (lesson 005): `the_history_card_offers_the_destination_model_and_effort` draws
+  `ui_cli_sessions` at 880px and checks that the options row sits under the
+  picker, shows the destination's saved model and effort, and stays inside the
+  column. The sweep's `card-draws-no-options-row` turns it red. The worktree
+  build has no way to point at a data directory of its own, so running it
+  would open this machine's real store. The look in the running app therefore
+  happens on the packaged build after the merge.
