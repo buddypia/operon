@@ -1,0 +1,5 @@
+2026-10-21T06:10:00Z auto intent intent.md ad5dcc6f96d3b113 approve evaluator: problem verified on main (setup and check lines uncompared; 001-a and 001-b both pass the id test and merge in the summary); Harness² claims match context.py and ledger.py; restates the person's quoted request
+2026-10-21T06:10:00Z auto spec spec.md 5bcdacebcd370ab6 revise evaluator: the missing-row refusal cannot be reached or watched failing
+2026-10-21T06:10:00Z auto plan plan.md 86d13c077ae6ecbb revise evaluator: no test reaches the row-count branch; the fixture must assert exit 1 and no rate line
+2026-10-21T06:20:00Z auto spec spec.md 70e91356ccc3390d approve evaluator second reading: narrowed to the duplicate check with a checked reason; removes no protection that exists today
+2026-10-21T06:20:00Z auto plan plan.md a245dab157b84ad6 approve evaluator second reading: exit 1, refused line, and no rate line make each listed mutation watchable failing

@@ -88,7 +88,10 @@ The summary gives `passed/judged` per eval, then the overall rate with its 95%
 Wilson interval, a `split:` line for any eval whose judged runs went both ways,
 and a warning for any eval that failed every judged run —
 suspect that eval (an ambiguous prompt, a check that contradicts the policy it
-tests) before the steering. Everything a run produced is under
+tests) before the steering. A `refused:` line in place of the rate means a
+run was recorded twice — two eval files share an id — and the runner exits 1
+even when every row passed: renumber one of them and run again, because a
+merged count can read as a full suite. Everything a run produced is under
 `target/eval-results/<stamp>-<sha>/`: `transcript.jsonl` and `check.log` per run,
 `results.tsv`, and a `summary.md` that links them.
 
@@ -155,8 +158,9 @@ The procedure:
    run produced nothing as unsafe. Keep it only when both moved the right way.
 6. **Never paste a failure into the steering.** No eval's prompt, setup, or check
    text, and no rule that only exists for one eval's situation.
-   `no_eval_prompt_is_pasted_into_the_steering` catches the verbatim case; the
-   rest is on whoever makes the edit, and review.
+   `no_eval_prompt_is_pasted_into_the_steering` catches the verbatim case — a
+   prompt, or any setup or check line of 20 characters or more that is not a
+   comment; the rest is on whoever makes the edit, and review.
 7. **After two flat rounds, stop editing and sort the remaining failures** by
    cause: an ambiguous eval, a check bug, an environment fault, or noise. Only a
    real, fixable failure earns another edit.
