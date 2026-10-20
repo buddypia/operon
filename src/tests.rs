@@ -262,6 +262,7 @@ pub(crate) fn full_history_restore_persists_a_resumable_session_before_launching
         // still preserve the normal native-resume command.
         agent_command: format!("codex resume {native_session_id}"),
         handoff_bundle: String::new(),
+        reused_bundle_created_at: None,
     };
     let data_file = root.join("store.json");
     let mut app = test_app(data_file.clone());
@@ -458,6 +459,7 @@ pub(crate) fn import_full_cli_history_writes_handoff_bundle_and_manifest_without
         &source,
         "codex",
         "Focus on src/history.rs",
+        &HandoffLaunchSettings::default(),
         &archive_root,
         Uuid::new_v4(),
     )
@@ -523,6 +525,7 @@ pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bun
         classification: RestoreClassification::default(),
         agent_command: format!("claude --session-id {native_session_id}"),
         handoff_bundle,
+        reused_bundle_created_at: None,
     };
     let data_file = root.join("store.json");
     let mut app = test_app(data_file.clone());
@@ -551,6 +554,687 @@ pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bun
         Duration::from_secs(15),
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+/// A two-turn Claude transcript, its project, and an archive root, all under
+/// one temporary directory: the handoff reuse and expiry tests (change 180).
+pub(crate) fn handoff_fixture(name: &str) -> (PathBuf, Project, CliSession, PathBuf) {
+    let root = std::env::temp_dir().join(format!("operon-{name}-{}", Uuid::new_v4()));
+    let project_path = root.join("project");
+    let source_path = root.join("source.jsonl");
+    fs::create_dir_all(&project_path).unwrap();
+    fs::write(
+        &source_path,
+        concat!(
+            r#"{"type":"user","message":{"content":"initial request from claude"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":"assistant reply from claude"}}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+    let native_id = Uuid::new_v4().to_string();
+    let source = CliSession {
+        provider: CliProvider::Claude,
+        native_id: native_id.clone(),
+        id: native_id,
+        title: Some("Claude source".into()),
+        last_user_message: Some("initial request from claude".into()),
+        branch: None,
+        updated_at: now(),
+        path: source_path,
+    };
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: project_path,
+        name: name.into(),
+        added_at: now(),
+    };
+    let archive_root = root.join("shared-sessions");
+    (root, project, source, archive_root)
+}
+
+pub(crate) fn handoff_with(
+    project: &Project,
+    source: &CliSession,
+    target: &str,
+    note: &str,
+    launch: &HandoffLaunchSettings,
+    archive_root: &Path,
+) -> UiResult<ImportedNativeSession> {
+    import_full_cli_history_with_note(
+        project,
+        source,
+        target,
+        note,
+        launch,
+        archive_root,
+        Uuid::new_v4(),
+    )
+}
+
+/// Moves an archive the import wrote back in time, through the manifest the
+/// sweep and the lookup read — not a hand-written one.
+pub(crate) fn age_handoff_archive(snapshot: &Path, last_used_at: u64) {
+    let manifest_path = snapshot.parent().unwrap().join(HANDOFF_MANIFEST_FILE_NAME);
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["created_at"] = serde_json::json!(last_used_at);
+    manifest["last_used_at"] = serde_json::json!(last_used_at);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+}
+
+pub(crate) fn handoff_manifest(snapshot: &Path) -> serde_json::Value {
+    let manifest_path = snapshot.parent().unwrap().join(HANDOFF_MANIFEST_FILE_NAME);
+    serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap()
+}
+
+pub(crate) fn archive_entries(archive_root: &Path) -> usize {
+    fs::read_dir(archive_root).map_or(0, |entries| entries.count())
+}
+
+#[test]
+pub(crate) fn handoff_launch_settings_round_trip_and_drop_what_the_gate_refuses() {
+    let root = std::env::temp_dir().join(format!("operon-handoff-settings-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let data_file = root.join("store.json");
+    let mut settings = RecentAgentSettings::default();
+    settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+    );
+    // A model the launch gate refuses, and an effort only Codex lists.
+    settings.handoff.insert(
+        "claude".into(),
+        HandoffLaunchSettings {
+            model: "sonnet; rm -rf ~".into(),
+            effort: "minimal".into(),
+        },
+    );
+    settings.handoff.insert(
+        "gemini".into(),
+        HandoffLaunchSettings {
+            model: "x".repeat(MAX_FIELD_STRING_LEN + 1),
+            effort: "high".into(),
+        },
+    );
+    settings.handoff.insert(
+        "custom".into(),
+        HandoffLaunchSettings {
+            model: "anything".into(),
+            effort: String::new(),
+        },
+    );
+    save_recent_agent_settings(&data_file, &settings).unwrap();
+
+    let loaded = load_recent_agent_settings(&data_file);
+    assert_eq!(
+        loaded.handoff.get("codex"),
+        Some(&HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        })
+    );
+    assert_eq!(
+        loaded.handoff.get("claude"),
+        Some(&HandoffLaunchSettings::default())
+    );
+    assert_eq!(
+        loaded.handoff.get("gemini"),
+        Some(&HandoffLaunchSettings {
+            model: String::new(),
+            effort: "high".into(),
+        })
+    );
+    assert!(!loaded.handoff.contains_key("custom"));
+
+    // A file written before the field existed.
+    fs::write(recent_agent_settings_path(&data_file), r#"{"agents":{}}"#).unwrap();
+    assert!(load_recent_agent_settings(&data_file).handoff.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_handoff_starts_its_destination_on_the_chosen_model_and_effort() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-launch");
+    let codex = handoff_with(
+        &project,
+        &source,
+        "codex",
+        "",
+        &HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(
+        codex.agent_command,
+        "codex --model gpt-5-mini -c model_reasoning_effort=low"
+    );
+
+    let claude_id = Uuid::new_v4();
+    let claude = import_full_cli_history_with_note(
+        &project,
+        &source,
+        "claude",
+        "",
+        &HandoffLaunchSettings {
+            model: "sonnet".into(),
+            effort: "high".into(),
+        },
+        &archive_root,
+        claude_id,
+    )
+    .unwrap();
+    assert_eq!(
+        claude.agent_command,
+        format!("claude --model sonnet --effort high --session-id {claude_id}")
+    );
+    assert_eq!(claude.native_session_id, Some(claude_id.to_string()));
+    // The options travel with a later resume of the destination.
+    let resumed = resume_command_with_launch_options(
+        CliProvider::Claude,
+        "claude",
+        &claude.agent_command,
+        &claude_id.to_string(),
+    );
+    assert!(resumed.contains("--model sonnet"), "{resumed}");
+    assert!(resumed.contains("--effort high"), "{resumed}");
+
+    let antigravity = handoff_with(
+        &project,
+        &source,
+        "gemini",
+        "",
+        &HandoffLaunchSettings::default(),
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(antigravity.agent_command, ANTIGRAVITY_COMMAND);
+
+    // Refused before anything is copied.
+    let untouched = root.join("untouched");
+    for refused in [
+        HandoffLaunchSettings {
+            model: "gpt;rm".into(),
+            effort: String::new(),
+        },
+        HandoffLaunchSettings {
+            model: String::new(),
+            effort: "turbo".into(),
+        },
+    ] {
+        assert!(handoff_with(&project, &source, "codex", "", &refused, &untouched).is_err());
+    }
+    assert!(!untouched.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_handoff_from_the_app_records_the_destination_model_in_the_session() {
+    let (root, _, source, _) = handoff_fixture("handoff-app");
+    // A project path that does not exist stops the launcher before any CLI.
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.join("missing-project"),
+        name: "handoff-app".into(),
+        added_at: now(),
+    };
+    let data_file = root.join("store.json");
+    let mut app = test_app(data_file.clone());
+    app.store.projects.push(project.clone());
+    app.tools.tmux = true;
+    app.tools.codex = true;
+
+    app.recent_agent_settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt;rm".into(),
+            effort: String::new(),
+        },
+    );
+    app.handoff_cli_session(&project, &source, "codex");
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("エージェントの起動オプションが不正です。"))
+    );
+    assert!(!app
+        .background_tasks
+        .iter()
+        .any(|key| matches!(key, BackgroundKey::FullHistoryImport(_))));
+    assert_eq!(
+        archive_entries(&shared_session_archive_directory(&data_file)),
+        0
+    );
+
+    app.recent_agent_settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+    );
+    app.handoff_cli_session(&project, &source, "codex");
+    let import = app
+        .background_tasks
+        .iter()
+        .find(|key| matches!(key, BackgroundKey::FullHistoryImport(_)))
+        .cloned()
+        .expect("a valid handoff starts its import");
+    wait_for_background_task(&mut app, &import, Duration::from_secs(15));
+
+    let persisted = load_store(&data_file).unwrap();
+    let session = persisted
+        .sessions
+        .iter()
+        .find(|session| session.agent == "codex")
+        .expect("the handoff records its destination session");
+    assert_eq!(
+        session.agent_command,
+        "codex --model gpt-5-mini -c model_reasoning_effort=low"
+    );
+    // The options are on disk, so the next launch of the app offers them.
+    assert_eq!(
+        load_recent_agent_settings(&data_file).handoff.get("codex"),
+        app.recent_agent_settings.handoff.get("codex")
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(session.id),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn an_unchanged_conversation_handed_off_again_reuses_its_snapshot_and_note() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-reuse");
+    let launch = HandoffLaunchSettings::default();
+    let mistaken = handoff_with(
+        &project,
+        &source,
+        "claude",
+        "Focus on src/history.rs",
+        &launch,
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(mistaken.reused_bundle_created_at, None);
+    let created_at = handoff_manifest(&mistaken.archive_path)["created_at"]
+        .as_u64()
+        .unwrap();
+
+    // The note field was cleared by the first attempt.
+    let intended = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(intended.archive_path, mistaken.archive_path);
+    assert_eq!(intended.reused_bundle_created_at, Some(created_at));
+    assert_eq!(archive_entries(&archive_root), 1);
+    assert!(intended.handoff_bundle.contains("Focus on src/history.rs"));
+    assert!(intended
+        .handoff_bundle
+        .contains(&format!("Destination CLI: {}", CliProvider::Codex.label())));
+    assert!(intended
+        .handoff_bundle
+        .contains("assistant reply from claude"));
+    assert_eq!(
+        fs::read_to_string(&intended.native_session_path).unwrap(),
+        intended.handoff_bundle
+    );
+    let manifest = handoff_manifest(&intended.archive_path);
+    assert_eq!(manifest["created_at"], created_at);
+    assert!(manifest["last_used_at"].as_u64().unwrap() >= created_at);
+    assert_eq!(manifest["destination_provider"], CliProvider::Codex.label());
+
+    // A note typed for the next attempt replaces the earlier one.
+    let renoted = handoff_with(
+        &project,
+        &source,
+        "gemini",
+        "Run the tests first",
+        &launch,
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(renoted.archive_path, mistaken.archive_path);
+    assert!(renoted.handoff_bundle.contains("Run the tests first"));
+    assert!(!renoted.handoff_bundle.contains("Focus on src/history.rs"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_reuse_whose_snapshot_is_gone_takes_a_fresh_one() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-gone");
+    let launch = HandoffLaunchSettings::default();
+    let first = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    fs::remove_file(&first.archive_path).unwrap();
+
+    let second = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(second.reused_bundle_created_at, None);
+    assert_ne!(second.archive_path, first.archive_path);
+    assert!(second.archive_path.is_file());
+
+    // A snapshot that reads to nothing it could carry is no better.
+    fs::write(&second.archive_path, "").unwrap();
+    let third = handoff_with(&project, &source, "gemini", "", &launch, &archive_root).unwrap();
+    assert_eq!(third.reused_bundle_created_at, None);
+    assert_ne!(third.archive_path, second.archive_path);
+    assert!(third.handoff_bundle.contains("initial request from claude"));
+
+    // A snapshot replaced by a link is not followed out of the archive.
+    fs::remove_file(&third.archive_path).unwrap();
+    std::os::unix::fs::symlink(&source.path, &third.archive_path).unwrap();
+    let fourth = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    assert_eq!(fourth.reused_bundle_created_at, None);
+    assert_ne!(fourth.archive_path, third.archive_path);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_conversation_that_moved_on_is_snapshotted_again() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-moved");
+    let launch = HandoffLaunchSettings::default();
+    let first = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    let mut transcript = OpenOptions::new().append(true).open(&source.path).unwrap();
+    writeln!(
+        transcript,
+        r#"{{"type":"user","message":{{"content":"a later request"}}}}"#
+    )
+    .unwrap();
+    drop(transcript);
+
+    let second = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(second.reused_bundle_created_at, None);
+    assert_ne!(second.archive_path, first.archive_path);
+    assert!(second.handoff_bundle.contains("a later request"));
+    assert!(!first.handoff_bundle.contains("a later request"));
+    assert_eq!(archive_entries(&archive_root), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn handoff_archives_unused_for_the_ttl_are_deleted_and_nothing_else_is() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-sweep");
+    let launch = HandoffLaunchSettings::default();
+    let now = now();
+    let expired = handoff_with(&project, &source, "claude", "", &launch, &archive_root)
+        .unwrap()
+        .archive_path;
+    // Each later handoff needs its own conversation, or it would reuse.
+    let (_, _, second_source, _) = handoff_fixture("handoff-sweep-second");
+    let nearly = handoff_with(
+        &project,
+        &second_source,
+        "claude",
+        "",
+        &launch,
+        &archive_root,
+    )
+    .unwrap()
+    .archive_path;
+    let (_, _, third_source, _) = handoff_fixture("handoff-sweep-third");
+    let fresh = handoff_with(
+        &project,
+        &third_source,
+        "claude",
+        "",
+        &launch,
+        &archive_root,
+    )
+    .unwrap()
+    .archive_path;
+    // Aged after the handoffs: each of them sweeps before it looks for reuse.
+    age_handoff_archive(&expired, now - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+    age_handoff_archive(&nearly, now - HANDOFF_ARCHIVE_TTL_SECONDS + 60);
+
+    let ancient = serde_json::json!({
+        "restore": HANDOFF_ARCHIVE_RESTORE_KIND,
+        "created_at": 0,
+        "last_used_at": 0,
+    });
+    // The earlier full-history restore wrote a different restore kind.
+    let full_history = archive_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&full_history).unwrap();
+    fs::write(
+        full_history.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 4,
+            "restore": "full conversation history",
+            "created_at": 0,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let without_manifest = archive_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&without_manifest).unwrap();
+    let oversized = archive_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&oversized).unwrap();
+    let mut padded = ancient.clone();
+    padded["padding"] = serde_json::json!("x".repeat(HANDOFF_MANIFEST_MAX_BYTES as usize));
+    fs::write(
+        oversized.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&padded).unwrap(),
+    )
+    .unwrap();
+    let not_a_uuid = archive_root.join("notes");
+    fs::create_dir_all(&not_a_uuid).unwrap();
+    fs::write(
+        not_a_uuid.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&ancient).unwrap(),
+    )
+    .unwrap();
+    let outside = root.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        outside.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&ancient).unwrap(),
+    )
+    .unwrap();
+    let link = archive_root.join(Uuid::new_v4().to_string());
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+    assert_eq!(sweep_expired_handoff_archives(&archive_root, now), 1);
+    assert!(!expired.parent().unwrap().exists());
+    assert!(nearly.is_file());
+    assert!(fresh.is_file());
+    assert!(full_history.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    assert!(without_manifest.is_dir());
+    assert!(oversized.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    assert!(not_a_uuid.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    assert!(fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(outside.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    // Nothing left to remove.
+    assert_eq!(sweep_expired_handoff_archives(&archive_root, now), 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn an_expired_archive_is_swept_rather_than_reused() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-expired");
+    let launch = HandoffLaunchSettings::default();
+    let first = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    age_handoff_archive(&first.archive_path, now() - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+
+    let second = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(second.reused_bundle_created_at, None);
+    assert_ne!(second.archive_path, first.archive_path);
+    assert!(!first.archive_path.parent().unwrap().exists());
+    assert_eq!(archive_entries(&archive_root), 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_app_sweeps_expired_handoff_archives_once_at_startup() {
+    let (root, project, source, _) = handoff_fixture("handoff-startup");
+    let data_file = root.join("store.json");
+    let archive_root = shared_session_archive_directory(&data_file);
+    let launch = HandoffLaunchSettings::default();
+    let expired = handoff_with(&project, &source, "claude", "", &launch, &archive_root)
+        .unwrap()
+        .archive_path;
+    age_handoff_archive(&expired, now() - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+
+    let mut app = test_app(data_file);
+    app.ensure_handoff_archive_sweep_started();
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::HandoffArchiveSweep,
+        Duration::from_secs(15),
+    );
+    assert!(!expired.parent().unwrap().exists());
+
+    let (_, _, later_source, _) = handoff_fixture("handoff-startup-later");
+    let later = handoff_with(
+        &project,
+        &later_source,
+        "claude",
+        "",
+        &launch,
+        &archive_root,
+    )
+    .unwrap()
+    .archive_path;
+    age_handoff_archive(&later, now() - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+    app.ensure_handoff_archive_sweep_started();
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::HandoffArchiveSweep));
+    assert!(later.is_file());
+
+    // And the frame is what starts it.
+    let app_source = include_str!("app.rs");
+    let update = app_source
+        .split("fn update(&mut self, ctx: &egui::Context")
+        .nth(1)
+        .unwrap();
+    let update = &update[..update.find("\n    }\n").unwrap()];
+    assert!(update.contains("self.ensure_handoff_archive_sweep_started();"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn finish_full_history_import_says_when_a_bundle_was_reused() {
+    let root = std::env::temp_dir().join(format!("operon-handoff-notice-{}", Uuid::new_v4()));
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.join("missing-project"),
+        name: "handoff-notice".into(),
+        added_at: now(),
+    };
+    let source = CliSession {
+        provider: CliProvider::Claude,
+        native_id: "11111111-1111-1111-1111-111111111111".into(),
+        id: "11111111-1111-1111-1111-111111111111".into(),
+        title: Some("Claude task".into()),
+        last_user_message: Some("Check handoff".into()),
+        branch: None,
+        updated_at: now(),
+        path: root.join("source.jsonl"),
+    };
+    let created_at = now() - 180;
+    let imported = |reused_bundle_created_at| ImportedNativeSession {
+        managed_session_id: Uuid::new_v4(),
+        provider: CliProvider::Codex,
+        native_session_id: None,
+        native_session_path: root.join(HANDOFF_BUNDLE_FILE_NAME),
+        archive_path: root.join(SHARED_SESSION_SNAPSHOT_FILE_NAME),
+        imported_records: 2,
+        classification: RestoreClassification::default(),
+        agent_command: "codex".into(),
+        handoff_bundle:
+            "Continue this coding task in a new CLI session.\n\nTask to continue:\nCheck handoff\n"
+                .into(),
+        reused_bundle_created_at,
+    };
+    let mut app = test_app(root.join("store.json"));
+    app.store.projects.push(project.clone());
+
+    let reused = imported(Some(created_at));
+    let reused_id = reused.managed_session_id;
+    app.finish_full_history_import(&project, &source, "codex", "", reused);
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "{source} の会話 {source_conversation} の Handoff バンドル（作成: {created}）を再利用し、{destination} の新規セッションを起動しています…{breakdown}",
+            source = CliProvider::Claude.label(),
+            source_conversation = source.native_id,
+            created = relative_time(created_at),
+            destination = CliProvider::Codex.label(),
+            breakdown = restore_classification_notice(&RestoreClassification::default()),
+        ))
+    );
+
+    let fresh = imported(None);
+    let fresh_id = fresh.managed_session_id;
+    app.finish_full_history_import(&project, &source, "codex", "", fresh);
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "{source} の会話 {source_conversation} から Handoff バンドル（直近 {records} ターン）を作成し、{destination} の新規セッションを起動しています…{breakdown}",
+            source = CliProvider::Claude.label(),
+            source_conversation = source.native_id,
+            records = 2,
+            destination = CliProvider::Codex.label(),
+            breakdown = restore_classification_notice(&RestoreClassification::default()),
+        ))
+    );
+    for id in [reused_id, fresh_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_session_menu_names_the_handoff_model_and_effort() {
+    let codex = agent_choice_copy("codex").0;
+    let plain = tf!("{p0} へ Handoff", p0 = codex);
+    assert_eq!(handoff_menu_label("codex", None), plain);
+    assert_eq!(
+        handoff_menu_label("codex", Some(&HandoffLaunchSettings::default())),
+        plain
+    );
+    let labelled = |launch: &str| tf!("{p0} へ Handoff（{launch}）", p0 = codex, launch = launch);
+    assert_eq!(
+        handoff_menu_label(
+            "codex",
+            Some(&HandoffLaunchSettings {
+                model: "gpt-5-mini".into(),
+                effort: "low".into(),
+            })
+        ),
+        labelled("gpt-5-mini · low")
+    );
+    assert_eq!(
+        handoff_menu_label(
+            "codex",
+            Some(&HandoffLaunchSettings {
+                model: String::new(),
+                effort: "low".into(),
+            })
+        ),
+        labelled("low")
+    );
+    assert_eq!(
+        handoff_menu_label(
+            "codex",
+            Some(&HandoffLaunchSettings {
+                model: "gpt-5-mini".into(),
+                effort: String::new(),
+            })
+        ),
+        labelled("gpt-5-mini")
+    );
 }
 
 #[test]
@@ -44171,6 +44855,69 @@ pub(crate) fn cli_restore_is_in_history_not_in_the_overview() {
     assert!(
         compact.contains("self.ui_history_cli_section(&mutcenter);self.ui_sessions(&mutcenter);"),
         "the library draws the CLI section"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 180: the history card draws the destination's model and effort
+/// under its picker, inside the 880px column, and shows that destination's
+/// own saved options rather than a shared field.
+#[test]
+pub(crate) fn the_history_card_offers_the_destination_model_and_effort() {
+    let (mut app, project, root) = launch_screen_fixture("handoff-card");
+    let native_id = Uuid::new_v4().to_string();
+    app.cli_sessions.insert(
+        project.id,
+        vec![CliSession {
+            provider: CliProvider::Claude,
+            native_id: native_id.clone(),
+            id: native_id,
+            title: Some("Claude source".into()),
+            last_user_message: Some("initial request from claude".into()),
+            branch: None,
+            updated_at: now(),
+            path: root.join("source.jsonl"),
+        }],
+    );
+    app.recent_agent_settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+    );
+    let width = 880.0;
+    let context = egui::Context::default();
+    let mut draw = || {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_cli_sessions(ui, &project));
+            },
+        )
+    };
+    let _ = draw();
+    let drawn = draw();
+    let target = drawn_text_rect(&drawn, |text| text == tr("復元先")).expect("the picker row");
+    let model =
+        drawn_text_rect(&drawn, |text| text == tr("モデル（任意）")).expect("the model label");
+    let effort =
+        drawn_text_rect(&drawn, |text| text == tr("推論の深さ")).expect("the effort label");
+    assert!(
+        model.min.y > target.max.y,
+        "the options sit under the picker"
+    );
+    assert!(drawn_text_rect(&drawn, |text| text == "gpt-5-mini").is_some());
+    let chosen = drawn_text_rect(&drawn, |text| text == "low").expect("the chosen effort");
+    assert!(
+        chosen.max.x <= width && effort.max.x <= width,
+        "inside the column"
     );
     fs::remove_dir_all(&root).ok();
 }

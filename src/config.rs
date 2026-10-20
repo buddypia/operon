@@ -42,6 +42,24 @@ pub(crate) const HANDOFF_BUNDLE_MAX_TURNS: usize = 8;
 pub(crate) const HANDOFF_BUNDLE_TURN_MAX_CHARS: usize = 1_200;
 pub(crate) const HANDOFF_BUNDLE_MAX_BYTES: usize = 6_000;
 pub(crate) const HANDOFF_BUNDLE_FILE_NAME: &str = "handoff-bundle.md";
+/// The files a handoff archive holds besides its bundle, and the restore kind
+/// its manifest names. The import writes them; the reuse lookup and the expiry
+/// sweep recognise an archive by them (change 180), so each is spelled once.
+pub(crate) const SHARED_SESSION_SNAPSHOT_FILE_NAME: &str = "source.jsonl";
+pub(crate) const HANDOFF_MANIFEST_FILE_NAME: &str = "manifest.json";
+pub(crate) const HANDOFF_ARCHIVE_RESTORE_KIND: &str = "compact handoff bundle";
+/// Version 6 added the source fingerprint, the note, and `last_used_at`, which
+/// is what makes an archive reusable. A version-5 manifest is never reused.
+pub(crate) const HANDOFF_MANIFEST_SCHEMA_VERSION: u64 = 6;
+/// A handoff archive is deleted once this long has passed since a handoff last
+/// used it. Its bundle names the snapshot, so a continuation can still open the
+/// whole transcript for this long after it starts.
+pub(crate) const HANDOFF_ARCHIVE_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
+/// One sweep or reuse lookup inspects at most this many entries under the
+/// archive root, and reads each manifest within this many bytes. An entry past
+/// either is neither reused nor deleted by that pass.
+pub(crate) const HANDOFF_ARCHIVE_SCAN_MAX_ENTRIES: usize = 4_096;
+pub(crate) const HANDOFF_MANIFEST_MAX_BYTES: u64 = 256 * 1024;
 /// Bumped to 5 when `SessionStatus::Lost` joined the vocabulary a saved session
 /// can carry. A build that predates it cannot read a record holding one, and the
 /// guard in `parse_store_contents` is what says so rather than letting an older

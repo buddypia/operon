@@ -93,6 +93,8 @@ pub(crate) enum BackgroundKey {
     KnowledgeSessionSearch,
     ModelDownload,
     ModelReadiness,
+    /// Deleting handoff archives past their expiry, once per launch (change 180).
+    HandoffArchiveSweep,
 }
 
 #[derive(Debug)]
@@ -210,6 +212,7 @@ pub(crate) enum BackgroundResult {
         result: UiResult<()>,
     },
     FullHistoryImported(Box<FullHistoryImportResult>),
+    HandoffArchivesSwept,
     NativeSessionResolved {
         session_id: Uuid,
         result: UiResult<CliSession>,
@@ -578,6 +581,7 @@ pub(crate) struct OperonApp {
     pub(crate) hook_installs: Vec<HookInstall>,
     pub(crate) hooks_enabled: bool,
     pub(crate) hooks_started: bool,
+    pub(crate) handoff_archive_sweep_started: bool,
     /// Sessions that said something while nobody was reading them. In memory:
     /// persisting it would put a field on the store, which
     /// `docs/sdlc/risk.yaml` holds at `paused`, and a restart already
@@ -1013,6 +1017,7 @@ impl OperonApp {
             hook_installs: Vec::new(),
             hooks_enabled,
             hooks_started: false,
+            handoff_archive_sweep_started: false,
             unread_sessions: HashSet::new(),
             pending_setup: None,
             setup_sessions: HashSet::new(),
@@ -1756,6 +1761,10 @@ impl OperonApp {
                             self.notice = Some(tf!("会話全履歴を復元できませんでした。元の CLI セッションは変更されていません: {error}", error = error));
                         }
                     }
+                }
+                BackgroundResult::HandoffArchivesSwept => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::HandoffArchiveSweep);
                 }
                 BackgroundResult::NativeSessionResolved { session_id, result } => {
                     self.background_tasks
@@ -3328,6 +3337,21 @@ impl OperonApp {
             self.bind_hook_listener(ctx);
         }
         self.request_hook_apply(self.hooks_enabled);
+    }
+
+    /// Deletes handoff archives past their expiry once per launch, off the UI
+    /// thread: it walks the archive directory. Every handoff sweeps again
+    /// before it looks for an archive to reuse.
+    pub(crate) fn ensure_handoff_archive_sweep_started(&mut self) {
+        if self.handoff_archive_sweep_started {
+            return;
+        }
+        self.handoff_archive_sweep_started = true;
+        let archive_root = shared_session_archive_directory(&self.data_file);
+        self.spawn_background(BackgroundKey::HandoffArchiveSweep, move || {
+            sweep_expired_handoff_archives(&archive_root, now());
+            BackgroundResult::HandoffArchivesSwept
+        });
     }
 
     pub(crate) fn bind_hook_listener(&mut self, ctx: &egui::Context) {
@@ -4909,6 +4933,26 @@ impl OperonApp {
             );
             return;
         };
+        // The same options whichever entry point the handoff came from: the
+        // session menu ends here too. Refused before anything is copied.
+        let launch = self
+            .recent_agent_settings
+            .handoff
+            .get(target)
+            .cloned()
+            .unwrap_or_default();
+        if let Err(error) = build_agent_launch_command(
+            target,
+            "",
+            launch.model.trim(),
+            "",
+            launch.effort.trim(),
+            &[],
+            "",
+        ) {
+            self.notice = Some(error);
+            return;
+        }
         if self.worktree_mutation_running(project.id) {
             self.notice = Some(tr("worktree 操作の完了を待ってください。").into());
             return;
@@ -4922,6 +4966,7 @@ impl OperonApp {
             ));
             return;
         }
+        self.persist_handoff_launch_settings();
         let import_id = Uuid::new_v4();
         let note = self.handoff_note_input.trim().to_owned();
         let source_provider = source.provider;
@@ -4948,6 +4993,7 @@ impl OperonApp {
                     &source,
                     &target,
                     &note,
+                    &launch,
                     &archive_root,
                     import_id,
                 ),
@@ -5036,15 +5082,34 @@ impl OperonApp {
             return;
         }
         self.handoff_note_input.clear();
-        self.notice = Some(tf!(
-            "{source} の会話 {source_conversation} から Handoff バンドル（直近 {records} ターン）を作成し、{destination} の新規セッションを起動しています…{breakdown}",
-            source = source.provider.label(),
-            source_conversation = source.native_id,
-            records = imported.imported_records,
-            destination = imported.provider.label(),
-            breakdown = restore_classification_notice(&imported.classification),
-        ));
+        let handoff_notice = match imported.reused_bundle_created_at {
+            Some(created_at) => tf!(
+                "{source} の会話 {source_conversation} の Handoff バンドル（作成: {created}）を再利用し、{destination} の新規セッションを起動しています…{breakdown}",
+                source = source.provider.label(),
+                source_conversation = source.native_id,
+                created = relative_time(created_at),
+                destination = imported.provider.label(),
+                breakdown = restore_classification_notice(&imported.classification),
+            ),
+            None => tf!(
+                "{source} の会話 {source_conversation} から Handoff バンドル（直近 {records} ターン）を作成し、{destination} の新規セッションを起動しています…{breakdown}",
+                source = source.provider.label(),
+                source_conversation = source.native_id,
+                records = imported.imported_records,
+                destination = imported.provider.label(),
+                breakdown = restore_classification_notice(&imported.classification),
+            ),
+        };
         self.start_session(id);
+        // `start_session` leaves a generic "starting" notice once the launch is
+        // under way, which hid what the handoff did (change 180). A refusal it
+        // made before launching is not under way, and stays.
+        if self
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id))
+        {
+            self.notice = Some(handoff_notice);
+        }
     }
 
     /// Restores a managed Codex or Claude session into another CLI without
@@ -6361,6 +6426,7 @@ impl eframe::App for OperonApp {
         self.apply_appearance(ctx);
         let palette = self.store.theme.palette();
         self.ensure_hooks_started(ctx);
+        self.ensure_handoff_archive_sweep_started();
         self.drain_hook_events();
         self.persist_diff_comments();
         self.request_port_scan();
