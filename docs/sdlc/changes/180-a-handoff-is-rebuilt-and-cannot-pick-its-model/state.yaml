@@ -40,18 +40,18 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "medium"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write spec.md and screen.md from the committed intent, then run the readiness gate."
+resume: "Build plan.md step by step from step 1, watching each named test fail before its code."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -74,6 +74,9 @@ contract:
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine pending touches src/history.rs, src/cli.rs, src/agents/settings.rs, src/app.rs, src/app/screens.rs, src/config.rs, src/i18n_tables.rs; package /Applications/Operon.app from main after merge"
   guards-verified-by-mutation: "human pending each new guard watched failing"
+  named-tests: "machine pending cargo test --locked for the eleven tests spec.md Acceptance names"
+  live-restore: "machine pending cargo test --locked -- --ignored, since the shared-session archive moved"
+  screen-observed: "human pending the history card, session menu, and reuse notice compared with screen.md in the running app"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

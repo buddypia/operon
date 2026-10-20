@@ -1,6 +1,6 @@
 # Intent: A handoff cannot choose the model it starts, and a mistaken one has to be built again
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-20
 
 ## Problem
