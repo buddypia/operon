@@ -2,7 +2,7 @@
 
 - **Spec**: none — route `bugfix`; the cause below is the intent
 - **Approved**: 2026-10-21
-- **Status**: approved
+- **Status**: done
 
 ## The cause
 

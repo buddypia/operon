@@ -594,7 +594,13 @@ pub(crate) fn session_display_name(name: &str) -> String {
 }
 
 pub(crate) fn session_display_goal(goal: &str) -> String {
-    original_task_from_session_goal(goal)
+    let task = original_task_from_session_goal(goal);
+    // The handoff marks its cuts for the session that reads the bundle; the
+    // person reading the name sees the ellipsis a cut always showed them.
+    match task.strip_suffix(HANDOFF_SHORTENED_MARKER) {
+        Some(kept) => format!("{}…", kept.trim_end()),
+        None => task,
+    }
 }
 
 /// A record written before titles carried the work names the mechanism that

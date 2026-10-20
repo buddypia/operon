@@ -11,8 +11,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -20,21 +20,32 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Commit plan.md, then make build_compact_handoff_bundle keep the
-  note whole and mark every cut with HANDOFF_SHORTENED_MARKER."
+resume: "Done once landed and shipped: two reviewer findings carried in
+  review.yaml for a follow-up, the byte fallback cutting through an old
+  marker among them."
 
 contract:
+  live-restore: "machine passed cargo test --locked -- --ignored: 6 of 6"
   failing-test-first: "machine passed a_long_handoff_keeps_the_persons_instruction_whole
     failed on main's builder (the person's handoff instructions were cut) and
     a_handoff_says_where_operon_shortened_the_text on the bare ellipsis (a
     shortened turn does not say Operon shortened it)"
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) clean; cargo test --locked handoff 15 ok; the suite
+    runs in CI on the push"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here (warn:
+    recorded, no action)"
   release-binary: "machine pending yes: src/history.rs and src/config.rs make
     /Applications/Operon.app stale; ends with bash scripts/package-macos.sh and
     the ship skill's swap"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  review: "human pending the reviewers check-review.sh names for the diff"
+  guards-verified-by-mutation: "human passed 7 of 7 caught by mutations.py in
+    this directory: the end-cut put back, the bare ellipsis, the byte overrun,
+    the last turn dropped, the task shortened before the excerpt, a second cut
+    through an earlier marker, and the marker shown in the session name; tree
+    restored"
+  review: "human passed round 2 at 3c512ce505fc05eb: rust-reviewer and
+    subprocess-safety-reviewer approve-with-nits 0 1 each, two nits carried"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
