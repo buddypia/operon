@@ -1,0 +1,4 @@
+2026-10-20T09:16:17Z auto intent intent.md 0ffa0312ee23f1b7 approve Restates the person's quoted request: per-destination handoff model and effort, reuse of an unchanged conversation's bundle and note, and seven-day expiry of compact handoff archives only
+2026-10-20T09:48:04Z auto spec spec.md d8579e295bab0a34 approve Every intent outcome is a numbered requirement with a test; deletion confined to expired compact archives under the root; gone-snapshot fallback added in round 2; no store shape change
+2026-10-20T09:48:04Z auto screen screen.md 01c7b585600265ae approve One added row of existing launch-sheet controls inside the history card, a menu-label suffix, and one notice sentence, all in existing palette roles; states match spec Behaviour
+2026-10-20T09:48:04Z auto plan plan.md e64ab75db1d26405 approve Covers all eleven tests and every file in the spec's Design in a compiling order, with mutations per guard; touches no paused risk surface

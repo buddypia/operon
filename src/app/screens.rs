@@ -1450,6 +1450,93 @@ impl OperonApp {
         }
     }
 
+    /// Saves the handoff options as they stand. Unlike
+    /// `persist_recent_agent_settings` it records nothing from the launch
+    /// sheet: a handoff is not a launch, and the sheet may be half filled in.
+    pub(crate) fn persist_handoff_launch_settings(&self) {
+        if let Err(error) = save_recent_agent_settings(&self.data_file, &self.recent_agent_settings)
+        {
+            eprintln!("Operon: failed to save recent agent settings: {error}");
+        }
+    }
+
+    /// The model and reasoning depth the card's chosen destination starts with
+    /// (change 180). Keyed by destination rather than by card: every card handing
+    /// off to Codex CLI uses Codex CLI's options, and so does the session menu.
+    pub(crate) fn ui_handoff_launch_options(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        card_id: &str,
+        target: &str,
+    ) {
+        let efforts = agent_effort_options(target);
+        // Inserted once per destination, so a frame after the first allocates
+        // nothing here.
+        if !self.recent_agent_settings.handoff.contains_key(target) {
+            self.recent_agent_settings
+                .handoff
+                .insert(target.to_owned(), HandoffLaunchSettings::default());
+        }
+        let Some(launch) = self.recent_agent_settings.handoff.get_mut(target) else {
+            return;
+        };
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(tr("モデル（任意）"))
+                    .size(12.0)
+                    .color(palette.text_muted),
+            );
+            let response = ui
+                .add(
+                    egui::TextEdit::singleline(&mut launch.model)
+                        .char_limit(MAX_FIELD_STRING_LEN)
+                        .hint_text(tr("既定のモデルを使う"))
+                        .desired_width(170.0),
+                )
+                .on_hover_ui(|ui| {
+                    let name = agent_choice_copy(target).0;
+                    ui.label(tf!(
+                        "{p0} への Handoff で使うモデル。空欄なら {p0} の既定のモデルです。",
+                        p0 = name
+                    ));
+                });
+            changed |= response.lost_focus();
+            if !efforts.is_empty() {
+                ui.label(
+                    RichText::new(tr("推論の深さ"))
+                        .size(12.0)
+                        .color(palette.text_muted),
+                );
+                egui::ComboBox::from_id_salt(("handoff-effort", card_id))
+                    .selected_text(if launch.effort.is_empty() {
+                        tr("既定（CLI に任せる）")
+                    } else {
+                        &launch.effort
+                    })
+                    .width(200.0)
+                    .show_ui(ui, |ui| {
+                        changed |= ui
+                            .selectable_value(
+                                &mut launch.effort,
+                                String::new(),
+                                tr("既定（CLI に任せる）"),
+                            )
+                            .changed();
+                        for effort in efforts {
+                            changed |= ui
+                                .selectable_value(&mut launch.effort, (*effort).to_owned(), *effort)
+                                .changed();
+                        }
+                    });
+            }
+        });
+        if changed {
+            self.persist_handoff_launch_settings();
+        }
+    }
+
     pub(crate) fn apply_agent_launch_settings(&mut self, agent: &str) {
         if let Some(settings) = self.recent_agent_settings.agents.get(agent).cloned() {
             self.agent_model_input = settings.model;
@@ -2713,7 +2800,7 @@ impl OperonApp {
                                 .color(palette.text),
                         );
                     }
-                    ui.horizontal(|ui| {
+                    let target = ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(tr("復元先"))
                                 .size(12.0)
@@ -2764,9 +2851,12 @@ impl OperonApp {
                         {
                             self.handoff_cli_session(project, &cli_session, &target);
                         }
-                        self.handoff_target_inputs
-                            .insert(cli_session.id.clone(), target);
-                    });
+                        target
+                    })
+                    .inner;
+                    self.ui_handoff_launch_options(ui, palette, &cli_session.id, &target);
+                    self.handoff_target_inputs
+                        .insert(cli_session.id.clone(), target);
                 });
                 ui.add_space(4.0);
             }
@@ -5268,7 +5358,7 @@ impl OperonApp {
     pub(crate) fn ui_terminal_session_tabs(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         let mut projects = self.store.projects.clone();
-        projects.sort_by_key(|project| project.name.to_lowercase());
+        sort_column_projects(&mut projects, &self.session_arrangement);
         let sessions = self.store.sessions.clone();
         // One pass over the sessions for all four numbers. `status_view` would
         // have built two `String`s per session to tell us the same thing, in a
@@ -5358,10 +5448,51 @@ impl OperonApp {
         // The queue is drawn first unless the chips leave 要対応 out, and a
         // session drawn there is not drawn again in its project.
         let pinning = !filtering || self.status_filter[SessionStatusGroup::NeedsYou.index()];
+        // A move inside the column ends as a dock move does: Escape, or a
+        // release the window never saw because focus left mid-drag.
+        if self.column_drag.is_some() {
+            let (escaped, lost) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::Escape),
+                    !i.pointer.primary_down() && !i.pointer.primary_released(),
+                )
+            });
+            if escaped || lost {
+                self.column_drag = None;
+            }
+        }
+        let column_drag = self.column_drag;
+        let pointer = ui.input(|i| i.pointer.latest_pos());
+        if column_drag.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // Held at the column's top or bottom edge, a drag scrolls it, so
+            // a row can be taken past what is on screen (change 181).
+            let view = ui.clip_rect();
+            if let Some(pointer) = pointer.filter(|pointer| {
+                column_drag.is_some() && view.x_range().contains(pointer.x)
+            }) {
+                let step = if pointer.y < view.top() + COLUMN_DRAG_EDGE {
+                    COLUMN_DRAG_SCROLL_STEP
+                } else if pointer.y > view.bottom() - COLUMN_DRAG_EDGE {
+                    -COLUMN_DRAG_SCROLL_STEP
+                } else {
+                    0.0
+                };
+                if step != 0.0 {
+                    ui.scroll_with_delta_animation(
+                        egui::vec2(0.0, step),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                    // No input arrives while the pointer is held still.
+                    ui.ctx().request_repaint();
+                }
+            }
             if pinning && !self.attention_order.is_empty() {
                 shown += self.ui_pinned_sessions(ui, &sessions);
             }
+            let mut project_targets = ColumnTargets::default();
             for project in projects {
                 // Sessions of this project drawn in the pinned section above:
                 // still the project's, so they count in its header and keep
@@ -5378,7 +5509,7 @@ impl OperonApp {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
-                project_sessions.sort_by_key(|session| Reverse(session.created_at));
+                sort_column_sessions(&mut project_sessions, &self.session_arrangement);
                 shown += project_sessions.len();
                 // A project with nothing to show contributes nothing: not its
                 // name, not its path, not its empty line. Four lines each, and
@@ -5386,10 +5517,16 @@ impl OperonApp {
                 if filtering && project_sessions.is_empty() && pinned_here == 0 {
                     continue;
                 }
+                // The rows a session dragged in this project can land among.
+                let mut session_targets = ColumnTargets::default();
+                let dragging_here = matches!(
+                    column_drag,
+                    Some(ColumnDrag::Session { project: dragged, .. }) if dragged == project.id
+                );
                 // A project and its sessions are one card (change 163). Space
                 // alone did not group them: the gap between two sessions was
                 // the gap between two projects, so the column read as one list.
-                card_frame(palette)
+                let card = card_frame(palette)
                     .inner_margin(egui::Margin::same(SPACE_SM as i8))
                     .show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -5412,19 +5549,30 @@ impl OperonApp {
                             ui.label(RichText::new(ICON_PROJECT).color(palette.accent_text));
                             // The strongest text in its card: the name used to
                             // be drawn smaller than its own sessions' titles.
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(&project.name)
-                                        .size(15.0)
-                                        .strong()
-                                        .color(palette.text_strong),
+                            // It is also the card's grip (change 181).
+                            let name = ui
+                                .add(
+                                    egui::Label::new(
+                                        RichText::new(&project.name)
+                                            .size(15.0)
+                                            .strong()
+                                            .color(palette.text_strong),
+                                    )
+                                    .truncate()
+                                    .selectable(false)
+                                    .sense(egui::Sense::drag()),
                                 )
-                                .truncate(),
-                            )
-                            .on_hover_ui(|ui| {
-                                ui.label(&project.name);
-                                ui.label(project.path.display().to_string());
-                            });
+                                .on_hover_ui(|ui| {
+                                    ui.label(&project.name);
+                                    ui.label(project.path.display().to_string());
+                                    ui.label(tr("ドラッグで並べ替え"));
+                                });
+                            if name.hovered() && column_drag.is_none() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                            }
+                            if name.drag_started() {
+                                self.column_drag = Some(ColumnDrag::Project(project.id));
+                            }
                         });
                     });
                 });
@@ -5436,6 +5584,9 @@ impl OperonApp {
                 let is_importing = self.background_tasks.iter().any(|key| {
                     matches!(key, BackgroundKey::FullHistoryImport(_))
                 });
+                // A copy, because the row menus outlive borrows of `self` that
+                // the rows take mutably. At most one entry per destination.
+                let handoff_launches = self.recent_agent_settings.handoff.clone();
                 for (index, candidate) in project_sessions.into_iter().enumerate() {
                     // A hairline between two sessions, none around them: the
                     // card is the edge of the group.
@@ -5478,9 +5629,9 @@ impl OperonApp {
                             ui.separator();
                             for agent in FULL_HISTORY_RESTORE_TARGETS.iter().copied() {
                                 if agent != candidate.agent.as_str() {
-                                    let button = egui::Button::new(tf!(
-                                        "{p0} へ Handoff",
-                                        p0 = agent_choice_copy(agent).0
+                                    let button = egui::Button::new(handoff_menu_label(
+                                        agent,
+                                        handoff_launches.get(agent),
                                     ));
                                     if ui
                                         .add_enabled(!is_importing, button)
@@ -5518,7 +5669,10 @@ impl OperonApp {
                     let session_card = ui.scope_builder(
                         egui::UiBuilder::new()
                             .id_salt(("terminal-session-card", candidate.id))
-                            .sense(egui::Sense::click()),
+                            // A drag moves the row among its project's
+                            // (change 181); a click still opens it, since
+                            // egui counts a click until the pointer moves.
+                            .sense(egui::Sense::click_and_drag()),
                         |ui| {
                             // A selectable label takes the click for itself:
                             // the row's second line opened nothing on a click
@@ -5738,9 +5892,18 @@ impl OperonApp {
                     } else if self.hovered_session_row == Some(candidate.id) {
                         self.hovered_session_row = None;
                     }
-                    let session_card_response = session_card.response.on_hover_text(
-                        tr("クリックでターミナル表示 · ダブルクリックで名前を変更"),
-                    );
+                    if dragging_here {
+                        session_targets.push(candidate.id, session_card.response.rect);
+                    }
+                    if session_card.response.drag_started() {
+                        self.column_drag = Some(ColumnDrag::Session {
+                            project: project.id,
+                            session: candidate.id,
+                        });
+                    }
+                    let session_card_response = session_card.response.on_hover_text(tr(
+                        "クリックでターミナル表示 · ダブルクリックで名前を変更 · ドラッグで並べ替え",
+                    ));
                     // A double click is easy to miss, and the title it lands on
                     // is small. The same actions are on the card's context menu so
                     // they can be found without knowing the gesture.
@@ -5794,7 +5957,22 @@ impl OperonApp {
                     }
                 }
                     });
+                if let Some(drag) = column_drag.filter(|_| dragging_here) {
+                    // Only over its own card: a session never changes project.
+                    let inside = pointer.filter(|pointer| card.response.rect.contains(*pointer));
+                    let slot = session_targets.slot(drag.moved(), inside);
+                    let span = card.response.rect.shrink(SPACE_SM).x_range();
+                    self.ui_column_drop(ui, drag, &session_targets, slot, span, 2.0 * SPACE_XS + 1.0);
+                }
+                if matches!(column_drag, Some(ColumnDrag::Project(_))) {
+                    project_targets.push(project.id, card.response.rect);
+                }
                 ui.add_space(SPACE_SM);
+            }
+            if let Some(drag) = column_drag.filter(|drag| matches!(drag, ColumnDrag::Project(_))) {
+                let inside = pointer.filter(|pointer| view.contains(*pointer));
+                let slot = project_targets.slot(drag.moved(), inside);
+                self.ui_column_drop(ui, drag, &project_targets, slot, view.x_range(), SPACE_SM);
             }
             if sessions.is_empty() {
                 // A person with no sessions is not being filtered, so this
@@ -5821,6 +5999,10 @@ impl OperonApp {
                 }
             }
         });
+        // Wherever it was released, the drag is over.
+        if self.column_drag.is_some() && ui.input(|i| i.pointer.primary_released()) {
+            self.column_drag = None;
+        }
     }
 
     pub(crate) fn ui_terminal_panel(&mut self, ui: &mut egui::Ui, session: &Session) {
@@ -6731,6 +6913,85 @@ impl OperonApp {
     pub(crate) fn finish_dock_drag(&mut self, target: Option<DockEdge>) {
         if let (Some(panel), Some(edge)) = (self.dock_drag.take(), target) {
             self.dock_panel_to(panel, edge);
+        }
+    }
+
+    /// One level of a move inside the session column, once its targets are
+    /// drawn: the line in the gap a release would land in and, on the
+    /// release, the move. `span` is the line's width, `gap` the room between
+    /// two of the level's items.
+    fn ui_column_drop(
+        &mut self,
+        ui: &egui::Ui,
+        drag: ColumnDrag,
+        targets: &ColumnTargets,
+        slot: Option<usize>,
+        span: egui::Rangef,
+        gap: f32,
+    ) {
+        let Some(slot) = slot else {
+            return;
+        };
+        if let Some(y) = slot_line_y(&targets.rects, slot, gap) {
+            let palette = self.store.theme.palette();
+            ui.painter()
+                .hline(span, y, egui::Stroke::new(2.0, palette.accent));
+        }
+        if ui.input(|i| i.pointer.primary_released()) {
+            self.finish_column_drag(drag, &targets.ids, slot);
+        }
+    }
+
+    /// Ends a move inside the session column: `drag`'s item goes to `slot`
+    /// among the `visible` items of its level, and the whole level is written
+    /// into the arrangement — on a first move the items not moved would
+    /// otherwise be unlisted and drawn ahead of it. A release that moves
+    /// nothing writes nothing.
+    pub(crate) fn finish_column_drag(&mut self, drag: ColumnDrag, visible: &[Uuid], slot: usize) {
+        let mut arrangement = self.session_arrangement.clone();
+        match drag {
+            ColumnDrag::Project(moved) => {
+                let mut projects = self.store.projects.iter().collect::<Vec<_>>();
+                sort_column_projects(&mut projects, &arrangement);
+                let mut order = projects
+                    .iter()
+                    .map(|project| project.id)
+                    .collect::<Vec<_>>();
+                if !place(&mut order, moved, visible, slot) {
+                    return;
+                }
+                arrangement.projects = order;
+            }
+            ColumnDrag::Session { project, session } => {
+                let mut sessions = self
+                    .store
+                    .sessions
+                    .iter()
+                    .filter(|candidate| candidate.project_id == project)
+                    .collect::<Vec<_>>();
+                sort_column_sessions(&mut sessions, &arrangement);
+                let mut order = sessions
+                    .iter()
+                    .map(|candidate| candidate.id)
+                    .collect::<Vec<_>>();
+                if !place(&mut order, session, visible, slot) {
+                    return;
+                }
+                arrangement.sessions.retain(|id| !order.contains(id));
+                arrangement.sessions.extend(order);
+            }
+        }
+        // Only what the store still holds, so the file is bounded by it.
+        let (projects, sessions) = (&self.store.projects, &self.store.sessions);
+        arrangement
+            .projects
+            .retain(|id| projects.iter().any(|project| project.id == *id));
+        arrangement
+            .sessions
+            .retain(|id| sessions.iter().any(|session| session.id == *id));
+        self.session_arrangement = arrangement;
+        if let Err(error) = save_session_arrangement(&self.data_file, &self.session_arrangement) {
+            self.notice = Some(tf!("並び順を保存できませんでした: {error}", error = error));
         }
     }
 }

@@ -1,0 +1,73 @@
+# Review record for 180-a-handoff-is-rebuilt-and-cannot-pick-its-model.
+#
+# The change: each handoff destination takes a model and an effort, remembered
+# per destination in recent-agent-settings.json and passed through
+# build_agent_launch_command; a handoff of a conversation whose transcript is
+# unchanged (length and mtime ns) reuses its archive and note; compact handoff
+# archives unused for seven days are swept at startup and inside every handoff,
+# under one process-wide lock shared with the reuse lookup and the rewrite. The
+# handoff notice now survives start_session's generic launch notice.
+#
+# rust-reviewer: approve-with-nits 0 4
+# - Per-frame work: ui_handoff_launch_options and the session list's clone of
+#   the handoff map (at most three entries) do no fs, Command, parse, or scan.
+# - Panics: no new unwrap, expect, or panic!; the poisoned lock is taken with
+#   PoisonError::into_inner and the call site argues why that is safe.
+# - i18n: the new tf! rows and the reuse notice have rows in EN_TABLE and
+#   KO_TABLE; the card's tr strings already had rows.
+# - egui 0.31: ComboBox::from_id_salt, TextEdit::char_limit, on_hover_ui, and
+#   selectable_value(..).changed() match 0.31.
+#
+# durability-reviewer: approve-with-nits 0 3
+# - Deletion scope: remove_dir_all reaches only real, UUID-named directories
+#   directly under the archive root whose manifest is within 256 KiB and names
+#   the compact restore kind and has expired; symlinks (DirEntry::file_type does
+#   not follow them), full-history, manifest-less, oversized, and corrupt
+#   manifests are kept; store-v2.json and legacy files are untouched.
+# - Races: the lock is held from the start of the import to its end, so a sweep
+#   on another thread cannot remove a directory whose snapshot is being taken;
+#   the fingerprint is taken before the copy, so a transcript that grows during
+#   it is snapshotted again next time.
+# - CommittedButNotSynced: the rewrites treat every Ok from
+#   write_file_atomically as success; bundle before manifest, so a crash between
+#   them leaves a new bundle and an old last_used_at, which is harmless.
+# - Permissions: 0700 directories and 0600 snapshots unchanged; no new kind of
+#   file or directory.
+
+#
+# Round 2: the close added lesson 079 to docs/sdlc/lessons.md and nothing else
+# outside the change directory. rust-reviewer checked its claims against the
+# index and 174c451 (179's tests never read app.notice; start_session sets its
+# own notice; the named test and mutation exist); durability-reviewer found no
+# persistence surface in it. Both verdicts stand with the same carried nits.
+
+#
+# Landing: the branch held two commits, and the merge is judged as one diff
+# against main, so the change lands as a single commit on
+# feature/land-180-handoff-model-reuse-and-expiry whose tree is the old tip
+# 874bb69. Both reviewers confirmed the whole diff is exactly the two parts
+# above; nothing new, the same verdicts and carried nits.
+
+digest: "c720f249fb68ea84"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/1 · src/app/screens.rs ui_handoff_launch_options: `changed |= response.lost_focus()` saves the settings file on the UI thread on every focus loss even when the text did not change; compare against the value at focus gain, or track response.changed() and save on lost_focus
+    person: "モデル欄からフォーカスを外すたびに、内容が変わっていなくても設定ファイルを保存し直します。操作 1 回につき小さな書き込み 1 回だけで、対応は不要です。"
+  - rust-reviewer/1/2 · src/app/screens.rs persist_handoff_launch_settings: a failed save only reaches eprintln!, so the person never learns the model choice was not kept; same as persist_recent_agent_settings
+    person: "設定ファイルの保存に失敗しても画面には何も出ず、選んだモデルが次回の起動で消えていることがあります。ほかの起動設定もいまは同じ動きで、ディスクがいっぱいでもない限り起きません。対応は不要です。"
+  - rust-reviewer/1/3 · src/app.rs handoff_cli_session: `.get(target).cloned().unwrap_or_default()` then `launch.model.trim()` at each use; trim once on the local copy (sanitize_handoff_launch_settings already trims at load)
+    person: "同じ空白除去を何度も書いているだけで、動きは変わりません。対応は不要です。"
+  - rust-reviewer/1/4 · src/history.rs reuse branch: an empty note on a reused handoff silently picks up the old archive's note; a person who clears the field to send no note still gets the earlier one
+    person: "同じ会話をもう一度 Handoff するとき、メモ欄を空にしておくと前回のメモがそのまま使われます。メモなしで送り直したいときも前回のメモが付きます。宛先を間違えて送り直すときにメモを打ち直さずに済むよう、わざとこうしています。別のメモを書けば、そちらに置き換わります。"
+  - durability-reviewer/1/1 · src/history.rs:381, src/app.rs:5044 the TTL counts seven days from the last handoff and ignores whether the destination session is alive; past it the bundle's "Full transcript snapshot" path and CliHandoff.archive_path name a deleted file; state the expiry in spec and README, or keep archives cli_handoffs still references
+    person: "Handoff 先のセッションを 7 日以上使い続けると、元の会話の全文コピーが自動で消えます。その後に AI がその全文を開こうとすると見つかりません。要約は会話の最初に渡してあるので、続きの作業はできます。全文が必要になったら、元の会話からもう一度 Handoff してください。"
+  - durability-reviewer/1/2 · src/history.rs:99 a fresh snapshot whose transcript reads no turns returns Err and leaves a manifest-less directory holding the full source.jsonl (a crash before the manifest does the same); the sweep keeps manifest-less directories, so the transcript outlives the TTL; remove the import directory on that error, or sweep manifest-less directories whose source.jsonl is older than the TTL; no test covers that path
+    person: "中身のない会話を Handoff しようとして失敗した場合や、Handoff の途中でアプリが落ちた場合に、会話の全文コピーが 7 日たっても消えずに残ることがあります。残る場所は自分しか読めないフォルダの中です。この取り残しを消す処理は、後の変更で追加します。いま対応する必要はありません。"
+  - durability-reviewer/1/3 · src/history.rs:201 `.take(4096)` applies before the UUID filter, so non-UUID entries and full-history archives use up the budget; read_dir order is unspecified and the excess is neither reused nor swept, silently; filter before take and report the truncation
+    person: "Handoff の保存フォルダに 4,096 件を超える項目がたまると、一部の古い Handoff が自動では消えなくなり、再利用もされなくなります。そこまでたまるのは何年も使い続けた場合で、いまは対応不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  durability-reviewer: "approve-with-nits 0 3"

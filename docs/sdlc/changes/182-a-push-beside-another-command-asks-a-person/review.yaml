@@ -12,8 +12,12 @@
 # read loop is sound under set -uo pipefail.
 #
 # All nits carried, not taken, per REVIEW.md.
+#
+# Re-verdict at 462ca91ba2022a31 after main (180, 181) was merged in; the only
+# conflict was lessons.md order (079 then 080). Both reviewers: same verdicts,
+# hook and test byte-identical. Not a round: no finding caused it (sdlc 084).
 
-digest: "055542dd94ee78ca"
+digest: "462ca91ba2022a31"
 
 rounds: 1
 

@@ -262,6 +262,7 @@ pub(crate) fn full_history_restore_persists_a_resumable_session_before_launching
         // still preserve the normal native-resume command.
         agent_command: format!("codex resume {native_session_id}"),
         handoff_bundle: String::new(),
+        reused_bundle_created_at: None,
     };
     let data_file = root.join("store.json");
     let mut app = test_app(data_file.clone());
@@ -458,6 +459,7 @@ pub(crate) fn import_full_cli_history_writes_handoff_bundle_and_manifest_without
         &source,
         "codex",
         "Focus on src/history.rs",
+        &HandoffLaunchSettings::default(),
         &archive_root,
         Uuid::new_v4(),
     )
@@ -523,6 +525,7 @@ pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bun
         classification: RestoreClassification::default(),
         agent_command: format!("claude --session-id {native_session_id}"),
         handoff_bundle,
+        reused_bundle_created_at: None,
     };
     let data_file = root.join("store.json");
     let mut app = test_app(data_file.clone());
@@ -551,6 +554,687 @@ pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bun
         Duration::from_secs(15),
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+/// A two-turn Claude transcript, its project, and an archive root, all under
+/// one temporary directory: the handoff reuse and expiry tests (change 180).
+pub(crate) fn handoff_fixture(name: &str) -> (PathBuf, Project, CliSession, PathBuf) {
+    let root = std::env::temp_dir().join(format!("operon-{name}-{}", Uuid::new_v4()));
+    let project_path = root.join("project");
+    let source_path = root.join("source.jsonl");
+    fs::create_dir_all(&project_path).unwrap();
+    fs::write(
+        &source_path,
+        concat!(
+            r#"{"type":"user","message":{"content":"initial request from claude"}}"#,
+            "\n",
+            r#"{"type":"assistant","message":{"content":"assistant reply from claude"}}"#,
+            "\n",
+        ),
+    )
+    .unwrap();
+    let native_id = Uuid::new_v4().to_string();
+    let source = CliSession {
+        provider: CliProvider::Claude,
+        native_id: native_id.clone(),
+        id: native_id,
+        title: Some("Claude source".into()),
+        last_user_message: Some("initial request from claude".into()),
+        branch: None,
+        updated_at: now(),
+        path: source_path,
+    };
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: project_path,
+        name: name.into(),
+        added_at: now(),
+    };
+    let archive_root = root.join("shared-sessions");
+    (root, project, source, archive_root)
+}
+
+pub(crate) fn handoff_with(
+    project: &Project,
+    source: &CliSession,
+    target: &str,
+    note: &str,
+    launch: &HandoffLaunchSettings,
+    archive_root: &Path,
+) -> UiResult<ImportedNativeSession> {
+    import_full_cli_history_with_note(
+        project,
+        source,
+        target,
+        note,
+        launch,
+        archive_root,
+        Uuid::new_v4(),
+    )
+}
+
+/// Moves an archive the import wrote back in time, through the manifest the
+/// sweep and the lookup read — not a hand-written one.
+pub(crate) fn age_handoff_archive(snapshot: &Path, last_used_at: u64) {
+    let manifest_path = snapshot.parent().unwrap().join(HANDOFF_MANIFEST_FILE_NAME);
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["created_at"] = serde_json::json!(last_used_at);
+    manifest["last_used_at"] = serde_json::json!(last_used_at);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+}
+
+pub(crate) fn handoff_manifest(snapshot: &Path) -> serde_json::Value {
+    let manifest_path = snapshot.parent().unwrap().join(HANDOFF_MANIFEST_FILE_NAME);
+    serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap()
+}
+
+pub(crate) fn archive_entries(archive_root: &Path) -> usize {
+    fs::read_dir(archive_root).map_or(0, |entries| entries.count())
+}
+
+#[test]
+pub(crate) fn handoff_launch_settings_round_trip_and_drop_what_the_gate_refuses() {
+    let root = std::env::temp_dir().join(format!("operon-handoff-settings-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let data_file = root.join("store.json");
+    let mut settings = RecentAgentSettings::default();
+    settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+    );
+    // A model the launch gate refuses, and an effort only Codex lists.
+    settings.handoff.insert(
+        "claude".into(),
+        HandoffLaunchSettings {
+            model: "sonnet; rm -rf ~".into(),
+            effort: "minimal".into(),
+        },
+    );
+    settings.handoff.insert(
+        "gemini".into(),
+        HandoffLaunchSettings {
+            model: "x".repeat(MAX_FIELD_STRING_LEN + 1),
+            effort: "high".into(),
+        },
+    );
+    settings.handoff.insert(
+        "custom".into(),
+        HandoffLaunchSettings {
+            model: "anything".into(),
+            effort: String::new(),
+        },
+    );
+    save_recent_agent_settings(&data_file, &settings).unwrap();
+
+    let loaded = load_recent_agent_settings(&data_file);
+    assert_eq!(
+        loaded.handoff.get("codex"),
+        Some(&HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        })
+    );
+    assert_eq!(
+        loaded.handoff.get("claude"),
+        Some(&HandoffLaunchSettings::default())
+    );
+    assert_eq!(
+        loaded.handoff.get("gemini"),
+        Some(&HandoffLaunchSettings {
+            model: String::new(),
+            effort: "high".into(),
+        })
+    );
+    assert!(!loaded.handoff.contains_key("custom"));
+
+    // A file written before the field existed.
+    fs::write(recent_agent_settings_path(&data_file), r#"{"agents":{}}"#).unwrap();
+    assert!(load_recent_agent_settings(&data_file).handoff.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_handoff_starts_its_destination_on_the_chosen_model_and_effort() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-launch");
+    let codex = handoff_with(
+        &project,
+        &source,
+        "codex",
+        "",
+        &HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(
+        codex.agent_command,
+        "codex --model gpt-5-mini -c model_reasoning_effort=low"
+    );
+
+    let claude_id = Uuid::new_v4();
+    let claude = import_full_cli_history_with_note(
+        &project,
+        &source,
+        "claude",
+        "",
+        &HandoffLaunchSettings {
+            model: "sonnet".into(),
+            effort: "high".into(),
+        },
+        &archive_root,
+        claude_id,
+    )
+    .unwrap();
+    assert_eq!(
+        claude.agent_command,
+        format!("claude --model sonnet --effort high --session-id {claude_id}")
+    );
+    assert_eq!(claude.native_session_id, Some(claude_id.to_string()));
+    // The options travel with a later resume of the destination.
+    let resumed = resume_command_with_launch_options(
+        CliProvider::Claude,
+        "claude",
+        &claude.agent_command,
+        &claude_id.to_string(),
+    );
+    assert!(resumed.contains("--model sonnet"), "{resumed}");
+    assert!(resumed.contains("--effort high"), "{resumed}");
+
+    let antigravity = handoff_with(
+        &project,
+        &source,
+        "gemini",
+        "",
+        &HandoffLaunchSettings::default(),
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(antigravity.agent_command, ANTIGRAVITY_COMMAND);
+
+    // Refused before anything is copied.
+    let untouched = root.join("untouched");
+    for refused in [
+        HandoffLaunchSettings {
+            model: "gpt;rm".into(),
+            effort: String::new(),
+        },
+        HandoffLaunchSettings {
+            model: String::new(),
+            effort: "turbo".into(),
+        },
+    ] {
+        assert!(handoff_with(&project, &source, "codex", "", &refused, &untouched).is_err());
+    }
+    assert!(!untouched.exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_handoff_from_the_app_records_the_destination_model_in_the_session() {
+    let (root, _, source, _) = handoff_fixture("handoff-app");
+    // A project path that does not exist stops the launcher before any CLI.
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.join("missing-project"),
+        name: "handoff-app".into(),
+        added_at: now(),
+    };
+    let data_file = root.join("store.json");
+    let mut app = test_app(data_file.clone());
+    app.store.projects.push(project.clone());
+    app.tools.tmux = true;
+    app.tools.codex = true;
+
+    app.recent_agent_settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt;rm".into(),
+            effort: String::new(),
+        },
+    );
+    app.handoff_cli_session(&project, &source, "codex");
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("エージェントの起動オプションが不正です。"))
+    );
+    assert!(!app
+        .background_tasks
+        .iter()
+        .any(|key| matches!(key, BackgroundKey::FullHistoryImport(_))));
+    assert_eq!(
+        archive_entries(&shared_session_archive_directory(&data_file)),
+        0
+    );
+
+    app.recent_agent_settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+    );
+    app.handoff_cli_session(&project, &source, "codex");
+    let import = app
+        .background_tasks
+        .iter()
+        .find(|key| matches!(key, BackgroundKey::FullHistoryImport(_)))
+        .cloned()
+        .expect("a valid handoff starts its import");
+    wait_for_background_task(&mut app, &import, Duration::from_secs(15));
+
+    let persisted = load_store(&data_file).unwrap();
+    let session = persisted
+        .sessions
+        .iter()
+        .find(|session| session.agent == "codex")
+        .expect("the handoff records its destination session");
+    assert_eq!(
+        session.agent_command,
+        "codex --model gpt-5-mini -c model_reasoning_effort=low"
+    );
+    // The options are on disk, so the next launch of the app offers them.
+    assert_eq!(
+        load_recent_agent_settings(&data_file).handoff.get("codex"),
+        app.recent_agent_settings.handoff.get("codex")
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(session.id),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn an_unchanged_conversation_handed_off_again_reuses_its_snapshot_and_note() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-reuse");
+    let launch = HandoffLaunchSettings::default();
+    let mistaken = handoff_with(
+        &project,
+        &source,
+        "claude",
+        "Focus on src/history.rs",
+        &launch,
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(mistaken.reused_bundle_created_at, None);
+    let created_at = handoff_manifest(&mistaken.archive_path)["created_at"]
+        .as_u64()
+        .unwrap();
+
+    // The note field was cleared by the first attempt.
+    let intended = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(intended.archive_path, mistaken.archive_path);
+    assert_eq!(intended.reused_bundle_created_at, Some(created_at));
+    assert_eq!(archive_entries(&archive_root), 1);
+    assert!(intended.handoff_bundle.contains("Focus on src/history.rs"));
+    assert!(intended
+        .handoff_bundle
+        .contains(&format!("Destination CLI: {}", CliProvider::Codex.label())));
+    assert!(intended
+        .handoff_bundle
+        .contains("assistant reply from claude"));
+    assert_eq!(
+        fs::read_to_string(&intended.native_session_path).unwrap(),
+        intended.handoff_bundle
+    );
+    let manifest = handoff_manifest(&intended.archive_path);
+    assert_eq!(manifest["created_at"], created_at);
+    assert!(manifest["last_used_at"].as_u64().unwrap() >= created_at);
+    assert_eq!(manifest["destination_provider"], CliProvider::Codex.label());
+
+    // A note typed for the next attempt replaces the earlier one.
+    let renoted = handoff_with(
+        &project,
+        &source,
+        "gemini",
+        "Run the tests first",
+        &launch,
+        &archive_root,
+    )
+    .unwrap();
+    assert_eq!(renoted.archive_path, mistaken.archive_path);
+    assert!(renoted.handoff_bundle.contains("Run the tests first"));
+    assert!(!renoted.handoff_bundle.contains("Focus on src/history.rs"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_reuse_whose_snapshot_is_gone_takes_a_fresh_one() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-gone");
+    let launch = HandoffLaunchSettings::default();
+    let first = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    fs::remove_file(&first.archive_path).unwrap();
+
+    let second = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(second.reused_bundle_created_at, None);
+    assert_ne!(second.archive_path, first.archive_path);
+    assert!(second.archive_path.is_file());
+
+    // A snapshot that reads to nothing it could carry is no better.
+    fs::write(&second.archive_path, "").unwrap();
+    let third = handoff_with(&project, &source, "gemini", "", &launch, &archive_root).unwrap();
+    assert_eq!(third.reused_bundle_created_at, None);
+    assert_ne!(third.archive_path, second.archive_path);
+    assert!(third.handoff_bundle.contains("initial request from claude"));
+
+    // A snapshot replaced by a link is not followed out of the archive.
+    fs::remove_file(&third.archive_path).unwrap();
+    std::os::unix::fs::symlink(&source.path, &third.archive_path).unwrap();
+    let fourth = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    assert_eq!(fourth.reused_bundle_created_at, None);
+    assert_ne!(fourth.archive_path, third.archive_path);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn a_conversation_that_moved_on_is_snapshotted_again() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-moved");
+    let launch = HandoffLaunchSettings::default();
+    let first = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    let mut transcript = OpenOptions::new().append(true).open(&source.path).unwrap();
+    writeln!(
+        transcript,
+        r#"{{"type":"user","message":{{"content":"a later request"}}}}"#
+    )
+    .unwrap();
+    drop(transcript);
+
+    let second = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(second.reused_bundle_created_at, None);
+    assert_ne!(second.archive_path, first.archive_path);
+    assert!(second.handoff_bundle.contains("a later request"));
+    assert!(!first.handoff_bundle.contains("a later request"));
+    assert_eq!(archive_entries(&archive_root), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn handoff_archives_unused_for_the_ttl_are_deleted_and_nothing_else_is() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-sweep");
+    let launch = HandoffLaunchSettings::default();
+    let now = now();
+    let expired = handoff_with(&project, &source, "claude", "", &launch, &archive_root)
+        .unwrap()
+        .archive_path;
+    // Each later handoff needs its own conversation, or it would reuse.
+    let (_, _, second_source, _) = handoff_fixture("handoff-sweep-second");
+    let nearly = handoff_with(
+        &project,
+        &second_source,
+        "claude",
+        "",
+        &launch,
+        &archive_root,
+    )
+    .unwrap()
+    .archive_path;
+    let (_, _, third_source, _) = handoff_fixture("handoff-sweep-third");
+    let fresh = handoff_with(
+        &project,
+        &third_source,
+        "claude",
+        "",
+        &launch,
+        &archive_root,
+    )
+    .unwrap()
+    .archive_path;
+    // Aged after the handoffs: each of them sweeps before it looks for reuse.
+    age_handoff_archive(&expired, now - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+    age_handoff_archive(&nearly, now - HANDOFF_ARCHIVE_TTL_SECONDS + 60);
+
+    let ancient = serde_json::json!({
+        "restore": HANDOFF_ARCHIVE_RESTORE_KIND,
+        "created_at": 0,
+        "last_used_at": 0,
+    });
+    // The earlier full-history restore wrote a different restore kind.
+    let full_history = archive_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&full_history).unwrap();
+    fs::write(
+        full_history.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 4,
+            "restore": "full conversation history",
+            "created_at": 0,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let without_manifest = archive_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&without_manifest).unwrap();
+    let oversized = archive_root.join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&oversized).unwrap();
+    let mut padded = ancient.clone();
+    padded["padding"] = serde_json::json!("x".repeat(HANDOFF_MANIFEST_MAX_BYTES as usize));
+    fs::write(
+        oversized.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&padded).unwrap(),
+    )
+    .unwrap();
+    let not_a_uuid = archive_root.join("notes");
+    fs::create_dir_all(&not_a_uuid).unwrap();
+    fs::write(
+        not_a_uuid.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&ancient).unwrap(),
+    )
+    .unwrap();
+    let outside = root.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        outside.join(HANDOFF_MANIFEST_FILE_NAME),
+        serde_json::to_vec(&ancient).unwrap(),
+    )
+    .unwrap();
+    let link = archive_root.join(Uuid::new_v4().to_string());
+    std::os::unix::fs::symlink(&outside, &link).unwrap();
+
+    assert_eq!(sweep_expired_handoff_archives(&archive_root, now), 1);
+    assert!(!expired.parent().unwrap().exists());
+    assert!(nearly.is_file());
+    assert!(fresh.is_file());
+    assert!(full_history.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    assert!(without_manifest.is_dir());
+    assert!(oversized.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    assert!(not_a_uuid.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    assert!(fs::symlink_metadata(&link)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert!(outside.join(HANDOFF_MANIFEST_FILE_NAME).is_file());
+    // Nothing left to remove.
+    assert_eq!(sweep_expired_handoff_archives(&archive_root, now), 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn an_expired_archive_is_swept_rather_than_reused() {
+    let (root, project, source, archive_root) = handoff_fixture("handoff-expired");
+    let launch = HandoffLaunchSettings::default();
+    let first = handoff_with(&project, &source, "claude", "", &launch, &archive_root).unwrap();
+    age_handoff_archive(&first.archive_path, now() - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+
+    let second = handoff_with(&project, &source, "codex", "", &launch, &archive_root).unwrap();
+    assert_eq!(second.reused_bundle_created_at, None);
+    assert_ne!(second.archive_path, first.archive_path);
+    assert!(!first.archive_path.parent().unwrap().exists());
+    assert_eq!(archive_entries(&archive_root), 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_app_sweeps_expired_handoff_archives_once_at_startup() {
+    let (root, project, source, _) = handoff_fixture("handoff-startup");
+    let data_file = root.join("store.json");
+    let archive_root = shared_session_archive_directory(&data_file);
+    let launch = HandoffLaunchSettings::default();
+    let expired = handoff_with(&project, &source, "claude", "", &launch, &archive_root)
+        .unwrap()
+        .archive_path;
+    age_handoff_archive(&expired, now() - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+
+    let mut app = test_app(data_file);
+    app.ensure_handoff_archive_sweep_started();
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::HandoffArchiveSweep,
+        Duration::from_secs(15),
+    );
+    assert!(!expired.parent().unwrap().exists());
+
+    let (_, _, later_source, _) = handoff_fixture("handoff-startup-later");
+    let later = handoff_with(
+        &project,
+        &later_source,
+        "claude",
+        "",
+        &launch,
+        &archive_root,
+    )
+    .unwrap()
+    .archive_path;
+    age_handoff_archive(&later, now() - HANDOFF_ARCHIVE_TTL_SECONDS - 1);
+    app.ensure_handoff_archive_sweep_started();
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::HandoffArchiveSweep));
+    assert!(later.is_file());
+
+    // And the frame is what starts it.
+    let app_source = include_str!("app.rs");
+    let update = app_source
+        .split("fn update(&mut self, ctx: &egui::Context")
+        .nth(1)
+        .unwrap();
+    let update = &update[..update.find("\n    }\n").unwrap()];
+    assert!(update.contains("self.ensure_handoff_archive_sweep_started();"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn finish_full_history_import_says_when_a_bundle_was_reused() {
+    let root = std::env::temp_dir().join(format!("operon-handoff-notice-{}", Uuid::new_v4()));
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.join("missing-project"),
+        name: "handoff-notice".into(),
+        added_at: now(),
+    };
+    let source = CliSession {
+        provider: CliProvider::Claude,
+        native_id: "11111111-1111-1111-1111-111111111111".into(),
+        id: "11111111-1111-1111-1111-111111111111".into(),
+        title: Some("Claude task".into()),
+        last_user_message: Some("Check handoff".into()),
+        branch: None,
+        updated_at: now(),
+        path: root.join("source.jsonl"),
+    };
+    let created_at = now() - 180;
+    let imported = |reused_bundle_created_at| ImportedNativeSession {
+        managed_session_id: Uuid::new_v4(),
+        provider: CliProvider::Codex,
+        native_session_id: None,
+        native_session_path: root.join(HANDOFF_BUNDLE_FILE_NAME),
+        archive_path: root.join(SHARED_SESSION_SNAPSHOT_FILE_NAME),
+        imported_records: 2,
+        classification: RestoreClassification::default(),
+        agent_command: "codex".into(),
+        handoff_bundle:
+            "Continue this coding task in a new CLI session.\n\nTask to continue:\nCheck handoff\n"
+                .into(),
+        reused_bundle_created_at,
+    };
+    let mut app = test_app(root.join("store.json"));
+    app.store.projects.push(project.clone());
+
+    let reused = imported(Some(created_at));
+    let reused_id = reused.managed_session_id;
+    app.finish_full_history_import(&project, &source, "codex", "", reused);
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "{source} の会話 {source_conversation} の Handoff バンドル（作成: {created}）を再利用し、{destination} の新規セッションを起動しています…{breakdown}",
+            source = CliProvider::Claude.label(),
+            source_conversation = source.native_id,
+            created = relative_time(created_at),
+            destination = CliProvider::Codex.label(),
+            breakdown = restore_classification_notice(&RestoreClassification::default()),
+        ))
+    );
+
+    let fresh = imported(None);
+    let fresh_id = fresh.managed_session_id;
+    app.finish_full_history_import(&project, &source, "codex", "", fresh);
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "{source} の会話 {source_conversation} から Handoff バンドル（直近 {records} ターン）を作成し、{destination} の新規セッションを起動しています…{breakdown}",
+            source = CliProvider::Claude.label(),
+            source_conversation = source.native_id,
+            records = 2,
+            destination = CliProvider::Codex.label(),
+            breakdown = restore_classification_notice(&RestoreClassification::default()),
+        ))
+    );
+    for id in [reused_id, fresh_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_session_menu_names_the_handoff_model_and_effort() {
+    let codex = agent_choice_copy("codex").0;
+    let plain = tf!("{p0} へ Handoff", p0 = codex);
+    assert_eq!(handoff_menu_label("codex", None), plain);
+    assert_eq!(
+        handoff_menu_label("codex", Some(&HandoffLaunchSettings::default())),
+        plain
+    );
+    let labelled = |launch: &str| tf!("{p0} へ Handoff（{launch}）", p0 = codex, launch = launch);
+    assert_eq!(
+        handoff_menu_label(
+            "codex",
+            Some(&HandoffLaunchSettings {
+                model: "gpt-5-mini".into(),
+                effort: "low".into(),
+            })
+        ),
+        labelled("gpt-5-mini · low")
+    );
+    assert_eq!(
+        handoff_menu_label(
+            "codex",
+            Some(&HandoffLaunchSettings {
+                model: String::new(),
+                effort: "low".into(),
+            })
+        ),
+        labelled("low")
+    );
+    assert_eq!(
+        handoff_menu_label(
+            "codex",
+            Some(&HandoffLaunchSettings {
+                model: "gpt-5-mini".into(),
+                effort: String::new(),
+            })
+        ),
+        labelled("gpt-5-mini")
+    );
 }
 
 #[test]
@@ -44175,6 +44859,69 @@ pub(crate) fn cli_restore_is_in_history_not_in_the_overview() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// Change 180: the history card draws the destination's model and effort
+/// under its picker, inside the 880px column, and shows that destination's
+/// own saved options rather than a shared field.
+#[test]
+pub(crate) fn the_history_card_offers_the_destination_model_and_effort() {
+    let (mut app, project, root) = launch_screen_fixture("handoff-card");
+    let native_id = Uuid::new_v4().to_string();
+    app.cli_sessions.insert(
+        project.id,
+        vec![CliSession {
+            provider: CliProvider::Claude,
+            native_id: native_id.clone(),
+            id: native_id,
+            title: Some("Claude source".into()),
+            last_user_message: Some("initial request from claude".into()),
+            branch: None,
+            updated_at: now(),
+            path: root.join("source.jsonl"),
+        }],
+    );
+    app.recent_agent_settings.handoff.insert(
+        "codex".into(),
+        HandoffLaunchSettings {
+            model: "gpt-5-mini".into(),
+            effort: "low".into(),
+        },
+    );
+    let width = 880.0;
+    let context = egui::Context::default();
+    let mut draw = || {
+        context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_cli_sessions(ui, &project));
+            },
+        )
+    };
+    let _ = draw();
+    let drawn = draw();
+    let target = drawn_text_rect(&drawn, |text| text == tr("復元先")).expect("the picker row");
+    let model =
+        drawn_text_rect(&drawn, |text| text == tr("モデル（任意）")).expect("the model label");
+    let effort =
+        drawn_text_rect(&drawn, |text| text == tr("推論の深さ")).expect("the effort label");
+    assert!(
+        model.min.y > target.max.y,
+        "the options sit under the picker"
+    );
+    assert!(drawn_text_rect(&drawn, |text| text == "gpt-5-mini").is_some());
+    let chosen = drawn_text_rect(&drawn, |text| text == "low").expect("the chosen effort");
+    assert!(
+        chosen.max.x <= width && effort.max.x <= width,
+        "inside the column"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
 /// Change 092, from review: the sheet is drawn every frame it is open, so
 /// nothing it draws may start a child process. The worktree chip used to ask
 /// `git` for its branch on every frame; it reads the worktree cache now.
@@ -52567,4 +53314,726 @@ pub(crate) fn knowledge_map_labels_are_placed_only_when_the_view_changes() {
         LabelPlacement::default()
     });
     assert_eq!(placed, 2, "a pan places again");
+}
+
+// ── Change 181: the person arranges the session column ──────────────────────
+
+/// Change 181: two projects, 「alpha」 with three finished Codex sessions made
+/// three, two, and one hour ago, and 「beta」 with one. Drawn in the column's
+/// own order, alpha comes first and its rows read 三番目, 二番目, 一番目.
+#[cfg(test)]
+struct ArrangedColumn {
+    data_file: PathBuf,
+    app: OperonApp,
+    alpha: Uuid,
+    beta: Uuid,
+    first: Uuid,
+    second: Uuid,
+    third: Uuid,
+}
+
+#[cfg(test)]
+impl ArrangedColumn {
+    fn new(label: &str) -> Self {
+        let root = temporary_directory(label);
+        Self::with_data_file(&root, root.join("store.json"))
+    }
+
+    fn with_data_file(root: &Path, data_file: PathBuf) -> Self {
+        let mut app = test_app(data_file.clone());
+        let mut project = |name: &str| {
+            let path = root.join(name);
+            fs::create_dir_all(&path).unwrap();
+            let project = Project {
+                id: Uuid::new_v4(),
+                path,
+                name: name.into(),
+                added_at: 0,
+            };
+            let id = project.id;
+            app.store.projects.push(project);
+            id
+        };
+        let (beta, alpha) = (project("beta"), project("alpha"));
+        let mut session = |project_id: Uuid, name: &str, hours_ago: u64| {
+            let mut session = test_session(Uuid::new_v4(), SessionStatus::Exited);
+            session.project_id = project_id;
+            session.name = name.into();
+            session.agent = "codex".into();
+            session.created_at = now().saturating_sub(hours_ago * 3600);
+            let id = session.id;
+            app.store.sessions.push(session);
+            id
+        };
+        let first = session(alpha, "一番目", 3);
+        let second = session(alpha, "二番目", 2);
+        let third = session(alpha, "三番目", 1);
+        session(beta, "ベータの一件", 1);
+        Self {
+            data_file,
+            app,
+            alpha,
+            beta,
+            first,
+            second,
+            third,
+        }
+    }
+
+    /// The same store, opened again from the same data folder.
+    fn reopened(&self) -> OperonApp {
+        let mut app = test_app(self.data_file.clone());
+        app.store = self.app.store.clone();
+        app
+    }
+}
+
+/// One frame of the session column alone, 300px wide.
+#[cfg(test)]
+fn column_181_output(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(300.0, height),
+        )),
+        events,
+        ..Default::default()
+    };
+    context.run(input, |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_session_tabs(ui));
+    })
+}
+
+#[cfg(test)]
+fn column_181_frame(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    events: Vec<egui::Event>,
+) -> Vec<(String, egui::Pos2)> {
+    text_positions(&column_181_output(app, context, height, events))
+}
+
+/// The heights of the 2px `accent` lines a frame painted: where a release
+/// would land.
+#[cfg(test)]
+fn column_181_drop_lines(output: &egui::FullOutput, palette: &Palette) -> Vec<f32> {
+    fn collect(shape: &egui::epaint::Shape, palette: &Palette, out: &mut Vec<f32>) {
+        match shape {
+            egui::epaint::Shape::LineSegment { points, stroke }
+                if stroke.color == palette.accent && stroke.width == 2.0 =>
+            {
+                out.push(points[0].y);
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect(child, palette, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut lines = Vec::new();
+    for shape in &output.shapes {
+        collect(&shape.shape, palette, &mut lines);
+    }
+    lines
+}
+
+/// Two frames with no input, read from the second.
+#[cfg(test)]
+fn column_181_settled(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+) -> Vec<(String, egui::Pos2)> {
+    column_181_frame(app, context, height, Vec::new());
+    column_181_frame(app, context, height, Vec::new())
+}
+
+#[cfg(test)]
+fn column_181_button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+/// Press at `from` and move to `to` in four steps, the button still held.
+#[cfg(test)]
+fn column_181_hold(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    from: egui::Pos2,
+    to: egui::Pos2,
+) {
+    column_181_frame(
+        app,
+        context,
+        height,
+        vec![
+            egui::Event::PointerMoved(from),
+            column_181_button(from, true),
+        ],
+    );
+    for step in 1..=4 {
+        let pos = from + (to - from) * (step as f32 / 4.0);
+        column_181_frame(app, context, height, vec![egui::Event::PointerMoved(pos)]);
+    }
+}
+
+/// A whole drag, as a person does it: press, move, release.
+#[cfg(test)]
+fn column_181_drag(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    height: f32,
+    from: egui::Pos2,
+    to: egui::Pos2,
+) {
+    column_181_hold(app, context, height, from, to);
+    column_181_frame(app, context, height, vec![column_181_button(to, false)]);
+}
+
+/// Where the column painted `text`, panicking with what it painted instead.
+#[cfg(test)]
+fn column_181_at(texts: &[(String, egui::Pos2)], text: &str) -> egui::Pos2 {
+    texts
+        .iter()
+        .find(|(painted, _)| painted == text)
+        .map(|(_, pos)| *pos)
+        .unwrap_or_else(|| panic!("「{text}」が列に描かれていません"))
+}
+
+/// The y of each text, in the order `texts` names them, top to bottom.
+#[cfg(test)]
+fn column_181_order(texts: &[(String, egui::Pos2)], names: &[&str]) -> Vec<String> {
+    let mut found = names
+        .iter()
+        .map(|name| (column_181_at(texts, name).y, (*name).to_owned()))
+        .collect::<Vec<_>>();
+    found.sort_by(|a, b| a.0.total_cmp(&b.0));
+    found.into_iter().map(|(_, name)| name).collect()
+}
+
+/// Inside a title, clear of its edge.
+#[cfg(test)]
+fn column_181_grip(texts: &[(String, egui::Pos2)], text: &str) -> egui::Pos2 {
+    column_181_at(texts, text) + egui::vec2(6.0, 6.0)
+}
+
+const ALPHA_ROWS_181: [&str; 3] = ["一番目", "二番目", "三番目"];
+
+/// Change 181, requirement 1: with nothing moved, the column is today's —
+/// projects by name, case aside, and sessions newest first. What an
+/// arrangement does not list leads, in that order; what it lists follows.
+#[test]
+pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
+    let project = |name: &str| Project {
+        id: Uuid::new_v4(),
+        path: PathBuf::from("/tmp"),
+        name: name.into(),
+        added_at: 0,
+    };
+    let mut projects = vec![project("beta"), project("Alpha"), project("gamma")];
+    let names = |projects: &[Project]| {
+        projects
+            .iter()
+            .map(|project| project.name.clone())
+            .collect::<Vec<_>>()
+    };
+    sort_column_projects(&mut projects, &SessionArrangement::default());
+    assert_eq!(names(&projects), ["Alpha", "beta", "gamma"]);
+    let arrangement = SessionArrangement {
+        projects: vec![projects[2].id, projects[0].id],
+        sessions: Vec::new(),
+    };
+    sort_column_projects(&mut projects, &arrangement);
+    assert_eq!(
+        names(&projects),
+        ["beta", "gamma", "Alpha"],
+        "an unlisted project leads; the listed ones follow in their order"
+    );
+
+    let session = |created_at: u64| {
+        let mut session = test_session(Uuid::new_v4(), SessionStatus::Exited);
+        session.created_at = created_at;
+        session
+    };
+    let (one, two, three) = (session(1), session(2), session(3));
+    let mut sessions = vec![&one, &two, &three];
+    let ids = |sessions: &[&Session]| sessions.iter().map(|s| s.id).collect::<Vec<_>>();
+    sort_column_sessions(&mut sessions, &SessionArrangement::default());
+    assert_eq!(ids(&sessions), [three.id, two.id, one.id], "newest first");
+    let arrangement = SessionArrangement {
+        projects: Vec::new(),
+        sessions: vec![one.id, three.id],
+    };
+    sort_column_sessions(&mut sessions, &arrangement);
+    assert_eq!(ids(&sessions), [two.id, one.id, three.id]);
+
+    // And the column draws by it: today's order with no file, the
+    // arrangement's with one.
+    let mut column = ArrangedColumn::new("column-181-order");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &["beta", "alpha"]),
+        ["alpha", "beta"]
+    );
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["三番目", "二番目", "一番目"]
+    );
+    column.app.session_arrangement = SessionArrangement {
+        projects: vec![column.beta, column.alpha],
+        sessions: vec![column.second, column.first, column.third],
+    };
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &["beta", "alpha"]),
+        ["beta", "alpha"]
+    );
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["二番目", "一番目", "三番目"]
+    );
+}
+
+/// Change 181, requirement 2: a release lands before the drawn row it is
+/// above, or after the last; rows not drawn keep their places; a release in
+/// either gap beside the row is no move. The first move from no arrangement
+/// lists the whole level, so the rows not moved do not jump above it.
+#[test]
+pub(crate) fn test_change_181_place_moves_relative_to_visible_neighbours() {
+    let [a, hidden, b, c] = [(); 4].map(|_| Uuid::new_v4());
+    let mut order = vec![a, hidden, b, c];
+    let visible = [a, b, c];
+    assert!(place(&mut order, c, &visible, 0));
+    assert_eq!(order, [c, a, hidden, b]);
+    let mut order = vec![a, hidden, b, c];
+    assert!(place(&mut order, a, &visible, 3));
+    assert_eq!(order, [hidden, b, c, a], "after the last drawn row");
+    for slot in [1, 2] {
+        let mut order = vec![a, hidden, b, c];
+        assert!(
+            !place(&mut order, b, &visible, slot),
+            "slot {slot} is a gap beside b: no move"
+        );
+        assert_eq!(order, [a, hidden, b, c]);
+    }
+    let mut order = vec![a, hidden, b, c];
+    assert!(
+        !place(&mut order, hidden, &visible, 0),
+        "a row not drawn is not dragged"
+    );
+    assert!(!slot_moves(&visible, b, 1) && !slot_moves(&visible, b, 2));
+    assert!(slot_moves(&visible, b, 0) && slot_moves(&visible, b, 3));
+
+    let rect = |y: f32| egui::Rect::from_center_size(egui::pos2(0.0, y), egui::vec2(10.0, 10.0));
+    let rects = [rect(10.0), rect(30.0), rect(50.0)];
+    assert_eq!(drop_slot(5.0, &rects), 0);
+    assert_eq!(drop_slot(25.0, &rects), 1);
+    assert_eq!(drop_slot(60.0, &rects), 3);
+
+    let mut column = ArrangedColumn::new("column-181-place");
+    assert_eq!(
+        column.app.session_arrangement,
+        SessionArrangement::default()
+    );
+    let drawn = [column.third, column.second, column.first];
+    column.app.finish_column_drag(
+        ColumnDrag::Session {
+            project: column.alpha,
+            session: column.first,
+        },
+        &drawn,
+        0,
+    );
+    let mut alpha = column
+        .app
+        .store
+        .sessions
+        .iter()
+        .filter(|session| session.project_id == column.alpha)
+        .collect::<Vec<_>>();
+    sort_column_sessions(&mut alpha, &column.app.session_arrangement);
+    assert_eq!(
+        alpha.iter().map(|session| session.id).collect::<Vec<_>>(),
+        [column.first, column.third, column.second]
+    );
+}
+
+/// Change 181, requirement 3: a session row dragged within its project stays
+/// where it is released, across a restart; released over another project it
+/// moves nothing; a click on a row still opens it.
+#[test]
+pub(crate) fn test_change_181_session_row_drag_reorders_within_its_project() {
+    let mut column = ArrangedColumn::new("column-181-session-drag");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    column_181_hold(&mut column.app, &context, 700.0, from, to);
+    // Held there, one 2px accent line, in the gap above the first row and
+    // below the project's name.
+    let palette = column.app.store.theme.palette();
+    let held = column_181_output(&mut column.app, &context, 700.0, Vec::new());
+    let lines = column_181_drop_lines(&held, palette);
+    let (alpha, third) = (
+        column_181_at(&texts, "alpha"),
+        column_181_at(&texts, "三番目"),
+    );
+    assert!(
+        lines.len() == 1 && lines[0] > alpha.y && lines[0] < third.y,
+        "the line marks the gap above 三番目: {lines:?} between {} and {}",
+        alpha.y,
+        third.y
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(to, false)],
+    );
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"],
+        "the dragged row is drawn where it was released"
+    );
+    assert!(session_arrangement_path(&column.data_file).exists());
+    let held = column_181_output(&mut column.app, &context, 700.0, Vec::new());
+    assert!(
+        column_181_drop_lines(&held, palette).is_empty(),
+        "no line once the drag is over"
+    );
+
+    let mut reopened = column.reopened();
+    let texts = column_181_settled(&mut reopened, &egui::Context::default(), 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"],
+        "the order survives a restart"
+    );
+
+    // Over beta's card, below every alpha row: were it a target, the top row
+    // would go last. A session never changes project, and nothing moves.
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "ベータの一件") + egui::vec2(6.0, 2.0);
+    column_181_drag(&mut column.app, &context, 700.0, from, to);
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"]
+    );
+    assert!(column.app.column_drag.is_none());
+
+    // A click on the row's second line still opens the terminal.
+    let title = column_181_at(&texts, "二番目");
+    let line = texts
+        .iter()
+        .filter(|(text, pos)| text == "Codex" && pos.y > title.y)
+        .map(|(_, pos)| *pos)
+        .min_by(|a, b| a.y.total_cmp(&b.y))
+        .expect("二番目 の二行目");
+    let at = line + egui::vec2(4.0, 4.0);
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![egui::Event::PointerMoved(at), column_181_button(at, true)],
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(at, false)],
+    );
+    assert_eq!(column.app.selected_session, Some(column.second));
+}
+
+/// Change 181, requirement 4: a project dragged by its name stays where it is
+/// released, across a restart, and its ＋ still starts a session.
+#[test]
+pub(crate) fn test_change_181_project_name_drag_reorders_the_column() {
+    let mut column = ArrangedColumn::new("column-181-project-drag");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "beta");
+    let to = column_181_at(&texts, "alpha") - egui::vec2(0.0, 4.0);
+    column_181_drag(&mut column.app, &context, 700.0, from, to);
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &["alpha", "beta"]),
+        ["beta", "alpha"],
+        "the dragged project is drawn where it was released"
+    );
+    let mut reopened = column.reopened();
+    let reopened_texts = column_181_settled(&mut reopened, &egui::Context::default(), 700.0);
+    assert_eq!(
+        column_181_order(&reopened_texts, &["alpha", "beta"]),
+        ["beta", "alpha"],
+        "the order survives a restart"
+    );
+
+    let beta = column_181_at(&texts, "beta");
+    let add = texts
+        .iter()
+        .filter(|(text, pos)| text == ICON_ADD && (pos.y - beta.y).abs() < CONTROL_HEIGHT_SMALL)
+        .map(|(_, pos)| *pos)
+        .next()
+        .expect("beta の見出しの＋");
+    let at = add + egui::vec2(4.0, 4.0);
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![egui::Event::PointerMoved(at), column_181_button(at, true)],
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(at, false)],
+    );
+    assert!(
+        column.app.launch_sheet_open,
+        "＋ が新しいセッションを開きません"
+    );
+    assert_eq!(column.app.selected_project, Some(column.beta));
+}
+
+/// Change 181, requirement 5: Escape with the button held, a release where
+/// the drag began, and a release the window never saw all move nothing and
+/// write nothing.
+#[test]
+pub(crate) fn test_change_181_escape_or_a_release_in_place_moves_nothing() {
+    let mut column = ArrangedColumn::new("column-181-abandon");
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    column_181_hold(&mut column.app, &context, 700.0, from, to);
+    assert_eq!(
+        column.app.column_drag,
+        Some(ColumnDrag::Session {
+            project: column.alpha,
+            session: column.first,
+        }),
+        "a press and a move on a row start a drag"
+    );
+    let escape = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    column_181_frame(&mut column.app, &context, 700.0, vec![escape]);
+    assert!(column.app.column_drag.is_none(), "Escape ends the drag");
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(to, false)],
+    );
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["三番目", "二番目", "一番目"]
+    );
+
+    // Out and back: released on its own row.
+    let from = column_181_grip(&texts, "一番目");
+    column_181_hold(
+        &mut column.app,
+        &context,
+        700.0,
+        from,
+        from + egui::vec2(0.0, 12.0),
+    );
+    assert!(column.app.column_drag.is_some());
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![egui::Event::PointerMoved(from)],
+    );
+    column_181_frame(
+        &mut column.app,
+        &context,
+        700.0,
+        vec![column_181_button(from, false)],
+    );
+    assert!(column.app.column_drag.is_none(), "a release ends the drag");
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["三番目", "二番目", "一番目"]
+    );
+    assert!(
+        !session_arrangement_path(&column.data_file).exists(),
+        "nothing moved, so nothing is written"
+    );
+
+    // Focus left mid-drag: no button down, and no release seen.
+    column.app.column_drag = Some(ColumnDrag::Project(column.beta));
+    column_181_frame(&mut column.app, &context, 700.0, Vec::new());
+    assert!(column.app.column_drag.is_none());
+    assert!(!session_arrangement_path(&column.data_file).exists());
+}
+
+/// Change 181, requirement 6: the arrangement round-trips beside the store,
+/// through the app's own start; a missing, broken, or over-ceiling file reads
+/// as none; a save lists only what the store still holds.
+#[test]
+pub(crate) fn test_change_181_arrangement_file_is_bounded_and_fails_towards_default() {
+    let root = temporary_directory("column-181-file");
+    let data_file = root.join("store.json");
+    let path = session_arrangement_path(&data_file);
+    assert_eq!(path, root.join(SESSION_ARRANGEMENT_FILE_NAME));
+    assert_eq!(
+        load_session_arrangement(&data_file),
+        SessionArrangement::default()
+    );
+
+    let arrangement = SessionArrangement {
+        projects: vec![Uuid::new_v4()],
+        sessions: vec![Uuid::new_v4(), Uuid::new_v4()],
+    };
+    save_session_arrangement(&data_file, &arrangement).unwrap();
+    assert_eq!(load_session_arrangement(&data_file), arrangement);
+    assert_eq!(test_app(data_file.clone()).session_arrangement, arrangement);
+
+    fs::write(&path, "not json").unwrap();
+    assert_eq!(
+        load_session_arrangement(&data_file),
+        SessionArrangement::default()
+    );
+
+    // At the ceiling it is read; one byte past it, it is not, though it parses.
+    let body = serde_json::to_string(&arrangement).unwrap();
+    let limit = SESSION_ARRANGEMENT_FILE_MAX_BYTES as usize;
+    let padded = |len: usize| format!("{body}{}", " ".repeat(len - body.len()));
+    fs::write(&path, padded(limit)).unwrap();
+    assert_eq!(load_session_arrangement(&data_file), arrangement);
+    fs::write(&path, padded(limit + 1)).unwrap();
+    assert_eq!(
+        load_session_arrangement(&data_file),
+        SessionArrangement::default()
+    );
+
+    // A save drops what the store no longer holds.
+    let mut column = ArrangedColumn::new("column-181-prune");
+    let gone = Uuid::new_v4();
+    column.app.session_arrangement.sessions.push(gone);
+    column.app.session_arrangement.projects.push(gone);
+    column.app.finish_column_drag(
+        ColumnDrag::Project(column.beta),
+        &[column.alpha, column.beta],
+        0,
+    );
+    let saved = load_session_arrangement(&column.data_file);
+    assert_eq!(saved.projects, [column.beta, column.alpha]);
+    assert!(!saved.sessions.contains(&gone) && !saved.projects.contains(&gone));
+}
+
+/// Change 181, requirement 7: when the file cannot be written the move holds
+/// and the person is told.
+#[test]
+pub(crate) fn test_change_181_save_failure_is_said() {
+    let root = temporary_directory("column-181-save-failure");
+    let blocker = root.join("blocker");
+    fs::write(&blocker, "a file where the data folder should be").unwrap();
+    let mut column = ArrangedColumn::with_data_file(&root, blocker.join("store.json"));
+    let context = egui::Context::default();
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    column_181_drag(&mut column.app, &context, 700.0, from, to);
+    let notice = column.app.notice.clone().unwrap_or_default();
+    assert!(
+        notice.starts_with("並び順を保存できませんでした: "),
+        "notice: {notice:?}"
+    );
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    assert_eq!(
+        column_181_order(&texts, &ALPHA_ROWS_181),
+        ["一番目", "三番目", "二番目"],
+        "the move holds for this run"
+    );
+}
+
+/// Change 181, requirement 8: a drag held at the column's bottom edge scrolls
+/// it, so a row can be taken past what is on screen.
+#[test]
+pub(crate) fn test_change_181_drag_near_the_edge_scrolls_the_column() {
+    let mut column = ArrangedColumn::new("column-181-edge-scroll");
+    let context = egui::Context::default();
+    let height = 260.0;
+    let texts = column_181_settled(&mut column.app, &context, height);
+    let before = column_181_at(&texts, "二番目").y;
+    let from = column_181_grip(&texts, "三番目");
+    let edge = egui::pos2(from.x, height - 4.0);
+    column_181_hold(&mut column.app, &context, height, from, edge);
+    for _ in 0..10 {
+        column_181_frame(&mut column.app, &context, height, Vec::new());
+    }
+    let texts = column_181_frame(&mut column.app, &context, height, Vec::new());
+    let after = column_181_at(&texts, "二番目").y;
+    assert!(
+        after < before - COLUMN_DRAG_SCROLL_STEP,
+        "held at the edge, the column scrolls: {before} → {after}"
+    );
+}
+
+/// Change 181, requirement 9: the row's hover and the project name's hover
+/// say that they can be dragged.
+#[test]
+pub(crate) fn test_change_181_hovers_say_rows_and_projects_can_be_dragged() {
+    let mut column = ArrangedColumn::new("column-181-hovers");
+    let context = egui::Context::default();
+    context.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let texts = column_181_settled(&mut column.app, &context, 700.0);
+    let hover = |app: &mut OperonApp, at: egui::Pos2| {
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            texts = column_181_frame(app, &context, 700.0, vec![egui::Event::PointerMoved(at)]);
+        }
+        texts.into_iter().map(|(text, _)| text).collect::<Vec<_>>()
+    };
+    // The row's second line, clear of the title, which has a hover of its own.
+    let title = column_181_at(&texts, "二番目");
+    let line = texts
+        .iter()
+        .filter(|(text, pos)| text == "Codex" && pos.y > title.y)
+        .map(|(_, pos)| *pos)
+        .min_by(|a, b| a.y.total_cmp(&b.y))
+        .expect("二番目 の二行目");
+    let row = hover(&mut column.app, line + egui::vec2(4.0, 4.0));
+    assert!(
+        row.iter().any(|text| text
+            == "クリックでターミナル表示 · ダブルクリックで名前を変更 · ドラッグで並べ替え"),
+        "row hover: {row:?}"
+    );
+    let name = hover(&mut column.app, column_181_grip(&texts, "beta"));
+    assert!(
+        name.iter().any(|text| text == "ドラッグで並べ替え"),
+        "project hover: {name:?}"
+    );
 }

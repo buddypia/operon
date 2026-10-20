@@ -57,6 +57,11 @@ Settings.
   `⌘K` also finds a session by what its agent last said, and among equal
   matches a waiting session comes first. The side panel (files, conversation,
   changes) opens on the right of the terminal; `⌥⌘B` folds it and opens it.
+- Below them, the session list is arranged by hand: drag a project by its
+  name to move its card, or a session's row to move it among its own
+  project's sessions. The order is kept in `session-order.json`, in the same
+  folder as the local index, and a project or session added later appears at
+  the top.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
   The launch button sits at its bottom right, and `⌘↩` presses it. A project's
@@ -267,6 +272,16 @@ Settings.
   destination CLI's internal store. The source bytes stay in a local verbatim
   archive alongside `handoff-bundle.md` and `manifest.json`, and the destination
   CLI starts a fresh native session with that compact Handoff bundle.
+- Each destination can start on a model and reasoning effort of its own, set
+  under the destination picker in the history tab and remembered per CLI; the
+  session menu names them beside each destination. Left empty, the CLI's own
+  default applies.
+- Handing the same conversation off again while it has not changed — after
+  picking the wrong destination, say — reuses the earlier snapshot and its note
+  instead of copying the transcript again. A conversation that has moved on is
+  snapshotted afresh. A handoff archive no handoff has used for seven days is
+  deleted at the next startup or handoff; archives from the earlier full-history
+  restore are left alone.
 - A handoff holds a modal window naming the source conversation, the destination,
   and the elapsed time — sendable to the background at any point.
 - Local history search covers recent Codex and Claude JSONL transcripts
@@ -334,7 +349,8 @@ Settings.
 - Scans are bounded and honest about it: the editor tree caps itself (and
   skips `.git`, `node_modules`, `target`, `.next`), files beyond 128 KiB open
   read-only, diff capture shares a fixed budget with explicit truncation
-  notices, and transcript search caps candidates, bytes, and lines. Use an
+  notices, transcript search caps candidates, bytes, and lines, and the handoff
+  archive sweep looks at 4,096 entries and 256 KiB of each manifest per pass. Use an
   external editor for a complete view of very large repositories.
 
 ## Requirements
@@ -385,6 +401,7 @@ provider; review each agent's permission and sandbox mode before launch. The
 local shared-session archive contains original transcripts and may include
 sensitive prompts, tool outputs, and code; Operon creates its directories `0700`
 and each snapshot `0600`, so only the account that made them can read them.
+A handoff archive is deleted seven days after a handoff last used it.
 
 Project knowledge, when a project opts in, is stored in Operon's data folder —
 never in the repository — under the same `0700`/`0600` modes. Its one network
