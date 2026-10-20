@@ -17,22 +17,28 @@
 # agreement than holds. Mutation sweep re-run after the fix: 11 of 11 caught.
 #
 # Round 2 at d2387581ea0b8014: rust-reviewer approves with no findings;
-# subprocess-safety-reviewer approves the fix with two nits, carried below.
+# subprocess-safety-reviewer approves the fix with two nits.
+#
+# After round 2, CI's harness_documents_only_name_paths_that_exist refused a
+# doc comment that put `--lessons` inside the backticks of a script path. The
+# fix touches comments and one panic message only: the flag moved out of the
+# backticks, the long line was rewrapped (nit 2/2), and the message now prints
+# the error rather than naming a timeout (nit 2/1). Both nits are therefore
+# fixed, not carried.
+#
+# Round 3 at 08b3603c3e3773b4, on that delta: both reviewers approve with no
+# findings.
 
-digest: "d2387581ea0b8014"
+digest: "08b3603c3e3773b4"
 
-rounds: 2
+rounds: 3
 
 carried:
   - rust-reviewer/1/3 · src/tests.rs lesson_admission_problems — the rule check reads the whole entry body, so a quoted "**The rule:**" inside a Guard would satisfy it
     person: "教訓の記録の書式検査が、ごくまれな書き方を見逃す余地があります。アプリの動作には関係せず、対応は不要です。"
   - rust-reviewer/1/4 · src/tests.rs every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran — about 15 seconds, almost all in the script's per-entry grep over src/tests.rs
     person: "追加した検査は 1 回あたり 15 秒ほどかかり、CI が少し長くなります。対応は不要です。"
-  - subprocess-safety-reviewer/2/1 · src/tests.rs run_lesson_indicators — the expect message names the timeout even when the error was the output cap or a failed spawn
-    person: "検査が失敗したとき、まれに原因の説明が実際と違う文面になることがあります。アプリの動作には関係せず、対応は不要です。"
-  - subprocess-safety-reviewer/2/2 · src/tests.rs every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran doc comment — one line is longer than the file's wrap
-    person: "コード内の説明文の 1 行が長いだけで、動作には関係しません。対応は不要です。"
 
 verdicts:
   rust-reviewer: "approve 0 0"
-  subprocess-safety-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve 0 0"

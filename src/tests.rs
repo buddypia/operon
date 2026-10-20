@@ -16428,8 +16428,9 @@ const FIRST_LESSON_WITH_WATCHED_GUARD: u32 = 81;
 
 /// What keeps each entry of `lessons.md` out of the ledger, one line per
 /// problem, each naming its entry. Whether a guard's name is held by this
-/// repository is not asked here: `scripts/pipeline-indicators.sh --lessons`
-/// owns that rule, and a second copy would drift from it (lesson 004).
+/// repository is not asked here: `scripts/pipeline-indicators.sh` with
+/// `--lessons` owns that rule, and a second copy would drift from it (lesson
+/// 004).
 fn lesson_admission_problems(lessons: &str) -> Vec<String> {
     let mut entries: Vec<(&str, Vec<&str>)> = Vec::new();
     let mut inside = false;
@@ -16528,9 +16529,10 @@ fn fixture_lessons(edit: impl Fn(u32, String) -> Option<String>) -> String {
     text
 }
 
-/// Runs `scripts/pipeline-indicators.sh --lessons` from `root`; exit code and
-/// all output. Bounded: the real tree takes about 15 seconds, so a stalled
-/// loop fails here with its message instead of holding CI to the job timeout.
+/// Runs `scripts/pipeline-indicators.sh` with `--lessons` from `root`; exit
+/// code and all output. Bounded: the real tree takes about 15 seconds, so a
+/// stalled loop fails here with its message instead of holding CI to the job
+/// timeout.
 fn run_lesson_indicators(root: &Path) -> (i32, String) {
     let mut command = Command::new("/bin/bash");
     command
@@ -16538,8 +16540,10 @@ fn run_lesson_indicators(root: &Path) -> (i32, String) {
         .arg("--lessons")
         .current_dir(root);
     forget_inherited_repository(&mut command);
-    let output = run_command_with_timeout(&mut command, Duration::from_secs(120))
-        .expect("pipeline-indicators.sh --lessons が 120 秒で終わりません");
+    let output =
+        run_command_with_timeout(&mut command, Duration::from_secs(120)).unwrap_or_else(|error| {
+            panic!("pipeline-indicators.sh --lessons を実行できません: {error:#}")
+        });
     let mut printed = String::from_utf8_lossy(&output.stdout).into_owned();
     printed.push_str(&String::from_utf8_lossy(&output.stderr));
     (output.status.code().unwrap_or(-1), printed)
@@ -16555,8 +16559,8 @@ fn run_lesson_indicators(root: &Path) -> (i32, String) {
 /// a hurry, read as finished until then.
 ///
 /// The suite asks the script rather than restating its rule, so the count it
-/// prints and this verdict on guard names cannot disagree; the script is shown to refuse on a
-/// fixture repository, since on this tree it passes.
+/// prints and this verdict on guard names cannot disagree; the script is
+/// shown to refuse on a fixture repository, since on this tree it passes.
 pub(crate) fn every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let (code, printed) = run_lesson_indicators(&root);
