@@ -1161,3 +1161,18 @@ only a space between `git` and `push`, only
 whitespace ending the word, detection reaching past `git` with no option, the lone
 check admitting shell syntax, a push that is not lone asked about, `-q` dropped,
 and the refusal no longer saying how to keep text out of the command).
+
+## 086 — A hook that ran where the session started, a third time
+
+Lessons 023 and 040 found a hook acting on `$CLAUDE_PROJECT_DIR` — the main
+checkout, for a session started there — while the work was in a worktree, and
+asked that sibling hooks be swept for the same mistake. The format-on-edit hook
+in `.claude/settings.json` was missed: every `.rs` edit in a worktree ran
+`cargo fmt` on main and left the edited file for the commit gate to refuse
+(change 191). A sweep asked for in prose did not reach a one-line hook written
+inline in a JSON file. **The rule:** a hook that acts on a file acts from that
+file's own directory; `$CLAUDE_PROJECT_DIR` names where hooks are found, not
+where the work is.
+
+**Guard.** `a_new_worktree_builds_from_mains_cache_and_formats_its_own_files`
+(watched failing with the hook put back in `$CLAUDE_PROJECT_DIR`).

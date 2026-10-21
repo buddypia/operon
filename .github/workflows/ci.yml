@@ -7,6 +7,14 @@ name: CI
 # merge into main until scripts/ci-verified.sh finds this workflow's `success`
 # on the branch head. So it runs on the branches changes are made on, not only
 # on main. The workflow file name is what ci-verified.sh asks for.
+#
+# Three jobs, each a macOS runner (change 191). A free account runs five macOS
+# jobs at once; a landing used to start seven — five here and two in
+# harness.yml — so a branch pushed during a landing queued behind it. What
+# merged into `checks` needs no build of its own: the band check reads files,
+# and the hook checks are `bash -n`. What went: a job running the ignored tests
+# with `continue-on-error` and `|| true`, which could not fail and had no agent
+# CLI to pass with; AGENTS.md says when to run those, locally.
 
 on:
   push:
@@ -22,7 +30,7 @@ concurrency:
 
 jobs:
   checks:
-    name: fmt / clippy
+    name: fmt / clippy / bands
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +41,32 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --locked -- -D warnings
+      - name: Hook scripts are executable
+        run: |
+          missing=0
+          for hook in .claude/hooks/*.sh; do
+            if [ ! -x "$hook" ]; then
+              echo "not executable: $hook"
+              missing=1
+            fi
+          done
+          exit "$missing"
+      - name: Shell syntax
+        run: |
+          for script in scripts/*.sh .claude/hooks/*.sh; do
+            bash -n "$script"
+          done
+      - name: Harness metrics
+        run: |
+          bash scripts/harness-metrics.sh | tee metrics.json
+          {
+            echo '### Harness metrics'
+            echo '```json'
+            cat metrics.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Control bands
+        run: bash scripts/check-bands.sh --metrics metrics.json
 
   test:
     name: test suite
@@ -46,21 +80,6 @@ jobs:
       - name: Full locked test suite
         run: cargo test --locked
 
-  ignored-tests:
-    name: cross-cli restore tests
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.88.0
-      - uses: Swatinem/rust-cache@v2
-      - name: Install tmux
-        run: brew install tmux || true
-      - name: Run ignored tests
-        run: cargo test --locked -- --ignored || true
-
   package:
     name: macos app bundle packaging
     runs-on: macos-latest
@@ -73,17 +92,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Package macOS app
         run: bash scripts/package-macos.sh
-
-  bands:
-    name: control bands and metrics
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.88.0
-      - uses: Swatinem/rust-cache@v2
-      - name: Harness metrics
-        run: bash scripts/harness-metrics.sh | tee metrics.json
-      - name: Control bands
-        run: bash scripts/check-bands.sh --metrics metrics.json

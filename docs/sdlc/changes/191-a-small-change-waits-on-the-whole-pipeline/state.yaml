@@ -1,0 +1,93 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report (the person, 2026-10-21): parallel agents each own a worktree, they
+# get in each other's way, and a small fix takes a very long time because
+# everything runs locally. Find the bottleneck and fix it at the root.
+#
+# Measured, 2026-10-21, load average 180-277 on 16 cores (41 Claude Code and
+# 28 Antigravity processes on the machine):
+#   - A new worktree has an empty target/. Its first `cargo clippy --locked`
+#     took 16m29s wall, 5m21s CPU — past the commit gate's 600-second hook
+#     timeout, which is a non-blocking error, so the first commit in every new
+#     worktree could skip fmt and clippy unseen (gate-commit.sh's own header
+#     says so). From an APFS clone of main's target/debug (15s, no extra disk
+#     until written) the same clippy rebuilt only `operon`: 64s.
+#   - The format-on-edit hook ran `cd $CLAUDE_PROJECT_DIR && cargo fmt`. That
+#     variable names the main checkout for a session started there, which is
+#     how every change starts, so an edit in a worktree formatted main and left
+#     the edited file unformatted for the commit gate to refuse.
+#   - A worktree lease outlived its session by the full two-hour TTL: nothing
+#     released it when a session ended, so an exited session kept every other
+#     session out of its worktree.
+#   - worktree-session-owner-guard.mjs called realpathSync without importing
+#     it; the ReferenceError was swallowed and onDiskPath never resolved case.
+#   - CI: a landing started seven macOS jobs (five in ci.yml, two in
+#     harness.yml) against a five-job concurrency limit, so a branch pushed
+#     during a landing queued. One of the five could not fail (`|| true` under
+#     continue-on-error, no agent CLI to pass with); harness.yml's invariants
+#     job re-ran ci.yml's `cargo test --locked` with no cache, nine minutes per
+#     landing; the bands job installed a toolchain for scripts that build
+#     nothing. harness.yml's header still said it had never run.
+#
+# Fix: `make wt.new` clones main's target/debug into the new worktree
+# (scripts/seed-target.sh, fail-open). The format hook runs rustfmt on the
+# edited file from its own directory. SessionEnd runs the owner tracker, which
+# removes this session's leases and no one else's. The missing import is added.
+# ci.yml has three jobs: bands and the hook checks moved into `checks`, the
+# always-green job removed; harness.yml keeps only the eval suite. Every check
+# that ran before still runs on the same events, except the job that could not
+# fail.
+#
+# Not changed, reported to the person instead: the per-change paper trail
+# (about ten lines of records per line of code on recent fixes), the review
+# rounds, the merge gate's requirement that a branch contain main, and the
+# 55k-line src/tests.rs that every change recompiles.
+#
+# Risk: .claude/settings.json, .cli, and .github/workflows are on the
+# gate-configuration surface — high. The person asked for this change; no check
+# is narrowed, and the one job removed passed whatever it ran.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Five remarks are carried in review.yaml; none needs the
+  person. Left for the person to decide: the paper trail per change, the
+  review rounds, main-before-merge, and the size of src/tests.rs."
+
+contract:
+  failing-test-first: "machine passed
+    a_new_worktree_builds_from_mains_cache_and_formats_its_own_files and
+    a_session_that_ends_gives_back_only_its_own_worktree_leases, each watched
+    failing by mutation: the format hook put back in $CLAUDE_PROJECT_DIR, the
+    seed step dropped from make wt.new, the SessionEnd branch removed, and the
+    owner check removed from releaseOwnerLease"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) and the named tests; the suite runs in CI.
+    test_fast_subprocess_completes_without_25ms_polling_floor and
+    the_commit_gate_runs_the_gates_in_the_tree_the_commit_lands_in fail on
+    main on this machine too, under the same load"
+  bands: "machine passed bash scripts/check-bands.sh: 1 of 21 at warn
+    (largest_module_lines, recorded, no action), none at propose"
+  release-binary: "machine passed no: src/tests.rs only, so
+    /Applications/Operon.app is not stale"
+  review: "human passed rust-reviewer approve-with-nits 0 4 and
+    subprocess-safety-reviewer approve-with-nits 0 4 at b3c242afd6434a8a
+    (round 2), remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

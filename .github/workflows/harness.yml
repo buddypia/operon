@@ -1,22 +1,15 @@
 name: Harness
 
-# NOT RUNNING. This repository has no git remote, so GitHub never receives a
-# push, a pull request, or a schedule tick, and this workflow has never run. It
-# is kept because it is correct for a repository that has a remote, and deleting
-# it would throw away work that a `git remote add` would make live. Until then
-# the gates that actually run are local: `.claude/hooks/gate-commit.sh` on every
-# commit and `.claude/hooks/gate-stop.sh` at the end of a session.
-#
-# `bash scripts/pipeline-indicators.sh --workflows` reports this and exits 1.
-# Whether these should stay, go, or get a remote is the open question in
-# docs/sdlc/changes/038-the-harness-is-built-but-not-measured/intent.md.
-
 # Stage 4 Play 2 of docs/sdlc/README.md: when the thing being changed is the
 # steering, the checks that judge steering are what should run.
 #
-# The band check and the invariant tests need no credentials and always run. The
-# eval suite needs an agent, so it runs only where ANTHROPIC_API_KEY is
+# The eval suite needs an agent, so it runs only where ANTHROPIC_API_KEY is
 # configured and is skipped — visibly, with a reason — everywhere else.
+#
+# The band check, the hook checks and the invariant tests ran here too, in a
+# second job that built the crate with no cache on every landing: nine minutes
+# for the `cargo test --locked` that ci.yml runs on the same push. ci.yml's
+# `checks` and `test` jobs carry all of it now (change 191).
 
 # The two path lists below are deliberately duplicated: GitHub Actions does not
 # support YAML anchors, so an alias here would silently match nothing.
@@ -53,48 +46,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  harness:
-    name: invariants / metrics / bands
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.88.0
-
-      - name: Hook scripts are executable
-        run: |
-          missing=0
-          for hook in .claude/hooks/*.sh; do
-            if [ ! -x "$hook" ]; then
-              echo "not executable: $hook"
-              missing=1
-            fi
-          done
-          exit "$missing"
-
-      - name: Shell syntax
-        run: |
-          for script in scripts/*.sh .claude/hooks/*.sh; do
-            bash -n "$script"
-          done
-
-      - name: Invariant tests
-        run: cargo test --locked
-
-      - name: Harness metrics
-        run: |
-          bash scripts/harness-metrics.sh | tee metrics.json
-          {
-            echo '### Harness metrics'
-            echo '```json'
-            cat metrics.json
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Control bands
-        run: bash scripts/check-bands.sh --metrics metrics.json
-
   evals:
     name: eval suite
     runs-on: macos-latest

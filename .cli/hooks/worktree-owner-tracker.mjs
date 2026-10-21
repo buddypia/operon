@@ -35,6 +35,9 @@
  *      friction. Added (`A`) files only — a modified test in a fix commit is the fix author's judgement call.
  *      Policy SSOT: internal-rule (testing.md).
  *
+ *   4. Lease release (change 191) — on `SessionEnd`, removes every lease this session holds, so a
+ *      worktree whose session exited is free at once instead of after the TTL.
+ *
  * Why: For worktree-session-owner-guard to allow edits/commits only for "worktrees created by my session",
  * the owning session must be recorded at creation time. Since session_id is provided via hook stdin JSON
  * rather than env vars, only a PostToolUse hook can record this.
@@ -51,7 +54,7 @@ import { HookOutput } from '../lib/hook-output.mjs';
 import { readStdin, output, safeHookMain, safeGit, resolveProjectDir, isDirectInvocation } from '../lib/utils.mjs';
 import { DERIVED_LOCK_BRANCH_RE, isEditLockEnforced, isTestFilePath } from '../lib/test-lock.mjs';
 import { parseWorktreeList } from '../lib/worktree-plan-path.mjs';
-import { claimOwnerLease, renewOwnerLease } from '../lib/worktree-owner-lease.mjs';
+import { claimOwnerLease, releaseOwnerLease, renewOwnerLease } from '../lib/worktree-owner-lease.mjs';
 import { resolveWorktreeRoot } from '../lib/worktree-path.mjs';
 
 const WORKTREE_CREATE_RE = /(?:\bwt\.new\b|worktree-new\.(?:mjs|sh)|\bgit\s+worktree\s+add\b)/;
@@ -89,6 +92,7 @@ export function parseBranchFromCommand(cmd) {
  * @returns {Promise<object>} Always {} (passthrough — tracker never blocks)
  */
 export async function run(data) {
+  if (data?.hook_event_name === 'SessionEnd') return releaseLeases(data);
   if (!data || data.tool_name !== 'Bash') return {};
 
   const cmd = data.tool_input?.command;
@@ -172,6 +176,23 @@ function renewLease(data, cmd) {
   } catch {
     // silent — failures must not block tool invocations
   }
+}
+
+/**
+ * SessionEnd (change 191): gives back every worktree lease this session holds, so a session that
+ * exited stops keeping other sessions out for the rest of the TTL. Silent and best-effort, like the
+ * heartbeat.
+ */
+function releaseLeases(data) {
+  try {
+    const sessionId = data.session_id;
+    if (!sessionId || typeof sessionId !== 'string') return {};
+    const wtOut = safeGit('worktree list --porcelain', resolveProjectDir(data), { timeout: 3000 });
+    for (const wt of parseWorktreeList(wtOut || '')) releaseOwnerLease(wt.path, null, sessionId);
+  } catch {
+    // silent — a hook at session end has nobody to report to
+  }
+  return {};
 }
 
 async function recordOwner(data, cmd) {
