@@ -1128,5 +1128,7 @@ refused, as an index and as a commit, and the stale refusal did not name the
 exit; and refusing one with no verdicts, a do-not-approve or another digest) —
 swept by
 `docs/sdlc/changes/190-a-re-verdict-after-main-cannot-be-committed/mutations.py`:
-three mutations each red — a record alone judged against its own base, the
-switch inverted, and the refusal no longer naming the exit.
+four mutations each red, `a_scrub_may_edit_closed_records_only_to_lose_a_listed_name`
+among the checks — a record alone judged against its own base, the switch
+inverted, a record-only diff across several change directories judged against
+main, and the refusal no longer naming the exit.

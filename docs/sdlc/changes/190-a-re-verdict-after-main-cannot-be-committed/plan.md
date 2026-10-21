@@ -91,3 +91,9 @@ gate made it one.
    mutations (the switch removed, inverted, and the claim).
 2. A test outside this change's guard, `the_review_gate_has_no_bypass`, pins
    every line that sets the base; it pins the new one.
+3. **CI on the reviewed head failed `a_scrub_may_edit_closed_records_only_to_lose_a_listed_name`**:
+   a scrub edits several closed changes' records and no code, so the switch
+   took it and judged it against main instead of by its own rules. A re-verdict
+   touches one change directory, so the switch now also requires exactly one;
+   the scrub test joined the sweep's checks, with a fourth mutation (several
+   directories admitted).

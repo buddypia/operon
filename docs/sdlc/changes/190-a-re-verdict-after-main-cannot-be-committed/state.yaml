@@ -24,7 +24,7 @@
 
 state:
   route: "bugfix"
-  stage: "test"
+  stage: "done"
   status: "done"
   attempts: "1 3"
   questions: "0 7"
@@ -33,8 +33,8 @@ state:
   readiness: "pending"
   screen: "n/a"
 
-resume: "Done. Next: change 183 records its re-verdict with a record-only commit
-  once this is on main."
+resume: "Reviewed at round 3; lands once CI passes. Then change 183 records
+  its re-verdict with a record-only commit."
 
 contract:
   failing-test-first: "machine passed the_review_gate_refuses_what_it_says_it_refuses
@@ -45,10 +45,10 @@ contract:
     pass; the whole suite runs in CI on the push"
   release-binary: "machine passed no: scripts, src/tests.rs and docs only —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human passed mutations.py in this directory: 3
-    of 3 caught, the claim among them"
+  guards-verified-by-mutation: "human passed mutations.py in this directory: 4
+    of 4 caught, the claim among them"
   review: "human passed rust-reviewer approve-with-nits 0 2 and
-    subprocess-safety-reviewer approve-with-nits 0 4 at bd3219d3a0c9dad1, round 2;
+    subprocess-safety-reviewer approve-with-nits 0 3 at 2deb2db25a3ad34f, round 3;
     nits carried with person lines in review.yaml"
   lesson-recorded: "machine passed entry 084 in docs/sdlc/lessons.md with its Guard"
 

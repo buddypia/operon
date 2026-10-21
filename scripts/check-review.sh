@@ -196,10 +196,19 @@ quiet_diff() {
     *) git -c core.quotePath=false diff --no-ext-diff --no-textconv --quiet "$base" -- "$@" 2>/dev/null ;;
   esac
 }
+# Only a commit inside one change directory: a scrub edits several closed
+# records at once and keeps its own judgement below.
 if quiet_diff . "$EXCLUDE"; then
   quiet_diff 'docs/sdlc/changes/*/review.yaml'
-  [ "$?" -eq 1 ] && git rev-parse --verify --quiet 'refs/heads/main^{commit}' >/dev/null 2>&1 \
-    && base=refs/heads/main
+  if [ "$?" -eq 1 ]; then
+    case "$mode" in
+      commit) own=$(git -c core.quotePath=false -c color.ui=false diff "$base" "$commit" --no-renames --name-only -- docs/sdlc/changes 2>/dev/null | sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u) ;;
+      *) own=$(git -c core.quotePath=false -c color.ui=false diff --cached "$base" --no-renames --name-only -- docs/sdlc/changes 2>/dev/null | sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u) ;;
+    esac
+    [ "$(printf '%s\n' "$own" | grep -c .)" -eq 1 ] \
+      && git rev-parse --verify --quiet 'refs/heads/main^{commit}' >/dev/null 2>&1 \
+      && base=refs/heads/main
+  fi
 fi
 case "$mode" in
   index) diff_mode=cached ;;

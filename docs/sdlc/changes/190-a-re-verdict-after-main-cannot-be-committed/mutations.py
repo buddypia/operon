@@ -84,7 +84,10 @@ RUN_SECONDS = 1800
 # 3. WHAT SAYS THE GUARDS ARE GREEN. One command per list; the first non-zero
 #    exit ends the check. Name the guards rather than running the whole suite —
 #    a sweep runs this once per mutation.
-TESTS = ["the_review_gate_refuses_what_it_says_it_refuses"]
+TESTS = [
+    "the_review_gate_refuses_what_it_says_it_refuses",
+    "a_scrub_may_edit_closed_records_only_to_lose_a_listed_name",
+]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
 # 4. WHAT TO BREAK. One entry per requirement in the change, plus the claim
@@ -99,8 +102,13 @@ MUTATIONS = {
     ),
     "the switch fires only when no review.yaml changed": (
         GATE,
-        '[ "$?" -eq 1 ] && git rev-parse',
-        '[ "$?" -eq 0 ] && git rev-parse',
+        'if [ "$?" -eq 1 ]; then',
+        'if [ "$?" -eq 0 ]; then',
+    ),
+    "a record-only diff across several change directories is judged against main": (
+        GATE,
+        '| grep -c .)" -eq 1 ]',
+        '| grep -c .)" -ge 1 ]',
     ),
     "the stale refusal no longer names the exit (the claim)": (
         GATE,
