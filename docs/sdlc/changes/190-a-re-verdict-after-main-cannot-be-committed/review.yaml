@@ -1,0 +1,55 @@
+# Round 1 (digest 9aae5624ee95c348): subprocess-safety-reviewer do-not-approve
+# 2 3 — the planned exit admitted a record-only commit on its digest alone and
+# skipped every check on what the record said, and a `--ff-only` landing makes
+# no merge commit to re-judge it; rust-reviewer approve-with-nits 1 3, its
+# Important a staged/unstaged mismatch caught mid-edit. Fixed by removing the
+# exit: a record alone has its base set to main and runs the gate's ordinary
+# path.
+#
+# Round 2 (bd3219d3a0c9dad1): both approve-with-nits, 0 Important. The safety
+# reviewer read every mode's failure path (a git error, a missing or symbolic
+# main, a deleted record, a commit on main, a stale main) and found each closed;
+# the rust reviewer ran both gate tests on the staged tree. Every nit carried,
+# not taken, per REVIEW.md.
+#
+# Round 3 (2deb2db25a3ad34f): CI on round 2's head failed the scrub test — the switch
+# took a scrub, which edits several closed records at once. The switch now
+# requires exactly one change directory. Both approve-with-nits, 0 Important;
+# the rust reviewer ran the scrub, bypass and gate tests on the staged tree.
+# The round-3 nits restate round 2's; each is listed once under its round-3 id.
+#
+# Round 4 (56c6230345a7094e): CI on round 3's head failed two harness tests — the
+# pipe-reading scan took `-eq` after `grep -c .)` for a `grep -q`, and `done` is
+# not a stage. The count became a `case` with no pipe. subprocess-safety-reviewer
+# approve 0 0 (the `case` equals the old count for every `own`; `$'\n'` in a
+# pattern holds in bash 3.2); rust-reviewer approve-with-nits 0 2, both its
+# round-3 nits again, listed below.
+#
+# Landing (this digest, recorded under round 4): every digest above was taken
+# with --index against HEAD, so each covered one round's increment; the merge
+# into main judges the branch's whole diff against e8bfddf. Main had not moved.
+# Both reviewers re-read e8bfddf..e9776bd, recomputed this digest, and stood by
+# their verdicts: subprocess-safety-reviewer approve-with-nits 0 3 (its round-3
+# findings, listed below), rust-reviewer approve-with-nits 0 2.
+
+digest: "3a504a92d6b25d41"
+
+rounds: 4
+
+carried:
+  - subprocess-safety-reviewer/3/1 · own is counted against the first parent but touched against main, so a record-only merge commit touching one directory against its first parent and several against main takes the ^2 exemption unchecked; narrowed from round 2, not new strength; skip the switch when the commit has a second parent
+    person: "まれな形の commit で、判定の確認が省かれる場合が残っています。以前から同じ形の抜けがあり、今回の変更で広がってはいないので、対応は不要です。"
+  - subprocess-safety-reviewer/3/2 · by hand, quiet_diff compares the working tree while own is counted from the index, so a preview of an unstaged record reports paper trail only where the commit would be judged against main (rust-reviewer/3/1 is the same finding)
+    person: "手で確認を走らせたときに、まれに表示が実際の commit 時と食い違うことがあります。commit 時の判定には影響せず、対応は不要です。"
+  - subprocess-safety-reviewer/3/3 · the pathspec docs/sdlc/changes/*/review.yaml also matches nested paths; no tests for a record-only merge commit, a deletion alone, or a missing or symbolic main
+    person: "対象を探す範囲が少し広めで、いくつかのまれな状況はテストで確かめられていません。確認役がコードを読んで安全側に倒れることを確かめており、対応は不要です。"
+  - rust-reviewer/3/1 · by-hand mode counts directories from the index, not the working tree; a comment saying so would do
+    person: "手で確認を走らせたときの表示についての指摘で、上と同じものです。対応は不要です。"
+  - rust-reviewer/3/2 · the_review_gate_has_no_bypass still exempts any line containing "&& base=refs/heads/main" from the base-assignment count; compare the trimmed line exactly
+    person: "テストの確認の仕方が少し緩い箇所があります。動きには影響がなく、対応は不要です。"
+  - rust-reviewer/2/2 · no mutation breaks the "no code" guard or the main-exists check; add one, and a code-plus-record case on topic if the gate test stays green
+    person: "壊れ方の一部がテストで見張られていません。いまの動きは正しく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

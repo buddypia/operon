@@ -1100,3 +1100,35 @@ failing on main's character cut at a turn of 1,115 characters) and
 main's byte cut at instructions of 705 characters), each asserting it reached
 the case — swept by
 `docs/sdlc/changes/187-a-handoff-cut-twice-keeps-a-marker-fragment/mutations.py`.
+
+## 084 — A re-verdict the gate had no commit for
+
+Change 183 merged main into its reviewed branch; the merge forced a lesson
+renumber and moved the review digest. The re-verdict could have ridden in the
+merge commit, but the merge was committed first, and then every way to record
+it was refused by a different guard — a record-only commit by the review gate,
+an amend, a reset, a new branch — leaving a force push of a pushed branch for a
+person who was away. Each guard was right about its own case; together they
+left a recoverable step no exit. The review gate's reason, "a record apart from
+the code it judged describes code that is not there", was not checked against
+the case: the code was there. **The rule:** a refusal states the condition it
+protects and checks that condition, not a shape that usually implies it; and
+where a pipeline says a step needs no person, some commit must be able to make
+it.
+
+The first fix added an exit that admitted such a record on its digest alone,
+and review found it skipped every check on what the record said; the fix that
+landed adds no exit, and judges a record alone against main through the gate's
+ordinary path. An exception to a gate is a second gate; changing the input to
+the one gate is not.
+
+**Guard.** `the_review_gate_refuses_what_it_says_it_refuses` (watched failing on
+the unedited script: a re-verdict alone at the branch's diff against main was
+refused, as an index and as a commit, and the stale refusal did not name the
+exit; and refusing one with no verdicts, a do-not-approve or another digest) —
+swept by
+`docs/sdlc/changes/190-a-re-verdict-after-main-cannot-be-committed/mutations.py`:
+four mutations each red, `a_scrub_may_edit_closed_records_only_to_lose_a_listed_name`
+among the checks — a record alone judged against its own base, the switch
+inverted, a record-only diff across several change directories judged against
+main, and the refusal no longer naming the exit.
