@@ -1,0 +1,36 @@
+# Review record for 192-a-gate-that-times-out-passes-silently.
+#
+# The change: the commit gate bounds its clippy at 540 seconds and refuses at
+# the limit instead of being cut off by the hook's 600; the format hook runs
+# `cargo fmt` from the edited file's directory; the guard against hooks that
+# work in $CLAUDE_PROJECT_DIR reads every hook command; two workflow headers
+# say what their workflows do.
+#
+# Round 1, both reviewers asked to break it. Verified by rust-reviewer: `case
+# $?` reads the clippy's own status under `set -uo pipefail`; the JSON walk
+# reaches every hook command and flags none of the current ones. Verified by
+# subprocess-safety-reviewer: the bounded run kills clippy's whole process
+# group, a killed build leaves no lock and keeps finished crates, and 540s plus
+# the kill grace and the gate's other work fits inside 600s.
+
+digest: "a4d782753bfae674"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · scripts/run-bounded.sh is resolved in the landing tree, so a branch from before change 128 is refused with a missing-file message
+    person: "とても古いブランチでは、commit が「ファイルがない」という分かりにくい理由で止まります。検査が飛ばされることはありません。対応は不要です。"
+  - rust-reviewer/1/2 · OPERON_COMMIT_CLIPPY_TIMEOUT set to 600 or more brings back the silent pass
+    person: "制限時間の設定を 600 秒以上に書き換えた場合だけ、以前の「検査なしで通る」状態に戻ります。普段は設定しないので、対応は不要です。"
+  - rust-reviewer/1/3 · the hook guard accepts `cd ${CLAUDE_PROJECT_DIR}/.claude/x && …`, and does not read statusLine or settings.local.json
+    person: "わざと特殊な書き方をした hook は検査をすり抜けます。対応は不要です。"
+  - subprocess-safety-reviewer/1/1 · if the hook itself is killed, the clippy in its own process group survives and holds the build lock
+    person: "まれに、時間切れの後も検査用のビルドが残り、次のビルドがそれを待つことがあります。待てば終わります。対応は不要です。"
+  - subprocess-safety-reviewer/1/3 · cargo fmt formats the whole package, so an unrelated module with a syntax error stops the format of every edit
+    person: "別のファイルに書きかけの構文エラーがあると、自動整形がしばらく効きません。commit 時の検査が整形漏れを見つけます。対応は不要です。"
+  - subprocess-safety-reviewer/1/4 · a .rs file outside any cargo project, or outside the module tree, is no longer formatted
+    person: "このリポジトリのビルド対象ではない Rust ファイルは自動整形されません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"

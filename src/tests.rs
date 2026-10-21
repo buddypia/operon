@@ -47659,7 +47659,10 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
     let commit_gate = code(&read(".claude/hooks/gate-commit.sh"));
     for runs in [
         "$(cargo fmt --check",
-        "$(cargo clippy --locked -- -D warnings",
+        // Change 192: under the gate's own limit, which has to end before the
+        // hook's, or a cold build lets the commit through unchecked.
+        "$(bash scripts/run-bounded.sh \"$limit\" cargo clippy --locked -- -D warnings",
+        "limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}",
     ] {
         assert!(
             commit_gate.iter().any(|line| line.contains(runs)),
@@ -47706,6 +47709,22 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
     assert!(
         timeout >= 600,
         "gate-merge.sh の hook timeout ({timeout}s) が suite の時間上限 540 秒に余裕を残していません"
+    );
+    let commit_timeout = settings["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|entry| entry["hooks"].as_array().unwrap().iter())
+        .find(|hook| {
+            hook["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with(".claude/hooks/gate-commit.sh"))
+        })
+        .and_then(|hook| hook["timeout"].as_u64())
+        .unwrap_or(0);
+    assert!(
+        commit_timeout >= 600,
+        "gate-commit.sh の hook timeout ({commit_timeout}s) が clippy の時間上限 540 秒に余裕を残していません"
     );
 }
 
@@ -47836,14 +47855,47 @@ pub(crate) fn a_new_worktree_builds_from_mains_cache_and_formats_its_own_files()
         both_streams(&output)
     );
 
-    let settings = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
-    let formats = settings
-        .lines()
-        .find(|line| line.contains("*.rs)"))
-        .expect(".claude/settings.json に .rs を整形する hook がありません");
+    // Lesson 086, as a rule over every hook rather than the one that broke it
+    // a third time: `$CLAUDE_PROJECT_DIR` may say where a hook's script is,
+    // never where the hook works, because for a session started on main it
+    // names main while the work is in a worktree.
+    let settings: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join(".claude/settings.json")).unwrap())
+            .unwrap();
+    let mut commands = Vec::new();
+    let mut pending = vec![&settings["hooks"]];
+    while let Some(value) = pending.pop() {
+        match value {
+            serde_json::Value::Object(map) => {
+                if let Some(command) = map.get("command").and_then(|c| c.as_str()) {
+                    commands.push(command.to_owned());
+                }
+                pending.extend(map.values());
+            }
+            serde_json::Value::Array(items) => pending.extend(items),
+            _ => {}
+        }
+    }
+    let works_in_main: Vec<&String> = commands
+        .iter()
+        .filter(|command| {
+            command
+                .match_indices("CLAUDE_PROJECT_DIR")
+                .any(|(at, name)| {
+                    let after = &command[at + name.len()..];
+                    !(after.starts_with("}/.claude/") || after.starts_with("}/.cli/"))
+                })
+        })
+        .collect();
     assert!(
-        !formats.contains("CLAUDE_PROJECT_DIR") && formats.contains("dirname"),
-        "整形 hook が編集されたファイルの worktree ではなく main で走ります: {formats}"
+        works_in_main.is_empty(),
+        "hook が $CLAUDE_PROJECT_DIR（main）で作業します。script の場所にだけ使ってください: {works_in_main:?}"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.contains("*.rs) cd \"$(dirname \"$p\")\" && cargo fmt")),
+        "整形 hook が編集されたファイルの worktree で cargo fmt を走らせていません: {commands:?}"
     );
 }
 

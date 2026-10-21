@@ -1175,4 +1175,24 @@ file's own directory; `$CLAUDE_PROJECT_DIR` names where hooks are found, not
 where the work is.
 
 **Guard.** `a_new_worktree_builds_from_mains_cache_and_formats_its_own_files`
-(watched failing with the hook put back in `$CLAUDE_PROJECT_DIR`).
+reads every hook command in `.claude/settings.json` and refuses any use of
+`$CLAUDE_PROJECT_DIR` that is not a script's path (change 192 widened it from
+the one hook; watched failing with the format hook put back in
+`$CLAUDE_PROJECT_DIR`).
+
+## 087 — A gate that ran out of time let the commit through
+
+The commit gate's clippy ran under the hook's 600-second timeout, and a hook
+that times out is a non-blocking error: the commit went ahead unchecked. A new
+worktree's first clippy took 16m29s (change 191), so every first commit could
+skip fmt and clippy, and the gate's header had said so since change 128 — as a
+note to "run the cargo gates by hand", which nothing made anyone do. The merge
+gate had already been fixed for the same cause by bounding its own suite.
+**The rule:** a gate's work runs under its own limit, shorter than the hook's,
+and reaching the limit refuses with what to do next.
+
+**Guard.** `the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` requires
+the bounded clippy, its 540-second limit, and a hook timeout of at least 600
+(change 192; watched failing with the clippy unbounded, the limit at 900, and
+the hook timeout at 500). The gate itself, driven with a `cargo` that never
+returns, refused with exit 2 after 8 seconds and left no child behind.

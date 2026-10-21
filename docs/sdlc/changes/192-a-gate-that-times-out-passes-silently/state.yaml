@@ -1,0 +1,89 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report (the person, 2026-10-21): verify change 191 adversarially, and fix
+# what is found at the root, with a mechanism that keeps it from recurring and
+# without over-engineering.
+#
+# Verified, not changed:
+#   - `make wt.new` end to end: the new worktree was seeded, its first clippy
+#     took 26s and its first `cargo test --no-run` 29s, each rebuilding only
+#     `operon`.
+#   - SessionEnd through the real entry point (stdin, child process): this
+#     session's lease removed in 474ms. Claude Code gives SessionEnd hooks
+#     1.5s by default and the hook's own `timeout: 10` raises it.
+#   - No document names the CI jobs 191 removed.
+#
+# Found:
+#   1. The commit gate still passes unchecked whenever clippy outruns the
+#      hook's 600 seconds. 191 made that rarer, not impossible: a Cargo.lock
+#      change or an empty main target/ brings back the cold build. The merge
+#      gate was fixed for this cause long ago by bounding its own suite; the
+#      commit gate's header had only told the reader to run the gates by hand.
+#   2. 191's format hook wrote the edition (2021) a second time beside
+#      Cargo.toml, and its guard read one line of settings.json, so the next
+#      hook written against $CLAUDE_PROJECT_DIR would pass — the third
+#      occurrence of lessons 023/040.
+#   3. claude-review.yml and scheduled-scan.yml still said the repository has
+#      no remote and they never run. The weekly scan has run, and failed both
+#      times (2026-10-12, 10-19), unseen: cargo audit reports RUSTSEC-2026-0194
+#      and -0195 in quick-xml 0.30.0, which comes only through Linux
+#      accessibility crates (zbus_xml, atspi) and is not built for macOS.
+#
+# Fix: gate-commit.sh runs clippy under scripts/run-bounded.sh at 540s and a
+# run that reaches it refuses, saying to run `make q.fast` first. The format
+# hook runs `cargo fmt` from the edited file's directory, which reads the
+# edition from Cargo.toml (1.7s against rustfmt's 0.6s on src/tests.rs). The
+# guard reads every hook command and refuses $CLAUDE_PROJECT_DIR anywhere but
+# a script's path. The two workflow headers say what they do. Lessons 086 and
+# 087 name the guards.
+#
+# Left to the person: whether the quick-xml advisories are ignored with that
+# reason or the Linux-only crates are bumped (a gate relaxation or a
+# dependency change, both theirs), and that the scan's failures reach no one.
+#
+# Risk: .claude/hooks, .claude/settings.json and .github/workflows are the
+# gate-configuration surface — high. Every edit tightens or corrects; none
+# narrows a check.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Six remarks are carried in review.yaml; none needs the
+  person. Left for the person: the quick-xml advisories and that the weekly
+  scan's failures reach no one."
+
+contract:
+  failing-test-first: "machine passed
+    the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate red with the
+    clippy unbounded, with the limit at 900, and with the hook timeout at 500;
+    a_new_worktree_builds_from_mains_cache_and_formats_its_own_files red with
+    the format hook and with gate-stop.sh each run in $CLAUDE_PROJECT_DIR; an
+    identity replacement stayed green as the control. The gate itself, driven
+    with a cargo that never returns and a 3s limit, refused with exit 2 after
+    8s and left no child behind"
+  three-gates: "machine passed make q.fast and the named tests; the suite
+    runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: 1 of 21 at warn
+    (largest_module_lines, recorded, no action), none at propose"
+  release-binary: "machine passed no: src/tests.rs only"
+  review: "human passed rust-reviewer approve-with-nits 0 4 and
+    subprocess-safety-reviewer approve-with-nits 0 5 at a4d782753bfae674
+    (round 1), remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
