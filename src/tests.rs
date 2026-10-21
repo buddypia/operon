@@ -20149,6 +20149,12 @@ pub(crate) fn the_pipeline_documents_ask_their_questions_before_review_does() {
              there was one, each from whichever was nearest, and all six \
              inherited the same unbounded run",
         ),
+        (
+            ".claude/skills/sdlc/SKILL.md",
+            "scripts/mutation_sweep.py",
+            "step 10 says the rules live in the runner the template calls, so a \
+             change directory holds what it breaks and not another copy of them",
+        ),
     ];
     let mut unasked = Vec::new();
     for (document, marker, purpose) in required {
@@ -21272,6 +21278,23 @@ pub(crate) fn the_installed_build_check_does_not_call_a_git_failure_stale() {
     );
 }
 
+/// The template a change copies, and a fixture directory it can run in: the
+/// template calls `scripts/mutation_sweep.py` under its own `ROOT`, so the
+/// runner is copied there. Since change 197 the template is only the part a
+/// change fills in, and these tests run the runner through it, as a change does.
+fn mutation_sweep_fixture(name: &str) -> (String, PathBuf) {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let template = fs::read_to_string(repository.join("docs/sdlc/templates/mutations.py")).unwrap();
+    let root = temporary_directory(name);
+    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::copy(
+        repository.join("scripts/mutation_sweep.py"),
+        root.join("scripts/mutation_sweep.py"),
+    )
+    .unwrap();
+    (template, root)
+}
+
 #[test]
 /// A mutation sweep does not wait forever on a mutation that hangs.
 ///
@@ -21287,7 +21310,8 @@ pub(crate) fn the_installed_build_check_does_not_call_a_git_failure_stale() {
 /// is the record of a run its `state.yaml` reports on. The bound went into
 /// `docs/sdlc/templates/mutations.py` instead — which is also why the defect
 /// spread, since there was no template and each sweep was copied from whichever
-/// one was nearest.
+/// one was nearest. Since change 197 the bound is in `scripts/mutation_sweep.py`,
+/// which the template calls, so a fix to it reaches every sweep written after.
 ///
 /// **Behavioural, because lesson 042 says a guard that a mechanism is referenced
 /// is not a guard that it runs.** Reading the template for the string `timeout=`
@@ -21311,10 +21335,7 @@ pub(crate) fn the_installed_build_check_does_not_call_a_git_failure_stale() {
 /// twice: `(sleep 2 && touch marker) & sleep 30` under the old bound left the
 /// marker behind, and an orphaned `sleep 30` with it.
 pub(crate) fn the_mutation_sweep_template_ends_a_run_that_will_not_finish() {
-    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let template = fs::read_to_string(repository.join("docs/sdlc/templates/mutations.py")).unwrap();
-
-    let root = temporary_directory("mutation-sweep-template");
+    let (template, root) = mutation_sweep_fixture("mutation-sweep-template");
     let subject = root.join("subject.txt");
 
     let sweep_with = |check: &str| {
@@ -21457,10 +21478,7 @@ pub(crate) fn the_mutation_sweep_template_ends_a_run_that_will_not_finish() {
 /// happen — a green run proving nothing, which is the shape of mistake change
 /// 068's review found one file over.
 pub(crate) fn the_mutation_sweep_template_puts_the_tree_back_when_it_is_killed() {
-    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let template = fs::read_to_string(repository.join("docs/sdlc/templates/mutations.py")).unwrap();
-
-    let root = temporary_directory("mutation-sweep-killed");
+    let (template, root) = mutation_sweep_fixture("mutation-sweep-killed");
     let subject = root.join("subject.txt");
     let marker = root.join("check-survived");
     fs::write(&subject, "kept\n").unwrap();
@@ -21584,10 +21602,7 @@ pub(crate) fn the_mutation_sweep_template_puts_the_tree_back_when_it_is_killed()
 pub(crate) fn the_mutation_sweep_template_restores_the_mode_it_found() {
     use std::os::unix::fs::PermissionsExt;
 
-    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let template = fs::read_to_string(repository.join("docs/sdlc/templates/mutations.py")).unwrap();
-
-    let root = temporary_directory("mutation-sweep-mode");
+    let (template, root) = mutation_sweep_fixture("mutation-sweep-mode");
     let subject = root.join("subject.sh");
     fs::write(&subject, "#!/bin/sh\nkept\n").unwrap();
     fs::set_permissions(&subject, PermissionsExt::from_mode(0o755)).unwrap();

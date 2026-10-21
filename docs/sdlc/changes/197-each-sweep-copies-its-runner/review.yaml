@@ -1,0 +1,25 @@
+# Review record for 197-each-sweep-copies-its-runner.
+#
+# The change: the mutation-sweep runner moves out of the template into
+# scripts/mutation_sweep.py; the template keeps the blocks a change fills in.
+#
+# Round 1, rust-reviewer diffed the old template body against the runner: the
+# only differences are the tail's indentation inside `main` and where the
+# handlers are registered, in the same order as before, before any file is
+# mutated. Two of its three remarks were figures in state.yaml (66 lines, four
+# statements), corrected there; the record is outside the reviewed diff. The
+# third is in the runner and is carried. subprocess-safety-reviewer checked the
+# signal and restore windows, atexit and os._exit under import rather than
+# __main__, and which runner the template loads; nothing found.
+
+digest: "0a288fc58f9062a4"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · scripts/mutation_sweep.py run_checks: the docstring says "No check named above does", but the checks now arrive through `main`, so the sentence points at nothing.
+    person: "検証用スクリプトの説明文の一文が、移動前の位置を指したままになっています。動作には影響せず、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve 0 0"
