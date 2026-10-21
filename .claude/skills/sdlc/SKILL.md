@@ -216,10 +216,12 @@ without recording one is indistinguishable from finishing.
 - **Watch each new guard fail** before trusting it. Delete or invert what it
   guards and confirm it goes red. A guard nobody has seen fail is a guess about
   what it guards.
-- **Copy the sweep from `docs/sdlc/templates/mutations.py`.** It carries the four
-  rules earlier sweeps learned by getting them wrong — assert the target is there
-  before replacing it, write the mutated file rather than `copy2` it, bound every
-  run, and mutate the claim.
+- **Copy the sweep from `docs/sdlc/templates/mutations.py`** and fill in its four
+  blocks; it calls `scripts/mutation_sweep.py`, which keeps the rules earlier
+  sweeps learned by getting them wrong — assert the target is there before
+  replacing it, write the mutated file rather than `copy2` it, bound every run,
+  restore on a signal — so the change directory holds only what this change
+  breaks. The one rule no runner can keep is yours: mutate the claim.
 - **If the change added or altered a sentence a person reads, mutate the claim**
   — not only the counters behind it. Weaken the sentence, or make it promise
   something the code does not do, and watch a guard go red. Change 061's fifteen
