@@ -272,6 +272,13 @@ Settings.
   destination CLI's internal store. The source bytes stay in a local verbatim
   archive alongside `handoff-bundle.md` and `manifest.json`, and the destination
   CLI starts a fresh native session with that compact Handoff bundle.
+- The bundle also carries the source's last 3 tool results — a test run, a
+  build log — each shortened by rule to at most 1,000 characters: repeated
+  lines become one line with a count, and the first and last lines survive
+  with the lines between them that report an error or a failure. What is
+  left out is counted or marked, and the whole output stays in the snapshot. A tool
+  result never reaches the destination as something the user or the
+  assistant said, and neither does reasoning.
 - Each destination can start on a model and reasoning effort of its own, set
   under the destination picker in the history tab and remembered per CLI; the
   session menu names them beside each destination. Left empty, the CLI's own

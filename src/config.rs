@@ -46,6 +46,22 @@ pub(crate) const HANDOFF_BUNDLE_MAX_BYTES: usize = 6_000;
 /// words, and know the whole text is in the archived transcript (change 185).
 pub(crate) const HANDOFF_SHORTENED_MARKER: &str =
     "[shortened by Operon to fit the handoff; the full text is in the transcript snapshot]";
+/// A handoff carries the last few tool results of the source conversation,
+/// each shortened by rule, so the receiving session knows what the tools found
+/// without the bundle growing past its budget (change 193). A result past the
+/// char limit keeps its first and last lines and the latest lines carrying a
+/// signal word between them; the rest is counted, never silently dropped.
+pub(crate) const HANDOFF_TOOL_RESULTS_MAX: usize = 3;
+pub(crate) const HANDOFF_TOOL_RESULT_MAX_CHARS: usize = 1_000;
+pub(crate) const HANDOFF_TOOL_RESULT_HEAD_LINES: usize = 3;
+pub(crate) const HANDOFF_TOOL_RESULT_TAIL_LINES: usize = 5;
+pub(crate) const HANDOFF_TOOL_RESULT_SIGNAL_LINES: usize = 6;
+/// Matched case-insensitively anywhere in a line.
+pub(crate) const HANDOFF_TOOL_RESULT_SIGNAL_WORDS: &[&str] =
+    &["error", "fail", "panic", "fatal", "exception", "traceback"];
+pub(crate) const HANDOFF_TOOL_RESULT_LINE_MAX_CHARS: usize = 150;
+pub(crate) const HANDOFF_TOOL_RESULT_LINE_SHORTENED: &str = "[line shortened by Operon]";
+pub(crate) const HANDOFF_TOOL_RESULTS_HEADING: &str = "Latest tool results from the source session (oldest first; the full output of each is in the transcript snapshot):";
 pub(crate) const HANDOFF_BUNDLE_FILE_NAME: &str = "handoff-bundle.md";
 /// The files a handoff archive holds besides its bundle, and the restore kind
 /// its manifest names. The import writes them; the reuse lookup and the expiry

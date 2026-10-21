@@ -1,0 +1,31 @@
+# Review record for 193-a-handoff-loses-what-the-tools-found.
+#
+# The change: a handoff bundle carries the source's last three tool results,
+# each shortened by rule (repeats counted, head and tail kept with the latest
+# signal lines, every gap counted, long lines cut), and a block splitter stops
+# a tool result's or a reasoning passage's later paragraphs from reaching the
+# excerpt as said text. Older turns give way first, then tool results oldest
+# first, then the existing sequence.
+#
+# Round 1, rust-reviewer (approve-with-nits 0 2): no Important. Nit 1 was
+# taken although graded a nit, because a person reads the claim it broke: the
+# last-resort cut appended the marker after 1,000 chars, so a result could
+# reach about 1,085 chars against the README's "at most 1,000". Fixed by
+# reserving the marker in the cut, guarded by a new case in
+# a_shortened_tool_result_keeps_its_error_lines_and_counts_repeats, mutation
+# 15 of 15 caught.
+#
+# Round 2 at 3841f789f1e32106: rust-reviewer approves the fix; nit 2 carried.
+#
+# Also run: cargo test --locked -- --ignored, 6 of 6 live-CLI restore tests ok.
+
+digest: "3841f789f1e32106"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/2 · src/history.rs handoff_blocks — a user's typed text that follows a [Tool result] block in the same message is folded into that tool result and leaves the excerpt
+    person: "元の会話で、ツールの結果と同じメッセージの中に続けて打ち込んだ文があると、引き継ぎではその文がユーザーの発言ではなくツール結果の一部として渡ります。文そのものは引き継ぎ先に届き、全文はスナップショットにも残るので、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
