@@ -603,6 +603,352 @@ pub(crate) fn a_handoff_says_where_operon_shortened_the_text() {
     );
 }
 
+fn tool_turns(results: &[String]) -> Vec<(&'static str, String)> {
+    results
+        .iter()
+        .flat_map(|result| {
+            [
+                (
+                    "assistant",
+                    "[Tool call: shell]\n{\"cmd\":\"cargo test\"}".to_owned(),
+                ),
+                ("user", format!("[Tool result]\n{result}")),
+            ]
+        })
+        .collect()
+}
+
+/// The handoff text before its tool section: what reads as said by the user
+/// or the assistant.
+fn handoff_excerpt(bundle: &str) -> &str {
+    bundle
+        .split_once(HANDOFF_TOOL_RESULTS_HEADING)
+        .map_or(bundle, |(excerpt, _)| excerpt)
+}
+
+#[test]
+/// Change 193. A handoff threw away every tool result, so the receiving
+/// session did not know which test failed or why and began by running
+/// everything again.
+pub(crate) fn a_handoff_carries_the_latest_tool_results_shortened() {
+    let mut log = vec!["running 120 tests".to_owned()];
+    log.extend(std::iter::repeat_n(
+        "test passes::case ... ok".to_owned(),
+        60,
+    ));
+    log.extend((0..50).map(|i| format!("noise before {i:02}")));
+    log.push("error[E0308]: mismatched types in importer.rs".to_owned());
+    log.extend((0..50).map(|i| format!("noise after {i:02}")));
+    log.push("test result: FAILED. 119 passed; 1 failed".to_owned());
+    let mut turns = vec![("user", "Fix the failing test.".to_owned())];
+    turns.extend(tool_turns(&[
+        "RESULT-ONE ok".to_owned(),
+        "RESULT-TWO ok".to_owned(),
+        "RESULT-THREE ok".to_owned(),
+        log.join("\n"),
+    ]));
+    turns.push((
+        "assistant",
+        "The importer test fails on a type mismatch.".to_owned(),
+    ));
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "",
+    );
+
+    assert!(
+        bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES,
+        "bundle byte length {} exceeded HANDOFF_BUNDLE_MAX_BYTES ({HANDOFF_BUNDLE_MAX_BYTES})",
+        bundle.len()
+    );
+    let (excerpt, tools) = bundle
+        .split_once(HANDOFF_TOOL_RESULTS_HEADING)
+        .unwrap_or_else(|| panic!("the bundle carries no tool results:\n{bundle}"));
+    assert!(excerpt.contains("The importer test fails on a type mismatch."));
+    assert!(
+        !tools.contains("RESULT-ONE"),
+        "more than {HANDOFF_TOOL_RESULTS_MAX} tool results were carried:\n{tools}"
+    );
+    let two = tools.find("RESULT-TWO").expect("second-to-last results");
+    let three = tools.find("RESULT-THREE").expect("second-to-last results");
+    let error = tools
+        .find("error[E0308]: mismatched types in importer.rs")
+        .unwrap_or_else(|| panic!("the error line was dropped:\n{tools}"));
+    assert!(two < three && three < error, "not oldest first:\n{tools}");
+    for kept in [
+        "running 120 tests",
+        "test result: FAILED. 119 passed; 1 failed",
+    ] {
+        assert!(tools.contains(kept), "{kept:?} was dropped:\n{tools}");
+    }
+    assert!(
+        tools.contains(&format!(
+            "test passes::case ... ok {}",
+            tool_result_repeat_note(60)
+        )),
+        "repeated lines are not counted:\n{tools}"
+    );
+    assert!(
+        !tools.contains("noise before 25") && tools.contains("lines omitted by Operon"),
+        "the long result was not shortened:\n{tools}"
+    );
+}
+
+#[test]
+/// Change 193. What survives the shortening is the start, the end, and the
+/// lines that say what went wrong; everything else is counted, so the
+/// receiving session can tell how much it is not seeing.
+pub(crate) fn a_shortened_tool_result_keeps_its_error_lines_and_counts_repeats() {
+    assert_eq!(
+        shorten_tool_result("a\n\nb"),
+        "a\n\nb",
+        "a short result changed"
+    );
+
+    let mut lines = vec!["start".to_owned()];
+    lines.extend(std::iter::repeat_n("tick".to_owned(), 30));
+    for i in 0..200 {
+        lines.push(format!("noise {i:03}"));
+        if i == 50 {
+            lines.extend(std::iter::repeat_n("dup".to_owned(), 5));
+        }
+        if i % 20 == 10 {
+            lines.push(format!("Error {i:03} in step {}", "e".repeat(100)));
+        }
+    }
+    lines.push("FATAL: disk full".to_owned());
+    lines.extend((0..3).map(|i| format!("tail {i}")));
+    lines.push("x".repeat(400));
+    let original = lines.join("\n");
+
+    let shortened = shorten_tool_result(&original);
+
+    assert!(
+        shortened.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS,
+        "{} chars:\n{shortened}",
+        shortened.chars().count()
+    );
+    assert!(
+        shortened.starts_with(&format!("start\ntick {}\n", tool_result_repeat_note(30))),
+        "the head or the repeat count was lost:\n{shortened}"
+    );
+    assert!(shortened.contains("FATAL: disk full"), "{shortened}");
+    assert!(shortened.contains("Error 190 in step"), "{shortened}");
+    assert!(
+        !shortened.contains("Error 010 in step"),
+        "more than {HANDOFF_TOOL_RESULT_SIGNAL_LINES} signal lines, the earliest first, were kept:\n{shortened}"
+    );
+    assert!(
+        shortened.ends_with(&format!(
+            "{} {HANDOFF_TOOL_RESULT_LINE_SHORTENED}",
+            "x".repeat(HANDOFF_TOOL_RESULT_LINE_MAX_CHARS)
+        )),
+        "a long last line was not cut, or the tail was lost:\n{shortened}"
+    );
+    // Every line of the original is either shown, counted by a repeat note, or
+    // counted by an omission note.
+    let accounted: usize = shortened
+        .lines()
+        .map(|line| {
+            (1..=original.lines().count())
+                .find(|&n| line == tool_result_omitted_note(n))
+                .or_else(|| {
+                    (2..=30).find(|&n| line.ends_with(&format!(" {}", tool_result_repeat_note(n))))
+                })
+                .unwrap_or(1)
+        })
+        .sum();
+    assert_eq!(accounted, original.lines().count(), "{shortened}");
+    // What the receiving session reads has to say who left the lines out and
+    // where the rest is, or it reads a gap as the tool's own output.
+    for wording in [
+        tool_result_omitted_note(7),
+        HANDOFF_TOOL_RESULT_LINE_SHORTENED.to_owned(),
+    ] {
+        assert!(wording.contains("Operon"), "{wording}");
+    }
+    assert!(tool_result_omitted_note(7).contains("transcript snapshot"));
+
+    // A tail whose own lines are long and repeated is past the limit even with
+    // the head gone; the last-resort cut still keeps the result within it,
+    // marker included.
+    let mut lines = vec!["one".to_owned(), "two".to_owned(), "three".to_owned()];
+    lines.extend((0..50).map(|i| format!("middle {i}")));
+    for tag in ["a", "b", "c", "d", "e"] {
+        lines.extend(std::iter::repeat_n(tag.repeat(200), 12));
+    }
+    let shortened = shorten_tool_result(&lines.join("\n"));
+    assert!(
+        shortened.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS
+            && shortened.ends_with(HANDOFF_SHORTENED_MARKER),
+        "{} chars:\n{shortened}",
+        shortened.chars().count()
+    );
+    assert!(
+        HANDOFF_TOOL_RESULTS_HEADING.contains("oldest first")
+            && HANDOFF_TOOL_RESULTS_HEADING.contains("transcript snapshot"),
+        "{HANDOFF_TOOL_RESULTS_HEADING}"
+    );
+}
+
+#[test]
+/// Change 193. The READMEs tell a person how much of a tool result crosses in
+/// a handoff; a limit changed in `src/config.rs` and not there makes them
+/// promise what the handoff no longer does.
+pub(crate) fn the_readmes_state_the_handoff_tool_result_limits() {
+    let chars = format!(
+        "{},{:03}",
+        HANDOFF_TOOL_RESULT_MAX_CHARS / 1_000,
+        HANDOFF_TOOL_RESULT_MAX_CHARS % 1_000
+    );
+    let count = HANDOFF_TOOL_RESULTS_MAX;
+    for (file, says_count) in [
+        ("README.md", format!("last {count} tool results")),
+        ("README.ja.md", format!("直近 {count} 件のツール結果")),
+        ("README.ko.md", format!("최근 도구 결과 {count}건")),
+    ] {
+        let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(file))
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert!(
+            text.contains(&says_count),
+            "{file} does not say {says_count:?}"
+        );
+        assert!(text.contains(&chars), "{file} does not say {chars}");
+    }
+}
+
+#[test]
+/// Change 193. A tool result was dropped only up to its first blank line, so
+/// the rest — the second half of a log, a block of a file that was read —
+/// reached the receiving session as the assistant's own words. Reasoning
+/// leaked the same way.
+pub(crate) fn a_tool_result_with_blank_lines_never_reads_as_conversation() {
+    let turns = vec![
+        ("user", "Fix the parser.".to_owned()),
+        (
+            "assistant",
+            "Reading the file.\n\n[Tool call: Read]\n{\"path\":\"src/a.rs\"}".to_owned(),
+        ),
+        (
+            "user",
+            "[Tool result]\nfn first() {}\n\nLEAKED_SECOND_PARAGRAPH".to_owned(),
+        ),
+        (
+            "assistant",
+            format!("{RESTORED_REASONING_LABEL}\nplan step\n\nTHINKING_TAIL"),
+        ),
+        ("assistant", "The parser drops the last token.".to_owned()),
+    ];
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "",
+    );
+
+    let excerpt = handoff_excerpt(&bundle);
+    assert!(
+        !excerpt.contains("LEAKED_SECOND_PARAGRAPH"),
+        "a tool result's second paragraph reads as conversation:\n{bundle}"
+    );
+    assert!(
+        !bundle.contains("THINKING_TAIL"),
+        "a reasoning passage's second paragraph was carried:\n{bundle}"
+    );
+    assert!(excerpt.contains("Reading the file."), "{bundle}");
+    assert!(
+        excerpt.contains("The parser drops the last token."),
+        "{bundle}"
+    );
+    assert!(
+        bundle.contains("fn first() {}\n\nLEAKED_SECOND_PARAGRAPH"),
+        "the tool result is not carried whole in its own section:\n{bundle}"
+    );
+    assert_eq!(
+        compact_handoff_turn_text("user", "[Tool result]\nfirst\n\nsecond"),
+        None
+    );
+}
+
+#[test]
+/// Change 193. Tool results outrank older turns but not the last turn, the
+/// task, or the person's instructions: over the budget, older turns go first,
+/// then tool results oldest first.
+pub(crate) fn a_handoff_gives_up_tool_results_before_the_last_turn_task_or_note() {
+    // Lines long enough that each result is shortened close to its limit.
+    let fat_result = |tag: &str| {
+        (0..40)
+            .map(|i| format!("{tag} line {i:02} {}", "-".repeat(120)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let tools = tool_turns(&[
+        fat_result("TOOL-A"),
+        fat_result("TOOL-B"),
+        fat_result("TOOL-C"),
+    ]);
+    let note = "Finish the tests, then summarise.";
+    let mut turns = vec![("user", "Fix the importer.".to_owned())];
+    for i in 1..=6 {
+        turns.push(("assistant", format!("OLDER-TURN-{i} {}", "o".repeat(1_100))));
+    }
+    turns.extend(tools.clone());
+    turns.push(("assistant", format!("LAST-TURN {}", "l".repeat(1_100))));
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        note,
+    );
+
+    assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+    assert!(
+        bundle.contains("LAST-TURN") && bundle.contains(note),
+        "{bundle}"
+    );
+    assert!(
+        ["TOOL-A", "TOOL-B", "TOOL-C"]
+            .iter()
+            .all(|tag| bundle.contains(tag)),
+        "a tool result gave way before an older turn:\n{bundle}"
+    );
+    assert!(!bundle.contains("OLDER-TURN-1 "), "{bundle}");
+
+    // A last turn of 1 200 Japanese characters leaves room for some results,
+    // not all: the oldest goes first, the newest stays.
+    let mut turns = vec![("user", "Fix the importer.".to_owned())];
+    turns.extend(tools);
+    turns.push(("assistant", format!("最後の報告。{}", "お".repeat(1_190))));
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        note,
+    );
+
+    assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+    assert_eq!(included, 1, "{bundle}");
+    assert!(
+        bundle.contains("最後の報告。") && bundle.contains(note),
+        "{bundle}"
+    );
+    assert!(bundle.contains("Fix the importer."), "{bundle}");
+    assert!(
+        bundle.contains("TOOL-C") && !bundle.contains("TOOL-A"),
+        "tool results did not give way oldest first:\n{bundle}"
+    );
+}
+
 #[test]
 pub(crate) fn compact_handoff_bundle_peels_nested_envelopes_and_preserves_display_goal() {
     let first_source = CliSession {
@@ -24991,6 +25337,77 @@ impl ReviewGateFixture {
             &format!("digest: \"{digest}\"\n\nverdicts:\n{verdicts}"),
         );
     }
+
+    /// The fixture after its first landing: a store change and its change
+    /// directory, committed with every verdict at the digest of its own diff.
+    /// Most scenarios start here, each in a repository of its own.
+    fn landed() -> Self {
+        let fixture = Self::new();
+        fixture.append("src/store.rs", "// change\n");
+        fixture.append(
+            "docs/sdlc/changes/900-fixture/state.yaml",
+            "resume: \"x\"\n",
+        );
+        fixture.git(&["add", "-A"]);
+        let digest = fixture.current_digest();
+        fixture.record(&digest, REVIEW_GATE_ALL_APPROVE);
+        fixture.git(&["add", "-A"]);
+        fixture.git(&["commit", "-q", "-m", "landed"]);
+        fixture
+    }
+
+    /// Takes the landed record out of the index and the tree, so the required
+    /// set is what the refusal names rather than a stale digest.
+    fn drop_record(&self) {
+        self.git(&[
+            "rm",
+            "-q",
+            "--cached",
+            "docs/sdlc/changes/900-fixture/review.yaml",
+        ]);
+        let _ = fs::remove_file(self.root.join("docs/sdlc/changes/900-fixture/review.yaml"));
+    }
+}
+
+const REVIEW_GATE_ALL_APPROVE: &str = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+
+/// The gate runs a scenario through, collected so one failure does not hide
+/// the rest.
+#[derive(Default)]
+struct GateChecks {
+    wrong: Vec<String>,
+}
+
+impl GateChecks {
+    /// An empty `want` means the gate must print nothing at all — the silent
+    /// pass — rather than anything, which an empty substring would match.
+    fn check(
+        &mut self,
+        label: &str,
+        (code, printed): (Option<i32>, String),
+        want_code: i32,
+        want: &str,
+    ) {
+        let matches = if want.is_empty() {
+            printed.is_empty()
+        } else {
+            printed.contains(want)
+        };
+        if code != Some(want_code) || !matches {
+            self.wrong.push(format!(
+                "{label}: expected exit {want_code} and `{want}`, got exit {code:?}:\n    {}",
+                printed.trim().replace('\n', "\n    ")
+            ));
+        }
+    }
+
+    fn finish(self) {
+        assert!(
+            self.wrong.is_empty(),
+            "scripts/check-review.sh が言っている通りに拒否していません:\n{}",
+            self.wrong.join("\n")
+        );
+    }
 }
 
 impl Drop for ReviewGateFixture {
@@ -25008,26 +25425,14 @@ impl Drop for ReviewGateFixture {
 /// the purpose, through each refusal it claims and the passes it allows — the
 /// way `the_readiness_gate_refuses_a_spec_that_is_not_filled_in` drives its
 /// script.
+///
+/// The scenarios are split across the tests that share this name as a
+/// prefix, each in its own repository, so they run side by side: in one
+/// function they were the slowest test in the suite (520s on a loaded
+/// machine, about 180s in CI), and the test job waited on it.
 pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
-    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
-    let mut wrong = Vec::new();
-    // An empty `want` means the gate must print nothing at all — the silent
-    // pass — rather than anything, which an empty substring would match.
-    let mut check =
-        |label: &str, (code, printed): (Option<i32>, String), want_code: i32, want: &str| {
-            let matches = if want.is_empty() {
-                printed.is_empty()
-            } else {
-                printed.contains(want)
-            };
-            if code != Some(want_code) || !matches {
-                wrong.push(format!(
-                    "{label}: expected exit {want_code} and `{want}`, got exit {code:?}:\n    {}",
-                    printed.trim().replace('\n', "\n    ")
-                ));
-            }
-        };
-
+    let all = REVIEW_GATE_ALL_APPROVE;
+    let mut c = GateChecks::default();
     let f = ReviewGateFixture::new();
 
     // Code on the store surface, staged with the change directory, no record.
@@ -25039,7 +25444,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.git(&["add", "-A"]);
     // The whole required set, with its line ending: the route's `full` set is
     // three reviewers, and a `full) ;;` would leave the one the surface adds.
-    check(
+    c.check(
         "no record",
         f.gate(&[]),
         1,
@@ -25049,13 +25454,13 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // A record about some other diff.
     f.record("0000000000000000", all);
     f.git(&["add", "-A"]);
-    check("stale record", f.gate(&[]), 1, "判定が古い diff のものです");
+    c.check("stale record", f.gate(&[]), 1, "判定が古い diff のものです");
 
     // The right digest, written but not staged: the index still holds the
     // stale one, and that is what would land.
     let digest = f.current_digest();
     f.record(&digest, all);
-    check(
+    c.check(
         "record unstaged",
         f.gate(&[]),
         1,
@@ -25064,11 +25469,11 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
 
     // Staged: this is the pass.
     f.git(&["add", "-A"]);
-    check("fresh record", f.gate(&[]), 0, "✅ SHIP");
+    c.check("fresh record", f.gate(&[]), 0, "✅ SHIP");
 
     // An unstaged edit to the working tree must not move the index digest.
     f.append("src/store.rs", "// not staged\n");
-    check(
+    c.check(
         "index digest ignores the working tree",
         f.gate(&[]),
         0,
@@ -25079,13 +25484,13 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // A missing reviewer, a do-not-approve, an Important, an invented reviewer.
     f.record(&digest, "  rust-reviewer: \"approve 0 0\"\n");
     f.git(&["add", "-A"]);
-    check("missing reviewer", f.gate(&[]), 1, "の判定がありません");
+    c.check("missing reviewer", f.gate(&[]), 1, "の判定がありません");
     f.record(
         &digest,
         "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "do-not-approve",
         f.gate(&[]),
         1,
@@ -25096,7 +25501,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "  rust-reviewer: \"approve-with-nits 2 1\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "Important above zero",
         f.gate(&[]),
         1,
@@ -25107,7 +25512,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         &format!("{all}  invented-reviewer: \"approve 0 0\"\n"),
     );
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "undefined reviewer",
         f.gate(&[]),
         1,
@@ -25122,13 +25527,13 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // Paper trail only.
     f.append("docs/sdlc/changes/900-fixture/state.yaml", "# done\n");
     f.git(&["add", "-A"]);
-    check("paper trail only", f.gate(&[]), 0, "判定は不要です");
+    c.check("paper trail only", f.gate(&[]), 0, "判定は不要です");
     f.git(&["reset", "-q", "--hard"]);
 
     // A record changing, or deleted, with no code beside it.
     f.record("1111111111111111", all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "record alone",
         f.gate(&[]),
         1,
@@ -25136,7 +25541,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["reset", "-q", "--hard"]);
     f.git(&["rm", "-q", "docs/sdlc/changes/900-fixture/review.yaml"]);
-    check(
+    c.check(
         "record deleted alone",
         f.gate(&[]),
         1,
@@ -25147,13 +25552,25 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // land alone either.
     f.record("e3b0c44298fc1c14", all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "record of an empty diff alone",
         f.gate(&[]),
         1,
         "判定だけが commit されようとしています",
     );
     f.git(&["reset", "-q", "--hard"]);
+
+    c.finish();
+}
+
+#[test]
+/// After a landing, under `--index`: change 190's record-only re-verdict, a
+/// commit with no change directory, and the shapes a record can be malformed
+/// in.
+pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_after_a_landing() {
+    let all = REVIEW_GATE_ALL_APPROVE;
+    let mut c = GateChecks::default();
+    let f = ReviewGateFixture::landed();
 
     // Change 190: main moved in under a reviewed branch and forced an edit, so
     // the record is stale and its re-verdict is all there is to commit. The
@@ -25170,7 +25587,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["add", "-A"]);
     f.git(&["commit", "-q", "-m", "merge of main"]);
-    check(
+    c.check(
         "a stale record names the exit",
         f.gate(&["--against", "main"]),
         1,
@@ -25179,7 +25596,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let against_main = f.current_digest_with(&["--against", "main"]);
     f.record(&against_main, "");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "re-verdict alone with no verdicts",
         f.gate(&[]),
         1,
@@ -25190,7 +25607,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "re-verdict alone with a do-not-approve",
         f.gate(&[]),
         1,
@@ -25198,7 +25615,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.record("2222222222222222", all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "record alone at another digest",
         f.gate(&[]),
         1,
@@ -25206,7 +25623,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.record(&against_main, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "re-verdict alone at the diff against main",
         f.gate(&[]),
         0,
@@ -25214,7 +25631,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["commit", "-q", "-m", "re-verdict"]);
     let re_verdict = f.git(&["rev-parse", "HEAD"]);
-    check(
+    c.check(
         "re-verdict alone as a commit",
         f.gate_in("--commit", &[re_verdict.trim()]),
         0,
@@ -25229,7 +25646,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // a child process on a low one is refused.
     f.append("src/store.rs", "// silent\n");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "directory-less high surface",
         f.gate(&[]),
         1,
@@ -25238,11 +25655,11 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.git(&["reset", "-q", "--hard"]);
     f.append("src/i18n_tables.rs", "// silent\n");
     f.git(&["add", "-A"]);
-    check("directory-less low surface", f.gate(&[]), 0, "");
+    c.check("directory-less low surface", f.gate(&[]), 0, "");
     f.git(&["reset", "-q", "--hard"]);
     f.append("src/i18n_tables.rs", "// Command::new\n");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "directory-less spawn",
         f.gate(&[]),
         1,
@@ -25263,7 +25680,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         &format!("{all}  rust-reviewer: \"do-not-approve 1 0\"\n"),
     );
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "duplicate reviewer line",
         f.gate(&[]),
         1,
@@ -25274,19 +25691,19 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "  rust-reviewer: \"approve 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
-    check("two-value line", f.gate(&[]), 1, "3 値ではありません");
+    c.check("two-value line", f.gate(&[]), 1, "3 値ではありません");
     f.record(
         &digest,
         "  rust-reviewer: \"approve 0x 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
-    check("non-numeric count", f.gate(&[]), 1, "数字ではありません");
+    c.check("non-numeric count", f.gate(&[]), 1, "数字ではありません");
     f.record(
         &digest,
         "  rust-reviewer: \"lgtm 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "unknown verdict word",
         f.gate(&[]),
         1,
@@ -25294,9 +25711,22 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["reset", "-q", "--hard"]);
 
-    // From here to the unset, the gate is git's own: `core.hooksPath` points at
-    // this repository's `.githooks`, so every `git commit` below runs
-    // the reference-transaction hook inside the commit, whatever the command said. A
+    c.finish();
+}
+
+#[test]
+/// The gate as git runs it, inside the commit: `-a`, `--no-verify`, `-C`,
+/// amends, refs that are not branches, a dangling ref, `pack-refs`, a root
+/// commit and a merge.
+pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_through_git() {
+    let all = REVIEW_GATE_ALL_APPROVE;
+    let mut c = GateChecks::default();
+    let f = ReviewGateFixture::landed();
+
+    // In this test the gate is git's own: `core.hooksPath` points at this
+    // repository's `.githooks`, except where a step unsets it to make a commit
+    // with the hook off, so every `git commit` below runs the
+    // reference-transaction hook inside the commit, whatever the command said. A
     // "landed" of 0 means HEAD moved; 1 means the commit was refused.
     f.git(&["config", "core.hooksPath", ".githooks"]);
     let root_str = f.root.to_str().unwrap().to_owned();
@@ -25311,13 +25741,13 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.record(&index_digest, all);
     f.git(&["add", "-A"]);
     f.append("src/store.rs", "// not staged\n");
-    check(
+    c.check(
         "-a is judged on what it stages",
         f.commit(&["commit", "-a", "-q", "-m", "with -a"], None),
         1,
         "判定が古い diff のものです",
     );
-    check(
+    c.check(
         "--no-verify does not skip the gate",
         f.commit(&["commit", "-a", "--no-verify", "-q", "-m", "x"], None),
         1,
@@ -25326,13 +25756,13 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // A pathspec commit is judged on the temporary index git builds for it,
     // where the record is still HEAD's.
     f.git(&["checkout", "--", "src/store.rs"]);
-    check(
+    c.check(
         "a pathspec commit is judged as the commit it builds",
         f.commit(&["commit", "-q", "-m", "partial", "src/store.rs"], None),
         1,
         "変更ディレクトリのない commit が store",
     );
-    check(
+    c.check(
         "a fresh record lands through git",
         f.commit(&["commit", "-q", "-m", "landed through git"], None),
         0,
@@ -25344,7 +25774,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.append("src/store.rs", "// from elsewhere\n");
     f.append("docs/sdlc/changes/900-fixture/state.yaml", "# elsewhere\n");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "-C from another directory is gated where it lands",
         f.commit(
             &["-C", &root_str, "commit", "-q", "-m", "x"],
@@ -25356,7 +25786,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let digest = f.current_digest();
     f.record(&digest, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "-C from another directory lands with a fresh record",
         f.commit(
             &["-C", &root_str, "commit", "-q", "-m", "from elsewhere"],
@@ -25369,7 +25799,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // An amend records against HEAD's parent; git tells the hook so.
     f.append("src/store.rs", "// amend more\n");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "an amend is judged against HEAD's parent",
         f.commit(&["commit", "--amend", "--no-edit", "-q"], None),
         1,
@@ -25378,7 +25808,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let amended = f.current_digest_with(&["--against", "HEAD^"]);
     f.record(&amended, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "an amend with a record about HEAD^ lands",
         f.commit(&["commit", "--amend", "--no-edit", "-q"], None),
         0,
@@ -25390,7 +25820,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // about the diff the amended commit records.
     f.append("src/store.rs", "// amend with -m\n");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "an amend with -m is still judged against HEAD's parent",
         f.commit(&["commit", "--amend", "-q", "-m", "amended with -m"], None),
         1,
@@ -25399,7 +25829,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let amended = f.current_digest_with(&["--against", "HEAD^"]);
     f.record(&amended, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "an amend with -m lands with a record about HEAD^",
         f.commit(&["commit", "--amend", "-q", "-m", "amended with -m"], None),
         0,
@@ -25410,20 +25840,19 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // can undo. The commit moved to here was made with the hook off and could
     // not pass the gate on its own, so the forward move proves the filter,
     // not merely that reset works.
-    let judged_tip = f.git(&["rev-parse", "HEAD"]);
     f.git(&["config", "--unset", "core.hooksPath"]);
     f.append("src/store.rs", "// ungated\n");
     f.git(&["add", "-A"]);
     f.git(&["commit", "-q", "-m", "made with the hook off"]);
     f.git(&["config", "core.hooksPath", ".githooks"]);
-    check(
+    c.check(
         "the ungated commit would not pass on its own",
         f.gate(&["--commit", "HEAD"]),
         1,
         "変更ディレクトリのない commit が store",
     );
     f.git(&["reset", "-q", "--hard", "HEAD~1"]);
-    check(
+    c.check(
         "moving forward to an existing commit is not judged",
         f.commit(&["reset", "-q", "--hard", "ORIG_HEAD"], None),
         0,
@@ -25435,7 +25864,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // reaches it, whichever ref the command names and whichever is checked out.
     f.append("src/store.rs", "// stashed\n");
     f.git(&["stash", "-q"]);
-    check(
+    c.check(
         "a fast-forward to the stash is judged",
         f.commit(&["merge", "-q", "--ff-only", "stash"], None),
         1,
@@ -25449,20 +25878,20 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let dangling = dangling.trim();
     f.git(&["reset", "-q", "--hard"]);
     // 128 is git's own exit for a ref update its hook aborted.
-    check(
+    c.check(
         "a branch created at a commit no branch reaches is judged",
         f.run(&["branch", "laundry", dangling]),
         128,
         "変更ディレクトリのない commit が store",
     );
-    check(
+    c.check(
         "a detached checkout of it is judged",
         f.run(&["checkout", "-q", dangling]),
         128,
         "変更ディレクトリのない commit が store",
     );
     f.git(&["checkout", "-q", "--detach"]);
-    check(
+    c.check(
         "moving a branch from a detached HEAD is judged",
         f.run(&["checkout", "-q", "-B", "main", dangling]),
         128,
@@ -25474,7 +25903,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // vouched for what nothing had judged. The symbolic write is judged at
     // its target; and made with the hook off, it vouches for nothing.
     f.git(&["tag", "laundry-tag", dangling]);
-    check(
+    c.check(
         "a branch made symbolic to a tag is judged at its target",
         f.run(&[
             "symbolic-ref",
@@ -25491,7 +25920,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "refs/tags/laundry-tag",
     ]);
     f.git(&["config", "core.hooksPath", ".githooks"]);
-    check(
+    c.check(
         "a symbolic branch does not vouch for its target",
         f.run(&["update-ref", "refs/heads/main", dangling]),
         128,
@@ -25524,7 +25953,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let dangling_digest = f.current_digest();
     f.record(&dangling_digest, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "a dangling branch ref does not turn the gate off",
         f.commit(&["commit", "-q", "-m", "beside a dangling ref"], None),
         1,
@@ -25538,7 +25967,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // under a commit that has a parent — has to keep it from being judged; the
     // tip is the ungated commit, which would be refused.
     f.git(&["reflog", "expire", "--expire=now", "--all"]);
-    check(
+    c.check(
         "pack-refs is not a root commit",
         f.run(&["pack-refs", "--all"]),
         0,
@@ -25551,7 +25980,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.git(&["symbolic-ref", "HEAD", "refs/heads/rooted"]);
     let refused = f.run(&["commit", "-q", "-m", "a root"]);
     let against_nothing = ReviewGateFixture::digest_named_in(&refused.1);
-    check(
+    c.check(
         "a root commit is judged against the empty tree",
         refused,
         128,
@@ -25559,14 +25988,14 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.record(&against_nothing, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "a root commit lands with a record about its own diff",
         f.run(&["commit", "-q", "-m", "a root"]),
         0,
         "✅ SHIP",
     );
     f.append("src/store.rs", "// amended into the root\n");
-    check(
+    c.check(
         "an amend of a root commit is judged",
         f.commit(&["commit", "-q", "-a", "--amend", "--no-edit"], None),
         1,
@@ -25587,7 +26016,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.append("src/i18n_tables.rs", "// meanwhile on main\n");
     f.git(&["commit", "-q", "-am", "main moves on"]);
     f.git(&["config", "core.hooksPath", ".githooks"]);
-    check(
+    c.check(
         "a merge commit is judged against its first parent",
         f.commit(
             &["merge", "-q", "--no-ff", "-m", "merge the side", "side"],
@@ -25599,12 +26028,22 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let _ = f.run(&["merge", "--abort"]);
     f.git(&["reset", "-q", "--hard"]);
     f.git(&["branch", "-q", "-D", "side"]);
+
+    c.finish();
+}
+
+#[test]
+/// The installed trampoline, a branch from before the gate, a branch that
+/// stubs the script, and an empty or cut-short script or hook in the checkout.
+pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_from_a_checkout_without_it() {
+    let mut c = GateChecks::default();
+    let f = ReviewGateFixture::landed();
+
     // What gate-commit.sh installs into the repository's own hooks directory
     // is a trampoline to the tracked hook — the main checkout's first — so a
     // commit from a linked worktree at a branch from before the gate existed
     // is judged by the gate main carries, with main's script; and a checkout
     // that has neither is refused rather than skipped.
-    f.git(&["config", "--unset", "core.hooksPath"]);
     let hooks = PathBuf::from(f.git(&["rev-parse", "--git-path", "hooks"]).trim());
     let hooks = if hooks.is_absolute() {
         hooks
@@ -25646,7 +26085,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let mut old = fs::read_to_string(worktree.join("src/store.rs")).unwrap();
     old.push_str("// from before the gate\n");
     fs::write(worktree.join("src/store.rs"), old).unwrap();
-    check(
+    c.check(
         "a commit from a worktree without the script is judged by the main checkout's gate",
         f.run_in(&worktree, &["commit", "-q", "-am", "from the old branch"]),
         128,
@@ -25673,7 +26112,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let mut old = fs::read_to_string(stubbing.join("src/store.rs")).unwrap();
     old.push_str("// judged by my own stub\n");
     fs::write(stubbing.join("src/store.rs"), old).unwrap();
-    check(
+    c.check(
         "a branch cannot judge itself with a stubbed script",
         f.run_in(&stubbing, &["commit", "-q", "-am", "with my own script"]),
         128,
@@ -25683,7 +26122,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.git(&["branch", "-q", "-D", "self-judging"]);
     f.git(&["checkout", "-q", "before-the-gate"]);
     f.append("src/store.rs", "// from before the gate\n");
-    check(
+    c.check(
         "a checkout with no tracked hook or script is judged by the main branch's",
         f.commit(&["commit", "-q", "-am", "from the old branch"], None),
         1,
@@ -25697,7 +26136,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // is judged all the same.
     f.write("scripts/check-review.sh", "");
     f.append("src/store.rs", "// past an empty script\n");
-    check(
+    c.check(
         "an empty script in the checkout is not a gate that passes",
         f.commit(&["commit", "-q", "-am", "past an empty script"], None),
         1,
@@ -25713,7 +26152,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         .map(|line| format!("{line}\n"))
         .collect();
     f.write("scripts/check-review.sh", &cut);
-    check(
+    c.check(
         "a cut-short script in the checkout is not a gate that passes",
         f.commit(&["commit", "-q", "-am", "past a cut-short script"], None),
         1,
@@ -25727,7 +26166,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         .map(|line| format!("{line}\n"))
         .collect();
     f.write(".githooks/reference-transaction", &cut);
-    check(
+    c.check(
         "a cut-short tracked hook in the checkout is not a gate that passes",
         f.commit(&["commit", "-q", "-am", "past a cut-short hook"], None),
         1,
@@ -25735,7 +26174,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["checkout", "-q", "--", ".githooks/reference-transaction"]);
     f.write(".githooks/reference-transaction", "");
-    check(
+    c.check(
         "an empty tracked hook in the checkout is not a gate that passes",
         f.commit(&["commit", "-q", "-am", "past an empty hook"], None),
         1,
@@ -25743,21 +26182,18 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["reset", "-q", "--hard"]);
     fs::remove_file(hooks.join("reference-transaction")).unwrap();
+
+    c.finish();
+}
+
+#[test]
+/// A commit that lowers the risk table or its own route, and the route table
+/// from before the gate.
+pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_when_a_table_is_lowered() {
+    let mut c = GateChecks::default();
+    let f = ReviewGateFixture::landed();
+
     f.git(&["config", "core.hooksPath", ".githooks"]);
-    // Back to the tip whose record is about its own diff, which the amend
-    // scenarios below build on. Moving to it is not making it.
-    f.git(&["reset", "-q", "--hard", judged_tip.trim()]);
-    // Taking the landed record out of the index and the tree, so the required
-    // set is what the refusal names rather than a stale digest.
-    let without_record = |f: &ReviewGateFixture| {
-        f.git(&[
-            "rm",
-            "-q",
-            "--cached",
-            "docs/sdlc/changes/900-fixture/review.yaml",
-        ]);
-        let _ = fs::remove_file(f.root.join("docs/sdlc/changes/900-fixture/review.yaml"));
-    };
     // A commit that lowers the risk table is judged by the union of both
     // sides: the surface it removes still classifies it. Under the `docs`
     // route, whose own set asks for nobody, so the reviewer named can only have
@@ -25773,8 +26209,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.write("docs/sdlc/risk.yaml", &lowered);
     f.append("src/store.rs", "// with the table lowered\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "a commit that lowers the risk table is still classified by it",
         f.commit(&["commit", "-q", "-m", "lower the table"], None),
         1,
@@ -25810,8 +26246,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("modify");
     f.append("src/i18n_tables.rs", "// under the old table\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "the old table's `no` is `none`, and a low surface ships",
         f.gate(&[]),
         0,
@@ -25821,8 +26257,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("modify");
     f.append("src/store.rs", "// under the old table, on the store\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "the old table's `no` is still widened by the surface",
         f.gate(&[]),
         1,
@@ -25832,8 +26268,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("security");
     f.append("src/i18n_tables.rs", "// under the old table, security\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "the old table's `yes` is `full`",
         f.gate(&[]),
         1,
@@ -25868,15 +26304,26 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "# route lowered\n",
     );
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "a commit that lowers its own route is still judged by the higher side",
         f.gate(&[]),
         1,
         "必要なレビュアー: rust-reviewer subprocess-safety-reviewer durability-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
-    f.git(&["config", "--unset", "core.hooksPath"]);
+
+    c.finish();
+}
+
+#[test]
+/// What git can be configured to print, the reviewer set of each route, a
+/// risk table removed from the index, an amend judged against `HEAD^`, and an
+/// untracked record.
+pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_by_route_and_base() {
+    let all = REVIEW_GATE_ALL_APPROVE;
+    let mut c = GateChecks::default();
+    let f = ReviewGateFixture::landed();
 
     // `GIT_EXTERNAL_DIFF` makes git print the program's output instead of its
     // own, and exit 0 either way — so the digest became the sha256 of empty
@@ -25889,7 +26336,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.append("src/i18n_tables.rs", "// judged under an external diff\n");
     f.git(&["add", "-A"]);
     // A state where the gate names a digest: no record for what is staged.
-    without_record(&f);
+    f.drop_record();
     let plain = f.current_digest();
     let (_, printed) = f.gate_in_env("--index", &[], &[("GIT_EXTERNAL_DIFF", "/usr/bin/true")]);
     assert!(
@@ -25922,7 +26369,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "\nlet child = std::process::Command::new(\"sh\").spawn();\n",
     );
     f.git(&["add", "-A"]);
-    without_record(&f);
+    f.drop_record();
     let (_, before) = f.gate(&[]);
     assert!(
         before.contains("subprocess-safety-reviewer"),
@@ -25946,8 +26393,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("modify");
     f.append("src/i18n_tables.rs", "// craft\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "craft route requires the rust reviewer",
         f.gate(&[]),
         1,
@@ -25957,8 +26404,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("docs");
     f.append("src/i18n_tables.rs", "// none\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "none route ships without a record",
         f.gate(&[]),
         0,
@@ -25968,8 +26415,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("docs");
     f.append("src/store.rs", "// none, but the store\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "none route still widened by the surface",
         f.gate(&[]),
         1,
@@ -25980,8 +26427,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("feature");
     f.append("src/i18n_tables.rs", "// feature\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "full route on a low surface requires all three",
         f.gate(&[]),
         1,
@@ -25993,8 +26440,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.set_route("docs");
     f.append("Cargo.toml", "# probe\n");
     f.git(&["add", "-A"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "dependencies surface requires the rust reviewer",
         f.gate(&[]),
         1,
@@ -26008,8 +26455,8 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.append("docs/sdlc/changes/900-fixture/state.yaml", "# no table\n");
     f.git(&["add", "-A"]);
     f.git(&["rm", "-q", "--cached", "docs/sdlc/risk.yaml"]);
-    without_record(&f);
-    check(
+    f.drop_record();
+    c.check(
         "a risk table removed from the index still classifies through the base",
         f.gate(&[]),
         1,
@@ -26023,7 +26470,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     // because against HEAD^ it is part of what the amended commit records.
     f.append("src/store.rs", "// amended in\n");
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "amend finds the change through the base",
         f.gate(&["--against", "HEAD^"]),
         1,
@@ -26034,13 +26481,13 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let head_only = f.current_digest();
     f.record(&head_only, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "amend judged against HEAD^",
         f.gate(&["--against", "HEAD^"]),
         1,
         "判定が古い diff のものです",
     );
-    check(
+    c.check(
         "a base that is not a commit",
         f.gate(&["--against", "nonsense"]),
         2,
@@ -26051,7 +26498,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let amended = f.current_digest_with(&["--against", "HEAD^"]);
     f.record(&amended, all);
     f.git(&["add", "-A"]);
-    check(
+    c.check(
         "amend with a record about HEAD^",
         f.gate(&["--against", "HEAD^"]),
         0,
@@ -26077,7 +26524,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "src/store.rs",
         "docs/sdlc/changes/900-fixture/state.yaml",
     ]);
-    check(
+    c.check(
         "untracked record under --index",
         f.gate(&[]),
         1,
@@ -26085,6 +26532,15 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.git(&["reset", "-q", "--hard"]);
     fs::remove_file(f.root.join("docs/sdlc/changes/900-fixture/review.yaml")).unwrap();
+
+    c.finish();
+}
+
+#[test]
+/// History from before the gate, past the reflog's expiry.
+pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_across_history_from_before_it() {
+    let mut c = GateChecks::default();
+    let f = ReviewGateFixture::new();
 
     // Last, because nothing comes back from it: history from before the gate.
     // The reflog is what makes a return free. Past its expiry, with no branch
@@ -26103,18 +26559,14 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     f.git(&["config", "core.hooksPath", ".githooks"]);
     f.git(&["reflog", "expire", "--expire=now", "--all"]);
     f.git(&["reset", "-q", "--hard", &format!("{gate_root}^")]);
-    check(
+    c.check(
         "moving forward across the gate's own commit past the reflog is judged",
         f.commit(&["reset", "-q", "--hard", gate_root], None),
         1,
         "変更ディレクトリのない commit が gate-configuration",
     );
 
-    assert!(
-        wrong.is_empty(),
-        "scripts/check-review.sh が言っている通りに拒否していません:\n{}",
-        wrong.join("\n")
-    );
+    c.finish();
 }
 
 #[test]

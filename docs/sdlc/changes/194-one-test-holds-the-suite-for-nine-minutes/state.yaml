@@ -1,0 +1,77 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report (the person, 2026-10-21): fix every item left over from 191 and 192
+# for good, including the ones that needed a decision. This one: src/tests.rs
+# is large and slow.
+#
+# Measured: the size of src/tests.rs is not what costs. It is one crate and one
+# test binary either way, and splitting the file would not cut compile time.
+# What costs is one test: the_review_gate_refuses_what_it_says_it_refuses ran
+# 74 gate checks in sequence in a single repository, 520s on this machine
+# under load when run by name, and the last test to finish in CI.
+# Each gate run is about 30 short processes, and on a machine at load 40-77
+# each spawn waits 60-80ms for a core: user+sys for five gate runs was 1.6s of
+# 12.5s wall.
+#
+# Fix: the scenario is split into seven tests that share its name as a prefix,
+# each in a repository of its own, so they run side by side and `cargo test
+# the_review_gate_refuses_what_it_says_it_refuses` (and every closed change's
+# mutations.py that names it) still runs all of them. Most start from
+# ReviewGateFixture::landed(), the state the old test reached at its first
+# landing; the two that start before it use ReviewGateFixture::new(). The
+# scenario text moved by line range, not retyped: 74 checks and 8 asserts
+# before and after, plus the one the collector now holds.
+#
+# Less history, on purpose: a test that starts from landed() has three commits
+# behind it, where the old sequence had reached the same checks with the topic
+# branch's commits in the reflog and HEAD amended twice. rust-reviewer read
+# every check that could have leaned on that history; each still passes or
+# refuses for the reason its comment gives.
+#
+# Measured after: 346s for all seven on this machine at load 40, against 520s
+# for the one. CI did not move: the suite took 130.9s against main's 130.3s
+# the same hour. On the runner's three cores the suite is bound by the work
+# of all 979 tests, not by this one, so the split ends a test earlier and the
+# rest fill the time. What it buys is the local run by name and a failure
+# that names one of seven scenarios instead of one test for 74 checks. The
+# record said "about 180s in CI, the critical path" until CI said otherwise.
+# The test's own comment still says so; change 196, the next to edit
+# src/tests.rs after this lands, corrects it, since a comment edit here would
+# cost a third review round for one sentence.
+#
+# Risk: src/tests.rs only, no behaviour of the gate or the app changes.
+
+state:
+  route: "refactor"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 2"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Nothing is left for the person."
+
+contract:
+  unchanged-behaviour: "machine passed the seven tests pass; with two of the
+    gate's refusal messages altered all seven fail, so none of them lost the
+    gate it drives; 74 checks and 8 asserts before and after"
+  three-gates: "machine passed cargo fmt and the named tests; clippy at the
+    commit; the suite runs in CI"
+  ci: "machine passed run 39615620631 at e88264b; the suite took 130.9s on
+    the branch against 130.3s on main, unchanged, as recorded above"
+  release-binary: "machine passed no: src/tests.rs only"
+  review: "human passed rust-reviewer approve 0 0 at 3e6619438e488873
+    (round 2, and still the digest after main merged in; round 1's comment remark fixed, its history remark named above)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
