@@ -603,6 +603,352 @@ pub(crate) fn a_handoff_says_where_operon_shortened_the_text() {
     );
 }
 
+fn tool_turns(results: &[String]) -> Vec<(&'static str, String)> {
+    results
+        .iter()
+        .flat_map(|result| {
+            [
+                (
+                    "assistant",
+                    "[Tool call: shell]\n{\"cmd\":\"cargo test\"}".to_owned(),
+                ),
+                ("user", format!("[Tool result]\n{result}")),
+            ]
+        })
+        .collect()
+}
+
+/// The handoff text before its tool section: what reads as said by the user
+/// or the assistant.
+fn handoff_excerpt(bundle: &str) -> &str {
+    bundle
+        .split_once(HANDOFF_TOOL_RESULTS_HEADING)
+        .map_or(bundle, |(excerpt, _)| excerpt)
+}
+
+#[test]
+/// Change 193. A handoff threw away every tool result, so the receiving
+/// session did not know which test failed or why and began by running
+/// everything again.
+pub(crate) fn a_handoff_carries_the_latest_tool_results_shortened() {
+    let mut log = vec!["running 120 tests".to_owned()];
+    log.extend(std::iter::repeat_n(
+        "test passes::case ... ok".to_owned(),
+        60,
+    ));
+    log.extend((0..50).map(|i| format!("noise before {i:02}")));
+    log.push("error[E0308]: mismatched types in importer.rs".to_owned());
+    log.extend((0..50).map(|i| format!("noise after {i:02}")));
+    log.push("test result: FAILED. 119 passed; 1 failed".to_owned());
+    let mut turns = vec![("user", "Fix the failing test.".to_owned())];
+    turns.extend(tool_turns(&[
+        "RESULT-ONE ok".to_owned(),
+        "RESULT-TWO ok".to_owned(),
+        "RESULT-THREE ok".to_owned(),
+        log.join("\n"),
+    ]));
+    turns.push((
+        "assistant",
+        "The importer test fails on a type mismatch.".to_owned(),
+    ));
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "",
+    );
+
+    assert!(
+        bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES,
+        "bundle byte length {} exceeded HANDOFF_BUNDLE_MAX_BYTES ({HANDOFF_BUNDLE_MAX_BYTES})",
+        bundle.len()
+    );
+    let (excerpt, tools) = bundle
+        .split_once(HANDOFF_TOOL_RESULTS_HEADING)
+        .unwrap_or_else(|| panic!("the bundle carries no tool results:\n{bundle}"));
+    assert!(excerpt.contains("The importer test fails on a type mismatch."));
+    assert!(
+        !tools.contains("RESULT-ONE"),
+        "more than {HANDOFF_TOOL_RESULTS_MAX} tool results were carried:\n{tools}"
+    );
+    let two = tools.find("RESULT-TWO").expect("second-to-last results");
+    let three = tools.find("RESULT-THREE").expect("second-to-last results");
+    let error = tools
+        .find("error[E0308]: mismatched types in importer.rs")
+        .unwrap_or_else(|| panic!("the error line was dropped:\n{tools}"));
+    assert!(two < three && three < error, "not oldest first:\n{tools}");
+    for kept in [
+        "running 120 tests",
+        "test result: FAILED. 119 passed; 1 failed",
+    ] {
+        assert!(tools.contains(kept), "{kept:?} was dropped:\n{tools}");
+    }
+    assert!(
+        tools.contains(&format!(
+            "test passes::case ... ok {}",
+            tool_result_repeat_note(60)
+        )),
+        "repeated lines are not counted:\n{tools}"
+    );
+    assert!(
+        !tools.contains("noise before 25") && tools.contains("lines omitted by Operon"),
+        "the long result was not shortened:\n{tools}"
+    );
+}
+
+#[test]
+/// Change 193. What survives the shortening is the start, the end, and the
+/// lines that say what went wrong; everything else is counted, so the
+/// receiving session can tell how much it is not seeing.
+pub(crate) fn a_shortened_tool_result_keeps_its_error_lines_and_counts_repeats() {
+    assert_eq!(
+        shorten_tool_result("a\n\nb"),
+        "a\n\nb",
+        "a short result changed"
+    );
+
+    let mut lines = vec!["start".to_owned()];
+    lines.extend(std::iter::repeat_n("tick".to_owned(), 30));
+    for i in 0..200 {
+        lines.push(format!("noise {i:03}"));
+        if i == 50 {
+            lines.extend(std::iter::repeat_n("dup".to_owned(), 5));
+        }
+        if i % 20 == 10 {
+            lines.push(format!("Error {i:03} in step {}", "e".repeat(100)));
+        }
+    }
+    lines.push("FATAL: disk full".to_owned());
+    lines.extend((0..3).map(|i| format!("tail {i}")));
+    lines.push("x".repeat(400));
+    let original = lines.join("\n");
+
+    let shortened = shorten_tool_result(&original);
+
+    assert!(
+        shortened.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS,
+        "{} chars:\n{shortened}",
+        shortened.chars().count()
+    );
+    assert!(
+        shortened.starts_with(&format!("start\ntick {}\n", tool_result_repeat_note(30))),
+        "the head or the repeat count was lost:\n{shortened}"
+    );
+    assert!(shortened.contains("FATAL: disk full"), "{shortened}");
+    assert!(shortened.contains("Error 190 in step"), "{shortened}");
+    assert!(
+        !shortened.contains("Error 010 in step"),
+        "more than {HANDOFF_TOOL_RESULT_SIGNAL_LINES} signal lines, the earliest first, were kept:\n{shortened}"
+    );
+    assert!(
+        shortened.ends_with(&format!(
+            "{} {HANDOFF_TOOL_RESULT_LINE_SHORTENED}",
+            "x".repeat(HANDOFF_TOOL_RESULT_LINE_MAX_CHARS)
+        )),
+        "a long last line was not cut, or the tail was lost:\n{shortened}"
+    );
+    // Every line of the original is either shown, counted by a repeat note, or
+    // counted by an omission note.
+    let accounted: usize = shortened
+        .lines()
+        .map(|line| {
+            (1..=original.lines().count())
+                .find(|&n| line == tool_result_omitted_note(n))
+                .or_else(|| {
+                    (2..=30).find(|&n| line.ends_with(&format!(" {}", tool_result_repeat_note(n))))
+                })
+                .unwrap_or(1)
+        })
+        .sum();
+    assert_eq!(accounted, original.lines().count(), "{shortened}");
+    // What the receiving session reads has to say who left the lines out and
+    // where the rest is, or it reads a gap as the tool's own output.
+    for wording in [
+        tool_result_omitted_note(7),
+        HANDOFF_TOOL_RESULT_LINE_SHORTENED.to_owned(),
+    ] {
+        assert!(wording.contains("Operon"), "{wording}");
+    }
+    assert!(tool_result_omitted_note(7).contains("transcript snapshot"));
+
+    // A tail whose own lines are long and repeated is past the limit even with
+    // the head gone; the last-resort cut still keeps the result within it,
+    // marker included.
+    let mut lines = vec!["one".to_owned(), "two".to_owned(), "three".to_owned()];
+    lines.extend((0..50).map(|i| format!("middle {i}")));
+    for tag in ["a", "b", "c", "d", "e"] {
+        lines.extend(std::iter::repeat_n(tag.repeat(200), 12));
+    }
+    let shortened = shorten_tool_result(&lines.join("\n"));
+    assert!(
+        shortened.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS
+            && shortened.ends_with(HANDOFF_SHORTENED_MARKER),
+        "{} chars:\n{shortened}",
+        shortened.chars().count()
+    );
+    assert!(
+        HANDOFF_TOOL_RESULTS_HEADING.contains("oldest first")
+            && HANDOFF_TOOL_RESULTS_HEADING.contains("transcript snapshot"),
+        "{HANDOFF_TOOL_RESULTS_HEADING}"
+    );
+}
+
+#[test]
+/// Change 193. The READMEs tell a person how much of a tool result crosses in
+/// a handoff; a limit changed in `src/config.rs` and not there makes them
+/// promise what the handoff no longer does.
+pub(crate) fn the_readmes_state_the_handoff_tool_result_limits() {
+    let chars = format!(
+        "{},{:03}",
+        HANDOFF_TOOL_RESULT_MAX_CHARS / 1_000,
+        HANDOFF_TOOL_RESULT_MAX_CHARS % 1_000
+    );
+    let count = HANDOFF_TOOL_RESULTS_MAX;
+    for (file, says_count) in [
+        ("README.md", format!("last {count} tool results")),
+        ("README.ja.md", format!("直近 {count} 件のツール結果")),
+        ("README.ko.md", format!("최근 도구 결과 {count}건")),
+    ] {
+        let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(file))
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert!(
+            text.contains(&says_count),
+            "{file} does not say {says_count:?}"
+        );
+        assert!(text.contains(&chars), "{file} does not say {chars}");
+    }
+}
+
+#[test]
+/// Change 193. A tool result was dropped only up to its first blank line, so
+/// the rest — the second half of a log, a block of a file that was read —
+/// reached the receiving session as the assistant's own words. Reasoning
+/// leaked the same way.
+pub(crate) fn a_tool_result_with_blank_lines_never_reads_as_conversation() {
+    let turns = vec![
+        ("user", "Fix the parser.".to_owned()),
+        (
+            "assistant",
+            "Reading the file.\n\n[Tool call: Read]\n{\"path\":\"src/a.rs\"}".to_owned(),
+        ),
+        (
+            "user",
+            "[Tool result]\nfn first() {}\n\nLEAKED_SECOND_PARAGRAPH".to_owned(),
+        ),
+        (
+            "assistant",
+            format!("{RESTORED_REASONING_LABEL}\nplan step\n\nTHINKING_TAIL"),
+        ),
+        ("assistant", "The parser drops the last token.".to_owned()),
+    ];
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "",
+    );
+
+    let excerpt = handoff_excerpt(&bundle);
+    assert!(
+        !excerpt.contains("LEAKED_SECOND_PARAGRAPH"),
+        "a tool result's second paragraph reads as conversation:\n{bundle}"
+    );
+    assert!(
+        !bundle.contains("THINKING_TAIL"),
+        "a reasoning passage's second paragraph was carried:\n{bundle}"
+    );
+    assert!(excerpt.contains("Reading the file."), "{bundle}");
+    assert!(
+        excerpt.contains("The parser drops the last token."),
+        "{bundle}"
+    );
+    assert!(
+        bundle.contains("fn first() {}\n\nLEAKED_SECOND_PARAGRAPH"),
+        "the tool result is not carried whole in its own section:\n{bundle}"
+    );
+    assert_eq!(
+        compact_handoff_turn_text("user", "[Tool result]\nfirst\n\nsecond"),
+        None
+    );
+}
+
+#[test]
+/// Change 193. Tool results outrank older turns but not the last turn, the
+/// task, or the person's instructions: over the budget, older turns go first,
+/// then tool results oldest first.
+pub(crate) fn a_handoff_gives_up_tool_results_before_the_last_turn_task_or_note() {
+    // Lines long enough that each result is shortened close to its limit.
+    let fat_result = |tag: &str| {
+        (0..40)
+            .map(|i| format!("{tag} line {i:02} {}", "-".repeat(120)))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let tools = tool_turns(&[
+        fat_result("TOOL-A"),
+        fat_result("TOOL-B"),
+        fat_result("TOOL-C"),
+    ]);
+    let note = "Finish the tests, then summarise.";
+    let mut turns = vec![("user", "Fix the importer.".to_owned())];
+    for i in 1..=6 {
+        turns.push(("assistant", format!("OLDER-TURN-{i} {}", "o".repeat(1_100))));
+    }
+    turns.extend(tools.clone());
+    turns.push(("assistant", format!("LAST-TURN {}", "l".repeat(1_100))));
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        note,
+    );
+
+    assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+    assert!(
+        bundle.contains("LAST-TURN") && bundle.contains(note),
+        "{bundle}"
+    );
+    assert!(
+        ["TOOL-A", "TOOL-B", "TOOL-C"]
+            .iter()
+            .all(|tag| bundle.contains(tag)),
+        "a tool result gave way before an older turn:\n{bundle}"
+    );
+    assert!(!bundle.contains("OLDER-TURN-1 "), "{bundle}");
+
+    // A last turn of 1 200 Japanese characters leaves room for some results,
+    // not all: the oldest goes first, the newest stays.
+    let mut turns = vec![("user", "Fix the importer.".to_owned())];
+    turns.extend(tools);
+    turns.push(("assistant", format!("最後の報告。{}", "お".repeat(1_190))));
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        note,
+    );
+
+    assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+    assert_eq!(included, 1, "{bundle}");
+    assert!(
+        bundle.contains("最後の報告。") && bundle.contains(note),
+        "{bundle}"
+    );
+    assert!(bundle.contains("Fix the importer."), "{bundle}");
+    assert!(
+        bundle.contains("TOOL-C") && !bundle.contains("TOOL-A"),
+        "tool results did not give way oldest first:\n{bundle}"
+    );
+}
+
 #[test]
 pub(crate) fn compact_handoff_bundle_peels_nested_envelopes_and_preserves_display_goal() {
     let first_source = CliSession {
