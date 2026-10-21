@@ -504,13 +504,15 @@ fi
 # and its answer does not change between a commit and the push that follows.
 # `the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` holds the split.
 
+# Bounded under the hook's 600 seconds, as gate-merge.sh bounds its suite: a
+# hook that times out lets the commit through unchecked (change 192). One limit
+# for clippy and the record tests below together, counted from the hook's start.
+limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}
+
 if [ "$needs_cargo" -eq 1 ]; then
   if ! output=$(cargo fmt --check 2>&1); then
     block "cargo fmt --check" "$output"
   fi
-  # Bounded under the hook's 600 seconds, as gate-merge.sh bounds its suite: a
-  # hook that times out lets the commit through unchecked (change 192).
-  limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}
   output=$(bash scripts/run-bounded.sh "$limit" cargo clippy --locked -- -D warnings 2>&1)
   case $? in
     0) ;;
@@ -520,6 +522,47 @@ refuses instead. A cold target/ is the usual cause. Run \`make q.fast\` in this
 worktree, which has no time limit, then commit again: the gate's clippy is then
 incremental." ;;
     *) block "cargo clippy --locked -- -D warnings" "$(printf '%s' "$output" | tail -60)" ;;
+  esac
+fi
+
+# --- the records ----------------------------------------------------------------
+#
+# A state.yaml whose `stage` is `review` or `done`, a contract line without its
+# third part, a document naming a path that moved: the suite catches each, but
+# the suite runs in CI, so each cost a push, a red run five minutes later, and a
+# second push. Of the 17 red CI runs from 2026-10-07 to 10-21, 6 were `stage`
+# or the contract in a state.yaml and 3 more were these other two tests (change
+# 198). They read files and nothing else, and take about two seconds once the
+# test binary is built, so they run here, by name, when the commit holds what
+# they read — in whatever the hook's run so far has left of the limit above.
+# They read the working tree, as clippy does, not only what is staged.
+record_tests=(
+  tests::every_state_file_names_a_route_and_a_stage_that_exist
+  tests::change_directory_numbers_are_unique
+  tests::harness_documents_only_name_paths_that_exist
+)
+records=""
+if printf '%s\n' "$changed" | grep -E '^docs/|^\.claude/|\.md$' >/dev/null; then
+  left=$(( limit - SECONDS ))
+  [ "$left" -gt 0 ] || block "no time left for the record tests (${SECONDS}s of ${limit}s spent)" \
+"Clippy or a cold build used the limit. Run \`make q.fast\` and
+\`cargo test --locked --no-run\` in this worktree, which have no time limit, then
+commit again."
+  output=$(bash scripts/run-bounded.sh "$left" cargo test --locked -q -- --exact "${record_tests[@]}" 2>&1)
+  status=$?
+  # `--exact` on a name that moved matches nothing, and cargo calls that a pass.
+  if [ "$status" -eq 0 ] && ! grep -F "test result: ok. ${#record_tests[@]} passed;" >/dev/null <<< "$output"; then
+    status=1
+    output="cargo ran fewer than the ${#record_tests[@]} record tests by name:
+$output"
+  fi
+  case $status in
+    0) records=" The record tests passed: ${record_tests[*]}." ;;
+    124) block "the record tests did not finish in the ${left}s left of ${limit}s" \
+"Building the test binary is the usual cause. Run \`cargo test --locked --no-run\`
+in this worktree, which has no time limit, then commit again." ;;
+    *) block "the record tests (${record_tests[*]})" \
+"$(printf '%s' "${output:-cargo exited $status with no output}" | tail -40)" ;;
   esac
 fi
 
@@ -554,6 +597,6 @@ seventh needs the same justification, plus OPERON_ALLOW_TEST_REMOVAL=1."
 fi
 
 if [ "$needs_cargo" -eq 1 ]; then
-  note "Commit gate passed: cargo fmt --check, cargo clippy --locked -- -D warnings, no test erosion. cargo test --locked runs in CI on the pushed branch, and the merge into main waits for it. The review gate runs inside git next.${unsynced:-}"
+  note "Commit gate passed: cargo fmt --check, cargo clippy --locked -- -D warnings, no test erosion. cargo test --locked runs in CI on the pushed branch, and the merge into main waits for it.${records} The review gate runs inside git next.${unsynced:-}"
 fi
-note "Commit gate: no Rust, manifest, or gate change staged, so the cargo gates were skipped. The review gate runs inside git next.${unsynced:-}"
+note "Commit gate: no Rust, manifest, or gate change staged, so the cargo gates were skipped.${records} The review gate runs inside git next.${unsynced:-}"

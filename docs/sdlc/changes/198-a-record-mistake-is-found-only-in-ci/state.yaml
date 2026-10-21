@@ -1,0 +1,81 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/198-final-verification.
+#
+# Report (the person, 2026-10-22): verify 194-197 adversarially and fix what the
+# verification finds, at the root and without overbuilding.
+#
+# Found: of the 17 red CI runs from 2026-10-07 to 10-21, 6 were
+# every_state_file_names_a_route_and_a_stage_that_exist (`stage: review` four
+# times, `stage: done` once, a two-part contract line once) and 3 more were
+# harness_documents_only_name_paths_that_exist (twice) and
+# change_directory_numbers_are_unique. Each is a mistake in a file the change
+# wrote, found by a test that reads files and nothing else, five minutes after
+# the push; the commit gate runs fmt and clippy only (change 128), so nothing
+# local said so first. Change 194 was one of the six, from this session.
+#
+# Fix: .claude/hooks/gate-commit.sh runs those three tests by name, with
+# `--exact`, when the commit holds something under docs/ or .claude/ or a .md
+# file, inside what is left of the limit clippy runs under (lesson 087), and
+# refuses a run that did not pass all three. With the test binary built they
+# take 1.7 seconds; a cold build is refused with the command to run first, as
+# clippy's limit is. The suite stays in CI.
+#
+# Found while verifying: two tests fail in this session and never in CI, because
+# $TMPDIR here links into the main checkout's .tmp/ — a fixture under it has
+# operon's Cargo.toml above it, and a socket path under it passes 104 bytes.
+# `temporary_directory` now roots fixtures in the per-user directory
+# `getconf DARWIN_USER_TEMP_DIR` names, falling back to $TMPDIR.
+# the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate pins the trigger,
+# the shared limit and the invocation, refuses any other `cargo test` in the
+# gate, and refuses a name in the list that src/tests.rs no longer has — a
+# renamed test would otherwise filter to nothing and pass.
+#
+# Verification of 194-197 (no change needed): 196's guard, against the guard as
+# it was before 196, on 34 commands built to slip past it (empty words beside an
+# expansion, ANSI-C quotes, redirects, wrappers, env prefixes, backticks, brace
+# expansion): only the two intended differences (`awk '{print $1}'` and a
+# quoted `'$HOME'/x` now pass). `a=~/y`, `{,~/y}` and a command substitution
+# that is a whole word pass both before and after. 195's notice is silent with
+# the last scan green and costs about two seconds per `make wt.new`. (e) of the
+# report was the existing close-before-commit step in feature-pilot §4, not a
+# new one.
+#
+# Risk: low. No application code; the gate refuses more, never less.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Four remarks are carried in review.yaml; none needs anything
+  from the person. Closed in the same commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed mutations.py here, 7 of 7 caught: no
+    record test run, the whole suite run instead, docs/ not a trigger, a limit
+    of their own, a listed name renamed away, a run matching no test passing,
+    fixtures back under $TMPDIR. The gate itself refused with exit 2 on this
+    state.yaml with `stage: review` and on a listed name moved to another
+    module, and passed in 14 seconds on the change as it is"
+  three-gates: "machine passed cargo fmt and the named tests; clippy and the
+    record tests at the commit; the suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed no: a hook, docs and src/tests.rs only"
+  review: "human passed rust-reviewer approve-with-nits 0 1 and
+    subprocess-safety-reviewer approve-with-nits 0 2 at 01a75b7325d1b2c3
+    (round 2), four remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

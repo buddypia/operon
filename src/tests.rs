@@ -28513,13 +28513,35 @@ pub(crate) fn reads_cursor_position_from_live_tmux_session() {
 
 // ── Agent status hooks (change 015) ─────────────────────────────────────────
 
+/// The per-user temporary directory macOS gives every process, not `$TMPDIR`.
+/// An agent session may set `$TMPDIR` to a link into the main checkout's
+/// `.tmp/`, and a fixture there has this repository above it and a longer path:
+/// `the_commit_gate_runs_the_gates_in_the_tree_the_commit_lands_in` found
+/// operon's Cargo.toml above its tree, and
+/// `the_installed_usage_reader_posts_a_reading_end_to_end` a socket path over
+/// the 103 bytes it has. Both failed only there, never in CI (change 198).
+fn temporary_root() -> &'static Path {
+    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    ROOT.get_or_init(|| {
+        run_command_with_timeout(
+            Command::new("/usr/bin/getconf").arg("DARWIN_USER_TEMP_DIR"),
+            Duration::from_secs(10),
+        )
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
+        .filter(|path| path.is_dir())
+        .unwrap_or_else(std::env::temp_dir)
+    })
+}
+
 /// A scratch directory for one test, removed by the test that made it.
 ///
 /// The suffix is short on purpose: a Unix socket path has 103 bytes to live in,
 /// and the temporary directory on macOS already spends half of them.
 fn temporary_directory(label: &str) -> PathBuf {
     let unique = Uuid::new_v4().simple().to_string();
-    let root = std::env::temp_dir().join(format!("operon-{label}-{}", &unique[..8]));
+    let root = temporary_root().join(format!("operon-{label}-{}", &unique[..8]));
     fs::create_dir_all(&root).unwrap();
     root
 }
@@ -48220,7 +48242,9 @@ pub(crate) fn the_merge_gate_waits_for_ci_and_falls_back_to_the_local_suite() {
 }
 
 /// The split change 128 made, read off the files that carry it: the commit
-/// gate runs fmt and clippy and no longer the suite, the merge gate is
+/// gate runs fmt and clippy and no longer the suite (since change 198, three
+/// tests that read only records, by name, when a record is in the commit), the
+/// merge gate is
 /// registered on every Bash call, and it asks the one script that decides.
 #[test]
 pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
@@ -48239,16 +48263,48 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
         // hook's, or a cold build lets the commit through unchecked.
         "$(bash scripts/run-bounded.sh \"$limit\" cargo clippy --locked -- -D warnings",
         "limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}",
+        // Change 198: the record tests, when the commit holds a record, in what
+        // the limit has left — clippy and they together end before the hook.
+        "grep -E '^docs/|^\\.claude/|\\.md$'",
+        "left=$(( limit - SECONDS ))",
+        "$(bash scripts/run-bounded.sh \"$left\" cargo test --locked -q -- --exact \"${record_tests[@]}\"",
+        // A name that moved matches nothing, and cargo exits 0 on that.
+        "if [ \"$status\" -eq 0 ] && ! grep -F \"test result: ok. ${#record_tests[@]} passed;\" >/dev/null <<< \"$output\"; then",
     ] {
         assert!(
             commit_gate.iter().any(|line| line.contains(runs)),
             "gate-commit.sh が `{runs}` を走らせていません"
         );
     }
+    // Those tests by name, and nothing else.
+    for line in commit_gate
+        .iter()
+        .filter(|line| line.contains("$(") && line.contains("cargo test"))
+    {
+        assert!(
+            line.contains("-- --exact \"${record_tests[@]}\""),
+            "gate-commit.sh がまた commit のたびに suite を走らせています — suite は CI と merge gate のものです: {line}"
+        );
+    }
+    let named: Vec<&str> = commit_gate
+        .iter()
+        .skip_while(|line| !line.starts_with("record_tests=("))
+        .skip(1)
+        .take_while(|line| line.trim() != ")")
+        .map(|line| line.trim())
+        .collect();
     assert!(
-        !commit_gate.iter().any(|line| line.contains("$(cargo test")),
-        "gate-commit.sh がまた commit のたびに suite を走らせています — suite は CI と merge gate のものです"
+        !named.is_empty(),
+        "gate-commit.sh に record_tests の一覧がありません"
     );
+    let suite = read("src/tests.rs");
+    for name in named {
+        let function = name.strip_prefix("tests::").unwrap_or(name);
+        assert!(
+            suite.contains(&format!("fn {function}()")),
+            "gate-commit.sh が名前で走らせる {name} が src/tests.rs にありません — 名前が変わると何も走らないまま commit が通ります"
+        );
+    }
 
     let merge_gate = code(&read(".claude/hooks/gate-merge.sh"));
     assert!(
