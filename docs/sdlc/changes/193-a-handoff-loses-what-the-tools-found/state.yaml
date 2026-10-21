@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# A handoff bundle drops every tool result, and a tool result or reasoning
+# passage with a blank line leaks its later paragraphs into the excerpt as
+# conversation. The person chose shortened tool results over dropped ones.
+#
+# Risk: src/history.rs is the foreign-store surface (medium, supervised);
+# src/config.rs, src/tests.rs, and the READMEs match nothing higher. The
+# bundle is text handed to an agent, not a screen: screen n/a.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Write the four failing tests named in spec.md, then follow plan.md from step 3."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: touches src/history.rs and src/config.rs;
+    package /Applications/Operon.app from main after merge with
+    bash scripts/package-macos.sh and the ship skill's swap"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
