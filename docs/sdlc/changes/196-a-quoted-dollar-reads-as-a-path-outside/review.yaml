@@ -1,0 +1,31 @@
+# Review record for 196-a-quoted-dollar-reads-as-a-path-outside.
+#
+# The change: a word whose `$` or `~` cannot expand as written (single-quoted,
+# escaped) is judged by its spelling, so `awk '{print $NF}' f` in a worktree is
+# no longer refused as trunk work. No word is literal in a command that hands
+# its arguments to another shell.
+#
+# Round 1, both reviewers probed the guard with built payloads: `>~/x` and
+# `bash -c 'rm $T/x'` got through (Important, both). Fixed; both test cases.
+# Round 2: the second still open behind wrappers the scanner does not unwrap
+# (`setsid sh -c`, `docker exec … sh -c`) and through `git -c alias.x='!…'`
+# (Important). Every word of the command is read now; both test cases.
+# Round 3: both re-probed the wrappers, the alias, `>~/x`, and the commands the
+# change is for; no Important. What is left is carried below, because round 3
+# is past the bugfix ceiling.
+
+digest: "d5f1a25264603683"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/1 · .cli/lib/bash-segments.mjs wordExpands: the `[=:]~` branch and its "wider than bash on `~` after `=`" comment never change a verdict, since toAbs only checks startsWith('~').
+    person: "コードの説明文が実際の判定より大げさに書かれているだけで、動作には影響しません。対応は不要です。"
+  - rust-reviewer/2 · src/tests.rs a_quoted_dollar_in_a_worktree_command_is_text_not_an_expansion: no cases for `$'…'`, an unterminated quote, or `'a'$B/x`; all three behave correctly today.
+    person: "確認用のテストに足りない例が3つありますが、今の動作は正しいです。対応は不要です。"
+  - subprocess-safety-reviewer/1 · other tools that run a single-quoted string through a shell are not listed (`make 'x=$(shell …)'`, `git -c core.sshCommand='…$T…'`, `git -c core.pager=…`); same class, and the scanner's header names payloads as opaque.
+    person: "引用符の中身を別のシェルが読み直す一部のコマンド（make や git の一部設定）は、この変更の前と同じく中身を確かめないまま通ります。新しく通るようになったものはなく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve 0 1"

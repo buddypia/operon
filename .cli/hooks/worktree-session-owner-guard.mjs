@@ -126,7 +126,7 @@ export function bashTargets(cmd, cwd, baseDir) {
   const add = (path, layer1) => path && out.push({ path, layer1, claim: false, action: 'command' });
   for (const seg of walkSegments(cmd, baseDir)) {
     for (const dir of [seg.cwd, seg.cdTo, ...seg.dirs]) add(dir, true);
-    for (const p of pathArgs(seg.words, seg.cwd, seg.effectiveDir).paths) add(p, false);
+    for (const p of pathArgs(seg.words, seg.cwd, seg.effectiveDir, seg.literal).paths) add(p, false);
   }
   out.push(...commitOwnership(cmd, cwd, baseDir));
   return out;
