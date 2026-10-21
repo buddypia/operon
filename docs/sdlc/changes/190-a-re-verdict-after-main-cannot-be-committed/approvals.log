@@ -1,0 +1,7 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The surface is paused, so the plan is the person's. The person asked, a second
+# time, for the defects a final review finds to be fixed at their root, quoted as
+# the reason. The move admits one commit the gate refused and nothing else, and
+# a revert undoes it; the plan lists it for them to overrule.
+2026-10-21T05:54:34Z person gate-configuration plan.md caca0150d80b5ce1 approve owner 2026-10-21 (second request): 「発見された問題点・改善点は根本的かつ長期運用が可能で、多角的な視点から検証されていること」 — admits only a record-only commit at the branch's diff against main
