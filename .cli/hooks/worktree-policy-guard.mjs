@@ -248,7 +248,7 @@ export function isWorktreeSegment(seg, projectDir, linked = hasGitEntry) {
   const dir = realPath(seg.effectiveDir);
   if (!worktreeHolding(dir, projectDir, linked)) return false;
   const root = realPath(projectDir);
-  const { paths, unresolved } = pathArgs(seg.words, seg.cwd, dir);
+  const { paths, unresolved } = pathArgs(seg.words, seg.cwd, dir, seg.literal);
   return !unresolved && !paths.some((p) => isTrunkPath(realPath(p), root));
 }
 
@@ -266,7 +266,7 @@ export function isOtherRepositorySegment(seg, projectDir) {
   // project, and a project root given as a subdirectory still lies inside its own repository.
   const other = repositoryOf(dir);
   if (!other || isInside(root, other) || isInside(other, root)) return false;
-  const { paths, unresolved } = pathArgs(seg.words, seg.cwd, dir);
+  const { paths, unresolved } = pathArgs(seg.words, seg.cwd, dir, seg.literal);
   return !unresolved && !paths.some((p) => isTrunkPath(realPath(p), root));
 }
 

@@ -25443,8 +25443,9 @@ impl Drop for ReviewGateFixture {
 ///
 /// The scenarios are split across the tests that share this name as a
 /// prefix, each in its own repository, so they run side by side: in one
-/// function they were the slowest test in the suite (520s on a loaded
-/// machine, about 180s in CI), and the test job waited on it.
+/// function they were the slowest test in the suite, 520s when run by name on
+/// a loaded machine, and a failure named one test for 74 checks. CI's suite
+/// time did not move (change 194's record says why).
 pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     let all = REVIEW_GATE_ALL_APPROVE;
     let mut c = GateChecks::default();
@@ -41309,6 +41310,114 @@ const staleSidecar = worktreeOwnerPath({stale:?}, null);\n\
         "deny",
         "このリポジトリの他セッションの worktree への命令が通りました: {verdicts}"
     );
+}
+
+/// Change 196. The trunk guard took every `$` and `~` for an expansion, inside
+/// single quotes too, so `awk '{print $NF}'` and `grep 'a$'` run in a worktree
+/// were refused as work that might reach the trunk — about fifteen times in
+/// one session, each answered by writing the command into a script. Inside
+/// single quotes, or escaped, nothing expands; a `$` that can expand still
+/// makes the command's reach unknown, and a literal path is judged as written.
+/// The commands are ones the trunk allowlist does not name (`cat` and `grep`
+/// would pass on the allowlist alone), so only the worktree rule decides.
+#[test]
+pub(crate) fn a_quoted_dollar_in_a_worktree_command_is_text_not_an_expansion() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("quoted-dollar");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+    let mine = project.join(".worktrees/feature/mine");
+    git_in(
+        &project,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/mine",
+            mine.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let in_mine = |rest: &str| format!("cd {} && {rest}", mine.display());
+    let allowed: Vec<String> = [
+        "awk '{print $NF}' README.md",
+        "sed -n 's/^x$/y/p' README.md",
+        "python3 edit.py 'a$'",
+        "python3 edit.py '~/notes'",
+        "python3 edit.py \\$HOME",
+        "python3 edit.py \"cost: \\$5\"",
+        "python3 edit.py < '$f'",
+        "python3 edit.py >'~/notes'",
+    ]
+    .iter()
+    .map(|rest| in_mine(rest))
+    .collect();
+    let denied: Vec<String> = [
+        "python3 edit.py $HOME/notes",
+        "python3 edit.py \"$HOME/notes\"",
+        "python3 edit.py x\"$HOME\"",
+        "python3 edit.py ~/notes",
+        "python3 edit.py > \"$f\"",
+        "python3 edit.py >~/notes",
+        "python3 edit.py 2>~/notes",
+        "python3 edit.py <~/notes",
+        // Single-quoted here, expanded by the shell that reads it.
+        "bash -c 'python3 edit.py $HOME/notes'",
+        "sh -c 'python3 edit.py $HOME/notes'",
+        "eval 'python3 edit.py $HOME/notes'",
+        // Behind a wrapper the scanner does not unwrap, and through git.
+        "setsid sh -c 'python3 edit.py $HOME/notes'",
+        "git -c alias.x='!python3 edit.py $HOME/notes' x",
+        "python3 edit.py ../../../README.md",
+        "python3 edit.py '../../../README.md'",
+    ]
+    .iter()
+    .map(|rest| in_mine(rest))
+    .collect();
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
+         const out = {{}};\n\
+         for (const command of {cases})\n\
+           out[command] = decide(await policy({{ tool_name: 'Bash', tool_input: {{ command }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }}));\n\
+         console.log(JSON.stringify(out));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        cases = serde_json::to_string(&[allowed.clone(), denied.clone()].concat()).unwrap(),
+        project = project.to_str().unwrap(),
+    );
+    let mut command = node_in(&project);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
+    for c in &allowed {
+        assert_eq!(
+            verdicts[c.as_str()].as_str(),
+            Some("allow"),
+            "引用符の中の $ や ~ を展開とみなし、worktree の中だけのコマンドを止めました ({c}): {verdicts}"
+        );
+    }
+    for c in &denied {
+        assert_eq!(
+            verdicts[c.as_str()].as_str(),
+            Some("deny"),
+            "展開される $ や ~、または main に届くパスを持つコマンドが通りました ({c}): {verdicts}"
+        );
+    }
 }
 
 /// Change 072. Recent agent launch settings save and load round-trip.
