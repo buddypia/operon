@@ -1,8 +1,8 @@
 name: Scheduled scan
 
 # Runs every Monday on GitHub (the repository has had a remote since this
-# header said otherwise; change 192). Its result is seen only on GitHub: a
-# failure here reaches no session and no gate.
+# header said otherwise; change 192). A failure reaches the next session that
+# starts a change: `make wt.new` runs scripts/scan-notice.sh (change 195).
 
 # Stage 6 of docs/sdlc/README.md: a breach that no commit caused is still a
 # breach. A deterministic script watches the repository, and what it finds
@@ -73,13 +73,23 @@ jobs:
         run: |
           cargo audit --json > audit.json || true
           cargo audit | tee audit.txt || true
+          # Judged by what the macOS app builds, not by all of Cargo.lock: a
+          # Linux-only crate is listed, and does not turn the scan red.
+          status=0
+          bash scripts/check-audit.sh audit.json > verdict.txt || status=$?
           {
+            echo '### Vulnerabilities, by whether the macOS app builds the crate'
+            echo '```'
+            cat verdict.txt
+            echo '```'
             echo '### cargo audit'
             echo '```'
             cat audit.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          cat verdict.txt
           # Operon is a local-first desktop app with no network surface of its
           # own, so an advisory is a finding to triage rather than an outage. The
-          # job fails so it is seen; the response tier is a person's call.
-          cargo audit
+          # job fails so it is seen, and `make wt.new` says so to the next
+          # change started (scripts/scan-notice.sh).
+          exit "$status"
