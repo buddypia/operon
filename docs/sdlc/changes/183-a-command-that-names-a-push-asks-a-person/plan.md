@@ -113,7 +113,9 @@ unasked because the gate never saw it, and still does.
    keeps no shell variables from the last one, so a `$P` meaning `push` is set
    on the same line, where the word is. The sweep's three argument mutations
    were retargeted and two added for the expansion rule: 15.
-5. The lesson is entry 084, not 081: main took 081 to 083 while this was in
-   review, and the merge of main renumbered it.
+5. The lesson is entry 085, not 081: main took 081 to 084 while this was in
+   review, and the merges of main renumbered it. The re-verdict after the
+   second merge rides in that merge commit (change 190 opened the other way, a
+   commit of `review.yaml` alone).
 6. `state.yaml`, `approvals.log`, `review.yaml` and `mutations.py` in this
    directory change too; the table lists only the files outside it.

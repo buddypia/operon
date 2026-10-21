@@ -82,7 +82,11 @@ necessary only because `main` moved under a reviewed branch — the change's own
 lines untouched, nothing new but the merge of `main` and what it forces, such
 as a renumbered change directory — is recorded under the round it re-confirms
 and does not count against the ceiling. Asking a person to allow it would be
-asking about a step another review undoes (sdlc 084).
+asking about a step another review undoes (sdlc 084). It rides in the merge
+commit when it can; once that commit is made, it lands as a commit of
+`review.yaml` alone, which the gate judges against the local `main` exactly as
+the branch's own code commit would be — every reviewer and verdict check, at
+the digest `bash scripts/check-review.sh --against main` names (change 190).
 
 ## Waiting for a reviewer is not blocking
 

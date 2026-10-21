@@ -6,4 +6,3 @@
 # reason; the three outcomes and what moves between them are listed in the plan
 # for them to overrule.
 2026-10-20T16:01:59Z person gate-configuration plan.md b880823189e76b17 approve owner 2026-10-21: 「発見された問題点・改善点は根本的かつ長期運用が可能で、多角的な視点から検証されていること」 — tightening only, nothing new allowed
-2026-10-21T05:16:46Z auto gate-configuration diff af762fe44c712ac5 approve subprocess-safety-reviewer round 4: tightening only — replayed rounds 1–3 and ~40 new cases against main's hook; nothing runs unasked that did not on main, nothing main asked about or denied is allowed

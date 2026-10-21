@@ -21,12 +21,17 @@
 # option counts only when the word push is on the line. Against main, 34 past
 # commands move from allow to deny and 59 from ask to deny.
 #
-# Round 4 (this digest): both approve-with-nits, 0 Important. The safety
+# Round 4 (af762fe44c712ac5): both approve-with-nits, 0 Important. The safety
 # reviewer replayed its round 1–3 cases and about 40 new ones: nothing runs
 # unasked that did not on main, and nothing main asked about or denied is now
 # allowed. Every nit carried, not taken, per REVIEW.md.
+#
+# After main was merged in (this digest, recorded under round 4): main took
+# change 190 and lessons 081 to 084. The hook and its test are the reviewed
+# diff unchanged; the lesson is renumbered 085. Both reviewers re-read the
+# landing diff against main and stood by their round-4 verdicts.
 
-digest: "af762fe44c712ac5"
+digest: "fd5921242a548115"
 
 rounds: 4
 

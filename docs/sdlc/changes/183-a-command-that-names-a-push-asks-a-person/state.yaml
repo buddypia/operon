@@ -54,9 +54,9 @@ contract:
   guards-verified-by-mutation: "human passed mutations.py in this directory: 15
     of 15 caught, the claim among them"
   review: "human passed rust-reviewer approve-with-nits 0 2 and
-    subprocess-safety-reviewer approve-with-nits 0 2 at af762fe44c712ac5, round 4;
+    subprocess-safety-reviewer approve-with-nits 0 2 at fd5921242a548115, round 4;
     nits carried with person lines in review.yaml"
-  lesson-recorded: "machine passed entry 084 in docs/sdlc/lessons.md with its Guard"
+  lesson-recorded: "machine passed entry 085 in docs/sdlc/lessons.md with its Guard"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
