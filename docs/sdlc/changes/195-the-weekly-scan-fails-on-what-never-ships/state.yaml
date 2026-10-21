@@ -47,8 +47,8 @@
 
 state:
   route: "bugfix"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -56,7 +56,9 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Reviewed and committed; awaiting CI, then the landing."
+resume: "Closed. Five remarks are carried in review.yaml; none needs the
+  person. Closed in the same commit that CI judges last, so the landing
+  waits on one CI run, not two."
 
 contract:
   failing-test-first: "machine passed
@@ -68,6 +70,8 @@ contract:
     replacement stayed green as the control"
   three-gates: "machine passed cargo fmt and the named test; clippy at the
     commit; the suite runs in CI"
+  ci: "machine passed run 39617308223 at 577f5a7, and again on the tip
+    with main (change 194) merged in, which the merge gate checks"
   release-binary: "machine passed no: src/tests.rs only"
   review: "human passed rust-reviewer approve-with-nits 0 3 and
     subprocess-safety-reviewer approve-with-nits 0 2 at 46fa9a70606e4ce8
