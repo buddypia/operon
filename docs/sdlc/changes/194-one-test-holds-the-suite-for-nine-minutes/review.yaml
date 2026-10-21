@@ -1,0 +1,20 @@
+# Review record for 194-one-test-holds-the-suite-for-nine-minutes.
+#
+# The change: the_review_gate_refuses_what_it_says_it_refuses is split into
+# seven tests that share its name as a prefix, each in its own fixture
+# repository, so they run side by side.
+#
+# Round 1, rust-reviewer asked to break it: compared each test's starting state
+# with what the old sequence had reached at the same checks (history, reflog,
+# core.hooksPath, branch, the record in HEAD) and found none that passes for a
+# different reason or vacuously; the fixtures share no state. Two remarks: a
+# comment still pointed at an unset that moved to another test (fixed), and the
+# shorter history behind the amend checks, now named in state.yaml.
+# Round 2: the comment fix re-read, approved.
+
+digest: "3e6619438e488873"
+
+rounds: 2
+
+verdicts:
+  rust-reviewer: "approve 0 0"
