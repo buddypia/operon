@@ -1,0 +1,35 @@
+# Round 1 (digest 9aae5624ee95c348): subprocess-safety-reviewer do-not-approve
+# 2 3 — the planned exit admitted a record-only commit on its digest alone and
+# skipped every check on what the record said, and a `--ff-only` landing makes
+# no merge commit to re-judge it; rust-reviewer approve-with-nits 1 3, its
+# Important a staged/unstaged mismatch caught mid-edit. Fixed by removing the
+# exit: a record alone has its base set to main and runs the gate's ordinary
+# path.
+#
+# Round 2 (this digest): both approve-with-nits, 0 Important. The safety
+# reviewer read every mode's failure path (a git error, a missing or symbolic
+# main, a deleted record, a commit on main, a stale main) and found each closed;
+# the rust reviewer ran both gate tests on the staged tree. Every nit carried,
+# not taken, per REVIEW.md.
+
+digest: "bd3219d3a0c9dad1"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/2/1 · the count>1 merge-commit exemption is now counted against main, so a record-only merge commit on a branch touching two change directories against main is exempt; no new strength (any merge touching two against its first parent already was); key the exemption on the original base
+    person: "まれな形の commit で、判定の確認が省かれる場合が残っています。以前から同じ形の抜けがあり、今回の変更で広がってはいないので、対応は不要です。"
+  - subprocess-safety-reviewer/2/2 · the pathspec docs/sdlc/changes/*/review.yaml also matches nested paths; anchor it to one level
+    person: "対象のファイルを探す範囲が少し広めです。実害のある場所にそのようなファイルはなく、対応は不要です。"
+  - subprocess-safety-reviewer/2/3 · by hand, quiet_diff compares the working tree while diff_mode may pick cached, so an advisory run can switch where the digest does not follow
+    person: "手で確認を走らせたときに、まれに表示が実際の commit 時と食い違うことがあります。commit 時の判定には影響せず、対応は不要です。"
+  - subprocess-safety-reviewer/2/4 · no tests for deleting review.yaml alone, a record-only merge commit, a missing or symbolic main, or a stale or ahead main; "fails closed" rests on reading
+    person: "いくつかのまれな状況がテストで確かめられていません。確認役がコードを読んで安全側に倒れることを確かめており、対応は不要です。"
+  - rust-reviewer/2/1 · the_review_gate_has_no_bypass exempts any line containing "&& base=refs/heads/main" from the base-assignment count; compare the trimmed line exactly, and the switch's guard condition is held only by the sweep
+    person: "テストの確認の仕方が少し緩い箇所があります。動きには影響がなく、対応は不要です。"
+  - rust-reviewer/2/2 · no mutation breaks the "no code" guard or the main-exists check; add one, and a code-plus-record case on topic if the gate test stays green
+    person: "壊れ方の一部がテストで見張られていません。いまの動きは正しく、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"

@@ -25143,6 +25143,87 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "判定だけが commit されようとしています",
     );
     f.git(&["reset", "-q", "--hard"]);
+    // On main the diff against main is empty, and a record of nothing does not
+    // land alone either.
+    f.record("e3b0c44298fc1c14", all);
+    f.git(&["add", "-A"]);
+    check(
+        "record of an empty diff alone",
+        f.gate(&[]),
+        1,
+        "判定だけが commit されようとしています",
+    );
+    f.git(&["reset", "-q", "--hard"]);
+
+    // Change 190: main moved in under a reviewed branch and forced an edit, so
+    // the record is stale and its re-verdict is all there is to commit. The
+    // refusal names that exit. A record alone is then judged against main as
+    // the branch's own code commit would be: it lands at the branch's diff
+    // against main with every verdict in order, as an index and as a commit,
+    // and is refused at any other digest, with a do-not-approve, or with no
+    // verdicts at all.
+    f.git(&["checkout", "-q", "-b", "topic"]);
+    f.append("src/store.rs", "// forced by the merge of main\n");
+    f.append(
+        "docs/sdlc/changes/900-fixture/state.yaml",
+        "resume: \"main merged in\"\n",
+    );
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-q", "-m", "merge of main"]);
+    check(
+        "a stale record names the exit",
+        f.gate(&["--against", "main"]),
+        1,
+        "review.yaml だけの commit",
+    );
+    let against_main = f.current_digest_with(&["--against", "main"]);
+    f.record(&against_main, "");
+    f.git(&["add", "-A"]);
+    check(
+        "re-verdict alone with no verdicts",
+        f.gate(&[]),
+        1,
+        "の判定がありません",
+    );
+    f.record(
+        &against_main,
+        "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+    );
+    f.git(&["add", "-A"]);
+    check(
+        "re-verdict alone with a do-not-approve",
+        f.gate(&[]),
+        1,
+        "do-not-approve を出しています",
+    );
+    f.record("2222222222222222", all);
+    f.git(&["add", "-A"]);
+    check(
+        "record alone at another digest",
+        f.gate(&[]),
+        1,
+        "判定が古い diff のものです",
+    );
+    f.record(&against_main, all);
+    f.git(&["add", "-A"]);
+    check(
+        "re-verdict alone at the diff against main",
+        f.gate(&[]),
+        0,
+        "✅ SHIP",
+    );
+    f.git(&["commit", "-q", "-m", "re-verdict"]);
+    let re_verdict = f.git(&["rev-parse", "HEAD"]);
+    check(
+        "re-verdict alone as a commit",
+        f.gate_in("--commit", &[re_verdict.trim()]),
+        0,
+        "✅ SHIP",
+    );
+    f.git(&["reset", "-q", "--hard"]);
+    // The branch would vouch for its commits in the reflog cases below.
+    f.git(&["checkout", "-q", "main"]);
+    f.git(&["branch", "-q", "-D", "topic"]);
 
     // No change directory: a high surface is refused, a low one passes, and
     // a child process on a low one is refused.
@@ -26436,6 +26517,7 @@ pub(crate) fn the_review_gate_has_no_bypass() {
             line.contains("base=")
                 && !line.contains("--against) shift; base=")
                 && !line.contains("base=$(git rev-parse --verify --quiet \"${commit}^\"")
+                && !line.contains("&& base=refs/heads/main")
         })
         .count();
     assert!(
@@ -26449,6 +26531,8 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         "*) git -c core.quotePath=false -c color.ui=false diff --no-ext-diff --no-textconv --text \"$base\" \"$@\" -- . \"$EXCLUDE\" 2>/dev/null ;;",
         REVIEW_DIGEST_LINE,
         REVIEW_LEGACY_DIGEST_LINE,
+        // Change 190: a record alone is judged against main.
+        "&& base=refs/heads/main",
         REVIEW_DIGEST_COMPARISON_LINE,
         "changed=$(run_diff --name-only)",
         // The base is HEAD unless the caller says which commit an amend

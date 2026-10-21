@@ -2,7 +2,7 @@
 
 - **Spec**: none — bugfix route; the bug report in `./state.yaml` is the intent.
 - **Approved**: 2026-10-21
-- **Status**: approved
+- **Status**: done
 
 ## The rule
 
@@ -77,3 +77,17 @@ gate made it one.
   main.
 
 ## Departures from the plan
+
+1. **Review round 1 found the planned exit skipped every check on the record**
+   (subprocess-safety-reviewer, Important): a record-only commit at the right
+   digest with no verdicts, a do-not-approve, or rounds past the ceiling would
+   have landed, and a `--ff-only` landing makes no merge commit to re-judge it,
+   so "landing re-judges" in Risks was wrong. The exit is gone. A commit that
+   changes a `review.yaml` and no code now has its base set to `refs/heads/main`
+   before the digest is taken, so the digest, the reviewer set and every verdict
+   check run on the branch's whole diff through the gate's ordinary path; on
+   main that diff is empty and the record is refused as before. The tests gained
+   the no-verdict, do-not-approve and other-digest cases; the sweep is three
+   mutations (the switch removed, inverted, and the claim).
+2. A test outside this change's guard, `the_review_gate_has_no_bypass`, pins
+   every line that sets the base; it pins the new one.

@@ -181,6 +181,26 @@ field() { printf '%s\n' "$1" | sed -n "s/^  $2: \"\([^\"]*\)\" *\(#.*\)\{0,1\}$/
 # would then be a number nobody outside this script could reproduce — which for
 # a value printed in a refusal message is most of its usefulness gone.
 EXCLUDE=':(exclude)docs/sdlc/changes'
+# A record alone is judged as the branch it records (change 190). When main
+# moves in under a reviewed branch and forces an edit, the re-verdict can ride
+# in the merge commit; once that commit is made, the only commit left to carry
+# it holds the record and no code, and the empty-diff refusal below sent it to
+# a rewrite of a pushed branch. So a commit that changes a review.yaml and no
+# code is judged against main: the digest, the reviewers and every verdict
+# check run on the branch's whole diff, as its own code commit would be. On
+# main itself that diff is empty and the record is refused as before.
+quiet_diff() {
+  case "$mode" in
+    index) git -c core.quotePath=false diff --no-ext-diff --no-textconv --quiet --cached "$base" -- "$@" 2>/dev/null ;;
+    commit) git -c core.quotePath=false diff --no-ext-diff --no-textconv --quiet "$base" "$commit" -- "$@" 2>/dev/null ;;
+    *) git -c core.quotePath=false diff --no-ext-diff --no-textconv --quiet "$base" -- "$@" 2>/dev/null ;;
+  esac
+}
+if quiet_diff . "$EXCLUDE"; then
+  quiet_diff 'docs/sdlc/changes/*/review.yaml'
+  [ "$?" -eq 1 ] && git rev-parse --verify --quiet 'refs/heads/main^{commit}' >/dev/null 2>&1 \
+    && base=refs/heads/main
+fi
 case "$mode" in
   index) diff_mode=cached ;;
   commit) diff_mode=commit ;;
@@ -510,7 +530,8 @@ fi
 # and asking for a verdict on an empty diff would make every stage 1 commit
 # carry an approval of nothing. One exception, and it is the whole point: a
 # review.yaml may not land on its own. A verdict committed apart from the code it
-# judged is a record in HEAD describing code that is not there.
+# judged is a record in HEAD describing code that is not there — so a record
+# alone is judged against main instead (change 190, where the base is chosen).
 if [ -z "$changed" ]; then
   if [ "$review_landing_changed" -eq 1 ]; then
     echo "❌ BLOCK — ${change} · 判定だけが commit されようとしています
@@ -701,7 +722,8 @@ nit は blocking しませんが、Important は直してから commit してく
     && [ "$recorded_digest" != "$digest" ] && [ "$recorded_digest" != "$legacy_digest" ]; then
     note "❌ BLOCK — ${change} · 判定が古い diff のものです
 判定は diff ${recorded_digest:-（記録なし）} のもの、現在の diff は ${digest}。
-古い承認は無い承認より悪いので、再レビューしてから commit してください。"
+古い承認は無い承認より悪いので、再レビューしてから commit してください。
+main の取り込みでこの diff になったのなら、再判定は review.yaml だけの commit で branch に載せられます。digest は branch で bash scripts/check-review.sh --against main が示す現在の diff です。"
   fi
 
   # --- and how many times has this gone back? ---------------------------------

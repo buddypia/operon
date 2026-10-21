@@ -24,8 +24,8 @@
 
 state:
   route: "bugfix"
-  stage: "plan"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
@@ -33,16 +33,24 @@ state:
   readiness: "pending"
   screen: "n/a"
 
-resume: "Plan committed; next the failing test in the_review_gate_refuses_what_it_says_it_refuses."
+resume: "Done. Next: change 183 records its re-verdict with a record-only commit
+  once this is on main."
 
 contract:
-  failing-test-first: "machine pending"
-  three-gates: "machine pending"
+  failing-test-first: "machine passed the_review_gate_refuses_what_it_says_it_refuses
+    failed on the unedited script at its three new cases (the exit unnamed, the
+    re-verdict refused as an index and as a commit), and passes on the edited one"
+  three-gates: "machine passed cargo fmt --check silent and cargo clippy --locked
+    -D warnings clean, re-run by gate-commit.sh on the commit; the gate tests
+    pass; the whole suite runs in CI on the push"
   release-binary: "machine passed no: scripts, src/tests.rs and docs only —
     /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending"
-  review: "human pending"
-  lesson-recorded: "machine pending"
+  guards-verified-by-mutation: "human passed mutations.py in this directory: 3
+    of 3 caught, the claim among them"
+  review: "human passed rust-reviewer approve-with-nits 0 2 and
+    subprocess-safety-reviewer approve-with-nits 0 4 at bd3219d3a0c9dad1, round 2;
+    nits carried with person lines in review.yaml"
+  lesson-recorded: "machine passed entry 084 in docs/sdlc/lessons.md with its Guard"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
