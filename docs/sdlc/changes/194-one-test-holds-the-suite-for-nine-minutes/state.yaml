@@ -36,16 +36,16 @@
 # rest fill the time. What it buys is the local run by name and a failure
 # that names one of seven scenarios instead of one test for 74 checks. The
 # record said "about 180s in CI, the critical path" until CI said otherwise.
-# The test's own comment still says so; change 195, which edits src/tests.rs
-# next, corrects it, since a comment edit here would cost a third review
-# round for one sentence.
+# The test's own comment still says so; change 196, the next to edit
+# src/tests.rs after this lands, corrects it, since a comment edit here would
+# cost a third review round for one sentence.
 #
 # Risk: src/tests.rs only, no behaviour of the gate or the app changes.
 
 state:
   route: "refactor"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "1 2"
   questions: "0 7"
   autonomy: "full"
@@ -53,7 +53,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Reviewed and committed; awaiting CI, then the landing."
+resume: "Closed. Nothing is left for the person."
 
 contract:
   unchanged-behaviour: "machine passed the seven tests pass; with two of the
@@ -61,8 +61,8 @@ contract:
     gate it drives; 74 checks and 8 asserts before and after"
   three-gates: "machine passed cargo fmt and the named tests; clippy at the
     commit; the suite runs in CI"
-  ci: "machine passed the suite in 130.9s on the branch against 130.3s on
-    main: unchanged, as recorded above"
+  ci: "machine passed run 39615620631 at e88264b; the suite took 130.9s on
+    the branch against 130.3s on main, unchanged, as recorded above"
   release-binary: "machine passed no: src/tests.rs only"
   review: "human passed rust-reviewer approve 0 0 at 3e6619438e488873
     (round 2, and still the digest after main merged in; round 1's comment remark fixed, its history remark named above)"
