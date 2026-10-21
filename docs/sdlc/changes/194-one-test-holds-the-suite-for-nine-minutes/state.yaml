@@ -9,7 +9,7 @@
 # test binary either way, and splitting the file would not cut compile time.
 # What costs is one test: the_review_gate_refuses_what_it_says_it_refuses ran
 # 74 gate checks in sequence in a single repository, 520s on this machine
-# under load and about 180s in CI, where it was the test job's critical path.
+# under load when run by name, and the last test to finish in CI.
 # Each gate run is about 30 short processes, and on a machine at load 40-77
 # each spawn waits 60-80ms for a core: user+sys for five gate runs was 1.6s of
 # 12.5s wall.
@@ -30,7 +30,15 @@
 # refuses for the reason its comment gives.
 #
 # Measured after: 346s for all seven on this machine at load 40, against 520s
-# for the one. CI's figure is in contract.ci.
+# for the one. CI did not move: the suite took 130.9s against main's 130.3s
+# the same hour. On the runner's three cores the suite is bound by the work
+# of all 979 tests, not by this one, so the split ends a test earlier and the
+# rest fill the time. What it buys is the local run by name and a failure
+# that names one of seven scenarios instead of one test for 74 checks. The
+# record said "about 180s in CI, the critical path" until CI said otherwise.
+# The test's own comment still says so; change 195, which edits src/tests.rs
+# next, corrects it, since a comment edit here would cost a third review
+# round for one sentence.
 #
 # Risk: src/tests.rs only, no behaviour of the gate or the app changes.
 
@@ -53,10 +61,11 @@ contract:
     gate it drives; 74 checks and 8 asserts before and after"
   three-gates: "machine passed cargo fmt and the named tests; clippy at the
     commit; the suite runs in CI"
-  ci: "pending"
+  ci: "machine passed the suite in 130.9s on the branch against 130.3s on
+    main: unchanged, as recorded above"
   release-binary: "machine passed no: src/tests.rs only"
   review: "human passed rust-reviewer approve 0 0 at 3e6619438e488873
-    (round 2; round 1's comment remark fixed, its history remark named above)"
+    (round 2, and still the digest after main merged in; round 1's comment remark fixed, its history remark named above)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
