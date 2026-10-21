@@ -310,19 +310,183 @@ pub(crate) fn compact_handoff_turn_text(role: &str, text: &str) -> Option<String
     } else {
         text.trim().to_owned()
     };
-    let chunks = base
-        .split("\n\n")
-        .filter(|chunk| {
-            let trimmed = chunk.trim_start();
-            !trimmed.is_empty()
-                && !trimmed.starts_with("[Tool call:")
-                && !trimmed.starts_with("[Tool result]")
-                && !trimmed.starts_with(RESTORED_REASONING_LABEL)
-        })
+    let chunks = handoff_blocks(&base)
+        .into_iter()
+        .filter(|(kind, chunk)| *kind == HandoffBlock::Said && !chunk.trim_start().is_empty())
+        .map(|(_, chunk)| chunk)
         .collect::<Vec<_>>();
     let joined = chunks.join("\n\n");
     nonempty_transcript_text(&joined)
         .map(|cleaned| shorten_for_handoff(cleaned.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum HandoffBlock {
+    Said,
+    ToolCall,
+    ToolResult,
+    Reasoning,
+}
+
+const TOOL_CALL_LABEL_PREFIX: &str = "[Tool call:";
+const TOOL_RESULT_LABEL: &str = "[Tool result]";
+
+/// A turn's text as the readers in this file wrote it: blocks joined by a
+/// blank line, each tool or reasoning block opening with its label. A chunk
+/// with no label continues the block before it when that is a tool or
+/// reasoning block — the output's own blank lines — and is said text
+/// otherwise. Judging each chunk alone carried everything after a tool
+/// result's first blank line as the assistant's words (change 193).
+fn handoff_blocks(text: &str) -> Vec<(HandoffBlock, String)> {
+    let mut blocks: Vec<(HandoffBlock, String)> = Vec::new();
+    for chunk in text.split("\n\n") {
+        let trimmed = chunk.trim_start();
+        let opens = if trimmed.starts_with(TOOL_CALL_LABEL_PREFIX) {
+            Some(HandoffBlock::ToolCall)
+        } else if trimmed.starts_with(TOOL_RESULT_LABEL) {
+            Some(HandoffBlock::ToolResult)
+        } else if trimmed.starts_with(RESTORED_REASONING_LABEL) {
+            Some(HandoffBlock::Reasoning)
+        } else {
+            None
+        };
+        match (opens, blocks.last_mut()) {
+            (Some(kind), _) => blocks.push((kind, chunk.to_owned())),
+            (None, Some((kind, block))) if *kind != HandoffBlock::Said => {
+                block.push_str("\n\n");
+                block.push_str(chunk);
+            }
+            (None, _) => blocks.push((HandoffBlock::Said, chunk.to_owned())),
+        }
+    }
+    blocks
+}
+
+/// The last `HANDOFF_TOOL_RESULTS_MAX` non-empty tool results across the
+/// turns, oldest first, each shortened. Read from the end, so a long
+/// conversation is split into blocks only as far back as the results go.
+fn handoff_tool_results(turns: &[(&'static str, String)]) -> Vec<String> {
+    let mut results = Vec::new();
+    'turns: for (_, text) in turns.iter().rev() {
+        for (kind, block) in handoff_blocks(text).into_iter().rev() {
+            if kind != HandoffBlock::ToolResult {
+                continue;
+            }
+            let body = block.trim_start();
+            let body = body.strip_prefix(TOOL_RESULT_LABEL).unwrap_or(body).trim();
+            if body.is_empty() {
+                continue;
+            }
+            results.push(shorten_tool_result(body));
+            if results.len() == HANDOFF_TOOL_RESULTS_MAX {
+                break 'turns;
+            }
+        }
+    }
+    results.reverse();
+    results
+}
+
+/// `text` within `HANDOFF_TOOL_RESULT_MAX_CHARS`, by rule rather than by a
+/// cut from the end, which is where a test run or a build says how it went.
+/// Repeated lines collapse into one with a count; then the first and last
+/// lines are kept with the latest lines between them that carry a signal
+/// word, every gap counted. Signal lines give way earliest first, then the
+/// head lines last first, and only a tail still past the limit is cut from
+/// its end with `HANDOFF_SHORTENED_MARKER`.
+pub(crate) fn shorten_tool_result(text: &str) -> String {
+    let text = text.trim();
+    if text.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS {
+        return text.to_owned();
+    }
+    let mut lines: Vec<(&str, usize)> = Vec::new();
+    for line in text.lines().map(str::trim_end) {
+        match lines.last_mut() {
+            Some((last, times)) if *last == line => *times += 1,
+            _ => lines.push((line, 1)),
+        }
+    }
+    let collapsed = render_tool_result_lines(&lines, 0..lines.len(), false);
+    if collapsed.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS {
+        return collapsed;
+    }
+    let count = lines.len();
+    let head = HANDOFF_TOOL_RESULT_HEAD_LINES.min(count);
+    let tail_start = count
+        .saturating_sub(HANDOFF_TOOL_RESULT_TAIL_LINES)
+        .max(head);
+    let mut signals = (head..tail_start)
+        .rev()
+        .filter(|&at| {
+            let lower = lines[at].0.to_lowercase();
+            HANDOFF_TOOL_RESULT_SIGNAL_WORDS
+                .iter()
+                .any(|word| lower.contains(word))
+        })
+        .take(HANDOFF_TOOL_RESULT_SIGNAL_LINES)
+        .collect::<Vec<_>>();
+    signals.reverse();
+    let attempts = (0..=signals.len())
+        .map(|skip| (head, skip))
+        .chain((0..head).rev().map(|kept_head| (kept_head, signals.len())));
+    let mut candidate = String::new();
+    for (kept_head, skip) in attempts {
+        let kept = (0..kept_head)
+            .chain(signals[skip..].iter().copied())
+            .chain(tail_start..count);
+        candidate = render_tool_result_lines(&lines, kept, true);
+        if candidate.chars().count() <= HANDOFF_TOOL_RESULT_MAX_CHARS {
+            return candidate;
+        }
+    }
+    // The marker and the line break before it count toward the limit too.
+    let room = HANDOFF_TOOL_RESULT_MAX_CHARS - HANDOFF_SHORTENED_MARKER.chars().count() - 1;
+    shorten_for_handoff(&candidate, room)
+}
+
+/// The `kept` lines, in order, each with its repeat count, and one omission
+/// note for every gap counting the original lines it stands for.
+fn render_tool_result_lines(
+    lines: &[(&str, usize)],
+    kept: impl Iterator<Item = usize>,
+    cut_long_lines: bool,
+) -> String {
+    let mut out = Vec::new();
+    let mut next = 0;
+    let omitted = |range: std::ops::Range<usize>| -> usize {
+        lines[range].iter().map(|(_, times)| times).sum()
+    };
+    for at in kept {
+        if at > next {
+            out.push(tool_result_omitted_note(omitted(next..at)));
+        }
+        let (line, times) = lines[at];
+        let mut shown = match line.char_indices().nth(HANDOFF_TOOL_RESULT_LINE_MAX_CHARS) {
+            Some((end, _)) if cut_long_lines => {
+                format!("{} {HANDOFF_TOOL_RESULT_LINE_SHORTENED}", &line[..end])
+            }
+            _ => line.to_owned(),
+        };
+        if times > 1 {
+            shown = format!("{shown} {}", tool_result_repeat_note(times));
+        }
+        out.push(shown);
+        next = at + 1;
+    }
+    if next < lines.len() {
+        out.push(tool_result_omitted_note(omitted(next..lines.len())));
+    }
+    out.join("\n")
+}
+
+/// The line standing in for `lines` lines a shortened tool result left out.
+pub(crate) fn tool_result_omitted_note(lines: usize) -> String {
+    format!("[{lines} lines omitted by Operon; the full output is in the transcript snapshot]")
+}
+
+/// What follows a line that a tool result printed `times` times in a row.
+pub(crate) fn tool_result_repeat_note(times: usize) -> String {
+    format!("[repeated {times} times]")
 }
 
 /// `text` cut to `max_chars`, saying the cut is Operon's and where the rest is.
@@ -426,10 +590,12 @@ pub(crate) fn build_compact_handoff_bundle(
         .saturating_sub(HANDOFF_BUNDLE_MAX_TURNS);
     let tail = &filtered_turns[tail_start..];
     let trimmed_note = shorten_for_handoff(note.trim(), HANDOFF_BUNDLE_TURN_MAX_CHARS);
+    let tool_results = handoff_tool_results(turns);
 
-    let render = |task: &str, slice: &[(&'static str, String)], note: &str| -> String {
-        let mut bundle = format!(
-            "Continue this coding task in a new CLI session.\n\n\
+    let render =
+        |task: &str, slice: &[(&'static str, String)], tools: &[String], note: &str| -> String {
+            let mut bundle = format!(
+                "Continue this coding task in a new CLI session.\n\n\
              Task to continue:\n\
              {task}\n\n\
              Latest terminal context from the source session:\n\
@@ -437,51 +603,68 @@ pub(crate) fn build_compact_handoff_bundle(
              - Destination CLI: {dest_label}\n\
              - Full transcript snapshot: `{archive}`\n\n\
              Recent conversation excerpt ({included} of {total_turns} turns):",
-            source_label = source.provider.label(),
-            source_id = source.native_id,
-            dest_label = destination.label(),
-            archive = archive_path.display(),
-            included = slice.len(),
-        );
-        for (role, text) in slice {
-            let heading = if *role == "user" { "User" } else { "Assistant" };
-            bundle.push_str(&format!("\n### {heading}\n{text}\n"));
-        }
-        if !note.is_empty() {
-            bundle.push_str(&format!("\nHandoff instructions from the user:\n{note}\n"));
-        }
-        bundle
-    };
+                source_label = source.provider.label(),
+                source_id = source.native_id,
+                dest_label = destination.label(),
+                archive = archive_path.display(),
+                included = slice.len(),
+            );
+            for (role, text) in slice {
+                let heading = if *role == "user" { "User" } else { "Assistant" };
+                bundle.push_str(&format!("\n### {heading}\n{text}\n"));
+            }
+            if !tools.is_empty() {
+                bundle.push_str(&format!("\n{HANDOFF_TOOL_RESULTS_HEADING}\n"));
+                for result in tools {
+                    bundle.push_str(&format!("### Tool result\n{result}\n"));
+                }
+            }
+            if !note.is_empty() {
+                bundle.push_str(&format!("\nHandoff instructions from the user:\n{note}\n"));
+            }
+            bundle
+        };
 
     // The person's instructions come last in the bundle, so it is never cut
-    // from its end: what gives way first is the excerpt, then the task, and
-    // the instructions only when they alone are past the budget (change 185).
+    // from its end: what gives way first is the older excerpt, then the tool
+    // results oldest first (change 193), then the last turn, the task, and the
+    // instructions only when they alone are past the budget (change 185).
     for start in 0..tail.len() {
         let slice = &tail[start..];
-        let candidate = render(&task, slice, &trimmed_note);
+        let candidate = render(&task, slice, &tool_results, &trimmed_note);
         if candidate.len() <= HANDOFF_BUNDLE_MAX_BYTES {
             return (candidate, slice.len());
         }
     }
-    if let Some((role, text)) = tail.last() {
-        let room = HANDOFF_BUNDLE_MAX_BYTES
-            .saturating_sub(render(&task, &[(role, String::new())], &trimmed_note).len());
-        let shortened = shorten_to_bytes(text, room);
-        if !shortened.is_empty() {
-            return (render(&task, &[(role, shortened)], &trimmed_note), 1);
+    let last = &tail[tail.len().saturating_sub(1)..];
+    for from in 0..tool_results.len() {
+        let candidate = render(&task, last, &tool_results[from + 1..], &trimmed_note);
+        if candidate.len() <= HANDOFF_BUNDLE_MAX_BYTES {
+            return (candidate, last.len());
         }
     }
-    let bare = render(&task, &[], &trimmed_note);
+    if let Some((role, text)) = tail.last() {
+        let room = HANDOFF_BUNDLE_MAX_BYTES
+            .saturating_sub(render(&task, &[(role, String::new())], &[], &trimmed_note).len());
+        let shortened = shorten_to_bytes(text, room);
+        if !shortened.is_empty() {
+            return (render(&task, &[(role, shortened)], &[], &trimmed_note), 1);
+        }
+    }
+    let bare = render(&task, &[], &[], &trimmed_note);
     if bare.len() <= HANDOFF_BUNDLE_MAX_BYTES {
         return (bare, 0);
     }
-    let room = HANDOFF_BUNDLE_MAX_BYTES.saturating_sub(render("", &[], &trimmed_note).len());
+    let room = HANDOFF_BUNDLE_MAX_BYTES.saturating_sub(render("", &[], &[], &trimmed_note).len());
     let shortened_task = shorten_to_bytes(&task, room);
     if !shortened_task.is_empty() {
-        return (render(&shortened_task, &[], &trimmed_note), 0);
+        return (render(&shortened_task, &[], &[], &trimmed_note), 0);
     }
-    let room = HANDOFF_BUNDLE_MAX_BYTES.saturating_sub(render("", &[], "").len());
-    (render("", &[], &shorten_to_bytes(&trimmed_note, room)), 0)
+    let room = HANDOFF_BUNDLE_MAX_BYTES.saturating_sub(render("", &[], &[], "").len());
+    (
+        render("", &[], &[], &shorten_to_bytes(&trimmed_note, room)),
+        0,
+    )
 }
 
 /// Only providers that support a compact handoff bundle are offered.

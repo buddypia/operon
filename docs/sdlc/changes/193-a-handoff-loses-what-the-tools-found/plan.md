@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-21
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -58,4 +58,24 @@
 
 ## Departures from the plan
 
-None yet.
+- **Line limit 150, not 160, and head lines give way too.** With 160-char
+  lines, three head and five tail lines plus an omission note exceed 1 000
+  chars, so the last-resort cut from the end took the tail — the lines that
+  say how a run ended. At 150, once signal lines and then head lines (last
+  first) give way, the tail fits on its own unless its lines also carry long
+  repeat notes; only then is the result cut with `HANDOFF_SHORTENED_MARKER`.
+- **The omission and repeat wordings are functions, not constants.** Each
+  takes a count, so `tool_result_omitted_note` and `tool_result_repeat_note`
+  in `src/history.rs` are the one place each is spelled, and the tests call
+  them rather than retyping the text. The line-cut wording and the section
+  heading are constants in `src/config.rs` as planned.
+- **A fifth test, `the_readmes_state_the_handoff_tool_result_limits`.** The
+  READMEs gained a sentence a person reads with two numbers in it; the
+  mutation sweep needs a guard that goes red when that sentence promises what
+  the constants do not. The English README says "last 3 tool results" in
+  digits so the guard can build the phrase from the constant.
+- **The last-resort cut reserves its marker** (review round 1). The cut
+  appended `HANDOFF_SHORTENED_MARKER` after 1 000 chars, so a result could
+  exceed the limit the READMEs state.
+- **Repeated blank lines carry a repeat note too.** Dropping the note for them
+  broke the rule that every original line is shown or counted.

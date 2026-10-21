@@ -11,8 +11,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -20,15 +20,31 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Write the four failing tests named in spec.md, then follow plan.md from step 3."
+resume: "Done once landed and shipped: one reviewer finding carried in review.yaml, typed text after a tool result in one message crossing inside the tool section."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: touches src/history.rs and src/config.rs;
+  live-restore: "machine passed cargo test --locked -- --ignored: 6 of 6"
+  failing-test-first: "machine passed the four tests the spec names failed on
+    main's builder: no tool-result section, the leaked second paragraph, the
+    unshortened stub, and a tool result giving way before an older turn"
+  three-gates: "machine passed make q.fast (cargo fmt --check · cargo clippy
+    --locked -D warnings) clean; cargo test --locked handoff and the new tests
+    23 ok; the suite runs in CI on the push"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here (warn:
+    recorded, no action)"
+  review: "human passed round 2 at 3841f789f1e32106: rust-reviewer
+    approve-with-nits 0 1, one nit carried"
+  release-binary: "machine passed yes: touches src/history.rs and src/config.rs;
     package /Applications/Operon.app from main after merge with
     bash scripts/package-macos.sh and the ship skill's swap"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed 15 of 15 caught by mutations.py in
+    this directory: results dropped, more than three, newest first, repeats not
+    collapsed, signal lines ignored, the latest signal giving way first,
+    omissions counted by collapsed line, long lines not cut, a tool paragraph
+    leaking as said text, older turns outranking results, the newest result
+    giving way first, the last-resort cut ignoring its marker, and three claims (the heading's snapshot pointer, the
+    omission note's author, the README's count); tree restored"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
