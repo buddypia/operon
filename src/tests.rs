@@ -46742,7 +46742,10 @@ pub(crate) fn ci_runs_on_the_branches_the_merge_gate_asks_about() {
 /// question for a person. A push that goes there too but is joined to other
 /// commands, piped, or leaves the remote and branch implicit is the session's to
 /// rewrite, so it is refused with the form that passes rather than asked about
-/// (change 182). A push whose destination or refspec is a decision still asks.
+/// (change 182). A push whose destination or refspec is a decision asks, and
+/// only when the command is that push alone, so the person reads all of what
+/// runs; a push written `git -C dir push`, or only named as text, is refused
+/// too (change 183).
 #[test]
 pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
     let hook = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".claude/hooks/guard-bash.sh");
@@ -46799,15 +46802,79 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
         "git push origin feature/x && rm -rf target",
         "git push origin feature/x\ngit push origin main",
         "git commit -q -m x && git push -q 2>&1 | tail -2; sleep 10; gh run list",
+        "git push origin fix/x > /tmp/log",
+        // A push written with options before it is still a push (change 183).
+        "git -C /w push -u origin fix/x",
+        "git -C /w push --force origin main",
+        "git -C \"/a b\" push --force origin main",
+        "git -c remote.origin.url=x push origin fix/x",
+        "git --no-pager push -f origin main",
+        // Spellings the shell reads as the same push (review of 183).
+        "\"git\" push --force origin main",
+        "'git' push --force origin main",
+        "git \"push\" --force origin main",
+        "git pu\"\"sh --force origin main",
+        "git \\\npush --force origin main",
+        "git -C a\\ b push --force origin main",
+        "git -C $'a b' push --force origin main",
+        // An option's argument is any shell word, so once an option follows git,
+        // a later push counts however the argument is spelled; a stash push
+        // written that way is refused with it.
+        "git -c user.name=\"a b\" push -f origin main",
+        "git -c a=$(echo b c) push -f origin main",
+        "git -c a=`echo b` push -f origin main",
+        "git -C d stash push",
+        // A program or subcommand computed when the command runs.
+        "$(which git) push --force origin main",
+        "G=git; $G push --force origin main",
+        "git -c alias.p=push p --force origin main",
+        "git -c Alias.p=push p --force origin main",
+        "x=git; \"$x\" push --force origin main",
+        "git $(echo push) --force origin main",
+        "git `echo push` --force origin main",
+        "git ${IFS}push --force origin main",
+        "P=push; git $P --force origin main",
+        "P=push; git -C \"$W\" $P --force origin main",
+        // A decision joined to other commands is asked about once it runs alone,
+        // so the person reads only the push.
+        "git commit -m x && git push --force origin main",
+        "git push -q origin feature/x && git push -f origin main",
+        "git push -q upstream main 2>&1 | tail -2",
+        "bash -c \"git push origin x\"",
+        "bash -c \"git push\"",
+        "git push;echo done",
+        "git push origin x &",
+        // A push that is only text has nothing to ask about either.
+        "git commit -m \"docs: explain the git push gate\"",
+        "grep -rn \"git push\" docs/",
+        "cat > notes.md <<'EOF'\ngit push origin main\nEOF",
     ] {
         let (decision, reason) = decide(rewritten);
         assert_eq!(
             decision, "deny",
-            "書き直せば通る push を人に確認しました: {rewritten}"
+            "書き直させるはずの push を拒みませんでした: {rewritten}"
         );
         assert!(
             reason.contains("`git push origin <branch>`"),
             "通る形を言わずに push を拒みました: {rewritten}: {reason}"
+        );
+        assert!(
+            reason.contains("`git commit -F <file>`"),
+            "push が文字列なだけのときの書き方を言わずに拒みました: {rewritten}: {reason}"
+        );
+    }
+    for untouched in [
+        "git commit -m \"push it\"",
+        "git commit -m \"$(cat <<'EOF'\nmake the push quiet\nEOF\n)\"",
+        "git log --grep push",
+        "git stash push",
+        "git --no-pager log --oneline -5",
+        "git -C \"$W\" status",
+    ] {
+        assert_eq!(
+            decide(untouched).0,
+            "allow",
+            "push でないコマンドを publishing gate で止めました: {untouched}"
         );
     }
     for asked in [
@@ -46824,12 +46891,8 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
         "git push origin --delete",
         "git push -u origin --all",
         "git push origin --force-with-lease",
-        // A decision joined to other commands is still a decision.
-        "git commit -m x && git push --force origin main",
-        "git push -q origin feature/x && git push -f origin main",
-        "git push -q upstream main 2>&1 | tail -2",
-        "bash -c \"git push origin x\"",
-        "git push origin x &",
+        "git push origin HEAD:main",
+        "git\tpush --force origin main",
     ] {
         assert_eq!(
             decide(asked).0,

@@ -2,7 +2,7 @@
 
 - **Spec**: none — bugfix route; the bug report in `./state.yaml` is the intent.
 - **Approved**: 2026-10-21
-- **Status**: planning
+- **Status**: done
 
 ## The rule
 
@@ -77,3 +77,41 @@ unasked because the gate never saw it, and still does.
 - The whole suite in CI on the push.
 
 ## Departures from the plan
+
+1. **Review round 1 found the detection still missed spellings the shell runs
+   as a push** (both reviewers, Important): `"git" push`, `git "push"`,
+   `git pu""sh`, a backslash-newline, `git -C a\ b push`, `git -C $'a b' push`,
+   and a program or subcommand computed at run time (`$(which git) push`,
+   `$G push`, `-c alias.p=push`). Each ran unasked on main as well. The hook now
+   reads the command a second time as the shell hands git its words (a
+   backslash-newline joined, quotes and backslashes dropped), reads an escaped
+   space inside an option argument, and counts a computed program as a push
+   whenever `push` appears. The denied list gained each spelling, the
+   untouched list `git stash push`, `git -C d stash push` and a `$(cat <<EOF)`
+   commit message, and the sweep three mutations (11 in all).
+2. **Review round 2 found computed spellings in argument position**
+   (subprocess-safety-reviewer, Important): `git $(echo push)`, `git ${IFS}push`,
+   `P=push; git $P`, `"$x" push`, and `Alias.` in another case. Rather than one
+   more pattern per spelling, a git subcommand that is an expansion is now a
+   push whatever it expands to, a quote may precede a computed program, and
+   `alias.` is matched in any case. Two more mutations (13 in all).
+3. The lone shape is an allowlist of word characters, stricter than the list
+   of shell syntax in "The rule": a glob, `#`, `!`, `%` or `,` is denied too.
+   Whitespace is folded only where bash splits words (space, tab, newline), so
+   a carriage return, `\v` or `\f` stays and is denied.
+4. **Review round 3 found option arguments the pattern could not read**
+   (subprocess-safety-reviewer, Important): `git -c user.name="a b" push -f`,
+   `git -c a=$(echo b c) push -f`, ``git -c a=`echo b` push -f`` ran unasked.
+   Each round had found one more spelling of a shell word, so the hook stopped
+   reading option arguments: once an option follows `git`, any later word
+   `push` on the line is a push. The detection is shorter than before, and
+   `git -C d stash push` moves from untouched to denied. Replaying the 7,728
+   distinct Bash commands in this project's transcripts through the hooks
+   measured what else moves, and showed round 2's rule refusing 185 ordinary
+   `git -C $W …` lines: an expansion after git's options now counts only when
+   the word `push` is on the line, as a computed program does. A Bash call
+   keeps no shell variables from the last one, so a `$P` meaning `push` is set
+   on the same line, where the word is. The sweep's three argument mutations
+   were retargeted and two added for the expansion rule: 15.
+5. `state.yaml`, `approvals.log`, `review.yaml` and `mutations.py` in this
+   directory change too; the table lists only the files outside it.

@@ -1,0 +1,45 @@
+# Four rounds, both reviewers each time. The route's ceiling is 2; rounds 3 and
+# 4 were each bought by an Important that let a force push run unasked, and
+# REVIEW.md lets only an Important move the digest.
+#
+# Round 1: both reviewers, Important — spellings the shell runs as a push went
+# undetected (`"git" push`, `git pu""sh`, backslash-newline, `git -C a\ b push`,
+# a computed program or alias). Fixed: a second reading as the shell hands git
+# its words; a computed program counts when `push` appears.
+#
+# Round 2: subprocess-safety-reviewer, Important — computed subcommands in
+# argument position (`git $(echo push)`, `${IFS}push`, `P=push; git $P`,
+# `Alias.`). Fixed: an expansion as git's subcommand counts as a push.
+#
+# Round 3 (digest 5cb1fd656f9842d5): rust-reviewer approve-with-nits 0 2;
+# subprocess-safety-reviewer do-not-approve 1 2 — an option argument with an
+# embedded quote or expansion (`git -c user.name="a b" push -f`) was not read,
+# so the force ran unasked. Fixed by no longer reading option arguments: once an
+# option follows git, any later word `push` counts. A replay of the 7,728
+# distinct Bash commands in this project's transcripts then showed round 2's
+# rule refusing 185 ordinary `git -C $W …` lines, so an expansion after an
+# option counts only when the word push is on the line. Against main, 34 past
+# commands move from allow to deny and 59 from ask to deny.
+#
+# Round 4 (this digest): both approve-with-nits, 0 Important. The safety
+# reviewer replayed its round 1–3 cases and about 40 new ones: nothing runs
+# unasked that did not on main, and nothing main asked about or denied is now
+# allowed. Every nit carried, not taken, per REVIEW.md.
+
+digest: "af762fe44c712ac5"
+
+rounds: 4
+
+carried:
+  - rust-reviewer/4/1 · lessons.md 081 says "three review rounds each found a spelling of an option argument"; round 2 found computed subcommands in argument position — say "another spelling of a shell word the pattern could not read"
+    person: "記録の文章に小さな不正確さがあります。動きには影響がなく、対応は不要です。"
+  - rust-reviewer/4/2 · guard-bash.sh push-gate comment: the sentence ending "the commonest such line in this repository's sessions, runs" runs past the wrapped width and "A quote / may end the word" wraps oddly; reflow
+    person: "コード内の説明文の折り返しが不揃いです。動きには影響がなく、対応は不要です。"
+  - subprocess-safety-reviewer/4/1 · guard-bash.sh:93,96 a push whose word is split by an expansion or quoting with no literal push on the line (`git -C d $(echo pu)sh -f`, `git pu$X -f`, `git -C d ${A}${B} -f`) stays allowed, as on main; the header's "nothing the guard has not read runs" overstates — name a computed word that splits push as out of scope, as script files are
+    person: "わざと分かりにくく書いた強制 push は、以前と同じく確認なしで通ります。エージェントがうっかりこう書くことはまずなく、確実に防ぐには GitHub 側で main への強制 push を禁止する設定が有効です。"
+  - subprocess-safety-reviewer/4/2 · guard-bash.sh:93 false positives: `git -C d log push`, `git -C d stash push`, any `git -<opt> … push` later on the line (greedy `-.*`), and from round 2 `$EDITOR src/push.rs` and a CR — all denied with a rerun hint
+    person: "push でないコマンドが、まれに push と見なされて差し戻されます。差し戻されるだけで何も実行されず、エージェントが書き直して進むので、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"
