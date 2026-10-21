@@ -47,6 +47,7 @@ import { isAbsolute, join, relative } from 'node:path';
 import { joinLineContinuations, stripGitGlobalOptions } from './hook-anchors.mjs';
 import {
   expandingHeredocBodies,
+  SHELL_INTERPRETERS,
   stripCommandPrefix,
   stripHeredocData,
 } from './heredoc-strip.mjs';
@@ -368,15 +369,59 @@ export function shellWords(raw) {
 }
 
 /**
+ * Can this word, as written, expand? A `$` outside single quotes and not escaped (`$X`, `"$X"`),
+ * or a `~` in unquoted text at the start or after `=` or `:`. Change 196: the unquoted word lost
+ * its quotes, so `awk '{print $NF}'` and `grep 'a$'` read as words that expand and the trunk guard
+ * refused them — inside single quotes nothing expands. Wider than bash on `~` after `=`, which
+ * bash leaves alone outside an assignment but a tool may expand itself (`git -c x=~/y`).
+ */
+const LEADING_TILDE_RE = /^(?:\d*(?:&>>?|>>?|>\||<))?~|[=:]~/;
+
+function wordExpands(word) {
+  let first = true;
+  for (const [, , dq, , plain] of word.matchAll(PIECE_RE)) {
+    // At the start of the word, after any redirect operator joined to it: bash expands the `~` in
+    // `>~/x`, and pathArgs judges that target with the word's flag (review of 196).
+    if (plain !== undefined && (plain.includes('$') || (first ? LEADING_TILDE_RE : /[=:]~/).test(plain))) {
+      return true;
+    }
+    if (dq !== undefined && /(?:^|[^\\])(?:\\\\)*\$/.test(dq)) return true;
+    first = false;
+  }
+  return false;
+}
+
+/**
  * Splits a segment into its prefix (env assignments, reserved words, wrappers and their options)
- * and the words from the command word on (`[]` when nothing runs).
+ * and the words from the command word on (`[]` when nothing runs). `literal[i]` says that
+ * `words[i]` cannot expand (see `wordExpands`).
  */
 function splitPrefix(raw) {
+  const written = raw.match(WORD_RE) || [];
   const all = shellWords(raw);
   const rest = stripCommandPrefix(all);
   const prefix = all.slice(0, all.length - rest.length);
-  return { prefix, words: rest.every((w) => CLOSING_RESERVED.has(w)) ? [] : rest };
+  if (rest.every((w) => CLOSING_RESERVED.has(w))) return { prefix, words: [], literal: [] };
+  const reshells = rest.some((w) => RESHELLING.has(w.split('/').pop()) || GIT_SHELL_ALIAS_RE.test(w));
+  const literal = written.slice(prefix.length).map((word) => !reshells && !wordExpands(word));
+  return { prefix, words: rest, literal };
 }
+
+/**
+ * Commands whose arguments a shell reads again (`bash -c '…'`, `eval '…'`, `find -exec sh -c`,
+ * `ssh h '…'`, `tmux new '…'`): text single-quoted here is expanded there, so none of their words
+ * is literal and a `$` in them leaves the command's reach unknown, as before change 196. Any word,
+ * not only the command word: a wrapper this scanner does not unwrap (`setsid sh -c`, `flock l sh
+ * -c`, `docker exec c sh -c`) puts the shell further along (review of 196). A word that merely
+ * names one (`grep x sh`) makes the command conservative, not wrong. Other interpreters' payloads
+ * (`python3 -c`, awk's `system()`) stay opaque, as the header says.
+ */
+const RESHELLING = new Set([
+  ...SHELL_INTERPRETERS,
+  'eval', 'source', '.', 'find', 'ssh', 'su', 'sg', 'watch', 'parallel', 'script', 'tmux', 'screen', 'docker',
+]);
+/** `git -c alias.x='!cmd'`: git hands a `!` alias to the shell. */
+const GIT_SHELL_ALIAS_RE = /^alias\.[^=]*=!/;
 
 /**
  * Words from the command word on: env assignments, reserved words (`then`, `if` …) and wrappers
@@ -440,15 +485,17 @@ export function commandText(words) {
 }
 
 /** A word to resolve as a path: path-like, or something that expands (`$X`, `~`). */
-function isPathCandidate(value) {
-  return looksLikePath(value) || value.includes('$') || value.startsWith('~');
+function isPathCandidate(value, literal = false) {
+  return looksLikePath(value) || (!literal && (value.includes('$') || value.startsWith('~')));
 }
 
 /** Brace / glob expansion can turn `..` into anything (`{.,../..}`, `../*`): not resolvable. */
 const EXPANDING_UP_RE = /\.\..*[{}[\]*?]|[{}[\]*?].*\.\./;
 
-function toAbs(raw, base) {
-  if (!raw || raw.includes(SUBST) || raw.startsWith('~') || raw.includes('$')) return null;
+/** `literal`: the word was written so that it cannot expand (see `wordExpands`). */
+function toAbs(raw, base, literal = false) {
+  if (!raw || raw.includes(SUBST)) return null;
+  if (!literal && (raw.startsWith('~') || raw.includes('$'))) return null;
   if (EXPANDING_UP_RE.test(raw)) return null;
   if (isAbsolute(raw)) return join(raw);
   return base ? join(base, raw) : null;
@@ -515,15 +562,17 @@ function looksLikePath(w) {
  *   - every other word that looks like a path (contains `/`, or is `.` / `..`), and the value
  *     after `=` in `--opt=<value>`, relative to where the command runs (`dir`)
  * `unresolved` is true when some path-like word could not be resolved (`$VAR/…`, `~/…`, a
- * substitution, or an unknown base directory) — callers that exempt must not.
+ * substitution, or an unknown base directory) — callers that exempt must not. `literal[i]`, from
+ * `walkSegments`, marks a word that cannot expand: its `$` and `~` are text (`'a$'`), and it is
+ * judged by its spelling like any other word. Without it every word is taken to expand.
  *
  * @returns {{paths: string[], unresolved: boolean}}
  */
-export function pathArgs(words, cwd, dir) {
+export function pathArgs(words, cwd, dir, literal = []) {
   const paths = [];
   let unresolved = false;
-  const add = (raw, base) => {
-    const abs = toAbs(raw, base);
+  const add = (raw, base, i) => {
+    const abs = toAbs(raw, base, literal[i] === true);
     if (abs) paths.push(abs);
     else unresolved = true;
   };
@@ -531,12 +580,15 @@ export function pathArgs(words, cwd, dir) {
     const w = words[i];
     const attached = REDIRECT_ATTACHED_RE.exec(w);
     if (REDIRECT_OP_RE.test(w)) {
-      if (i + 1 < words.length) add(words[++i], cwd);
+      if (i + 1 < words.length) {
+        i += 1;
+        add(words[i], cwd, i);
+      }
     } else if (attached) {
-      add(attached[1], cwd);
+      add(attached[1], cwd, i);
     } else {
       const value = w.startsWith('-') && w.includes('=') ? w.slice(w.indexOf('=') + 1) : w;
-      if (isPathCandidate(value)) add(value, dir);
+      if (isPathCandidate(value, literal[i] === true)) add(value, dir, i);
     }
   }
   return { paths, unresolved };
@@ -566,7 +618,7 @@ export function isInside(abs, root) {
  * @param {string} command
  * @param {string|null} cwd
  * @returns {Array<{raw: string, redirect: boolean, depth: number, sep: string, words: string[],
- *   cwd: string|null, cwdCertain: boolean, cdTo: string|null, isCd: boolean,
+ *   literal: boolean[], cwd: string|null, cwdCertain: boolean, cdTo: string|null, isCd: boolean,
  *   dirs: Array<string|null>, effectiveDir: string|null}>}
  */
 export function walkSegments(command, cwd) {
@@ -578,12 +630,13 @@ export function walkSegments(command, cwd) {
     level = seg.group;
     const st = states[level];
     if (seg.depth === 0 && st.cdPending && seg.sep !== '&&') st.certain = false;
-    const { prefix, words } = splitPrefix(seg.raw);
+    const { prefix, words, literal } = splitPrefix(seg.raw);
     const effects = prefixEffects(prefix);
     const ctx = {
       ...seg,
       redirect: seg.redirect || effects.writes,
       words,
+      literal,
       assigns: effects.assigns,
       opaque: effects.opaque,
       cwd: st.dir,
