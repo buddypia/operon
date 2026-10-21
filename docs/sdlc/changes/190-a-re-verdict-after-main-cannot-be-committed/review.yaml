@@ -12,15 +12,22 @@
 # the rust reviewer ran both gate tests on the staged tree. Every nit carried,
 # not taken, per REVIEW.md.
 #
-# Round 3 (this digest): CI on round 2's head failed the scrub test — the switch
+# Round 3 (2deb2db25a3ad34f): CI on round 2's head failed the scrub test — the switch
 # took a scrub, which edits several closed records at once. The switch now
 # requires exactly one change directory. Both approve-with-nits, 0 Important;
 # the rust reviewer ran the scrub, bypass and gate tests on the staged tree.
 # The round-3 nits restate round 2's; each is listed once under its round-3 id.
+#
+# Round 4 (this digest): CI on round 3's head failed two harness tests — the
+# pipe-reading scan took `-eq` after `grep -c .)` for a `grep -q`, and `done` is
+# not a stage. The count became a `case` with no pipe. subprocess-safety-reviewer
+# approve 0 0 (the `case` equals the old count for every `own`; `$'\n'` in a
+# pattern holds in bash 3.2); rust-reviewer approve-with-nits 0 2, both its
+# round-3 nits again, listed below.
 
-digest: "2deb2db25a3ad34f"
+digest: "56c6230345a7094e"
 
-rounds: 3
+rounds: 4
 
 carried:
   - subprocess-safety-reviewer/3/1 · own is counted against the first parent but touched against main, so a record-only merge commit touching one directory against its first parent and several against main takes the ^2 exemption unchecked; narrowed from round 2, not new strength; skip the switch when the commit has a second parent
@@ -38,4 +45,4 @@ carried:
 
 verdicts:
   rust-reviewer: "approve-with-nits 0 2"
-  subprocess-safety-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve 0 0"

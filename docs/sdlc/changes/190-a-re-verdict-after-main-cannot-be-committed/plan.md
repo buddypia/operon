@@ -97,3 +97,9 @@ gate made it one.
    touches one change directory, so the switch now also requires exactly one;
    the scrub test joined the sweep's checks, with a fourth mutation (several
    directories admitted).
+4. **CI on round 3's head failed two harness tests**: the count `grep -c .)" -eq 1`
+   read to `every_gate_script_reads_its_pipes_to_the_end` as a `grep -q` (its
+   flag scan does not stop at `)`, so `-eq` carries a `q`), and `stage: "done"`
+   is not a stage. The count is now a `case` on the newline-separated list (no
+   pipe), the fourth mutation follows it, and the stage is `test` as every
+   closed bugfix's is.

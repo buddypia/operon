@@ -24,7 +24,7 @@
 
 state:
   route: "bugfix"
-  stage: "done"
+  stage: "test"
   status: "done"
   attempts: "1 3"
   questions: "0 7"
@@ -33,7 +33,7 @@ state:
   readiness: "pending"
   screen: "n/a"
 
-resume: "Reviewed at round 3; lands once CI passes. Then change 183 records
+resume: "Reviewed at round 4; lands once CI passes. Then change 183 records
   its re-verdict with a record-only commit."
 
 contract:
@@ -48,7 +48,7 @@ contract:
   guards-verified-by-mutation: "human passed mutations.py in this directory: 4
     of 4 caught, the claim among them"
   review: "human passed rust-reviewer approve-with-nits 0 2 and
-    subprocess-safety-reviewer approve-with-nits 0 3 at 2deb2db25a3ad34f, round 3;
+    subprocess-safety-reviewer approve 0 0 at 56c6230345a7094e, round 4;
     nits carried with person lines in review.yaml"
   lesson-recorded: "machine passed entry 084 in docs/sdlc/lessons.md with its Guard"
 

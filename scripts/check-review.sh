@@ -205,7 +205,12 @@ if quiet_diff . "$EXCLUDE"; then
       commit) own=$(git -c core.quotePath=false -c color.ui=false diff "$base" "$commit" --no-renames --name-only -- docs/sdlc/changes 2>/dev/null | sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u) ;;
       *) own=$(git -c core.quotePath=false -c color.ui=false diff --cached "$base" --no-renames --name-only -- docs/sdlc/changes 2>/dev/null | sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u) ;;
     esac
-    [ "$(printf '%s\n' "$own" | grep -c .)" -eq 1 ] \
+    one_dir=0
+    case "$own" in
+      '' | *$'\n'*) ;;
+      *) one_dir=1 ;;
+    esac
+    [ "$one_dir" -eq 1 ] \
       && git rev-parse --verify --quiet 'refs/heads/main^{commit}' >/dev/null 2>&1 \
       && base=refs/heads/main
   fi

@@ -107,8 +107,8 @@ MUTATIONS = {
     ),
     "a record-only diff across several change directories is judged against main": (
         GATE,
-        '| grep -c .)" -eq 1 ]',
-        '| grep -c .)" -ge 1 ]',
+        "      '' | *$'\\n'*) ;;\n",
+        "      '') ;;\n",
     ),
     "the stale refusal no longer names the exit (the claim)": (
         GATE,
