@@ -25,11 +25,12 @@
 # by .claude/hooks/gate-stop.sh before the session ends.
 #
 # The hook's timeout in .claude/settings.json is 600 seconds, which is generous
-# for a warm cache — about a minute for the suite — and can be short of a cold
-# one. A timeout is a non-blocking error, so what a timeout skips is the three
-# cargo gates and the erosion count; the review gate runs inside git and is not
-# in this window at all. On the first build after a `cargo clean`, run the
-# cargo gates by hand once.
+# for a warm cache and can be short of a cold one: 16m29s was measured for a
+# new worktree's first clippy under load (change 191). A timeout is a
+# non-blocking error, so it would skip the cargo gates and the erosion count
+# unseen; clippy therefore runs under its own 540-second limit and a run that
+# reaches it refuses the commit (change 192). The review gate runs inside git
+# and is not in this window at all.
 #
 # Every predicate here is `grep … >/dev/null`, never `grep -q`: under `pipefail`
 # a `grep -q` that stops reading at its first match hands the pipeline the
@@ -507,9 +508,19 @@ if [ "$needs_cargo" -eq 1 ]; then
   if ! output=$(cargo fmt --check 2>&1); then
     block "cargo fmt --check" "$output"
   fi
-  if ! output=$(cargo clippy --locked -- -D warnings 2>&1); then
-    block "cargo clippy --locked -- -D warnings" "$(printf '%s' "$output" | tail -60)"
-  fi
+  # Bounded under the hook's 600 seconds, as gate-merge.sh bounds its suite: a
+  # hook that times out lets the commit through unchecked (change 192).
+  limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}
+  output=$(bash scripts/run-bounded.sh "$limit" cargo clippy --locked -- -D warnings 2>&1)
+  case $? in
+    0) ;;
+    124) block "cargo clippy --locked -- -D warnings did not finish in ${limit}s" \
+"A hook that runs out of time lets the commit through unchecked, so the gate
+refuses instead. A cold target/ is the usual cause. Run \`make q.fast\` in this
+worktree, which has no time limit, then commit again: the gate's clippy is then
+incremental." ;;
+    *) block "cargo clippy --locked -- -D warnings" "$(printf '%s' "$output" | tail -60)" ;;
+  esac
 fi
 
 # --- test erosion -------------------------------------------------------------
