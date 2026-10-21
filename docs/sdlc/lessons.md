@@ -1196,3 +1196,25 @@ the bounded clippy, its 540-second limit, and a hook timeout of at least 600
 (change 192; watched failing with the clippy unbounded, the limit at 900, and
 the hook timeout at 500). The gate itself, driven with a `cargo` that never
 returns, refused with exit 2 after 8 seconds and left no child behind.
+
+## 088 — A mistake in a record was found five minutes after the push
+
+`stage: review` in a state.yaml — the stage set is plan design build test
+deploy maintain, and review happens in deploy — was written four times, by
+changes 133, 144, 152 and 167, and `stage: done`, a contract line without its
+third part, a document naming a moved path and a reused change number followed:
+9 of the 17 red CI runs from 2026-10-07 to 10-21. Every one was found by a test
+that reads files and nothing else, and every one was found in CI, because the
+commit gate had left all tests there (change 128) — so each cost a push, a red
+run, and a second push. **The rule:** a check that reads only what the commit
+holds runs at the commit; the suite stays in CI.
+
+**Guard.** `the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` pins the
+commit gate running `every_state_file_names_a_route_and_a_stage_that_exist`,
+`change_directory_numbers_are_unique` and
+`harness_documents_only_name_paths_that_exist` by name when the commit holds
+docs/, .claude/ or a .md file, within what is left of clippy's limit, refuses
+any other `cargo test` there, and refuses a listed name src/tests.rs no longer
+has and a run that passed fewer than all three (change 198; watched failing on the six gate mutants in its mutations.py). The
+gate itself, run on this change's state.yaml with `stage: review`, refused with
+exit 2 and the test's own message.

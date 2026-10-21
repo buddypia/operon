@@ -1,0 +1,32 @@
+# Review record for 198-a-record-mistake-is-found-only-in-ci.
+#
+# The change: the commit gate runs the three tests that read only records, by
+# name, when the commit holds one; test fixtures leave $TMPDIR for the per-user
+# temporary directory.
+#
+# Round 1, both approve-with-nits. Fixed for round 2: subprocess-safety-reviewer
+# found that a listed test moved to another module would match nothing under
+# `--exact` and pass, so the gate now requires all three to have passed; a
+# zero budget blocks directly instead of running cargo for one second; an empty
+# failure names cargo's exit; the doc comment of temporary_directory went back
+# to it. Round 2 re-read those lines: the count check cannot be fooled by "13
+# passed", keeps a timeout reported as a timeout, and the worst case still ends
+# before the hook's 600 seconds. What is left is carried below.
+
+digest: "01a75b7325d1b2c3"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/2 · .claude/hooks/gate-commit.sh:509: the comment says one limit for clippy and the record tests "counted from the hook's start"; clippy takes the full limit, only the record tests get `limit - SECONDS`.
+    person: "コミット時の確認の説明文に、時間の数え方が実際と少し違う一文があります。動作には影響せず、対応は不要です。"
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-commit.sh trigger: a commit that only moves a src/ or scripts/ path a document names does not run harness_documents_only_name_paths_that_exist; CI still does.
+    person: "ファイルを移動するだけのコミットでは、文書に残った古いパスはこれまで通り CI で見つかります。対応は不要です。"
+  - rust-reviewer/1 · .claude/hooks/gate-commit.sh: the record tests read the working tree, so an unrelated unstaged mistake in docs/ can block a commit that does not touch it.
+    person: "コミットしていない作業中の記録に誤りがあると、関係のないコミットも止まることがあります。止まったときにどのファイルかが表示されるので、対応は不要です。"
+  - subprocess-safety-reviewer/1 · src/tests.rs: many tests call std::env::temp_dir() directly rather than temporary_directory; none fails under this session's $TMPDIR today.
+    person: "一部のテストは今も AI 作業用の一時フォルダを使いますが、そのせいで失敗するものは今はありません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"
