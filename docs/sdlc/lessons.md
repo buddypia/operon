@@ -7,6 +7,13 @@ The part that matters is **Guard**. An entry with no guard is unfinished work:
 every guard is a test in `src/tests.rs` or an eval in `evals/`, because those
 run without being remembered.
 
+The suite holds every entry to that (change 186):
+`every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran` refuses an entry
+with no title, no **The rule**, or no **Guard**, a guard naming no test or eval
+this repository holds, or a number out of sequence; and from entry 081 on, a
+Guard that does not say it was watched failing. Append new entries last, with
+the next number.
+
 Two forms live here. Recent entries (069–070) carry the full account; entries
 001 to 068 are compressed to the rule and the guard (changes 030, 097, and 147).
 **No guard was removed by the compression**: `scripts/pipeline-indicators.sh`
@@ -1032,7 +1039,69 @@ rewritable shape admitting `--force`, the split removed, one unreadable push no
 longer making the line a question, and the refusal no longer naming
 `git push origin <branch>`).
 
-## 081 — A gate that read a pattern asked about text and missed a force
+## 081 — The gate asked for a reviewer by a name Claude Code does not use
+
+`scripts/check-review.sh` admits a reviewer when `.claude/agents/<name>.md`
+exists. Claude Code does not offer that file under its name: measured in change
+184, a definition with no `description:` is left out of the subagents a session
+can start, without a message, and one whose `name:` differs from its file is
+offered under the `name:`. Either edit leaves the gate asking for a verdict no
+session can produce, and nothing said so. In the same change, the eval summary
+printed an eval whose repeated runs went both ways as a bare count, though
+Harness² measured that split as the cheapest thing to fix. **The rule:** a gate
+that names a thing another program loads checks the shape that program loads
+it by, measured rather than taken from the file listing; and a repeated
+measurement says where its runs disagreed, not only how often they passed.
+
+**Guard.** `every_subagent_loads_under_the_name_the_review_gate_asks_for` (six
+mutants, each refused for its own reason, and each check watched failing when
+removed), `the_eval_runner_names_an_eval_whose_runs_split`, and
+`the_hillclimb_procedure_states_what_harness2_measured` — swept by
+`docs/sdlc/changes/184-eval-runs-that-disagree-go-unread/mutations.py`.
+
+## 082 — A handoff over its budget was cut through the person's instruction
+
+The compact handoff bundle (changes 179, 180) puts the person's handoff
+instructions last and, when even one turn left it over 6,000 bytes, kept the
+first 6,000 bytes. A Japanese task, turn, and note are three bytes a character
+and each was allowed 1,200 characters, so a long handoff opened the new session
+without the one sentence the person typed for it. Every shortened turn ended in
+a bare `…`, which the receiving session reads as the source's words stopping,
+with nothing saying where the rest was. Harness² prints each cut it makes in
+what an agent reads as its own (`harness2/core/context.py`). **The rule:** a
+budget gives way in order of what matters least, and is never met by cutting
+from the end of a text whose end matters; and every cut handed to an agent says
+who cut it and where the whole is.
+
+**Guard.** `a_long_handoff_keeps_the_persons_instruction_whole` (watched
+failing on the old builder: the instructions were cut),
+`a_handoff_says_where_operon_shortened_the_text` (watched failing on the bare
+ellipsis), `a_long_handoff_shortens_the_excerpt_before_the_task`, and
+`a_handoff_of_a_shortened_task_marks_it_once` (found in review; watched failing
+with a cut ending on spaces) — swept by
+`docs/sdlc/changes/185-a-long-handoff-loses-the-persons-instruction/mutations.py`.
+
+## 083 — A cut through a marker the cut did not look for
+
+Change 185 marked every handoff cut and made a cut strip an earlier marker
+first, but only a marker at the very end of the text. A marker with text after
+it — an earlier handoff pasted or quoted into a turn — was cut through when the
+limit landed inside it, and the bundle carried `[shortened by Op` as the
+source's words. Change 185's review had named the byte cut through a trailing
+marker instead; the first plan for 187 took that on trust and its test passed
+on the unfixed code, because the byte cut reserves the marker's room and cannot
+reach a trailing one. **The rule:** a cut that must not split a token checks
+every occurrence the cut can reach, not the one position it expected; and a
+reported defect is reproduced before it is planned against.
+
+**Guard.** `a_handoff_cut_never_splits_a_marker_inside_the_text` (watched
+failing on main's character cut at a turn of 1,115 characters) and
+`a_handoff_byte_cut_never_splits_a_marker_inside_the_text` (watched failing on
+main's byte cut at instructions of 705 characters), each asserting it reached
+the case — swept by
+`docs/sdlc/changes/187-a-handoff-cut-twice-keeps-a-marker-fragment/mutations.py`.
+
+## 084 — A gate that read a pattern asked about text and missed a force
 
 Change 182's publishing gate found a push by the literal `git push` and judged
 each segment of the line. Probed adversarially once it landed, it put

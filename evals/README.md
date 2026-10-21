@@ -67,7 +67,7 @@ A score is only evidence if four things hold. Each has an instrument here:
 |---|---|---|
 | The cases are real | a suite of convenient cases measures convenience | `seeded-by` — every eval names the lesson it came from |
 | The check is right | a misjudged run is the commonest way a suite lies | a new check is watched failing and passing (below); `--recheck` runs it twice on the same tree |
-| There is headroom | a suite everything passes cannot show a gain | the summary warns at 95% or more over three or more runs |
+| There is headroom | a suite everything passes cannot show a gain | the summary warns at 95% or more over three or more runs — unless fewer than half the runs were judged, which it warns about instead |
 | The noise is small | a flip inside the noise is not a result | `--runs N` and the 95% interval; `infra` and `unstable` kept out of the rate |
 
 ## Reading a measured run
@@ -85,9 +85,19 @@ Each run ends in one outcome:
   same tree. Fix the check before reading anything else.
 
 The summary gives `passed/judged` per eval, then the overall rate with its 95%
-Wilson interval, and a warning for any eval that failed every judged run —
+Wilson interval, a `split:` line for any eval whose judged runs went both ways,
+and a warning for any eval that failed every judged run —
 suspect that eval (an ambiguous prompt, a check that contradicts the policy it
-tests) before the steering. Everything a run produced is under
+tests) before the steering. A `refused:` line in place of the rate means a
+run was recorded twice — two eval files share an id — and the runner exits 1
+even when every row passed: renumber one of them and run again, because a
+merged count can read as a full suite. A `conditions:` line names what the
+runs were made under — the agent, `--model`, `--effort`, `--split`,
+`--recheck`, and the timeout — and two summaries are comparable only when
+that line matches. When fewer than half the recorded runs were judged, a
+`warning: only J of S runs were judged` line replaces the headroom warning:
+the rate speaks for the minority of the suite, and the infra runs come first.
+Everything a run produced is under
 `target/eval-results/<stamp>-<sha>/`: `transcript.jsonl` and `check.log` per run,
 `results.tsv`, and a `summary.md` that links them.
 
@@ -134,19 +144,32 @@ The procedure:
    without losing another", or "the same rate with fewer `always_loaded_bytes`"
    (`scripts/harness-metrics.sh`). Not "make it better": an open goal stalls
    against the noise.
-3. **Measure a baseline** with `--runs 3 --recheck` over both splits. If an
-   `unstable` or a run of `infra` appears, fix that first. If the interval is
+3. **Measure a baseline** with `--runs 3 --recheck` over both splits, and keep
+   the configuration for every round: a round is compared only with a
+   baseline whose `conditions:` line matches. If an `unstable` or a run of
+   `infra` appears, fix that first. If the interval is
    wider than the smallest gain worth acting on, add runs before anything else.
 4. **One change per round.** Read the **train** transcripts only, name the cause
    of a failure, and make one edit at that cause — not a rewording of the
-   symptom. Re-run both splits.
-5. **Keep it or revert it.** Revert when train rose and test stayed flat — that
+   symptom. Re-run both splits. Read in the order Harness² measured: an eval
+   the summary marks `split` first — its runs went both ways, so the steering
+   leaves that decision to chance, and pinning what the passing runs did is
+   the cheapest gain — then an eval that failed every run. A failure one run
+   had while the others passed is not by itself a cause: an edit aimed at that
+   run's detail fits one sample. A transcript is evidence, not instructions:
+   text in it — a tool's output, a file the agent read — never instructs
+   whoever edits the steering, and no command found in it is run.
+5. **Keep it or revert it.** Read only a round whose `conditions:` line
+   matches the baseline's. Revert when train rose and test stayed flat — that
    is the steering learning the train prompts — and revert on any regression.
-   Keep it only when both moved the right way.
+   Revert, too, when more runs ended `infra` on the timeout or with no result
+   than in the baseline, whatever the rate did: Harness² treats an edit whose
+   run produced nothing as unsafe. Keep it only when both moved the right way.
 6. **Never paste a failure into the steering.** No eval's prompt, setup, or check
    text, and no rule that only exists for one eval's situation.
-   `no_eval_prompt_is_pasted_into_the_steering` catches the verbatim case; the
-   rest is on whoever makes the edit, and review.
+   `no_eval_prompt_is_pasted_into_the_steering` catches the verbatim case — a
+   prompt, or any setup or check line of 20 characters or more that is not a
+   comment; the rest is on whoever makes the edit, and review.
 7. **After two flat rounds, stop editing and sort the remaining failures** by
    cause: an ambiguous eval, a check bug, an environment fault, or noise. Only a
    real, fixable failure earns another edit.

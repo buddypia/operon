@@ -1,0 +1,3 @@
+2026-10-20T17:20:33Z auto intent intent.md 214d3c92fd60f0bc approve evaluator: restates the quoted request; Harness² claims (prompts.py, tree.py) verified in source; no paused surface edited
+2026-10-20T17:21:37Z auto spec spec.md 75687f5d7441f2d9 approve evaluator round 2: the over-length (1,025-char) mutant added; all six checks each have an owning mutant; no paused surface edited
+2026-10-20T17:21:37Z auto plan plan.md 57dd0a5c70f1ce1d approve evaluator round 2: step 4 names all six checks including the 1,024 limit; consistent with the spec; no paused surface edited

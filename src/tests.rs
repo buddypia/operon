@@ -358,6 +358,251 @@ pub(crate) fn compact_handoff_bundle_bounds_turns_and_bytes_and_strips_tool_spam
     assert!(!bundle.contains("turn-01 "));
 }
 
+fn long_japanese_handoff_source() -> CliSession {
+    CliSession {
+        provider: CliProvider::Codex,
+        native_id: "33333333-3333-3333-3333-333333333333".into(),
+        id: "33333333-3333-3333-3333-333333333333".into(),
+        title: None,
+        last_user_message: None,
+        branch: None,
+        updated_at: now(),
+        path: PathBuf::from("/tmp/rollout.jsonl"),
+    }
+}
+
+#[test]
+/// Change 185. The person's handoff instructions are the last section of the
+/// bundle, and a bundle over its byte budget was cut from the end, so a long
+/// Japanese task — three bytes a character — took the instructions with it,
+/// and the new session started without the one thing the person typed for it.
+pub(crate) fn a_long_handoff_keeps_the_persons_instruction_whole() {
+    let task = format!("請求書の集計を直す。{}", "あ".repeat(1_400));
+    let turns = vec![
+        ("user", task),
+        ("assistant", format!("調べました。{}", "い".repeat(1_400))),
+    ];
+    let note = format!("{}最後に、結論を先に書いてください。", "う".repeat(900));
+
+    let (bundle, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        &note,
+    );
+
+    assert!(
+        bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES,
+        "bundle byte length {} exceeded HANDOFF_BUNDLE_MAX_BYTES ({HANDOFF_BUNDLE_MAX_BYTES})",
+        bundle.len()
+    );
+    assert!(
+        bundle.contains(&note),
+        "the person's handoff instructions were cut:\n{bundle}"
+    );
+    assert!(bundle.contains("請求書の集計を直す。"));
+
+    // The marker is for the session reading the bundle. The person reads the
+    // session's name, which showed a long task ending in `…` before and still
+    // does.
+    let display = session_display_goal(&bundle);
+    assert!(display.starts_with("請求書の集計を直す。"), "{display}");
+    assert!(
+        display.ends_with('…') && !display.contains(HANDOFF_SHORTENED_MARKER),
+        "the session name shows Operon's marker to the person: {display}"
+    );
+}
+
+#[test]
+/// Change 185, found in its review. A task Operon already shortened ends in
+/// the marker, so handing that session off again cut the text through the old
+/// marker and added a new one, and a fragment like `[shortened by Operon to fi`
+/// reached the next session and the session's name.
+pub(crate) fn a_handoff_of_a_shortened_task_marks_it_once() {
+    // The first cut ends on spaces, which it trims, so the shortened task is
+    // under the limit by those spaces and a second cut reaches into its marker.
+    let task = format!(
+        "集計を直す。{}{}{}",
+        "さ".repeat(1_189),
+        " ".repeat(10),
+        "し".repeat(300)
+    );
+    let (first, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Codex,
+        &[("user", task)],
+        Path::new("/tmp/archive-1.jsonl"),
+        "",
+    );
+    let tracked = goal_with_native_tracking_token("codex", first, Uuid::new_v4());
+    let (second, _) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &[("user", tracked)],
+        Path::new("/tmp/archive-2.jsonl"),
+        "",
+    );
+
+    let fragment = &HANDOFF_SHORTENED_MARKER[..4];
+    assert_eq!(
+        second.matches(fragment).count(),
+        second.matches(HANDOFF_SHORTENED_MARKER).count(),
+        "a cut went through an earlier marker:\n{second}"
+    );
+    let display = session_display_goal(&second);
+    assert!(
+        display.ends_with('…') && !display.contains('['),
+        "the session name shows a broken marker: {display}"
+    );
+}
+
+#[test]
+/// Change 187. A turn that holds Operon's marker with text after it — an
+/// earlier handoff pasted or quoted — is cut to its character limit through
+/// that marker when the limit lands inside it. The cut steps back to before
+/// the marker, so the bundle never carries a fragment of one.
+pub(crate) fn a_handoff_cut_never_splits_a_marker_inside_the_text() {
+    let fragment = &HANDOFF_SHORTENED_MARKER[..4];
+    let mut reached = 0;
+    for lead in 1_100..1_200 {
+        let quoted = format!(
+            "{}\n{HANDOFF_SHORTENED_MARKER}\nその後。",
+            "け".repeat(lead)
+        );
+        let (bundle, _) = build_compact_handoff_bundle(
+            &long_japanese_handoff_source(),
+            CliProvider::Claude,
+            &[("user", "直す。".to_owned()), ("assistant", quoted)],
+            Path::new("/tmp/archive.jsonl"),
+            "",
+        );
+        assert_eq!(
+            bundle.matches(fragment).count(),
+            bundle.matches(HANDOFF_SHORTENED_MARKER).count(),
+            "a turn of {lead} characters before a quoted marker: the cut went through it:\n{bundle}"
+        );
+        if lead + 1 < HANDOFF_BUNDLE_TURN_MAX_CHARS
+            && lead + 1 + HANDOFF_SHORTENED_MARKER.len() > HANDOFF_BUNDLE_TURN_MAX_CHARS
+        {
+            reached += 1;
+        }
+    }
+    assert!(
+        reached > 0,
+        "no length put the cut inside the quoted marker; the test checked nothing"
+    );
+}
+
+#[test]
+/// Change 187. The byte cut that fits the last turn into the bundle steps back
+/// out of a marker inside the turn too.
+pub(crate) fn a_handoff_byte_cut_never_splits_a_marker_inside_the_text() {
+    let fragment = &HANDOFF_SHORTENED_MARKER[..4];
+    let before = "け".repeat(500);
+    let quoted = format!("{before}\n{HANDOFF_SHORTENED_MARKER}\n{}", "こ".repeat(600));
+    let mut reached = 0;
+    for length in 300..=1_200 {
+        let note = format!("{}テストも足してください。", "く".repeat(length));
+        let (bundle, _) = build_compact_handoff_bundle(
+            &long_japanese_handoff_source(),
+            CliProvider::Claude,
+            &[
+                ("user", format!("集計を直す。{}", "さ".repeat(600))),
+                ("assistant", quoted.clone()),
+            ],
+            Path::new("/tmp/archive.jsonl"),
+            &note,
+        );
+        assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+        assert_eq!(
+            bundle.matches(fragment).count(),
+            bundle.matches(HANDOFF_SHORTENED_MARKER).count(),
+            "instructions of {length} characters: the byte cut went through a quoted marker:\n{bundle}"
+        );
+        if bundle.contains(&before) && !bundle.contains("こ") {
+            reached += 1;
+        }
+    }
+    assert!(
+        reached > 0,
+        "no instruction length cut the turn near its quoted marker; the test checked nothing"
+    );
+}
+
+#[test]
+/// Change 185. When the task and the instructions fit and the last turn does
+/// not, the turn is what gives way, shortened and marked, rather than dropped
+/// or cut through the instructions after it.
+pub(crate) fn a_long_handoff_shortens_the_excerpt_before_the_task() {
+    let task = format!("インポーターを直す。{}", "か".repeat(600));
+    let turns = vec![
+        ("user", task.clone()),
+        ("assistant", format!("途中経過。{}", "き".repeat(1_500))),
+    ];
+    let note = format!("{}テストも足してください。", "く".repeat(300));
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        &note,
+    );
+
+    assert!(bundle.len() <= HANDOFF_BUNDLE_MAX_BYTES, "{}", bundle.len());
+    assert_eq!(included, 1, "{bundle}");
+    assert!(bundle.contains("途中経過。"), "{bundle}");
+    assert!(
+        bundle.contains(&task),
+        "the task was shortened first:\n{bundle}"
+    );
+    assert!(bundle.contains(&note), "{bundle}");
+    assert!(bundle.contains(HANDOFF_SHORTENED_MARKER), "{bundle}");
+}
+
+#[test]
+/// Change 185. Harness² marks every cut it makes in what an agent reads as its
+/// own, because an agent handed a sentence that stops mid-word diagnoses the
+/// source as broken. The bundle shortened turns with a bare `…`, so the session
+/// receiving it could not tell Operon's cut from the source's text, nor where
+/// the rest was.
+pub(crate) fn a_handoff_says_where_operon_shortened_the_text() {
+    let long_turn = format!("調査の続き。{}", "え".repeat(2_000));
+    let turns = vec![
+        ("user", "Fix the importer.".to_owned()),
+        ("assistant", long_turn),
+    ];
+
+    let (bundle, included) = build_compact_handoff_bundle(
+        &long_japanese_handoff_source(),
+        CliProvider::Claude,
+        &turns,
+        Path::new("/tmp/archive.jsonl"),
+        "",
+    );
+
+    assert_eq!(included, 2, "{bundle}");
+    assert!(
+        bundle.contains(HANDOFF_SHORTENED_MARKER),
+        "a shortened turn does not say Operon shortened it:\n{bundle}"
+    );
+    assert_eq!(
+        bundle.matches(HANDOFF_SHORTENED_MARKER).count(),
+        1,
+        "a turn that fit was marked as shortened:\n{bundle}"
+    );
+    assert!(
+        !bundle.contains("…"),
+        "a bare ellipsis is still how a cut is shown:\n{bundle}"
+    );
+    assert!(
+        HANDOFF_SHORTENED_MARKER.contains("Operon")
+            && HANDOFF_SHORTENED_MARKER.contains("transcript snapshot"),
+        "the marker must say who cut it and where the rest is: {HANDOFF_SHORTENED_MARKER}"
+    );
+}
+
 #[test]
 pub(crate) fn compact_handoff_bundle_peels_nested_envelopes_and_preserves_display_goal() {
     let first_source = CliSession {
@@ -16249,6 +16494,278 @@ pub(crate) fn every_lesson_cited_by_number_is_a_lesson_that_exists() {
     );
 }
 
+/// The first lesson written after the ledger began requiring its guard to have
+/// been seen failing. Entries before it were compressed by changes 030, 097,
+/// and 147 and many no longer say so; they are not rewritten.
+const FIRST_LESSON_WITH_WATCHED_GUARD: u32 = 81;
+
+/// What keeps each entry of `lessons.md` out of the ledger, one line per
+/// problem, each naming its entry. Whether a guard's name is held by this
+/// repository is not asked here: `scripts/pipeline-indicators.sh` with
+/// `--lessons` owns that rule, and a second copy would drift from it (lesson
+/// 004).
+fn lesson_admission_problems(lessons: &str) -> Vec<String> {
+    let mut entries: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut inside = false;
+    for line in lessons.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            inside = heading.starts_with(|c: char| c.is_ascii_digit());
+            if inside {
+                entries.push((heading, Vec::new()));
+            }
+        } else if inside {
+            if let Some((_, body)) = entries.last_mut() {
+                body.push(line);
+            }
+        }
+    }
+    if entries.is_empty() {
+        return vec![
+            "lessons.md: 教訓の見出しを 1 つも読めません — 検査が何も見ていません".to_owned(),
+        ];
+    }
+
+    let mut problems = Vec::new();
+    let mut previous = 0;
+    for (heading, body) in entries {
+        let (number, rest) = heading.split_once(' ').unwrap_or((heading, ""));
+        let expected = previous + 1;
+        match number.parse::<u32>() {
+            Ok(written) if number.len() == 3 && written == expected => previous = written,
+            parsed => {
+                problems.push(format!(
+                    "{heading}: 番号が {expected:03} ではありません — 新しい教訓は末尾に連番で足します"
+                ));
+                previous = parsed.unwrap_or(expected);
+            }
+        }
+        let title = rest.trim_start().strip_prefix('—').map_or("", str::trim);
+        if title.is_empty() {
+            problems.push(format!(
+                "{heading}: 見出しに題がありません — どの場面の教訓か分かりません"
+            ));
+        }
+        // A Guard paragraph runs to the blank line or rule that ends it; an
+        // entry may hold more than one, and any of them may say it was seen.
+        // Narrower than the script, which reads on to the next heading for
+        // guard names: "watched failing" belongs in a Guard paragraph itself.
+        // The rule is read outside them, so a Guard quoting "**The rule:**"
+        // cannot stand in for an entry's own.
+        let mut guard = Vec::new();
+        let mut account = Vec::new();
+        let mut collecting = false;
+        for line in &body {
+            if line.starts_with("**Guard.**") {
+                collecting = true;
+            } else if line.trim().is_empty() || line.trim() == "---" {
+                collecting = false;
+            }
+            if collecting {
+                guard.push(*line);
+            } else {
+                account.push(*line);
+            }
+        }
+        let account = account.join("\n");
+        if !account.contains("**The rule:**") && !account.contains("**The rule.**") {
+            problems.push(format!(
+                "{heading}: The rule がありません — 何を守る教訓か分かりません"
+            ));
+        }
+        if guard.is_empty() {
+            problems.push(format!(
+                "{heading}: Guard がありません — 教訓を守るものがありません"
+            ));
+        } else if previous >= FIRST_LESSON_WITH_WATCHED_GUARD
+            && !guard
+                .join(" ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains("watched failing")
+        {
+            problems.push(format!(
+                "{heading}: Guard が watched failing と言っていません — 失敗するところを見ていない guard は推測です"
+            ));
+        }
+    }
+    problems
+}
+
+/// A lessons file of 082 entries that pass, each handed to `edit` to be
+/// changed, or dropped when it returns `None`.
+fn fixture_lessons(edit: impl Fn(u32, String) -> Option<String>) -> String {
+    let mut text = String::from("# Lessons\n\n---\n\n");
+    for number in 1..=82 {
+        let entry = format!(
+            "## {number:03} — Fixture lesson {number}\n\nA mistake. **The rule:** a rule.\n\n**Guard.** `a_fixture_guard` (watched\nfailing on its mutant).\n\n---\n\n"
+        );
+        if let Some(entry) = edit(number, entry) {
+            text.push_str(&entry);
+        }
+    }
+    text
+}
+
+/// Runs `scripts/pipeline-indicators.sh` with `--lessons` from `root`; exit
+/// code and all output. Bounded: the real tree takes about 15 seconds, so a
+/// stalled loop fails here with its message instead of holding CI to the job
+/// timeout.
+fn run_lesson_indicators(root: &Path) -> (i32, String) {
+    let mut command = Command::new("/bin/bash");
+    command
+        .arg(root.join("scripts/pipeline-indicators.sh"))
+        .arg("--lessons")
+        .current_dir(root);
+    forget_inherited_repository(&mut command);
+    let output =
+        run_command_with_timeout(&mut command, Duration::from_secs(120)).unwrap_or_else(|error| {
+            panic!("pipeline-indicators.sh --lessons を実行できません: {error:#}")
+        });
+    let mut printed = String::from_utf8_lossy(&output.stdout).into_owned();
+    printed.push_str(&String::from_utf8_lossy(&output.stderr));
+    (output.status.code().unwrap_or(-1), printed)
+}
+
+#[test]
+/// Harness² admits a lesson to its library only with the situation it applies
+/// to, the lesson, and the evidence it rests on, and refuses the entry before
+/// it is stored otherwise. `lessons.md` said the same in prose — an entry with
+/// no guard is unfinished work, a guard nobody watched fail is a guess — and
+/// `pipeline-indicators.sh --lessons` counted the entries whose guard exists,
+/// but only when somebody ran it. A test renamed away, or an entry appended in
+/// a hurry, read as finished until then.
+///
+/// The suite asks the script rather than restating its rule, so the count it
+/// prints and this verdict on guard names cannot disagree; the script is
+/// shown to refuse on a fixture repository, since on this tree it passes.
+pub(crate) fn every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let (code, printed) = run_lesson_indicators(&root);
+    assert_eq!(
+        code, 0,
+        "lessons.md: pipeline-indicators.sh --lessons が失敗しました — Guard が指すテストか eval が無い教訓があります:\n{printed}"
+    );
+    let lessons = fs::read_to_string(root.join("docs/sdlc/lessons.md"))
+        .expect("docs/sdlc/lessons.md を読めません — 教訓の受け入れ検査が何も見ていません");
+    let problems = lesson_admission_problems(&lessons);
+    assert!(
+        problems.is_empty(),
+        "教訓が受け入れ条件を満たしていません:\n{}",
+        problems.join("\n")
+    );
+    // The header is where an agent appending an entry learns what is refused,
+    // so it states the threshold this function reads.
+    let header = lessons.split("\n## ").next().unwrap_or_default();
+    let threshold = format!("from entry {FIRST_LESSON_WITH_WATCHED_GUARD:03} on");
+    assert!(
+        header.contains("`every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran`")
+            && header.contains(&threshold),
+        "lessons.md の冒頭が、この検査と「{threshold}」を書いていません — 教訓を足す人が何を拒まれるか分かりません"
+    );
+
+    let passing = fixture_lessons(|_, entry| Some(entry));
+    assert_eq!(
+        lesson_admission_problems(&passing),
+        Vec::<String>::new(),
+        "変異の土台が通りません — 各変異が自分の理由で拒まれたか分かりません"
+    );
+    let unseen = "(watched\nfailing on its mutant)";
+    let edited = |at: u32, from: &'static str, to: &'static str| {
+        fixture_lessons(move |number, entry| {
+            Some(if number == at {
+                entry.replace(from, to)
+            } else {
+                entry
+            })
+        })
+    };
+    let mutants = [
+        (
+            "rule のない教訓",
+            edited(40, "**The rule:** a rule.", "No rule."),
+            "040 — Fixture lesson 40: The rule がありません",
+        ),
+        (
+            "Guard の中にだけある rule",
+            edited(
+                42,
+                "**The rule:** a rule.\n\n**Guard.**",
+                "No rule.\n\n**Guard.** Quotes **The rule:** as text.",
+            ),
+            "042 — Fixture lesson 42: The rule がありません",
+        ),
+        (
+            "Guard のない教訓",
+            edited(41, "**Guard.**", "Nothing guards it:"),
+            "041 — Fixture lesson 41: Guard がありません",
+        ),
+        (
+            "081 以降で watched failing と言わない Guard",
+            edited(82, unseen, "(seen passing)"),
+            "082 — Fixture lesson 82: Guard が watched failing と言っていません",
+        ),
+        (
+            "飛んだ番号",
+            fixture_lessons(|number, entry| (number != 50).then_some(entry)),
+            "051 — Fixture lesson 51: 番号が 050 ではありません",
+        ),
+        (
+            "題のない見出し",
+            edited(30, "030 — Fixture lesson 30", "030"),
+            "030: 見出しに題がありません",
+        ),
+        ("空のファイル", String::new(), "1 つも読めません"),
+    ];
+    for (what, text, expected) in mutants {
+        let found = lesson_admission_problems(&text);
+        assert!(
+            found.iter().any(|problem| problem.contains(expected)),
+            "変異 {what} を見逃しました — 検査が検査していません: {found:?}"
+        );
+    }
+    assert_eq!(
+        lesson_admission_problems(&edited(80, unseen, "(seen passing)")),
+        Vec::<String>::new(),
+        "080 の Guard に watched failing を求めています — 圧縮済みの教訓は書き直しません"
+    );
+
+    let fixture = temporary_directory("lessons");
+    fs::create_dir_all(fixture.join("scripts")).unwrap();
+    fs::create_dir_all(fixture.join("docs/sdlc")).unwrap();
+    fs::create_dir_all(fixture.join("src")).unwrap();
+    fs::copy(
+        root.join("scripts/pipeline-indicators.sh"),
+        fixture.join("scripts/pipeline-indicators.sh"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("docs/sdlc/lessons.md"),
+        "# Lessons\n\n## 001 — A fixture lesson\n\nA mistake. **The rule:** a rule.\n\n**Guard.** `a_fixture_guard` (watched failing).\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("src/tests.rs"),
+        "fn another_fixture_test() {}\n",
+    )
+    .unwrap();
+    let (refused, refusal) = run_lesson_indicators(&fixture);
+    fs::write(fixture.join("src/tests.rs"), "fn a_fixture_guard() {}\n").unwrap();
+    let (admitted, admission) = run_lesson_indicators(&fixture);
+    // Removed before asserting, so a failing mutant run leaves nothing behind.
+    fs::remove_dir_all(&fixture).unwrap();
+    assert!(
+        refused == 1
+            && refusal.contains("no guard found for:")
+            && refusal.contains("## 001 — A fixture lesson"),
+        "変異 リポジトリに無い Guard を見逃しました — 検査が検査していません (exit {refused}):\n{refusal}"
+    );
+    assert_eq!(
+        admitted, 0,
+        "リポジトリにある Guard を拒みました — 検査が何を探しているか分かりません:\n{admission}"
+    );
+}
+
 #[test]
 /// `CLAUDE.md`'s module map is the index an agent navigates this crate by, and
 /// it is the one document nothing else can check: no compiler error, no clippy
@@ -21949,6 +22466,148 @@ pub(crate) fn every_skill_loads_under_codex_and_antigravity() {
         }
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// What stops Claude Code offering one subagent definition under the name the
+/// review gate asks for. Measured in change 184 with Claude Code in a scratch
+/// project, asked twice: a definition with no `description:` was missing from
+/// the subagents it offered, without a message, and one whose `name:` differed
+/// from its file was offered under the `name:`. `REVIEW.md` and
+/// `scripts/check-review.sh` require reviewers by file name, so either shape
+/// leaves the gate asking for a reviewer no session can start. Harness²'s
+/// validator refuses a definition with no description for the same reason.
+fn subagent_definition_problems(file: &str, text: &str, review: &str) -> Vec<String> {
+    let stem = file.strip_suffix(".md").unwrap_or(file);
+    let Some(front) = text
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---"))
+        .map(|(front, _)| front)
+    else {
+        return vec![format!(
+            "{file}: frontmatter で始まっていません — Claude Code はこの subagent を読み込みません"
+        )];
+    };
+    let field = |key: &str| {
+        front
+            .lines()
+            .find_map(|line| line.strip_prefix(key))
+            .map(|value| value.trim().to_owned())
+    };
+    let mut problems = Vec::new();
+    match field("description:") {
+        None => problems.push(format!(
+            "{file}: description がありません — Claude Code は description の無い subagent を一覧から黙って外します"
+        )),
+        Some(description) if description.is_empty() => problems.push(format!(
+            "{file}: description が空です — Claude Code は description の無い subagent を一覧から黙って外します"
+        )),
+        // Every description is listed to the agent on every turn, so the skill
+        // limit beside this test bounds what the listing costs.
+        Some(description) if description.chars().count() > 1024 => problems.push(format!(
+            "{file}: description が 1024 文字を超えています ({} 文字) — 毎ターン読み込まれる一覧に載ります",
+            description.chars().count()
+        )),
+        Some(_) => {}
+    }
+    let name = field("name:");
+    if name.as_deref() != Some(stem) {
+        problems.push(format!(
+            "{file}: name が {name:?} で、ファイル名と違います — Claude Code は name で呼び、レビューの関門はファイル名で求めます"
+        ));
+    }
+    if !review.contains(&format!("`{stem}`")) && !review.contains(&format!(".claude/agents/{file}"))
+    {
+        problems.push(format!(
+            "{file}: REVIEW.md に名前がありません — 呼ばれない subagent は使われません"
+        ));
+    }
+    problems
+}
+
+#[test]
+/// Change 184. Every reviewer `REVIEW.md` requires is a definition Claude Code
+/// offers under that name, and the check refuses each shape it exists for.
+pub(crate) fn every_subagent_loads_under_the_name_the_review_gate_asks_for() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let review = fs::read_to_string(root.join("REVIEW.md"))
+        .unwrap_or_else(|error| panic!("REVIEW.md が読めません: {error}"));
+    let dir = root.join(".claude/agents");
+    let mut files: Vec<String> = fs::read_dir(&dir)
+        .unwrap_or_else(|error| panic!("{} が読めません: {error}", dir.display()))
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".md"))
+        .collect();
+    files.sort();
+    assert!(
+        !files.is_empty(),
+        "{} に subagent の定義が一つもありません — レビューの関門が求めるレビュアーがいません",
+        dir.display()
+    );
+    let mut problems = Vec::new();
+    for file in &files {
+        let text = fs::read_to_string(dir.join(file))
+            .unwrap_or_else(|error| panic!("{file} が読めません: {error}"));
+        problems.extend(subagent_definition_problems(file, &text, &review));
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+
+    let review = "| store | `rust-reviewer` |\n";
+    let long = "x".repeat(1025);
+    let mutants = [
+        (
+            "no front matter",
+            "rust-reviewer.md",
+            "# rust\n".to_owned(),
+            "rust-reviewer.md: frontmatter で始まっていません — Claude Code はこの subagent を読み込みません".to_owned(),
+        ),
+        (
+            "no description",
+            "rust-reviewer.md",
+            "---\nname: rust-reviewer\n---\n".to_owned(),
+            "rust-reviewer.md: description がありません — Claude Code は description の無い subagent を一覧から黙って外します".to_owned(),
+        ),
+        (
+            "an empty description",
+            "rust-reviewer.md",
+            "---\nname: rust-reviewer\ndescription:\n---\n".to_owned(),
+            "rust-reviewer.md: description が空です — Claude Code は description の無い subagent を一覧から黙って外します".to_owned(),
+        ),
+        (
+            "a description of 1025 characters",
+            "rust-reviewer.md",
+            format!("---\nname: rust-reviewer\ndescription: {long}\n---\n"),
+            "rust-reviewer.md: description が 1024 文字を超えています (1025 文字) — 毎ターン読み込まれる一覧に載ります".to_owned(),
+        ),
+        (
+            "a name that is not the file's",
+            "rust-reviewer.md",
+            "---\nname: rust-critic\ndescription: Reviews Rust.\n---\n".to_owned(),
+            "rust-reviewer.md: name が Some(\"rust-critic\") で、ファイル名と違います — Claude Code は name で呼び、レビューの関門はファイル名で求めます".to_owned(),
+        ),
+        (
+            "a reviewer REVIEW.md never names",
+            "spare-reviewer.md",
+            "---\nname: spare-reviewer\ndescription: Reviews spares.\n---\n".to_owned(),
+            "spare-reviewer.md: REVIEW.md に名前がありません — 呼ばれない subagent は使われません".to_owned(),
+        ),
+    ];
+    for (what, file, text, expected) in mutants {
+        assert_eq!(
+            subagent_definition_problems(file, &text, review),
+            vec![expected],
+            "変異 {what} を見逃しました — 検査が検査していません"
+        );
+    }
+    assert!(
+        subagent_definition_problems(
+            "rust-reviewer.md",
+            "---\nname: rust-reviewer\ndescription: Reviews Rust.\n---\n",
+            review
+        )
+        .is_empty(),
+        "正しい定義を拒んでいます"
+    );
 }
 
 /// What Claude Code loads on every turn is `CLAUDE.md` with the `AGENTS.md` it
@@ -45572,10 +46231,52 @@ pub(crate) fn every_eval_declares_a_split_and_both_splits_are_used() {
     );
 }
 
+/// How long a line of an eval's setup or check must be, once trimmed, to count
+/// as that eval's text rather than shell grammar every script shares (`set -e`,
+/// `fi`). Measured on 2026-10-21: 145 lines reach it and none is in the
+/// steering (change 188).
+const EVAL_ANSWER_LINE_MIN_CHARS: usize = 20;
+
+/// Every line of an eval in `evals` found in a steering document: the prompt
+/// whole, and the setup and check where a line is long enough to be the eval's
+/// own. The count is how many lines were compared, so a reader that finds
+/// nothing to compare cannot pass for one that found no leak.
+fn eval_text_in_the_steering(
+    evals: &[(String, String)],
+    steering: &[(String, String)],
+) -> (usize, Vec<String>) {
+    let mut compared = 0;
+    let mut pasted = Vec::new();
+    for (name, text) in evals {
+        for section in ["Prompt", "Setup", "Check"] {
+            for line in eval_section_lines(text, section) {
+                if section != "Prompt"
+                    && (line.chars().count() < EVAL_ANSWER_LINE_MIN_CHARS || line.starts_with('#'))
+                {
+                    continue;
+                }
+                compared += 1;
+                for (document, body) in steering {
+                    if body.contains(&line) {
+                        pasted.push(format!(
+                            "{name} の {section}「{line}」が {document} にあります"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    (compared, pasted)
+}
+
 #[test]
 /// Change 103: pasting a failed eval's prompt into the steering raises the score
 /// and teaches nothing that reaches a person's next request — the overfitting the
 /// hillclimb procedure in evals/README.md forbids. This is that rule as a check.
+///
+/// Change 188: the setup and the check too. Harness² scans what an agent reads
+/// for the grader's text and refuses on a hit — "a leak, not a false positive to
+/// widen" — and a check line in a skill tells the agent what passes.
 pub(crate) fn no_eval_prompt_is_pasted_into_the_steering() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut documents: Vec<PathBuf> = ["CLAUDE.md", "AGENTS.md", "REVIEW.md"]
@@ -45593,9 +46294,17 @@ pub(crate) fn no_eval_prompt_is_pasted_into_the_steering() {
             }
         }
     }
-    let steering: Vec<(PathBuf, String)> = documents
+    let mut steering: Vec<(String, String)> = documents
         .into_iter()
-        .filter_map(|path| fs::read_to_string(&path).ok().map(|text| (path, text)))
+        .filter_map(|path| {
+            let text = fs::read_to_string(&path).ok()?;
+            let name = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .display()
+                .to_string();
+            Some((name, text))
+        })
         .collect();
     assert!(
         steering.len() > 3,
@@ -45603,23 +46312,44 @@ pub(crate) fn no_eval_prompt_is_pasted_into_the_steering() {
         steering.len()
     );
 
-    let mut pasted = Vec::new();
-    let mut prompts = 0;
-    for (name, text) in eval_documents() {
-        for line in eval_section_lines(&text, "Prompt") {
-            prompts += 1;
-            for (path, body) in &steering {
-                if body.contains(&line) {
-                    pasted.push(format!(
-                        "{name} の prompt「{line}」が {} にあります",
-                        path.strip_prefix(&root).unwrap_or(path).display()
-                    ));
-                }
-            }
-        }
-    }
+    let evals = eval_documents();
+    let prompts: usize = evals
+        .iter()
+        .map(|(_, text)| eval_section_lines(text, "Prompt").len())
+        .sum();
     assert!(prompts > 0, "eval の prompt が一行も読めていません");
+    let (compared, pasted) = eval_text_in_the_steering(&evals, &steering);
+    assert!(
+        compared > prompts,
+        "eval の setup と check が一行も読めていません"
+    );
     assert!(pasted.is_empty(), "{}", pasted.join("\n"));
+
+    // A rule that quotes one check line is refused, naming the eval.
+    let (name, text) = evals
+        .iter()
+        .find(|(_, text)| {
+            eval_section_lines(text, "Check").iter().any(|line| {
+                line.chars().count() >= EVAL_ANSWER_LINE_MIN_CHARS && !line.starts_with('#')
+            })
+        })
+        .expect("長い check 行を持つ eval がありません");
+    let quoted = eval_section_lines(text, "Check")
+        .into_iter()
+        .find(|line| line.chars().count() >= EVAL_ANSWER_LINE_MIN_CHARS && !line.starts_with('#'))
+        .unwrap_or_default();
+    steering.push((
+        "mutant-rule.md".to_owned(),
+        format!("When closing a change, run:\n\n    {quoted}\n"),
+    ));
+    let (_, caught) = eval_text_in_the_steering(&evals, &steering);
+    assert!(
+        caught
+            .iter()
+            .any(|leak| leak.starts_with(&format!("{name} の Check"))
+                && leak.ends_with("mutant-rule.md にあります")),
+        "変異 check 行を写した rule を見逃しました — 検査が検査していません: {caught:?}"
+    );
 }
 
 /// Stand-in for an agent CLI in the runner tests. A keyword in the prompt picks
@@ -45643,6 +46373,11 @@ case "$prompt" in
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"git show HEAD:evals/001-work.md"}}]}}'
     echo done > answer.txt ;;
   *DO-WORK*) echo done > answer.txt ;;
+  *SOMETIMES*)
+    count="$(dirname "$0")/sometimes-count"
+    n=$(cat "$count" 2>/dev/null || echo 0)
+    echo $((n + 1)) > "$count"
+    if [ $((n % 2)) -eq 0 ]; then echo done > answer.txt; fi ;;
 esac
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"duration_ms":5,"num_turns":1,"total_cost_usd":0.25}'
 "#;
@@ -45822,6 +46557,131 @@ pub(crate) fn the_eval_runner_judges_every_run_and_keeps_infra_and_unstable_out_
 }
 
 #[test]
+/// Change 184. Harness² reads disagreement between replicate runs as its first
+/// signal: where every run did the same thing the steering already decides it,
+/// and where runs went both ways the steering leaves the decision to chance.
+/// The summary printed such an eval as a bare `1/2 passed`, like any count, and
+/// only an eval that failed every run had a line of its own. One that only
+/// passed, or only failed, is not split.
+pub(crate) fn the_eval_runner_names_an_eval_whose_runs_split() {
+    let root = eval_runner_fixture(
+        "eval-runner-split",
+        &[
+            ("001-work", "train", "DO-WORK please", "test -f answer.txt"),
+            (
+                "002-idle",
+                "train",
+                "DO-NOTHING please",
+                "test -f answer.txt",
+            ),
+            (
+                "003-sometimes",
+                "test",
+                "SOMETIMES please",
+                "test -f answer.txt",
+            ),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &["--runs", "2"]);
+    assert_eq!(
+        code, 1,
+        "失敗した run があるのに exit 1 ではありません:\n{printed}"
+    );
+    assert!(
+        printed.contains("eval 003   1/2 passed\n"),
+        "SOMETIMES の eval が一勝一敗になっていません:\n{printed}"
+    );
+    let split = "split: eval 003 passed 1 of 2 judged runs — the steering leaves this to chance; read a passing and a failing transcript side by side before any other failure\n";
+    let at = printed
+        .find(split)
+        .unwrap_or_else(|| panic!("`{split}` がありません:\n{printed}"));
+    assert_eq!(
+        printed.matches("split: eval").count(),
+        1,
+        "全勝か全敗の eval まで split と呼んでいます:\n{printed}"
+    );
+    let warning = printed
+        .find("warning: eval 002 failed every judged run")
+        .unwrap_or_else(|| panic!("全敗の警告がありません:\n{printed}"));
+    assert!(at < warning, "split の行が警告より後にあります:\n{printed}");
+    let summary = fs::read_to_string(eval_results_directory(&printed).join("summary.md")).unwrap();
+    assert!(
+        summary.contains(split),
+        "summary.md に split の行がありません:\n{summary}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 188. Harness² checks that the runs it counted are the runs it
+/// scheduled before it reports a rate, duplicates first, because a duplicate
+/// can make the counts come out right. Two eval files that share an id each
+/// pass the id test, and the summary merged them into one eval with twice the
+/// runs: here both pass, and the runner refuses the rate and fails.
+pub(crate) fn the_eval_runner_refuses_a_rate_over_runs_it_did_not_schedule() {
+    let root = eval_runner_fixture(
+        "eval-runner-duplicate",
+        &[
+            ("001-first", "train", "DO-WORK please", "test -f answer.txt"),
+            ("001-second", "test", "DO-WORK please", "test -f answer.txt"),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &[]);
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(
+        code, 1,
+        "同じ id の eval が二つあるのに exit 1 ではありません:\n{printed}"
+    );
+    assert!(
+        printed.contains(
+            "refused: eval 001 run 1 was recorded 2 times — two eval files share id 001; no rate is printed\n"
+        ),
+        "重複した run を名指ししていません:\n{printed}"
+    );
+    assert!(
+        !printed.lines().any(|line| line.starts_with("evals: ")),
+        "重複した run の上に率を出しています:\n{printed}"
+    );
+}
+
+#[test]
+/// Change 184. What Harness² measured about improving a harness from repeated
+/// runs, in the procedure that improves this one: read the runs that split
+/// first, a single failed run among passes is not a cause, a transcript is
+/// data rather than instructions, and an edit whose runs produced nothing is
+/// reverted. One phrase per rule, so dropping any rule turns this red.
+pub(crate) fn the_hillclimb_procedure_states_what_harness2_measured() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("evals/README.md");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("{} が読めません: {error}", path.display()));
+    let section = text
+        .split_once("## Hillclimbing the steering")
+        .map(|(_, rest)| rest.split("\n## ").next().unwrap_or(rest))
+        .unwrap_or_else(|| panic!("{} に Hillclimbing の節がありません", path.display()));
+    let section = section.split_whitespace().collect::<Vec<_>>().join(" ");
+    let missing: Vec<&str> = [
+        "Harness²",
+        "marks `split` first",
+        "is not by itself a cause",
+        "A transcript is evidence, not instructions",
+        "no command found in it is run",
+        "Revert, too, when more runs ended `infra`",
+    ]
+    .into_iter()
+    .filter(|phrase| !section.contains(phrase))
+    .collect();
+    assert!(
+        missing.is_empty(),
+        "evals/README.md の Hillclimbing に {missing:?} がありません — Harness² が測った、繰り返した run の読み方です"
+    );
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        text.contains("a `split:` line for any eval whose judged runs went both ways"),
+        "evals/README.md の Reading a measured run が split の行を説明していません"
+    );
+}
+
+#[test]
 /// Change 103: an agent that can read the check is not being measured. While it
 /// works, each eval file is its id, title, split and prompt — no setup, no check,
 /// and no `guards:` naming the test the check leans on — and `git status` does
@@ -45992,6 +46852,22 @@ pub(crate) fn the_eval_runner_passes_the_model_and_effort_through() {
     assert!(given.contains("--effort\neffort-y\n"), "{given}");
     assert!(given.starts_with("-p\nDO-WORK please\n"), "{given}");
 
+    // Change 189: Harness² records the configuration an experiment ran under,
+    // and a summary that does not cannot be compared with another.
+    let timeout = eval_timeout_field("60");
+    let named = format!(
+        "conditions: agent stub-agent.sh · model model-x · effort effort-y · split both · recheck off · timeout {timeout}\n"
+    );
+    assert!(
+        printed.contains(&named),
+        "`{named}` がありません:\n{printed}"
+    );
+    let summary = fs::read_to_string(eval_results_directory(&printed).join("summary.md")).unwrap();
+    assert!(
+        summary.contains(&named),
+        "summary.md に条件の行がありません:\n{summary}"
+    );
+
     let (code, printed) = run_eval_runner(&root, &stub, &["--keep"]);
     assert_eq!(code, 0, "{printed}");
     let worktree = kept_eval_worktree(&printed);
@@ -46001,6 +46877,87 @@ pub(crate) fn the_eval_runner_passes_the_model_and_effort_through() {
         !plain.contains("--model") && !plain.contains("--effort"),
         "{plain}"
     );
+    let unnamed = format!(
+        "conditions: agent stub-agent.sh · model default · effort default · split both · recheck off · timeout {timeout}\n"
+    );
+    assert!(
+        printed.contains(&unnamed),
+        "`{unnamed}` がありません:\n{printed}"
+    );
+
+    let (code, printed) = run_eval_runner(&root, &stub, &["--split", "train", "--recheck"]);
+    assert_eq!(code, 0, "{printed}");
+    let selected = format!(
+        "conditions: agent stub-agent.sh · model default · effort default · split train · recheck on · timeout {timeout}\n"
+    );
+    assert!(
+        printed.contains(&selected),
+        "`{selected}` がありません:\n{printed}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// The `timeout` field the runner prints for `EVAL_TIMEOUT=seconds`, read from
+/// the same `PATH` check the runner makes: bounded only when `timeout` or
+/// `gtimeout` exists.
+fn eval_timeout_field(seconds: &str) -> String {
+    let bounded = Command::new("/bin/sh")
+        .args([
+            "-c",
+            "command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1",
+        ])
+        .status()
+        .unwrap()
+        .success();
+    if bounded {
+        format!("{seconds}s")
+    } else {
+        "none".to_owned()
+    }
+}
+
+#[test]
+/// Change 189: Harness² warns when the rows behind a figure are not the rows it
+/// meant to read. A rate over the few runs that were judged, beside a majority
+/// that ended infra, read as a suite with no headroom and sent the next session
+/// to write harder evals.
+pub(crate) fn the_eval_runner_warns_when_most_runs_were_not_judged() {
+    let root = eval_runner_fixture(
+        "eval-runner-thin",
+        &[
+            ("001-work", "train", "DO-WORK please", "test -f answer.txt"),
+            ("002-crash", "train", "CRASH please", "test -f answer.txt"),
+            ("003-crash", "test", "CRASH please", "test -f answer.txt"),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &["--runs", "3"]);
+    assert_eq!(
+        code, 1,
+        "infra の run があるのに exit 1 ではありません:\n{printed}"
+    );
+    let thin = "warning: only 3 of 9 runs were judged — fix the infra and unstable runs before reading the rate\n";
+    assert!(printed.contains(thin), "`{thin}` がありません:\n{printed}");
+    assert!(
+        !printed.contains("no headroom"),
+        "判定された run が半分に満たないのに headroom の警告が出ています:\n{printed}"
+    );
+    fs::remove_dir_all(&root).ok();
+
+    // Exactly half judged is not thin, and the headroom warning stands.
+    let root = eval_runner_fixture(
+        "eval-runner-half",
+        &[
+            ("001-work", "train", "DO-WORK please", "test -f answer.txt"),
+            ("002-crash", "train", "CRASH please", "test -f answer.txt"),
+        ],
+    );
+    let (code, printed) = run_eval_runner(&root, &root.join("stub-agent.sh"), &["--runs", "3"]);
+    assert_eq!(code, 1, "{printed}");
+    assert!(
+        !printed.contains("runs were judged"),
+        "半分が判定された run で警告が出ています:\n{printed}"
+    );
+    assert!(printed.contains("no headroom"), "{printed}");
     fs::remove_dir_all(&root).ok();
 }
 

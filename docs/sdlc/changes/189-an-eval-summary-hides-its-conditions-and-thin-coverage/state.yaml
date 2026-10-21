@@ -1,0 +1,48 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Harness² records the configuration an experiment ran under and refuses to
+# judge it under another, and its report warns when the rows behind a figure
+# are not the rows it meant to read. Here every eval summary names its
+# conditions on one line, and a summary where fewer than half the runs were
+# judged says so in place of the headroom warning.
+#
+# Risk: src/tests.rs, scripts/run-evals.sh, and evals/README.md match no
+# surface in docs/sdlc/risk.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Built and reviewed: the conditions line and the coverage warning in
+  scripts/run-evals.sh, two runner tests, the README. Next: push, CI, merge."
+
+contract:
+  three-gates: "machine passed make q.fast clean; cargo test --locked eval
+    14 ok; --ignored not run: restore and the shared archive do not move"
+  bands: "machine passed bash scripts/check-bands.sh: 20 of 21 within band;
+    largest_module_lines warns at 8856 for src/app.rs, untouched here"
+  release-binary: "machine passed no: src/tests.rs, a script, and a document —
+    /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed mutations.py: 7 of 7 caught — the
+    conditions line removed, the model printed as default, the recheck hidden,
+    the coverage warning removed, the headroom warning beside it, the boundary
+    at exactly half, and the warning's scheduled count printed as the judged"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer
+    approve-with-nits 0 2 each, recorded in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

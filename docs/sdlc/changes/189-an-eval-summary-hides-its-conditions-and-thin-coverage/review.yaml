@@ -1,0 +1,33 @@
+# Review record for 189-an-eval-summary-hides-its-conditions-and-thin-coverage.
+#
+# The change: scripts/run-evals.sh prints a conditions: line (agent, model,
+# effort, split, recheck, timeout) on every summary, and warns in place of the
+# headroom warning when fewer than half the recorded runs were judged; the
+# README's Reading section and hillclimb steps 3 and 5 follow. Two runner
+# tests watched failing on main; mutations 7 of 7.
+#
+# Round 1, rust-reviewer (approve-with-nits 0 2) and subprocess-safety-reviewer
+# (approve-with-nits 0 2): no Important. awk -v with the middle dot, the
+# && || forms under set -uo pipefail, basename, bound before conditions, the
+# test's PATH check against the runner's, existing fixtures' counts, and
+# summary.md all checked. Both reviewers named the awk -v escape as one nit.
+# The nits are carried: taking one moves the digest (REVIEW.md), and each is a
+# follow-up change.
+
+digest: "04468f3398c28c11"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1/1 · scripts/run-evals.sh report awk — awk -v expands backslash escapes, so a --model or --effort holding \n or \t prints a mangled conditions line, and two configurations could print the same one
+    person: "モデル名や推論の強さの指定に「\\」が含まれていると、要約に出る実行条件の行が崩れて表示されることがあります。通常のモデル名には含まれないため、対応は不要です。"
+  - rust-reviewer/1/2 · evals/README.md — the added sentence names only the infra runs, while the runner's warning names the infra and unstable runs
+    person: "手順書の一文が、判定されなかった実行の理由として二つのうち一つしか挙げていません。実際の警告文は両方を挙げており、対応は不要です。"
+  - subprocess-safety-reviewer/1/1 · scripts/run-evals.sh:361 — the same awk -v escape: passing conditions through ENVIRON would keep the line faithful
+    person: "モデル名に「\\」が含まれていると、別々の実行条件が要約の上では同じ行に見えることがあります。通常のモデル名には含まれないため、対応は不要です。"
+  - subprocess-safety-reviewer/1/2 · src/tests.rs eval_timeout_field — the test restates the runner's timeout lookup and its 60, so a change to the runner's lookup would not be followed by the test
+    person: "テストは、時間制限のコマンドがあるかどうかを実行スクリプトとは別に自分で調べています。今は両者の結果が一致しており、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"
