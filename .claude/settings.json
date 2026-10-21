@@ -80,7 +80,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "p=$(jq -r '.tool_input.file_path // empty'); case \"$p\" in *.rs) cd \"$CLAUDE_PROJECT_DIR\" && cargo fmt ;; esac",
+            "command": "p=$(jq -r '.tool_input.file_path // empty'); case \"$p\" in *.rs) cd \"$(dirname \"$p\")\" && rustfmt --edition 2021 \"$p\" ;; esac",
             "timeout": 60
           }
         ]
@@ -107,6 +107,17 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-shipping-guard.mjs\""
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-owner-tracker.mjs\"",
+            "timeout": 10
           }
         ]
       }

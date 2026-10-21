@@ -47779,6 +47779,132 @@ pub(crate) fn ci_runs_on_the_branches_the_merge_gate_asks_about() {
     );
 }
 
+/// Change 191. A worktree is where every build of a change happens, and two
+/// things made its first one slow or wrong. Its target/ started empty, so the
+/// first clippy compiled all of Cargo.lock — 16m29s measured, past the commit
+/// gate's 600-second timeout, which skips the gate instead of failing it. And
+/// the format-on-edit hook ran `cargo fmt` in `$CLAUDE_PROJECT_DIR`, the main
+/// checkout, so an edit in a worktree formatted main and left the edited file
+/// as it was.
+#[test]
+pub(crate) fn a_new_worktree_builds_from_mains_cache_and_formats_its_own_files() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let makefile = fs::read_to_string(root.join("Makefile")).unwrap();
+    let creates = makefile.find("node .claude/scripts/worktree-new.mjs");
+    let seeds = makefile.find("bash scripts/seed-target.sh \"$(BR)\"");
+    assert!(
+        matches!((creates, seeds), (Some(c), Some(s)) if c < s),
+        "make wt.new が worktree を作った後に target/ を複製していません"
+    );
+
+    // Run from inside another worktree, as `make wt.new` may be: the clone
+    // still comes from main's target/ and lands in the new worktree, which
+    // worktree-new.mjs puts under main wherever it was run from.
+    let fixture = worktree_fixture_repository("seed-target");
+    let cache = fixture.join("target/debug/deps");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join("libcached.rlib"), "built\n").unwrap();
+    let mut made = Vec::new();
+    for branch in ["feature/elsewhere", "feature/new"] {
+        let worktree = fixture.join(".worktrees").join(branch);
+        git_in(
+            &fixture,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        made.push(worktree);
+    }
+    let mut command = Command::new("bash");
+    forget_inherited_repository(&mut command)
+        .arg(root.join("scripts/seed-target.sh"))
+        .arg("feature/new")
+        .current_dir(&made[0]);
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(60))
+        .expect("scripts/seed-target.sh が時間内に終わりませんでした");
+    let seeded = made[1].join("target/debug/deps/libcached.rlib").exists();
+    let elsewhere = made[0].join("target").exists();
+    fs::remove_dir_all(&fixture).ok();
+    assert!(
+        output.status.success() && seeded && !elsewhere,
+        "新しい worktree に main の target/debug が複製されていません: {}",
+        both_streams(&output)
+    );
+
+    let settings = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+    let formats = settings
+        .lines()
+        .find(|line| line.contains("*.rs)"))
+        .expect(".claude/settings.json に .rs を整形する hook がありません");
+    assert!(
+        !formats.contains("CLAUDE_PROJECT_DIR") && formats.contains("dirname"),
+        "整形 hook が編集されたファイルの worktree ではなく main で走ります: {formats}"
+    );
+}
+
+/// Change 191. A worktree lease outlived the session holding it by the whole
+/// two-hour TTL, so a worktree whose session had exited kept every other
+/// session out. At SessionEnd the tracker gives back this session's leases and
+/// no one else's.
+#[test]
+pub(crate) fn a_session_that_ends_gives_back_only_its_own_worktree_leases() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let settings = fs::read_to_string(root.join(".claude/settings.json")).unwrap();
+    let ends = settings
+        .split_once("\"SessionEnd\"")
+        .map(|(_, rest)| rest)
+        .expect(".claude/settings.json に SessionEnd の hook がありません");
+    assert!(
+        ends.split_once(']')
+            .is_some_and(|(entry, _)| entry.contains(".cli/hooks/worktree-owner-tracker.mjs")),
+        "SessionEnd で worktree-owner-tracker.mjs が走りません"
+    );
+
+    let script = format!(
+        "import {{ execFileSync }} from 'node:child_process';\n\
+         import {{ mkdtempSync, realpathSync, rmSync }} from 'node:fs';\n\
+         import {{ tmpdir }} from 'node:os';\n\
+         import {{ join }} from 'node:path';\n\
+         globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ claimOwnerLease, readOwnerLease }} = await import({lease:?});\n\
+         const {{ run }} = await import({tracker:?});\n\
+         const root = realpathSync(mkdtempSync(join(tmpdir(), 'operon-lease-')));\n\
+         const git = (...a) => execFileSync('git', a, {{ cwd: root }});\n\
+         git('init', '-q', '-b', 'main');\n\
+         git('-c', 'user.email=a@b', '-c', 'user.name=a', 'commit', '-q', '--allow-empty', '-m', 'x');\n\
+         const mine = join(root, '.worktrees/feature/mine');\n\
+         const theirs = join(root, '.worktrees/feature/theirs');\n\
+         git('worktree', 'add', '-q', '-b', 'feature/mine', mine);\n\
+         git('worktree', 'add', '-q', '-b', 'feature/theirs', theirs);\n\
+         claimOwnerLease(mine, null, 'session-a');\n\
+         claimOwnerLease(theirs, null, 'session-b');\n\
+         const held = readOwnerLease(mine).owner;\n\
+         process.env.CLAUDE_PROJECT_DIR = root;\n\
+         await run({{ hook_event_name: 'SessionEnd', session_id: 'session-a', cwd: root }});\n\
+         console.log(JSON.stringify([held, readOwnerLease(mine).owner, readOwnerLease(theirs).owner]));\n\
+         rmSync(root, {{ recursive: true, force: true }});",
+        lease = root.join(".cli/lib/worktree-owner-lease.mjs").to_str().unwrap(),
+        tracker = root.join(".cli/hooks/worktree-owner-tracker.mjs").to_str().unwrap(),
+    );
+    let mut command = node_in(&root);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+        .expect("node が見つからないか、時間内に終わりませんでした");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        r#"["session-a",null,"session-b"]"#,
+        "SessionEnd が自分の lease だけを返していません: {}",
+        both_streams(&output)
+    );
+}
+
 /// A push of one branch to origin is how a change reaches CI, so it is not a
 /// question for a person. A push that goes there too but is joined to other
 /// commands, piped, or leaves the remote and branch implicit is the session's to

@@ -1,0 +1,39 @@
+# Review record for 191-a-small-change-waits-on-the-whole-pipeline.
+#
+# The change: a new worktree's target/ is cloned from main's (APFS, copy on
+# write) so its first build checks only `operon`; the format-on-edit hook
+# formats the edited file in its own tree instead of main; a session gives
+# back its worktree leases when it ends; the owner guard imports realpathSync;
+# ci.yml runs three macOS jobs instead of five and harness.yml only the evals.
+#
+# Round 1: subprocess-safety-reviewer found that `make wt.new` run from inside
+# a worktree made the seed step exit 2 after the worktree existed and seed from
+# that worktree's target/ (Important; rust-reviewer named the same as a nit).
+# Round 2 resolves both ends from git's common dir and exits 0 when anything is
+# missing; the test runs the script on a fixture from inside another worktree,
+# watched failing with the main root taken from the current checkout.
+#
+# Verified by subprocess-safety-reviewer: no check was dropped from CI — the
+# hook checks, metrics and bands moved into `checks`, `cargo test --locked`
+# still runs in `test`, and the removed job could not fail. SessionEnd releases
+# only leases whose owner is this session.
+
+digest: "b3c242afd6434a8a"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1/1 · the format hook hard-codes --edition 2021, which drifts from Cargo.toml on an edition bump
+    person: "Rust の版を上げたとき、編集時の自動整形だけが古い規則のまま動きます。commit 時の検査が差を見つけるので、壊れることはありません。対応は不要です。"
+  - rust-reviewer/1/2 · when the edited .rs file no longer exists the format hook exits non-zero with no message
+    person: "消したファイルの直後には自動整形が何も言わずに失敗します。作業には影響しません。対応は不要です。"
+  - rust-reviewer/1/4 · the settings.json checks in the new tests read the file as text and depend on its line layout
+    person: "設定ファイルの書き方を変えると、動作が同じでもテストが失敗することがあります。対応は不要です。"
+  - subprocess-safety-reviewer/1/4 · releaseOwnerLease reads then unlinks, so a lease adopted by another session in that gap can be removed
+    person: "ごくまれに、終了したセッションが他のセッションの作業場所の確保を外すことがあります。次の編集で取り直されるので、対応は不要です。"
+  - rust-reviewer/2/1 · the seed test removes its fixture only after the script returns, so a timeout leaves it in the temp directory
+    person: "テストが時間切れで失敗したときだけ、一時フォルダにテスト用のファイルが残ります。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"

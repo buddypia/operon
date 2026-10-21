@@ -61,7 +61,7 @@
  *   never make the guard stop human work.
  */
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { atomicWriteJson } from './utils.mjs';
 import { worktreeOwnerPath } from './worktree-plan-path.mjs';
 
@@ -198,4 +198,24 @@ export function renewOwnerLease(worktreeRoot, branch, sessionId) {
   const lease = readOwnerLease(worktreeRoot, branch);
   if (lease.owner !== sessionId) return false;
   return writeLease(worktreeRoot, lease.path, sessionId, lease.audit);
+}
+
+/**
+ * Change 191: gives back a lease this session holds, when the session ends. Until then a lease
+ * outlived its session by the full TTL, so a worktree whose session had exited kept every other
+ * session out of it for up to two hours. Only this session's own lease is removed; the next session
+ * to edit or commit there claims it as it would claim a worktree nobody holds.
+ *
+ * @returns {boolean} whether the lease was removed
+ */
+export function releaseOwnerLease(worktreeRoot, branch, sessionId) {
+  if (!sessionId || typeof sessionId !== 'string') return false;
+  const lease = readOwnerLease(worktreeRoot, branch);
+  if (lease.owner !== sessionId) return false;
+  try {
+    unlinkSync(lease.path);
+    return true;
+  } catch {
+    return false;
+  }
 }

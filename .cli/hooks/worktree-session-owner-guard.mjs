@@ -54,6 +54,7 @@
  *   - error → passthrough (internal-rule fail-open)
  */
 
+import { realpathSync } from 'node:fs';
 import { join, relative, isAbsolute } from 'node:path';
 import {
   readStdin,
