@@ -1,0 +1,33 @@
+# Review record for 195-the-weekly-scan-fails-on-what-never-ships.
+#
+# The change: the weekly dependency audit fails only for a vulnerable crate the
+# macOS app builds (scripts/check-audit.sh), and a failed scan is announced by
+# the next `make wt.new` (scripts/scan-notice.sh).
+#
+# Round 1, both reviewers asked to break it, and both found the same Important:
+# `cargo audit --json > audit.json || true` leaves an empty file when the
+# advisory database cannot be fetched, jq reads that as no input and exits 0,
+# and the scan went green without having scanned — where the old trailing
+# `cargo audit` had failed. Fixed: the report's shape is checked on its own
+# first, and an empty report is a test case (exit 2).
+# Round 2: both re-ran the shape check on empty, null and empty-list input.
+
+digest: "46fa9a70606e4ce8"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1/2 · scripts/scan-notice.sh reads only the latest run and only `failure`: a scan still running hides the previous failure, and `timed_out` is never reported
+    person: "週次スキャンが実行中の間や、時間切れで終わったときは、前回の失敗が表示されないことがあります。対応は不要ですが、気づきにくくなります。"
+  - subprocess-safety-reviewer/1/3 · scripts/scan-notice.sh prints nothing when gh is missing, logged out, or offline, so silence cannot be told from a clean scan
+    person: "GitHub に接続できないときは何も表示されないため、「問題なし」と見分けがつきません。操作は不要です。"
+  - rust-reviewer/1/2 · the test's temporary directory leaks when an assertion before its cleanup panics
+    person: "一時フォルダが、テストが途中で失敗したときだけ消えずに残ります。利用者の操作は要りません。"
+  - rust-reviewer/1/3 · the fake gh is rewritten and executed three times in a multi-threaded test process, which can rarely hit ETXTBSY
+    person: "テスト用の偽 gh を書き換えて直後に実行するため、まれに「ファイルが使用中」で失敗することがあります。再実行すれば通り、利用者の操作は要りません。"
+  - rust-reviewer/1/4 · the test runs a real `cargo tree --locked`, which needs the registry cache and can fail offline with a cold cache
+    person: "ネットワークが使えない状態でテストを走らせると、このテストだけ失敗することがあります。ネットワークがつながる環境で再実行すれば足り、利用者の操作は要りません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

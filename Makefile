@@ -9,6 +9,7 @@ wt.new:
 	@bash scripts/check-change-number.sh $(BR)
 	@node .claude/scripts/worktree-new.mjs --branch $(BR) $(if $(BASE),--base $(BASE)) $(if $(DRY),--dry-run)
 	@$(if $(DRY),true,bash scripts/seed-target.sh "$(BR)")
+	@$(if $(DRY),true,bash scripts/scan-notice.sh)
 
 wt.run:
 	@if [ -z "$(CMD)" ]; then \

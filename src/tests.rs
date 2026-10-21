@@ -48460,6 +48460,132 @@ pub(crate) fn a_new_worktree_builds_from_mains_cache_and_formats_its_own_files()
     );
 }
 
+/// Change 195. The weekly scan failed twice and no one saw it, and what it
+/// failed on was quick-xml 0.30.0, which only the Linux accessibility crates
+/// pull in. The audit is judged by what the macOS app builds, and a failed
+/// scan is announced by `make wt.new`, so the next change started hears of it.
+#[test]
+pub(crate) fn the_weekly_scan_fails_on_what_ships_and_says_so_to_the_next_change() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = temporary_directory("weekly-scan");
+    let report = |name: &str, crate_name: &str, version: &str| {
+        let path = scratch.join(format!("{name}.json"));
+        fs::write(
+            &path,
+            format!(
+                "{{\"vulnerabilities\":{{\"found\":true,\"count\":1,\"list\":[{{\"advisory\":\
+                 {{\"id\":\"RUSTSEC-0000-0000\",\"title\":\"probe\"}},\"package\":\
+                 {{\"name\":\"{crate_name}\",\"version\":\"{version}\"}}}}]}}}}"
+            ),
+        )
+        .unwrap();
+        path
+    };
+    // The version eframe is locked at: a crate the app is certainly built from.
+    let lock = fs::read_to_string(root.join("Cargo.lock")).unwrap();
+    let eframe = lock
+        .split("[[package]]")
+        .find(|entry| entry.contains("\nname = \"eframe\"\n"))
+        .and_then(|entry| {
+            entry
+                .lines()
+                .find_map(|line| line.strip_prefix("version = \""))
+        })
+        .map(|version| version.trim_end_matches('"').to_owned())
+        .expect("Cargo.lock に eframe がありません");
+    let not_json = scratch.join("not-json.json");
+    fs::write(&not_json, "not json\n").unwrap();
+    // What `cargo audit --json > audit.json || true` leaves when the advisory
+    // database cannot be fetched: nothing, which jq reads as no input and exit 0.
+    let empty = scratch.join("empty.json");
+    fs::write(&empty, "").unwrap();
+    let audit = |path: &std::path::Path| {
+        let mut command = Command::new("bash");
+        forget_inherited_repository(&mut command)
+            .arg(root.join("scripts/check-audit.sh"))
+            .arg(path)
+            .current_dir(&root);
+        run_command_with_timeout(&mut command, Duration::from_secs(120))
+            .expect("scripts/check-audit.sh が時間内に終わりませんでした")
+    };
+    for (label, path, want) in [
+        (
+            "a Linux-only crate",
+            report("linux", "quick-xml", "0.30.0"),
+            Some(0),
+        ),
+        (
+            "a crate the app builds",
+            report("built", "eframe", &eframe),
+            Some(1),
+        ),
+        ("a report that cannot be read", not_json.clone(), Some(2)),
+        ("an audit that wrote nothing", empty.clone(), Some(2)),
+    ] {
+        let output = audit(&path);
+        assert_eq!(
+            output.status.code(),
+            want,
+            "check-audit.sh の判定が違います（{label}）: {}",
+            both_streams(&output)
+        );
+    }
+    let workflow = fs::read_to_string(root.join(".github/workflows/scheduled-scan.yml")).unwrap();
+    assert!(
+        workflow.contains("bash scripts/check-audit.sh audit.json > verdict.txt || status=$?")
+            && workflow.contains("exit \"$status\""),
+        "週次スキャンが check-audit.sh の判定で失敗していません"
+    );
+
+    // The notice, against a `gh` that answers as GitHub would.
+    let bin = scratch.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let gh = bin.join("gh");
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let url = "https://github.com/buddypia/operon/actions/runs/1";
+    let notice = |answer: &str| {
+        use std::os::unix::fs::PermissionsExt;
+        fs::write(&gh, format!("#!/usr/bin/env bash\n{answer}\n")).unwrap();
+        fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = Command::new("bash");
+        forget_inherited_repository(&mut command)
+            .arg(root.join("scripts/scan-notice.sh"))
+            .env("PATH", &path)
+            .current_dir(&scratch);
+        run_command_with_timeout(&mut command, Duration::from_secs(30))
+            .expect("scripts/scan-notice.sh が時間内に終わりませんでした")
+    };
+    let failed = notice(&format!(
+        "echo '[{{\"conclusion\":\"failure\",\"createdAt\":\"2026-10-19T03:00:00Z\",\"url\":\"{url}\"}}]'"
+    ));
+    let passed = notice(&format!(
+        "echo '[{{\"conclusion\":\"success\",\"createdAt\":\"2026-10-26T03:00:00Z\",\"url\":\"{url}\"}}]'"
+    ));
+    let offline = notice("echo 'error connecting to api.github.com' >&2; exit 1");
+    fs::remove_dir_all(&scratch).ok();
+    assert!(
+        failed.status.success() && both_streams(&failed).contains(url),
+        "失敗した週次スキャンが知らされません: {}",
+        both_streams(&failed)
+    );
+    for (label, output) in [("a passed scan", &passed), ("no GitHub", &offline)] {
+        assert!(
+            output.status.success() && both_streams(output).trim().is_empty(),
+            "scan-notice.sh が黙っていません（{label}）: {}",
+            both_streams(output)
+        );
+    }
+    let makefile = fs::read_to_string(root.join("Makefile")).unwrap();
+    assert!(
+        makefile.contains("bash scripts/scan-notice.sh"),
+        "make wt.new が週次スキャンの結果を知らせていません"
+    );
+}
+
 /// Change 191. A worktree lease outlived the session holding it by the whole
 /// two-hour TTL, so a worktree whose session had exited kept every other
 /// session out. At SessionEnd the tracker gives back this session's leases and

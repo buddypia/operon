@@ -278,7 +278,9 @@ root cause, and — the column that matters — which test or eval now catches i
 An entry with an empty guard column is unfinished work.
 
 `.github/workflows/scheduled-scan.yml` runs the band check and a dependency audit
-weekly, so a breach that no commit caused is still found.
+weekly, so a breach that no commit caused is still found. The audit fails only
+for a crate the macOS app builds (`scripts/check-audit.sh`), and a failed scan
+is announced by the next `make wt.new` (`scripts/scan-notice.sh`).
 
 ## What the pipeline is made of, and what it leaves out
 
