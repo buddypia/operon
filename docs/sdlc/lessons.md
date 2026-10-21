@@ -1132,3 +1132,32 @@ four mutations each red, `a_scrub_may_edit_closed_records_only_to_lose_a_listed_
 among the checks — a record alone judged against its own base, the switch
 inverted, a record-only diff across several change directories judged against
 main, and the refusal no longer naming the exit.
+
+## 085 — A gate that read a pattern asked about text and missed a force
+
+Change 182's publishing gate found a push by the literal `git push` and judged
+each segment of the line. Probed adversarially once it landed, it put
+`git commit -m "… git push …"` and `grep "git push"` to a person, and let
+`git -C dir push --force origin main`, `git<TAB>push --force` and
+`"git" push --force` run unasked, with no branch protection behind it. Both came from the same place: the gate
+decided on a fragment of the command, so its ask could carry commands it never
+read and its detection missed forms git accepts. **The rule:** a gate decides on
+the whole command — `allow` only its one exact form, `ask` only when the command
+is the decision alone and holds no shell syntax, so a person reads all of what
+runs, and `deny` with the form that runs for anything else that names it. Nothing
+denied runs, so a decision reached through `deny` still reaches a person.
+And a gate does not parse the shell: three review rounds each found a spelling of
+an option argument the last pattern missed, until the gate stopped reading
+arguments and counted any later `push` once an option follows `git`. Where a
+pattern cannot read a span exactly, it widens toward `deny`, never toward a
+longer pattern.
+
+**Guard.** `a_plain_push_to_origin_is_not_asked_about` (watched failing on the
+unedited hook; fifteen mutations each red — options before `push` unread, an
+option argument read as one plain word, quotes and backslashes read as written, a
+computed program or subcommand not counted, an expansion after an option counted
+without the word `push` or not at all, an alias read in one case only,
+only a space between `git` and `push`, only
+whitespace ending the word, detection reaching past `git` with no option, the lone
+check admitting shell syntax, a push that is not lone asked about, `-q` dropped,
+and the refusal no longer saying how to keep text out of the command).
