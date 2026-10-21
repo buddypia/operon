@@ -1,0 +1,68 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Report (the person, 2026-10-21): fix every item left over from 191 and 192
+# for good, including the ones that needed a decision. This one: src/tests.rs
+# is large and slow.
+#
+# Measured: the size of src/tests.rs is not what costs. It is one crate and one
+# test binary either way, and splitting the file would not cut compile time.
+# What costs is one test: the_review_gate_refuses_what_it_says_it_refuses ran
+# 74 gate checks in sequence in a single repository, 520s on this machine
+# under load and about 180s in CI, where it was the test job's critical path.
+# Each gate run is about 30 short processes, and on a machine at load 40-77
+# each spawn waits 60-80ms for a core: user+sys for five gate runs was 1.6s of
+# 12.5s wall.
+#
+# Fix: the scenario is split into seven tests that share its name as a prefix,
+# each in a repository of its own, so they run side by side and `cargo test
+# the_review_gate_refuses_what_it_says_it_refuses` (and every closed change's
+# mutations.py that names it) still runs all of them. Most start from
+# ReviewGateFixture::landed(), the state the old test reached at its first
+# landing; the two that start before it use ReviewGateFixture::new(). The
+# scenario text moved by line range, not retyped: 74 checks and 8 asserts
+# before and after, plus the one the collector now holds.
+#
+# Less history, on purpose: a test that starts from landed() has three commits
+# behind it, where the old sequence had reached the same checks with the topic
+# branch's commits in the reflog and HEAD amended twice. rust-reviewer read
+# every check that could have leaned on that history; each still passes or
+# refuses for the reason its comment gives.
+#
+# Measured after: 346s for all seven on this machine at load 40, against 520s
+# for the one. CI's figure is in contract.ci.
+#
+# Risk: src/tests.rs only, no behaviour of the gate or the app changes.
+
+state:
+  route: "refactor"
+  stage: "test"
+  status: "reviewing"
+  attempts: "1 2"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Reviewed and committed; awaiting CI, then the landing."
+
+contract:
+  unchanged-behaviour: "machine passed the seven tests pass; with two of the
+    gate's refusal messages altered all seven fail, so none of them lost the
+    gate it drives; 74 checks and 8 asserts before and after"
+  three-gates: "machine passed cargo fmt and the named tests; clippy at the
+    commit; the suite runs in CI"
+  ci: "pending"
+  release-binary: "machine passed no: src/tests.rs only"
+  review: "human passed rust-reviewer approve 0 0 at 3e6619438e488873
+    (round 2; round 1's comment remark fixed, its history remark named above)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
