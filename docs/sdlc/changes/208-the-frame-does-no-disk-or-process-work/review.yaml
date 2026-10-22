@@ -22,8 +22,12 @@
 # Round 4, CI again: lesson 096's guard did not say it was watched failing.
 # Reworded, and the lessons test joins the gate's record tests. rust-reviewer
 # approve 0 0; subprocess-safety-reviewer approve-with-nits 0 2.
+# The digests of rounds 3 and 4 were taken over each round's staged delta,
+# not the branch; the merge gate judges the branch against main. Each
+# reviewer confirmed their verdict for the whole branch at a135edd823c71f85,
+# main unmoved and no code changed; recorded under round 4.
 
-digest: "ae4127512f524e98"
+digest: "a135edd823c71f85"
 
 rounds: 4
 
@@ -52,4 +56,4 @@ carried:
 verdicts:
   rust-reviewer: "approve 0 0"
   durability-reviewer: "approve 0 0"
-  subprocess-safety-reviewer: "approve-with-nits 0 2"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"
