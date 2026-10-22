@@ -43,7 +43,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -53,7 +53,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Run the app with your own Claude Code and confirm a turn reports WORKING then IDLE, then have a person read the diff."
+resume: "Closed by change 202 after reading it against the code: landed; the envelope and Codex's flag moved since, by design."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -68,7 +68,7 @@ contract:
   bands: "machine waived steering_bytes was already at diagnose before this change (141780) and this adds 219 bytes of module map; every other metric is inside its band"
   guards-verified-by-mutation: "human passed six mutations watched failing: a sha256 round constant, the entry-preservation step, the boundary suppression, the Codex append, the launch-token check, and the tmux -e arguments"
   installed-command-round-trip: "machine passed cargo test --locked an_installed_hook_command_posts_a_reading_end_to_end"
-  live-hook-round-trip: "human pending a Claude Code session launched from Operon reports WORKING then IDLE; verified so far only as far as the installed command posting a correct envelope, because a scratch config directory has no credentials"
+  live-hook-round-trip: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
