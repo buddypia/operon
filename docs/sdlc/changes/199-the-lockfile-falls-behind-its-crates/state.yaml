@@ -1,0 +1,56 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Request (the person, 2026-10-22): land the dependency update that an earlier
+# session left staged on a branch `chore/update-dependencies-latest` in the
+# main checkout, with no commit and no pull request behind it.
+#
+# Found: that staged Cargo.lock was a plain `cargo update`, which picks
+# uuid 1.28.0; uuid 1.28 needs rustc 1.89 and the toolchain is pinned to 1.88.0
+# (rust-toolchain.toml, Cargo.toml rust-version), so clippy at the commit gate
+# refused it. The same MSRV conflict change 141 met with uuid 1.27.
+#
+# Fix: Cargo.lock only, regenerated in this worktree with
+# `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback cargo update`, which
+# keeps every crate at the newest version whose rust-version is <= 1.88.0.
+# 67 version lines move. No Cargo.toml requirement changes, so every bump is
+# inside an existing requirement (approval.md: evaluator, not person). Crates
+# that newly appear in the lock (tokio, zlib-rs, a second miniz_oxide and
+# quick-xml) are transitive; `cargo tree -i` finds no path to tokio or zlib-rs
+# on the macOS target this app builds for. The windows-* family drops out.
+#
+# Route refactor: the app is meant to behave exactly as before; the suite in CI
+# and rust-reviewer are what say it does.
+
+state:
+  route: "refactor"
+  stage: "test"
+  status: "in-progress"
+  attempts: "1 2"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Review the Cargo.lock diff, commit, push, merge once CI passes, then
+  ship, since the binary links the updated crates."
+
+contract:
+  three-gates: "machine pending cargo clippy --locked -- -D warnings passed
+    locally; the commit gate and CI decide"
+  ci: "machine pending CI on the branch tip"
+  release-binary: "machine pending yes: Cargo.lock changes the crates the app
+    links, so /Applications/Operon.app is stale until
+    .claude/skills/ship/SKILL.md runs"
+  review: "human passed rust-reviewer approve-with-nits 0 2 at
+    76fcc2d6bfd4f7b8 (round 1), two remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
