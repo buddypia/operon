@@ -1,7 +1,7 @@
 state:
   route: "security"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 2"
   questions: "1 7"
   autonomy: "paused"
@@ -9,7 +9,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Take the security route's human sign-off; a person reads this diff because it changes what a gate permits."
+resume: "Closed by change 202 after reading it against the code: landed; change 128 later let it take CI's verdict for a clean tree."
 
 contract:
   three-gates: "machine passed fmt silent, 433 passed 0 failed 6 ignored, clippy clean past the compile lines"
@@ -17,4 +17,4 @@ contract:
   guards-verified-by-mutation: "human passed four watched failing: the hook not calling the script, the ask fallback losing its two-space indent, the pgrep check deleted, and a bypass switch added"
   paused-surface-authorized: "human passed the release gate's owner asked for this change and chose machine verification over a prompt"
   gate-still-refuses: "human passed five watched refusals: a non-canonical swap, a failing test, an absent bundle, a hand-edited resource, and a live Operon with its pid"
-  human-sign-off: "human pending the security route says a person reads this diff; it changes what a gate permits"
+  human-sign-off: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
