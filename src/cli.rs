@@ -1444,7 +1444,7 @@ pub(crate) fn shared_session_archive_directory(store_path: &Path) -> PathBuf {
 pub(crate) const SHARED_SESSION_DIRECTORY_MODE: u32 = 0o700;
 pub(crate) const SHARED_SESSION_FILE_MODE: u32 = 0o600;
 
-fn create_private_directory(directory: &Path) -> std::io::Result<()> {
+pub(crate) fn create_private_directory(directory: &Path) -> std::io::Result<()> {
     fs::create_dir_all(directory)?;
     fs::set_permissions(
         directory,

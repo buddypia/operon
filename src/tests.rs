@@ -33294,17 +33294,26 @@ pub(crate) fn an_edited_setup_script_is_not_the_one_that_was_approved() {
 /// contains a space, and a path that reaches a shell unquoted stops at it.
 #[test]
 pub(crate) fn the_setup_command_survives_a_worktree_path_with_a_space() {
-    let command = setup_command(Path::new(
-        "/Users/x/Application Support/wt/.operon/setup.sh",
-    ));
+    let command = setup_command(
+        Path::new("/Users/x/Application Support/wt/.operon/setup.sh"),
+        Path::new("/Users/x/Application Support/Operon/approved-scripts/ab.sh"),
+    );
     assert_eq!(
         command,
-        "bash '/Users/x/Application Support/wt/.operon/setup.sh'"
+        "bash -c 'approved=$1; shift; . \"$approved\"' \
+         '/Users/x/Application Support/wt/.operon/setup.sh' \
+         '/Users/x/Application Support/Operon/approved-scripts/ab.sh'"
     );
 
     // A single quote in a path is the case naive quoting gets wrong.
-    let awkward = setup_command(Path::new("/tmp/it's here/.operon/setup.sh"));
-    assert_eq!(awkward, r"bash '/tmp/it'\''s here/.operon/setup.sh'");
+    let awkward = setup_command(
+        Path::new("/tmp/it's here/.operon/setup.sh"),
+        Path::new("/tmp/a.sh"),
+    );
+    assert!(
+        awkward.ends_with(r"'/tmp/it'\''s here/.operon/setup.sh' '/tmp/a.sh'"),
+        "{awkward}"
+    );
 }
 
 /// The whole chain, through a real shell, under a path with a space: the same
@@ -33325,9 +33334,11 @@ pub(crate) fn a_setup_script_runs_end_to_end_in_a_path_with_a_space() {
     let SetupScriptRead::Found(script) = read_setup_script(&root) else {
         panic!("スクリプトが見つからない");
     };
+    let data_file = root.join("Application Support").join("store.json");
+    let approved = keep_approved_script(&data_file, &script).unwrap();
 
     let output = Command::new("/bin/sh")
-        .args(["-c", &setup_command(&script.path)])
+        .args(["-c", &setup_command(&script.path, &approved)])
         .output()
         .unwrap();
     assert!(
@@ -57477,4 +57488,261 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
             line: Some(12),
         })
     );
+}
+
+/// Change 209 (A15): an approved script ran from the repository's path, so
+/// what bash read was whatever the file held by then. The approved bytes are
+/// kept beside the store under their digest and that copy runs, with `$0`
+/// still the repository's path and no arguments left over.
+#[test]
+pub(crate) fn the_script_that_runs_is_the_bytes_that_were_approved() {
+    let root = temporary_directory("approved-bytes-run");
+    write_setup_script(
+        &root,
+        "#!/bin/bash\nprintf '%s %s\\n' \"$0\" \"$#\"\necho approved\n",
+    );
+    let SetupScriptRead::Found(shown) = read_setup_script(&root) else {
+        panic!("スクリプトが見つからない");
+    };
+    let SetupRunDecision::Run(script) = decide_setup_run(&root, &shown.digest) else {
+        panic!("確認したスクリプトが実行の判断で通りません");
+    };
+    // The repository's file changes after the check; what is kept and what
+    // runs does not.
+    write_setup_script(&root, "#!/bin/bash\necho changed\n");
+    let data_file = root.join("data").join("store.json");
+    let approved = keep_approved_script(&data_file, &script).unwrap();
+    assert_eq!(
+        approved,
+        root.join("data")
+            .join(APPROVED_SCRIPTS_DIRECTORY)
+            .join(format!("{}.sh", script.digest))
+    );
+    assert_eq!(fs::read(&approved).unwrap(), script.bytes);
+    let mut command = Command::new("/bin/sh");
+    command
+        .current_dir(&root)
+        .args(["-c", &setup_command(&script.path, &approved)]);
+    let output = run_command_with_timeout(&mut command, Duration::from_secs(10)).unwrap();
+    let said = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{said}");
+    assert_eq!(
+        said,
+        format!("{} 0\napproved\n", setup_script_path(&root).display()),
+        "承認した内容ではなく、いまのファイルが実行されました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 209 (A15, from 208's review): the size was read, then the whole
+/// file. A read bounded by the ceiling itself refuses a file past it whatever
+/// its size said a moment before.
+#[test]
+pub(crate) fn a_script_past_the_ceiling_is_refused_by_the_read_itself() {
+    let root = temporary_directory("script-ceiling-read");
+    let mut body = "#!/bin/sh\n".to_owned();
+    body.push_str(&"#".repeat(SETUP_SCRIPT_MAX_BYTES as usize - body.len()));
+    write_setup_script(&root, &body);
+    assert!(
+        matches!(read_setup_script(&root), SetupScriptRead::Found(_)),
+        "上限ちょうどのスクリプトが拒否されました"
+    );
+    body.push('#');
+    write_setup_script(&root, &body);
+    assert!(matches!(
+        read_setup_script(&root),
+        SetupScriptRead::TooLarge(size) if size > SETUP_SCRIPT_MAX_BYTES
+    ));
+    let source = fs::read_to_string("src/git/setup.rs").unwrap();
+    assert!(
+        source.contains(".take(SETUP_SCRIPT_MAX_BYTES + 1)"),
+        "スクリプトの読み込みが上限で区切られていません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 209 (A14): the land checked a branch with a hand-written subset of
+/// git's rules, and `a~1`, `a@{1}` or a control character passed it to be read
+/// as a revision. git decides now; `@`, which git allows and reads as HEAD,
+/// is refused.
+#[test]
+pub(crate) fn a_branch_git_would_refuse_is_never_landed() {
+    for refused in [
+        "a~1",
+        "a@{1}",
+        "a^",
+        "a:b",
+        "@",
+        "a/.b",
+        "a.lock",
+        "a//b",
+        "a.",
+        "a\u{1}b",
+        "a\\b",
+        "a?b",
+        "a b",
+        "-s",
+        "--upload-pack",
+        "",
+        "bad..branch",
+        "@{-1}",
+        "a@{-1}",
+    ] {
+        assert!(!is_safe_ref_name(refused), "{refused:?} が通りました");
+    }
+    for accepted in [
+        "main",
+        "feature/safe-branch",
+        "fix/209-what-was-approved-is-what-runs",
+    ] {
+        assert!(is_safe_ref_name(accepted), "{accepted:?} が拒否されました");
+    }
+}
+
+/// Change 209 (A14): a checkpoint id was checked as hex and nothing else, so
+/// an empty or short one reached git. Only a whole object id passes, and the
+/// refusal is the app's own words.
+#[test]
+pub(crate) fn a_checkpoint_is_named_by_a_whole_object_id() {
+    let sha1 = "0123456789abcdef0123456789abcdef01234567";
+    let sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    assert!(is_commit_id(sha1) && is_commit_id(sha256));
+    for refused in [
+        "",
+        "abc1234",
+        &sha1[..39],
+        "g123456789abcdef0123456789abcdef01234567",
+    ] {
+        assert!(!is_commit_id(refused), "{refused:?} が通りました");
+    }
+    let root = temporary_directory("checkpoint-id");
+    for result in [
+        git_diff_checkpoint(&root, "").map(|_| ()),
+        git_restore_checkpoint(&root, ""),
+    ] {
+        assert_eq!(
+            result.map_err(|error| error.to_string()),
+            Err("無効なコミット SHA です".to_owned())
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 209 (A15): both buttons that run an approved script build the
+/// command from the kept copy; neither names the repository's file to bash.
+#[test]
+pub(crate) fn both_script_buttons_run_the_kept_copy() {
+    let root = temporary_directory("script-buttons-copy");
+    write_setup_script(&root, "#!/bin/sh\necho hi\n");
+    let SetupScriptRead::Found(script) = read_setup_script(&root) else {
+        panic!("スクリプトが見つからない");
+    };
+    let mut app = test_app(root.join("data").join("store.json"));
+    let command = app.approved_script_command(&script).unwrap();
+    let approved = root
+        .join("data")
+        .join(APPROVED_SCRIPTS_DIRECTORY)
+        .join(format!("{}.sh", script.digest));
+    assert_eq!(command, setup_command(&script.path, &approved));
+    assert!(approved.is_file());
+
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let app_source = fs::read_to_string("src/app.rs").unwrap();
+    assert!(
+        !screens.contains("format!(\"bash {}\"") && !app_source.contains("format!(\"bash {}\""),
+        "承認したスクリプトをリポジトリのパスのまま bash に渡しています"
+    );
+    for caller in ["fn start_setup_session(", "fn run_approved_script("] {
+        let body = app_source
+            .split_once(caller)
+            .and_then(|(_, after)| after.split_once("\n    }\n"))
+            .map(|(body, _)| body)
+            .unwrap_or_else(|| panic!("{caller} がありません"));
+        assert!(
+            body.contains("self.approved_script_command(script)"),
+            "{caller} が承認したコピーから実行していません"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 209 (A15, from its review): the read checked the path, then opened
+/// it, and a FIFO swapped in between left the window waiting on an open with
+/// no writer. The open does not wait and what it opened is checked.
+#[test]
+pub(crate) fn a_fifo_at_the_script_path_is_not_waited_on() {
+    let root = temporary_directory("script-fifo");
+    let path = setup_script_path(&root);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut mkfifo = Command::new("mkfifo");
+    mkfifo.arg(&path);
+    assert!(
+        run_command_with_timeout(&mut mkfifo, Duration::from_secs(5))
+            .unwrap()
+            .status
+            .success()
+    );
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let reader = root.clone();
+    std::thread::spawn(move || {
+        sender
+            .send(matches!(
+                read_setup_script(&reader),
+                SetupScriptRead::Missing
+            ))
+            .ok();
+    });
+    assert_eq!(
+        receiver.recv_timeout(Duration::from_secs(5)),
+        Ok(true),
+        "スクリプトの位置にある FIFO を開いて待ち続けました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 209 (A15, from its review): with no home directory the data
+/// directory is relative, and the pane changes into the worktree before it
+/// runs the copy, so a relative copy would name the repository's own file.
+#[test]
+pub(crate) fn the_kept_copy_is_named_by_an_absolute_path() {
+    let directory = approved_scripts_directory(Path::new(".operon/store.json")).unwrap();
+    assert!(directory.is_absolute(), "{}", directory.display());
+    assert_eq!(
+        directory,
+        std::env::current_dir()
+            .unwrap()
+            .join(".operon")
+            .join(APPROVED_SCRIPTS_DIRECTORY)
+    );
+    assert_eq!(
+        approved_scripts_directory(Path::new("store.json")).unwrap(),
+        std::env::current_dir()
+            .unwrap()
+            .join(APPROVED_SCRIPTS_DIRECTORY)
+    );
+}
+
+/// Change 209 (A15, from its review): when the approved bytes cannot be kept,
+/// nothing runs and the person is told why.
+#[test]
+pub(crate) fn a_script_whose_copy_cannot_be_kept_does_not_run() {
+    let root = temporary_directory("script-keep-fails");
+    write_setup_script(&root, "#!/bin/sh\necho hi\n");
+    let SetupScriptRead::Found(script) = read_setup_script(&root) else {
+        panic!("スクリプトが見つからない");
+    };
+    // The store's directory is a file, so nothing can be kept beneath it.
+    let blocked = root.join("blocked");
+    fs::write(&blocked, "").unwrap();
+    let mut app = test_app(blocked.join("store.json"));
+    assert_eq!(app.approved_script_command(&script), None);
+    let notice = app.notice.clone().unwrap_or_default();
+    assert!(
+        notice.contains("承認した内容を保存できなかったため実行しませんでした")
+            && notice.contains(APPROVED_SCRIPTS_DIRECTORY),
+        "{notice}"
+    );
+    // The reason, not only the path, reaches the person.
+    assert!(notice.matches(": ").count() >= 2, "{notice}");
+    fs::remove_dir_all(&root).ok();
 }

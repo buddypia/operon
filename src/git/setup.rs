@@ -22,6 +22,8 @@ pub(crate) struct SetupScript {
     pub(crate) digest: String,
     pub(crate) preview: Vec<String>,
     pub(crate) total_lines: usize,
+    /// The bytes the digest was taken over: what an approval runs.
+    pub(crate) bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -46,46 +48,96 @@ pub(crate) fn setup_script_path(worktree: &Path) -> PathBuf {
 }
 
 pub(crate) fn read_setup_script(worktree: &Path) -> SetupScriptRead {
-    let path = setup_script_path(worktree);
-    let Ok(metadata) = fs::metadata(&path) else {
+    read_script(setup_script_path(worktree))
+}
+
+/// One read, bounded by the ceiling itself rather than by a size read first:
+/// a file that grows between the two would otherwise be read whole (change
+/// 209). The open does not wait, and what was opened is checked to be a file,
+/// so a FIFO planted there, or swapped in, never stalls the window.
+fn read_script(path: PathBuf) -> SetupScriptRead {
+    let Ok(file) = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(&path)
+    else {
+        return SetupScriptRead::Missing;
+    };
+    let Ok(metadata) = file.metadata() else {
         return SetupScriptRead::Missing;
     };
     if !metadata.is_file() {
         return SetupScriptRead::Missing;
     }
-    if metadata.len() > SETUP_SCRIPT_MAX_BYTES {
-        return SetupScriptRead::TooLarge(metadata.len());
-    }
-    let Ok(bytes) = fs::read(&path) else {
+    let mut bytes = Vec::new();
+    if file
+        .take(SETUP_SCRIPT_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+    {
         return SetupScriptRead::Missing;
-    };
-    SetupScriptRead::Found(describe_setup_script(path, &bytes))
+    }
+    if bytes.len() as u64 > SETUP_SCRIPT_MAX_BYTES {
+        return SetupScriptRead::TooLarge(metadata.len().max(bytes.len() as u64));
+    }
+    SetupScriptRead::Found(describe_setup_script(path, bytes))
 }
 
 /// The preview and the digest are cut from one read of one buffer. Reading
 /// twice would let the file change between them, and then what is shown is not
 /// what is approved.
-fn describe_setup_script(path: PathBuf, bytes: &[u8]) -> SetupScript {
-    let text = String::from_utf8_lossy(bytes);
+fn describe_setup_script(path: PathBuf, bytes: Vec<u8>) -> SetupScript {
+    let text = String::from_utf8_lossy(&bytes);
     let lines: Vec<&str> = text.lines().collect();
+    let preview = lines
+        .iter()
+        .take(SETUP_SCRIPT_PREVIEW_LINES)
+        .map(|line| (*line).to_owned())
+        .collect();
+    let total_lines = lines.len();
     SetupScript {
         path,
-        digest: sha256_hex(bytes),
-        preview: lines
-            .iter()
-            .take(SETUP_SCRIPT_PREVIEW_LINES)
-            .map(|line| (*line).to_owned())
-            .collect(),
-        total_lines: lines.len(),
+        digest: sha256_hex(&bytes),
+        preview,
+        total_lines,
+        bytes,
     }
 }
 
-/// What the pane runs. A function rather than a `format!` at the call site so
-/// that the quoting has exactly one place to be missing from — entry 013 in
-/// `docs/sdlc/lessons.md` is what happens when a path with a space reaches a
-/// shell unquoted, and every macOS worktree path may contain one.
-pub(crate) fn setup_command(script: &Path) -> String {
-    format!("bash {}", shell_quote(&script.display().to_string()))
+/// Keeps the approved bytes beside the store, named by their digest, and says
+/// where. Running the repository's own file would run whatever it holds when
+/// bash reads it, which can be after the check (change 209).
+pub(crate) fn keep_approved_script(data_file: &Path, script: &SetupScript) -> Result<PathBuf> {
+    let directory = approved_scripts_directory(data_file)?;
+    create_private_directory(&directory).with_context(|| directory.display().to_string())?;
+    let path = directory.join(format!("{}.sh", script.digest));
+    write_file_atomically(&path, &script.bytes).with_context(|| path.display().to_string())?;
+    Ok(path)
+}
+
+/// Absolute, because the pane changes into the worktree before it runs the
+/// copy: a relative data directory there would name a file the repository
+/// controls.
+pub(crate) fn approved_scripts_directory(data_file: &Path) -> Result<PathBuf> {
+    let parent = data_file
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    Ok(std::path::absolute(parent)?.join(APPROVED_SCRIPTS_DIRECTORY))
+}
+
+/// What the pane runs: the approved copy, sourced by a bash whose `$0` is the
+/// repository's path, so a script that finds its folder from `$0` finds the
+/// same one it always did, with no arguments left over. A function rather than
+/// a `format!` at the call site so that the quoting has exactly one place to
+/// be missing from — entry 013 in `docs/sdlc/lessons.md` is what happens when
+/// a path with a space reaches a shell unquoted.
+pub(crate) fn setup_command(script: &Path, approved: &Path) -> String {
+    format!(
+        "bash -c 'approved=$1; shift; . \"$approved\"' {} {}",
+        shell_quote(&script.display().to_string()),
+        shell_quote(&approved.display().to_string())
+    )
 }
 
 /// One approval: these contents, in this project. Not the path — an approval
@@ -190,20 +242,7 @@ pub(crate) fn run_script_path(worktree: &Path) -> PathBuf {
 }
 
 pub(crate) fn read_run_script(worktree: &Path) -> SetupScriptRead {
-    let path = run_script_path(worktree);
-    let Ok(metadata) = fs::metadata(&path) else {
-        return SetupScriptRead::Missing;
-    };
-    if !metadata.is_file() {
-        return SetupScriptRead::Missing;
-    }
-    if metadata.len() > SETUP_SCRIPT_MAX_BYTES {
-        return SetupScriptRead::TooLarge(metadata.len());
-    }
-    let Ok(bytes) = fs::read(&path) else {
-        return SetupScriptRead::Missing;
-    };
-    SetupScriptRead::Found(describe_setup_script(path, &bytes))
+    read_script(run_script_path(worktree))
 }
 
 pub(crate) fn decide_run_script_run(worktree: &Path, shown_digest: &str) -> SetupRunDecision {

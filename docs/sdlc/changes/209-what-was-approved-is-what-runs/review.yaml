@@ -1,0 +1,53 @@
+# Review record for 209-what-was-approved-is-what-runs.
+#
+# The change: an approved setup or run script runs from a copy of the bytes
+# that were approved, kept beside the store under their digest, and the read
+# is bounded by the ceiling itself; the branch the land merges is checked by
+# git's own rules, and a checkpoint is named by a whole object id.
+#
+# Round 1: rust-reviewer approve-with-nits 0 4, durability-reviewer
+# approve-with-nits 0 5, subprocess-safety-reviewer request-changes 2 4.
+# Important, both taken: a relative data directory made the copy's path
+# relative, and the pane changes into the worktree first, so it would have
+# named a file the repository holds (now absolute, with a test); the read
+# checked the path and then opened it, so a FIFO swapped in between stalled
+# the window (now opened without waiting and checked on the handle, with a
+# test). Also taken: the path in the error, `@{-1}` in the refused names, a
+# private directory, a test that a copy that cannot be kept runs nothing, and
+# the manuals name the BASH_SOURCE guard. Refusing `@{` before git was tried
+# and dropped: git asked from `/` refuses it already, and no test told them
+# apart.
+# Round 2: all three approve-with-nits (0 3 each). Taken: the notice carries
+# the reason, a bare file name keeps the current directory as its folder, a
+# misplaced doc comment went back to git_land_worktree, and the manuals say a
+# script that runs `bash "$0"` again runs the repository's file.
+# Round 3, over that delta: rust-reviewer approve 0 0,
+# subprocess-safety-reviewer approve 0 0. No commit sat on the branch, so the
+# staged digest is the branch's against main.
+
+digest: "f769a159792df528"
+
+rounds: 3
+
+carried:
+  - rust-reviewer/1 · src/tests.rs both_script_buttons_run_the_kept_copy, a_script_past_the_ceiling_is_refused_by_the_read_itself: the source checks slice function bodies and match substrings, so a nested closing brace or a comment naming the call would trip them.
+    person: "承認したスクリプトの実行方法を確かめるテストの一部は、コードの文字列を探しています。コードの書き方を変えると、問題がなくても失敗することがあります。"
+  - rust-reviewer/1 · src/git.rs is_valid_branch_name: with git missing or slow past 5 s, the land reports an invalid branch name rather than the real cause.
+    person: "git が見つからないときに作業ブランチを取り込もうとすると、本当の原因ではなく「無効なブランチ名」と表示されます。取り込み自体は安全に止まります。"
+  - subprocess-safety-reviewer/1 · src/git/setup.rs setup_command: sourcing the copy makes `${BASH_SOURCE[0]}` the copy's path, so a `[[ ${BASH_SOURCE[0]} == $0 ]]` guard skips its body and exits 0; the manuals say so, the preview does not.
+    person: "セットアップ用や実行用のスクリプトで `${BASH_SOURCE[0]}` を使っている場合、承認したコピーの場所を指すようになりました。`${BASH_SOURCE[0]}` と `$0` を比べて本体を動かす書き方では、本体が動かないまま成功と表示されます。`$0` を使えば元どおり動きます。マニュアルに書いてあります。"
+  - subprocess-safety-reviewer/1 · src/git/setup.rs keep_approved_script: a restart re-runs the kept copy without hashing it again, and the copy has the default file mode inside a private directory.
+    person: "実行中のスクリプトを再起動すると、保存してある承認済みのコピーをもう一度確かめずに実行します。コピーは本人だけが開けるフォルダにあります。"
+  - subprocess-safety-reviewer/2 · src/git/setup.rs setup_command: the wrapper's `approved` variable stays set in the script's scope.
+    person: "スクリプトの中から、`approved` という変数にコピーの場所が入っているのが見えます。動作への影響はありません。"
+  - subprocess-safety-reviewer/2 · src/git/setup.rs approved_scripts_directory: the copy's path is saved in the session, so after the data directory moves, or the copy is removed, a restart fails with bash's own message.
+    person: "データの保存場所を移したり承認済みのコピーを消したりした後に再起動すると、スクリプトは実行されず、bash のエラーだけが表示されます。もう一度承認すれば実行できます。"
+  - durability-reviewer/1 · src/store.rs write_file_atomically: a crash between writing and renaming leaves a temporary file in approved-scripts/.
+    person: "アプリが保存の途中で落ちると、承認済みのコピーを置くフォルダに小さな一時ファイルが残ることがあります。動作には影響しません。"
+  - durability-reviewer/2 · src/git/setup.rs keep_approved_script: copies are not pruned; one stays per approved version, each under the script ceiling.
+    person: "スクリプトを承認するたびに、その内容のコピーが1つずつ残り、自動では消えません。1つあたりは小さなファイルです。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
+  durability-reviewer: "approve-with-nits 0 3"

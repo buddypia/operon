@@ -4413,6 +4413,38 @@ impl OperonApp {
         self.notice = Some(tr("ターミナルを起動しています…").into());
     }
 
+    /// The command that runs an approved script: the bytes just checked, kept
+    /// beside the store, not the repository's file, which can change before
+    /// bash reads it (change 209). `None`, said in the notice, when the copy
+    /// cannot be written; nothing runs then.
+    pub(crate) fn approved_script_command(&mut self, script: &SetupScript) -> Option<String> {
+        match keep_approved_script(&self.data_file, script) {
+            Ok(approved) => Some(setup_command(&script.path, &approved)),
+            Err(error) => {
+                self.notice = Some(tf!(
+                    "承認した内容を保存できなかったため実行しませんでした: {error}",
+                    error = format!("{error:#}")
+                ));
+                None
+            }
+        }
+    }
+
+    /// 承認して実行 on the run script, once the file has been read again and
+    /// found to be what was shown.
+    pub(crate) fn run_approved_script(
+        &mut self,
+        project: Uuid,
+        worktree: &Path,
+        script: &SetupScript,
+    ) {
+        let Some(command) = self.approved_script_command(script) else {
+            return;
+        };
+        let name = format!("run-{}", script.digest.chars().take(8).collect::<String>());
+        self.launch_custom_script_session(project, worktree, &name, &command);
+    }
+
     pub(crate) fn launch_custom_script_session(
         &mut self,
         project_id: Uuid,
@@ -8056,9 +8088,11 @@ impl OperonApp {
             self.notice = Some(tr("tmux が必要です。「設定」を開いてください。").into());
             return;
         }
+        let Some(command) = self.approved_script_command(script) else {
+            return;
+        };
         let id = Uuid::new_v4();
         let tmux_name = managed_tmux_name(id);
-        let command = setup_command(&script.path);
         let previous_store = self.store.clone();
         self.store.sessions.push(Session {
             id,

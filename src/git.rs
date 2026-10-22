@@ -1761,22 +1761,22 @@ pub(crate) fn review_decision_label(decision: Option<&str>) -> &str {
     }
 }
 
-/// Land a worktree branch back into the mainline branch.
-///
-/// Merges `branch` into mainline using `--no-ff`.
-/// Rejects if worktree has uncommitted changes, if main checkout is dirty,
-/// or if there are 0 commits ahead. On conflict, aborts merge and returns error.
-/// Optionally removes worktree and deletes merged branch with `git branch -d`.
+/// A branch the land may name to git. git's own `check-ref-format --branch`
+/// decides, as it does for a new worktree's branch: the hand-written subset
+/// before change 209 let through `a~1`, `a@{1}` and control characters, which
+/// the land would read as revisions. `@` passes git's check and means HEAD.
 pub(crate) fn is_safe_ref_name(name: &str) -> bool {
-    if name.is_empty() || name.starts_with('-') || name.contains(['\0', '\n', '\r', ' ']) {
-        return false;
-    }
-    !name.contains("..")
-        && !name.starts_with('/')
-        && !name.ends_with('/')
-        && !name.ends_with(".lock")
+    name != "@" && !name.starts_with('-') && is_valid_branch_name(name)
 }
 
+/// A whole object id, as a checkpoint records one. An empty or shortened one
+/// would reach git as something other than the checkpoint (change 209).
+pub(crate) fn is_commit_id(sha: &str) -> bool {
+    matches!(sha.len(), 40 | 64) && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Land a worktree branch back into the mainline branch.
+///
 /// Merges `branch` into mainline using `--no-ff`.
 /// Rejects if worktree has uncommitted changes, if main checkout is dirty or not on mainline,
 /// or if there are 0 commits ahead. On conflict, aborts merge and returns error.
@@ -2153,8 +2153,8 @@ pub(crate) fn git_list_checkpoints(worktree: &Path, session_id: Uuid) -> Result<
 
 /// Restore files in the worktree to match the state at a checkpoint.
 pub(crate) fn git_restore_checkpoint(worktree: &Path, commit_sha: &str) -> Result<()> {
-    if !commit_sha.chars().all(|c| c.is_ascii_hexdigit()) {
-        anyhow::bail!("無効なコミット SHA です");
+    if !is_commit_id(commit_sha) {
+        anyhow::bail!(tr("無効なコミット SHA です"));
     }
     let mut cmd = git_command(worktree);
     cmd.args(["checkout", commit_sha, "--", "."]);
@@ -2170,8 +2170,8 @@ pub(crate) fn git_restore_checkpoint(worktree: &Path, commit_sha: &str) -> Resul
 /// Diff changes between a checkpoint and the current working tree.
 /// Output is bounded to 1 MB to prevent memory exhaustion.
 pub(crate) fn git_diff_checkpoint(worktree: &Path, commit_sha: &str) -> Result<String> {
-    if !commit_sha.chars().all(|c| c.is_ascii_hexdigit()) {
-        anyhow::bail!("無効なコミット SHA です");
+    if !is_commit_id(commit_sha) {
+        anyhow::bail!(tr("無効なコミット SHA です"));
     }
     let (diff_text, truncated) =
         git_output_allowing_limited(worktree, &["diff", commit_sha, "--"], &[0, 1], 1024 * 1024)?;
