@@ -1,0 +1,59 @@
+# Review record for 208-the-frame-does-no-disk-or-process-work.
+#
+# The change: opening an editor and copying a checkpoint's diff leave the
+# frame and say their failures; a terminal row is read for links only under
+# the pointer; the staged selection is settled when the status arrives; the
+# run script and the templates are read on background threads.
+#
+# Round 1: rust-reviewer approve-with-nits 0 4, durability-reviewer
+# approve-with-nits 0 4. Both confirmed the run path still re-reads the
+# script against the digest shown. Taken: the readers skip building a
+# closure while a read is out, a diff whose session closed is dropped (with
+# a test), the missing-path message no longer says folder. Carried: below.
+# The bounded read of the run script moves to change 209, which runs the
+# approved bytes themselves.
+# Round 2: both approve 0 0.
+# Round 3, an Important finding from CI on the landed tip: the four new
+# message rows sat at the head of both tables, which are binary-searched, so
+# they would have shown untranslated. The rows are in order, and the commit
+# gate runs the four table tests whenever src/ changes (lesson 096).
+# rust-reviewer approve 0 1; subprocess-safety-reviewer, which the gate
+# change brought in, approve-with-nits 0 5 over the whole branch.
+# Round 4, CI again: lesson 096's guard did not say it was watched failing.
+# Reworded, and the lessons test joins the gate's record tests. rust-reviewer
+# approve 0 0; subprocess-safety-reviewer approve-with-nits 0 2.
+# The digests of rounds 3 and 4 were taken over each round's staged delta,
+# not the branch; the merge gate judges the branch against main. Each
+# reviewer confirmed their verdict for the whole branch at a135edd823c71f85,
+# main unmoved and no code changed; recorded under round 4.
+
+digest: "a135edd823c71f85"
+
+rounds: 4
+
+carried:
+  - rust-reviewer/1 · src/tests.rs the_staged_selection_is_settled_when_the_changes_arrive: the source checks are substring matches that a comment naming the call would trip.
+    person: "描画処理の中で重い処理を呼んでいないかを確かめるテストは、コードの文字列を探しています。コメントに同じ名前を書くと、問題がなくても失敗します。"
+  - rust-reviewer/1 · src/app.rs cached_prompt_templates_for: the template menu is empty on the frame it first opens, until the read lands.
+    person: "テンプレートのメニューを初めて開いた瞬間は、一覧が空に見えることがあります。すぐに表示されます。"
+  - durability-reviewer/1 · src/app.rs copy_checkpoint_diff: a second click while the diff is still being read does nothing and says nothing.
+    person: "チェックポイントの差分のコピーを連続で押すと、2回目は何も起きません。1回目のコピーはそのまま完了します。"
+  - durability-reviewer/1 · src/app.rs apply_git_changes: a status that lands after its project was removed leaves an in-memory entry for it.
+    person: "プロジェクトを外した直後に Git の状態が届くと、使われない小さな記録がメモリに残ります。保存はされず、再起動で消えます。"
+  - durability-reviewer/1 · src/git/setup.rs read_run_script: the size is checked before an unbounded read, so a file growing in between passes the cap.
+    person: "実行スクリプトの読み込みで、サイズを確かめた直後にファイルが大きくなると上限を超えて読めてしまいます。次の変更で直します。"
+  - rust-reviewer/3 · .claude/hooks/gate-commit.sh: a commit touching only src/tests.rs runs the four table tests too, about four seconds.
+    person: "テストだけを直したコミットでも、翻訳表の確認が数秒かかるようになりました。"
+  - subprocess-safety-reviewer/3 · .claude/hooks/gate-commit.sh: a commit touching src/*.rs builds the test binary inside the hook, so a cold first commit may hit the time limit.
+    person: "新しい作業場所での最初のコミットは、テストの準備に時間がかかり、時間切れで止まることがあります。止まったときは、案内のとおりに準備をしてからもう一度コミットすれば通ります。"
+  - subprocess-safety-reviewer/3 · src/exec.rs: the stdout and stderr readers are joined after the kill, so an editor CLI that hands its pipe to a long-lived child holds the worker thread past 5 s.
+    person: "エディタによっては、起動の完了を待つ処理が5秒を超えて続くことがあります。画面は止まりません。"
+  - subprocess-safety-reviewer/3 · src/util.rs open_in_external_editor: a path starting with '-' would be read as an option; every caller passes an absolute worktree path.
+    person: "現在の使い方では起きませんが、ハイフンで始まるパスをエディタに渡すと、オプションとして読まれるおそれがあります。"
+  - subprocess-safety-reviewer/4 · .claude/hooks/gate-commit.sh: the lessons test runs pipeline-indicators.sh as a child, bounded only by the hook's remaining limit.
+    person: "コミット前の確認で、教訓の書式を調べる処理が止まった場合は、時間切れでコミットが止まります。もう一度コミットすれば通ります。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  durability-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"

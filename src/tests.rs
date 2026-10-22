@@ -48671,7 +48671,8 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
         "limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}",
         // Change 198: the record tests, when the commit holds a record, in what
         // the limit has left — clippy and they together end before the hook.
-        "grep -E '^docs/|^\\.claude/|\\.md$'",
+        // Change 208: and when it touches src/, for the message tables.
+        "grep -E '^docs/|^\\.claude/|\\.md$|^src/.*\\.rs$'",
         // Change 201: and when it deletes or moves a path a document may name.
         "if [ -n \"$({ git diff --cached --diff-filter=DR --name-only; git diff --diff-filter=D --name-only; } 2>/dev/null)\" ] ||",
         "left=$(( limit - SECONDS ))",
@@ -57159,5 +57160,321 @@ pub(crate) fn the_note_editor_does_not_take_the_keyboard_back() {
     assert!(
         ctx.memory(|memory| memory.has_focus(other)),
         "メモの欄が別の欄からキーボードを取り返しました"
+    );
+}
+
+/// Change 208 (A11): copying a checkpoint's diff ran `git diff` on the frame
+/// that drew the menu and dropped its error. The diff is read on a
+/// background thread and reaches the clipboard when it arrives; a failure is
+/// said.
+#[test]
+pub(crate) fn a_checkpoint_diff_is_copied_from_a_background_thread() {
+    let root = temporary_directory("checkpoint-diff-off-frame");
+    let file_path = root.join("app.txt");
+    fs::write(&file_path, "version 1\n").unwrap();
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.email", "test@example.invalid"],
+        vec!["config", "user.name", "Operon test"],
+        vec!["add", "app.txt"],
+        vec!["commit", "-m", "v1"],
+    ] {
+        assert!(git_command(&root).args(args).status().unwrap().success());
+    }
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.worktree_path = Some(root.clone());
+    let session_id = session.id;
+    fs::write(&file_path, "version 2\n").unwrap();
+    let checkpoint = git_create_checkpoint(&root, session_id, 1, "turn").unwrap();
+    fs::write(&file_path, "version 3\n").unwrap();
+
+    let mut app = test_app(root.join("store.json"));
+    app.store.sessions.push(session);
+    let ctx = egui::Context::default();
+    app.repaint = Some(ctx.clone());
+    // Applied inside a frame, as `update` applies it.
+    let settle =
+        |app: &mut OperonApp| {
+            let mut copied = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let output = ctx.run(egui::RawInput::default(), |_| {
+                    app.process_background_results()
+                });
+                copied.extend(
+                    output.platform_output.commands.into_iter().filter_map(
+                        |command| match command {
+                            egui::OutputCommand::CopyText(text) => Some(text),
+                            _ => None,
+                        },
+                    ),
+                );
+                let key = BackgroundKey::CheckpointDiff(session_id);
+                if !app.background_tasks.contains(&key) || Instant::now() > deadline {
+                    assert!(
+                        !app.background_tasks.contains(&key),
+                        "差分の読み取りが終わりません"
+                    );
+                    return copied;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+
+    app.copy_checkpoint_diff(session_id, checkpoint.commit.clone());
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::CheckpointDiff(session_id)),
+        "差分がメニューを描いたフレームで読まれています"
+    );
+    let copied = settle(&mut app);
+    assert_eq!(copied.len(), 1, "{copied:?}");
+    assert!(copied[0].contains("version 3"), "{}", copied[0]);
+    assert_eq!(app.notice.as_deref(), Some("差分をコピーしました。"));
+
+    app.copy_checkpoint_diff(session_id, "not-a-commit".into());
+    assert!(settle(&mut app).is_empty());
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|notice| notice.starts_with("差分をコピーできませんでした: ")),
+        "差分を読めなかったことが伝わりません: {:?}",
+        app.notice
+    );
+
+    // Closed while its diff was read: nothing is copied, nothing is said.
+    app.copy_checkpoint_diff(session_id, checkpoint.commit.clone());
+    app.store.sessions.clear();
+    app.notice = None;
+    assert!(
+        settle(&mut app).is_empty(),
+        "閉じたセッションの差分をコピーしました"
+    );
+    assert_eq!(app.notice, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 208 (A11): opening a folder in an editor waited up to ten seconds
+/// on the frame and dropped the error. It runs as a system action, and a
+/// failure is said in the notice.
+#[test]
+pub(crate) fn opening_in_an_editor_runs_off_the_frame_and_says_why_it_failed() {
+    let root = temporary_directory("editor-off-frame");
+    let mut app = test_app(root.join("store.json"));
+    let missing = root.join("gone");
+    app.open_in_editor(&missing, ExternalEditor::VsCode);
+    assert_eq!(
+        app.background_tasks
+            .iter()
+            .filter(|key| matches!(key, BackgroundKey::SystemAction(_)))
+            .count(),
+        1,
+        "エディタの起動がフレームの中で行われています"
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !app.background_tasks.is_empty() && Instant::now() < deadline {
+        app.process_background_results();
+        thread::sleep(Duration::from_millis(10));
+    }
+    let notice = app.notice.clone().unwrap_or_default();
+    assert!(
+        notice.contains("VS Code") && notice.contains("が見つかりません"),
+        "エディタを開けなかった理由が伝わりません: {notice:?}"
+    );
+    // Nothing the draw path calls opens an editor or runs `git diff` itself.
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    for call in ["open_in_external_editor(", "git_diff_checkpoint("] {
+        assert!(
+            !screens.contains(call),
+            "src/app/screens.rs が描画中に {call} を呼んでいます"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 208 (A17): the session menu read `.operon/run.sh`, and the launch
+/// form read the templates folder, on the frame that drew them and every two
+/// seconds while they stayed open. Both are read on a background thread; the
+/// frame shows the last reading, and only for the folder it was taken from.
+#[test]
+pub(crate) fn the_run_script_and_the_templates_are_read_off_the_frame() {
+    let root = temporary_directory("menu-reads-off-frame");
+    let script = run_script_path(&root);
+    fs::create_dir_all(script.parent().unwrap()).unwrap();
+    fs::write(&script, "echo run\n").unwrap();
+    let prompts = root.join(".operon/prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("custom-fix.md"), "Fix it\n").unwrap();
+    let mut app = test_app(root.join("store.json"));
+
+    assert!(
+        app.cached_run_script_for(&root).is_none(),
+        "実行スクリプトがメニューを描いたフレームで読まれています"
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::RunScriptRead,
+        Duration::from_secs(10),
+    );
+    assert_eq!(
+        app.cached_run_script_for(&root)
+            .map(|found| found.path.clone()),
+        Some(script.clone())
+    );
+    assert!(
+        !app.background_tasks.contains(&BackgroundKey::RunScriptRead),
+        "読んだばかりの実行スクリプトをまた読みに行っています"
+    );
+    // Another folder is not offered this one's script while its own is read.
+    let other = root.join("other");
+    fs::create_dir_all(&other).unwrap();
+    assert!(app.cached_run_script_for(&other).is_none());
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::RunScriptRead,
+        Duration::from_secs(10),
+    );
+    assert!(app.cached_run_script_for(&other).is_none());
+
+    assert!(
+        !app.cached_prompt_templates_for(Some(&root))
+            .iter()
+            .any(|template| template.is_custom),
+        "テンプレートがフォームを描いたフレームで読まれています"
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::PromptTemplatesRead,
+        Duration::from_secs(10),
+    );
+    assert!(app
+        .cached_prompt_templates_for(Some(&root))
+        .iter()
+        .any(|template| template.title == "custom fix"));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 208 (A12): which files are ticked for the commit was worked out
+/// on every frame the list was drawn, from a copy of the whole status. It is
+/// worked out when the status arrives, and the list borrows what it draws.
+#[test]
+pub(crate) fn the_staged_selection_is_settled_when_the_changes_arrive() {
+    let root = temporary_directory("staged-selection-on-arrival");
+    let mut app = test_app(root.join("store.json"));
+    let project = Uuid::new_v4();
+    let changed = |files: &[(&str, &str)]| {
+        Ok(GitChangesSnapshot {
+            status: format!("{files:?}"),
+            files: files
+                .iter()
+                .map(|(status, path)| ChangedFile {
+                    status: (*status).into(),
+                    path: (*path).into(),
+                })
+                .collect(),
+        })
+    };
+    let ticked = |app: &OperonApp| {
+        let mut files: Vec<String> = app.git_staged_files[&project].iter().cloned().collect();
+        files.sort();
+        files
+    };
+    app.apply_git_changes(project, changed(&[("M", "a.rs"), ("??", "scratch.txt")]));
+    assert_eq!(
+        ticked(&app),
+        ["a.rs"],
+        "変更が届いた時点で選択が決まっていません"
+    );
+    app.toggle_staged_file(project, "scratch.txt", true);
+    app.apply_git_changes(project, changed(&[("??", "scratch.txt")]));
+    assert_eq!(
+        ticked(&app),
+        ["scratch.txt"],
+        "変更でなくなったファイルが選択に残っています"
+    );
+
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    for per_frame in [
+        "ensure_staged_selection(",
+        "staged_selection(",
+        "git_changes_cache.get(&project.id).cloned()",
+    ] {
+        assert!(
+            !screens.contains(per_frame),
+            "src/app/screens.rs が描画のたびに {per_frame} を行っています"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 208 (A12): every visible terminal row was read for links on every
+/// frame, though a link is only underlined under the pointer. Only the row
+/// under the pointer is read now, and its paths are probed from there.
+#[test]
+pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
+    let palette = AppTheme::Dark.palette();
+    let text = "see src/main.rs:12 now";
+    let cell = {
+        let ctx = egui::Context::default();
+        let mut cell = egui::Vec2::ZERO;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| cell = terminal_cell_size(ui));
+        });
+        cell
+    };
+    let row = egui::Rect::from_min_size(egui::pos2(0.0, 100.0), egui::vec2(800.0, cell.y));
+    let on_path = egui::pos2(6.5 * cell.x, row.center().y);
+    let probe = |pointer: Option<egui::Pos2>, resolved: &HashMap<String, Option<PathBuf>>| {
+        let ctx = egui::Context::default();
+        let mut unresolved = Vec::new();
+        let mut hovered = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                events: pointer.map(egui::Event::PointerMoved).into_iter().collect(),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    hovered = terminal_row_links(
+                        ui,
+                        text,
+                        row,
+                        cell,
+                        &mut TerminalLinkOverlay {
+                            resolved,
+                            unresolved: &mut unresolved,
+                            palette: &palette,
+                        },
+                    );
+                });
+            },
+        );
+        (hovered, unresolved)
+    };
+    let nothing = HashMap::new();
+    assert_eq!(
+        probe(None, &nothing),
+        (None, Vec::new()),
+        "ポインタのない行を読んでいます"
+    );
+    assert_eq!(
+        probe(Some(egui::pos2(on_path.x, row.bottom() + cell.y)), &nothing),
+        (None, Vec::new()),
+        "ポインタが別の行にあるのに、この行を読んでいます"
+    );
+    assert_eq!(
+        probe(Some(on_path), &nothing),
+        (None, vec!["src/main.rs".to_owned()])
+    );
+    let resolved = HashMap::from([(
+        "src/main.rs".to_owned(),
+        Some(PathBuf::from("/x/src/main.rs")),
+    )]);
+    assert_eq!(
+        probe(Some(on_path), &resolved).0,
+        Some(TerminalTargetKind::Path {
+            path: "src/main.rs".into(),
+            line: Some(12),
+        })
     );
 }

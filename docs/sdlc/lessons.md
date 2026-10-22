@@ -1322,3 +1322,21 @@ tables is a message the code shows; removing the last use removes the row.
 
 **Guard.** `every_message_row_is_one_the_code_shows` (change 207; watched
 failing with a row added that nothing shows).
+
+---
+
+## 096 — Four rows added at the top of a sorted table
+
+Change 208 added four messages at the head of both tables. The tables are
+searched with `binary_search_by`, so the four would have shown in Japanese
+whatever the language; `every_translation_table_is_sorted_by_message_id` said
+so, but only in CI, after a push. The commit gate ran only the record tests,
+and only for documents. **The rule:** a check that reads files and nothing else
+runs before the commit that changes those files, not after the push.
+
+**Guard.** `.claude/hooks/gate-commit.sh` runs the four table tests, and this
+file's own `every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran`, with
+the record tests whenever `src/` or a document changes;
+`the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` checks every name it
+runs exists (change 208; watched failing with the `src/` trigger removed and
+with a row put back at the top of a table).

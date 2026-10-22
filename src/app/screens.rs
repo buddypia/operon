@@ -2096,15 +2096,18 @@ impl OperonApp {
                     .color(palette.text_strong),
             );
             ui.menu_button(tr("テンプレートを挿入"), |ui| {
-                let templates = self.cached_prompt_templates_for(Some(&project.path));
-                for t in templates {
+                let mut chosen = None;
+                for t in self.cached_prompt_templates_for(Some(&project.path)) {
                     if ui.button(&t.title).clicked() {
-                        if self.goal_input.is_empty() {
-                            self.goal_input = t.content;
-                        } else {
-                            self.goal_input = format!("{}\n\n{}", self.goal_input, t.content);
-                        }
+                        chosen = Some(t.content.clone());
                         ui.close_menu();
+                    }
+                }
+                if let Some(content) = chosen {
+                    if self.goal_input.is_empty() {
+                        self.goal_input = content;
+                    } else {
+                        self.goal_input = format!("{}\n\n{}", self.goal_input, content);
                     }
                 }
             });
@@ -3073,9 +3076,13 @@ impl OperonApp {
                 {
                     ui.label(RichText::new(tr("Git の状態を更新しています…")).weak());
                 }
-                match self.git_changes_cache.get(&project.id).cloned() {
+                // Borrowed, not cloned: the list is drawn every frame. What a
+                // click changes is done after the loop (change 208).
+                match self.git_changes_cache.get(&project.id) {
                     Some(Ok(snapshot)) => {
-                        self.ensure_staged_selection(project.id, &snapshot.files);
+                        let mut toggled = None;
+                        let mut chosen = None;
+                        let mut opened = None;
                         ui.label(RichText::new(tr("変更されたファイル")).strong());
                         if snapshot.files.is_empty() {
                             ui.label(RichText::new(tr("作業ツリーに変更はありません。")).weak());
@@ -3091,7 +3098,7 @@ impl OperonApp {
                                     .on_hover_text(tr("次のコミットに含めます"))
                                     .changed()
                                 {
-                                    self.toggle_staged_file(project.id, &file.path, ticked);
+                                    toggled = Some((file.path.clone(), ticked));
                                 }
                                 let (mark, colour) = git_status_badge(&file.status, palette);
                                 ui.label(RichText::new(mark).size(12.0).color(colour))
@@ -3105,8 +3112,7 @@ impl OperonApp {
                                     .on_hover_text(tr("このファイルの差分だけを表示します"))
                                     .clicked()
                                 {
-                                    self.git_selected_file = Some(file.path.clone());
-                                    self.git_view = GitView::Diff;
+                                    chosen = Some(file.path.clone());
                                 }
                                 // Reviewing a change is usually the step before
                                 // editing it, so the file is one click from the
@@ -3114,11 +3120,22 @@ impl OperonApp {
                                 if icon_button(ui, palette, ICON_EDIT, tr("エディタで開く"))
                                     .clicked()
                                 {
-                                    self.open_document(project, PathBuf::from(&file.path));
+                                    opened = Some(PathBuf::from(&file.path));
                                 }
                             });
                         }
-                        if !snapshot.files.is_empty() {
+                        let has_files = !snapshot.files.is_empty();
+                        if let Some((path, ticked)) = toggled {
+                            self.toggle_staged_file(project.id, &path, ticked);
+                        }
+                        if let Some(path) = chosen {
+                            self.git_selected_file = Some(path);
+                            self.git_view = GitView::Diff;
+                        }
+                        if let Some(path) = opened {
+                            self.open_document(project, path);
+                        }
+                        if has_files {
                             ui.add_space(SPACE_SM);
                             self.ui_commit_box(ui, palette, project);
                         }
@@ -3349,33 +3366,11 @@ impl OperonApp {
                                 });
                             }
                             ui.menu_button(tr("エディタで開く"), |ui| {
-                                if ui.button("VS Code").clicked() {
-                                    let _ = open_in_external_editor(
-                                        &worktree.path,
-                                        ExternalEditor::VsCode,
-                                    );
-                                    ui.close_menu();
-                                }
-                                if ui.button("Cursor").clicked() {
-                                    let _ = open_in_external_editor(
-                                        &worktree.path,
-                                        ExternalEditor::Cursor,
-                                    );
-                                    ui.close_menu();
-                                }
-                                if ui.button("Zed").clicked() {
-                                    let _ = open_in_external_editor(
-                                        &worktree.path,
-                                        ExternalEditor::Zed,
-                                    );
-                                    ui.close_menu();
-                                }
-                                if ui.button("Finder").clicked() {
-                                    let _ = open_in_external_editor(
-                                        &worktree.path,
-                                        ExternalEditor::Finder,
-                                    );
-                                    ui.close_menu();
+                                for editor in ExternalEditor::ALL {
+                                    if ui.button(editor.label()).clicked() {
+                                        self.open_in_editor(&worktree.path, editor);
+                                        ui.close_menu();
+                                    }
                                 }
                             });
                             if !worktree.is_main {
@@ -6101,21 +6096,11 @@ impl OperonApp {
                         if let Some(ref wt) = session.worktree_path {
                             ui.separator();
                             ui.label(RichText::new(tr("外部エディタで開く")).small().weak());
-                            if ui.button("VS Code").clicked() {
-                                let _ = open_in_external_editor(wt, ExternalEditor::VsCode);
-                                ui.close_menu();
-                            }
-                            if ui.button("Cursor").clicked() {
-                                let _ = open_in_external_editor(wt, ExternalEditor::Cursor);
-                                ui.close_menu();
-                            }
-                            if ui.button("Zed").clicked() {
-                                let _ = open_in_external_editor(wt, ExternalEditor::Zed);
-                                ui.close_menu();
-                            }
-                            if ui.button("Finder").clicked() {
-                                let _ = open_in_external_editor(wt, ExternalEditor::Finder);
-                                ui.close_menu();
+                            for editor in ExternalEditor::ALL {
+                                if ui.button(editor.label()).clicked() {
+                                    self.open_in_editor(wt, editor);
+                                    ui.close_menu();
+                                }
                             }
                         }
                         if let (Some(project), Some(ref wt), Some(ref branch)) =
@@ -6148,6 +6133,7 @@ impl OperonApp {
                                     .button(tr("実行スクリプト (.operon/run.sh) を起動…"))
                                     .clicked()
                                 {
+                                    let script = script.clone();
                                     self.pending_run_script = Some(PendingRunScript {
                                         project: project.id,
                                         worktree: wt_to_check.to_path_buf(),
@@ -6199,12 +6185,7 @@ impl OperonApp {
                                     self.restore_checkpoint(session_id, &commit);
                                 }
                                 if let Some(commit) = copy_diff_commit {
-                                    if let Some(ref wt) = session.worktree_path {
-                                        if let Ok(diff) = git_diff_checkpoint(wt, &commit) {
-                                            ui.ctx().copy_text(diff);
-                                            self.notice_briefly(tr("差分をコピーしました。"));
-                                        }
-                                    }
+                                    self.copy_checkpoint_diff(session_id, commit);
                                 }
                             }
                         }
@@ -7039,7 +7020,10 @@ impl OperonApp {
             });
             ui.add_space(SPACE_XS);
         }
-        let selected = self.staged_selection(project.id).len();
+        let selected = self
+            .git_staged_files
+            .get(&project.id)
+            .map_or(0, HashSet::len);
         ui.add(
             egui::TextEdit::multiline(self.commit_messages.entry(project.id).or_default())
                 .desired_rows(3)

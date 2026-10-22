@@ -84,6 +84,12 @@ pub(crate) enum BackgroundKey {
     CheckpointCapture(Uuid, usize),
     Checkpoints(Uuid),
     CheckpointRestore(Uuid),
+    CheckpointDiff(Uuid),
+    /// Reading `.operon/run.sh` for the session menu, and the prompt
+    /// templates for the launch form: off the frame that shows them
+    /// (change 208).
+    RunScriptRead,
+    PromptTemplatesRead,
     /// One for every project (change 157): enabled projects run one after
     /// another inside it, so two runs can never overlap.
     KnowledgeRun,
@@ -289,6 +295,18 @@ pub(crate) enum BackgroundResult {
         session_id: Uuid,
         project_id: Uuid,
         result: UiResult<()>,
+    },
+    CheckpointDiff {
+        session_id: Uuid,
+        result: UiResult<String>,
+    },
+    RunScriptRead {
+        worktree: PathBuf,
+        script: Option<SetupScript>,
+    },
+    PromptTemplatesRead {
+        project_path: Option<PathBuf>,
+        templates: Vec<PromptTemplate>,
     },
     KnowledgeRan {
         results: Vec<(Uuid, UiResult<KnowledgeSnapshot>)>,
@@ -1088,35 +1106,99 @@ impl OperonApp {
         base
     }
 
-    pub(crate) fn cached_run_script_for(&mut self, worktree: &Path) -> Option<SetupScript> {
-        let now = Instant::now();
-        if let Some((cached_path, read_at, cached_script)) = &self.cached_run_script {
-            if cached_path == worktree && now.duration_since(*read_at) < Duration::from_secs(2) {
-                return cached_script.clone();
-            }
+    /// The run script the session menu offers, as last read. The menu is
+    /// drawn every frame it is open, so the file is read on a background
+    /// thread, again once the reading is two seconds old (change 208); what
+    /// runs is read again and checked against the digest shown.
+    pub(crate) fn cached_run_script_for(&mut self, worktree: &Path) -> Option<&SetupScript> {
+        let fresh = self
+            .cached_run_script
+            .as_ref()
+            .is_some_and(|(path, read_at, _)| {
+                path == worktree && read_at.elapsed() < Duration::from_secs(2)
+            });
+        // Checked before the closure is built: while a read is out, a stale
+        // menu asks every frame.
+        if !fresh
+            && !self
+                .background_tasks
+                .contains(&BackgroundKey::RunScriptRead)
+        {
+            let worktree = worktree.to_path_buf();
+            self.spawn_background(BackgroundKey::RunScriptRead, move || {
+                let script = match read_run_script(&worktree) {
+                    SetupScriptRead::Found(script) => Some(script),
+                    _ => None,
+                };
+                BackgroundResult::RunScriptRead { worktree, script }
+            });
         }
-        let found = match read_run_script(worktree) {
-            SetupScriptRead::Found(script) => Some(script),
+        match &self.cached_run_script {
+            Some((path, _, script)) if path == worktree => script.as_ref(),
             _ => None,
-        };
-        self.cached_run_script = Some((worktree.to_path_buf(), now, found.clone()));
-        found
+        }
     }
 
+    /// The templates the launch form offers, read the way the run script is.
     pub(crate) fn cached_prompt_templates_for(
         &mut self,
         project_path: Option<&Path>,
-    ) -> Vec<PromptTemplate> {
-        let now = Instant::now();
-        let key = project_path.map(Path::to_path_buf);
-        if let Some((cached_path, read_at, templates)) = &self.cached_prompt_templates {
-            if *cached_path == key && now.duration_since(*read_at) < Duration::from_secs(2) {
-                return templates.clone();
-            }
+    ) -> &[PromptTemplate] {
+        let fresh = self
+            .cached_prompt_templates
+            .as_ref()
+            .is_some_and(|(path, read_at, _)| {
+                path.as_deref() == project_path && read_at.elapsed() < Duration::from_secs(2)
+            });
+        if !fresh
+            && !self
+                .background_tasks
+                .contains(&BackgroundKey::PromptTemplatesRead)
+        {
+            let project_path = project_path.map(Path::to_path_buf);
+            self.spawn_background(BackgroundKey::PromptTemplatesRead, move || {
+                let templates = list_prompt_templates(project_path.as_deref());
+                BackgroundResult::PromptTemplatesRead {
+                    project_path,
+                    templates,
+                }
+            });
         }
-        let templates = list_prompt_templates(project_path);
-        self.cached_prompt_templates = Some((key, now, templates.clone()));
-        templates
+        match &self.cached_prompt_templates {
+            Some((path, _, templates)) if path.as_deref() == project_path => templates,
+            _ => &[],
+        }
+    }
+
+    /// Opens a folder in an editor or Finder. The editor's command line can
+    /// take seconds to answer, so it runs off the frame and a failure is
+    /// shown rather than dropped (change 208).
+    pub(crate) fn open_in_editor(&mut self, path: &Path, editor: ExternalEditor) {
+        let path = path.to_path_buf();
+        self.request_system_action(
+            tf!("{editor} で開く", editor = editor.label()),
+            move || open_in_external_editor(&path, editor),
+        );
+    }
+
+    /// Copies what changed since a checkpoint. `git diff` runs off the frame;
+    /// the text reaches the clipboard when it arrives (change 208).
+    pub(crate) fn copy_checkpoint_diff(&mut self, session_id: Uuid, commit: String) {
+        let Some(worktree) = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| session.worktree_path.clone())
+        else {
+            return;
+        };
+        self.spawn_background(BackgroundKey::CheckpointDiff(session_id), move || {
+            BackgroundResult::CheckpointDiff {
+                session_id,
+                result: git_diff_checkpoint(&worktree, &commit).map_err(|error| error.to_string()),
+            }
+        });
     }
 
     pub(crate) fn selected_project(&self) -> Option<&Project> {
@@ -2290,6 +2372,47 @@ impl OperonApp {
                         self.session_checkpoints.insert(session_id, checkpoints);
                     }
                 }
+                BackgroundResult::CheckpointDiff { session_id, result } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::CheckpointDiff(session_id));
+                    // A session closed while its diff was read: what arrives
+                    // is no longer what anybody asked to copy.
+                    if !self
+                        .store
+                        .sessions
+                        .iter()
+                        .any(|session| session.id == session_id)
+                    {
+                        continue;
+                    }
+                    match result {
+                        Ok(diff) => {
+                            // Results are applied inside `update`, which sets
+                            // `repaint` first, so this is the context the
+                            // frame is drawing; `None` is a test's app only.
+                            if let Some(ctx) = &self.repaint {
+                                ctx.copy_text(diff);
+                                self.notice_briefly(tr("差分をコピーしました。"));
+                            }
+                        }
+                        Err(error) => {
+                            self.notice =
+                                Some(tf!("差分をコピーできませんでした: {error}", error = error));
+                        }
+                    }
+                }
+                BackgroundResult::RunScriptRead { worktree, script } => {
+                    self.background_tasks.remove(&BackgroundKey::RunScriptRead);
+                    self.cached_run_script = Some((worktree, Instant::now(), script));
+                }
+                BackgroundResult::PromptTemplatesRead {
+                    project_path,
+                    templates,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::PromptTemplatesRead);
+                    self.cached_prompt_templates = Some((project_path, Instant::now(), templates));
+                }
                 BackgroundResult::CheckpointRestored {
                     session_id,
                     project_id,
@@ -2357,6 +2480,7 @@ impl OperonApp {
                     .map(|file| (file.path.clone(), file.status.clone()))
                     .collect();
                 self.git_status_badge_cache.insert(project_id, badge_map);
+                self.ensure_staged_selection(project_id, &snapshot.files);
             }
             Err(_) => {
                 self.git_status_badge_cache.remove(&project_id);
@@ -8236,8 +8360,9 @@ impl OperonApp {
 
 /// Choosing what goes in, saying what it was, and sending it.
 impl OperonApp {
-    /// Which files are ticked, seeded the first time this project's changes are
-    /// seen: tracked modifications yes, untracked no. An agent that left a
+    /// Which files are ticked, seeded the first time this project's changes
+    /// arrive: tracked modifications yes, untracked no. Run when they arrive,
+    /// not when they are drawn (change 208). An agent that left a
     /// scratch file behind should not have it recorded by somebody who did not
     /// look at it.
     pub(crate) fn ensure_staged_selection(&mut self, project: Uuid, files: &[ChangedFile]) {

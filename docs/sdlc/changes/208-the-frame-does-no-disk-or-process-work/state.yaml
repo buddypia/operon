@@ -1,0 +1,73 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/208-the-frame-does-no-disk-or-process-work.
+#
+# Report: change 202's reading of the open records (triage.md there, A11,
+# A12 and A17).
+#
+# A11. Opening a folder in an editor and copying a checkpoint's diff ran on
+#      the frame that drew the menu, up to ten seconds (two five-second
+#      command timeouts), and every error was dropped with `let _`.
+# A12. Every visible terminal row was split into links on every frame, though
+#      a link is only underlined under the pointer; the staged-file selection
+#      was rebuilt, from a clone of the whole status, on every frame the
+#      changes list was drawn, and the commit box built a sorted list to count
+#      it.
+# A17. The session menu read `.operon/run.sh`, and the launch form listed and
+#      read the templates folder, on the frame that drew them and every two
+#      seconds while they stayed open.
+#
+# Fix: open_in_editor runs the editor as a system action, so its failure is a
+# notice, said in Japanese; copy_checkpoint_diff reads the diff on a
+# background thread and copies it when it arrives. Both menus loop over
+# ExternalEditor::ALL. terminal_row_links reads only the row under the
+# pointer and asks for a repaint when it queues a path to probe. The staged
+# selection is settled in apply_git_changes; the list borrows the snapshot
+# and applies a click after its loop; the commit box counts the set. The run
+# script and the templates are read on background threads, again once the
+# reading is two seconds old, and shown only for the folder they were read
+# from; running the script still reads it again against the digest shown.
+#
+# Looked at and left: ui_terminal_session_tabs clones the projects and the
+# sessions each frame it is drawn, and ui_session_ports collects a session's
+# ports. Both are a few dozen small structs, tens of microseconds; taking the
+# first clone out means reworking a 650-line drawing function around the
+# borrows, which costs more than it saves.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Ten remarks are carried in review.yaml; the bounded run
+  script read is change 209's. Closed in the same commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the five new tests fail on the code as
+    it was: three name the calls it lacked, the selection test finds nothing
+    ticked on arrival, and the link test finds rows read with no pointer on
+    them; mutations.py here caught 12 of 12"
+  three-gates: "machine passed cargo fmt, clippy and the named tests; the
+    suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed yes: src/app.rs, src/app/screens.rs,
+    src/ui/terminal.rs, src/util.rs; the installed app is rebuilt from main
+    after the changes that follow 202"
+  review: "human passed rust-reviewer approve 0 0, durability-reviewer
+    approve 0 0 and subprocess-safety-reviewer approve-with-nits 0 2 at
+    a135edd823c71f85 (round 4: CI found the rows out of order, then a lesson
+    whose guard was not watched failing), ten remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
