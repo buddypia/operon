@@ -1357,3 +1357,19 @@ with no row, one with a row written where nothing translates it, and an
 exemption nothing uses any more (change 212; watched failing on the four
 literals above, and on each of them put back raw by `mutations.py`).
 
+
+## 098 — A landed record judged against a main it never saw
+
+The stop gate re-judges every commit since a branch's audit mark. Change 190
+judges a commit that holds only a review record against `refs/heads/main`,
+which is right before the branch lands and wrong after: main moves on, the
+record's diff then carries the next changes' code, and 208's correct
+re-verdict was refused once 209 and 210 had landed. The audit marks were moved
+by hand to clear it. **The rule:** a commit is re-judged against what it was
+judged against when it landed — for a record main already holds, main just
+before the merge that brought it in.
+
+**Guard.** `the_review_gate_refuses_what_it_says_it_refuses_after_a_landing`
+merges the re-verdict into main, lands another change on main, and expects
+`--commit` on the re-verdict to still ship (change 213; watched failing with
+the refusal 208's record got, and against each base `mutations.py` puts back).

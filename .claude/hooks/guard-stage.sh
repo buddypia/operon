@@ -22,6 +22,8 @@
 set -uo pipefail
 export GIT_NO_REPLACE_OBJECTS=1
 export GIT_GRAFT_FILE=/dev/null
+# The graft deprecation hint git 2.56 prints on every call; scripts/check-review.sh.
+export GIT_ADVICE=0
 
 payload=$(cat)
 [ "${OPERON_SKIP_STAGE_GATE:-0}" = "1" ] && exit 0

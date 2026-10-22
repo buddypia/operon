@@ -1,0 +1,33 @@
+# Review record for 213-a-landed-record-is-judged-where-it-landed.
+#
+# The change: under --commit, a record-only commit main already holds is
+# judged against the main it was reviewed against — the parent of the first
+# commit on main's first-parent line the record does not contain — instead of
+# today's main; seven gate scripts export GIT_ADVICE=0 beside the graft guard.
+# Lesson 098.
+#
+# Round 1: rust-reviewer approve-with-nits 0 4, subprocess-safety-reviewer
+# approve-with-nits 0 3. Taken: main also moves between the fork and the merge
+# in the test, with a mutation for "the merge's parent"; the base-assignment
+# pin matches the whole line. Withdrawn by the reviewer after checking: the
+# block cannot be reached under --against, since --commit always overwrites
+# the base with a SHA; an empty expectation in GateChecks means "printed
+# nothing".
+# Round 2: rust-reviewer approve 0 0, subprocess-safety-reviewer
+# approve-with-nits 0 3 (all carried from round 1).
+
+digest: "78ad04d52062bc54"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1 · scripts/check-review.sh: a record committed on main's own first-parent line gets itself as its base and an empty diff, so --commit passes it; safe only because main's line is gated.
+    person: "main に直接 commit された判定記録は、後から確かめ直しても中身が空として通ります。main への直接の commit は別の仕組みで止めているので、いま困ることはありません。"
+  - subprocess-safety-reviewer/1 · scripts/check-review.sh: $commit is passed to git as given rather than resolved to a commit id once.
+    person: "確かめる commit の指定を、最初に commit の ID へ変換せずにそのまま git に渡しています。おかしな指定は失敗し、厳しい側の判定になります。"
+  - subprocess-safety-reviewer/1 · scripts/check-review.sh: rev-list walks every commit on main since the record to take the last line.
+    person: "取り込み済みの記録を確かめ直すとき、その記録以降の main の履歴をすべてたどります。履歴がとても長くなると少し遅くなります。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

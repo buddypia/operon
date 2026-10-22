@@ -48,6 +48,9 @@ export GIT_NO_REPLACE_OBJECTS=1
 # twin with the same tree makes the diff empty and the gate finds nothing to
 # judge. Measured: `-c core.graftFile=/dev/null` does not close it; this does.
 export GIT_GRAFT_FILE=/dev/null
+# git 2.56 deprecates grafts and hints so on every call made with the variable
+# above, which buried this gate's own message. Advice only; errors still print.
+export GIT_ADVICE=0
 
 # The repository is the one the caller is in, not the one this file sits in:
 # the git hook may be running this script out of the main branch's tree, from
@@ -213,6 +216,17 @@ if quiet_diff . "$EXCLUDE"; then
     [ "$one_dir" -eq 1 ] \
       && git rev-parse --verify --quiet 'refs/heads/main^{commit}' >/dev/null 2>&1 \
       && base=refs/heads/main
+    # Once landed, main moves on and the stop gate still re-judges this commit:
+    # against today's main its diff carries the next changes' code (change
+    # 213). Main's own line names where it landed: the first commit on it the
+    # record does not contain, whose parent is the main the record was
+    # reviewed against. A record at main's tip has none, `^1` alone names no
+    # commit, and it keeps main.
+    if [ "$mode" = commit ] && [ "$base" = refs/heads/main ] \
+      && git merge-base --is-ancestor "$commit" refs/heads/main 2>/dev/null; then
+      landing=$(git rev-list --first-parent refs/heads/main "^$commit" 2>/dev/null | tail -n 1)
+      landed_on=$(git rev-parse --verify --quiet "${landing}^1" 2>/dev/null) && base=$landed_on
+    fi
   fi
 fi
 case "$mode" in

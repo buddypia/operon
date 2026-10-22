@@ -21,6 +21,8 @@ set -uo pipefail
 # objects, and every number below is read from history. Entry in REVIEW.md.
 export GIT_NO_REPLACE_OBJECTS=1
 export GIT_GRAFT_FILE=/dev/null
+# The graft deprecation hint git 2.56 prints on every call; scripts/check-review.sh.
+export GIT_ADVICE=0
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
