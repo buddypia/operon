@@ -48022,6 +48022,49 @@ pub(crate) fn the_merge_gate_waits_for_ci_and_falls_back_to_the_local_suite() {
         (Some(0), "", ""),
         "worktree での素の merge に口を出しました"
     );
+    // The main checkout switched to somebody's branch: a merge run there would
+    // land on that branch and pass as "not into main". Change 200 met it once,
+    // stopped only by that branch's uncommitted Cargo.lock.
+    // A detached HEAD there is the same: the merge lands on no branch.
+    for (switch, held) in [
+        (
+            &["checkout", "-q", "-b", "chore/elsewhere"][..],
+            "chore/elsewhere",
+        ),
+        (&["checkout", "-q", "--detach"][..], "a detached HEAD"),
+    ] {
+        ci_gate_git(&repository, switch);
+        for spelled in [merge, "git merge feature/x"] {
+            let (code, said, calls) = attempt(&repository, spelled, &passed);
+            assert_eq!(
+                code,
+                Some(2),
+                "main でない main checkout への merge を通しました ({spelled}): {said}"
+            );
+            assert!(
+                said.lines().next().unwrap_or_default().contains(held),
+                "拒否の理由が main checkout の今の branch を名指ししていません ({spelled}): {said}"
+            );
+            assert!(
+                calls.is_empty(),
+                "main でない main checkout で suite を走らせました ({spelled}): {calls}"
+            );
+        }
+        // Only the main checkout: a worktree still merges main into its
+        // branch, and an abort still passes.
+        for (from, spelled) in [
+            (&worktree, "git merge --no-ff --no-edit main"),
+            (&repository, "git merge --abort"),
+        ] {
+            let (code, said, calls) = attempt(from, spelled, &offline);
+            assert_eq!(
+                (code, said.as_str(), calls.as_str()),
+                (Some(0), "", ""),
+                "main checkout が main でないときに {spelled} を止めました"
+            );
+        }
+        ci_gate_git(&repository, &["checkout", "-q", "main"]);
+    }
 
     // Every other spelling of a merge into main is refused rather than read:
     // an option after the branch, a merge chained behind another, and a merge

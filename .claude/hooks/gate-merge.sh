@@ -105,7 +105,28 @@ fi
 cd -- "$running_in" 2>/dev/null || exit 0
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
 on_main=0
-[ "$(git branch --show-current 2>/dev/null)" = main ] && on_main=1
+current=$(git branch --show-current 2>/dev/null)
+[ "$current" = main ] && on_main=1
+
+# A merge run in the main checkout is a landing, but it lands on whatever branch
+# the checkout holds. The trunk guard refuses switching it away from main, so a
+# switch comes from outside these hooks — a person, another tool — and the
+# merge would go into their branch and pass below as "not into main". Change
+# 200 met it once, stopped only by that branch's uncommitted Cargo.lock.
+# A payload with no usable cwd is judged in CLAUDE_PROJECT_DIR, the main
+# checkout, and refused here too. `--path-format` needs git 2.31; an older git
+# leaves git_dir empty and the check off.
+git_dir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)
+if [ "$on_main" = 0 ] && [ -n "$git_dir" ] &&
+  [ "$git_dir" = "$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ]; then
+  block "the main checkout is on ${current:-a detached HEAD}, not main" \
+"A merge here would land on ${current:-that detached HEAD}, which somebody else
+switched to. Leave the main checkout as it is. Land from your own worktree:
+\`git switch main\` there, the merge, \`git push origin main\`, then \`git switch\`
+back to your branch at once — also when the merge or the push failed — so the
+main checkout can return to main. If git refuses the switch because main is
+checked out in another worktree, somebody else is landing: wait for them."
+fi
 
 canonical='^git[[:space:]]+merge[[:space:]]+--(no-ff|ff-only)([[:space:]]+--no-edit)?[[:space:]]+[A-Za-z0-9][A-Za-z0-9._/-]*$'
 if [ "$single" = 0 ] || ! printf '%s' "$trimmed" | grep -E "$canonical" >/dev/null; then
