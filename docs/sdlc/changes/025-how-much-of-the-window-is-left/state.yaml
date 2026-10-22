@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "4 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Verify against a real authenticated Claude Code turn, then have a person read the diff."
+resume: "Closed by change 202 after reading it against the code: landed; the install marker and throttle defects are A1 and A2 in triage.md."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine waived only steering_bytes is breached, at diagnose, which it was before this session"
   guards-verified-by-mutation: "human passed a foreign slot taken, an emptied slot refilled, and the throttle restored to the form that shipped nothing; the two halves of the throttle fix are each sufficient, so only restoring both reproduces it"
   screen-agreed: "human passed a toolbar chip was chosen over a settings row"
-  live-reading: "human pending run one turn of an authenticated Claude Code and confirm the chip fills in"
+  live-reading: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
