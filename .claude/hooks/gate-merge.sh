@@ -29,6 +29,8 @@
 set -uo pipefail
 export GIT_NO_REPLACE_OBJECTS=1
 export GIT_GRAFT_FILE=/dev/null
+# The graft deprecation hint git 2.56 prints on every call; scripts/check-review.sh.
+export GIT_ADVICE=0
 
 payload=$(cat)
 command=$(printf '%s' "$payload" | jq -r '.tool_input.command // .tool_input.CommandLine // .toolCall.args.CommandLine // .toolCall.args.command // empty')

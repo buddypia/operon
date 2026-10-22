@@ -26,6 +26,8 @@ export GIT_NO_REPLACE_OBJECTS=1
 # twin with the same tree makes the diff empty and the gate finds nothing to
 # judge. Measured: `-c core.graftFile=/dev/null` does not close it; this does.
 export GIT_GRAFT_FILE=/dev/null
+# The graft deprecation hint git 2.56 prints on every call; scripts/check-review.sh.
+export GIT_ADVICE=0
 common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 main=""
 [ -n "$common" ] && main=$(dirname "$common")

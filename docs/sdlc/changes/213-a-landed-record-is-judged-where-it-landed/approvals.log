@@ -1,0 +1,14 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The plan changes what the main-branch judge reads for a commit main already
+# holds, turning a wrong refusal into a pass, which approval.md gives to a
+# person; the evaluator, a fresh subagent, approved it after two revisions
+# (the plan file had not been placed; then the base was named X^1 and the
+# main-tip fallback added). The person line quotes the owner's standing
+# instruction, given before this defect surfaced in the stop gate's refusal of
+# 208's record, to fix every problem found along the way, judgement calls
+# included; it is reported to them as a loosening with the landing.
+# The digest is of the approved text plus the blank line the departures
+# section added before its heading; the approved text is unchanged.
+2026-10-22T12:28:00Z auto plan plan.md ef74cea3712672e4 approve evaluator: base X^1 only for landed ancestors, main-tip and unlanded keep refs/heads/main, --index/--against untouched, GIT_ADVICE=0 hides no errors; person approval still required (gate-configuration)
+2026-10-22T12:28:00Z person gate-configuration plan.md ef74cea3712672e4 approve owner: 判断が必要なものも恒久対応しても全て対応して / 見つかった残タスクや問題も恒久対応してPRマージクリーンアップして / それで進めて。取りこぼさないで1件ずつ確認して恒久対応すること

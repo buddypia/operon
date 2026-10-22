@@ -24374,6 +24374,7 @@ pub(crate) fn every_judging_script_reads_the_real_objects() {
         ".claude/hooks/gate-stop.sh",
         ".claude/hooks/gate-merge.sh",
         ".claude/hooks/guard-stage.sh",
+        "scripts/pipeline-indicators.sh",
     ] {
         let text = fs::read_to_string(root.join(rel)).unwrap();
         // Code, not prose, and the whole line: entry 011 in docs/sdlc/lessons.md
@@ -24403,6 +24404,18 @@ pub(crate) fn every_judging_script_reads_the_real_objects() {
                  grafts が親を差し替えると sha^..sha が空になり、判定するものが無くなります"
             );
         };
+        // git 2.56 deprecates grafts and says so on every call made with the
+        // graft file set, so a refusal arrived under a screen of hints
+        // (change 213). Advice only: errors still print.
+        let quiet = code
+            .iter()
+            .position(|line| line.trim() == "export GIT_ADVICE=0");
+        let Some(quiet) = quiet else {
+            panic!(
+                "{rel} が GIT_ADVICE=0 を export していません — \
+                 git の grafts 非推奨の hint が git を呼ぶたびに出て、拒否の理由が埋もれます"
+            );
+        };
         // Before the first `git`, or it is an export that arrives too late to
         // change what any of them read. Split on the shell's own separators,
         // not on whitespace: every `git` call in the trampoline is a command
@@ -24416,15 +24429,17 @@ pub(crate) fn every_judging_script_reads_the_real_objects() {
                 .any(|word| word == "git" || word.ends_with("/git"))
         });
         // Not `is_none_or`: "the detector found nothing, so pass" is the exact
-        // shape round 18 caught here. All four scripts call git, so a `None`
+        // shape round 18 caught here. Every script listed calls git, so a `None`
         // means the detector stopped working, not that the script is clean.
         assert!(
             first_git.is_some(),
             "{rel} で git の呼び出しが1つも見つかりません — 検出器が壊れています"
         );
         assert!(
-            first_git.is_some_and(|first_git| exported < first_git && grafted < first_git),
-            "{rel} の GIT_NO_REPLACE_OBJECTS=1 / GIT_GRAFT_FILE=/dev/null が最初の git 呼び出しより後にあります — \
+            first_git.is_some_and(|first_git| {
+                exported < first_git && grafted < first_git && quiet < first_git
+            }),
+            "{rel} の GIT_NO_REPLACE_OBJECTS=1 / GIT_GRAFT_FILE=/dev/null / GIT_ADVICE=0 が最初の git 呼び出しより後にあります — \
              それより前の git は差し替えられた object や親を読んだままです"
         );
     }
@@ -25649,8 +25664,55 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_after_a_landing() 
         "✅ SHIP",
     );
     f.git(&["reset", "-q", "--hard"]);
-    // The branch would vouch for its commits in the reflog cases below.
+    // Change 213: once landed, the stop gate re-judges the re-verdict while
+    // main keeps moving. Judged against today's main, its diff carried the
+    // next change's code and the commit that was right was refused; it is
+    // judged against main as it was before the merge that brought it in.
+    // Main also moves between the branch taking it in and the merge, so the
+    // merge's own parent is not the main the record was reviewed against.
     f.git(&["checkout", "-q", "main"]);
+    let before_landing = f.git(&["rev-parse", "HEAD"]);
+    f.append("Cargo.toml", "# main moved before the merge\n");
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-q", "-m", "main moved before the merge"]);
+    f.git(&["merge", "-q", "--no-ff", "--no-edit", "topic"]);
+    f.append("src/store.rs", "// the next change on main\n");
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-q", "-m", "next change"]);
+    c.check(
+        "re-verdict re-judged after main moved on",
+        f.gate_in("--commit", &[re_verdict.trim()]),
+        0,
+        "✅ SHIP",
+    );
+    // A record committed alone on main's tip contains every commit on main's
+    // line, so nothing names a landing: it keeps main as its base and the
+    // answer it had before change 213, not an unreadable base.
+    f.record("3333333333333333", all);
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-q", "-m", "record on main"]);
+    let on_main = f.git(&["rev-parse", "HEAD"]);
+    c.check(
+        "record alone at main's tip",
+        f.gate_in("--commit", &[on_main.trim()]),
+        0,
+        "",
+    );
+    // Not landed while main moved on: the record is judged against today's
+    // main, as before, not at the commit it forked from — a branch does not
+    // get to say it has landed.
+    f.git(&["reset", "-q", "--hard", before_landing.trim()]);
+    f.append("src/store.rs", "// main moved before the landing\n");
+    f.git(&["add", "-A"]);
+    f.git(&["commit", "-q", "-m", "main moved"]);
+    c.check(
+        "unlanded re-verdict after main moved",
+        f.gate_in("--commit", &[re_verdict.trim()]),
+        1,
+        "判定が古い diff のものです",
+    );
+    f.git(&["reset", "-q", "--hard", before_landing.trim()]);
+    // The branch would vouch for its commits in the reflog cases below.
     f.git(&["branch", "-q", "-D", "topic"]);
 
     // No change directory: a high surface is refused, a low one passes, and
@@ -26981,6 +27043,9 @@ pub(crate) fn the_review_gate_has_no_bypass() {
                 && !line.contains("--against) shift; base=")
                 && !line.contains("base=$(git rev-parse --verify --quiet \"${commit}^\"")
                 && !line.contains("&& base=refs/heads/main")
+                // Change 213: a landed record, at main as it was reviewed.
+                && line.trim()
+                    != "landed_on=$(git rev-parse --verify --quiet \"${landing}^1\" 2>/dev/null) && base=$landed_on"
         })
         .count();
     assert!(

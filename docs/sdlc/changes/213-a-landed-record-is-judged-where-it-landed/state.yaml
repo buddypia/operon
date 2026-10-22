@@ -1,0 +1,63 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/213-a-landed-record-is-judged-where-it-landed.
+#
+# Report: found while landing changes 209 and 210. The stop gate re-judges
+# every commit since a branch's audit mark, and judged 208's record-only commit
+# 0b32a27 against a main that already held 209 and 210: its diff carried their
+# code, its digest was stale, and the gate refused a commit that was right.
+# The audit marks were moved by hand to clear it. Beside it, git 2.56 printed
+# a grafts deprecation hint on every git call the gates make, burying the
+# refusal under repeated hints.
+#
+# Fix: plan.md. A record-only commit main already holds is judged against the
+# main it was reviewed against: the parent of the first commit on main's
+# first-parent line it does not contain. GIT_ADVICE=0 beside every
+# GIT_GRAFT_FILE=/dev/null. Measured on this repository: 0b32a27 under --commit
+# was refused by the old script and ships under the new one.
+#
+# Route: bugfix. The surface is gate configuration, a paused one. The landed
+# base changes only how a commit main already holds is re-judged, and nothing
+# lands differently, but it turns a refusal into a pass, so the plan went to a
+# person as well as an evaluator; the person's words are the request this work
+# follows.
+#
+# Found on the way, and its own change (214): the mutation sweep never runs
+# the checks on the unmutated tree, so a test that already failed reported
+# every mutation as caught. This sweep was re-run on a green tree.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Three remarks are carried in review.yaml. Closed in the same
+  commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the_review_gate_refuses_what_it_says_it_refuses_after_a_landing
+    refused the landed re-verdict as 208's record was refused, and
+    every_judging_script_reads_the_real_objects found no GIT_ADVICE=0, on the
+    unedited scripts; mutations.py here caught 5 of 5 on a green tree"
+  three-gates: "machine passed cargo fmt, clippy and the named tests; the
+    suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed no: only scripts, hooks, src/tests.rs and
+    records change"
+  review: "human passed rust-reviewer approve 0 0 and
+    subprocess-safety-reviewer approve-with-nits 0 3 at 78ad04d52062bc54
+    (round 2), three remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
