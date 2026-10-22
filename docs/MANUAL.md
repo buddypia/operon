@@ -467,6 +467,7 @@ Operon's data lives in `~/Library/Application Support/com.local.operon/`
 | `keybindings.json` | Your shortcuts, if you created it |
 | `diff-comments.json` | Notes written on diffs |
 | `setup-trust.json` | Approved `.operon/setup.sh` digests |
+| `approved-scripts/` | The exact bytes of each approved setup or run script, by digest: what runs is this copy, with `$0` still the script's path in the repository. `${BASH_SOURCE[0]}` names the copy, so a script that finds its folder from it, or runs only when `${BASH_SOURCE[0]}` equals `$0`, should use `$0` or the worktree, which is the current directory. A script that runs `bash "$0"` again runs the repository's file as it is then, not the approved copy |
 | `agent-hooks/` | Managed hook scripts, endpoint file, and the local `hook.sock` socket (mode `0700`) |
 | `shared-sessions/` | The restore archive ([section 6](#6-cross-cli-conversation-restore)) |
 | `.operon-instance.lock` | Single-instance lock |

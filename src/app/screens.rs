@@ -7533,20 +7533,8 @@ impl OperonApp {
                         .clicked()
                     {
                         match crate::git::setup::decide_run_script_run(&pending.worktree, &pending.script.digest) {
-                            crate::git::setup::SetupRunDecision::Run(_) => {
-                                let script_path = pending.worktree.join(RUN_SCRIPT_RELATIVE_PATH);
-                                let cmd_str =
-                                    format!("bash {}", shell_quote(&script_path.display().to_string()));
-                                let session_name = format!(
-                                    "run-{}",
-                                    pending.script.digest.chars().take(8).collect::<String>()
-                                );
-                                self.launch_custom_script_session(
-                                    pending.project,
-                                    &pending.worktree,
-                                    &session_name,
-                                    &cmd_str,
-                                );
+                            crate::git::setup::SetupRunDecision::Run(script) => {
+                                self.run_approved_script(pending.project, &pending.worktree, &script);
                                 self.pending_run_script = None;
                             }
                             crate::git::setup::SetupRunDecision::Changed(script) => {

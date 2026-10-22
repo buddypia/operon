@@ -406,6 +406,7 @@ Operon のデータは `~/Library/Application Support/com.local.operon/` にあ�
 | `keybindings.json` | あなたのショートカット（作成した場合） |
 | `diff-comments.json` | diff に書いたメモ |
 | `setup-trust.json` | 承認済みの `.operon/setup.sh` のダイジェスト |
+| `approved-scripts/` | 承認したセットアップ・実行スクリプトの内容そのもの（ダイジェストごと）。実行されるのはこのコピーで、`$0` はリポジトリ内の元のパスのままです。`${BASH_SOURCE[0]}` はコピーを指すため、そこからフォルダを求めるスクリプトや、`${BASH_SOURCE[0]}` と `$0` が等しいときだけ動くスクリプトは、`$0` か作業ディレクトリ（worktree）を使ってください。`bash "$0"` で自分を呼び直すと、承認したコピーではなく、その時点のリポジトリのファイルが実行されます |
 | `agent-hooks/` | 管理フックのスクリプト、endpoint ファイル、ローカルの `hook.sock`（`0700`） |
 | `shared-sessions/` | 復元アーカイブ（[第 6 章](#6-cli-をまたぐ会話の復元)） |
 | `.operon-instance.lock` | 多重起動ロック |

@@ -407,6 +407,7 @@ Operon의 데이터는 `~/Library/Application Support/com.local.operon/`에 있�
 | `keybindings.json` | 사용자 단축키(만든 경우) |
 | `diff-comments.json` | diff에 쓴 메모 |
 | `setup-trust.json` | 승인한 `.operon/setup.sh`의 다이제스트 |
+| `approved-scripts/` | 승인한 설정·실행 스크립트의 내용 그대로(다이제스트별). 실행되는 것은 이 사본이며, `$0`은 저장소 안의 원래 경로 그대로입니다. `${BASH_SOURCE[0]}`은 사본을 가리키므로, 그 값으로 폴더를 찾거나 `${BASH_SOURCE[0]}`과 `$0`이 같을 때만 실행되는 스크립트는 `$0`이나 작업 디렉터리(worktree)를 사용하세요. `bash "$0"`로 자신을 다시 실행하면 승인한 사본이 아니라 그 시점의 저장소 파일이 실행됩니다 |
 | `agent-hooks/` | 관리형 hook 스크립트, endpoint 파일, 로컬 `hook.sock`(`0700`) |
 | `shared-sessions/` | 복원 아카이브([6장](#6-cli-간-대화-복원)) |
 | `.operon-instance.lock` | 중복 실행 잠금 |

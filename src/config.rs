@@ -334,6 +334,10 @@ pub(crate) const SETUP_SCRIPT_PREVIEW_LINES: usize = 8;
 /// it, because the store is a paused surface and this is a per-machine
 /// approval rather than work anybody would miss.
 pub(crate) const SETUP_TRUST_FILE_NAME: &str = "setup-trust.json";
+/// Where the bytes of an approved setup or run script are kept, one file per
+/// digest, beside the store. What runs is this copy, so an edit to the
+/// repository's file after the approval runs nothing (change 209).
+pub(crate) const APPROVED_SCRIPTS_DIRECTORY: &str = "approved-scripts";
 /// Where the notes a person wrote against a diff live: beside the store rather
 /// than in it, because the store is a paused surface and this is a working set
 /// for one machine. A review interrupted is a review finished later, so they
