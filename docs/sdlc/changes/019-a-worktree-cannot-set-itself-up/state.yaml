@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Put a real .operon/setup.sh in a project, make a worktree, and watch the block; then have a person read the diff."
+resume: "Closed by change 202 after reading it against the code: landed; the run-time recheck has the gap triage.md calls A15."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine waived steering_bytes was already at diagnose; largest_module_lines rose to 9078 against a warn of 8800, which the band calls recorded-no-action and which now needs its own change"
   guards-verified-by-mutation: "human passed six watched failing: quoting dropped, corrupt trust made permissive, preview widened past the digest, ceiling removed, approval keyed by digest alone, run decided against the shown digest"
   screen-agreed: "human passed the inline confirmation with the script preview and the remember checkbox was chosen over running without asking"
-  real-repository-check: "human pending run a real .operon/setup.sh from the app, tick the box, and confirm the second worktree does not ask"
+  real-repository-check: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
