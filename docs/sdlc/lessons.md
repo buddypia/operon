@@ -1218,3 +1218,19 @@ any other `cargo test` there, and refuses a listed name src/tests.rs no longer
 has and a run that passed fewer than all three (change 198; watched failing on the six gate mutants in its mutations.py). The
 gate itself, run on this change's state.yaml with `stage: review`, refused with
 exit 2 and the test's own message.
+
+## 089 — A landing merge ran in a main checkout that held another branch
+
+Change 198's `git merge --no-ff --no-edit` ran in the main checkout while it
+held chore/update-dependencies-latest, switched there from outside these hooks.
+The merge gate judged only a merge into main, so it read "not on main" as "not a
+landing" and passed; only that branch's staged Cargo.lock stopped the fix from
+landing in somebody else's work. **The rule:** a gate that guards a place
+checks that the place is what it assumes, and refuses when it is not.
+
+**Guard.** `the_merge_gate_waits_for_ci_and_falls_back_to_the_local_suite`
+switches the fixture's main checkout to another branch and requires both a
+canonical and a bare merge there to be refused, naming the branch, with no
+suite run (change 200; watched failing before the fix and on the three gate
+mutants in its mutations.py). A merge of main into a branch in a linked
+worktree stays silent in the same test.

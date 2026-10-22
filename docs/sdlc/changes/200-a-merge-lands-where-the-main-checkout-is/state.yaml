@@ -1,0 +1,72 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch:
+# fix/200-a-merge-lands-where-the-main-checkout-is.
+#
+# Report (the person, 2026-10-22): verify the work adversarially and fix what
+# the verification finds, at the root and without overbuilding; earlier, "fix
+# even what needs a judgement, permanently".
+#
+# Found: landing change 198, `git merge --no-ff --no-edit` ran in the main
+# checkout, which somebody had switched to chore/update-dependencies-latest at
+# 01:09 — not through these hooks: the trunk guard refuses a switch away from
+# main, and the main checkout's reflog holds one such switch among its 109
+# branch switches. The merge gate passed it, because it judges only a merge
+# into main and reads "not on main" as "not a landing". It failed only on that
+# branch's staged Cargo.lock; without it the fix would have landed in somebody
+# else's branch.
+#
+# Fix: .claude/hooks/gate-merge.sh refuses any merge run in the main checkout
+# (its git dir is the common dir) while it holds a branch other than main,
+# naming that branch, and says how to land from one's own worktree instead.
+# A linked worktree is untouched: merging main into a branch there stays
+# silent.
+#
+# Numbered 199 when the worktree opened; the dependency update landed first
+# as 199 from a branch with no number in its name, which check-change-number.sh
+# cannot see. The duplicate surfaced at the next commit after merging main in:
+# change_directory_numbers_are_unique, which the commit gate runs since 198.
+# Renumbered 200 on a fresh branch from main with the reviewed files, because
+# the review gate does not take a commit that moves a record from one change
+# directory to another; fix/199-a-merge-lands-where-the-main-checkout-is, which
+# holds the first commit at a2834e1, is left unlanded.
+#
+# Also verified, no change needed: change 198's record tests cost 36 seconds on
+# the first record-only commit of a freshly seeded worktree under a load
+# average of 114, and 1.1 seconds after.
+#
+# Risk: low. No application code; the gate refuses more, never less.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Nothing is carried and nothing needs the person. Closed in
+  the same commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the new assertions failed on the gate as
+    it was (exit 0, nothing said), and mutations.py here caught 3 of 3: the
+    check gone, a linked worktree read as the main checkout, the branch name
+    dropped from the refusal"
+  three-gates: "machine passed cargo fmt and the named tests; clippy and the
+    record tests at the commit; the suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed no: a hook, docs and src/tests.rs only"
+  review: "human passed rust-reviewer approve 0 0 and
+    subprocess-safety-reviewer approve 0 0 at 776d6bed3500123b (round 2, re-read after the renumber)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

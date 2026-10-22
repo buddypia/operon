@@ -1,0 +1,26 @@
+# Review record for 200-a-merge-lands-where-the-main-checkout-is.
+#
+# The change: the merge gate refuses a merge run in the main checkout while it
+# holds a branch other than main.
+#
+# Round 1, both approve-with-nits. Fixed for round 2: the refusal says to
+# switch back even after a failed merge or push and to wait when main is
+# checked out in another worktree; the test covers a detached HEAD, and in both
+# states a linked worktree's merge of main and `merge --abort` still pass; the
+# assertion reads the refusal's first line rather than two whole sentences, and
+# its messages are Japanese; a comment names the CLAUDE_PROJECT_DIR fallback and
+# git 2.31. Round 2 re-read those lines and left nothing open. After main
+# brought in its own change 199, both re-read the renumber to 200 — "199" to
+# "200" in two comments and the lesson, behaviour unchanged — and approved
+# (776d6bed3500123b). The digest below is this branch's diff from main: the
+# round-2 diff with that renumber, nothing else.
+
+digest: "6a2d6b7d39c0a6e0"
+
+rounds: 2
+
+carried: []
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
