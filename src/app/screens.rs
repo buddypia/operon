@@ -1016,13 +1016,18 @@ impl OperonApp {
                         self.choose_workspace_folder();
                     }
                     ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(tr(
-                            "Finder からフォルダをここにドラッグすることもできます · ⌘O",
-                        ))
-                        .small()
-                        .color(palette.text_muted),
-                    );
+                    // The chord is read from the keymap, so a rebound key is
+                    // the key it names.
+                    let hint = match self.keymap.chord_for("project.add") {
+                        Some(chord) => tf!(
+                            "Finder からフォルダをここにドラッグすることもできます · {chord}",
+                            chord = chord_label(chord)
+                        ),
+                        None => {
+                            tr("Finder からフォルダをここにドラッグすることもできます").to_owned()
+                        }
+                    };
+                    ui.label(RichText::new(hint).small().color(palette.text_muted));
                 });
                 ui.add_space(24.0);
                 ui.vertical_centered(|ui| {
@@ -7036,7 +7041,7 @@ impl OperonApp {
         }
         let selected = self.staged_selection(project.id).len();
         ui.add(
-            egui::TextEdit::multiline(&mut self.commit_message_input)
+            egui::TextEdit::multiline(self.commit_messages.entry(project.id).or_default())
                 .desired_rows(3)
                 .desired_width(f32::INFINITY)
                 .hint_text(tr("コミットメッセージ")),
@@ -7605,23 +7610,50 @@ impl OperonApp {
             let search = self.terminal_search.entry(session_id).or_default();
             search.open = true;
             search.needs_focus = true;
+            // A closed bar is not searched when the buffer moves, so the
+            // count it kept is the one from when it closed.
+            self.refresh_terminal_search(session_id);
         }
-        let open = self
+        let (open, composing) = self
             .terminal_search
             .get(&session_id)
-            .is_some_and(|search| search.open);
-        if open
-            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            .map_or((false, false), |search| (search.open, search.composing));
+        // An Esc that cancels a conversion arrives beside the IME's own events
+        // and is the IME's, not a request to close.
+        let conversion_moved = ctx.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Ime(egui::ImeEvent::Preedit(_) | egui::ImeEvent::Commit(_))
+                )
+            })
+        });
+        if !open {
+            return;
+        }
+        if composing || conversion_moved {
+            // egui takes the keyboard from a focused field on any Esc, before
+            // this runs, so the field asks for it back.
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+                if let Some(search) = self.terminal_search.get_mut(&session_id) {
+                    search.needs_focus = true;
+                }
+            }
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.close_terminal_search(session_id);
         }
     }
 
+    /// Close the bar and give the keyboard back to the pane: the field that
+    /// held it is no longer drawn.
     pub(crate) fn close_terminal_search(&mut self, session_id: Uuid) {
         if let Some(search) = self.terminal_search.get_mut(&session_id) {
             search.open = false;
+            search.composing = false;
             search.scroll_to = None;
         }
+        self.terminal_focus_request = Some(session_id);
     }
 
     /// Recompute where the query occurs.
@@ -7709,6 +7741,7 @@ impl OperonApp {
         }
         let mut query = search.query.clone();
         let needs_focus = search.needs_focus;
+        let mut composing = search.composing;
         let total = search.matches.len();
         let current = search.current;
         let mut changed = false;
@@ -7722,10 +7755,13 @@ impl OperonApp {
                     .size(13.5)
                     .color(palette.text_muted),
             );
+            // No return key: a single-line field gives up the keyboard on
+            // Enter by default, and here Enter means "next", again and again.
             let field = ui.add(
                 egui::TextEdit::singleline(&mut query)
                     .desired_width(240.0)
-                    .hint_text(tr("スクロールバックを検索")),
+                    .hint_text(tr("スクロールバックを検索"))
+                    .return_key(None),
             );
             if needs_focus {
                 field.request_focus();
@@ -7733,25 +7769,20 @@ impl OperonApp {
             if field.changed() {
                 changed = true;
             }
-            // Enter only means "next" once the composition is committed: a
-            // preedit is not yet text, which is what change 014 is about.
-            let composing = !self
-                .terminal_preedits
-                .get(&session_id)
-                .is_none_or(String::is_empty);
-            if field.has_focus() && !composing {
-                let (next, previous) = ui.input_mut(|input| {
-                    (
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter),
-                        input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter),
-                    )
+            // Enter only means "next" once the conversion is committed: a
+            // preedit is not yet text (change 014), and the Enter that commits
+            // it is the IME's (lesson 016).
+            if field.has_focus() {
+                let (stepped, still_composing) =
+                    ui.input(|input| find_bar_step(&input.events, composing));
+                step = stepped;
+                composing = still_composing;
+                ui.input_mut(|input| {
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                    input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter);
                 });
-                if next {
-                    step = Some(true);
-                }
-                if previous {
-                    step = Some(false);
-                }
+            } else {
+                composing = false;
             }
             ui.label(
                 RichText::new(if query.trim().is_empty() {
@@ -7782,11 +7813,7 @@ impl OperonApp {
             {
                 step = Some(true);
             }
-            if ui
-                .button(ICON_CLOSE)
-                .on_hover_text(tr("検索を閉じる"))
-                .clicked()
-            {
+            if small_icon_button(ui, palette, ICON_CLOSE, tr("検索を閉じる")).clicked() {
                 close = true;
             }
         });
@@ -7794,6 +7821,7 @@ impl OperonApp {
         if let Some(search) = self.terminal_search.get_mut(&session_id) {
             search.query = query;
             search.needs_focus = false;
+            search.composing = composing;
         }
         if changed {
             if let Some(search) = self.terminal_search.get_mut(&session_id) {

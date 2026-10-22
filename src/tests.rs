@@ -56468,3 +56468,322 @@ pub(crate) fn test_change_181_hovers_say_rows_and_projects_can_be_dragged() {
         "project hover: {name:?}"
     );
 }
+
+/// Change 205 (A4): the commit message field belongs to the project it was
+/// written for. One field for the whole window carried a draft from one
+/// project into the next one opened, where 記録 would commit it.
+#[test]
+pub(crate) fn a_commit_message_stays_with_the_project_it_was_written_for() {
+    let root = temporary_directory("commit-message-per-project");
+    let mut app = test_app(root.join("store.json"));
+    let project = |name: &str| Project {
+        id: Uuid::new_v4(),
+        path: root.join(name),
+        name: name.to_owned(),
+        added_at: 0,
+    };
+    let (first, second) = (project("first"), project("second"));
+    let draw = |app: &mut OperonApp, project: &Project| {
+        let ctx = egui::Context::default();
+        let mut texts = Vec::new();
+        for _ in 0..2 {
+            let drawn = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.ui_commit_box(ui, app.store.theme.palette(), project);
+                });
+            });
+            texts.clear();
+            for clipped in &drawn.shapes {
+                collect_text_shapes(&clipped.shape, &mut texts);
+            }
+        }
+        texts
+    };
+
+    app.background_tasks
+        .insert(BackgroundKey::CommitMessage(first.id));
+    app.background_sender
+        .send(BackgroundResult::CommitMessageDrafted {
+            project_id: first.id,
+            result: Ok("first の下書き".into()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        !draw(&mut app, &second)
+            .iter()
+            .any(|text| text.contains("first の下書き")),
+        "別のプロジェクトのコミットメッセージ欄に下書きが出ています"
+    );
+    assert!(
+        draw(&mut app, &first)
+            .iter()
+            .any(|text| text.contains("first の下書き")),
+        "下書きを頼んだプロジェクトの欄に下書きがありません"
+    );
+
+    // A commit in the other project empties its own field, not this one.
+    app.background_tasks
+        .insert(BackgroundKey::GitMutation(second.id));
+    app.background_sender
+        .send(BackgroundResult::StagedChangeRecorded {
+            project_id: second.id,
+            result: Ok(String::new()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        draw(&mut app, &first)
+            .iter()
+            .any(|text| text.contains("first の下書き")),
+        "別のプロジェクトのコミットでこの下書きが消えました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// One frame of the find bar, the way the window runs it: the keys are read
+/// before the pane and the bar draw.
+fn find_bar_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    session_id: Uuid,
+    events: Vec<egui::Event>,
+) {
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            app.handle_terminal_search_keys(ctx);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.ui_terminal_search(ui, app.store.theme.palette(), session_id);
+            });
+        },
+    );
+}
+
+/// An app with one selected session whose buffer holds `lines`, and its find
+/// bar open on an empty query with the field focused.
+fn app_with_open_find_bar(root: &Path, lines: &[&str]) -> (OperonApp, egui::Context, Uuid) {
+    let mut app = test_app(root.join("store.json"));
+    let session_id = Uuid::new_v4();
+    app.selected_session = Some(session_id);
+    app.terminal_layouts
+        .insert(session_id, terminal_test_lines(lines));
+    let ctx = egui::Context::default();
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![key_press(egui::Key::F, egui::Modifiers::COMMAND)],
+    );
+    find_bar_frame(&mut app, &ctx, session_id, Vec::new());
+    assert!(app.terminal_search[&session_id].open);
+    (app, ctx, session_id)
+}
+
+/// Change 205 (A7): Enter steps to the next match and Shift+Enter back, and
+/// the field keeps the keyboard while it does. The Enter that confirms a
+/// conversion, or one pressed mid-conversion, is the IME's and steps nowhere.
+#[test]
+pub(crate) fn the_find_bar_steps_on_enter_but_not_on_a_conversions_enter() {
+    let root = temporary_directory("find-bar-enter");
+    let (mut app, ctx, session_id) = app_with_open_find_bar(
+        &root,
+        &["にほん 日本 一", "にほん 日本 二", "にほん 日本 三"],
+    );
+    let current = |app: &OperonApp| app.terminal_search[&session_id].current;
+    let enter = || key_press(egui::Key::Enter, egui::Modifiers::NONE);
+
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![
+            egui::Event::Ime(egui::ImeEvent::Enabled),
+            egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into())),
+        ],
+    );
+    // Mid-conversion: the Enter belongs to the IME. The preedit is in every
+    // line, so a step would show.
+    assert_eq!(app.terminal_search[&session_id].matches.len(), 3);
+    find_bar_frame(&mut app, &ctx, session_id, vec![enter()]);
+    assert_eq!(current(&app), 0, "変換中の Enter で次の一致へ移りました");
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![
+            egui::Event::Ime(egui::ImeEvent::Commit("日本".into())),
+            enter(),
+        ],
+    );
+    assert_eq!(app.terminal_search[&session_id].query, "日本");
+    assert_eq!(app.terminal_search[&session_id].matches.len(), 3);
+    assert_eq!(
+        current(&app),
+        0,
+        "変換を確定した Enter で次の一致へ移りました"
+    );
+
+    find_bar_frame(&mut app, &ctx, session_id, vec![enter()]);
+    assert_eq!(current(&app), 1, "Enter で次の一致へ移りません");
+    find_bar_frame(&mut app, &ctx, session_id, vec![enter()]);
+    assert_eq!(current(&app), 2, "二度目の Enter で次の一致へ移りません");
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![key_press(egui::Key::Enter, egui::Modifiers::SHIFT)],
+    );
+    assert_eq!(current(&app), 1, "Shift+Enter で前の一致へ戻りません");
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 205 (A7): Esc closes the bar and hands the keyboard back to the
+/// pane, except while a conversion is open, where Esc is the IME's.
+#[test]
+pub(crate) fn esc_closes_the_find_bar_into_the_pane_but_not_mid_conversion() {
+    let root = temporary_directory("find-bar-esc");
+    let (mut app, ctx, session_id) = app_with_open_find_bar(&root, &["line"]);
+    let escape = || key_press(egui::Key::Escape, egui::Modifiers::NONE);
+
+    // In the frame the conversion starts, before the field has said so.
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![
+            egui::Event::Ime(egui::ImeEvent::Enabled),
+            egui::Event::Ime(egui::ImeEvent::Preedit("か".into())),
+            escape(),
+        ],
+    );
+    assert!(
+        app.terminal_search[&session_id].open,
+        "変換を始めたフレームの Esc で検索バーが閉じました"
+    );
+    // In a frame of its own while the conversion is open.
+    find_bar_frame(&mut app, &ctx, session_id, vec![escape()]);
+    assert!(
+        app.terminal_search[&session_id].open,
+        "変換中の Esc で検索バーが閉じました"
+    );
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![
+            egui::Event::Ime(egui::ImeEvent::Preedit(String::new())),
+            escape(),
+        ],
+    );
+    assert!(
+        app.terminal_search[&session_id].open,
+        "変換を取り消す Esc で検索バーが閉じました"
+    );
+
+    app.terminal_focus_request = None;
+    find_bar_frame(&mut app, &ctx, session_id, vec![escape()]);
+    assert!(!app.terminal_search[&session_id].open, "Esc で閉じません");
+    assert_eq!(
+        app.terminal_focus_request,
+        Some(session_id),
+        "閉じた後、キーボードがターミナルに戻りません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 205 (A6): the matches are counted again when the bar reopens. While
+/// it is closed a new buffer is not searched, so ⌘F showed the old count.
+#[test]
+pub(crate) fn reopening_the_find_bar_counts_what_arrived_while_it_was_closed() {
+    let root = temporary_directory("find-bar-reopen");
+    let (mut app, ctx, session_id) = app_with_open_find_bar(&root, &["error 1"]);
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![egui::Event::Text("error".into())],
+    );
+    assert_eq!(app.terminal_search[&session_id].matches.len(), 1);
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![key_press(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    assert!(!app.terminal_search[&session_id].open);
+
+    // The buffer moves while the bar is closed.
+    app.terminal_layouts.insert(
+        session_id,
+        terminal_test_lines(&["error 1", "error 2", "error 3"]),
+    );
+    app.refresh_terminal_search(session_id);
+
+    find_bar_frame(
+        &mut app,
+        &ctx,
+        session_id,
+        vec![key_press(egui::Key::F, egui::Modifiers::COMMAND)],
+    );
+    assert_eq!(
+        app.terminal_search[&session_id].matches.len(),
+        3,
+        "開き直した検索バーが閉じていた間の出力を数えていません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 205 (A8): a remappable action's key reaches the screen through the
+/// keymap, never typed into a message. The empty projects page said ⌘O after
+/// `project.add` had been moved to another key.
+#[test]
+pub(crate) fn no_message_spells_a_remappable_chord() {
+    let labels: Vec<(&str, String)> = KEYMAP_ACTIONS
+        .iter()
+        .map(|action| {
+            (
+                action.id,
+                chord_label(parse_chord(action.default).expect("defaults parse")),
+            )
+        })
+        .collect();
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut offenders = Vec::new();
+    let mut stack = vec![src.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path.strip_prefix(&src).unwrap().display().to_string();
+            if !name.ends_with(".rs") || name == "tests.rs" || name == "app/keymap.rs" {
+                continue;
+            }
+            let text = fs::read_to_string(&path).unwrap();
+            for (number, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                for (id, label) in &labels {
+                    if line.contains(label.as_str()) {
+                        offenders.push(format!("src/{name}:{} {label} ({id})", number + 1));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "割り当てを変えられるキーが文字列に書かれています: {offenders:#?}"
+    );
+}

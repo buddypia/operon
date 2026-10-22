@@ -19,6 +19,8 @@ pub(crate) struct TerminalSearch {
     pub(crate) matches: Vec<TerminalMatch>,
     pub(crate) current: usize,
     pub(crate) needs_focus: bool,
+    /// A conversion is open in the field, so Enter and Esc are the IME's.
+    pub(crate) composing: bool,
     /// Set once when the pane should jump, and cleared by the frame that jumps,
     /// so scrolling by hand afterwards is not undone on the next frame.
     pub(crate) scroll_to: Option<usize>,
@@ -616,7 +618,9 @@ pub(crate) struct OperonApp {
     /// rather than work: it is re-derived from `git status` whenever the list
     /// changes, so nothing is lost by keeping it out of the store.
     pub(crate) git_staged_files: HashMap<Uuid, HashSet<String>>,
-    pub(crate) commit_message_input: String,
+    /// The message being written for the next commit, per project: a draft
+    /// left in one project is not the next project's message (change 205).
+    pub(crate) commit_messages: HashMap<Uuid, String>,
     /// The upstream reading behind the push line, per project.
     pub(crate) upstream_cache: HashMap<Uuid, UpstreamState>,
     /// What the machine is listening on, and which worktree each belongs to.
@@ -1025,7 +1029,7 @@ impl OperonApp {
             diff_annotations,
             diff_comments_dirty: false,
             git_staged_files: HashMap::new(),
-            commit_message_input: String::new(),
+            commit_messages: HashMap::new(),
             upstream_cache: HashMap::new(),
             listening_ports: Vec::new(),
             ports_scanned_at: None,
@@ -1949,7 +1953,7 @@ impl OperonApp {
                     match result {
                         Ok(_) => {
                             self.last_commit_failure.remove(&project_id);
-                            self.commit_message_input.clear();
+                            self.commit_messages.remove(&project_id);
                             self.git_staged_files.remove(&project_id);
                             self.git_changes_cache.remove(&project_id);
                             self.git_status_badge_cache.remove(&project_id);
@@ -1961,7 +1965,14 @@ impl OperonApp {
                             let files = self.staged_selection(project_id);
                             self.last_commit_failure.insert(
                                 project_id,
-                                (self.commit_message_input.clone(), files, error.clone()),
+                                (
+                                    self.commit_messages
+                                        .get(&project_id)
+                                        .cloned()
+                                        .unwrap_or_default(),
+                                    files,
+                                    error.clone(),
+                                ),
                             );
                             self.notice =
                                 Some(tf!("コミットできませんでした: {error}", error = error));
@@ -1989,7 +2000,7 @@ impl OperonApp {
                         Ok(drafted) => {
                             // Into the field, never past it. The person edits
                             // it and presses the other button.
-                            self.commit_message_input = drafted;
+                            self.commit_messages.insert(project_id, drafted);
                         }
                         Err(error) => {
                             self.notice = Some(tf!(
@@ -8273,7 +8284,11 @@ impl OperonApp {
 
     /// Stage exactly what is ticked and record it.
     pub(crate) fn record_staged_change(&mut self, project: &Project) {
-        let message = self.commit_message_input.trim().to_owned();
+        let message = self
+            .commit_messages
+            .get(&project.id)
+            .map(|message| message.trim().to_owned())
+            .unwrap_or_default();
         if message.is_empty() {
             self.notice = Some(tr("コミットメッセージを入力してください。").into());
             return;
