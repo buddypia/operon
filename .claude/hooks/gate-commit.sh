@@ -541,7 +541,8 @@ fi
 # rename detection lists only the new path in $changed (change 201).
 # The message tables are read the same way: a row added out of order is not a
 # wrong translation but none, and it reached CI from change 208, so a commit
-# that touches src/ runs the table tests too.
+# that touches src/ runs the table tests too — and the lessons test, which
+# reached CI from the same change.
 record_tests=(
   tests::every_state_file_names_a_route_and_a_stage_that_exist
   tests::change_directory_numbers_are_unique
@@ -550,6 +551,7 @@ record_tests=(
   tests::every_message_id_has_a_row_in_every_table
   tests::every_translation_keeps_the_placeholder_names_of_its_message_id
   tests::every_message_row_is_one_the_code_shows
+  tests::every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran
 )
 records=""
 if [ -n "$({ git diff --cached --diff-filter=DR --name-only; git diff --diff-filter=D --name-only; } 2>/dev/null)" ] ||

@@ -1334,7 +1334,9 @@ so, but only in CI, after a push. The commit gate ran only the record tests,
 and only for documents. **The rule:** a check that reads files and nothing else
 runs before the commit that changes those files, not after the push.
 
-**Guard.** `.claude/hooks/gate-commit.sh` runs the four table tests with the
-record tests whenever `src/` changes, and
-`the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` checks every name it runs
-exists.
+**Guard.** `.claude/hooks/gate-commit.sh` runs the four table tests, and this
+file's own `every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran`, with
+the record tests whenever `src/` or a document changes;
+`the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` checks every name it
+runs exists (change 208; watched failing with the `src/` trigger removed and
+with a row put back at the top of a table).

@@ -19,10 +19,13 @@
 # gate runs the four table tests whenever src/ changes (lesson 096).
 # rust-reviewer approve 0 1; subprocess-safety-reviewer, which the gate
 # change brought in, approve-with-nits 0 5 over the whole branch.
+# Round 4, CI again: lesson 096's guard did not say it was watched failing.
+# Reworded, and the lessons test joins the gate's record tests. rust-reviewer
+# approve 0 0; subprocess-safety-reviewer approve-with-nits 0 2.
 
-digest: "e0dc1214ef519365"
+digest: "ae4127512f524e98"
 
-rounds: 3
+rounds: 4
 
 carried:
   - rust-reviewer/1 · src/tests.rs the_staged_selection_is_settled_when_the_changes_arrive: the source checks are substring matches that a comment naming the call would trip.
@@ -43,8 +46,10 @@ carried:
     person: "エディタによっては、起動の完了を待つ処理が5秒を超えて続くことがあります。画面は止まりません。"
   - subprocess-safety-reviewer/3 · src/util.rs open_in_external_editor: a path starting with '-' would be read as an option; every caller passes an absolute worktree path.
     person: "現在の使い方では起きませんが、ハイフンで始まるパスをエディタに渡すと、オプションとして読まれるおそれがあります。"
+  - subprocess-safety-reviewer/4 · .claude/hooks/gate-commit.sh: the lessons test runs pipeline-indicators.sh as a child, bounded only by the hook's remaining limit.
+    person: "コミット前の確認で、教訓の書式を調べる処理が止まった場合は、時間切れでコミットが止まります。もう一度コミットすれば通ります。"
 
 verdicts:
-  rust-reviewer: "approve 0 1"
+  rust-reviewer: "approve 0 0"
   durability-reviewer: "approve 0 0"
-  subprocess-safety-reviewer: "approve-with-nits 0 5"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

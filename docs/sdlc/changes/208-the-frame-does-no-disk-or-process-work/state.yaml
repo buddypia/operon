@@ -44,7 +44,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Closed. Nine remarks are carried in review.yaml; the bounded run
+resume: "Closed. Ten remarks are carried in review.yaml; the bounded run
   script read is change 209's. Closed in the same commit that CI judges last."
 
 contract:
@@ -58,10 +58,10 @@ contract:
   release-binary: "machine passed yes: src/app.rs, src/app/screens.rs,
     src/ui/terminal.rs, src/util.rs; the installed app is rebuilt from main
     after the changes that follow 202"
-  review: "human passed rust-reviewer approve 0 1, durability-reviewer
-    approve 0 0 and subprocess-safety-reviewer approve-with-nits 0 5 at
-    e0dc1214ef519365 (round 3, after CI found the rows out of order), nine
-    remarks carried in review.yaml"
+  review: "human passed rust-reviewer approve 0 0, durability-reviewer
+    approve 0 0 and subprocess-safety-reviewer approve-with-nits 0 2 at
+    ae4127512f524e98 (round 4: CI found the rows out of order, then a lesson
+    whose guard was not watched failing), ten remarks carried in review.yaml"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
