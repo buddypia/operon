@@ -260,6 +260,10 @@ pub(crate) enum HookInstallState {
 pub(crate) struct HookInstall {
     pub(crate) provider: CliProvider,
     pub(crate) state: HookInstallState,
+    /// One line per registered account whose folder was not there to install
+    /// into, already in the person's words: the install skips such a folder
+    /// rather than creating it, and this is where the skip is said.
+    pub(crate) missing_accounts: Vec<String>,
 }
 
 /// Operon's own note beside the scripts: whether the mechanism is on, and the
@@ -522,6 +526,26 @@ pub(crate) fn codex_config_in(root: &Path) -> PathBuf {
 /// launched under a second login finds no managed hooks in the directory it was
 /// pointed at, and goes quiet — the state chip stops moving, a finished turn is
 /// never marked unread, and the usage reading disappears.
+/// The registered accounts `account_roots` skipped because their folder is
+/// gone, as the line the settings screen shows for each (change 031's spec:
+/// named in the hook status list, where a missing CLI is named).
+pub(crate) fn missing_account_notices(
+    provider: CliProvider,
+    accounts: &AgentAccounts,
+) -> Vec<String> {
+    accounts
+        .for_agent(provider.agent())
+        .into_iter()
+        .filter(|account| !account.path.is_dir())
+        .map(|account| {
+            tf!(
+                "アカウント「{name}」のフォルダが見つかりません。",
+                name = account.name
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn account_roots(
     provider: CliProvider,
     home: &Path,
@@ -561,14 +585,55 @@ pub(crate) fn install_claude_hooks(data_file: &Path, root: &Path, remove_only: b
     let mut settings = read_json_object(&path)?;
     install_event_groups(&mut settings, CliProvider::Claude, &script, remove_only);
     // The usage reader rides in the same file, in a slot of its own, and is
-    // never put back once the person has taken it out.
+    // never put back once the person has taken it out. What says it was ever
+    // here is a marker for this file alone: one marker for every folder kept
+    // the reader out of each account after the first (change 203).
     let reader = statusline_script_path(data_file);
-    let marker = hook_directory(data_file).join(STATUSLINE_INSTALL_MARKER);
-    apply_statusline(&mut settings, &reader, marker.exists(), !remove_only);
-    if !remove_only && !marker.exists() {
-        let _ = write_file_atomically(&marker, b"");
+    let marker = statusline_marker_path(data_file, &path);
+    let installed_before = marker.exists();
+    let ours_before = statusline_slot(&settings, &reader, installed_before) == StatusLineSlot::Ours;
+    apply_statusline(&mut settings, &reader, installed_before, !remove_only);
+    write_json_object(&path, &settings)?;
+    // Only once the file says so. The marker means "the reader has been in
+    // this slot": written when it is seen there, never for a slot somebody
+    // else's command holds, and taken away when Operon itself removes the
+    // reader — the hook setting turned off — so turning it on again puts it
+    // back. A marker that could not be written is written on the next launch
+    // that finds the reader in the slot.
+    if statusline_slot(&settings, &reader, false) == StatusLineSlot::Ours {
+        if !installed_before {
+            let _ = write_file_atomically(&marker, b"");
+        }
+    } else if ours_before && remove_only {
+        let _ = fs::remove_file(&marker);
     }
-    write_json_object(&path, &settings)
+    Ok(())
+}
+
+/// Where the usage-reader marker for one Claude settings file lives: beside
+/// the hook scripts, named by a digest of the file's path, so two accounts
+/// never share one.
+pub(crate) fn statusline_marker_path(data_file: &Path, settings: &Path) -> PathBuf {
+    let digest = sha256_hex(settings.to_string_lossy().as_bytes());
+    hook_directory(data_file).join(format!(
+        "{STATUSLINE_MARKER_PREFIX}{}{STATUSLINE_MARKER_SUFFIX}",
+        &digest[..16]
+    ))
+}
+
+/// The marker every folder used to share stood, in practice, for the machine's
+/// own folder: it was written on the first install there. It becomes that
+/// folder's marker, once, so a reader the person removed before the upgrade
+/// stays removed.
+fn adopt_shared_statusline_marker(data_file: &Path, own_settings: &Path) {
+    let shared = hook_directory(data_file).join(STATUSLINE_INSTALL_MARKER);
+    if !shared.exists() {
+        return;
+    }
+    let own = statusline_marker_path(data_file, own_settings);
+    if own.exists() || fs::rename(&shared, &own).is_err() {
+        let _ = fs::remove_file(&shared);
+    }
 }
 
 /// Codex's own name for an event inside a trust key: the event in snake case.
@@ -1852,6 +1917,7 @@ pub(crate) fn apply_hooks(
                     .into_iter()
                     .map(|provider| HookInstall {
                         provider,
+                        missing_accounts: Vec::new(),
                         state: HookInstallState::Failed(tf!(
                             "フックスクリプトを書き込めませんでした: {error}",
                             error = error
@@ -1862,6 +1928,7 @@ pub(crate) fn apply_hooks(
             );
         }
     }
+    adopt_shared_statusline_marker(data_file, &claude_settings_in(&claude_config_root(home)));
     let mut installs = Vec::new();
     let mut codex_keys = Vec::new();
     for provider in providers {
@@ -1912,7 +1979,11 @@ pub(crate) fn apply_hooks(
             )),
             Ok(()) => HookInstallState::Installed,
         };
-        installs.push(HookInstall { provider, state });
+        installs.push(HookInstall {
+            provider,
+            state,
+            missing_accounts: missing_account_notices(provider, accounts),
+        });
     }
     let _ = save_hook_settings(
         data_file,
@@ -2444,7 +2515,10 @@ if [ -r "$stamp" ]; then
   read -r last < "$stamp" 2>/dev/null
   case "$last" in ''|*[!0-9]*) last=0 ;; esac
 fi
-if [ "$now" -gt 0 ] && [ "$last" -gt 0 ] && [ $((now - last)) -lt {STATUSLINE_MIN_POST_INTERVAL_MS} ]; then
+# A clock behind the stamp is a new CLI in the same pane, which counts from
+# zero again: that posts, and its stamp replaces the old one. Read as a tick
+# inside the interval, it went quiet for as long as the last CLI had run.
+if [ "$now" -gt 0 ] && [ "$last" -gt 0 ] && [ "$now" -ge "$last" ] && [ $((now - last)) -lt {STATUSLINE_MIN_POST_INTERVAL_MS} ]; then
   exit 0
 fi
 printf '%s\n' "$now" > "$stamp" 2>/dev/null || :
