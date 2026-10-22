@@ -29,7 +29,7 @@ nobody looks at for an hour. Change 067's review carried it as a nit; change
 068 put the bound into the template rather than into five closed changes'
 records of sweeps that were already run.
 
-SIX RULES THE SWEEPS BEFORE THIS ONE LEARNED THE HARD WAY. They are in the code
+SEVEN RULES THE SWEEPS BEFORE THIS ONE LEARNED THE HARD WAY. They are in the code
 below; they are restated here because a sweep that loses one looks fine.
 
 1. **Assert the target is present before replacing it.** `str.replace` that
@@ -64,6 +64,11 @@ below; they are restated here because a sweep that loses one looks fine.
    `mkstemp` creates at `0600`, and the first version of this file restored a
    755 script as a 600 one with its bytes intact, which no `git diff` and no
    read-back of the contents can see.
+
+7. **Run the checks once on the unmutated tree, and stop if they are not
+   green.** Otherwise a test that already fails makes every mutation read as
+   caught. Change 213's first sweep reported 5 of 5 while its own test was red
+   on the unmutated tree; nothing in the output said so.
 
 A WEAK MUTATION PASSES FOR THE WRONG REASON. Two shapes to avoid, both met:
 commenting a line out when a guard searches for a substring the comment still
@@ -304,6 +309,12 @@ def main(run_seconds, checks, mutations):
 
     failures = []
     try:
+        # Rule 7: a catch means something only against a green start.
+        green, output = run_checks()
+        if not green:
+            print("SETUP FAILED — 変異の前からチェックが通りません。どの変異も catch に見えるので、掃引は何も示しません:")
+            print(reason_from(output))
+            sys.exit(1)
         for name, (path, old, new) in MUTATIONS.items():
             text = originals[path]
             hits = text.count(old)

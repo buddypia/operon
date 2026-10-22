@@ -1,0 +1,23 @@
+# Review record for 214-a-sweep-starts-from-a-green-tree.
+#
+# The change: scripts/mutation_sweep.py runs the checks once on the unmutated
+# tree and stops unless they pass, so a red start no longer reads as a catch;
+# the three sweep tests' fixture checks react only to the mutation. Lesson 099.
+#
+# Round 1: rust-reviewer approve-with-nits 0 2. The descendant and killed
+# cases still exercise the group kill while the mutation is on disk; the
+# baseline runs inside the try, after the signal handlers. Both remarks are
+# carried.
+
+digest: "880adf6d367f4e36"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tests.rs the_mutation_sweep_template_ends_a_run_that_will_not_finish: no case covers a check that hangs before any mutation; only a check that exits red is exercised.
+    person: "変異の前からテストが止まったまま終わらない場合の動きは、テストで確かめていません。終わらない場合も、すぐ失敗する場合と同じ処理を通ります。"
+  - rust-reviewer/1 · src/tests.rs the_mutation_sweep_template_puts_the_tree_back_when_it_is_killed: the stop signal can arrive after the file is broken but before the check starts, and then the check-survived assertion proves nothing; older than this change.
+    person: "途中で止めたときに走っていた検査も止まるかを確かめるテストは、止めるタイミングによっては何も確かめずに通ることがあります。この変更の前からある弱さです。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

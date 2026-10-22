@@ -1,0 +1,53 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/214-a-sweep-starts-from-a-green-tree.
+#
+# Report: found while closing change 213. Its first mutation sweep printed
+# "5 of 5 caught" while the test it ran was red on the unmutated tree (a merge
+# in the fixture conflicted), because scripts/mutation_sweep.py never runs the
+# checks without a mutation. The result was about to be recorded as evidence.
+#
+# Fix: the runner runs the checks once before any mutation and stops with
+# SETUP FAILED unless they pass; rule 7 in its header, and the template says
+# seven rules. The sweep tests' fixture checks now react only to the mutation,
+# since a check that hangs or fails whatever the tree holds is now refused at
+# the start, which is the point. Lesson 099.
+#
+# Decided: closed changes' mutations.py files are not edited. They call the
+# runner, so a re-run of any of them now gets the baseline too.
+#
+# Route: bugfix. scripts/mutation_sweep.py is on no paused surface.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Two remarks are carried in review.yaml. Closed in the same
+  commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the_mutation_sweep_template_ends_a_run_that_will_not_finish
+    failed on the runner without the baseline: a red check was swept through;
+    mutations.py here caught 2 of 2"
+  three-gates: "machine passed cargo fmt, clippy and the named tests; the
+    suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed no: only scripts/mutation_sweep.py, the
+    template, src/tests.rs and records change"
+  review: "human passed rust-reviewer approve-with-nits 0 2 at 880adf6d367f4e36
+    (round 1), two remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

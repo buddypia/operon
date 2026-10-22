@@ -1373,3 +1373,18 @@ before the merge that brought it in.
 merges the re-verdict into main, lands another change on main, and expects
 `--commit` on the re-verdict to still ship (change 213; watched failing with
 the refusal 208's record got, and against each base `mutations.py` puts back).
+
+## 099 — A sweep reported five catches against a test that was already red
+
+Change 213's first mutation sweep printed `5 of 5 caught` while the test it
+ran failed on the unmutated tree: a merge in the fixture conflicted, so every
+run panicked before reaching the assertion the mutations aimed at. The runner
+never ran the checks without a mutation, so a red start read as a catch, and
+the result was about to go into `state.yaml` as evidence. **The rule:** a
+sweep runs its checks once on the unmutated tree and stops unless they pass.
+
+**Guard.** `the_mutation_sweep_template_ends_a_run_that_will_not_finish` runs
+the template with a check that is red before any mutation and requires exit 1,
+the words 変異の前から, and no catch; the fixture checks of the three sweep tests
+now react only to the mutation (change 214; watched failing on the runner
+without the baseline, and on each mutation in `mutations.py`).

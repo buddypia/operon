@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The mutation sweep a change copies. Put it in the change directory as
 `mutations.py` and fill in the four blocks below. The runner is
-scripts/mutation_sweep.py, and its header holds the six rules every sweep
+scripts/mutation_sweep.py, and its header holds the seven rules every sweep
 keeps — read it before writing a mutation. Rule 4 is the one a copy forgets:
 mutate the claim, not only the counter. `.claude/skills/sdlc/SKILL.md` step
 10 asks for a sweep; `state.yaml` records the result as
