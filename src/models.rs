@@ -552,6 +552,9 @@ pub(crate) enum ExternalEditor {
 }
 
 impl ExternalEditor {
+    /// In the order the menus offer them.
+    pub(crate) const ALL: [Self; 4] = [Self::VsCode, Self::Cursor, Self::Zed, Self::Finder];
+
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::VsCode => "VS Code",

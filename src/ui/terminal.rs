@@ -1226,7 +1226,12 @@ pub(crate) fn terminal_row_links(
     cell: egui::Vec2,
     overlay: &mut TerminalLinkOverlay<'_>,
 ) -> Option<TerminalTargetKind> {
-    let pointer = ui.input(|input| input.pointer.hover_pos());
+    // Only the row under the pointer is read. The underline is drawn on hover
+    // and nowhere else, so reading every visible row on every frame bought
+    // nothing (change 208); a path is probed the first time it is hovered.
+    let pointer = ui
+        .input(|input| input.pointer.hover_pos())
+        .filter(|position| rect.contains(*position))?;
     let mut under_pointer = None;
     for target in terminal_targets(text) {
         let openable = match &target.kind {
@@ -1238,6 +1243,9 @@ pub(crate) fn terminal_row_links(
                         && !overlay.unresolved.iter().any(|seen| seen == path)
                     {
                         overlay.unresolved.push(path.clone());
+                        // Probed at the start of the next frame; ask for it
+                        // rather than wait for the pointer to move.
+                        ui.ctx().request_repaint();
                     }
                     false
                 }
@@ -1250,8 +1258,7 @@ pub(crate) fn terminal_row_links(
             egui::pos2(rect.left() + target.column as f32 * cell.x, rect.top()),
             egui::vec2(target.columns as f32 * cell.x, cell.y),
         );
-        let hovered = pointer.is_some_and(|position| span.contains(position));
-        if hovered {
+        if span.contains(pointer) {
             // Only on hover. A pane of permanently underlined words is a pane
             // that is harder to read than the plain text it replaced.
             ui.painter().hline(

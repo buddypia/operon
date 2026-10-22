@@ -210,11 +210,7 @@ pub(crate) fn open_in_external_editor(
     editor: crate::models::ExternalEditor,
 ) -> Result<()> {
     if !path.exists() {
-        anyhow::bail!(
-            "{}: path does not exist: {}",
-            editor.label(),
-            path.display()
-        );
+        anyhow::bail!(tf!("{path} が見つかりません", path = path.display()));
     }
 
     let mut command = Command::new(editor.command());
@@ -244,5 +240,8 @@ pub(crate) fn open_in_external_editor(
         }
     }
 
-    anyhow::bail!("{}: failed to launch editor", editor.label());
+    anyhow::bail!(tf!(
+        "{editor} を起動できませんでした",
+        editor = editor.label()
+    ));
 }

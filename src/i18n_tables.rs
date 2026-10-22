@@ -15,6 +15,10 @@ use crate::i18n::Language;
 pub(crate) type Table = &'static [(&'static str, &'static str)];
 
 pub(crate) const EN_TABLE: Table = &[
+    ("{editor} で開く", "Open in {editor}"),
+    ("{editor} を起動できませんでした", "Could not start {editor}"),
+    ("{path} が見つかりません", "{path} was not found"),
+    ("差分をコピーできませんでした: {error}", "Could not copy the diff: {error}"),
     ("\n\n… 差分を {p0} KiB で切り詰めました", "\n\n… Diff truncated at {p0} KiB"),
     ("\n## ターン {p0} — {speaker}\n\n{text}\n", "\n## Turn {p0} — {speaker}\n\n{text}\n"),
     ("\n... コマンドのエラー出力を切り詰めました", "\n... Command error output was truncated"),
@@ -1153,6 +1157,10 @@ pub(crate) const EN_TABLE: Table = &[
 ];
 
 pub(crate) const KO_TABLE: Table = &[
+    ("{editor} で開く", "{editor}에서 열기"),
+    ("{editor} を起動できませんでした", "{editor}을(를) 시작할 수 없습니다"),
+    ("{path} が見つかりません", "{path}을(를) 찾을 수 없습니다"),
+    ("差分をコピーできませんでした: {error}", "변경 사항을 복사할 수 없습니다: {error}"),
     ("\n\n… 差分を {p0} KiB で切り詰めました", "\n\n… diff를 {p0} KiB에서 잘랐습니다"),
     ("\n## ターン {p0} — {speaker}\n\n{text}\n", "\n## 턴 {p0} — {speaker}\n\n{text}\n"),
     ("\n... コマンドのエラー出力を切り詰めました", "\n... 명령의 오류 출력을 잘랐습니다"),
