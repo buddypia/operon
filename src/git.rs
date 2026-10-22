@@ -2177,7 +2177,8 @@ pub(crate) fn git_diff_checkpoint(worktree: &Path, commit_sha: &str) -> Result<S
         git_output_allowing_limited(worktree, &["diff", commit_sha, "--"], &[0, 1], 1024 * 1024)?;
     if truncated {
         Ok(format!(
-            "{diff_text}\n\n[差分が 1MB を超えたため切り詰められました]"
+            "{diff_text}\n\n{}",
+            tr("[差分が 1MB を超えたため切り詰められました]")
         ))
     } else {
         Ok(diff_text)

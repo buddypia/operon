@@ -6156,7 +6156,7 @@ impl OperonApp {
                             ui.separator();
                             ui.label(RichText::new(tr("チェックポイント")).small().weak());
                             if ui.button(tr("手動チェックポイントを作成")).clicked() {
-                                self.capture_checkpoint(session_id, "手動作成");
+                                self.capture_checkpoint(session_id, tr("手動作成"));
                                 self.notice_briefly(tr("チェックポイントを作成しました。"));
                                 ui.close_menu();
                             }
@@ -7230,13 +7230,13 @@ impl OperonApp {
                                     |ui| {
                                         if turn.completed {
                                             ui.label(
-                                                RichText::new("✓ 完了")
+                                                RichText::new(tr("✓ 完了"))
                                                     .size(11.5)
                                                     .color(palette.success),
                                             );
                                         } else {
                                             ui.label(
-                                                RichText::new("● 実行中")
+                                                RichText::new(tr("● 実行中"))
                                                     .size(11.5)
                                                     .color(palette.accent),
                                             );

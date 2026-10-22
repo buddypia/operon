@@ -1,0 +1,32 @@
+# Review record for 212-every-japanese-string-is-translated.
+#
+# The change: four Japanese literals that reached the screen untranslated go
+# through tr with rows, and a test reads every string literal in src/ and
+# refuses Japanese with no row, with a row but written where nothing
+# translates it, or named as data no more. Lesson 097.
+#
+# Round 1: rust-reviewer approve-with-nits 0 4, subprocess-safety-reviewer
+# approve 0 1. The scanner handles every literal form in non-test source
+# today; the checkpoint name stays one argv entry after a fixed prefix. Taken:
+# `br"…"` and `cr"…"` read as raw strings; a translating position must not
+# be the tail of another identifier (`extr(` is not `tr(`).
+# Round 2: rust-reviewer approve-with-nits 0 3 (all carried from round 1),
+# subprocess-safety-reviewer approve 0 1 (the decided checkpoint language).
+
+digest: "e0120f0f3105df42"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/tests.rs every_japanese_literal_is_a_message_or_named_data: a `label:` or `=>` value with a row is trusted to reach tr where it is shown; nothing follows it there.
+    person: "メニューの項目名のように、表の形で書いた日本語は、表示するときに翻訳されている前提で確かめています。表示側で翻訳を通し忘れた場合は、このテストでは見つかりません。"
+  - rust-reviewer/1 · src/tests.rs every_japanese_literal_is_a_message_or_named_data: an exemption matches its value anywhere in its file, not only where it is named.
+    person: "画面に出ない言葉として除外した単語（「失敗」など）を、同じファイルの別の場所で画面向けに使うと、このテストは見逃します。"
+  - rust-reviewer/1 · src/tests.rs every_japanese_literal_is_a_message_or_named_data: a `const` region ends at the first `];`, so one inside an exemplar would cut it short.
+    person: "ナレッジの例文に「];」という文字を入れると、このテストが分かりにくい理由で失敗します。いまの例文には含まれていません。"
+  - subprocess-safety-reviewer/1 · src/app/screens.rs: a manual checkpoint is named in the language active when it is made, so the list can mix languages.
+    person: "手動で作ったチェックポイントの名前は、作ったときの表示言語で保存されます。言語を切り替えると、一覧に複数の言語が混ざります。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  subprocess-safety-reviewer: "approve 0 1"
