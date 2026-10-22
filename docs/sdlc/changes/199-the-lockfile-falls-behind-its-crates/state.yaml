@@ -24,8 +24,8 @@
 
 state:
   route: "refactor"
-  stage: "test"
-  status: "in-progress"
+  stage: "deploy"
+  status: "awaiting-user"
   attempts: "1 2"
   questions: "0 7"
   autonomy: "supervised"
@@ -33,13 +33,14 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Review the Cargo.lock diff, commit, push, merge once CI passes, then
-  ship, since the binary links the updated crates."
+resume: "Landed once CI passed. /Applications/Operon.app is stale until
+  .claude/skills/ship/SKILL.md runs, and that quits the running Operon, so it
+  waits for the person to say when."
 
 contract:
-  three-gates: "machine pending cargo clippy --locked -- -D warnings passed
-    locally; the commit gate and CI decide"
-  ci: "machine pending CI on the branch tip"
+  three-gates: "machine passed the commit gate admitted 9a2ce09; CI run
+    39707877396 green on fmt, clippy, bands and the suite"
+  ci: "machine passed on the tip, which the merge gate checks"
   release-binary: "machine pending yes: Cargo.lock changes the crates the app
     links, so /Applications/Operon.app is stale until
     .claude/skills/ship/SKILL.md runs"
