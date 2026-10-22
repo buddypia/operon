@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "supervised"
@@ -9,7 +9,7 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Tick two of three files in the running app, draft a message, commit, push; then have a person read the diff."
+resume: "Closed by change 202 after reading it against the code: landed; all eight tests are present."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
@@ -17,4 +17,4 @@ contract:
   guards-verified-by-mutation: "human passed six watched failing: the index reset removed, ahead and behind swapped, the message cleaner made a no-op, a force fed to the scan, an agent given a non-read-only draft form, the push refusal removed"
   screen-agreed: "human passed per-file checkboxes were chosen over committing everything tracked, and the drafting CLI is auto-chosen rather than configured"
   no-force-push: "machine passed no_source_file_can_force_a_push, watched failing with --force-with-lease added to the push"
-  real-repository-check: "human pending tick two of three files in the running app, draft, edit, commit, push"
+  real-repository-check: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"

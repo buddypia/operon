@@ -76,8 +76,9 @@ field() { sed -n "s/^  $2: \"\(.*\)\"$/\1/p" "$1" | head -1; }
 # --- which change is in flight? -------------------------------------------------
 #
 # Scoped to the change directories touched in this worktree/branch against
-# refs/heads/main (matching gate-stop.sh), so historical pre-035 changes on main
-# (such as 008 at `reviewing`) never shadow the change in flight.
+# refs/heads/main (matching gate-stop.sh), so a record another change left open
+# never shadows the change in flight. Thirty did until change 202 closed them;
+# gate-merge.sh now refuses a landing while any record on the branch is open.
 
 if git merge-base refs/heads/main HEAD >/dev/null 2>&1; then
   in_play=$(

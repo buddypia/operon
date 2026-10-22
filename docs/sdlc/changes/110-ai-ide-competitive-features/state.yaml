@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "build"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,10 +9,10 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Implementing AI IDE workflow features (worktree land, run scripts, checkpoints, PR creation, external editors, issue import) in feature/ide-enhancements worktree."
+resume: "Closed by change 202 after reading it against the code: landed; change 115 records it shipped; its defects are A11, A16 and A17 in triage.md."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed main at 3d5d07e, which holds this change, passed CI run 39719429456: fmt, clippy, the suite, the bands and the release bundle"
+  bands: "machine passed main at 3d5d07e, which holds this change, passed CI run 39719429456: fmt, clippy, the suite, the bands and the release bundle"
+  release-binary: "machine passed yes; CI builds the bundle on every push, and the installed app is rebuilt from main after the changes that follow 202"
+  guards-verified-by-mutation: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"

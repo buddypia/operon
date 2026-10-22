@@ -211,6 +211,49 @@ in $changed_state on $branch before merging — main itself refuses direct edits
   esac
 done
 
+# And every other record on the branch, by status alone. The loop above reads
+# the directories this branch touched, so a record that reached main open some
+# other way — thirty arrived in the squashed import of 2026-10-05 — was never
+# read again, and sat at `reviewing` for weeks while guards learned to skip it
+# (sdlc 202). Every state.yaml is listed first, so one whose status cannot be
+# read is open rather than absent; then the first `  status:` line of each,
+# which is the state block's, ahead of the closed set in `sets:`. A git that
+# fails here refuses: an unread list would pass as an empty one.
+record_files=$(git ls-tree -r --name-only "$sha" -- docs/sdlc/changes) ||
+  block "the records on $branch could not be listed" "git ls-tree failed on ${sha:0:12}."
+record_statuses=$(git grep -n -E '^  status: "' "$sha" -- 'docs/sdlc/changes/*/state.yaml')
+[ "$?" -le 1 ] ||
+  block "the records on $branch could not be read" "git grep failed on ${sha:0:12}."
+open_records=$(
+  {
+    printf '%s\n' "$record_files" | grep -E '^docs/sdlc/changes/[^/]+/state\.yaml$' | sed 's/^/file:/'
+    printf '%s\n' "$record_statuses" | sed "s/^$sha://"
+  } | awk '
+    /^file:/ { path = substr($0, 6); order[++n] = path; next }
+    {
+      path = $0; sub(/:.*/, "", path)
+      if (path in status) next
+      value = $0; sub(/^[^:]*:[0-9]+:  status: "/, "", value); sub(/".*/, "", value)
+      status[path] = value
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        path = order[i]
+        value = (path in status) ? status[path] : "no readable status"
+        if (value == "done" || value == "archived") continue
+        dir = path; sub(/^docs\/sdlc\/changes\//, "", dir); sub(/\/state\.yaml$/, "", dir)
+        print "  " dir " (" value ")"
+      }
+    }')
+if [ -n "$open_records" ]; then
+  block "records on $branch that never closed" \
+"$open_records
+Each of these is on $branch without a terminal status, and this branch did not
+touch it. Read each against the code, then record \`done\` in its state.yaml on
+$branch, or \`archived\` if it was abandoned or superseded — one commit per
+change directory — before merging."
+fi
+
 verdict=$(bash "$root/scripts/ci-verified.sh" "$sha" 2>&1)
 status=$?
 case "$status" in

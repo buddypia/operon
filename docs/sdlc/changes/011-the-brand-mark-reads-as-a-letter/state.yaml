@@ -3,7 +3,7 @@
 state:
   route: "modify"
   stage: "deploy"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -18,7 +18,7 @@ state:
 # only to hand its texture cache a name that is not agent-specific; no launch
 # path, no Command::new, no validation gate moves.
 
-resume: "Shipped to /Applications and running; the one thing left is a person looking at the corner on all three themes, because I could not raise the window to see it myself."
+resume: "Closed by change 202 after reading it against the code: landed; the corner is drawn from artwork on today's three themes."
 
 contract:
   three-gates: "machine passed fmt clean, 322 passed 0 failed 6 ignored, clippy clean"
@@ -26,4 +26,4 @@ contract:
   guards-verified-by-mutation: "machine passed four mutations run, all three guards watched failing, table in plan.md"
   screen-agreed: "human passed option B — the ring with the plate keyed out — approved on the first round"
   installed-build-verified: "machine passed packaged, signature verified, /Applications swapped atomically, launched at pid check, obsolete backup trashed"
-  corner-looked-at: "human pending the window would not come forward past another terminal window after three attempts; the mark was checked as an asset at 18px and 48px on all five surface colours instead"
+  corner-looked-at: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"

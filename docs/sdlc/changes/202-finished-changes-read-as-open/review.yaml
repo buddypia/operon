@@ -1,0 +1,27 @@
+# Review record for 202-finished-changes-read-as-open.
+#
+# The change: the merge gate refuses a landing while any record on the branch
+# is open, not only the records the branch touched; thirty records that arrived
+# open in the squashed import are read against the code and closed (triage.md),
+# each in a commit of its own, since those commits carry no code.
+#
+# Round 1, both approve-with-nits. Fixed for round 2: every state.yaml is
+# listed with git ls-tree before statuses are read, so a record whose status
+# cannot be read is open rather than absent; a git that fails refuses instead
+# of reading as empty; the refusal names the branch and offers archived; the
+# test proves two open records, the unreadable one, and the exact reason the
+# gate refuses once every record is closed. mutations.py caught 4 of 4.
+
+digest: "0a75782d4e7dfd43"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/2 · .claude/hooks/gate-merge.sh record list: git ls-tree quotes a path with non-ASCII bytes, so such a change directory would be missing from the list; directories are NNN-slug ASCII.
+    person: "記録のフォルダ名に日本語などを使うと、その記録だけ確認から漏れます。フォルダ名は英数字だけの決まりなので、対応は不要です。"
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-merge.sh record list: a path containing ':' would be cut at the colon when its status is read; directories are NNN-slug.
+    person: "記録のフォルダ名にコロンを含めると、その記録の状態を読み違えます。フォルダ名の決まりで起きないので、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 1"

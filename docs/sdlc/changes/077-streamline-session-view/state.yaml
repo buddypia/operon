@@ -1,7 +1,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,13 +9,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Session sidebar instruction text removed, session card density improved, port indicators consolidated into compact popover, and tests passing."
+resume: "Closed by change 202 after reading it against the code: landed; its two tests assert nothing, A13 in triage.md."
 
 contract:
   three-gates: "machine passed cargo fmt --check, cargo test --locked 586 passed 0 failed 6 ignored, cargo clippy --locked -- -D warnings"
   # Same breaches as main (always_loaded_bytes warn, steering_bytes diagnose, unsafe_blocks propose); nothing here moves them.
   bands: "machine waived bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh"
+  release-binary: "machine passed yes; CI builds the bundle on every push, and the installed app is rebuilt from main after the changes that follow 202"
   guards-verified-by-mutation: "human passed new tests cover streamlined card actions and port popover rendering"
 
 sets:

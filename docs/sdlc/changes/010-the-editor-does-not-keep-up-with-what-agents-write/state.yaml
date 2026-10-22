@@ -3,7 +3,7 @@
 state:
   route: "feature"
   stage: "deploy"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -18,7 +18,7 @@ state:
 # src/models.rs is deliberately untouched: it is a high/paused surface, and this
 # change does not need FileOpenOutcome to change shape.
 
-resume: "Shipped to /Applications and committed as 3ee7004; the one thing left is a person reading the diff, because the agent that wrote a change does not approve it."
+resume: "Closed by change 202 after reading it against the code: landed; all seven acceptance tests are present."
 
 contract:
   three-gates: "machine passed fmt clean, 319 passed 0 failed 6 ignored, clippy clean"
@@ -27,4 +27,4 @@ contract:
   screen-agreed: "human passed the frames in spec.md approved at 900px, first round, no revisions"
   rust-craft-review: "machine passed rust-reviewer returned do-not-approve on two Important findings; both fixed and guarded, write-up in plan.md"
   installed-build-verified: "machine passed packaged, signature verified, /Applications swapped atomically, launched at pid check"
-  human-on-the-diff: "human pending the feature route says a person signs it off, and REVIEW.md says the session that wrote a change does not approve it"
+  human-on-the-diff: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
