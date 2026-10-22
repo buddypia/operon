@@ -401,6 +401,51 @@ pub(crate) fn terminal_input_events(
     })
 }
 
+/// Which way the find bar steps this frame — `Some(true)` for Enter,
+/// `Some(false)` for Shift+Enter — and whether a conversion is still open
+/// after it.
+///
+/// The same reading as `terminal_input_events`, for a field rather than a
+/// pane: each confirmed conversion owns one Enter wherever it falls in the
+/// frame (lesson 016), and an Enter while a preedit is showing is the IME's.
+pub(crate) fn find_bar_step(events: &[egui::Event], composing: bool) -> (Option<bool>, bool) {
+    let mut enters_the_ime_owns = events
+        .iter()
+        .filter(|e| matches!(e, egui::Event::Ime(egui::ImeEvent::Commit(text)) if !text.is_empty()))
+        .count();
+    let mut composing = composing;
+    let mut step = None;
+    for event in events {
+        match event {
+            egui::Event::Ime(egui::ImeEvent::Preedit(text)) => composing = !text.is_empty(),
+            egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::Disabled) => {
+                composing = false;
+            }
+            egui::Event::Key {
+                key: egui::Key::Enter,
+                pressed: true,
+                modifiers,
+                ..
+            } => {
+                if enters_the_ime_owns > 0 {
+                    enters_the_ime_owns -= 1;
+                    continue;
+                }
+                if composing {
+                    continue;
+                }
+                if modifiers.is_none() {
+                    step = Some(true);
+                } else if modifiers.shift_only() {
+                    step = Some(false);
+                }
+            }
+            _ => {}
+        }
+    }
+    (step, composing)
+}
+
 pub(crate) fn terminal_key_binding(key: egui::Key, modifiers: egui::Modifiers) -> Option<String> {
     // Keep macOS application shortcuts under the app's control. Ctrl remains
     // available for terminal conventions such as Ctrl+C and Ctrl+R.

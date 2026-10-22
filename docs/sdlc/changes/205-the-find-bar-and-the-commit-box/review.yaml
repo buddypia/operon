@@ -1,0 +1,27 @@
+# Review record for 205-the-find-bar-and-the-commit-box.
+#
+# The change: the commit message is kept per project; ⌘F searches again as
+# the find bar opens; Enter and Shift+Enter step without the field giving up
+# the keyboard, and a conversion's Enter and Esc are the IME's; closing hands
+# the keyboard to the pane; the empty projects page reads its key from the
+# keymap.
+#
+# Round 1: rust-reviewer approve-with-nits, no Important. Of its three nits,
+# the second (composing reset in the frame focus comes back) does not hold:
+# ui_terminal_search requests focus before it asks has_focus, which reads
+# memory at call time, and esc_closes_the_find_bar_into_the_pane_but_not_mid_conversion
+# stays open on a lone Esc only because composing survived that frame. The
+# other two are carried.
+
+digest: "4a379c335e211f11"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/ui/terminal.rs find_bar_step: a conversion confirmed by clicking a candidate, with a real Enter in the same frame, takes that Enter as its own.
+    person: "変換候補をマウスで選んだのと同じ瞬間に Enter を押すと、その Enter で次の一致へ移らないことがあります。もう一度 Enter を押せば移ります。"
+  - rust-reviewer/1 · src/tests.rs no_message_spells_a_remappable_chord: a message that spells a remappable key another way, such as Cmd+O, is not found.
+    person: "画面の文言に割り当て可能なキーを「Cmd+O」のような別の書き方で書いた場合は、自動チェックで見つかりません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
