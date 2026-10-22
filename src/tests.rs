@@ -21386,9 +21386,18 @@ pub(crate) fn the_mutation_sweep_template_ends_a_run_that_will_not_finish() {
         )
     };
 
-    // A check that never returns. `exec`-free on purpose: `sleep` is the child,
-    // and the bound has to kill it rather than wait for the pipe to close.
-    let (hung_for, hung_code, hung_output, hung_subject) = sweep_with("[\"sleep\", \"30\"]");
+    // Every check below is green on the unmutated tree and does its thing only
+    // once the subject reads `broken`: the sweep runs the checks once before any
+    // mutation and stops on a red or hung tree (change 214).
+    let when_broken = |then: &str| {
+        format!(
+            "[\"/bin/sh\", \"-c\", \"grep -q broken {} || exit 0; {then}\"]",
+            subject.display()
+        )
+    };
+    // A check that never returns, and the bound has to kill it rather than wait
+    // for the pipe to close.
+    let (hung_for, hung_code, hung_output, hung_subject) = sweep_with(&when_broken("sleep 30"));
     // A check that returns green however the file was mutated, which is what a
     // sweep is supposed to call out.
     let (_, green_code, green_output, green_subject) = sweep_with("[\"true\"]");
@@ -21397,10 +21406,14 @@ pub(crate) fn the_mutation_sweep_template_ends_a_run_that_will_not_finish() {
     // reaches only the child lets the grandchild outlive the sweep and write
     // this marker two seconds later.
     let marker = root.join("grandchild-survived");
-    let (_, _, descendant_output, _) = sweep_with(&format!(
-        "[\"/bin/sh\", \"-c\", \"sleep 2 && touch {} & sleep 30\"]",
+    let (_, _, descendant_output, _) = sweep_with(&when_broken(&format!(
+        "sleep 2 && touch {} & sleep 30",
         marker.display()
-    ));
+    )));
+    // A check that is red before anything was mutated. Every mutation would
+    // then read as caught, and a sweep run past a test that already failed
+    // reported 5 of 5 for change 213.
+    let (_, red_code, red_output, red_subject) = sweep_with("[\"/bin/sh\", \"-c\", \"exit 1\"]");
     // Past when the grandchild would fire, had it survived.
     std::thread::sleep(std::time::Duration::from_secs(4));
     let descendant_survived = marker.exists();
@@ -21435,6 +21448,19 @@ pub(crate) fn the_mutation_sweep_template_ends_a_run_that_will_not_finish() {
     );
     assert_eq!(
         green_subject, "kept\n",
+        "掃引が変異したファイルを戻していません"
+    );
+    assert_eq!(
+        red_code,
+        Some(1),
+        "変異の前から赤いチェックで掃引を最後まで走らせました:\n{red_output}"
+    );
+    assert!(
+        red_output.contains("変異の前から") && !red_output.contains("caught"),
+        "変異の前から赤いチェックで、変異を catch と報告しています。何も示さない掃引です:\n{red_output}"
+    );
+    assert_eq!(
+        red_subject, "kept\n",
         "掃引が変異したファイルを戻していません"
     );
     assert!(
@@ -21490,7 +21516,8 @@ pub(crate) fn the_mutation_sweep_template_puts_the_tree_back_when_it_is_killed()
         (
             "CHECKS = [[\"cargo\", \"test\", \"--locked\", \"--manifest-path\", str(ROOT / \"Cargo.toml\"), \"--\", *TESTS]]".to_string(),
             format!(
-                "CHECKS = [[\"/bin/sh\", \"-c\", \"sleep 2 && touch {} & sleep 600\"]]",
+                "CHECKS = [[\"/bin/sh\", \"-c\", \"grep -q BROKEN {} || exit 0; sleep 2 && touch {} & sleep 600\"]]",
+                subject.display(),
                 marker.display()
             ),
         ),
@@ -21591,9 +21618,9 @@ pub(crate) fn the_mutation_sweep_template_puts_the_tree_back_when_it_is_killed()
 /// A hook restored without its executable bit is a gate that no longer runs, in
 /// a tree whose `git status` is clean.
 ///
-/// The fixture's check exits non-zero immediately, so the mutation is "caught"
-/// and the sweep finishes in a moment: what is under test is the restore, not
-/// the checking.
+/// The fixture's check fails as soon as the subject is mutated, so the
+/// mutation is "caught" and the sweep finishes in a moment: what is under test
+/// is the restore, not the checking.
 pub(crate) fn the_mutation_sweep_template_restores_the_mode_it_found() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -21610,7 +21637,10 @@ pub(crate) fn the_mutation_sweep_template_restores_the_mode_it_found() {
         ),
         (
             "CHECKS = [[\"cargo\", \"test\", \"--locked\", \"--manifest-path\", str(ROOT / \"Cargo.toml\"), \"--\", *TESTS]]".to_string(),
-            "CHECKS = [[\"/bin/sh\", \"-c\", \"exit 1\"]]".to_string(),
+            format!(
+                "CHECKS = [[\"/bin/sh\", \"-c\", \"! grep -q BROKEN {}\"]]",
+                subject.display()
+            ),
         ),
         (
             "    \"<what-this-breaks>\": (ROOT / \"<file>\", \"<text that is there>\", \"<text that breaks it>\"),".to_string(),
