@@ -1,0 +1,28 @@
+# Review record for 211-codex-waits-for-ci-before-main.
+#
+# The change: Codex runs the main checkout's merge gate on every shell call,
+# appended last to its shell group with Claude's 600 seconds, so a Codex
+# session cannot land on main before CI has judged the branch.
+#
+# Round 1: rust-reviewer approve-with-nits 0 4, subprocess-safety-reviewer
+# approve-with-nits 0 3. Both confirmed the command expands as the file's other
+# handlers do, the gate reads Codex's payload and refuses with exit 2, and the
+# test's child cannot hang. Taken: the helper names the file in its panics and
+# only reports; the order, timeout and path checks sit in the test, which now
+# requires every shell group to carry the gate; `.git/info` is made before the
+# exclude write; a closed pipe no longer hides the gate's stderr.
+# Round 2: rust-reviewer approve 0 0, subprocess-safety-reviewer approve 0 0.
+
+digest: "4f54b188dd3a5e6d"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1 · src/tests.rs merge_gate_refuses_branch_with_in_flight_state_yaml: the Codex arm runs only from the main checkout; no payload from a worktree session is tried.
+    person: "Codex の合流チェックのテストは、main の作業場所から実行した場合だけを確かめています。作業ブランチ側から実行した場合の動きは、Claude と同じ仕組みに任せています。"
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-merge.sh: with jq missing, or a payload jq cannot read, the gate lets the command through, as it does under Claude.
+    person: "jq が入っていない環境では、Codex でも Claude でも合流チェックが働かず、CI を待たずに main へ取り込めてしまいます。jq は通常の環境には入っています。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

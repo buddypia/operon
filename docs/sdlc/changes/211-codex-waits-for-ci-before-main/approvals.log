@@ -1,0 +1,10 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The plan adds a refusal to Codex's hooks and relaxes nothing, which
+# approval.md gives to an evaluator; gate-configuration starts with a person.
+# The evaluator, a fresh subagent, approved it, then re-approved after the
+# plan took its two risk notes into the last bullet. The person line is the
+# owner's instruction to fix every row of 202's triage, A18 among them, after
+# the list naming this change was put to them.
+2026-10-22T11:40:00Z auto plan plan.md 732de66b10365627 approve evaluator: fixes A18 with one handler; tightening only; the existing hook tests hold; the risk notes on unified_exec and a failed rev-parse are in the plan
+2026-10-22T11:40:00Z person gate-configuration plan.md 732de66b10365627 approve owner: 判断が必要なものも恒久対応しても全て対応して / それで進めて。取りこぼさないで1件ずつ確認して恒久対応すること
