@@ -1,0 +1,29 @@
+# Review record for 203-the-usage-reader-misses-accounts.
+#
+# The change: the usage reader's marker is one per Claude settings file,
+# written after the file and only when the reader is in the slot, removed when
+# Operon removes the reader itself; the shared marker becomes the machine's own
+# folder's once; a status-line clock behind the stamp posts; a registered
+# account whose folder is gone is named beside the hook verdict.
+#
+# Round 1: rust-reviewer and durability-reviewer both approve-with-nits, no
+# Important. The nits are failure paths of best-effort marker files and a
+# layout remark; they are carried below.
+
+digest: "d1ae4bb789016b8a"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tmux/hooks.rs install_claude_hooks: if removing the marker fails when Operon takes the reader out, the slot later reads as the person's and the reader is not put back.
+    person: "フック連携をオフにしたときに Operon の内部ファイルを消せないという、まれな失敗が起きると、オンに戻しても利用状況の表示が戻りません。"
+  - rust-reviewer/1 · src/tmux/hooks.rs statusline_marker_path: the marker is keyed by the settings path as written, so a folder registered again under another spelling gets the reader back once.
+    person: "アカウントのフォルダを別の書き方（末尾のスラッシュやエイリアス）で登録し直すと、本人が外した利用状況の表示が一度だけ戻ることがあります。"
+  - durability-reviewer/1 · src/tmux/hooks.rs adopt_shared_statusline_marker: a rename that fails inside one directory deletes the shared marker, so a reader the person removed before the upgrade could be put back once.
+    person: "更新直後の一回だけ、ごくまれなファイル操作の失敗が重なると、以前に外した利用状況の表示が戻ることがあります。"
+  - rust-reviewer/1 · src/app/screens.rs settings agents row: several missing-account notices sit side by side in one row and a long name can crowd the hook verdict.
+    person: "フォルダが見つからないアカウントがいくつもあると、設定画面の一行に並んで窮屈に見えます。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"
+  durability-reviewer: "approve-with-nits 0 3"

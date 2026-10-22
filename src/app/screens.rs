@@ -4898,7 +4898,6 @@ impl OperonApp {
                         self.hook_installs
                             .iter()
                             .find(|install| install.provider.agent() == agent)
-                            .map(|install| &install.state)
                     })
                     .flatten();
                 let accounts = agent_supports_accounts(agent).then(|| {
@@ -4927,8 +4926,13 @@ impl OperonApp {
                                     .color(palette.text_muted),
                             );
                         }
-                        if let Some(state) = hook {
-                            hook_cell(ui, state, palette);
+                        if let Some(install) = hook {
+                            hook_cell(ui, &install.state, palette);
+                            // Where the install skipped a registered folder
+                            // that is gone, beside the verdict it qualifies.
+                            for notice in &install.missing_accounts {
+                                ui.label(RichText::new(notice).size(12.0).color(palette.warning));
+                            }
                         }
                     },
                 );

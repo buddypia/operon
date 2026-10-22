@@ -34778,6 +34778,25 @@ pub(crate) fn the_installed_usage_reader_posts_a_reading_end_to_end() {
         71.0
     );
 
+    // A new CLI in the same pane starts its clock again. That is a new session,
+    // not a tick inside the interval: it posts at once (change 203).
+    let restarted = post(
+        r#"{"total_duration_ms":500,"rate_limits":{"five_hour":{"used_percentage":5}}}"#,
+        &stamps,
+    );
+    assert!(restarted.status.success());
+    let event = events
+        .recv_timeout(Duration::from_secs(5))
+        .expect("同じ画面で CLI を起動し直すと投稿が止まります");
+    assert_eq!(
+        parse_rate_limits(&event.payload)
+            .unwrap()
+            .five_hour
+            .unwrap()
+            .used_percent,
+        5.0
+    );
+
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -37344,6 +37363,157 @@ pub(crate) fn the_hooks_follow_every_account_that_is_registered() {
     );
     assert_eq!(codex, vec![home.join(".codex")]);
 
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 203: the usage reader went into the first Claude folder only, because
+/// one "installed once" marker stood for every folder; it never came back after
+/// the hook setting was turned off and on, because Operon's own removal left the
+/// marker behind; and a folder somebody else's command held was marked anyway.
+/// A registered folder that is gone was skipped without a word.
+#[test]
+pub(crate) fn the_usage_reader_reaches_every_account_and_survives_a_toggle() {
+    let root = temporary_directory("usage-accounts");
+    let home = root.join("home");
+    let work = root.join("claude-work");
+    let mine = root.join("claude-mine");
+    let gone = root.join("claude-deleted");
+    let data_file = root.join("data").join("store-v2.json");
+    for directory in [&home, &work, &mine, data_file.parent().unwrap()] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    fs::write(
+        claude_settings_in(&mine),
+        r#"{"statusLine":{"type":"command","command":"~/bin/mine.sh"}}"#,
+    )
+    .unwrap();
+    let mut accounts = AgentAccounts::default();
+    register_account(&mut accounts, "claude", "仕事", &work).expect("a claude account");
+    register_account(&mut accounts, "claude", "自分", &mine).expect("a second account");
+    fs::create_dir_all(&gone).unwrap();
+    register_account(&mut accounts, "claude", "古い", &gone).expect("a third account");
+    fs::remove_dir_all(&gone).unwrap();
+
+    let tools = ToolStatus {
+        git: true,
+        tmux: true,
+        codex: false,
+        claude: true,
+        antigravity: false,
+        gh: false,
+    };
+    let socket = hook_socket_path(&data_file);
+    let apply =
+        |enabled: bool| apply_hooks(&data_file, &home, &socket, &tools, enabled, &accounts).0;
+    let slot = |directory: &Path| {
+        read_json(&claude_settings_in(directory))["statusLine"]["command"]
+            .as_str()
+            .map(str::to_owned)
+    };
+    let own = home.join(".claude");
+    let ours = Some(statusline_script_path(&data_file).display().to_string());
+
+    let installs = apply(true);
+    assert_eq!(
+        slot(&own),
+        ours,
+        "この機械の Claude に読み取りが入っていません"
+    );
+    assert_eq!(
+        slot(&work),
+        ours,
+        "2 つ目のアカウントに読み取りが入っていません"
+    );
+    assert_eq!(
+        slot(&mine).as_deref(),
+        Some("~/bin/mine.sh"),
+        "他人の設定を書き換えました"
+    );
+    let claude = installs
+        .iter()
+        .find(|install| install.provider == CliProvider::Claude)
+        .expect("a Claude row");
+    assert_eq!(
+        claude.missing_accounts,
+        vec![tf!(
+            "アカウント「{name}」のフォルダが見つかりません。",
+            name = "古い"
+        )],
+        "フォルダが消えたアカウントの名前が出ていません"
+    );
+
+    // Off, then on: Operon took the reader out itself, so it puts it back.
+    apply(false);
+    assert_eq!(slot(&own), None);
+    assert_eq!(slot(&work), None);
+    apply(true);
+    assert_eq!(
+        slot(&own),
+        ours,
+        "オフからオンに戻しても読み取りが戻りません"
+    );
+    assert_eq!(
+        slot(&work),
+        ours,
+        "オフからオンに戻しても読み取りが戻りません"
+    );
+
+    // The person empties their own slot: it was never Operon's, so it is free.
+    fs::write(claude_settings_in(&mine), "{}").unwrap();
+    apply(true);
+    assert_eq!(
+        slot(&mine),
+        ours,
+        "他人が使っていた枠が空いても読み取りが入りません"
+    );
+
+    // The person takes Operon's out of one file: that one stays out.
+    fs::write(claude_settings_in(&work), "{}").unwrap();
+    apply(true);
+    assert_eq!(slot(&work), None, "本人が外した読み取りを戻しました");
+    assert_eq!(slot(&own), ours);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 203: before the upgrade one marker stood for every folder, and it was
+/// written on the first install into the machine's own. It becomes that
+/// folder's marker, so a reader the person removed there stays removed.
+#[test]
+pub(crate) fn the_shared_usage_marker_becomes_the_machines_own() {
+    let root = temporary_directory("usage-shared-marker");
+    let home = root.join("home");
+    let data_file = root.join("data").join("store-v2.json");
+    let shared = hook_directory(&data_file).join(STATUSLINE_INSTALL_MARKER);
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    fs::create_dir_all(shared.parent().unwrap()).unwrap();
+    fs::write(&shared, b"").unwrap();
+    let tools = ToolStatus {
+        git: true,
+        tmux: true,
+        codex: false,
+        claude: true,
+        antigravity: false,
+        gh: false,
+    };
+    apply_hooks(
+        &data_file,
+        &home,
+        &hook_socket_path(&data_file),
+        &tools,
+        true,
+        &AgentAccounts::default(),
+    );
+    let own = claude_settings_in(&home.join(".claude"));
+    assert!(
+        read_json(&own).get("statusLine").is_none(),
+        "外したはずの読み取りを戻しました"
+    );
+    assert!(!shared.exists(), "共有の印が残っています");
+    assert!(
+        statusline_marker_path(&data_file, &own).exists(),
+        "共有の印がこの機械の Claude の印になっていません"
+    );
     fs::remove_dir_all(&root).ok();
 }
 
@@ -46866,10 +47036,20 @@ pub(crate) fn the_hook_cell_follows_the_hooks_switch() {
     app.hook_installs = vec![HookInstall {
         provider: CliProvider::Claude,
         state: HookInstallState::Installed,
+        missing_accounts: vec![tf!(
+            "アカウント「{name}」のフォルダが見つかりません。",
+            name = "古い"
+        )],
     }];
     app.hooks_enabled = true;
     let on = settings_texts(&mut app, SettingsSection::Agents);
     assert!(on.iter().any(|text| text == tr("フック 導入済み")));
+    // Change 203: a registered folder the install skipped is named beside it.
+    assert!(
+        on.iter()
+            .any(|text| text.contains("「古い」のフォルダが見つかりません")),
+        "消えたアカウントのフォルダがフックの欄に出ていません: {on:?}"
+    );
     app.hooks_enabled = false;
     let off = settings_texts(&mut app, SettingsSection::Agents);
     assert!(

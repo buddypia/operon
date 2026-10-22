@@ -414,10 +414,15 @@ pub(crate) const STATUSLINE_MIN_POST_INTERVAL_MS: u64 = 15_000;
 pub(crate) const STATUSLINE_STALE_AFTER_SECONDS: u64 = 30 * 60;
 /// The share of a window at which its number is worth noticing.
 pub(crate) const STATUSLINE_WARN_PERCENT: f32 = 80.0;
-/// Records that the usage reader was installed once, so that an empty slot
-/// later is read as the person having removed it rather than as a slot free to
-/// fill again.
+/// The one marker every Claude folder used to share (change 025). Change 203
+/// gives each settings file its own; this one is adopted by the machine's own
+/// folder on the first install after the upgrade and then removed.
 pub(crate) const STATUSLINE_INSTALL_MARKER: &str = "claude-statusline.installed";
+/// Records that the usage reader has been in one settings file's slot, so that
+/// an empty slot there later is read as the person having removed it rather
+/// than as a slot free to fill again. Named after the file, one per file.
+pub(crate) const STATUSLINE_MARKER_PREFIX: &str = "claude-statusline-";
+pub(crate) const STATUSLINE_MARKER_SUFFIX: &str = ".installed";
 /// The longest run of characters after a dot that will still be read as a file
 /// extension. Past this it is a sentence, not a name.
 pub(crate) const TERMINAL_PATH_MAX_EXTENSION: usize = 12;
