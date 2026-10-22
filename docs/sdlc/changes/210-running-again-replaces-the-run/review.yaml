@@ -1,0 +1,24 @@
+# Review record for 210-running-again-replaces-the-run.
+#
+# The change: while the run script runs in a worktree, the session menu
+# offers to stop it in place of starting it, and an approval that arrives
+# anyway starts no second copy.
+#
+# Round 1: rust-reviewer approve-with-nits 0 2. It confirmed the lookup runs
+# only while the menu is open, the agent string now lives in one constant,
+# sessions saved before the change match it unmigrated, and the approval
+# dialog's guard covers a dialog opened before another run began. Both
+# remarks are carried; state.yaml says why.
+
+digest: "a13cee13928b1c9b"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app/screens.rs session menu: a run still Starting shows the stop item, and stop_session takes only Active, so a click in that moment says it cannot stop yet.
+    person: "実行スクリプトを起動した直後の一瞬に「実行スクリプトを停止」を押すと、まだ停止できないと表示されます。起動が終われば止められます。"
+  - rust-reviewer/1 · src/app.rs running_run_session: a session the store migration marked Unknown is not counted as running until the next poll settles it.
+    person: "古いバージョンから更新した直後は、実行中の実行スクリプトを一瞬見落とすことがあります。数秒で正しい状態に戻ります。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"

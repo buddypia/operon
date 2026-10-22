@@ -6127,7 +6127,13 @@ impl OperonApp {
                         if let Some(project) = &project {
                             let wt_to_check =
                                 session.worktree_path.as_deref().unwrap_or(&project.path);
-                            if let Some(script) = self.cached_run_script_for(wt_to_check) {
+                            if let Some(running) = self.running_run_session(wt_to_check) {
+                                ui.separator();
+                                if ui.button(tr("実行スクリプトを停止")).clicked() {
+                                    self.stop_session(running);
+                                    ui.close_menu();
+                                }
+                            } else if let Some(script) = self.cached_run_script_for(wt_to_check) {
                                 ui.separator();
                                 if ui
                                     .button(tr("実行スクリプト (.operon/run.sh) を起動…"))
