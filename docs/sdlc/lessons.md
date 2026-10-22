@@ -1234,3 +1234,47 @@ canonical and a bare merge there to be refused, naming the branch, with no
 suite run (change 200; watched failing before the fix and on the three gate
 mutants in its mutations.py). A merge of main into a branch in a linked
 worktree stays silent in the same test.
+
+## 090 — A temporary directory inside this repository broke a test a third time
+
+An agent session's `$TMPDIR` links into the main checkout's `.tmp/`. Change 168
+met it with live tests, change 198 with two fixtures, and each fix moved only
+the tests that had failed, leaving 212 `temp_dir()` calls and every node
+fixture's `os.tmpdir()` where the next one would fail. **The rule:** a fixture
+takes its root from one function, and the suite holds every fixture to it.
+
+**Guard.** `fixtures_take_their_root_from_one_place` refuses a direct
+`temp_dir` call outside `temporary_root` and a `node_in` without `TMPDIR` set to
+it (change 201; watched failing on a fixture moved back and on `TMPDIR` dropped,
+in its mutations.py).
+
+## 091 — A check whose answer moved with the machine's load
+
+`test_fast_subprocess_completes_without_25ms_polling_floor` held four calls to
+85 ms, and failed in CI and under local load with nothing wrong. SessionEnd's
+lease release gave `git worktree list` 3 seconds and read a timeout as "no
+worktrees", so under load every lease stayed held for two hours — in production,
+and once in `a_session_that_ends_gives_back_only_its_own_worktree_leases`.
+**The rule:** a check reads what load cannot move, and a budget whose timeout
+reads as "nothing there" takes most of the time it has.
+
+**Guard.** `test_fast_subprocess_completes_without_25ms_polling_floor` reads
+from src/exec.rs a first sleep of at most 2 ms that doubles, and compares the
+calls with a blocking wait; `a_session_that_ends_gives_back_only_its_own_worktree_leases`
+reads the release's budget from the hook's source and requires it from 5 seconds
+to one second short of the hook's timeout — read, because `node_in`'s patience
+floor, which `fixtures_take_their_root_from_one_place` requires, now lifts every
+budget the test runs under (change 201; watched failing with the first sleep at
+25 ms, a flat 25 ms after it, the budget at 3 s, and the floor dropped; before
+the fix, the lease test failed with a 4-second git).
+
+## 092 — A change number held inside a branch with no number in its name
+
+The dependency update committed change 199 on chore/update-dependencies-latest,
+and 199 was opened again minutes later: `scripts/check-change-number.sh` read
+change directories on main alone and numbers from branch names. **The rule:** a
+number is in use wherever a branch tip holds its directory.
+
+**Guard.** `a_new_change_cannot_take_a_number_already_in_use` refuses a number
+whose directory only an unnumbered local branch holds (change 201; watched
+failing on the script as it was).
