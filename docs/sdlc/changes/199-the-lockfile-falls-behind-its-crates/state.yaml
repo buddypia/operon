@@ -25,7 +25,7 @@
 state:
   route: "refactor"
   stage: "deploy"
-  status: "awaiting-user"
+  status: "done"
   attempts: "1 2"
   questions: "0 7"
   autonomy: "supervised"
@@ -33,17 +33,18 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Landed once CI passed. /Applications/Operon.app is stale until
-  .claude/skills/ship/SKILL.md runs, and that quits the running Operon, so it
-  waits for the person to say when."
+resume: "Closed. What outlives it: /Applications/Operon.app is stale until
+  .claude/skills/ship/SKILL.md runs from main, which quits the running Operon,
+  so it runs when the person says. Two remarks are carried in review.yaml;
+  they need nothing from the person."
 
 contract:
   three-gates: "machine passed the commit gate admitted 9a2ce09; CI run
     39707877396 green on fmt, clippy, bands and the suite"
   ci: "machine passed on the tip, which the merge gate checks"
-  release-binary: "machine pending yes: Cargo.lock changes the crates the app
-    links, so /Applications/Operon.app is stale until
-    .claude/skills/ship/SKILL.md runs"
+  release-binary: "machine passed yes: Cargo.lock changes the crates the app
+    links; package /Applications/Operon.app from main after merge with
+    bash scripts/package-macos.sh and the ship skill's swap"
   review: "human passed rust-reviewer approve-with-nits 0 2 at
     76fcc2d6bfd4f7b8 (round 1), two remarks carried in review.yaml"
 
