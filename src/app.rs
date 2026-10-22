@@ -8092,27 +8092,7 @@ impl OperonApp {
             self.notice = Some(tr("エージェントの応答が終わるまで待ってください。").into());
             return;
         }
-        let files = self.diff_file_cache.get(&(project, None)).cloned();
-        let annotated: Vec<(DiffComment, bool)> = self
-            .diff_annotations
-            .comments
-            .iter()
-            .filter(|comment| comment.project == project && !comment.resolved)
-            .map(|comment| {
-                let stale = files.as_ref().is_some_and(|files| {
-                    files
-                        .iter()
-                        .find(|file| file.path == comment.file)
-                        .and_then(|file| {
-                            file.lines
-                                .iter()
-                                .find(|line| line.new_number == Some(comment.line))
-                        })
-                        .is_some_and(|line| comment_anchor(&line.text) != comment.anchor)
-                });
-                (comment.clone(), stale)
-            })
-            .collect();
+        let annotated = self.annotated_diff_comments(project, true);
         if annotated.is_empty() {
             self.notice = Some(tr("送信する未解決のコメントがありません。").into());
             return;
@@ -8149,29 +8129,41 @@ impl OperonApp {
         }
     }
 
-    /// Export review notes formatted as structured Markdown to clipboard.
-    pub(crate) fn copy_diff_comments_markdown(&mut self, project: Uuid, ctx: &egui::Context) {
-        let files = self.diff_file_cache.get(&(project, None)).cloned();
-        let annotated: Vec<(DiffComment, bool)> = self
-            .diff_annotations
+    /// A project's notes, each with whether its line has changed since it was
+    /// written. The line is read from the diff the note can be seen in: the
+    /// editor's review pane parses one file (`(project, Some(file))`), the
+    /// project's diff all of them (`(project, None)`), and either may be the
+    /// only one parsed.
+    pub(crate) fn annotated_diff_comments(
+        &self,
+        project: Uuid,
+        unresolved_only: bool,
+    ) -> Vec<(DiffComment, bool)> {
+        self.diff_annotations
             .comments
             .iter()
-            .filter(|comment| comment.project == project)
+            .filter(|comment| comment.project == project && !(unresolved_only && comment.resolved))
             .map(|comment| {
-                let stale = files.as_ref().is_some_and(|files| {
-                    files
-                        .iter()
-                        .find(|file| file.path == comment.file)
-                        .and_then(|file| {
-                            file.lines
-                                .iter()
-                                .find(|line| line.new_number == Some(comment.line))
-                        })
-                        .is_some_and(|line| comment_anchor(&line.text) != comment.anchor)
-                });
+                let line = [Some(comment.file.clone()), None]
+                    .into_iter()
+                    .filter_map(|key| self.diff_file_cache.get(&(project, key)))
+                    .find_map(|files| {
+                        files
+                            .iter()
+                            .find(|file| file.path == comment.file)?
+                            .lines
+                            .iter()
+                            .find(|line| line.new_number == Some(comment.line))
+                    });
+                let stale = line.is_some_and(|line| comment_anchor(&line.text) != comment.anchor);
                 (comment.clone(), stale)
             })
-            .collect();
+            .collect()
+    }
+
+    /// Export review notes formatted as structured Markdown to clipboard.
+    pub(crate) fn copy_diff_comments_markdown(&mut self, project: Uuid, ctx: &egui::Context) {
+        let annotated = self.annotated_diff_comments(project, false);
         if annotated.is_empty() {
             return;
         }

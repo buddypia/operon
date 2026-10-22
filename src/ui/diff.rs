@@ -60,13 +60,22 @@ pub(crate) fn diff_pane_rows(
 /// visible range is found by searching them. Returned as `offsets.len() ==
 /// rows.len() + 1`, so the height of row `i` is `offsets[i + 1] - offsets[i]`
 /// and the total is the last entry — one shape, no special case for the end.
-pub(crate) fn diff_row_offsets(rows: &[DiffRow], line_height: f32) -> Vec<f32> {
+///
+/// A note is as tall as it drew last frame (`note_height`), and
+/// `DIFF_COMMENT_ROW_LINES` lines before it has been drawn once.
+pub(crate) fn diff_row_offsets(
+    rows: &[DiffRow],
+    line_height: f32,
+    note_height: &dyn Fn(usize, usize) -> Option<f32>,
+) -> Vec<f32> {
     let mut offsets = Vec::with_capacity(rows.len() + 1);
     let mut cursor = 0.0;
     for row in rows {
         offsets.push(cursor);
-        cursor += match row {
-            DiffRow::Comment(_, _) => line_height * DIFF_COMMENT_ROW_LINES,
+        cursor += match *row {
+            DiffRow::Comment(file, line) => {
+                note_height(file, line).unwrap_or(line_height * DIFF_COMMENT_ROW_LINES)
+            }
             _ => line_height,
         };
     }
@@ -149,7 +158,14 @@ pub(crate) fn diff_pane(
     let rows = diff_pane_rows(files, collapsed, &|file, line| {
         annotations.shows_row(project, file, line)
     });
-    let offsets = diff_row_offsets(&rows, cell.y);
+    let offsets = diff_row_offsets(&rows, cell.y, &|file, line| {
+        let number = files[file].lines[line].new_number?;
+        annotations
+            .note_heights
+            .get(files[file].path.as_str())?
+            .get(&(project, number))
+            .copied()
+    });
     let total_height = offsets.last().copied().unwrap_or(0.0);
     let widest = files.iter().map(|file| file.widest).max().unwrap_or(0);
     // Two gutters, the sign, and a space after it, then the widest line in the
@@ -332,10 +348,20 @@ pub(crate) fn diff_pane(
                                 .max_rect(rect.shrink2(egui::vec2(16.0, 6.0)))
                                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
                         );
+                        // Until the row has its measured height, what does not
+                        // fit is cut rather than painted over the next line.
+                        note.set_clip_rect(rect.intersect(ui.clip_rect()));
                         let (comment_sent, comment_resolved) = annotations
                             .find(project, path, number)
                             .map(|c| (c.sent, c.resolved))
                             .unwrap_or((false, false));
+                        let reading = if editing {
+                            None
+                        } else {
+                            annotations
+                                .find(project, path, number)
+                                .map(|c| (c.body.clone(), c.resolved))
+                        };
                         note.horizontal(|ui| {
                             ui.label(
                                 RichText::new(tf!(
@@ -368,6 +394,27 @@ pub(crate) fn diff_pane(
                                         .color(palette.warning),
                                 );
                             }
+                            // The note's buttons sit on its header line, so the
+                            // body below can take the whole width and wrap.
+                            if let Some((_, is_resolved)) = &reading {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if secondary_button(ui, tr("削除")).clicked() {
+                                            changed |= annotations.remove(project, path, number);
+                                        }
+                                        let toggle_label = if *is_resolved {
+                                            tr("再開")
+                                        } else {
+                                            tr("解決")
+                                        };
+                                        if secondary_button(ui, toggle_label).clicked() {
+                                            changed |=
+                                                annotations.toggle_resolved(project, path, number);
+                                        }
+                                    },
+                                );
+                            }
                         });
                         if editing {
                             let editor = note.add(
@@ -376,7 +423,9 @@ pub(crate) fn diff_pane(
                                     .desired_width(f32::INFINITY)
                                     .hint_text(tr("この行について書く")),
                             );
-                            editor.request_focus();
+                            if std::mem::take(&mut annotations.focus_pending) {
+                                editor.request_focus();
+                            }
                             if annotations.draft.chars().count() > DIFF_COMMENT_BODY_MAX_CHARS {
                                 annotations.draft = annotations
                                     .draft
@@ -397,38 +446,32 @@ pub(crate) fn diff_pane(
                                     );
                                 }
                             });
-                        } else if let Some((body, is_resolved)) = annotations
-                            .find(project, path, number)
-                            .map(|c| (c.body.clone(), c.resolved))
+                        } else if let Some((body, is_resolved)) = reading {
+                            let body_text = if is_resolved {
+                                RichText::new(body)
+                                    .size(12.5)
+                                    .strikethrough()
+                                    .color(palette.text_muted)
+                            } else {
+                                RichText::new(body).size(12.5).color(palette.text)
+                            };
+                            note.label(body_text);
+                        }
+                        // The row is as tall as the note drew, margins included;
+                        // a change is laid out again on the next frame.
+                        let drawn = note.min_rect().height() + 12.0;
+                        if annotations
+                            .note_heights
+                            .get(path.as_str())
+                            .and_then(|heights| heights.get(&(project, number)))
+                            .is_none_or(|height| (height - drawn).abs() > 0.5)
                         {
-                            note.horizontal(|ui| {
-                                let body_text = if is_resolved {
-                                    RichText::new(body)
-                                        .size(12.5)
-                                        .strikethrough()
-                                        .color(palette.text_muted)
-                                } else {
-                                    RichText::new(body).size(12.5).color(palette.text)
-                                };
-                                ui.label(body_text);
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if secondary_button(ui, tr("削除")).clicked() {
-                                            changed |= annotations.remove(project, path, number);
-                                        }
-                                        let toggle_label = if is_resolved {
-                                            tr("再開")
-                                        } else {
-                                            tr("解決")
-                                        };
-                                        if secondary_button(ui, toggle_label).clicked() {
-                                            changed |=
-                                                annotations.toggle_resolved(project, path, number);
-                                        }
-                                    },
-                                );
-                            });
+                            annotations
+                                .note_heights
+                                .entry(path.clone())
+                                .or_default()
+                                .insert((project, number), drawn);
+                            ui.ctx().request_repaint();
                         }
                     }
                 }

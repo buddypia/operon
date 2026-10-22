@@ -1,0 +1,31 @@
+# Review record for 206-a-diff-note-overflows-and-keeps-focus.
+#
+# The change: copying or sending notes reads a changed line from the per-file
+# review as well; a note's row is as tall as it drew, its body wraps, and the
+# editor takes the keyboard once.
+#
+# Round 1: rust-reviewer approve-with-nits 0 5. Taken: heights of removed
+# notes are dropped, save and remove clear the pending focus, and the test
+# asserts the heights settle and leave with their note. Carried: heights of
+# off-screen notes after a resize, and the source check that send and copy
+# share one reading.
+# Round 2: approve-with-nits 0 2, both about when a height is dropped; carried.
+# The path check then refused a test comment that named src/a.rs in
+# backticks; the reviewer confirmed the one-line fix at 16173a3dfa09ddfc.
+
+digest: "16173a3dfa09ddfc"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/ui/diff.rs diff_pane: a note off screen keeps the height it drew at the old width after the pane is resized, until it is drawn again.
+    person: "差分の表示幅を変えた直後、画面外にあるメモまでスクロールすると、位置が一度だけずれて見えることがあります。メモが表示されると直ります。"
+  - rust-reviewer/1 · src/tests.rs a_note_on_a_changed_line_says_so_from_the_per_file_review: that send and copy share one reading is checked by the name of the call in their bodies.
+    person: "エージェントへの送信とコピーが同じ読み方をしていることは、関数名で確かめています。名前を変えると、動きが同じでもテストが失敗します。"
+  - rust-reviewer/2 · src/git/comments.rs save: a note opened on an empty line and closed empty leaves its measured height until another note is removed.
+    person: "メモを書きかけて空のまま閉じると、内部で使う小さな記録がしばらく残ります。動きには影響しません。"
+  - rust-reviewer/2 · src/git/comments.rs forget_removed_heights: deleting one note while another, unsaved, is being written re-measures the one being written.
+    person: "新しいメモを書いている途中で別のメモを消すと、書いている欄が一瞬だけ描き直されます。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
