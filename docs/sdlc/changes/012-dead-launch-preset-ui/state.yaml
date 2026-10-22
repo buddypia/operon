@@ -5,7 +5,7 @@
 state:
   route: "refactor"
   stage: "deploy"
-  status: "reviewing"
+  status: "done"
   attempts: "0 2"
   questions: "0 7"
   autonomy: "supervised"
@@ -13,7 +13,7 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Implemented and green. Needs a review pass by someone other than the writing session."
+resume: "Closed by change 202 after reading it against the code: landed; every removed symbol is gone from src/."
 
 contract:
   three-gates: "machine passed cargo fmt, cargo test (315 passed, 6 ignored), cargo clippy -D warnings"
