@@ -1,7 +1,7 @@
 state:
   route: "refactor"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 2"
   questions: "0 7"
   autonomy: "full"
@@ -9,7 +9,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "The reviewer's findings are answered; have a person read the diff."
+resume: "Closed by change 202 after reading it against the code: landed; the largest module has since grown back into the warn tier, where the bands say record and do not act."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
