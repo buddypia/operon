@@ -1,7 +1,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Type a Japanese sentence into a session and confirm one Enter confirms the conversion and the next sends the line."
+resume: "Closed by change 202 after reading it against the code: landed; pinned and named in lesson 016."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine waived steering_bytes crossed 150000 on this commit, and the 2309 bytes that crossed it are lesson 016 — the entry this bugfix route required. Deleting a guarded lesson to pass a band is correcting a gate in order to pass it, so the reduction is change 030 rather than this line. Nothing else moved"
   guards-verified-by-mutation: "human passed two watched failing: the count restored to a frame-wide flag, and the absorption removed altogether"
   lesson-recorded: "human passed entry 016 in docs/sdlc/lessons.md, guard column filled"
-  real-machine-check: "human pending type a Japanese sentence into a session and confirm the second Enter sends it"
+  real-machine-check: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
