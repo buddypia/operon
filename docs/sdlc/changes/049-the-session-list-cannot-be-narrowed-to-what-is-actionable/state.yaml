@@ -41,7 +41,7 @@
 state:
   route: "feature"
   stage: "deploy"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "full"
@@ -66,10 +66,10 @@ state:
 # mistaken for part of the status filter. main's row
 # `{awaiting_input_count} 件のセッションが応答を待っています` was dropped: this
 # change moved its only call site to `…あなたを待っています`.
-resume: "Merge to main with --no-ff, remove this worktree with cleanup-worktree, then package"
+resume: "Closed by change 202 after reading it against the code: landed; the two remarks it carried are A13 in triage.md."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed main at 3d5d07e, which holds this change, passed CI run 39719429456: fmt, clippy, the suite, the bands and the release bundle"
   bands: "machine waived bash scripts/check-bands.sh"
   guards-verified-by-mutation: "human passed each new guard watched failing"
 
