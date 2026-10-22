@@ -4438,11 +4438,35 @@ impl OperonApp {
         worktree: &Path,
         script: &SetupScript,
     ) {
+        // The menu offers stop while a run is running, but the approval dialog
+        // can have been opened before another run started.
+        if self.running_run_session(worktree).is_some() {
+            self.notice = Some(tr("実行スクリプトは既に実行中です。").into());
+            return;
+        }
         let Some(command) = self.approved_script_command(script) else {
             return;
         };
         let name = format!("run-{}", script.digest.chars().take(8).collect::<String>());
         self.launch_custom_script_session(project, worktree, &name, &command);
+    }
+
+    /// The run script's session still running in `worktree`. One per
+    /// worktree: while it runs, the menu offers to stop it rather than start
+    /// a second copy (change 210, as change 110's spec said).
+    pub(crate) fn running_run_session(&self, worktree: &Path) -> Option<Uuid> {
+        self.store
+            .sessions
+            .iter()
+            .find(|session| {
+                session.agent == RUN_SCRIPT_AGENT
+                    && session.worktree_path.as_deref() == Some(worktree)
+                    && matches!(
+                        session.status,
+                        SessionStatus::Starting | SessionStatus::Active
+                    )
+            })
+            .map(|session| session.id)
     }
 
     pub(crate) fn launch_custom_script_session(
@@ -4464,7 +4488,7 @@ impl OperonApp {
             project_id,
             name: name.to_owned(),
             goal: format!("Run: {command}"),
-            agent: "script".into(),
+            agent: RUN_SCRIPT_AGENT.into(),
             tmux_name: tmux_name.clone(),
             created_at: now(),
             launched_at: Some(now()),

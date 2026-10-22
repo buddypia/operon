@@ -57746,3 +57746,77 @@ pub(crate) fn a_script_whose_copy_cannot_be_kept_does_not_run() {
     assert!(notice.matches(": ").count() >= 2, "{notice}");
     fs::remove_dir_all(&root).ok();
 }
+
+fn run_script_session(project_id: Uuid, worktree: &Path, status: SessionStatus) -> Session {
+    let id = Uuid::new_v4();
+    Session {
+        id,
+        project_id,
+        name: "run-0123abcd".into(),
+        goal: "Run: bash run.sh".into(),
+        agent: RUN_SCRIPT_AGENT.into(),
+        tmux_name: managed_tmux_name(id),
+        created_at: now(),
+        launched_at: Some(now()),
+        status,
+        worktree_path: Some(worktree.to_path_buf()),
+        branch: None,
+        agent_command: "bash run.sh".into(),
+        native_session_id: None,
+        native_session_path: None,
+        origin: Some(SessionOrigin::PlainTerminal),
+        depends_on: Vec::new(),
+    }
+}
+
+/// Change 210 (A16): approving the run script again while it ran started a
+/// second copy beside the first. While one runs in a worktree, the menu offers
+/// to stop it, and a run that arrives anyway starts nothing.
+#[test]
+pub(crate) fn a_running_run_script_is_not_started_twice() {
+    let root = temporary_directory("run-script-twice");
+    write_setup_script(&root, "#!/bin/sh\necho hi\n");
+    let SetupScriptRead::Found(script) = read_setup_script(&root) else {
+        panic!("スクリプトが見つからない");
+    };
+    let project = Uuid::new_v4();
+    let mut app = test_app(root.join("data").join("store.json"));
+    let other = root.join("other");
+    let finished = run_script_session(project, &root, SessionStatus::Exited);
+    let elsewhere = run_script_session(project, &other, SessionStatus::Active);
+    let mut agent = run_script_session(project, &root, SessionStatus::Active);
+    agent.agent = "claude".into();
+    app.store.sessions = vec![finished, elsewhere, agent];
+    assert_eq!(app.running_run_session(&root), None);
+
+    for status in [SessionStatus::Starting, SessionStatus::Active] {
+        let running = run_script_session(project, &root, status);
+        let running_id = running.id;
+        app.store.sessions.push(running);
+        assert_eq!(app.running_run_session(&root), Some(running_id));
+
+        let before = app.store.sessions.len();
+        app.notice = None;
+        app.run_approved_script(project, &root, &script);
+        assert_eq!(app.store.sessions.len(), before);
+        assert_eq!(
+            app.notice.as_deref(),
+            Some(tr("実行スクリプトは既に実行中です。")),
+            "実行中の実行スクリプトをもう一度起動しようとしました"
+        );
+        app.store.sessions.pop();
+    }
+
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let menu = screens
+        .split_once("self.running_run_session(wt_to_check)")
+        .map(|(_, after)| after)
+        .expect("メニューが実行中の実行スクリプトを確かめていません");
+    let stop = menu.find("self.stop_session(running)");
+    let launch = menu.find("self.pending_run_script = Some(");
+    assert!(
+        matches!((stop, launch), (Some(stop), Some(launch)) if stop < launch),
+        "実行中は停止を、止まっているときは起動を出すメニューになっていません"
+    );
+    fs::remove_dir_all(&root).ok();
+}

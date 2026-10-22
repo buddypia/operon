@@ -1,0 +1,66 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/210-running-again-replaces-the-run.
+#
+# Report: change 202's reading of the open records (triage.md there, A16).
+#
+# A16. Approving the run script again while it ran started a second copy in a
+#      new session beside the first: two dev servers on one port, or two test
+#      runs racing over one worktree. Change 110's spec said a click while it
+#      runs stops it, and nothing did.
+#
+# Fix: running_run_session finds the run-script session still starting or
+# running in a worktree, by the agent its sessions record (RUN_SCRIPT_AGENT,
+# now one constant where it was a literal). While one runs, the menu offers
+# 実行スクリプトを停止, which goes through stop_session, in place of the launch
+# item. run_approved_script refuses a second copy too, since the approval
+# dialog can have been opened before another run started.
+#
+# Decided: stop, not restart. The spec says stop, a restart would kill a dev
+# server the person may still be using, and starting again is one more click
+# once the stop lands. The branch name says "replaces"; the behaviour is the
+# spec's.
+#
+# From review: a run still Starting shows the stop item, and stop_session takes
+# only Active, so a click in that moment says it cannot stop yet; Starting ends
+# when the start task returns, and the item then works. Unknown is not counted
+# as running: only the store migration sets it, and the next poll turns it
+# into Active or an ending.
+#
+# Route: bugfix. The defect reproduces (a second approval made a second
+# session), triage.md is the report, and the spec it falls short of is 110's.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Two remarks are carried in review.yaml. Closed in the same
+  commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed a_running_run_script_is_not_started_twice
+    failed on the code as it was, with tmux's notice where the refusal should
+    be; mutations.py here caught 5 of 5"
+  three-gates: "machine passed cargo fmt, clippy and the named tests; the
+    suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed yes: src/app.rs, src/app/screens.rs,
+    src/config.rs, src/i18n_tables.rs; the installed app is rebuilt from main
+    after the changes that follow 202"
+  review: "human passed rust-reviewer approve-with-nits 0 2 at
+    a13cee13928b1c9b, two remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
