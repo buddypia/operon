@@ -1,0 +1,61 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/206-a-diff-note-overflows-and-keeps-focus.
+#
+# Report: change 202's reading of the open records (triage.md there, A5, A9,
+# A10; change 033's remaining.md M, K, L).
+#
+# A5. Copying or sending notes read whether a note's line had changed from
+#     the whole-project parse only. The editor's review pane parses one file,
+#     so a note it showed as 「行が変わっています」 went to the agent without
+#     saying so. Reproduced by
+#     a_note_on_a_changed_line_says_so_from_the_per_file_review.
+# A9. A note's row was five lines tall whatever it held. A note being written
+#     grew past it and was painted over the lines below (保存 then sat under
+#     the next line's click area); a note being read ran on one line off the
+#     pane's right edge. Reproduced by
+#     a_long_diff_note_wraps_and_pushes_the_next_line_down, both ways.
+# A10. The note editor asked for the keyboard on every frame, so typing in any
+#     other field typed into the note. Reproduced by
+#     the_note_editor_does_not_take_the_keyboard_back.
+#
+# Fix: annotated_diff_comments reads the per-file parse and then the
+# whole-project one, and both copy and send use it. A note's row is as tall
+# as it drew last frame (kept in DiffAnnotations.note_heights, five lines until
+# drawn once), the note is clipped to its row meanwhile, and its body is a
+# wrapped label under a header that carries its buttons. The editor takes the
+# keyboard once, when opened.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Four remarks are carried in review.yaml; none needs
+  anything from the person. Closed in the same commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the three new tests failed on the code as
+    it was; mutations.py here caught 8 of 8"
+  three-gates: "machine passed cargo fmt, clippy and the named tests; the
+    suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed yes: src/app.rs, src/ui/diff.rs and
+    src/git/comments.rs; the installed app is rebuilt from main after the
+    changes that follow 202"
+  review: "human passed rust-reviewer approve-with-nits 0 2 at
+    16173a3dfa09ddfc (round 2), four remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -180,6 +180,13 @@ pub(crate) struct DiffAnnotations {
     /// The file and new-side line number of the note being written, if any.
     pub(crate) editing: Option<(String, usize)>,
     pub(crate) draft: String,
+    /// The editor takes the keyboard once, on the frame it is first drawn
+    /// after opening; asking every frame took it from every other field.
+    pub(crate) focus_pending: bool,
+    /// How tall each note drew last frame, so the rows under it start below
+    /// it. A note is as tall as what it holds, which is only known once drawn.
+    /// Keyed by file first, so a frame looks a path up without copying it.
+    pub(crate) note_heights: HashMap<String, HashMap<(Uuid, usize), f32>>,
 }
 
 impl DiffAnnotations {
@@ -245,13 +252,30 @@ impl DiffAnnotations {
         let before = self.comments.len();
         self.comments
             .retain(|comment| !(comment.project == project && comment.resolved));
+        self.forget_removed_heights();
         before - self.comments.len()
     }
 
     pub(crate) fn clear_project(&mut self, project: Uuid) -> usize {
         let before = self.comments.len();
         self.comments.retain(|comment| comment.project != project);
+        self.forget_removed_heights();
         before - self.comments.len()
+    }
+
+    /// Keep a measured height only for a note that still exists, so the map
+    /// does not grow with every note ever drawn and a new note on a line is
+    /// not laid out at the height of the one deleted from it.
+    fn forget_removed_heights(&mut self) {
+        let comments = &self.comments;
+        self.note_heights.retain(|file, heights| {
+            heights.retain(|(project, line), _| {
+                comments.iter().any(|comment| {
+                    comment.project == *project && comment.file == *file && comment.line == *line
+                })
+            });
+            !heights.is_empty()
+        });
     }
 
     /// Whether a row needs a note under it: it has one, or one is being written
@@ -272,6 +296,7 @@ impl DiffAnnotations {
             .map(|comment| comment.body.clone())
             .unwrap_or_default();
         self.editing = Some((file.to_owned(), line));
+        self.focus_pending = true;
     }
 
     /// Writing an empty note is how a note is deleted, so that there is one
@@ -279,6 +304,7 @@ impl DiffAnnotations {
     pub(crate) fn save(&mut self, project: Uuid, file: &str, line: usize, anchor: &str) -> bool {
         let body = self.draft.trim().to_owned();
         self.editing = None;
+        self.focus_pending = false;
         self.draft.clear();
         let existing = self.comments.iter().position(|comment| {
             comment.project == project && comment.file == file && comment.line == line
@@ -286,6 +312,7 @@ impl DiffAnnotations {
         match (existing, body.is_empty()) {
             (Some(index), true) => {
                 self.comments.remove(index);
+                self.forget_removed_heights();
                 true
             }
             (Some(index), false) => {
@@ -313,11 +340,13 @@ impl DiffAnnotations {
 
     pub(crate) fn remove(&mut self, project: Uuid, file: &str, line: usize) -> bool {
         self.editing = None;
+        self.focus_pending = false;
         self.draft.clear();
         let before = self.comments.len();
         self.comments.retain(|comment| {
             !(comment.project == project && comment.file == file && comment.line == line)
         });
+        self.forget_removed_heights();
         self.comments.len() != before
     }
 }

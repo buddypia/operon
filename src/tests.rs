@@ -33576,7 +33576,7 @@ pub(crate) fn offsets_every_diff_row_by_the_height_of_the_rows_above_it() {
         DiffRow::Comment(0, 0),
         DiffRow::Line(0, 1),
     ];
-    let offsets = diff_row_offsets(&rows, 10.0);
+    let offsets = diff_row_offsets(&rows, 10.0, &|_, _| None);
     let note = 10.0 * DIFF_COMMENT_ROW_LINES;
 
     // One entry more than there are rows, so the height of row i is always
@@ -33587,6 +33587,13 @@ pub(crate) fn offsets_every_diff_row_by_the_height_of_the_rows_above_it() {
     assert_eq!(offsets[2], 20.0);
     assert_eq!(offsets[3], 20.0 + note);
     assert_eq!(offsets[4], 30.0 + note);
+
+    // Once drawn, a note is as tall as it drew (change 206).
+    let measured = diff_row_offsets(&rows, 10.0, &|file, line| {
+        (file == 0 && line == 0).then_some(77.0)
+    });
+    assert_eq!(measured[3], 20.0 + 77.0);
+    assert_eq!(measured[4], 30.0 + 77.0);
 }
 
 /// A row that begins above the viewport and ends inside it is visible, and
@@ -33601,7 +33608,7 @@ pub(crate) fn finds_the_visible_rows_when_the_viewport_begins_inside_a_comment()
         DiffRow::Line(0, 1),
         DiffRow::Line(0, 2),
     ];
-    let offsets = diff_row_offsets(&rows, 10.0);
+    let offsets = diff_row_offsets(&rows, 10.0, &|_, _| None);
     let note_end = 20.0 + 10.0 * DIFF_COMMENT_ROW_LINES;
 
     assert_eq!(diff_visible_rows(&offsets, 0.0, 10.0), 0..1);
@@ -56785,5 +56792,226 @@ pub(crate) fn no_message_spells_a_remappable_chord() {
     assert!(
         offenders.is_empty(),
         "割り当てを変えられるキーが文字列に書かれています: {offenders:#?}"
+    );
+}
+
+/// A diff of a fixture file, src/a.rs, whose second line now reads differently from what a
+/// note written by `test_diff_comment` was anchored to.
+fn diff_with_a_changed_second_line() -> Vec<DiffFile> {
+    parse_unified_diff(
+        "diff --git a/src/a.rs b/src/a.rs\n\
+         --- a/src/a.rs\n\
+         +++ b/src/a.rs\n\
+         @@ -1,3 +1,3 @@\n \
+         fn one() {}\n\
+         -    let base = detect_worktree_base(&project.path);\n\
+         +    let base = something_else();\n \
+         fn three() {}\n",
+    )
+}
+
+/// Change 206 (A5): a note whose line has changed says so when it is copied or
+/// sent, whichever diff the person reviewed it in. The editor's review pane
+/// parses per file, and only the whole-project parse was read.
+#[test]
+pub(crate) fn a_note_on_a_changed_line_says_so_from_the_per_file_review() {
+    let root = temporary_directory("diff-note-stale-per-file");
+    let mut app = test_app(root.join("store.json"));
+    let project = Uuid::new_v4();
+    app.diff_annotations
+        .comments
+        .push(test_diff_comment(project, "src/a.rs", 2, "ここを見て"));
+    app.diff_file_cache.insert(
+        (project, Some("src/a.rs".to_owned())),
+        diff_with_a_changed_second_line(),
+    );
+    let ctx = egui::Context::default();
+    let output = ctx.run(egui::RawInput::default(), |ctx| {
+        app.copy_diff_comments_markdown(project, ctx);
+    });
+    let copied: Vec<&String> = output
+        .platform_output
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            egui::OutputCommand::CopyText(text) => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copied.len(), 1, "{copied:?}");
+    assert!(
+        copied[0].contains("stale"),
+        "ファイルごとの差分で行が変わったメモに、そのことが書かれていません:\n{}",
+        copied[0]
+    );
+    // The message sent to the agent is built from the same reading.
+    let send = rust_function_body("send_diff_comments").expect("send_diff_comments exists");
+    let copy = rust_function_body("copy_diff_comments_markdown").expect("copy exists");
+    for body in [&send, &copy] {
+        assert!(
+            body.contains("self.annotated_diff_comments("),
+            "送信とコピーが同じ読み方をしていません"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Every text shape the frame painted, with where it was painted.
+fn painted_text_rects(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, egui::Rect)> {
+    fn walk(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => out.push((
+                text.galley.text().to_owned(),
+                text.galley.rect.translate(text.pos.to_vec2()),
+            )),
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    walk(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// One frame of the diff pane over `files`, with `before` drawn above it.
+fn diff_pane_frame(
+    ctx: &egui::Context,
+    files: &[DiffFile],
+    project: Uuid,
+    annotations: &mut DiffAnnotations,
+    before: &mut dyn FnMut(&mut egui::Ui),
+) -> egui::FullOutput {
+    let mut collapsed = HashSet::new();
+    ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                before(ui);
+                diff_pane(
+                    ui,
+                    files,
+                    &mut collapsed,
+                    AppTheme::Dark.palette(),
+                    600.0,
+                    project,
+                    annotations,
+                );
+            });
+        },
+    )
+}
+
+/// Change 206 (A9): a long note wraps inside the pane and pushes the lines
+/// under it down, read or being written. The row was five lines tall whatever
+/// it held: a note being written was painted over the lines below, and a note
+/// being read ran off the pane's right edge on one line.
+#[test]
+pub(crate) fn a_long_diff_note_wraps_and_pushes_the_next_line_down() {
+    let project = Uuid::new_v4();
+    let files = diff_with_a_changed_second_line();
+    let body = "長いメモ。".repeat(120);
+    for editing in [false, true] {
+        let mut annotations = DiffAnnotations::default();
+        annotations
+            .comments
+            .push(test_diff_comment(project, "src/a.rs", 1, &body));
+        if editing {
+            annotations.open(project, "src/a.rs", 1);
+        }
+        let ctx = egui::Context::default();
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            let output = diff_pane_frame(&ctx, &files, project, &mut annotations, &mut |_| {});
+            texts = painted_text_rects(&output.shapes);
+        }
+        let note: Vec<egui::Rect> = texts
+            .iter()
+            .filter(|(text, _)| text.contains("長いメモ"))
+            .map(|(_, rect)| *rect)
+            .collect();
+        assert!(
+            !note.is_empty(),
+            "the note body is drawn (editing: {editing})"
+        );
+        let note_bottom = note
+            .iter()
+            .map(|rect| rect.bottom())
+            .fold(f32::MIN, f32::max);
+        let note_right = note
+            .iter()
+            .map(|rect| rect.right())
+            .fold(f32::MIN, f32::max);
+        let next_top = texts
+            .iter()
+            .find(|(text, _)| text.contains("something_else"))
+            .map(|(_, rect)| rect.top())
+            .expect("the line under the note is drawn");
+        assert!(
+            note_bottom <= next_top,
+            "メモの本文（下端 {note_bottom}）が次の行（上端 {next_top}）に重なっています（編集中: {editing}）"
+        );
+        assert!(
+            note_right <= 900.0,
+            "メモの本文が右端 {note_right} まで伸びて、画面の外で切れています（編集中: {editing}）"
+        );
+        // The measurement settles: one more frame lays the note out the same.
+        let settled = annotations.note_heights.clone();
+        diff_pane_frame(&ctx, &files, project, &mut annotations, &mut |_| {});
+        assert_eq!(
+            annotations.note_heights, settled,
+            "メモの高さが毎フレーム変わり、描き直しが止まりません（編集中: {editing}）"
+        );
+        // A deleted note takes its measured height with it.
+        assert!(annotations.remove(project, "src/a.rs", 1));
+        assert!(
+            annotations.note_heights.is_empty(),
+            "{:?}",
+            annotations.note_heights
+        );
+    }
+}
+
+/// Change 206 (A10): the note editor takes the keyboard when it opens and
+/// then lets go of it. It asked for focus every frame, so typing into any
+/// other field typed into the note.
+#[test]
+pub(crate) fn the_note_editor_does_not_take_the_keyboard_back() {
+    let project = Uuid::new_v4();
+    let files = diff_with_a_changed_second_line();
+    let mut annotations = DiffAnnotations::default();
+    annotations.open(project, "src/a.rs", 1);
+    let ctx = egui::Context::default();
+    let other = egui::Id::new("another-field");
+    let mut filter = String::new();
+    let mut draw = |annotations: &mut DiffAnnotations| {
+        diff_pane_frame(&ctx, &files, project, annotations, &mut |ui| {
+            ui.add(egui::TextEdit::singleline(&mut filter).id(other));
+        });
+    };
+    draw(&mut annotations);
+    draw(&mut annotations);
+    let focused = ctx.memory(|memory| memory.focused());
+    assert!(
+        focused.is_some_and(|id| id != other),
+        "開いたメモの欄にキーボードが行っていません"
+    );
+    ctx.memory_mut(|memory| memory.request_focus(other));
+    draw(&mut annotations);
+    draw(&mut annotations);
+    assert!(
+        ctx.memory(|memory| memory.has_focus(other)),
+        "メモの欄が別の欄からキーボードを取り返しました"
     );
 }
