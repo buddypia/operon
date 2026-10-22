@@ -50850,6 +50850,14 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
         "state:\n  route: \"bugfix\"\n  stage: \"test\"\n  status: \"reviewing\"\n  screen: \"skipped\"\n",
     )
     .unwrap();
+    // And one whose status is not written the way the gate reads it: unread
+    // must count as open, not as absent (change 202).
+    fs::create_dir_all(repo.join("docs/sdlc/changes/997-unquoted")).unwrap();
+    fs::write(
+        repo.join("docs/sdlc/changes/997-unquoted/state.yaml"),
+        "state:\n  route: \"bugfix\"\n  status: done\n",
+    )
+    .unwrap();
     fs::write(repo.join("a.txt"), "a\n").unwrap();
 
     let run_git = |dir: &Path, args: &[&str]| {
@@ -51058,6 +51066,71 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
     assert!(
         stderr4.contains("998-preexisting/state.yaml has status `reviewing`"),
         "expected refusal naming 998-preexisting/state.yaml and status `reviewing`, got: {stderr4}"
+    );
+
+    // Change 202: untouched, 998-preexisting is still open on main, and a
+    // record nobody touches is read too — thirty sat open for weeks because
+    // only touched directories were.
+    let commit_all = |message: &str| {
+        run_git(&repo, &["add", "-A"]);
+        run_git(
+            &repo,
+            &[
+                "-c",
+                "user.name=Operon test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-q",
+                "-m",
+                message,
+            ],
+        );
+    };
+    run_git(&repo, &["checkout", "-q", "fix/unclosed"]);
+    fs::remove_file(repo.join("docs/sdlc/changes/998-preexisting/notes.md")).unwrap();
+    commit_all("leave 998-preexisting as main has it");
+    run_git(&repo, &["checkout", "-q", "main"]);
+    let (code5, stderr5) = invoke_merge(claude_payload.clone());
+    assert_eq!(
+        code5,
+        Some(2),
+        "branch が触れていない未完了の記録でも merge を止めるはずです: {stderr5}"
+    );
+    assert!(
+        stderr5.contains("records on fix/unclosed that never closed")
+            && stderr5.contains("998-preexisting (reviewing)")
+            && stderr5.contains("997-unquoted (no readable status)"),
+        "止めた理由に未完了の記録と、状態を読めない記録の名前がありません: {stderr5}"
+    );
+
+    // Archived on the branch, nothing is left open and the gate goes on to ask
+    // CI. The closed set below repeats `  status:`; the state block's is read.
+    run_git(&repo, &["checkout", "-q", "fix/unclosed"]);
+    fs::write(
+        repo.join("docs/sdlc/changes/998-preexisting/state.yaml"),
+        "state:\n  route: \"bugfix\"\n  stage: \"test\"\n  status: \"archived\"\n  screen: \"n/a\"\n\nsets:\n  status: \"planning ready in-progress reviewing done awaiting-user blocked failed archived\"\n",
+    )
+    .unwrap();
+    fs::write(
+        repo.join("docs/sdlc/changes/997-unquoted/state.yaml"),
+        "state:\n  route: \"bugfix\"\n  status: \"done\"\n",
+    )
+    .unwrap();
+    commit_all("archive 998-preexisting, quote 997-unquoted");
+    run_git(&repo, &["checkout", "-q", "main"]);
+    let (code6, stderr6) = invoke_merge(claude_payload);
+    // The fixture has no CI and no worktree for the branch, so the gate still
+    // refuses — for that reason, and not for a record.
+    assert_eq!(
+        code6,
+        Some(2),
+        "CI のない fixture では merge は止まるはずです: {stderr6}"
+    );
+    assert!(
+        !stderr6.contains("never closed")
+            && stderr6.contains("CI could not be asked, and fix/unclosed has no worktree"),
+        "すべての記録が閉じたあとは CI の確認まで進むはずです: {stderr6}"
     );
 
     let _ = fs::remove_dir_all(&repo);

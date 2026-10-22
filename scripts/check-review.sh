@@ -363,10 +363,11 @@ fi
 # --- which change is being judged --------------------------------------------
 #
 # Not "the first one with an in-flight status". That is what guard-stage.sh does
-# and it does not survive contact with this repository: 23 changes sit at
+# and it did not survive contact with this repository: 23 changes sat at
 # `reviewing` because that is where a change stops when nobody gets to it, which
 # is the exact failure this gate exists for. Selecting by status would have made
-# every commit answer for change 008.
+# every commit answer for change 008. Change 202 closed them and the merge gate
+# keeps main closed, but two branches in flight still both read as open.
 #
 # The diff says which change it is. A session working on a change edits that
 # change's own directory, so the change directory the tree touches is the one

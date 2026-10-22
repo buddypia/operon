@@ -1278,3 +1278,16 @@ number is in use wherever a branch tip holds its directory.
 **Guard.** `a_new_change_cannot_take_a_number_already_in_use` refuses a number
 whose directory only an unnumbered local branch holds (change 201; watched
 failing on the script as it was).
+
+## 093 — Thirty records stayed open because only touched ones were read
+
+The squashed import of 2026-10-05 put thirty change records on main at
+`reviewing`, `in-progress`, `blocked` and `awaiting-user`. The merge gate reads
+the directories a branch touches, so none was read again; guards learned to
+skip them, and the defects their unrun checks would have found stayed in the
+app. **The rule:** a landing reads every record on the branch, and a record that
+is open on main stops the next landing until someone reads it against the code.
+
+**Guard.** `merge_gate_refuses_branch_with_in_flight_state_yaml` refuses a merge
+while a record the branch never touched is open, and lets an archived one
+through (change 202; watched failing with the new check removed).
