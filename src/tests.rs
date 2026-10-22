@@ -28166,7 +28166,7 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
-            for (name, scroll_to) in [("full", 17), ("spare", 16), ("gone", 15)] {
+            for (_case, scroll_to) in [("full", 17), ("spare", 16), ("gone", 15)] {
                 let search = TerminalSearchOverlay {
                     matches: &[],
                     current: None,
@@ -32414,8 +32414,7 @@ pub(crate) fn the_status_filter_shows_everything_when_nothing_is_selected() {
     let busy = app.store.sessions[0].clone();
     assert!(app.session_matches_status_filter(&busy));
 
-    let mut idle = app.store.sessions[1].clone();
-    idle.status = SessionStatus::Active;
+    app.store.sessions[1].status = SessionStatus::Active;
     let mut tracker = ActivityTracker::default();
     for _ in 0..ACTIVITY_CONFIRMATIONS {
         observe_agent_activity(&mut tracker, AgentActivity::Idle);
@@ -45372,12 +45371,19 @@ pub(crate) fn ui_session_tabs_omits_static_instruction_label_and_streamlines_car
     app.store.sessions.push(session);
     app.selected_session = Some(session_id);
 
-    let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            app.ui_terminal_session_tabs(ui);
-        });
-    });
+    let texts = session_tabs_texts(&mut app);
+    assert!(
+        texts.iter().any(|text| text == "test"),
+        "the session's card is drawn: {texts:?}"
+    );
+    // Change 077 took the standing guide line out of the list; its words are
+    // in the card's hover text and menu now, not on the page.
+    for guide in ["ダブルクリックで名前を変更", "⇆ 復元", "× 削除"] {
+        assert!(
+            !texts.iter().any(|text| text.contains(guide)),
+            "セッション一覧に操作の説明文「{guide}」が戻っています: {texts:?}"
+        );
+    }
 
     let _ = fs::remove_dir_all(&root);
 }
@@ -45402,33 +45408,159 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
     });
     app.store.sessions.push(session.clone());
 
-    // 1. When no ports listening: renders nothing, no panics
     let ctx = egui::Context::default();
     let palette = app.store.theme.palette();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            app.ui_session_ports(ui, palette, &session);
+    let draw = |app: &mut OperonApp| {
+        let output = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.ui_session_ports(ui, palette, &session);
+            });
         });
-    });
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            collect_text_shapes(&clipped.shape, &mut texts);
+        }
+        texts
+    };
 
-    // 2. When ports listening on worktree: renders compact button without panics
-    app.listening_ports.push((
-        ListeningPort {
-            pid: 100,
-            process: "node".into(),
-            port: 8791,
-            host: "localhost".into(),
-        },
-        Some(project_path),
-    ));
+    // Nothing listening: nothing drawn.
+    assert_eq!(draw(&mut app), Vec::<String>::new());
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            app.ui_session_ports(ui, palette, &session);
-        });
-    });
+    // One port: the badge names it.
+    let port = |number: u16, process: &str| {
+        (
+            ListeningPort {
+                pid: 100,
+                process: process.into(),
+                port: number,
+                host: "localhost".into(),
+            },
+            Some(project_path.clone()),
+        )
+    };
+    app.listening_ports.push(port(8791, "node"));
+    let texts = draw(&mut app);
+    assert!(
+        texts.iter().any(|text| text.contains(":8791 node")),
+        "ポートが一つのとき、バッジにそのポートがありません: {texts:?}"
+    );
+
+    // Two: the badge counts them, and the list stays in the closed menu.
+    app.listening_ports.push(port(5173, "vite"));
+    let texts = draw(&mut app);
+    assert!(
+        texts.iter().any(|text| text.contains("2 ポート稼働中")),
+        "ポートが二つのとき、バッジが数を言いません: {texts:?}"
+    );
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.contains("8791") || text.contains("5173")),
+        "メニューを開く前からポートの一覧が並んでいます: {texts:?}"
+    );
 
     let _ = fs::remove_dir_all(&root);
+}
+
+/// Every text the session list drew, on the second of two frames.
+fn session_tabs_texts(app: &mut OperonApp) -> Vec<String> {
+    let ctx = egui::Context::default();
+    let mut texts = Vec::new();
+    for _ in 0..2 {
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.ui_terminal_session_tabs(ui);
+                });
+            },
+        );
+        texts.clear();
+        for clipped in &output.shapes {
+            collect_text_shapes(&clipped.shape, &mut texts);
+        }
+    }
+    texts
+}
+
+/// Change 207 (A13, from 049): a filtered list says how many sessions it is
+/// hiding, and an unfiltered one says nothing about hiding.
+#[test]
+pub(crate) fn the_filtered_session_list_says_how_many_it_hides() {
+    let root = temporary_directory("status-filter-hidden-count");
+    let (mut app, _, _) = app_with_two_sessions(&root);
+    app.store.sessions[0].status = SessionStatus::Exited;
+    assert!(
+        !session_tabs_texts(&mut app)
+            .iter()
+            .any(|text| text.contains("件を非表示中")),
+        "フィルタなしで「非表示中」と出ています"
+    );
+    // 終了 keeps the finished one and hides the running one.
+    app.status_filter[SessionStatusGroup::Finished.index()] = true;
+    let texts = session_tabs_texts(&mut app);
+    assert!(
+        texts.iter().any(|text| text == "1 件を非表示中"),
+        "隠したセッションの数が出ていません: {texts:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 207: every row in the message tables is a message the code can
+/// show. Fifty rows had outlived the code that showed them, some of them
+/// copies with their newlines escaped twice, and a translator fixing one of
+/// those fixes nothing anybody sees. A row whose id is not written as a
+/// literal outside the tables and the tests is one nobody reaches.
+#[test]
+pub(crate) fn every_message_row_is_one_the_code_shows() {
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut code = String::new();
+    let mut stack = vec![src.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs")
+                && !path.ends_with("i18n_tables.rs")
+                && !path.ends_with("tests.rs")
+            {
+                code.push_str(&fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    let tables = include_str!("i18n_tables.rs");
+    let ids: Vec<&str> = tables
+        .lines()
+        .filter_map(|line| line.strip_prefix("    (\""))
+        .filter_map(|rest| {
+            // The id ends at the first quote no backslash escapes.
+            let mut escaped = false;
+            rest.char_indices().find_map(|(at, ch)| {
+                let end = ch == '"' && !escaped;
+                escaped = ch == '\\' && !escaped;
+                end.then(|| &rest[..at])
+            })
+        })
+        .collect();
+    // Every row was read: a row laid out another way would pass unread.
+    assert_eq!(ids.len(), EN_TABLE.len() + KO_TABLE.len());
+    // The same words in a comment or another literal keep a row alive; the
+    // check misses some dead rows but never calls a live one dead.
+    let unused: Vec<&str> = ids
+        .into_iter()
+        .filter(|id| !code.contains(&format!("\"{id}\"")))
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "どこからも表示されないメッセージの行があります: {unused:#?}"
+    );
 }
 
 /// Change 088: a brief notice is cleared by its own timer and by nothing else.
@@ -48698,6 +48830,20 @@ pub(crate) fn ci_runs_on_the_branches_the_merge_gate_asks_about() {
             .lines()
             .any(|line| line.trim() == "run: cargo test --locked"),
         "ci.yml が suite を走らせていないか、失敗を握りつぶしています"
+    );
+    // And builds the tests with warnings as errors, which nothing else does
+    // (change 207).
+    let test_job: Vec<&str> = workflow
+        .lines()
+        .skip_while(|line| *line != "  test:")
+        .skip(1)
+        .take_while(|line| line.is_empty() || line.starts_with("    "))
+        .collect();
+    let test_job = test_job.join("\n");
+    assert!(
+        // On the job's env, which keys the cache, not on a step.
+        test_job.contains("\n    env:\n      RUSTFLAGS: -D warnings\n"),
+        "ci.yml の test ジョブが警告をエラーにしていません:\n{test_job}"
     );
     let script = fs::read_to_string(root.join("scripts/ci-verified.sh")).unwrap();
     assert!(
@@ -55620,7 +55766,7 @@ pub(crate) fn knowledge_map_refits_when_the_window_narrows() {
     let (mut app, project, _snapshot, root) = map_test_app("kn-map-resize", &[5, 5, 5]);
     app.knowledge.layout_mode = KnowledgeLayoutMode::Map;
     let context = egui::Context::default();
-    let mut draw_at = |app: &mut OperonApp, width: f32| {
+    let draw_at = |app: &mut OperonApp, width: f32| {
         for _ in 0..2 {
             let _ = context.run(
                 egui::RawInput {

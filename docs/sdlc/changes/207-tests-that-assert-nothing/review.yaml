@@ -1,0 +1,29 @@
+# Review record for 207-tests-that-assert-nothing.
+#
+# The change: the 077 and 049 tests read what they drew, CI builds the tests
+# with warnings denied, and fifty message rows no code shows are gone.
+#
+# Round 1: rust-reviewer approve-with-nits 0 3, subprocess-safety-reviewer
+# approve-with-nits 0 2. Both confirmed every removed id is unreachable and
+# that job-level RUSTFLAGS changes nothing but the cache key. Taken: the
+# message scan asserts it read every row, and states the direction it can
+# miss in; the CI check requires RUSTFLAGS on the test job's env. Carried:
+# the scan counts a row alive when its words sit in a comment.
+# Round 2: subprocess-safety-reviewer approve; rust-reviewer
+# approve-with-nits 0 1, a clone of the source path the scan never needed.
+
+digest: "2ab8db0e1ca1773d"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · src/tests.rs every_message_row_is_one_the_code_shows: an id that also appears in a comment or an unrelated literal counts as shown, so a dead row can survive the check.
+    person: "翻訳表の使われない行を探すテストは、同じ文がコメントなどにあると見逃します。使われている行を誤って消せと言うことはありません。"
+  - rust-reviewer/1 · src/tests.rs ci_runs_on_the_branches_the_merge_gate_asks_about: trailing whitespace on the test job's name line would empty the slice and fail with an unclear message.
+    person: "CI 設定の書き方がわずかに変わると、このテストが分かりにくい文言で失敗することがあります。設定そのものの不具合ではありません。"
+  - rust-reviewer/2 · src/tests.rs every_message_row_is_one_the_code_shows: vec![src.clone()] clones a path that is not used again.
+    person: "テストの中に不要な複製が一つ残っています。動きには影響しません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 1"
+  subprocess-safety-reviewer: "approve 0 0"
