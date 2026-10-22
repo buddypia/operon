@@ -1309,3 +1309,16 @@ would take seconds longer than the bound.
 from `src/exec.rs` the first sleep, its doubling to 25 ms, and that the loop
 sleeps nowhere else, and times nothing (change 204; five mutations watched
 failing).
+
+---
+
+## 095 — Fifty messages outlived the code that showed them
+
+The message tables held fifty ids that no code wrote any more: rows left behind
+when a screen changed, and copies whose newlines were escaped twice. The tests
+checked that every message the code shows has a row, never the other way, so a
+translator could fix a row nobody would ever see. **The rule:** a row in the
+tables is a message the code shows; removing the last use removes the row.
+
+**Guard.** `every_message_row_is_one_the_code_shows` (change 207; watched
+failing with a row added that nothing shows).

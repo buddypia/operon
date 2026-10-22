@@ -1,0 +1,60 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/207-tests-that-assert-nothing.
+#
+# Report: change 202's reading of the open records (triage.md there, A13 and
+# A19), and what reading them turned up.
+#
+# A13. Change 077's two tests drew the session list and the ports badge and
+#      asserted nothing; change 049's hidden count had no test; one of 049's
+#      tests built a session it never read.
+# A19. The test build carried two warnings (a loop name no assertion used, a
+#      `mut` nothing mutated), and nothing built the tests with warnings
+#      denied: the commit gate's clippy does not build them.
+# Found here: fifty message ids in both tables that no code shows any more,
+#      some of them copies with their newlines escaped twice. The tests checked
+#      only that every shown message has a row. Lesson 095.
+#
+# Fix: the two 077 tests read what they drew (no guide line in the list; one
+# port named, two counted, the list kept in the closed menu);
+# the_filtered_session_list_says_how_many_it_hides pins 049's count; the idle
+# session is the one the test reads. The two warnings are gone, and CI's test
+# job builds with RUSTFLAGS -D warnings, pinned by
+# ci_runs_on_the_branches_the_merge_gate_asks_about. The fifty rows are gone,
+# and every_message_row_is_one_the_code_shows keeps it so.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Three remarks are carried in review.yaml; none needs
+  anything from the person. Closed in the same commit that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the hidden-count, message-row and CI
+    assertions failed on the tree as it was; the two 077 tests now fail when
+    what they guard is broken; mutations.py here caught 6 of 6"
+  three-gates: "machine passed cargo fmt, clippy and the named tests; the
+    suite runs in CI, now with warnings denied"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed yes: src/i18n_tables.rs lost rows no code
+    reads; the installed app is rebuilt from main after the changes that
+    follow 202"
+  review: "human passed rust-reviewer approve-with-nits 0 1 and
+    subprocess-safety-reviewer approve 0 0 at 2ab8db0e1ca1773d (round 2),
+    three remarks carried in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
