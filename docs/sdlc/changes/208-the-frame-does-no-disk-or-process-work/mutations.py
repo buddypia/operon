@@ -16,12 +16,16 @@ TESTS = [
     "tests::the_run_script_and_the_templates_are_read_off_the_frame",
     "tests::the_staged_selection_is_settled_when_the_changes_arrive",
     "tests::a_terminal_row_is_read_for_links_only_under_the_pointer",
+    "tests::the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate",
+    "tests::every_translation_table_is_sorted_by_message_id",
 ]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--"] + TESTS]
 
 APP = ROOT / "src/app.rs"
 SCREENS = ROOT / "src/app/screens.rs"
 TERMINAL = ROOT / "src/ui/terminal.rs"
+GATE = ROOT / ".claude/hooks/gate-commit.sh"
+TABLES = ROOT / "src/i18n_tables.rs"
 MUTATIONS = {
     "the checkpoint diff is read on the frame again": (
         SCREENS,
@@ -72,6 +76,16 @@ MUTATIONS = {
         TERMINAL,
         "        .filter(|position| rect.contains(*position))?;\n",
         "        ?;\n",
+    ),
+    "the commit gate skips the table tests for code": (
+        GATE,
+        "\\.md$|^src/.*\\.rs$'",
+        "\\.md$'",
+    ),
+    "a new row goes back to the top of the table": (
+        TABLES,
+        'pub(crate) const EN_TABLE: Table = &[\n',
+        'pub(crate) const EN_TABLE: Table = &[\n    ("{editor} で開く", "Open in {editor}"),\n',
     ),
 }
 

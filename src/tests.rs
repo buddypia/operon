@@ -48671,7 +48671,8 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
         "limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}",
         // Change 198: the record tests, when the commit holds a record, in what
         // the limit has left — clippy and they together end before the hook.
-        "grep -E '^docs/|^\\.claude/|\\.md$'",
+        // Change 208: and when it touches src/, for the message tables.
+        "grep -E '^docs/|^\\.claude/|\\.md$|^src/.*\\.rs$'",
         // Change 201: and when it deletes or moves a path a document may name.
         "if [ -n \"$({ git diff --cached --diff-filter=DR --name-only; git diff --diff-filter=D --name-only; } 2>/dev/null)\" ] ||",
         "left=$(( limit - SECONDS ))",

@@ -13,10 +13,16 @@
 # The bounded read of the run script moves to change 209, which runs the
 # approved bytes themselves.
 # Round 2: both approve 0 0.
+# Round 3, an Important finding from CI on the landed tip: the four new
+# message rows sat at the head of both tables, which are binary-searched, so
+# they would have shown untranslated. The rows are in order, and the commit
+# gate runs the four table tests whenever src/ changes (lesson 096).
+# rust-reviewer approve 0 1; subprocess-safety-reviewer, which the gate
+# change brought in, approve-with-nits 0 5 over the whole branch.
 
-digest: "c011e4332d8689a6"
+digest: "e0dc1214ef519365"
 
-rounds: 2
+rounds: 3
 
 carried:
   - rust-reviewer/1 · src/tests.rs the_staged_selection_is_settled_when_the_changes_arrive: the source checks are substring matches that a comment naming the call would trip.
@@ -29,7 +35,16 @@ carried:
     person: "プロジェクトを外した直後に Git の状態が届くと、使われない小さな記録がメモリに残ります。保存はされず、再起動で消えます。"
   - durability-reviewer/1 · src/git/setup.rs read_run_script: the size is checked before an unbounded read, so a file growing in between passes the cap.
     person: "実行スクリプトの読み込みで、サイズを確かめた直後にファイルが大きくなると上限を超えて読めてしまいます。次の変更で直します。"
+  - rust-reviewer/3 · .claude/hooks/gate-commit.sh: a commit touching only src/tests.rs runs the four table tests too, about four seconds.
+    person: "テストだけを直したコミットでも、翻訳表の確認が数秒かかるようになりました。"
+  - subprocess-safety-reviewer/3 · .claude/hooks/gate-commit.sh: a commit touching src/*.rs builds the test binary inside the hook, so a cold first commit may hit the time limit.
+    person: "新しい作業場所での最初のコミットは、テストの準備に時間がかかり、時間切れで止まることがあります。止まったときは、案内のとおりに準備をしてからもう一度コミットすれば通ります。"
+  - subprocess-safety-reviewer/3 · src/exec.rs: the stdout and stderr readers are joined after the kill, so an editor CLI that hands its pipe to a long-lived child holds the worker thread past 5 s.
+    person: "エディタによっては、起動の完了を待つ処理が5秒を超えて続くことがあります。画面は止まりません。"
+  - subprocess-safety-reviewer/3 · src/util.rs open_in_external_editor: a path starting with '-' would be read as an option; every caller passes an absolute worktree path.
+    person: "現在の使い方では起きませんが、ハイフンで始まるパスをエディタに渡すと、オプションとして読まれるおそれがあります。"
 
 verdicts:
-  rust-reviewer: "approve 0 0"
+  rust-reviewer: "approve 0 1"
   durability-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"

@@ -539,14 +539,21 @@ fi
 # They read the working tree, as clippy does, not only what is staged. A commit
 # that deletes or moves a path runs them too: a document may still name it, and
 # rename detection lists only the new path in $changed (change 201).
+# The message tables are read the same way: a row added out of order is not a
+# wrong translation but none, and it reached CI from change 208, so a commit
+# that touches src/ runs the table tests too.
 record_tests=(
   tests::every_state_file_names_a_route_and_a_stage_that_exist
   tests::change_directory_numbers_are_unique
   tests::harness_documents_only_name_paths_that_exist
+  tests::every_translation_table_is_sorted_by_message_id
+  tests::every_message_id_has_a_row_in_every_table
+  tests::every_translation_keeps_the_placeholder_names_of_its_message_id
+  tests::every_message_row_is_one_the_code_shows
 )
 records=""
 if [ -n "$({ git diff --cached --diff-filter=DR --name-only; git diff --diff-filter=D --name-only; } 2>/dev/null)" ] ||
-  printf '%s\n' "$changed" | grep -E '^docs/|^\.claude/|\.md$' >/dev/null; then
+  printf '%s\n' "$changed" | grep -E '^docs/|^\.claude/|\.md$|^src/.*\.rs$' >/dev/null; then
   left=$(( limit - SECONDS ))
   [ "$left" -gt 0 ] || block "no time left for the record tests (${SECONDS}s of ${limit}s spent)" \
 "Clippy or a cold build used the limit. Run \`make q.fast\` and

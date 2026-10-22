@@ -15,10 +15,6 @@ use crate::i18n::Language;
 pub(crate) type Table = &'static [(&'static str, &'static str)];
 
 pub(crate) const EN_TABLE: Table = &[
-    ("{editor} で開く", "Open in {editor}"),
-    ("{editor} を起動できませんでした", "Could not start {editor}"),
-    ("{path} が見つかりません", "{path} was not found"),
-    ("差分をコピーできませんでした: {error}", "Could not copy the diff: {error}"),
     ("\n\n… 差分を {p0} KiB で切り詰めました", "\n\n… Diff truncated at {p0} KiB"),
     ("\n## ターン {p0} — {speaker}\n\n{text}\n", "\n## Turn {p0} — {speaker}\n\n{text}\n"),
     ("\n... コマンドのエラー出力を切り詰めました", "\n... Command error output was truncated"),
@@ -228,6 +224,8 @@ pub(crate) const EN_TABLE: Table = &[
     ("{cli} で判定できませんでした。次回の更新で再試行します。", "{cli} could not judge the conversation. The next update will try again."),
     ("{count} ファイル", "{count} files"),
     ("{destination} へ会話全履歴を復元するには {tools} が PATH 上に必要です。", "Restoring the full conversation history to {destination} requires {tools} on PATH."),
+    ("{editor} で開く", "Open in {editor}"),
+    ("{editor} を起動できませんでした", "Could not start {editor}"),
     ("{external_effect}。メタデータは書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。確認が済むまで強制終了しないでください。エラー: {error}", "{external_effect}. The metadata was written, but Operon could not confirm it reached the disk. Operon will retry automatically. Do not force quit until it is confirmed. Error: {error}"),
     ("{external_effect}が、ローカルのメタデータを保存できませんでした。Operon が自動的に再試行します。アプリを開いたままにするか、再起動後にターミナル復旧を使ってください。エラー: {error}", "{external_effect}, but the local metadata could not be saved. Operon will retry automatically. Keep the app open, or use terminal recovery after restarting. Error: {error}"),
     ("{failed} 件が失敗", "{failed} failed"),
@@ -305,6 +303,7 @@ pub(crate) const EN_TABLE: Table = &[
     ("{panel}を{edge}に移動", "Move {panel} to the {edge}"),
     ("{panel}を{edge}に移動しました", "Moved {panel} to the {edge}"),
     ("{parent} によりブロック中", "Blocked by {parent}"),
+    ("{path} が見つかりません", "{path} was not found"),
     ("{path} は Operon に登録されたプロジェクトではありません。", "{path} is not a project registered in Operon."),
     ("{path} はフォルダではありません。", "{path} is not a folder."),
     ("{pending} 件が実行中", "{pending} running"),
@@ -939,6 +938,7 @@ pub(crate) const EN_TABLE: Table = &[
     ("左側に移動", "Move to the left"),
     ("差分", "Diff"),
     ("差分をコピーしました。", "Copied diff."),
+    ("差分をコピーできませんでした: {error}", "Could not copy the diff: {error}"),
     ("差分を取得できません: {error}", "Could not load the diff: {error}"),
     ("差分を見る", "View diff"),
     ("差分を読み込んでいます…", "Loading diff…"),
@@ -1157,10 +1157,6 @@ pub(crate) const EN_TABLE: Table = &[
 ];
 
 pub(crate) const KO_TABLE: Table = &[
-    ("{editor} で開く", "{editor}에서 열기"),
-    ("{editor} を起動できませんでした", "{editor}을(를) 시작할 수 없습니다"),
-    ("{path} が見つかりません", "{path}을(를) 찾을 수 없습니다"),
-    ("差分をコピーできませんでした: {error}", "변경 사항을 복사할 수 없습니다: {error}"),
     ("\n\n… 差分を {p0} KiB で切り詰めました", "\n\n… diff를 {p0} KiB에서 잘랐습니다"),
     ("\n## ターン {p0} — {speaker}\n\n{text}\n", "\n## 턴 {p0} — {speaker}\n\n{text}\n"),
     ("\n... コマンドのエラー出力を切り詰めました", "\n... 명령의 오류 출력을 잘랐습니다"),
@@ -1370,6 +1366,8 @@ pub(crate) const KO_TABLE: Table = &[
     ("{cli} で判定できませんでした。次回の更新で再試行します。", "{cli}(으)로 판정하지 못했습니다. 다음 업데이트에서 다시 시도합니다."),
     ("{count} ファイル", "파일 {count}개"),
     ("{destination} へ会話全履歴を復元するには {tools} が PATH 上に必要です。", "{destination}(으)로 대화 전체 기록을 복원하려면 PATH에 {tools}이(가) 필요합니다."),
+    ("{editor} で開く", "{editor}에서 열기"),
+    ("{editor} を起動できませんでした", "{editor}을(를) 시작할 수 없습니다"),
     ("{external_effect}。メタデータは書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。確認が済むまで強制終了しないでください。エラー: {error}", "{external_effect}. 메타데이터는 기록되었지만 디스크에 저장되었는지 확인하지 못했습니다. Operon이 자동으로 다시 시도합니다. 확인될 때까지 강제 종료하지 마세요. 오류: {error}"),
     ("{external_effect}が、ローカルのメタデータを保存できませんでした。Operon が自動的に再試行します。アプリを開いたままにするか、再起動後にターミナル復旧を使ってください。エラー: {error}", "{external_effect}했지만 로컬 메타데이터를 저장하지 못했습니다. Operon이 자동으로 다시 시도합니다. 앱을 열어 두거나, 재시작 후 터미널 복구를 사용해 주세요. 오류: {error}"),
     ("{failed} 件が失敗", "{failed}개 실패"),
@@ -1447,6 +1445,7 @@ pub(crate) const KO_TABLE: Table = &[
     ("{panel}を{edge}に移動", "{panel}을(를) {edge}(으)로 이동"),
     ("{panel}を{edge}に移動しました", "{panel}을(를) {edge}(으)로 이동했습니다"),
     ("{parent} によりブロック中", "{parent}에 의해 차단됨"),
+    ("{path} が見つかりません", "{path}을(를) 찾을 수 없습니다"),
     ("{path} は Operon に登録されたプロジェクトではありません。", "{path}은(는) Operon에 등록된 프로젝트가 아닙니다."),
     ("{path} はフォルダではありません。", "{path}는 폴더가 아닙니다."),
     ("{pending} 件が実行中", "{pending}개 실행 중"),
@@ -2081,6 +2080,7 @@ pub(crate) const KO_TABLE: Table = &[
     ("左側に移動", "왼쪽으로 이동"),
     ("差分", "차이점"),
     ("差分をコピーしました。", "변경 사항을 복사했습니다."),
+    ("差分をコピーできませんでした: {error}", "변경 사항을 복사할 수 없습니다: {error}"),
     ("差分を取得できません: {error}", "diff를 가져올 수 없습니다: {error}"),
     ("差分を見る", "차이점 보기"),
     ("差分を読み込んでいます…", "diff를 불러오고 있습니다…"),
