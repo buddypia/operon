@@ -1291,3 +1291,21 @@ is open on main stops the next landing until someone reads it against the code.
 **Guard.** `merge_gate_refuses_branch_with_in_flight_state_yaml` refuses a merge
 while a record the branch never touched is open, and lets an archived one
 through (change 202; watched failing with the new check removed).
+
+---
+
+## 094 — A timing test measured the runner's sleep, not the poll
+
+`test_fast_subprocess_completes_without_25ms_polling_floor` failed in CI on a
+branch that never touched `src/exec.rs`: the fastest of eight fast commands
+took 9.5 ms against 2.0 ms waited for directly. Its bound assumed a 1 ms sleep
+returns in 1 ms, and on a loaded macOS runner it returns several ms late.
+Change 201 had already replaced a fixed bound with this relative one, which is
+lesson 064 broken a second time. **The rule:** a fast path is judged by what
+the code says, never by a clock; a clock bound is kept only where the defect
+would take seconds longer than the bound.
+
+**Guard.** `test_fast_subprocess_completes_without_25ms_polling_floor` reads
+from `src/exec.rs` the first sleep, its doubling to 25 ms, and that the loop
+sleeps nowhere else, and times nothing (change 204; five mutations watched
+failing).

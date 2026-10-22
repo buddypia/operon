@@ -1,0 +1,21 @@
+# Review record for 204-the-poll-timing-test-reads-the-clock.
+#
+# The change: test_fast_subprocess_completes_without_25ms_polling_floor stops
+# timing a fast command against the runner's sleep and reads the poll's floor
+# from src/exec.rs instead.
+#
+# Round 1: both reviewers approve-with-nits. A second sleep before or beside
+# the loop passed all three source checks, and the 25 ms cap was unpinned;
+# both are now checked, and mutations.py plants both. The match against
+# comments or dead code is left, as both reviewers advised.
+# Round 2: both approve with nothing left.
+
+digest: "a50f8b338ab09b2d"
+
+rounds: 2
+
+carried: []
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

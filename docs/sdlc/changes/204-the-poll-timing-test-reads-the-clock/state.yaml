@@ -1,0 +1,49 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/204-the-poll-timing-test-reads-the-clock.
+#
+# Report: CI run 39730353874 (change 203's branch) failed
+# test_fast_subprocess_completes_without_25ms_polling_floor: "the fastest of 8
+# fast commands 9.481375ms, waited for directly 1.996875ms". The branch did not
+# touch src/exec.rs, and a rerun of the same commit passed.
+#
+# Cause: the test's wall-clock bound, helper < blocking * 2 + 5 ms, holds only
+# if a 1 ms thread::sleep returns within about 1 ms. On a loaded macOS runner it
+# returns several ms late, so the bound measured the runner. Change 201 had
+# already moved this test from a fixed bound to this relative one.
+#
+# Fix: the clock comparison is gone. The test reads the three things a polling
+# floor needs from src/exec.rs: the first sleep, its doubling, and the sleep
+# the loop takes (the third is new). Lesson 094.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Closed. Nothing is carried in review.yaml. Closed in the same commit
+  that CI judges last."
+
+contract:
+  failing-test-first: "machine passed the failure is CI run 39730353874 on an
+    unchanged src/exec.rs; mutations.py here caught 5 of 5"
+  three-gates: "machine passed cargo fmt and the named test; clippy at the
+    commit; the suite runs in CI"
+  ci: "machine passed on the tip, which the merge gate checks"
+  release-binary: "machine passed no: src/tests.rs and docs only"
+  review: "human passed rust-reviewer approve 0 0 and
+    subprocess-safety-reviewer approve 0 0 at a50f8b338ab09b2d (round 2)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
