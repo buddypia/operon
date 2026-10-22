@@ -51408,45 +51408,39 @@ pub(crate) fn test_set_session_output_skips_redundant_relayout_and_generation_bu
 /// artificial latency floor.
 #[test]
 pub(crate) fn test_fast_subprocess_completes_without_25ms_polling_floor() {
-    // Against the same command waited for by a blocking `status()`, taken in
-    // turn with it, not against a fixed time: a fixed 85 ms for four failed
-    // under load in CI and here, and a fixed 20 ms for the fastest of eight
-    // failed beside four other tests (change 201). The backoff wakes at 1, 3,
-    // 7, 15 ms…, so a child done after t is seen before 2t + 1 ms; a 25 ms
-    // first sleep is never under 25 ms, since a sleep never ends early.
-    // Under load the blocking wait itself passes 10 ms and that bound passes a
-    // floor too, so the first sleep is read from the source as well: the one
-    // check no load can move.
-    let first_sleep_ms = include_str!("exec.rs")
+    // Read from the source, not timed. A fixed 85 ms for four calls failed
+    // under load (change 201), and so did the fastest of eight against the
+    // same command waited for by a blocking `status()` (change 204): on a
+    // loaded CI runner a 1 ms sleep returns several ms late, so any bound on
+    // a fast path measures the machine. The floor is in three places — the
+    // first sleep, its growth, and the sleep actually taken — and no load
+    // moves any of them (lesson 064).
+    let source = include_str!("exec.rs");
+    let first_sleep_ms = source
         .split_once("let mut poll_sleep = Duration::from_millis(")
         .and_then(|(_, rest)| rest.split_once(')'))
         .and_then(|(number, _)| number.parse::<u64>().ok())
         .expect("src/exec.rs の poll の最初の sleep が読めません");
-    // And it grows by doubling: a flat sleep after a short first one is the
-    // same floor one poll later.
-    assert!(
-        include_str!("exec.rs").contains("poll_sleep = (poll_sleep * 2).min("),
-        "src/exec.rs の poll の sleep が倍々に伸びていません"
-    );
     assert!(
         first_sleep_ms <= 2,
         "src/exec.rs の poll が最初に {first_sleep_ms}ms 眠ります — 速いコマンドがその分待たされます"
     );
-    let (mut helper, mut blocking) = (Duration::MAX, Duration::MAX);
-    for _ in 0..8 {
-        let start = Instant::now();
-        let mut cmd = Command::new("/usr/bin/true");
-        let out = run_command_with_timeout(&mut cmd, Duration::from_secs(5)).unwrap();
-        assert!(out.status.success());
-        helper = helper.min(start.elapsed());
-        let start = Instant::now();
-        assert!(Command::new("/usr/bin/true").status().unwrap().success());
-        blocking = blocking.min(start.elapsed());
-    }
+    // A flat sleep after a short first one is the same floor one poll later,
+    // and a cap past 25 ms is a cancel that waits that long (change 157).
     assert!(
-        helper < blocking * 2 + Duration::from_millis(5),
-        "速いコマンド 8 回の最速が {helper:?}、直接待つと {blocking:?} — poll に下限があります"
+        source.contains("poll_sleep = (poll_sleep * 2).min(Duration::from_millis(25));"),
+        "src/exec.rs の poll の sleep が 25ms までの倍々で伸びていません"
     );
+    // And the loop sleeps for that value and nothing else: a second sleep
+    // before or beside it is the floor back under another name.
+    assert!(
+        source.contains("thread::sleep(poll_sleep.min(")
+            && source.matches("thread::sleep(").count() == 1,
+        "src/exec.rs の poll が poll_sleep の長さ以外でも眠っています"
+    );
+    let mut cmd = Command::new("/usr/bin/true");
+    let out = run_command_with_timeout(&mut cmd, Duration::from_secs(5)).unwrap();
+    assert!(out.status.success());
 }
 
 /// Change 152: `ensure_initial_prompt_turn` is called from the UI draw path
