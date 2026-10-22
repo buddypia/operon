@@ -1,0 +1,24 @@
+# Review record for 199-the-lockfile-falls-behind-its-crates.
+# Shape: docs/sdlc/templates/review.yaml.
+#
+# The change: Cargo.lock only, updated within rust-version 1.88.
+#
+# Round 1, rust-reviewer checked the lock against state.yaml with
+# `cargo tree --locked`, macOS target included: direct dependencies (eframe and
+# egui 0.31.1, rusqlite 0.40.2, rfd, image, syntect) do not move; uuid goes
+# 1.24.1 to 1.26.1 inside `^1.16`; tokio and zlib-rs are not linked on macOS;
+# the windows-* duplicates collapse. Two remarks, both on 0.x minor jumps
+# reached transitively on macOS, are carried: the suite in CI covers both paths.
+
+digest: "76fcc2d6bfd4f7b8"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · Cargo.lock, plist (via syntect): quick-xml 0.41 to 0.42 and base64 0.22 to 0.23 are 0.x minor jumps, linked on macOS only through plist 1.10.3; the app uses default-fancy and parses no plist at runtime, and highlighting is covered by tests in CI.
+    person: "構文ハイライトが間接的に使う部品の版が上がりました。実行時には使われない経路で、自動テストで確認されるため、対応は不要です。"
+  - rust-reviewer/2 · Cargo.lock, flate2 1.1.10: the lock lists zlib-rs and a second miniz_oxide (0.9.1 beside 0.8.9); on macOS zlib-rs is not linked, so PNG, GIF and WebP decoding keeps a miniz_oxide backend, now 0.9.1; a decode regression would be caught in CI.
+    person: "画像の読み込みに使う圧縮部品の版が上がりました。不具合があれば自動テストで分かるため、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
