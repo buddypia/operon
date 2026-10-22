@@ -48780,6 +48780,73 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
     );
 }
 
+/// The merge gate in each of `.codex/hooks.json`'s shell groups: its command,
+/// its timeout, and whether it is the group's last handler. `None` for a shell
+/// group that does not run it.
+fn codex_merge_gates(manifest: &Path) -> Vec<Option<(String, u64, bool)>> {
+    let path = manifest.join(".codex/hooks.json");
+    let hooks: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display())),
+    )
+    .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    hooks["hooks"]["PreToolUse"]
+        .as_array()
+        .expect(".codex/hooks.json の hooks.PreToolUse が配列ではありません")
+        .iter()
+        .filter(|group| {
+            group["matcher"]
+                .as_str()
+                .is_some_and(|matcher| matcher.contains("Bash"))
+        })
+        .map(|group| {
+            let handlers = group["hooks"]
+                .as_array()
+                .expect(".codex/hooks.json のシェル呼び出しの hooks が配列ではありません");
+            let at = handlers.iter().position(|hook| {
+                hook["command"]
+                    .as_str()
+                    .is_some_and(|command| command.contains(".claude/hooks/gate-merge.sh"))
+            })?;
+            let gate = &handlers[at];
+            Some((
+                gate["command"].as_str().unwrap_or_default().to_owned(),
+                gate["timeout"].as_u64().unwrap_or(0),
+                at + 1 == handlers.len(),
+            ))
+        })
+        .collect()
+}
+
+/// Change 211 (A18): only Claude Code ran the merge gate, so a Codex session
+/// could land on main before CI had judged the branch. Codex runs the main
+/// checkout's gate on every shell call, with as long as Claude's to refuse.
+#[test]
+pub(crate) fn codex_runs_the_merge_gate_on_every_shell_call() {
+    let gates = codex_merge_gates(Path::new(env!("CARGO_MANIFEST_DIR")));
+    assert!(
+        !gates.is_empty(),
+        ".codex/hooks.json にシェル呼び出しの PreToolUse がありません"
+    );
+    for gate in gates {
+        let (command, timeout, last) =
+            gate.expect("Codex のシェル呼び出しで gate-merge.sh が動きません");
+        assert!(
+            command.contains("--git-common-dir"),
+            "Codex の合流チェックが main checkout の gate-merge.sh を指していません: {command}"
+        );
+        assert!(
+            timeout >= 600,
+            "Codex の gate-merge.sh の timeout ({timeout}s) が suite の時間上限 540 秒に余裕を残していません"
+        );
+        // Codex keys a person's trust of a handler by its place in the group,
+        // so a handler added before the others would move the ones trusted.
+        assert!(
+            last,
+            "gate-merge.sh が Codex のシェル呼び出しの最後の handler ではありません"
+        );
+    }
+}
+
 /// The swap into /Applications used to run the suite twice. CI's verdict
 /// stands in for it only when CI ran exactly this tree. What "exactly" means —
 /// no edit, no untracked file — is `ci-verified.sh --worktree`'s, and
@@ -51303,6 +51370,60 @@ pub(crate) fn merge_gate_refuses_branch_with_in_flight_state_yaml() {
         code_agy,
         Some(2),
         "gate-merge.sh must refuse Antigravity merge payload with status: in-progress, stderr={stderr_agy}"
+    );
+
+    // Codex (change 211): the command .codex/hooks.json registers, run as
+    // Codex runs it, with Codex's payload and no CLAUDE_PROJECT_DIR. It names
+    // the gate in the main checkout of the repository it runs in, so the gate
+    // is placed there, where git does not see it.
+    let (codex_command, _, _) = codex_merge_gates(&manifest)
+        .into_iter()
+        .flatten()
+        .next()
+        .expect("Codex のシェル呼び出しで gate-merge.sh が動きません");
+    fs::create_dir_all(repo.join(".claude/hooks")).unwrap();
+    fs::copy(&hook, repo.join(".claude/hooks/gate-merge.sh")).unwrap();
+    fs::create_dir_all(repo.join(".git/info")).unwrap();
+    fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(repo.join(".git/info/exclude"))
+        .unwrap()
+        .write_all(b"/.claude/\n")
+        .unwrap();
+    let mut codex = Command::new("/bin/sh");
+    forget_inherited_repository(&mut codex)
+        .args(["-c", &codex_command])
+        .current_dir(&repo)
+        .env_remove("CLAUDE_PROJECT_DIR")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = codex.spawn().unwrap();
+    // A command that dies before reading its input closes the pipe; what it
+    // said on stderr is the useful part, so the write's own error is not.
+    let _ = child.stdin.take().unwrap().write_all(
+        serde_json::json!({
+            "session_id": "codex-session",
+            "cwd": repo.to_string_lossy(),
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_use_id": "call-1",
+            "tool_input": { "command": "git merge --no-ff --no-edit fix/unclosed" }
+        })
+        .to_string()
+        .as_bytes(),
+    );
+    let out = child.wait_with_output().unwrap();
+    let stderr_codex = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "Codex の合流チェックが in-progress のブランチを止めませんでした: {stderr_codex}"
+    );
+    assert!(
+        stderr_codex.contains("999-unclosed/state.yaml has status `in-progress`"),
+        "Codex の合流チェックが別の理由で止まりました: {stderr_codex}"
     );
 
     // Setting status: done while leaving a `machine pending` contract item must also be refused.

@@ -277,7 +277,8 @@ worktree=$(git worktree list --porcelain | awk -v ref="branch refs/heads/$branch
 The fallback tests the branch in its worktree, which has changes or another
 commit checked out, so it would be testing something else."
 command -v cargo >/dev/null 2>&1 || PATH="$HOME/.cargo/bin:$PATH"
-# Under this hook's 600 seconds in .claude/settings.json, with room to refuse.
+# Under this hook's 600 seconds in .claude/settings.json and .codex/hooks.json,
+# with room to refuse.
 limit=${OPERON_MERGE_SUITE_TIMEOUT:-540}
 output=$(cd -- "$worktree" && bash "$root/scripts/run-bounded.sh" "$limit" cargo test --locked 2>&1)
 case $? in
