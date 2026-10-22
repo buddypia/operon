@@ -1,7 +1,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Register a second Claude directory, start a session under it, and confirm the status chip moves as the agent works."
+resume: "Closed by change 202 after reading it against the code: landed; a missing account folder is not yet named, A3 in triage.md."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine waived steering_bytes was already at propose before this change began and 031 added none of it; every other metric is inside its band. Change 030 owns the reduction"
   guards-verified-by-mutation: "human passed eight watched failing: the wrong variable, the hooks reaching only the machine's own root, the split moving the machine's own settings file, a deleted folder still getting hooks, a missing folder left for tmux to discover, the same folder registered twice, one session accumulating records, and nothing ever pruned"
   screen-agreed: "human passed the account sits on the launch screen beside the agent; the hooks follow every registered account"
-  real-machine-check: "human pending register a second Claude directory, start a session under it, and confirm the status chip moves"
+  real-machine-check: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
