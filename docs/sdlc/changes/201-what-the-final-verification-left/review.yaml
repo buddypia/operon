@@ -1,0 +1,28 @@
+# Review record for 201-what-the-final-verification-left.
+#
+# The change: change numbers read from every branch's change directories; the
+# polling test reads its floor from the source; SessionEnd's lease release
+# waits 8 s of its hook's 10; every fixture takes one temporary root; a commit
+# that deletes or moves a path runs the record tests.
+#
+# Round 1, both approve-with-nits. Fixed for round 2: a ref name with `|` or
+# `&` no longer breaks the number check's records (awk -v, not sed); an
+# unstaged deletion committed with -a triggers the record tests too; the
+# direct-call guard counts `env::temp_dir`; the polling test also requires the
+# doubling, with a mutation for a flat sleep (8 of 8 caught); the two English
+# messages are Japanese; the range uses saturating_sub; lesson 091 says the
+# lease budget is held by reading the source. Round 2 re-read those lines.
+
+digest: "12028a68b46ea47d"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1 · src/tests.rs temporary_root: it ignores $TMPDIR, so in a sandbox that allows writes only under $TMPDIR the fixtures could not be written, and they land outside the session's scratch directory.
+    person: "テストの一時ファイルは、AI 作業用の一時フォルダではなく macOS の利用者ごとの一時フォルダに作られます。各テストが自分で片付けるので、対応は不要です。"
+  - subprocess-safety-reviewer/1 · .claude/hooks/gate-commit.sh trigger: a commit that only deletes a file, in a fresh worktree whose test binary is not built yet, may stop on the time limit; the refusal names the command to run first.
+    person: "新しい作業場所で、ファイルを消すだけのコミットを最初にすると、確認に時間がかかって一度止まることがあります。止まったときに次にすることが表示されるので、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve-with-nits 0 1"

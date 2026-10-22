@@ -505,8 +505,9 @@ fi
 # `the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` holds the split.
 
 # Bounded under the hook's 600 seconds, as gate-merge.sh bounds its suite: a
-# hook that times out lets the commit through unchecked (change 192). One limit
-# for clippy and the record tests below together, counted from the hook's start.
+# hook that times out lets the commit through unchecked (change 192). Clippy
+# runs under the whole limit; the record tests below get what the hook's run has
+# left of it, so the two together end within a few seconds of it.
 limit=${OPERON_COMMIT_CLIPPY_TIMEOUT:-540}
 
 if [ "$needs_cargo" -eq 1 ]; then
@@ -535,14 +536,17 @@ fi
 # 198). They read files and nothing else, and take about two seconds once the
 # test binary is built, so they run here, by name, when the commit holds what
 # they read — in whatever the hook's run so far has left of the limit above.
-# They read the working tree, as clippy does, not only what is staged.
+# They read the working tree, as clippy does, not only what is staged. A commit
+# that deletes or moves a path runs them too: a document may still name it, and
+# rename detection lists only the new path in $changed (change 201).
 record_tests=(
   tests::every_state_file_names_a_route_and_a_stage_that_exist
   tests::change_directory_numbers_are_unique
   tests::harness_documents_only_name_paths_that_exist
 )
 records=""
-if printf '%s\n' "$changed" | grep -E '^docs/|^\.claude/|\.md$' >/dev/null; then
+if [ -n "$({ git diff --cached --diff-filter=DR --name-only; git diff --diff-filter=D --name-only; } 2>/dev/null)" ] ||
+  printf '%s\n' "$changed" | grep -E '^docs/|^\.claude/|\.md$' >/dev/null; then
   left=$(( limit - SECONDS ))
   [ "$left" -gt 0 ] || block "no time left for the record tests (${SECONDS}s of ${limit}s spent)" \
 "Clippy or a cold build used the limit. Run \`make q.fast\` and
@@ -562,7 +566,8 @@ $output"
 "Building the test binary is the usual cause. Run \`cargo test --locked --no-run\`
 in this worktree, which has no time limit, then commit again." ;;
     *) block "the record tests (${record_tests[*]})" \
-"$(printf '%s' "${output:-cargo exited $status with no output}" | tail -40)" ;;
+"They read the working tree, so a file named below may be work not yet staged.
+$(printf '%s' "${output:-cargo exited $status with no output}" | tail -40)" ;;
   esac
 fi
 

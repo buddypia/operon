@@ -75,7 +75,7 @@ pub(crate) fn wait_for_background_task(
 
 #[test]
 pub(crate) fn shared_history_snapshot_preserves_the_source_jsonl_byte_for_byte() {
-    let root = std::env::temp_dir().join(format!("operon-history-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-history-{}", Uuid::new_v4()));
     let source = root.join("source.jsonl");
     let archive_root = root.join("shared-sessions");
     let bytes = b"{\"type\":\"user\",\"message\":\"first\"}\nnot valid json\n";
@@ -90,7 +90,7 @@ pub(crate) fn shared_history_snapshot_preserves_the_source_jsonl_byte_for_byte()
 
 #[test]
 pub(crate) fn accepts_a_codex_session_file_after_the_app_server_has_flushed_it() {
-    let root = std::env::temp_dir().join(format!("operon-codex-flush-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-flush-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("session.jsonl");
     fs::write(&transcript, "{}\n").unwrap();
@@ -104,7 +104,7 @@ pub(crate) fn accepts_a_codex_session_file_after_the_app_server_has_flushed_it()
 
 #[test]
 pub(crate) fn codex_history_verification_requires_every_imported_turn_to_match() {
-    let root = std::env::temp_dir().join(format!("operon-history-verify-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-history-verify-{}", Uuid::new_v4()));
     let source = root.join("source.jsonl");
     let destination = root.join("destination.jsonl");
     fs::create_dir_all(&root).unwrap();
@@ -229,7 +229,7 @@ pub(crate) fn codex_import_keeps_every_short_claude_conversation_turn_in_order()
 
 #[test]
 pub(crate) fn full_history_restore_persists_a_resumable_session_before_launching_it() {
-    let root = std::env::temp_dir().join(format!("operon-history-record-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-history-record-{}", Uuid::new_v4()));
     let project_path = root.join("missing-project");
     let project = Project {
         id: Uuid::new_v4(),
@@ -1013,7 +1013,7 @@ pub(crate) fn compact_handoff_bundle_peels_nested_envelopes_and_preserves_displa
 #[test]
 pub(crate) fn import_full_cli_history_writes_handoff_bundle_and_manifest_without_touching_destination_store(
 ) {
-    let root = std::env::temp_dir().join(format!("operon-handoff-bundle-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-handoff-bundle-{}", Uuid::new_v4()));
     let project_path = root.join("project");
     let archive_root = root.join("shared-sessions");
     let source_path = root.join("source.jsonl");
@@ -1085,7 +1085,7 @@ pub(crate) fn import_full_cli_history_writes_handoff_bundle_and_manifest_without
 
 #[test]
 pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bundle_prompt() {
-    let root = std::env::temp_dir().join(format!("operon-handoff-finish-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-handoff-finish-{}", Uuid::new_v4()));
     let project_path = root.join("missing-project");
     let project = Project {
         id: Uuid::new_v4(),
@@ -1150,7 +1150,7 @@ pub(crate) fn finish_full_history_import_launches_fresh_session_with_handoff_bun
 /// A two-turn Claude transcript, its project, and an archive root, all under
 /// one temporary directory: the handoff reuse and expiry tests (change 180).
 pub(crate) fn handoff_fixture(name: &str) -> (PathBuf, Project, CliSession, PathBuf) {
-    let root = std::env::temp_dir().join(format!("operon-{name}-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-{name}-{}", Uuid::new_v4()));
     let project_path = root.join("project");
     let source_path = root.join("source.jsonl");
     fs::create_dir_all(&project_path).unwrap();
@@ -1226,7 +1226,7 @@ pub(crate) fn archive_entries(archive_root: &Path) -> usize {
 
 #[test]
 pub(crate) fn handoff_launch_settings_round_trip_and_drop_what_the_gate_refuses() {
-    let root = std::env::temp_dir().join(format!("operon-handoff-settings-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-handoff-settings-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let data_file = root.join("store.json");
     let mut settings = RecentAgentSettings::default();
@@ -1712,7 +1712,7 @@ pub(crate) fn the_app_sweeps_expired_handoff_archives_once_at_startup() {
 
 #[test]
 pub(crate) fn finish_full_history_import_says_when_a_bundle_was_reused() {
-    let root = std::env::temp_dir().join(format!("operon-handoff-notice-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-handoff-notice-{}", Uuid::new_v4()));
     let project = Project {
         id: Uuid::new_v4(),
         path: root.join("missing-project"),
@@ -2328,8 +2328,8 @@ pub(crate) fn a_live_restore_project_is_outside_every_project() {
             .and_then(|(_, rest)| rest.split_once('('))
             .map_or("?", |(name, _)| name);
         assert!(
-            !body.contains("temp_dir()"),
-            "{name} keeps its project under temp_dir(); use live_restore_root"
+            !body.contains("temp_dir()") && !body.contains("temporary_"),
+            "{name} が project を一時ディレクトリに置いています — live_restore_root を使ってください"
         );
     }
 }
@@ -2406,7 +2406,7 @@ pub(crate) fn full_history_restore_offers_only_destinations_that_can_hold_the_hi
 /// transcript, which reads as "the restore did nothing".
 #[test]
 pub(crate) fn codex_restore_appends_history_the_terminal_can_replay() {
-    let root = std::env::temp_dir().join(format!("operon-codex-replay-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-replay-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.jsonl");
     let rollout = root.join("rollout.jsonl");
@@ -2478,7 +2478,7 @@ pub(crate) fn codex_restore_appends_history_the_terminal_can_replay() {
 
 #[test]
 pub(crate) fn codex_restore_refuses_to_append_after_a_partial_record() {
-    let root = std::env::temp_dir().join(format!("operon-codex-partial-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-partial-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.jsonl");
     let rollout = root.join("rollout.jsonl");
@@ -2525,7 +2525,7 @@ fn codex_rollout_records(rollout: &Path) -> Vec<serde_json::Value> {
 /// same file resumes.
 #[test]
 pub(crate) fn codex_restore_numbers_replay_records_the_way_the_rollout_numbers_its_own() {
-    let root = std::env::temp_dir().join(format!("operon-codex-ordinal-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-ordinal-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.jsonl");
     let rollout = root.join("rollout.jsonl");
@@ -2633,7 +2633,7 @@ pub(crate) fn codex_restore_numbers_replay_records_the_way_the_rollout_numbers_i
 #[test]
 pub(crate) fn codex_restore_numbers_its_turns_in_an_unnumbered_rollout_and_leaves_codex_records_alone(
 ) {
-    let root = std::env::temp_dir().join(format!("operon-codex-legacy-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-legacy-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.jsonl");
     let rollout = root.join("rollout.jsonl");
@@ -2678,7 +2678,7 @@ pub(crate) fn codex_restore_numbers_its_turns_in_an_unnumbered_rollout_and_leave
 /// later, with nothing on screen naming the restore.
 #[test]
 pub(crate) fn a_rollout_whose_last_record_lost_its_number_fails_verification() {
-    let root = std::env::temp_dir().join(format!("operon-codex-mixture-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-mixture-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let rollout = root.join("rollout.jsonl");
     fs::write(
@@ -2776,7 +2776,7 @@ pub(crate) fn codex_replay_records_use_codex_rollout_timestamps() {
 
 #[test]
 pub(crate) fn codex_replay_records_preserve_and_continue_paginated_ordinals() {
-    let root = std::env::temp_dir().join(format!("operon-codex-ordinals-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-ordinals-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.jsonl");
     let rollout = root.join("rollout.jsonl");
@@ -2885,7 +2885,7 @@ pub(crate) fn codex_replay_records_preserve_and_continue_paginated_ordinals() {
 
 #[test]
 pub(crate) fn codex_rollout_metadata_recovers_full_uuid_from_filename() {
-    let root = std::env::temp_dir().join(format!("operon-codex-stem-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-stem-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let id = "01a09b53-dd3c-7333-80e9-ffe372779194";
     let rollout = root.join(format!("rollout-2026-09-14T00-00-00-{id}.jsonl"));
@@ -2899,7 +2899,7 @@ pub(crate) fn codex_rollout_metadata_recovers_full_uuid_from_filename() {
 
 #[test]
 pub(crate) fn codex_replay_records_default_to_ordinals_and_monotonic_time() {
-    let root = std::env::temp_dir().join(format!("operon-codex-monotonic-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-monotonic-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let source = root.join("source.jsonl");
     let rollout = root.join("rollout.jsonl");
@@ -2965,7 +2965,7 @@ pub(crate) fn antigravity_restore_renders_every_turn_with_its_speaker() {
 
 #[test]
 pub(crate) fn antigravity_restore_writes_a_conversation_the_cli_reopens() {
-    let root = std::env::temp_dir().join(format!("operon-agy-write-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-write-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let conversation_id = "11111111-1111-1111-1111-111111111111";
     let path = root.join(format!("{conversation_id}.db"));
@@ -3049,7 +3049,7 @@ pub(crate) fn antigravity_restore_writes_a_conversation_the_cli_reopens() {
 
 #[test]
 pub(crate) fn antigravity_restore_refuses_a_conversation_it_cannot_read_back() {
-    let root = std::env::temp_dir().join(format!("operon-agy-verify-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-verify-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("conversation.db");
     let turns = vec![
@@ -3085,7 +3085,7 @@ pub(crate) fn antigravity_restore_refuses_a_conversation_it_cannot_read_back() {
 /// terminal said the conversation was not found (change 172).
 #[test]
 pub(crate) fn a_restored_antigravity_conversation_opens_while_another_process_reads_it() {
-    let root = std::env::temp_dir().join(format!("operon-agy-reader-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-reader-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let conversation_id = "33333333-3333-3333-3333-333333333333";
     let path = root.join(format!("{conversation_id}.db"));
@@ -3137,7 +3137,7 @@ pub(crate) fn a_restored_antigravity_conversation_opens_while_another_process_re
 
 #[test]
 pub(crate) fn claude_restore_writes_a_conversation_the_cli_reopens() {
-    let root = std::env::temp_dir().join(format!("operon-claude-write-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-write-{}", Uuid::new_v4()));
     let workspace = root.join("project");
     fs::create_dir_all(&workspace).unwrap();
     let session_id = "33333333-3333-3333-3333-333333333333";
@@ -3193,7 +3193,7 @@ pub(crate) fn claude_restore_writes_a_conversation_the_cli_reopens() {
 
 #[test]
 pub(crate) fn claude_restore_refuses_a_conversation_it_cannot_read_back() {
-    let root = std::env::temp_dir().join(format!("operon-claude-verify-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-verify-{}", Uuid::new_v4()));
     let workspace = root.join("project");
     fs::create_dir_all(&workspace).unwrap();
     let session_id = "44444444-4444-4444-4444-444444444444";
@@ -3266,7 +3266,7 @@ pub(crate) fn claude_restore_refuses_a_conversation_it_cannot_read_back() {
 /// rather than be re-stripped into a failed restore.
 #[test]
 pub(crate) fn claude_restore_keeps_a_turn_that_quotes_another_cli_s_plumbing() {
-    let root = std::env::temp_dir().join(format!("operon-claude-quote-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-quote-{}", Uuid::new_v4()));
     let workspace = root.join("project");
     fs::create_dir_all(&workspace).unwrap();
     let session_id = "66666666-6666-6666-6666-666666666666";
@@ -3290,7 +3290,7 @@ pub(crate) fn claude_restore_keeps_a_turn_that_quotes_another_cli_s_plumbing() {
 /// written where the destination CLI will look for it.
 #[test]
 pub(crate) fn claude_conversations_are_filed_under_the_resolved_project_path() {
-    let root = std::env::temp_dir().join(format!("operon-claude-link-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-link-{}", Uuid::new_v4()));
     let real = root.join("real");
     let link = root.join("link");
     fs::create_dir_all(&real).unwrap();
@@ -3334,7 +3334,7 @@ pub(crate) fn project_directories_are_named_the_way_claude_code_names_them() {
 
 #[test]
 pub(crate) fn antigravity_restore_lists_the_conversation_in_the_cli_history_index() {
-    let root = std::env::temp_dir().join(format!("operon-agy-index-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-index-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let index = root.join("history.jsonl");
     fs::write(&index, "{\"display\":\"existing\"}\n").unwrap();
@@ -3415,7 +3415,7 @@ pub(crate) fn native_session_path_for_project_resolves_gemini_transcript() {
 
 #[test]
 pub(crate) fn every_saved_cli_history_can_be_read_as_the_same_kind_of_conversation() {
-    let root = std::env::temp_dir().join(format!("operon-restore-turns-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-restore-turns-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let expected = vec![("user", "one".to_owned()), ("assistant", "two".to_owned())];
 
@@ -3647,7 +3647,7 @@ pub(crate) fn reasoning_reaches_every_destination_as_attributed_text() {
     // And it survives the crossing: a destination writes it and reads it back
     // as the same bytes. Both file-writing destinations are checked; Codex's
     // needs a live app server and is covered by the ignored end-to-end tests.
-    let root = std::env::temp_dir().join(format!("operon-reasoning-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-reasoning-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let turns = vec![("assistant", format!("{RESTORED_REASONING_LABEL}\n考えた"))];
     let claude = root.join("claude.jsonl");
@@ -3719,7 +3719,7 @@ pub(crate) fn every_content_block_crosses_as_the_kind_of_thing_it_is() {
 /// nothing counted it. Now an unknown kind is carried under a label and named
 /// in the summary — the two halves of "passed through, not silently stripped".
 pub(crate) fn an_unclassified_record_is_restored_and_reported() {
-    let root = std::env::temp_dir().join(format!("operon-unclassified-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-unclassified-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("transcript.jsonl");
     fs::write(
@@ -3782,7 +3782,7 @@ pub(crate) fn an_unclassified_record_is_restored_and_reported() {
 /// a reader that loses a record cannot balance, so the arithmetic is what
 /// notices a loss no assertion was written for.
 pub(crate) fn restore_counts_every_source_record_into_exactly_one_class() {
-    let root = std::env::temp_dir().join(format!("operon-classify-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-classify-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("transcript.jsonl");
     fs::write(
@@ -3846,7 +3846,7 @@ pub(crate) fn restore_counts_every_source_record_into_exactly_one_class() {
 /// `claude/cost-state` is the same thing for the other CLI and is `Operational`,
 /// so the judgement is not a close one.
 pub(crate) fn a_codex_token_count_record_is_excluded_rather_than_reported_as_unknown() {
-    let root = std::env::temp_dir().join(format!("operon-token-usage-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-token-usage-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("rollout.jsonl");
     fs::write(
@@ -3906,7 +3906,7 @@ pub(crate) fn a_codex_token_count_record_is_excluded_rather_than_reported_as_unk
 /// kind, with the kind names swapped out, must still differ. If they do not, one
 /// sentence is covering both again however it is worded.
 pub(crate) fn a_kind_that_crossed_and_a_kind_that_was_dropped_are_reported_as_different_things() {
-    let root = std::env::temp_dir().join(format!("operon-carried-dropped-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-carried-dropped-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     // Neither kind is in TRANSCRIPT_VOCABULARY. The first carries its text in
     // `message.content`, so `record_text` finds it; the second has nothing
@@ -3992,7 +3992,7 @@ pub(crate) fn a_kind_that_crossed_and_a_kind_that_was_dropped_are_reported_as_di
 /// restored conversation never arrived. The same is true of an unknown `is*`
 /// flag, which never excludes the record it sits on.
 pub(crate) fn an_unknown_role_is_reported_as_carried_because_its_turn_crosses() {
-    let root = std::env::temp_dir().join(format!("operon-unknown-role-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-unknown-role-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("rollout.jsonl");
     fs::write(
@@ -4051,7 +4051,7 @@ pub(crate) fn an_unknown_role_is_reported_as_carried_because_its_turn_crosses() 
 /// `message.content` is `[]`, and a Codex message with an unrecognised role and
 /// no `content` key at all.
 pub(crate) fn an_unknown_flag_or_role_is_counted_against_what_the_record_did() {
-    let root = std::env::temp_dir().join(format!("operon-deferred-arm-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-deferred-arm-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     // (record, provider, kind, expected (carried, dropped), what it is)
@@ -4151,7 +4151,7 @@ pub(crate) fn an_unknown_flag_or_role_is_counted_against_what_the_record_did() {
 /// `.claude/rules/identifiers.md` — a guard that restates the value it guards is
 /// not a guard.
 pub(crate) fn the_notice_promises_no_marker_the_restored_text_does_not_carry() {
-    let root = std::env::temp_dir().join(format!("operon-notice-promises-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-notice-promises-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     // Everything the label is except the kind it names, so the assertion holds
     // whatever kind a fixture happens to use.
@@ -4215,7 +4215,7 @@ pub(crate) fn the_notice_promises_no_marker_the_restored_text_does_not_carry() {
 /// notice to differ is the claim itself — and it stays true through any
 /// rewording, which the previous shape of this guard would not have.
 pub(crate) fn the_notices_printed_counts_account_for_every_record_read() {
-    let root = std::env::temp_dir().join(format!("operon-notice-arithmetic-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-notice-arithmetic-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("transcript.jsonl");
     // Ten records, and every counter a different number: a bucket printed in
@@ -4385,7 +4385,7 @@ pub(crate) fn antigravity_tool_output_crosses_marked_as_a_tool_result() {
 /// the conversation's own transcript has to answer for both.
 #[test]
 pub(crate) fn a_restore_names_the_last_request_of_the_conversation_it_reads() {
-    let root = std::env::temp_dir().join(format!("operon-agy-last-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-last-{}", Uuid::new_v4()));
     let conversation_id = Uuid::new_v4().to_string();
     let transcript = antigravity_conversation_transcript_in(&root, &conversation_id);
     fs::create_dir_all(transcript.parent().unwrap()).unwrap();
@@ -4597,7 +4597,7 @@ pub(crate) fn codex_source_restores_the_conversation_without_its_session_setup()
 
 #[test]
 pub(crate) fn every_restore_source_resolves_to_the_file_that_holds_its_conversation() {
-    let root = std::env::temp_dir().join(format!("operon-source-path-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-source-path-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let jsonl = root.join("conversation.jsonl");
     fs::write(&jsonl, "").unwrap();
@@ -5099,7 +5099,7 @@ pub(crate) fn caps_child_output_during_capture_instead_of_after_buffering() {
 }
 #[test]
 pub(crate) fn recognizes_git_metadata_without_spawning_a_process() {
-    let root = std::env::temp_dir().join(format!("operon-git-meta-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-git-meta-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     assert!(!has_git_metadata(&root));
     fs::write(root.join(".git"), "gitdir: /tmp/example\n").unwrap();
@@ -5108,7 +5108,7 @@ pub(crate) fn recognizes_git_metadata_without_spawning_a_process() {
 }
 #[test]
 pub(crate) fn preserves_an_unreadable_store_before_starting_empty() {
-    let root = std::env::temp_dir().join(format!("operon-corrupt-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-corrupt-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("store.json");
     fs::write(&path, "{ definitely not valid json").unwrap();
@@ -5142,7 +5142,7 @@ pub(crate) fn preserves_an_unreadable_store_before_starting_empty() {
 
 #[test]
 pub(crate) fn project_registration_persists_deduplicates_and_rejects_invalid_paths() {
-    let root = std::env::temp_dir().join(format!("operon-add-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-add-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let mut app = test_app(root.join("data").join("store.json"));
@@ -5158,7 +5158,7 @@ pub(crate) fn project_registration_persists_deduplicates_and_rejects_invalid_pat
 
 #[test]
 pub(crate) fn project_registration_rolls_back_when_persistence_fails() {
-    let root = std::env::temp_dir().join(format!("operon-add-fail-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-add-fail-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let mut app = test_app(root.clone());
@@ -5173,7 +5173,7 @@ pub(crate) fn project_registration_rolls_back_when_persistence_fails() {
 }
 #[test]
 pub(crate) fn project_removal_waits_for_an_inflight_worktree_mutation() {
-    let root = std::env::temp_dir().join(format!("operon-remove-race-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-remove-race-{}", Uuid::new_v4()));
     let project_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
         root.join("store.json"),
@@ -5200,7 +5200,7 @@ pub(crate) fn project_removal_waits_for_an_inflight_worktree_mutation() {
 }
 #[test]
 pub(crate) fn worktree_mutation_fences_manual_empty_and_queued_session_starts() {
-    let root = std::env::temp_dir().join(format!("operon-launch-fence-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-launch-fence-{}", Uuid::new_v4()));
     let project_path = root.join("project");
     fs::create_dir_all(&project_path).unwrap();
     let project_id = Uuid::new_v4();
@@ -5259,8 +5259,8 @@ pub(crate) fn worktree_mutation_fences_manual_empty_and_queued_session_starts() 
 
 #[test]
 pub(crate) fn accepts_a_non_git_project_root_as_a_session_directory() {
-    let root = std::env::temp_dir().join(format!("operon-non-git-{}", Uuid::new_v4()));
-    let unrelated = std::env::temp_dir().join(format!("operon-unrelated-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-non-git-{}", Uuid::new_v4()));
+    let unrelated = temporary_root().join(format!("operon-unrelated-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::create_dir_all(&unrelated).unwrap();
     assert!(is_allowed_session_path(&root, &root));
@@ -5270,7 +5270,7 @@ pub(crate) fn accepts_a_non_git_project_root_as_a_session_directory() {
 }
 #[test]
 pub(crate) fn resolves_the_selected_worktree_for_agent_and_empty_sessions() {
-    let root = std::env::temp_dir().join(format!("operon-path-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-path-{}", Uuid::new_v4()));
     let project = root.join("project");
     let selected = root.join("linked-worktree");
     fs::create_dir_all(&project).unwrap();
@@ -5288,7 +5288,7 @@ pub(crate) fn resolves_the_selected_worktree_for_agent_and_empty_sessions() {
 }
 #[test]
 pub(crate) fn rejects_a_working_directory_selected_for_another_project() {
-    let root = std::env::temp_dir().join(format!("operon-path-scope-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-path-scope-{}", Uuid::new_v4()));
     let project = root.join("project");
     let selected = root.join("linked-worktree");
     fs::create_dir_all(&project).unwrap();
@@ -5367,7 +5367,7 @@ pub(crate) fn switching_projects_clears_project_scoped_launch_state() {
 }
 #[test]
 pub(crate) fn accepts_only_finder_folders_from_a_drop() {
-    let root = std::env::temp_dir().join(format!("operon-drop-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-drop-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let file = root.join("ticket.txt");
     fs::write(&file, "not a project folder").unwrap();
@@ -5388,7 +5388,7 @@ pub(crate) fn accepts_only_finder_folders_from_a_drop() {
 }
 #[test]
 pub(crate) fn native_folder_picker_result_adds_a_project_and_cancel_is_non_mutating() {
-    let root = std::env::temp_dir().join(format!("operon-picker-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-picker-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let mut app = test_app(root.join("data/store.json"));
@@ -5970,7 +5970,7 @@ pub(crate) fn rejoins_wrapped_lines_the_way_each_script_is_written() {
 /// worth quoting, and does not outlive the session it belongs to.
 #[test]
 pub(crate) fn keeps_the_last_quote_through_a_screenful_of_tool_output() {
-    let root = std::env::temp_dir().join(format!("operon-preview-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-preview-{}", Uuid::new_v4()));
     let mut app = test_app(root.join("store.json"));
     let session = Uuid::new_v4();
     let spoken = ConversationPreview {
@@ -6708,7 +6708,7 @@ pub(crate) fn auto_approval_sends_enter_only_after_a_workspace_trust_prompt() {
     // Reporting the bytes is the whole point. The version of this test that
     // only asserted "something arrived" passed throughout the life of the bug:
     // a blind Enter arrives too, and on this layout it means "exit".
-    let root = std::env::temp_dir().join(format!("operon-trust-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-trust-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let fake = root.join("prompt.sh");
     fs::write(
@@ -7858,7 +7858,7 @@ pub(crate) fn ansi_numbers_map_to_the_colours_they_name() {
 /// terminal in the colours of the theme it was captured under.
 #[test]
 pub(crate) fn switching_themes_recolours_open_terminals() {
-    let root = std::env::temp_dir().join(format!("operon-theme-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-theme-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let data_file = root.join("store.json");
     let session_id = Uuid::new_v4();
@@ -7974,7 +7974,7 @@ pub(crate) fn a_clickable_card_yields_to_the_controls_drawn_on_it() {
 /// look like one.
 #[test]
 pub(crate) fn tapping_a_session_row_opens_its_terminal() {
-    let root = std::env::temp_dir().join(format!("operon-row-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-row-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let mut store = Store::default();
@@ -8383,7 +8383,7 @@ pub(crate) fn includes_standard_macos_agent_install_locations_in_command_path() 
 }
 #[test]
 pub(crate) fn saves_the_local_store_atomically_and_loads_it_back() {
-    let root = std::env::temp_dir().join(format!("operon-store-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-store-{}", Uuid::new_v4()));
     let path = root.join("store.json");
     let store = Store {
         schema_version: STORE_SCHEMA_VERSION,
@@ -8431,7 +8431,7 @@ pub(crate) fn instance_lock_holder_process() {
 }
 #[test]
 pub(crate) fn instance_lock_rejects_a_second_process_and_releases_after_crash() {
-    let root = std::env::temp_dir().join(format!("operon-instance-lock-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-instance-lock-{}", Uuid::new_v4()));
     let store = root.join("store.json");
     let ready = root.join("ready");
     let mut holder = Command::new(std::env::current_exe().unwrap())
@@ -8466,7 +8466,7 @@ pub(crate) fn instance_lock_rejects_a_second_process_and_releases_after_crash() 
 }
 #[test]
 pub(crate) fn instance_lock_distinguishes_storage_errors_from_contention() {
-    let root = std::env::temp_dir().join(format!("operon-instance-error-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-instance-error-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let blocked_parent = root.join("not-a-directory");
     fs::write(&blocked_parent, "file").unwrap();
@@ -8479,7 +8479,7 @@ pub(crate) fn instance_lock_distinguishes_storage_errors_from_contention() {
 }
 #[test]
 pub(crate) fn imports_the_legacy_store_once_without_modifying_its_snapshot() {
-    let root = std::env::temp_dir().join(format!("operon-store-migration-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-store-migration-{}", Uuid::new_v4()));
     let legacy = root.join("store.json");
     let current = root.join("store-v2.json");
     let pending = Uuid::new_v4();
@@ -8553,7 +8553,7 @@ pub(crate) fn current_and_legacy_builds_use_distinct_store_files() {
 }
 #[test]
 pub(crate) fn the_newest_legacy_snapshot_wins_and_none_of_them_are_modified() {
-    let root = std::env::temp_dir().join(format!("operon-brand-migration-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-brand-migration-{}", Uuid::new_v4()));
     let renamed = root.join("previous-brand-store-v2.json");
     let pre_versioned = root.join("previous-brand-store.json");
     let current = root.join("store-v2.json");
@@ -8599,7 +8599,7 @@ pub(crate) fn the_newest_legacy_snapshot_wins_and_none_of_them_are_modified() {
 }
 #[test]
 pub(crate) fn atomic_write_distinguishes_precommit_failure_from_committed_unsynced_data() {
-    let root = std::env::temp_dir().join(format!("operon-atomic-write-phases-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-atomic-write-phases-{}", Uuid::new_v4()));
     let path = root.join("store.json");
     fs::create_dir_all(&root).unwrap();
     fs::write(&path, b"old").unwrap();
@@ -8652,7 +8652,7 @@ pub(crate) fn committed_unsynced_persistence_keeps_memory_and_schedules_a_retry(
 }
 #[test]
 pub(crate) fn cancellation_waits_when_neither_recovery_copy_is_confirmed_durable() {
-    let root = std::env::temp_dir().join(format!("operon-cancel-dual-unsynced-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cancel-dual-unsynced-{}", Uuid::new_v4()));
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
         root.join("store.json"),
@@ -8695,7 +8695,7 @@ pub(crate) fn cancellation_waits_when_neither_recovery_copy_is_confirmed_durable
 }
 #[test]
 pub(crate) fn restarted_pending_cancellation_is_reconfirmed_before_tmux_can_stop() {
-    let root = std::env::temp_dir().join(format!(
+    let root = temporary_root().join(format!(
         "operon-cancel-restart-reconfirm-{}",
         Uuid::new_v4()
     ));
@@ -8774,7 +8774,7 @@ pub(crate) fn durable_cancellation_reconfirmation_clears_a_stale_warning() {
 }
 #[test]
 pub(crate) fn partial_legacy_import_retries_without_modifying_the_legacy_snapshot() {
-    let root = std::env::temp_dir().join(format!("operon-partial-import-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-partial-import-{}", Uuid::new_v4()));
     let legacy = root.join("store.json");
     let current = root.join("store-v2.json");
     let pending = Uuid::new_v4();
@@ -8810,7 +8810,7 @@ pub(crate) fn partial_legacy_import_retries_without_modifying_the_legacy_snapsho
 }
 #[test]
 pub(crate) fn committed_unsynced_legacy_import_requests_an_automatic_retry() {
-    let root = std::env::temp_dir().join(format!("operon-unsynced-import-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-unsynced-import-{}", Uuid::new_v4()));
     let legacy = root.join("store.json");
     let current = root.join("store-v2.json");
     save_store(&legacy, &Store::default()).unwrap();
@@ -8834,7 +8834,7 @@ pub(crate) fn committed_unsynced_legacy_import_requests_an_automatic_retry() {
 }
 #[test]
 pub(crate) fn malformed_legacy_import_is_preserved_without_changing_its_source() {
-    let root = std::env::temp_dir().join(format!("operon-invalid-import-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-invalid-import-{}", Uuid::new_v4()));
     let legacy = root.join("store.json");
     let current = root.join("store-v2.json");
     fs::create_dir_all(&root).unwrap();
@@ -8859,8 +8859,7 @@ pub(crate) fn malformed_legacy_import_is_preserved_without_changing_its_source()
 }
 #[test]
 pub(crate) fn malformed_legacy_sidecar_is_preserved_and_rebuilt_for_the_current_store() {
-    let root =
-        std::env::temp_dir().join(format!("operon-invalid-sidecar-import-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-invalid-sidecar-import-{}", Uuid::new_v4()));
     let legacy = root.join("store.json");
     let current = root.join("store-v2.json");
     let session_id = Uuid::new_v4();
@@ -8896,7 +8895,7 @@ pub(crate) fn malformed_legacy_sidecar_is_preserved_and_rebuilt_for_the_current_
 }
 #[test]
 pub(crate) fn future_legacy_schema_is_preserved_and_does_not_block_current_startup() {
-    let root = std::env::temp_dir().join(format!("operon-future-import-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-future-import-{}", Uuid::new_v4()));
     let legacy = root.join("store.json");
     let current = root.join("store-v2.json");
     fs::create_dir_all(&root).unwrap();
@@ -8916,7 +8915,7 @@ pub(crate) fn future_legacy_schema_is_preserved_and_does_not_block_current_start
 }
 #[test]
 pub(crate) fn failed_store_write_preserves_existing_cancellation_recovery() {
-    let root = std::env::temp_dir().join(format!("operon-sidecar-order-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-sidecar-order-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let store_path = root.join("store.json");
     fs::create_dir_all(&store_path).unwrap();
@@ -8933,7 +8932,7 @@ pub(crate) fn failed_store_write_preserves_existing_cancellation_recovery() {
 }
 #[test]
 pub(crate) fn ordinary_store_save_does_not_clear_a_pending_recovery_retry() {
-    let root = std::env::temp_dir().join(format!("operon-retry-flag-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-retry-flag-{}", Uuid::new_v4()));
     let mut app = test_app(root.join("store.json"));
     app.store_retry_pending = true;
 
@@ -8943,7 +8942,7 @@ pub(crate) fn ordinary_store_save_does_not_clear_a_pending_recovery_retry() {
 }
 #[test]
 pub(crate) fn loads_legacy_store_without_a_schema_field_and_rejects_future_schema() {
-    let root = std::env::temp_dir().join(format!("operon-schema-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-schema-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let legacy = root.join("legacy.json");
     fs::write(
@@ -9023,7 +9022,7 @@ pub(crate) fn persisted_ready_queue_is_discovered_after_restart() {
 }
 #[test]
 pub(crate) fn failed_session_has_a_durable_retry_transition() {
-    let root = std::env::temp_dir().join(format!("operon-session-retry-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-session-retry-{}", Uuid::new_v4()));
     let project_path = root.join("project");
     fs::create_dir_all(&project_path).unwrap();
     let project_id = Uuid::new_v4();
@@ -9073,7 +9072,7 @@ pub(crate) fn failed_session_has_a_durable_retry_transition() {
 /// survive the poll cadence: the same idle screen is seen over and over.
 #[test]
 pub(crate) fn announces_a_finished_turn_once_per_managed_session() {
-    let root = std::env::temp_dir().join(format!("operon-activity-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-activity-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut session = test_session(session_id, SessionStatus::Active);
@@ -9109,7 +9108,7 @@ pub(crate) fn announces_a_finished_turn_once_per_managed_session() {
 }
 #[test]
 pub(crate) fn cancelling_a_queued_session_is_durable() {
-    let root = std::env::temp_dir().join(format!("operon-cancel-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cancel-{}", Uuid::new_v4()));
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
         root.join("store.json"),
@@ -9131,7 +9130,7 @@ pub(crate) fn cancelling_a_queued_session_is_durable() {
 
 #[test]
 pub(crate) fn removing_a_queued_session_cancels_then_deletes_its_record() {
-    let root = std::env::temp_dir().join(format!("operon-remove-queued-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-remove-queued-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9153,7 +9152,7 @@ pub(crate) fn removing_a_queued_session_cancels_then_deletes_its_record() {
 
 #[test]
 pub(crate) fn removing_an_active_session_waits_for_confirmation() {
-    let root = std::env::temp_dir().join(format!("operon-remove-active-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-remove-active-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9175,7 +9174,7 @@ pub(crate) fn removing_an_active_session_waits_for_confirmation() {
 
 #[test]
 pub(crate) fn failed_poll_persistence_rolls_back_and_does_not_release_queue() {
-    let root = std::env::temp_dir().join(format!("operon-poll-save-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-poll-save-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let parent_id = Uuid::new_v4();
     let mut child = test_session(Uuid::new_v4(), SessionStatus::Queued);
@@ -9208,7 +9207,7 @@ pub(crate) fn failed_poll_persistence_rolls_back_and_does_not_release_queue() {
 }
 #[test]
 pub(crate) fn external_stop_state_is_retained_and_retried_when_metadata_save_fails() {
-    let root = std::env::temp_dir().join(format!("operon-external-save-retry-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-external-save-retry-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9249,7 +9248,7 @@ pub(crate) fn external_stop_state_is_retained_and_retried_when_metadata_save_fai
 }
 #[test]
 pub(crate) fn cancellation_intent_survives_restart_before_external_stop_result_is_saved() {
-    let root = std::env::temp_dir().join(format!("operon-cancel-restart-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cancel-restart-{}", Uuid::new_v4()));
     let data_file = root.join("store.json");
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9288,7 +9287,7 @@ pub(crate) fn cancellation_intent_survives_restart_before_external_stop_result_i
 }
 #[test]
 pub(crate) fn stop_error_never_reverses_a_cancelled_poll_result() {
-    let root = std::env::temp_dir().join(format!("operon-stop-poll-order-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-stop-poll-order-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9330,8 +9329,7 @@ pub(crate) fn stop_error_never_reverses_a_cancelled_poll_result() {
 }
 #[test]
 pub(crate) fn stop_error_keeps_intent_until_a_later_gone_poll_cancels_it() {
-    let root =
-        std::env::temp_dir().join(format!("operon-stop-error-before-poll-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-stop-error-before-poll-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9383,7 +9381,7 @@ pub(crate) fn cancellation_sidecar_survives_a_previous_store_read_modify_write()
         notifications_enabled: bool,
     }
 
-    let root = std::env::temp_dir().join(format!("operon-cancel-old-roundtrip-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cancel-old-roundtrip-{}", Uuid::new_v4()));
     let data_file = root.join("store.json");
     let session_id = Uuid::new_v4();
     let current = Store {
@@ -9427,7 +9425,7 @@ pub(crate) fn cancellation_sidecar_survives_a_previous_store_read_modify_write()
 }
 #[test]
 pub(crate) fn startup_discards_duplicate_or_stale_cancellation_metadata() {
-    let root = std::env::temp_dir().join(format!(
+    let root = temporary_root().join(format!(
         "operon-normalized-cancellations-{}",
         Uuid::new_v4()
     ));
@@ -9453,7 +9451,7 @@ pub(crate) fn startup_discards_duplicate_or_stale_cancellation_metadata() {
 }
 #[test]
 pub(crate) fn external_start_state_is_retained_when_metadata_save_fails() {
-    let root = std::env::temp_dir().join(format!("operon-external-start-save-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-external-start-save-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9488,7 +9486,7 @@ pub(crate) fn external_start_state_is_retained_when_metadata_save_fails() {
 
 #[test]
 pub(crate) fn opening_a_session_selects_it_and_leaves_the_session_tools_view() {
-    let root = std::env::temp_dir().join(format!("operon-open-session-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-open-session-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -9515,7 +9513,7 @@ pub(crate) fn opening_a_session_selects_it_and_leaves_the_session_tools_view() {
 
 #[test]
 pub(crate) fn opening_worktrees_from_a_session_action_selects_its_project() {
-    let root = std::env::temp_dir().join(format!("operon-open-worktrees-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-open-worktrees-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let project_id = Uuid::new_v4();
     let mut app = test_app(root.join("store.json"));
@@ -9568,7 +9566,7 @@ pub(crate) fn prevents_removing_a_record_required_by_a_queued_session() {
     assert_eq!(queued_dependency_count(&sessions, parent_id), 1);
     assert_eq!(queued_dependency_count(&sessions, Uuid::new_v4()), 0);
 
-    let root = std::env::temp_dir().join(format!("operon-dependency-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-dependency-{}", Uuid::new_v4()));
     let mut app = OperonApp::from_state(
         root.join("store.json"),
         Store {
@@ -9592,7 +9590,7 @@ pub(crate) fn prevents_removing_a_record_required_by_a_queued_session() {
 
 #[test]
 pub(crate) fn removing_the_last_session_keeps_its_project() {
-    let root = std::env::temp_dir().join(format!("operon-last-session-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-last-session-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let project_id = Uuid::new_v4();
     let session_id = Uuid::new_v4();
@@ -9855,7 +9853,7 @@ pub(crate) fn parses_porcelain_changes_including_untracked_and_renames() {
 }
 #[test]
 pub(crate) fn git_changes_include_untracked_renamed_and_unborn_repository_content() {
-    let root = std::env::temp_dir().join(format!("operon-git-changes-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-git-changes-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     for arguments in [
         vec!["init"],
@@ -9901,7 +9899,7 @@ pub(crate) fn git_changes_include_untracked_renamed_and_unborn_repository_conten
         .contains("new local content"));
     fs::remove_dir_all(root).unwrap();
 
-    let unborn = std::env::temp_dir().join(format!("operon-git-unborn-{}", Uuid::new_v4()));
+    let unborn = temporary_root().join(format!("operon-git-unborn-{}", Uuid::new_v4()));
     fs::create_dir_all(&unborn).unwrap();
     assert!(git_command(&unborn).arg("init").status().unwrap().success());
     fs::write(unborn.join("first.txt"), "before first commit\n").unwrap();
@@ -9915,7 +9913,7 @@ pub(crate) fn git_changes_include_untracked_renamed_and_unborn_repository_conten
 /// git is not tracking yet.
 #[test]
 pub(crate) fn parses_the_diff_shapes_git_writes_for_a_working_tree() {
-    let root = std::env::temp_dir().join(format!("operon-diff-parse-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-diff-parse-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let git = |arguments: &[&str]| {
         assert!(git_command(&root)
@@ -10311,7 +10309,7 @@ pub(crate) fn a_marked_row_is_painted_with_its_emphasis_band() {
 /// depends on last frame's state gets to be wrong.
 #[test]
 pub(crate) fn the_editor_draws_every_view_without_a_window() {
-    let root = std::env::temp_dir().join(format!("operon-editor-draw-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-editor-draw-{}", Uuid::new_v4()));
     fs::create_dir_all(root.join("docs")).unwrap();
     fs::write(
         root.join("docs/plan.md"),
@@ -10423,7 +10421,7 @@ pub(crate) fn the_editor_draws_every_view_without_a_window() {
 /// agent's work with no message and no undo.
 #[test]
 pub(crate) fn a_save_refuses_to_overwrite_work_that_landed_after_the_file_was_opened() {
-    let root = std::env::temp_dir().join(format!("operon-save-race-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-save-race-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("plan.md"), "# opened\n").unwrap();
 
@@ -10463,7 +10461,7 @@ pub(crate) fn a_save_refuses_to_overwrite_work_that_landed_after_the_file_was_op
 /// atomic replacement — and the replacement leaves no temporary behind.
 #[test]
 pub(crate) fn saving_keeps_the_file_mode_and_cleans_up_after_itself() {
-    let root = std::env::temp_dir().join(format!("operon-save-mode-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-save-mode-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let script = root.join("hook.sh");
     fs::write(&script, "#!/bin/sh\necho before\n").unwrap();
@@ -10498,7 +10496,7 @@ pub(crate) fn saving_keeps_the_file_mode_and_cleans_up_after_itself() {
 /// and a path that climbs out of the project does not get read or written.
 #[test]
 pub(crate) fn the_editor_cannot_reach_outside_the_project() {
-    let root = std::env::temp_dir().join(format!("operon-escape-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-escape-{}", Uuid::new_v4()));
     fs::create_dir_all(root.join("inside")).unwrap();
     fs::write(root.join("secret.txt"), "not yours\n").unwrap();
     let project = root.join("inside");
@@ -10524,7 +10522,7 @@ pub(crate) fn the_editor_cannot_reach_outside_the_project() {
 /// over that is a warning people learn to ignore.
 #[test]
 pub(crate) fn a_changed_file_is_reported_and_an_unchanged_one_is_not() {
-    let root = std::env::temp_dir().join(format!("operon-watch-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-watch-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let note = root.join("plan.md");
     fs::write(&note, "# Plan\n").unwrap();
@@ -10561,7 +10559,7 @@ pub(crate) fn a_changed_file_is_reported_and_an_unchanged_one_is_not() {
 /// Open a document in a throwaway project and let the read land, so a watch
 /// test starts from the state the editor is actually in.
 fn app_with_open_document(name: &str, contents: &str) -> (OperonApp, Project, PathBuf) {
-    let root = std::env::temp_dir().join(format!("operon-{name}-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-{name}-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("plan.md"), contents).unwrap();
     let mut app = test_app(root.join("store.json"));
@@ -10794,7 +10792,7 @@ pub(crate) fn a_watch_does_not_answer_a_failed_save_on_the_persons_behalf() {
 /// project tree. Neither is an error; both say why they cannot be edited.
 #[test]
 pub(crate) fn a_file_the_editor_cannot_edit_says_so_instead_of_failing() {
-    let root = std::env::temp_dir().join(format!("operon-unopenable-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-unopenable-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("note.md"), "# hello\n").unwrap();
     fs::write(root.join("binary.bin"), [0x00, 0x01, 0x02, 0x03]).unwrap();
@@ -11083,7 +11081,7 @@ pub(crate) fn editor_text_layout_cache_reuses_unchanged_document() {
 #[test]
 pub(crate) fn changed_working_tree_invalidates_an_open_editor_diff() {
     let project_id = Uuid::new_v4();
-    let mut app = test_app(std::env::temp_dir().join(format!("operon-diff-fresh-{project_id}")));
+    let mut app = test_app(temporary_root().join(format!("operon-diff-fresh-{project_id}")));
     let file = Some("src/main.rs".to_owned());
     app.git_changes_cache.insert(
         project_id,
@@ -11131,7 +11129,7 @@ pub(crate) fn changed_working_tree_invalidates_an_open_editor_diff() {
 /// The editor must nevertheless replace the old bytes with a new per-file Diff.
 #[test]
 pub(crate) fn editor_diff_refreshes_after_a_second_write_with_unchanged_git_status() {
-    let root = std::env::temp_dir().join(format!("operon-editor-diff-fresh-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-editor-diff-fresh-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let git = |arguments: &[&str]| {
         assert!(git_command(&root)
@@ -11197,7 +11195,7 @@ pub(crate) fn editor_diff_refreshes_after_a_second_write_with_unchanged_git_stat
 /// even though the task key prevented two children from running at once.
 #[test]
 pub(crate) fn stale_inflight_editor_diff_result_is_replaced_by_its_new_generation() {
-    let root = std::env::temp_dir().join(format!("operon-diff-generation-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-diff-generation-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let git = |arguments: &[&str]| {
         assert!(git_command(&root)
@@ -11583,7 +11581,7 @@ pub(crate) fn hunk_headers_number_both_sides() {
 
 #[test]
 pub(crate) fn git_diff_enforces_one_capture_budget_for_large_tracked_and_untracked_content() {
-    let root = std::env::temp_dir().join(format!("operon-git-cap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-git-cap-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     for arguments in [
         vec!["init"],
@@ -11627,7 +11625,7 @@ pub(crate) fn git_diff_enforces_one_capture_budget_for_large_tracked_and_untrack
 }
 #[test]
 pub(crate) fn finds_text_in_a_codex_style_transcript() {
-    let root = std::env::temp_dir().join(format!("operon-transcript-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-transcript-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("rollout-test.jsonl");
     fs::write(
@@ -11644,7 +11642,7 @@ pub(crate) fn finds_text_in_a_codex_style_transcript() {
 }
 #[test]
 pub(crate) fn uses_claude_titles_when_present_in_a_transcript() {
-    let root = std::env::temp_dir().join(format!("operon-title-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-title-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("session.jsonl");
     fs::write(
@@ -11658,7 +11656,7 @@ pub(crate) fn uses_claude_titles_when_present_in_a_transcript() {
 }
 #[test]
 pub(crate) fn finds_a_claude_title_that_appears_after_the_matching_message() {
-    let root = std::env::temp_dir().join(format!("operon-title-after-hit-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-title-after-hit-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("session.jsonl");
     fs::write(
@@ -11674,7 +11672,7 @@ pub(crate) fn finds_a_claude_title_that_appears_after_the_matching_message() {
 }
 #[test]
 pub(crate) fn transcript_readers_account_for_actual_bounded_bytes() {
-    let root = std::env::temp_dir().join(format!("operon-byte-budget-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-byte-budget-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("session.jsonl");
     let content = "{\"type\":\"assistant\",\"message\":{\"content\":\"bounded transcript\"}}\n";
@@ -11691,7 +11689,7 @@ pub(crate) fn transcript_readers_account_for_actual_bounded_bytes() {
 }
 #[test]
 pub(crate) fn discovers_local_claude_cli_sessions_for_a_project() {
-    let root = std::env::temp_dir().join(format!("operon-cli-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cli-{}", Uuid::new_v4()));
     let project = PathBuf::from("/tmp/operon-cli-project");
     let directory = root.join(encode_claude_project_path(&project));
     fs::create_dir_all(&directory).unwrap();
@@ -11716,7 +11714,7 @@ pub(crate) fn discovers_local_claude_cli_sessions_for_a_project() {
 }
 #[test]
 pub(crate) fn recovers_a_legacy_managed_claude_session_from_task_and_timestamp() {
-    let root = std::env::temp_dir().join(format!("operon-claude-recovery-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-recovery-{}", Uuid::new_v4()));
     let project = root.join("project");
     let history = root.join("history");
     let directory = history.join(encode_claude_project_path(&project));
@@ -11759,7 +11757,7 @@ pub(crate) fn recovers_a_legacy_managed_claude_session_from_task_and_timestamp()
 /// request, which reads as "the restore invented a new answer".
 #[test]
 pub(crate) fn a_live_managed_claude_terminal_recovers_its_own_conversation_not_an_older_one() {
-    let root = std::env::temp_dir().join(format!("operon-claude-live-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-live-{}", Uuid::new_v4()));
     let project = root.join("project");
     let history = root.join("history");
     let directory = history.join(encode_claude_project_path(&project));
@@ -11869,8 +11867,7 @@ impl ClearedClaudeTerminal {
 }
 
 fn cleared_claude_terminal(name: &str) -> ClearedClaudeTerminal {
-    let root =
-        std::env::temp_dir().join(format!("operon-claude-registry-{name}-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-registry-{name}-{}", Uuid::new_v4()));
     let workspace = root.join("workspace");
     let registry = root.join("registry");
     let projects = root.join("projects");
@@ -12269,7 +12266,7 @@ pub(crate) fn transcript_timestamps_are_read_as_utc_instants() {
 }
 #[test]
 pub(crate) fn discovers_native_codex_sessions_only_for_the_project() {
-    let root = std::env::temp_dir().join(format!("operon-codex-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-{}", Uuid::new_v4()));
     let project = root.join("project");
     let sessions = root.join("sessions").join("2026").join("08");
     fs::create_dir_all(&project).unwrap();
@@ -12312,7 +12309,7 @@ pub(crate) fn discovers_native_codex_sessions_only_for_the_project() {
 /// modification time would pick.
 #[test]
 pub(crate) fn recovers_a_managed_codex_conversation_launched_without_a_goal() {
-    let root = std::env::temp_dir().join(format!("operon-codex-recovery-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-recovery-{}", Uuid::new_v4()));
     let project = root.join("project");
     let sessions = root.join("sessions").join("2026").join("08").join("19");
     fs::create_dir_all(&project).unwrap();
@@ -12380,7 +12377,7 @@ pub(crate) fn recovers_a_managed_codex_conversation_launched_without_a_goal() {
 /// that invented one, so an unresolvable tie has to fail.
 #[test]
 pub(crate) fn refuses_to_recover_an_ambiguous_managed_codex_conversation() {
-    let root = std::env::temp_dir().join(format!("operon-codex-ambiguous-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-codex-ambiguous-{}", Uuid::new_v4()));
     let project = root.join("project");
     let sessions = root.join("sessions").join("2026").join("08").join("19");
     fs::create_dir_all(&project).unwrap();
@@ -12452,7 +12449,7 @@ pub(crate) fn reads_current_codex_user_message_records_for_native_launch_tokens(
 }
 #[test]
 pub(crate) fn discovers_antigravity_sessions_with_conversation_ids() {
-    let root = std::env::temp_dir().join(format!("operon-gemini-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-gemini-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12492,7 +12489,7 @@ pub(crate) fn discovers_antigravity_sessions_with_conversation_ids() {
 /// own transcript for the request it would be restoring.
 #[test]
 pub(crate) fn discovered_antigravity_sessions_name_their_last_request() {
-    let root = std::env::temp_dir().join(format!("operon-agy-listed-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-listed-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12524,7 +12521,7 @@ pub(crate) fn discovered_antigravity_sessions_name_their_last_request() {
 /// conversation the user returned to must not win.
 #[test]
 pub(crate) fn recovers_a_managed_antigravity_conversation_by_when_it_began() {
-    let root = std::env::temp_dir().join(format!("operon-agy-recovery-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-recovery-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12577,7 +12574,7 @@ pub(crate) fn recovers_a_managed_antigravity_conversation_by_when_it_began() {
 /// dated, so it is never offered as the terminal's conversation.
 #[test]
 pub(crate) fn ignores_antigravity_conversations_without_a_transcript() {
-    let root = std::env::temp_dir().join(format!("operon-agy-notext-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-notext-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12647,7 +12644,7 @@ pub(crate) fn write_antigravity_transcript(
 /// discovery. Its process log names both.
 #[test]
 pub(crate) fn recovers_a_managed_antigravity_conversation_the_history_index_never_named() {
-    let root = std::env::temp_dir().join(format!("operon-agy-logged-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-logged-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12691,7 +12688,7 @@ pub(crate) fn recovers_a_managed_antigravity_conversation_the_history_index_neve
 /// last conversation that terminal attached to, not the first.
 #[test]
 pub(crate) fn restores_the_conversation_a_managed_antigravity_terminal_last_attached_to() {
-    let root = std::env::temp_dir().join(format!("operon-agy-cleared-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-cleared-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12719,7 +12716,7 @@ pub(crate) fn restores_the_conversation_a_managed_antigravity_terminal_last_atta
 /// is what lets a retried terminal resolve to its own attempt.
 #[test]
 pub(crate) fn recovers_the_antigravity_process_started_for_this_terminal() {
-    let root = std::env::temp_dir().join(format!("operon-agy-launch-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-launch-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12752,7 +12749,7 @@ pub(crate) fn recovers_the_antigravity_process_started_for_this_terminal() {
 /// of the pool a managed terminal is recovered from.
 #[test]
 pub(crate) fn ignores_antigravity_process_logs_of_other_workspaces() {
-    let root = std::env::temp_dir().join(format!("operon-agy-foreign-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-foreign-{}", Uuid::new_v4()));
     let project = root.join("project");
     let other = root.join("other");
     fs::create_dir_all(&project).unwrap();
@@ -12778,7 +12775,7 @@ pub(crate) fn ignores_antigravity_process_logs_of_other_workspaces() {
 /// with it, which a log cannot supply.
 #[test]
 pub(crate) fn keeps_indexed_antigravity_titles_when_a_process_log_repeats_the_conversation() {
-    let root = std::env::temp_dir().join(format!("operon-agy-merge-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-agy-merge-{}", Uuid::new_v4()));
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let history = root.join("history.jsonl");
@@ -12807,7 +12804,7 @@ pub(crate) fn keeps_indexed_antigravity_titles_when_a_process_log_repeats_the_co
 }
 #[test]
 pub(crate) fn keeps_native_references_local_without_copying_a_transcript() {
-    let root = std::env::temp_dir().join(format!("operon-native-ref-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-native-ref-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let data_file = root.join("store.json");
     let project_id = Uuid::new_v4();
@@ -13055,7 +13052,7 @@ pub(crate) fn reports_what_a_session_is_actually_doing() {
 /// name must not leave a session nobody can identify.
 #[test]
 pub(crate) fn renaming_a_session_is_durable() {
-    let root = std::env::temp_dir().join(format!("operon-rename-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-rename-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let data_file = root.join("store.json");
     let session_id = Uuid::new_v4();
@@ -13097,7 +13094,7 @@ pub(crate) fn renaming_a_session_is_durable() {
 
 #[test]
 pub(crate) fn reports_an_unreadable_claude_project_history_root() {
-    let root = std::env::temp_dir().join(format!("operon-cli-root-error-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cli-root-error-{}", Uuid::new_v4()));
     let project = PathBuf::from("/tmp/operon-cli-root-error-project");
     fs::create_dir_all(&root).unwrap();
     fs::write(
@@ -13114,7 +13111,7 @@ pub(crate) fn reports_an_unreadable_claude_project_history_root() {
 }
 #[test]
 pub(crate) fn caps_claude_session_candidates_before_parsing_history() {
-    let root = std::env::temp_dir().join(format!("operon-cli-cap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-cli-cap-{}", Uuid::new_v4()));
     let project = PathBuf::from("/tmp/operon-cli-cap-project");
     let directory = root.join(encode_claude_project_path(&project));
     fs::create_dir_all(&directory).unwrap();
@@ -13160,7 +13157,7 @@ pub(crate) fn parses_only_recoverable_operon_tmux_sessions() {
 }
 #[test]
 pub(crate) fn adopts_a_recovered_terminal_result_without_blocking_the_ui() {
-    let root = std::env::temp_dir().join(format!("operon-recover-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-recover-{}", Uuid::new_v4()));
     let project_id = Uuid::new_v4();
     let orphan = OrphanedTmuxSession {
         name: "operon-recovered123".into(),
@@ -13255,7 +13252,7 @@ pub(crate) fn recognizes_gone_tmux_server_errors() {
 #[test]
 pub(crate) fn terminal_resize_failure_from_missing_tmux_socket_transitions_session_to_lost_without_error_banner(
 ) {
-    let root = std::env::temp_dir().join(format!("operon-resize-gone-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resize-gone-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13290,7 +13287,7 @@ pub(crate) fn terminal_resize_failure_from_missing_tmux_socket_transitions_sessi
 }
 #[test]
 pub(crate) fn deleting_session_with_missing_tmux_socket_removes_session_record() {
-    let root = std::env::temp_dir().join(format!("operon-delete-gone-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-delete-gone-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13324,7 +13321,7 @@ pub(crate) fn deleting_session_with_missing_tmux_socket_removes_session_record()
 /// finishes it.
 #[test]
 pub(crate) fn failed_stop_keeps_the_requested_delete_for_the_retry() {
-    let root = std::env::temp_dir().join(format!("operon-delete-retry-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-delete-retry-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13373,7 +13370,7 @@ pub(crate) fn failed_stop_keeps_the_requested_delete_for_the_retry() {
 /// for a reason other than a gone server keeps the requested delete.
 #[test]
 pub(crate) fn failed_close_keeps_the_requested_delete_for_the_retry() {
-    let root = std::env::temp_dir().join(format!("operon-close-retry-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-close-retry-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13405,7 +13402,7 @@ pub(crate) fn failed_close_keeps_the_requested_delete_for_the_retry() {
 /// store write — every frame.
 #[test]
 pub(crate) fn gone_resize_with_unwritable_store_stays_lost_and_retries() {
-    let root = std::env::temp_dir().join(format!("operon-resize-unwritable-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resize-unwritable-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     // A regular file where the store's directory should be: every write fails.
     fs::write(root.join("blocker"), "").unwrap();
@@ -13444,7 +13441,7 @@ pub(crate) fn gone_resize_with_unwritable_store_stays_lost_and_retries() {
 
 #[test]
 pub(crate) fn closing_completed_terminal_with_missing_tmux_socket_removes_session_record() {
-    let root = std::env::temp_dir().join(format!("operon-close-gone-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-close-gone-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13475,7 +13472,7 @@ pub(crate) fn closing_completed_terminal_with_missing_tmux_socket_removes_sessio
 }
 #[test]
 pub(crate) fn stopping_active_session_with_missing_tmux_socket_cancels_cleanly_without_removal() {
-    let root = std::env::temp_dir().join(format!("operon-stop-gone-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-stop-gone-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13515,7 +13512,7 @@ pub(crate) fn stopping_active_session_with_missing_tmux_socket_cancels_cleanly_w
 }
 #[test]
 pub(crate) fn closing_terminal_with_missing_tmux_socket_without_removal_reports_success() {
-    let root = std::env::temp_dir().join(format!("operon-close-no-rem-gone-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-close-no-rem-gone-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13548,7 +13545,7 @@ pub(crate) fn closing_terminal_with_missing_tmux_socket_without_removal_reports_
 }
 #[test]
 pub(crate) fn terminal_resize_failure_with_pending_cancellation_transitions_to_cancelled() {
-    let root = std::env::temp_dir().join(format!("operon-resize-cancel-gone-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resize-cancel-gone-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13590,7 +13587,7 @@ pub(crate) fn terminal_resize_failure_with_pending_cancellation_transitions_to_c
 #[test]
 pub(crate) fn terminal_resize_failure_with_permission_denied_shows_error_notice_and_keeps_session_active(
 ) {
-    let root = std::env::temp_dir().join(format!("operon-resize-perm-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resize-perm-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
@@ -13701,7 +13698,7 @@ pub(crate) fn failed_session_can_stop_a_live_old_terminal_and_then_retry() {
     if !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-failed-live-terminal-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-failed-live-terminal-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session_id = Uuid::new_v4();
     let tmux_name = format!("operon-failed-live-{}", session_id.simple());
@@ -13787,7 +13784,7 @@ pub(crate) fn parses_tmux_exit_status_and_recovers_a_starting_session() {
 }
 #[test]
 pub(crate) fn session_poll_persists_nonzero_exit_as_failure() {
-    let root = std::env::temp_dir().join(format!("operon-poll-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-poll-{}", Uuid::new_v4()));
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
         root.join("store.json"),
@@ -13897,7 +13894,7 @@ pub(crate) fn a_vanished_terminal_is_recorded_as_unresolved_rather_than_failed()
 /// longer support is not made true by having been written down.
 #[test]
 pub(crate) fn failures_recorded_before_the_evidence_rule_are_re_judged_once() {
-    let root = std::env::temp_dir().join(format!("operon-refailure-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-refailure-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let legacy = Store {
         schema_version: EVIDENCE_BASED_FAILURE_SCHEMA_VERSION - 1,
@@ -13966,7 +13963,7 @@ pub(crate) fn failures_recorded_before_the_evidence_rule_are_re_judged_once() {
 }
 #[test]
 pub(crate) fn a_poll_that_loses_a_terminal_persists_it_without_reporting_a_failure() {
-    let root = std::env::temp_dir().join(format!("operon-poll-lost-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-poll-lost-{}", Uuid::new_v4()));
     let session_id = Uuid::new_v4();
     let mut app = OperonApp::from_state(
         root.join("store.json"),
@@ -14096,7 +14093,7 @@ pub(crate) fn an_agent_starts_only_after_its_placeholder_let_go_of_its_terminal(
     // `set-hook -g` needs a running server.
     let keeper = format!("operon-test-{}", Uuid::new_v4().simple());
     start_empty_tmux_session(&keeper, Path::new("/tmp"), &[]).unwrap();
-    let record = std::env::temp_dir().join(format!("operon-pane-died-{}", Uuid::new_v4()));
+    let record = temporary_root().join(format!("operon-pane-died-{}", Uuid::new_v4()));
     let hook = format!("run-shell 'echo #{{session_name}} >> {}'", record.display());
     let _ = tmux_command()
         .args(["set-hook", "-g", "pane-died[160]", &hook])
@@ -14171,7 +14168,7 @@ pub(crate) fn an_agent_terminal_opens_without_its_placeholders_end_of_file() {
 /// stands in a directory that has just been deleted, as such a pane does.
 #[test]
 pub(crate) fn an_agent_starts_in_its_directory_even_where_tmux_cannot_put_it() {
-    let root = std::env::temp_dir().join(format!("operon-pane-cwd-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-pane-cwd-{}", Uuid::new_v4()));
     // The quote and the space are what the quoting is for.
     let project = root.join("it's a project");
     let missing = root.join("gone");
@@ -14217,7 +14214,7 @@ pub(crate) fn a_plain_terminal_is_a_login_shell_in_its_directory() {
     if !tool_available("tmux") {
         return;
     }
-    let root = std::env::temp_dir().join(format!("operon-plain-terminal-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-plain-terminal-{}", Uuid::new_v4()));
     let project = root.join("it's a project");
     fs::create_dir_all(&project).unwrap();
     let name = format!("operon-test-{}", Uuid::new_v4().simple());
@@ -14331,7 +14328,7 @@ pub(crate) fn observes_a_nonzero_tmux_pane_exit_status() {
 }
 #[test]
 pub(crate) fn scans_only_git_repositories_in_workspace() {
-    let root = std::env::temp_dir().join(format!("operon-scan-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-scan-{}", Uuid::new_v4()));
     let repository = root.join("team").join("service");
     let ignored = root.join("node_modules").join("ignored-repository");
     fs::create_dir_all(&repository).unwrap();
@@ -14354,7 +14351,7 @@ pub(crate) fn scans_only_git_repositories_in_workspace() {
 }
 #[test]
 pub(crate) fn workspace_scan_stops_at_its_global_visit_limit() {
-    let root = std::env::temp_dir().join(format!("operon-workspace-scan-limit-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-workspace-scan-limit-{}", Uuid::new_v4()));
     for index in 0..6 {
         fs::create_dir_all(root.join(format!("repository-{index}")).join(".git")).unwrap();
     }
@@ -14371,7 +14368,7 @@ pub(crate) fn workspace_scan_stops_at_its_global_visit_limit() {
 pub(crate) fn file_scans_do_not_follow_directory_symlinks_outside_the_project() {
     use std::os::unix::fs::symlink;
 
-    let root = std::env::temp_dir().join(format!("operon-files-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-files-{}", Uuid::new_v4()));
     let project = root.join("project");
     let outside = root.join("outside");
     fs::create_dir_all(&project).unwrap();
@@ -14387,7 +14384,7 @@ pub(crate) fn file_scans_do_not_follow_directory_symlinks_outside_the_project() 
 }
 #[test]
 pub(crate) fn file_scan_is_sorted_and_discloses_result_truncation() {
-    let root = std::env::temp_dir().join(format!("operon-file-cap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-file-cap-{}", Uuid::new_v4()));
     fs::create_dir_all(root.join("z-dir")).unwrap();
     fs::create_dir_all(root.join("a-dir")).unwrap();
     fs::write(root.join("z-dir/z.txt"), "z").unwrap();
@@ -14401,7 +14398,7 @@ pub(crate) fn file_scan_is_sorted_and_discloses_result_truncation() {
 }
 #[test]
 pub(crate) fn file_scan_bounds_each_directory_before_collecting_and_sorting() {
-    let root = std::env::temp_dir().join(format!("operon-wide-dir-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-wide-dir-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     for index in 0..8 {
         fs::write(root.join(format!("{index}.txt")), "x").unwrap();
@@ -14425,7 +14422,7 @@ pub(crate) fn empty_file_scan_still_discloses_unreadable_directories() {
 }
 #[test]
 pub(crate) fn transcript_candidates_keep_the_newest_file_before_capping() {
-    let root = std::env::temp_dir().join(format!("operon-transcript-cap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-transcript-cap-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let old = root.join("old.jsonl");
     let newest = root.join("newest.jsonl");
@@ -14437,8 +14434,7 @@ pub(crate) fn transcript_candidates_keep_the_newest_file_before_capping() {
 }
 #[test]
 pub(crate) fn transcript_discovery_shares_one_visit_and_candidate_budget_across_roots() {
-    let root =
-        std::env::temp_dir().join(format!("operon-transcript-global-cap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-transcript-global-cap-{}", Uuid::new_v4()));
     let roots = (0..3)
         .map(|index| {
             let directory = root.join(format!("root-{index}"));
@@ -14458,7 +14454,7 @@ pub(crate) fn transcript_discovery_shares_one_visit_and_candidate_budget_across_
 }
 #[test]
 pub(crate) fn zero_match_transcript_search_obeys_shared_byte_and_line_budgets() {
-    let root = std::env::temp_dir().join(format!(
+    let root = temporary_root().join(format!(
         "operon-transcript-aggregate-budget-{}",
         Uuid::new_v4()
     ));
@@ -14500,8 +14496,7 @@ pub(crate) fn zero_match_transcript_search_obeys_shared_byte_and_line_budgets() 
 }
 #[test]
 pub(crate) fn history_partial_results_are_disclosed_even_during_automatic_discovery() {
-    let root =
-        std::env::temp_dir().join(format!("operon-history-partial-notice-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-history-partial-notice-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let mut app = OperonApp::from_state(
         root.join("store.json"),
@@ -14552,7 +14547,7 @@ pub(crate) fn history_partial_results_are_disclosed_even_during_automatic_discov
 }
 #[test]
 pub(crate) fn codex_title_index_is_counted_against_the_global_line_budget() {
-    let root = std::env::temp_dir().join(format!("operon-title-budget-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-title-budget-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("session_index.jsonl");
     let content =
@@ -14570,7 +14565,7 @@ pub(crate) fn codex_title_index_is_counted_against_the_global_line_budget() {
 }
 #[test]
 pub(crate) fn claude_discovery_keeps_the_newest_session_when_its_heap_is_bounded() {
-    let root = std::env::temp_dir().join(format!("operon-claude-heap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-claude-heap-{}", Uuid::new_v4()));
     let project = PathBuf::from("/tmp/operon-claude-heap-project");
     let directory = root.join(encode_claude_project_path(&project));
     fs::create_dir_all(&directory).unwrap();
@@ -14614,7 +14609,7 @@ pub(crate) fn claude_discovery_keeps_the_newest_session_when_its_heap_is_bounded
 pub(crate) fn packaging_lock_rejects_a_concurrent_transaction_before_building() {
     use std::os::unix::fs::MetadataExt;
 
-    let root = std::env::temp_dir().join(format!("operon-package-lock-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-package-lock-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let lock = root.join(".operon-package.lockfile");
     let ready = root.join("ready");
@@ -14675,7 +14670,7 @@ pub(crate) fn packaging_lock_rejects_a_concurrent_transaction_before_building() 
 pub(crate) fn packaging_lock_allows_exactly_one_of_two_simultaneous_packagers() {
     use std::os::unix::fs::PermissionsExt;
 
-    let root = std::env::temp_dir().join(format!("operon-package-race-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-package-race-{}", Uuid::new_v4()));
     let fake_bin = root.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
     let marker = root.join("build-marker");
@@ -14750,7 +14745,7 @@ pub(crate) fn packaging_lock_allows_exactly_one_of_two_simultaneous_packagers() 
 pub(crate) fn the_packager_runs_the_three_gates_before_it_builds() {
     use std::os::unix::fs::PermissionsExt;
 
-    let root = std::env::temp_dir().join(format!("operon-package-gates-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-package-gates-{}", Uuid::new_v4()));
     let fake_bin = root.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
     let log = root.join("cargo-calls");
@@ -14805,7 +14800,7 @@ pub(crate) fn the_packager_runs_the_three_gates_before_it_builds() {
 pub(crate) fn the_packager_leaves_the_suite_to_ci_by_default() {
     use std::os::unix::fs::PermissionsExt;
 
-    let root = std::env::temp_dir().join(format!("operon-package-default-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-package-default-{}", Uuid::new_v4()));
     let fake_bin = root.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
     let log = root.join("cargo-calls");
@@ -14878,7 +14873,7 @@ pub(crate) fn the_packager_leaves_the_suite_to_ci_by_default() {
 }
 #[test]
 pub(crate) fn bundle_replacement_leaves_the_current_app_when_staging_is_missing() {
-    let root = std::env::temp_dir().join(format!("operon-bundle-rollback-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-bundle-rollback-{}", Uuid::new_v4()));
     let bundle = root.join("Operon.app");
     let previous = root.join("Operon.previous.app");
     fs::create_dir_all(&bundle).unwrap();
@@ -14911,7 +14906,7 @@ pub(crate) fn bundle_replacement_rolls_back_normal_failures_after_each_swap() {
         ("second", "OPERON_TEST_FAIL_AFTER_SECOND_SWAP"),
     ] {
         for has_previous in [false, true] {
-            let root = std::env::temp_dir().join(format!(
+            let root = temporary_root().join(format!(
                 "operon-bundle-normal-rollback-{phase}-{has_previous}-{}",
                 Uuid::new_v4()
             ));
@@ -14962,7 +14957,7 @@ pub(crate) fn term_after_either_atomic_swap_restores_the_exact_previous_generati
             ("first", "OPERON_TEST_AFTER_FIRST_SWAP_MARKER"),
             ("second", "OPERON_TEST_AFTER_SECOND_SWAP_MARKER"),
         ] {
-            let root = std::env::temp_dir().join(format!(
+            let root = temporary_root().join(format!(
                 "operon-bundle-term-{phase}-{has_previous}-{}",
                 Uuid::new_v4()
             ));
@@ -15028,7 +15023,7 @@ pub(crate) fn term_after_either_atomic_swap_restores_the_exact_previous_generati
 #[test]
 pub(crate) fn repeated_term_cannot_interrupt_an_in_progress_bundle_rollback() {
     for has_previous in [false, true] {
-        let root = std::env::temp_dir().join(format!(
+        let root = temporary_root().join(format!(
             "operon-bundle-repeated-term-{has_previous}-{}",
             Uuid::new_v4()
         ));
@@ -15110,7 +15105,7 @@ pub(crate) fn repeated_term_cannot_interrupt_an_in_progress_bundle_rollback() {
 pub(crate) fn a_bundle_test_pause_nobody_releases_ends_and_rolls_back() {
     // A test that dies between a pause and its signal used to leave the script
     // looping for good; two such had run nine days (sdlc 099).
-    let root = std::env::temp_dir().join(format!("operon-bundle-abandoned-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-bundle-abandoned-{}", Uuid::new_v4()));
     let staged = root.join("staged.app");
     let bundle = root.join("Operon.app");
     let previous = root.join("Operon.previous.app");
@@ -15166,7 +15161,7 @@ pub(crate) fn a_bundle_test_pause_nobody_releases_ends_and_rolls_back() {
 }
 #[test]
 pub(crate) fn bundle_replacement_keeps_the_last_good_app_after_success() {
-    let root = std::env::temp_dir().join(format!("operon-bundle-swap-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-bundle-swap-{}", Uuid::new_v4()));
     let staged = root.join("staged.app");
     let bundle = root.join("Operon.app");
     let previous = root.join("Operon.previous.app");
@@ -15193,7 +15188,7 @@ pub(crate) fn bundle_replacement_keeps_the_last_good_app_after_success() {
 }
 #[test]
 pub(crate) fn hard_kill_after_atomic_bundle_swap_never_removes_the_canonical_app() {
-    let root = std::env::temp_dir().join(format!("operon-bundle-hard-kill-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-bundle-hard-kill-{}", Uuid::new_v4()));
     let staged = root.join("staged.app");
     let bundle = root.join("Operon.app");
     let previous = root.join("Operon.previous.app");
@@ -15295,7 +15290,7 @@ pub(crate) fn accepts_only_strict_operon_tmux_names() {
 }
 #[test]
 pub(crate) fn lists_main_and_linked_git_worktrees() {
-    let root = std::env::temp_dir().join(format!("operon-test-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("README.md"), "test\n").unwrap();
     for arguments in [
@@ -15340,7 +15335,7 @@ pub(crate) fn lists_main_and_linked_git_worktrees() {
 
 #[test]
 pub(crate) fn test_git_land_worktree_success_and_guardrails() {
-    let root = std::env::temp_dir().join(format!("operon-test-land-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-land-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("README.md"), "mainline\n").unwrap();
     for args in [
@@ -15353,7 +15348,7 @@ pub(crate) fn test_git_land_worktree_success_and_guardrails() {
         assert!(git_command(&root).args(args).status().unwrap().success());
     }
 
-    let linked = std::env::temp_dir().join(format!("operon-test-land-wt-{}", Uuid::new_v4()));
+    let linked = temporary_root().join(format!("operon-test-land-wt-{}", Uuid::new_v4()));
     assert!(git_command(&root)
         .args([
             "worktree",
@@ -15425,9 +15420,9 @@ struct LandFixture {
 impl LandFixture {
     fn new(main_files: &[(&str, &str)], worktree_files: &[(&str, &str)]) -> Self {
         let id = Uuid::new_v4();
-        let root = std::env::temp_dir().join(format!("operon-test-land-{id}"));
-        let linked = std::env::temp_dir().join(format!("operon-test-land-wt-{id}"));
-        let hooks = std::env::temp_dir().join(format!("operon-test-land-hooks-{id}"));
+        let root = temporary_root().join(format!("operon-test-land-{id}"));
+        let linked = temporary_root().join(format!("operon-test-land-wt-{id}"));
+        let hooks = temporary_root().join(format!("operon-test-land-hooks-{id}"));
         fs::create_dir_all(&root).unwrap();
         fs::create_dir_all(&hooks).unwrap();
         fs::write(root.join("README.md"), "mainline\n").unwrap();
@@ -15656,7 +15651,7 @@ pub(crate) fn a_landing_that_left_the_tree_changed_is_not_called_unchanged() {
 pub(crate) fn landing_and_the_projects_other_git_writes_wait_for_each_other() {
     let project = Project {
         id: Uuid::new_v4(),
-        path: std::env::temp_dir().join(format!("operon-test-land-busy-{}", Uuid::new_v4())),
+        path: temporary_root().join(format!("operon-test-land-busy-{}", Uuid::new_v4())),
         name: "busy".into(),
         added_at: 0,
     };
@@ -15704,7 +15699,7 @@ pub(crate) fn landing_and_the_projects_other_git_writes_wait_for_each_other() {
 pub(crate) fn landing_waits_for_a_session_in_the_main_checkout() {
     let project = Project {
         id: Uuid::new_v4(),
-        path: std::env::temp_dir().join(format!("operon-test-land-agent-{}", Uuid::new_v4())),
+        path: temporary_root().join(format!("operon-test-land-agent-{}", Uuid::new_v4())),
         name: "agent".into(),
         added_at: 0,
     };
@@ -15758,7 +15753,7 @@ pub(crate) fn landing_waits_for_a_session_in_the_main_checkout() {
 
 #[test]
 pub(crate) fn test_checkpoints_create_list_restore_diff() {
-    let root = std::env::temp_dir().join(format!("operon-test-cp-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-cp-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let file_path = root.join("app.txt");
     fs::write(&file_path, "version 1\n").unwrap();
@@ -15807,7 +15802,7 @@ pub(crate) fn test_checkpoints_create_list_restore_diff() {
 
 #[test]
 pub(crate) fn test_run_script_discovery_and_preview() {
-    let root = std::env::temp_dir().join(format!("operon-test-run-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-run-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     let path = run_script_path(&root);
@@ -15854,7 +15849,7 @@ pub(crate) fn test_prompt_templates_defaults_and_custom() {
         .iter()
         .any(|t| t.title.contains("レビュー") || t.title.contains("Review")));
 
-    let root = std::env::temp_dir().join(format!("operon-test-prompts-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-prompts-{}", Uuid::new_v4()));
     let prompt_dir = root.join(".operon/prompts");
     fs::create_dir_all(&prompt_dir).unwrap();
     fs::write(
@@ -15889,7 +15884,7 @@ pub(crate) fn test_github_issue_parsing() {
 
 #[test]
 pub(crate) fn test_adversarial_security_and_resilience_invariants() {
-    let root = std::env::temp_dir().join(format!("operon-test-sec-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-sec-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     fs::write(root.join("README.md"), "mainline\n").unwrap();
     for args in [
@@ -15910,7 +15905,7 @@ pub(crate) fn test_adversarial_security_and_resilience_invariants() {
     assert!(!is_safe_ref_name("bad..branch"));
     assert!(!is_safe_ref_name(""));
 
-    let linked = std::env::temp_dir().join(format!("operon-test-sec-wt-{}", Uuid::new_v4()));
+    let linked = temporary_root().join(format!("operon-test-sec-wt-{}", Uuid::new_v4()));
     assert!(git_command(&root)
         .args([
             "worktree",
@@ -16024,7 +16019,7 @@ pub(crate) fn test_adversarial_security_and_resilience_invariants() {
 /// project UUID deliberately has no entry in the catalogue.
 #[test]
 pub(crate) fn a_general_session_folder_is_an_allowed_session_path() {
-    let root = std::env::temp_dir().join(format!("operon-general-session-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-general-session-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let mut session = test_session(Uuid::new_v4(), SessionStatus::Starting);
     // A general session's project UUID deliberately has no entry in the
@@ -16169,7 +16164,7 @@ pub(crate) fn the_pre_rename_session_prefix_still_opens_but_is_never_written() {
 /// account on the machine. Nothing in the type system says otherwise, so this
 /// is the only thing that does.
 pub(crate) fn the_transcript_archive_is_readable_only_by_its_owner() {
-    let root = std::env::temp_dir().join(format!("operon-archive-mode-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-archive-mode-{}", Uuid::new_v4()));
     let source = root.join("source.jsonl");
     let archive_root = root.join("shared-sessions");
     fs::create_dir_all(&root).unwrap();
@@ -17840,7 +17835,7 @@ pub(crate) fn the_control_bands_say_whether_a_propose_breach_has_an_answer() {
         } else {
             propose - 1
         };
-        let path = std::env::temp_dir().join(format!("operon-bands-{}.json", Uuid::new_v4()));
+        let path = temporary_root().join(format!("operon-bands-{}.json", Uuid::new_v4()));
         fs::write(&path, format!("{{\"{key}\": {value}}}\n")).unwrap();
         path
     };
@@ -17864,7 +17859,7 @@ pub(crate) fn the_control_bands_say_whether_a_propose_breach_has_an_answer() {
     // because three of the four outcomes cannot be produced from the real tree
     // on demand — it would mean parking or closing a real change to see a line.
     let fixture_tree = |cases: &[(&str, &str, &str)]| -> PathBuf {
-        let tree = std::env::temp_dir().join(format!("operon-changes-{}", Uuid::new_v4()));
+        let tree = temporary_root().join(format!("operon-changes-{}", Uuid::new_v4()));
         for (directory, declaration, status) in cases {
             let change = tree.join(directory);
             fs::create_dir_all(&change).unwrap();
@@ -22287,7 +22282,7 @@ pub(crate) fn the_readiness_gate_refuses_a_spec_that_is_not_filled_in() {
     // a change that does not exist. It did, about one run in three. The
     // checker takes a path rather than a name, so the fixture has no reason to
     // live in the tree it is checking.
-    let staged = std::env::temp_dir().join(format!(
+    let staged = temporary_root().join(format!(
         "operon-readiness-{}-{}",
         std::process::id(),
         Uuid::new_v4().simple()
@@ -25123,7 +25118,7 @@ impl ReviewGateFixture {
         // Two fixtures built on two test threads in the same instant shared a
         // directory once; the counter makes the name unique within a process.
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let root = std::env::temp_dir().join(format!(
+        let root = temporary_root().join(format!(
             "operon-review-gate-{}-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -25746,7 +25741,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_through_git() {
     // "landed" of 0 means HEAD moved; 1 means the commit was refused.
     f.git(&["config", "core.hooksPath", ".githooks"]);
     let root_str = f.root.to_str().unwrap().to_owned();
-    let elsewhere = std::env::temp_dir();
+    let elsewhere = temporary_root().to_path_buf();
 
     // `-a` stages the working tree first, so a record about the index alone is
     // stale — and `--no-verify` does not skip the hook that says so.
@@ -27410,6 +27405,20 @@ pub(crate) fn a_new_change_cannot_take_a_number_already_in_use() {
     );
     expect("no number", "chore/install-159-160", 0, &[]);
     expect("a free number", "feature/010-new", 0, &[]);
+    // Change 201: a branch with no number in its name, holding a change
+    // directory main has not seen yet.
+    git(&["switch", "-q", "-c", "chore/no-number"]);
+    fs::create_dir_all(repo.join("docs/sdlc/changes/012-epsilon")).unwrap();
+    fs::write(repo.join("docs/sdlc/changes/012-epsilon/state.yaml"), "x\n").unwrap();
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "epsilon"]);
+    git(&["switch", "-q", "main"]);
+    expect(
+        "a change directory on an unnumbered branch holds it",
+        "fix/012-other",
+        1,
+        &["変更番号 012 は使用中です", "012-epsilon (chore/no-number)"],
+    );
     git(&[
         "remote",
         "set-url",
@@ -28335,7 +28344,7 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
 /// the session died. A capture without a cursor is the pane saying it does
 /// not know where the caret is: the stored one has to go.
 pub(crate) fn a_capture_without_a_cursor_clears_the_stored_one() {
-    let root = std::env::temp_dir().join(format!("operon-caret-clear-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-caret-clear-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let data_file = root.join("store.json");
     let session_id = Uuid::new_v4();
@@ -28533,6 +28542,37 @@ fn temporary_root() -> &'static Path {
         .filter(|path| path.is_dir())
         .unwrap_or_else(std::env::temp_dir)
     })
+}
+
+/// Every fixture takes its root from `temporary_root`. Change 168 met a
+/// `$TMPDIR` inside this repository with live tests, 198 with two fixtures,
+/// and 201 moved the 212 other `temp_dir()` calls here; node fixtures get the
+/// same root through `node_in`.
+#[test]
+pub(crate) fn fixtures_take_their_root_from_one_place() {
+    let source = include_str!("tests.rs");
+    // From `env::` on: the full path, and a call after `use std::env`.
+    let direct = concat!("env::", "temp_dir");
+    let fallback = concat!(".unwrap_or_else(std::env::", "temp_dir)");
+    assert_eq!(
+        (
+            source.matches(direct).count(),
+            source.matches(fallback).count()
+        ),
+        (1, 1),
+        "temporary_root の外で temp_dir を直接使っています"
+    );
+    let node = node_in(Path::new("/"));
+    assert!(
+        node.get_envs()
+            .any(|(key, value)| key == "TMPDIR" && value == Some(temporary_root().as_os_str())),
+        "node_in が node の一時ディレクトリを temporary_root にしていません"
+    );
+    assert!(
+        node.get_envs()
+            .any(|(key, value)| key == "HARNESS_EXEC_TIMEOUT_FLOOR_MS" && value.is_some()),
+        "node_in が hook の git の待ち時間に下限を付けていません — 負荷で時間切れが「何もない」と読まれます"
+    );
 }
 
 /// A scratch directory for one test, removed by the test that made it.
@@ -30802,7 +30842,7 @@ pub(crate) fn the_config_check_and_the_writer_read_one_file_the_same_way() {
     ];
 
     for (label, config, has_features_hooks, has_toplevel_scalar, writer_sets_flag) in cases {
-        let path = std::env::temp_dir().join(format!("operon-shape-{}.toml", Uuid::new_v4()));
+        let path = temporary_root().join(format!("operon-shape-{}.toml", Uuid::new_v4()));
         fs::write(&path, &config).unwrap();
         // A raw `.output()` with no timeout, which `.claude/rules/rust.md`
         // forbids in production code and which `unwrapped_spawns` will never
@@ -30922,15 +30962,15 @@ pub(crate) fn the_config_check_and_the_writer_read_one_file_the_same_way() {
     //                        failing — which is why the PATH below is built
     //                        rather than inherited. Change that line and this
     //                        test grows a child process.
-    let missing = std::env::temp_dir().join(format!("operon-absent-{}.toml", Uuid::new_v4()));
-    let present = std::env::temp_dir().join(format!("operon-shape-{}.toml", Uuid::new_v4()));
+    let missing = temporary_root().join(format!("operon-absent-{}.toml", Uuid::new_v4()));
+    let present = temporary_root().join(format!("operon-shape-{}.toml", Uuid::new_v4()));
     fs::write(&present, "[features]\nhooks = true\n").unwrap();
     // A PATH with exactly what the script needs to reach its `command -v
     // codex` check and nothing else, so "codex is not on PATH" is true here on
     // any machine rather than only on one where Codex happens to be installed
     // somewhere `/usr/bin:/bin` does not reach. `dirname` is the only external
     // the script runs before that check.
-    let bare = std::env::temp_dir().join(format!("operon-bare-path-{}", Uuid::new_v4()));
+    let bare = temporary_root().join(format!("operon-bare-path-{}", Uuid::new_v4()));
     fs::create_dir_all(&bare).unwrap();
     std::os::unix::fs::symlink("/usr/bin/dirname", bare.join("dirname")).unwrap();
     for (label, arguments, path) in [
@@ -30974,7 +31014,7 @@ pub(crate) fn the_config_check_and_the_writer_read_one_file_the_same_way() {
     // bash answers 2 for a script it cannot parse, and says nothing on stdout.
     // If that ever stopped being true the `UNKNOWN:` line would be carrying no
     // information and this whole fixture would be theatre.
-    let broken = std::env::temp_dir().join(format!("operon-broken-{}.sh", Uuid::new_v4()));
+    let broken = temporary_root().join(format!("operon-broken-{}.sh", Uuid::new_v4()));
     fs::write(&broken, "if then fi\n").unwrap();
     let parse_failure = Command::new("/bin/bash")
         .arg(&broken)
@@ -31182,7 +31222,7 @@ pub(crate) fn a_config_toml_would_refuse_is_still_not_a_config_to_delete_from() 
             false,
         ),
     ] {
-        let path = std::env::temp_dir().join(format!("operon-refused-{}.toml", Uuid::new_v4()));
+        let path = temporary_root().join(format!("operon-refused-{}.toml", Uuid::new_v4()));
         fs::write(&path, config).unwrap();
         let output = std::process::Command::new("bash")
             .arg(&script)
@@ -37026,7 +37066,7 @@ pub(crate) fn a_keymap_that_cannot_be_read_keeps_the_defaults_and_says_why() {
 /// The one destructive thing this change can do.
 #[test]
 pub(crate) fn writing_the_default_keymap_never_overwrites_one_that_is_there() {
-    let root = std::env::temp_dir().join(format!("operon-keymap-{}", Uuid::new_v4().simple()));
+    let root = temporary_root().join(format!("operon-keymap-{}", Uuid::new_v4().simple()));
     fs::create_dir_all(&root).unwrap();
     let path = root.join("keybindings.json");
 
@@ -38064,7 +38104,7 @@ fn editor_view_labels(app: &mut OperonApp, project: &Project) -> Vec<String> {
 /// same directory and not the same `PathBuf`, so two tabs, two background keys,
 /// and a buffer that could reach the wrong copy.
 ///
-/// The existing tests do catch it, because `std::env::temp_dir()` returns the
+/// The existing tests do catch it, because `temporary_root()` returns the
 /// uncanonical spelling on this platform and the fixtures use it — but they
 /// catch it by accident and say nothing about why. This says it.
 #[test]
@@ -39129,7 +39169,7 @@ pub(crate) fn the_project_list_offers_inline_deletion_and_confirmation() {
 
 #[test]
 fn resume_readiness_validates_healthy_transcripts() {
-    let root = std::env::temp_dir().join(format!("operon-resume-valid-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resume-valid-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("session.jsonl");
     fs::write(
@@ -39145,7 +39185,7 @@ fn resume_readiness_validates_healthy_transcripts() {
 
 #[test]
 fn resume_refuses_empty_transcript_and_falls_back_to_clean_start() {
-    let root = std::env::temp_dir().join(format!("operon-resume-empty-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resume-empty-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let missing = root.join("missing.jsonl");
     assert_eq!(
@@ -39171,7 +39211,7 @@ fn resume_refuses_empty_transcript_and_falls_back_to_clean_start() {
 
 #[test]
 fn resume_sanitizes_truncated_trailing_transcript_line() {
-    let root = std::env::temp_dir().join(format!("operon-resume-sanitize-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-resume-sanitize-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let transcript = root.join("truncated.jsonl");
     let content = "{\"type\":\"user\",\"message\":\"hello\"}\n{\"type\":\"agent\",\"message\":\"partial content";
@@ -39292,7 +39332,7 @@ pub(crate) fn prune_target_script_runs_dry_run_cleanly() {
 /// the keyboard and the IME through `ui_terminal_panel`. The tmux name is
 /// unique so that a key the pane forwards cannot reach a real session.
 fn ime_pane_fixture(label: &str) -> (PathBuf, OperonApp, Session) {
-    let root = std::env::temp_dir().join(format!("operon-{label}-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-{label}-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
     session.tmux_name = format!("operon-test-{}", Uuid::new_v4());
@@ -39534,7 +39574,7 @@ pub(crate) fn a_focused_terminal_pane_claims_the_ime_without_redrawing_every_fra
 /// first and then stopped".
 #[test]
 pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
-    let root = std::env::temp_dir().join(format!("operon-pane-click-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-pane-click-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let mut store = Store::default();
@@ -39600,7 +39640,15 @@ fn node_in(root: &Path) -> Command {
     let mut command = Command::new("node");
     forget_inherited_repository(&mut command)
         .current_dir(root)
-        .env("CLAUDE_PROJECT_DIR", root);
+        .env("CLAUDE_PROJECT_DIR", root)
+        // The patience floor .cli/lib/utils.mjs keeps for tests: a hook's git
+        // budget is a production choice, and under load it timed out and read
+        // as "nothing there" (change 201). Below NODE_HOOK_TEST_TIMEOUT, so a
+        // hang still fails.
+        .env("HARNESS_EXEC_TIMEOUT_FLOOR_MS", "60000")
+        // os.tmpdir() for the scripts' own fixtures, out of a session's
+        // $TMPDIR inside this repository (see temporary_root).
+        .env("TMPDIR", temporary_root());
     command
 }
 
@@ -42729,7 +42777,7 @@ pub(crate) fn test_session_file_tree_adversarial_rapid_switching_stress() {
 /// Change 076: Test image file loading for PNG, JPEG, and size limit enforcement.
 #[test]
 pub(crate) fn test_read_file_for_editing_image_outcome() {
-    let root = std::env::temp_dir().join(format!("operon-test-img-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-test-img-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
 
     // 1. Valid 2x3 PNG image
@@ -43908,7 +43956,7 @@ pub(crate) fn test_in_editor_image_preview_document_state() {
 #[test]
 pub(crate) fn test_titlebar_double_click_toggles_maximize() {
     let mut app =
-        test_app(std::env::temp_dir().join(format!("operon-test-titlebar-max-{}", Uuid::new_v4())));
+        test_app(temporary_root().join(format!("operon-test-titlebar-max-{}", Uuid::new_v4())));
     let ctx = egui::Context::default();
 
     let click_pos = egui::pos2(500.0, 26.0); // empty titlebar space
@@ -44047,9 +44095,8 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
 
 #[test]
 pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
-    let mut app = test_app(
-        std::env::temp_dir().join(format!("operon-test-titlebar-drag-{}", Uuid::new_v4())),
-    );
+    let mut app =
+        test_app(temporary_root().join(format!("operon-test-titlebar-drag-{}", Uuid::new_v4())));
     let ctx = egui::Context::default();
 
     let drag_pos = egui::pos2(500.0, 26.0); // empty titlebar space
@@ -44108,9 +44155,8 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
 
 #[test]
 pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize() {
-    let mut app = test_app(
-        std::env::temp_dir().join(format!("operon-test-titlebar-ctrls-{}", Uuid::new_v4())),
-    );
+    let mut app =
+        test_app(temporary_root().join(format!("operon-test-titlebar-ctrls-{}", Uuid::new_v4())));
     let ctx = egui::Context::default();
 
     // 1. Traffic light inset (x = 30.0 < 78.0)
@@ -44361,7 +44407,7 @@ fn drawn_text_rects(output: &egui::FullOutput, matches: impl Fn(&str) -> bool) -
 #[test]
 pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
     let mut app =
-        test_app(std::env::temp_dir().join(format!("operon-test-titlebar-adv-{}", Uuid::new_v4())));
+        test_app(temporary_root().join(format!("operon-test-titlebar-adv-{}", Uuid::new_v4())));
     let ctx = egui::Context::default();
 
     let render_frame = |app: &mut OperonApp, time: f64, events: Vec<egui::Event>| {
@@ -44768,9 +44814,8 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
 
 #[test]
 pub(crate) fn test_titlebar_none_position_failsafe() {
-    let mut app = test_app(
-        std::env::temp_dir().join(format!("operon-test-titlebar-none-{}", Uuid::new_v4())),
-    );
+    let mut app =
+        test_app(temporary_root().join(format!("operon-test-titlebar-none-{}", Uuid::new_v4())));
     let ctx = egui::Context::default();
 
     // Frame with no pointer interaction / position
@@ -44792,9 +44837,8 @@ pub(crate) fn test_titlebar_none_position_failsafe() {
 
 #[test]
 pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
-    let mut app = test_app(
-        std::env::temp_dir().join(format!("operon-test-titlebar-matrix-{}", Uuid::new_v4())),
-    );
+    let mut app =
+        test_app(temporary_root().join(format!("operon-test-titlebar-matrix-{}", Uuid::new_v4())));
     let ctx = egui::Context::default();
 
     let render_frame = |app: &mut OperonApp, time: f64, width: f32, events: Vec<egui::Event>| {
@@ -45133,7 +45177,7 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
 /// Change 077. Session sidebar omits static instruction label and renders clean card.
 #[test]
 pub(crate) fn ui_session_tabs_omits_static_instruction_label_and_streamlines_card() {
-    let root = std::env::temp_dir().join(format!("operon-session-tabs-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-session-tabs-{}", Uuid::new_v4()));
     let project_path = root.join("project");
     fs::create_dir_all(&project_path).unwrap();
     let project_id = Uuid::new_v4();
@@ -45164,7 +45208,7 @@ pub(crate) fn ui_session_tabs_omits_static_instruction_label_and_streamlines_car
 /// Change 077. Session ports render as compact popover indicator without sprawling raw text.
 #[test]
 pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
-    let root = std::env::temp_dir().join(format!("operon-session-ports-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-session-ports-{}", Uuid::new_v4()));
     let project_path = root.join("project");
     fs::create_dir_all(&project_path).unwrap();
     let project_id = Uuid::new_v4();
@@ -45462,7 +45506,7 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
     let defaults = Keymap::defaults();
     assert_eq!(defaults.chord_for("session.new"), parse_chord("Mod+N"));
 
-    let root = std::env::temp_dir().join(format!("operon-new-session-row-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-new-session-row-{}", Uuid::new_v4()));
     let mut app = test_app(root.clone());
     let entries = app.palette_entries();
     assert_eq!(entries[0].kind, PaletteKind::Action("New session"));
@@ -45536,7 +45580,7 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
 /// the 実行中 tile's number is one no other tile draws.
 #[test]
 pub(crate) fn a_group_tile_filters_the_session_list_to_that_group() {
-    let root = std::env::temp_dir().join(format!("operon-home-tiles-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-home-tiles-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let mut store = Store::default();
     for status in [
@@ -45614,7 +45658,7 @@ fn draw_home(app: &mut OperonApp, context: &egui::Context) -> egui::FullOutput {
 }
 
 fn home_app(label: &str, store: Store) -> (OperonApp, PathBuf) {
-    let root = std::env::temp_dir().join(format!("operon-{label}-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-{label}-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
     let mut app =
         OperonApp::from_state(root.join("store.json"), store, ToolStatus::default(), None);
@@ -45877,7 +45921,7 @@ pub(crate) fn new_session_opens_the_sheet_over_the_current_page() {
     fs::remove_dir_all(&root).ok();
 
     // No project: nothing to open a sheet for, and the old answer stands.
-    let root = std::env::temp_dir().join(format!("operon-sheet-none-{}", Uuid::new_v4()));
+    let root = temporary_root().join(format!("operon-sheet-none-{}", Uuid::new_v4()));
     let mut app = test_app(root.clone());
     app.page = Page::Home;
     app.open_new_session();
@@ -48309,6 +48353,8 @@ pub(crate) fn the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate() {
         // Change 198: the record tests, when the commit holds a record, in what
         // the limit has left — clippy and they together end before the hook.
         "grep -E '^docs/|^\\.claude/|\\.md$'",
+        // Change 201: and when it deletes or moves a path a document may name.
+        "if [ -n \"$({ git diff --cached --diff-filter=DR --name-only; git diff --diff-filter=D --name-only; } 2>/dev/null)\" ] ||",
         "left=$(( limit - SECONDS ))",
         "$(bash scripts/run-bounded.sh \"$left\" cargo test --locked -q -- --exact \"${record_tests[@]}\"",
         // A name that moved matches nothing, and cargo exits 0 on that.
@@ -48716,6 +48762,34 @@ pub(crate) fn a_session_that_ends_gives_back_only_its_own_worktree_leases() {
         ends.split_once(']')
             .is_some_and(|(entry, _)| entry.contains(".cli/hooks/worktree-owner-tracker.mjs")),
         "SessionEnd で worktree-owner-tracker.mjs が走りません"
+    );
+    // The release's git budget: a timeout reads as no worktrees and keeps every
+    // lease for the TTL, so it takes most of the hook's time but ends inside it
+    // (change 201: 3 s of 10 failed under load).
+    let hook_seconds = serde_json::from_str::<serde_json::Value>(&settings).unwrap()["hooks"]
+        ["SessionEnd"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| entry["hooks"].as_array().into_iter().flatten())
+        .find(|hook| {
+            hook["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with("worktree-owner-tracker.mjs\""))
+        })
+        .and_then(|hook| hook["timeout"].as_u64())
+        .expect("SessionEnd の worktree-owner-tracker.mjs に timeout がありません");
+    let tracker_source =
+        fs::read_to_string(root.join(".cli/hooks/worktree-owner-tracker.mjs")).unwrap();
+    let budget_ms = tracker_source
+        .split_once("function releaseLeases")
+        .and_then(|(_, body)| body.split_once("{ timeout: "))
+        .and_then(|(_, rest)| rest.split_once(' '))
+        .and_then(|(number, _)| number.parse::<u64>().ok())
+        .expect("releaseLeases の git に timeout がありません");
+    assert!(
+        (5000..(hook_seconds * 1000).saturating_sub(1000)).contains(&budget_ms),
+        "SessionEnd の git の待ち時間 {budget_ms}ms が、hook の {hook_seconds}s の大半を使いつつ 1 秒残す範囲にありません"
     );
 
     let script = format!(
@@ -51081,16 +51155,44 @@ pub(crate) fn test_set_session_output_skips_redundant_relayout_and_generation_bu
 /// artificial latency floor.
 #[test]
 pub(crate) fn test_fast_subprocess_completes_without_25ms_polling_floor() {
-    let start = Instant::now();
-    for _ in 0..4 {
+    // Against the same command waited for by a blocking `status()`, taken in
+    // turn with it, not against a fixed time: a fixed 85 ms for four failed
+    // under load in CI and here, and a fixed 20 ms for the fastest of eight
+    // failed beside four other tests (change 201). The backoff wakes at 1, 3,
+    // 7, 15 ms…, so a child done after t is seen before 2t + 1 ms; a 25 ms
+    // first sleep is never under 25 ms, since a sleep never ends early.
+    // Under load the blocking wait itself passes 10 ms and that bound passes a
+    // floor too, so the first sleep is read from the source as well: the one
+    // check no load can move.
+    let first_sleep_ms = include_str!("exec.rs")
+        .split_once("let mut poll_sleep = Duration::from_millis(")
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .and_then(|(number, _)| number.parse::<u64>().ok())
+        .expect("src/exec.rs の poll の最初の sleep が読めません");
+    // And it grows by doubling: a flat sleep after a short first one is the
+    // same floor one poll later.
+    assert!(
+        include_str!("exec.rs").contains("poll_sleep = (poll_sleep * 2).min("),
+        "src/exec.rs の poll の sleep が倍々に伸びていません"
+    );
+    assert!(
+        first_sleep_ms <= 2,
+        "src/exec.rs の poll が最初に {first_sleep_ms}ms 眠ります — 速いコマンドがその分待たされます"
+    );
+    let (mut helper, mut blocking) = (Duration::MAX, Duration::MAX);
+    for _ in 0..8 {
+        let start = Instant::now();
         let mut cmd = Command::new("/usr/bin/true");
         let out = run_command_with_timeout(&mut cmd, Duration::from_secs(5)).unwrap();
         assert!(out.status.success());
+        helper = helper.min(start.elapsed());
+        let start = Instant::now();
+        assert!(Command::new("/usr/bin/true").status().unwrap().success());
+        blocking = blocking.min(start.elapsed());
     }
-    let elapsed = start.elapsed();
     assert!(
-        elapsed < Duration::from_millis(85),
-        "4 sequential fast commands took {elapsed:?}, expected < 85ms without 25ms polling floor"
+        helper < blocking * 2 + Duration::from_millis(5),
+        "速いコマンド 8 回の最速が {helper:?}、直接待つと {blocking:?} — poll に下限があります"
     );
 }
 
@@ -51148,9 +51250,8 @@ pub(crate) fn test_ensure_initial_prompt_turn_does_not_create_git_checkpoint_on_
 /// Until change 153 a focused pane redrew every frame, which hid it.
 #[test]
 pub(crate) fn a_finished_background_job_wakes_the_frame_that_reads_it() {
-    let mut app = test_app(
-        std::env::temp_dir().join(format!("operon-background-wake-{}.json", Uuid::new_v4())),
-    );
+    let mut app =
+        test_app(temporary_root().join(format!("operon-background-wake-{}.json", Uuid::new_v4())));
     let context = egui::Context::default();
     let (woke, wakes) = mpsc::channel();
     context.set_request_repaint_callback(move |_| {

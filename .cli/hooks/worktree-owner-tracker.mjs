@@ -187,7 +187,9 @@ function releaseLeases(data) {
   try {
     const sessionId = data.session_id;
     if (!sessionId || typeof sessionId !== 'string') return {};
-    const wtOut = safeGit('worktree list --porcelain', resolveProjectDir(data), { timeout: 3000 });
+    // 8 s of the hook's 10 in .claude/settings.json. A git past the budget reads as no worktrees, so
+    // every lease stays held for the TTL; at 3 s a loaded machine did that (change 201).
+    const wtOut = safeGit('worktree list --porcelain', resolveProjectDir(data), { timeout: 8000 });
     for (const wt of parseWorktreeList(wtOut || '')) releaseOwnerLease(wt.path, null, sessionId);
   } catch {
     // silent — a hook at session end has nobody to report to

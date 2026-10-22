@@ -32,12 +32,16 @@ if git remote get-url origin >/dev/null 2>&1; then
     || echo "⚠ origin を取得できませんでした。手元の情報だけで番号を確かめます。"
 fi
 
-# Every `NNN-slug` in use, one per line, a tab, and where it was seen.
+# Every `NNN-slug` in use, one per line, a tab, and where it was seen: the
+# change directories at the tip of every local and origin branch, and the
+# branch names. Main alone missed a branch with no number in its name holding a
+# directory (change 201: chore/update-dependencies-latest held 199 while 199
+# was opened again).
 in_use() {
   local ref
-  for ref in main origin/main; do
+  for ref in $(git for-each-ref --format='%(refname:short)' refs/heads refs/remotes/origin 2>/dev/null); do
     git ls-tree --name-only "$ref:docs/sdlc/changes" 2>/dev/null |
-      grep -E '^[0-9]{3}-' | sed "s|^\\(.*\\)\$|\\1	docs/sdlc/changes/\\1 ($ref)|"
+      grep -E '^[0-9]{3}-' | awk -v ref="$ref" '{ print $0 "\tdocs/sdlc/changes/" $0 " (" ref ")" }'
   done
   git for-each-ref --format='%(refname:lstrip=2)' refs/heads refs/remotes 2>/dev/null |
     sed 's|^origin/||' | grep -E '^[a-z]+/[0-9]{3}-' |
