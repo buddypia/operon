@@ -41,7 +41,7 @@
 state:
   route: "modify"
   stage: "build"
-  status: "blocked"
+  status: "done"
   attempts: "0 3"
   questions: "3 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Commit blocked by foreign dirt and missing craft verdict; see report"
+resume: "Closed by change 202 after reading it against the code: landed; change 136 extended the focus ring to every button."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -62,9 +62,9 @@ resume: "Commit blocked by foreign dirt and missing craft verdict; see report"
 #   kind     machine | human
 #   verdict  pending | passed | waived
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh — pending because this change has no diff yet, not because a gate ran red. Running the gates on whatever tree happens to be checked out would vouch for code 041 has not written, which is the defect change 057 exists for. It passes when the recolour lands and the gates are green on that diff"
-  bands: "machine pending bash scripts/check-bands.sh — same: the reading to judge is the one after this change's diff, and there is no diff yet. For the record, the metric this change could move is always_loaded_bytes and it sat at warn (11648 against 11000) on 2026-09-19, unchanged by 041"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed main at 3d5d07e, which holds this change, passed CI run 39719429456: fmt, clippy, the suite, the bands and the release bundle"
+  bands: "machine passed main at 3d5d07e, which holds this change, passed CI run 39719429456: fmt, clippy, the suite, the bands and the release bundle"
+  guards-verified-by-mutation: "human waived not observed when the change landed; change 202 read it against the code instead, and triage.md there lists what it found"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
