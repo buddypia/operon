@@ -1340,3 +1340,20 @@ the record tests whenever `src/` or a document changes;
 `the_commit_gate_leaves_the_suite_to_ci_and_the_merge_gate` checks every name it
 runs exists (change 208; watched failing with the `src/` trigger removed and
 with a row put back at the top of a table).
+
+## 097 — A label written in Japanese, past every table test
+
+The session view drew 「✓ 完了」 and 「● 実行中」 as literals, a truncated
+checkpoint diff ended in a Japanese note, and a manual checkpoint was named
+「手動作成」 in every language. The table tests read only what goes through
+`tr` and `tf!`, so a literal that never went through them was invisible to all
+of them; the rule lived in CLAUDE.md as prose. **The rule:** every Japanese
+literal in the source is a message id with rows, written where it is
+translated, or data that is never shown, named with its reason.
+
+**Guard.** `every_japanese_literal_is_a_message_or_named_data` reads every
+string literal in `src/` outside the tests and the tables, and fails on one
+with no row, one with a row written where nothing translates it, and an
+exemption nothing uses any more (change 212; watched failing on the four
+literals above, and on each of them put back raw by `mutations.py`).
+

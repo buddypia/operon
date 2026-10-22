@@ -57941,3 +57941,242 @@ pub(crate) fn a_running_run_script_is_not_started_twice() {
     );
     fs::remove_dir_all(&root).ok();
 }
+
+/// The string literals in Rust source, with their byte offsets and their values
+/// as Rust reads them. Comments, char literals and lifetimes are stepped over,
+/// so a `'"'` does not open a string.
+fn rust_string_literals(text: &str) -> Vec<(usize, String)> {
+    fn unescape(body: &str) -> String {
+        let mut value = String::new();
+        let mut chars = body.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                value.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => value.push('\n'),
+                Some('t') => value.push('\t'),
+                Some('r') => value.push('\r'),
+                Some('0') => value.push('\0'),
+                Some('u') => {
+                    let code: String = chars
+                        .by_ref()
+                        .skip_while(|c| *c == '{')
+                        .take_while(|c| *c != '}')
+                        .collect();
+                    if let Some(c) = u32::from_str_radix(&code, 16).ok().and_then(char::from_u32) {
+                        value.push(c);
+                    }
+                }
+                Some('\n') => {
+                    while chars.peek().is_some_and(|c| c.is_whitespace()) {
+                        chars.next();
+                    }
+                }
+                Some(other) => value.push(other),
+                None => {}
+            }
+        }
+        value
+    }
+
+    let bytes = text.as_bytes();
+    let ident = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    let mut literals = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        let rest = &text[at..];
+        if rest.starts_with("//") {
+            at += rest.find('\n').unwrap_or(rest.len());
+        } else if rest.starts_with("/*") {
+            at += rest.find("*/").map_or(rest.len(), |end| end + 2);
+        } else if bytes[at] == b'\'' {
+            // `'x'` and `'\…'` are char literals; anything else is a lifetime.
+            let inner = &rest[1..];
+            at += if inner.starts_with('\\') {
+                inner
+                    .get(2..)
+                    .and_then(|after| after.find('\''))
+                    .map_or(1, |end| end + 4)
+            } else {
+                let mut chars = inner.chars();
+                match (chars.next(), chars.next()) {
+                    (Some(c), Some('\'')) => 2 + c.len_utf8(),
+                    _ => 1,
+                }
+            };
+        } else if bytes[at] == b'r'
+            // `r"…"`, and `br"…"` / `cr"…"`: a raw string's prefix, not the
+            // end of an identifier.
+            && (at == 0
+                || !ident(bytes[at - 1])
+                || (matches!(bytes[at - 1], b'b' | b'c') && (at == 1 || !ident(bytes[at - 2]))))
+            && rest[1..].trim_start_matches('#').starts_with('"')
+        {
+            let hashes = rest[1..].len() - rest[1..].trim_start_matches('#').len();
+            let open = 1 + hashes + 1;
+            let close = format!("\"{}", "#".repeat(hashes));
+            let end = rest[open..]
+                .find(&close)
+                .map_or(rest.len(), |end| open + end);
+            literals.push((at, rest[open..end].to_owned()));
+            at += end + close.len();
+        } else if bytes[at] == b'"' {
+            let mut end = 1;
+            let mut escaped = false;
+            for (index, c) in rest[1..].char_indices() {
+                match c {
+                    '\\' if !escaped => escaped = true,
+                    '"' if !escaped => {
+                        end = index + 1;
+                        break;
+                    }
+                    _ => escaped = false,
+                }
+            }
+            literals.push((at, unescape(&rest[1..end])));
+            at += end + 1;
+        } else {
+            at += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    literals
+}
+
+/// Change 212: Japanese written straight into a label reached an English or
+/// Korean screen as it was — 「✓ 完了」, 「● 実行中」, a truncated diff's note —
+/// because nothing asked whether a literal had a row. Every Japanese literal
+/// in the source is now a message id with rows in the tables, written where it
+/// is translated: inside `tr(`/`tf!(`, or as a `label:`, a `detail:`, a match
+/// arm or a `const` that is passed to `tr` where it is shown. What is neither
+/// is data never shown as UI text, named below with the reason it stays.
+#[test]
+pub(crate) fn every_japanese_literal_is_a_message_or_named_data() {
+    // (file, the literal or the const it sits in, why it is not a message)
+    const NOT_MESSAGES: &[(&str, &str, &str)] = &[
+        (
+            "src/agents.rs",
+            "会話全履歴を復元（",
+            "a session name saved by an older version, read to recover its origin",
+        ),
+        (
+            "src/agents.rs",
+            " で会話全履歴を復元（",
+            "the same saved name",
+        ),
+        ("src/agents.rs", " から）", "the same saved name"),
+        (
+            "src/agents.rs",
+            "復旧したターミナルセッション",
+            "a session name saved by an older version",
+        ),
+        (
+            "src/knowledge.rs",
+            "const KEEP_EXEMPLARS",
+            "embedding exemplars, fixed by the golden fixture",
+        ),
+        (
+            "src/knowledge.rs",
+            "const DROP_EXEMPLARS",
+            "embedding exemplars, fixed by the golden fixture",
+        ),
+        (
+            "src/knowledge.rs",
+            "エラー",
+            "a word the ranking looks for in a turn",
+        ),
+        (
+            "src/knowledge.rs",
+            "ため",
+            "a word the ranking looks for in a turn",
+        ),
+        (
+            "src/knowledge.rs",
+            "失敗",
+            "a word the ranking looks for in a turn",
+        ),
+        (
+            "src/knowledge.rs",
+            "原因",
+            "a word the ranking looks for in a turn",
+        ),
+    ];
+    let is_japanese = |c: char| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}' | '\u{ff01}'..='\u{ff5e}');
+    let messages: std::collections::HashSet<&str> = EN_TABLE.iter().map(|(id, _)| *id).collect();
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut used = vec![false; NOT_MESSAGES.len()];
+    let mut offenders = Vec::new();
+    for (path, text) in source_files() {
+        let file = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        if file == "src/tests.rs" || file == "src/i18n_tables.rs" {
+            continue;
+        }
+        let regions: Vec<(usize, std::ops::Range<usize>)> = NOT_MESSAGES
+            .iter()
+            .enumerate()
+            .filter(|(_, (in_file, name, _))| *in_file == file && name.starts_with("const "))
+            .filter_map(|(index, (_, name, _))| {
+                let start = text.find(name)?;
+                let end = start + text[start..].find("];")?;
+                Some((index, start..end))
+            })
+            .collect();
+        for (offset, value) in rust_string_literals(&text) {
+            if !value.chars().any(is_japanese) {
+                continue;
+            }
+            let before = text[..offset].trim_end();
+            let line = &text[text[..offset].rfind('\n').map_or(0, |at| at + 1)..offset];
+            let where_translated = ["tr(", "tf!(", "label:", "detail:", "=>"]
+                .iter()
+                .any(|call| {
+                    before.strip_suffix(call).is_some_and(|head| {
+                        !head.ends_with(|c: char| c.is_alphanumeric() || c == '_')
+                    })
+                })
+                || (before.ends_with('=')
+                    && ["const ", "pub(crate) const "]
+                        .iter()
+                        .any(|item| line.trim_start().starts_with(item)));
+            if where_translated && messages.contains(value.as_str()) {
+                continue;
+            }
+            let named = NOT_MESSAGES
+                .iter()
+                .position(|(in_file, literal, _)| *in_file == file && *literal == value)
+                .or_else(|| {
+                    regions
+                        .iter()
+                        .find(|(_, range)| range.contains(&offset))
+                        .map(|(index, _)| *index)
+                });
+            match named {
+                Some(index) => used[index] = true,
+                None => {
+                    let line = text[..offset].matches('\n').count() + 1;
+                    offenders.push(format!("{file}:{line}: {value:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "翻訳表に行がないか、tr を通さずに書かれた日本語の文字列があります。tr か tf! を通して行を足すか、画面に出ないデータなら理由をつけてここに書いてください:\n{}",
+        offenders.join("\n")
+    );
+    let stale: Vec<_> = NOT_MESSAGES
+        .iter()
+        .zip(&used)
+        .filter(|(_, used)| !**used)
+        .map(|((file, literal, _), _)| format!("{file}: {literal}"))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "もう使われていない除外があります: {stale:?}"
+    );
+}
