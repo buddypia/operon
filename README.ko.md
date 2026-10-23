@@ -358,6 +358,22 @@ bash scripts/package-macos.sh
 인증서와 notarization이 필요하며, 그 전에는 Gatekeeper의 명시적 승인이
 요구될 수 있습니다.
 
+### 배틀테스트용(canary)과 안정판(stable) 전환
+
+일상적으로 쓰는 안정판을 `/Applications/Operon Stable.app`에 고정해 두고 새 변경을
+`dist/Operon.app`에서 반복 검증하려면 `scripts/operon-channel.sh`를 사용하세요.
+
+```sh
+bash scripts/operon-channel.sh status          # HEAD, 실행 중인 프로세스, 채널별 커밋 표시
+bash scripts/operon-channel.sh canary --build  # dist/Operon.app을 빌드하고 canary로 전환
+bash scripts/operon-channel.sh promote         # 검증된 canary를 /Applications/Operon Stable.app으로 원자적 승격
+bash scripts/operon-channel.sh stable          # canary를 종료하고 /Applications/Operon Stable.app으로 복귀
+bash scripts/operon-channel.sh rollback        # 이전 stable 번들로 롤백
+```
+
+에이전트 세션은 `tmux`에서 계속 실행되므로 `canary`와 `stable` 사이를 전환해도
+실행 중인 세션이 끊기지 않고 그대로 다시 연결됩니다.
+
 ## 개인정보
 
 Operon 자체는 텔레메트리, 계정, 클라우드 서비스를 전혀 사용하지 않습니다.

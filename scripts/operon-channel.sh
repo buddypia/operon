@@ -1,0 +1,481 @@
+#!/usr/bin/env bash
+# Switch between Operon's battle-test (canary) and stable release channels.
+#
+# Channels:
+#   canary           dist/Operon.app (built from the current checkout for live verification)
+#   stable           /Applications/Operon Stable.app (promoted from a verified canary bundle)
+#   stable-previous  dist/Operon.stable-previous.app (retained rollback copy of stable)
+#   installed        /Applications/Operon.app (default macOS install location)
+#
+# Subcommands:
+#   status                           Show repo HEAD, running process, and each channel's stamp
+#   canary [--build|-b] [--full] [--no-open]
+#                                    Build (if requested or missing) and launch the canary bundle
+#   promote [--open]                 Atomically promote dist/Operon.app to /Applications/Operon Stable.app
+#   stable [--no-open]               Quit any running Operon and launch /Applications/Operon Stable.app
+#   rollback [--no-open]             Atomically restore dist/Operon.stable-previous.app to stable
+#   dev [-- <args...>]               Quit any running Operon and run `cargo run --release --locked`
+#   quit                             Quit any running Operon and wait for single-instance lock release
+#
+# Exit codes:
+#   0   success
+#   64  usage error
+#   66  required bundle or helper script missing
+#   75  running Operon process did not exit within OPERON_QUIT_WAIT_SECONDS
+set -euo pipefail
+
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR
+
+stage_app=""
+scratch_backup=""
+cleanup_staging() {
+  local status=$?
+  trap - EXIT
+  trap '' INT TERM
+  if [ -n "$stage_app" ] && [ -e "$stage_app" ]; then
+    rm -rf "$stage_app"
+  fi
+  if [ -n "$scratch_backup" ] && [ -e "$scratch_backup" ]; then
+    rm -rf "$scratch_backup"
+  fi
+  return "$status"
+}
+trap cleanup_staging EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+resolve_script_dir() {
+  local src="${BASH_SOURCE[0]}"
+  while [ -L "$src" ]; do
+    local dir
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    case "$src" in
+      /*) ;;
+      *) src="$dir/$src" ;;
+    esac
+  done
+  cd -P "$(dirname "$src")" && pwd
+}
+
+script_dir="$(resolve_script_dir)"
+if [ -n "${OPERON_REPO_ROOT:-}" ]; then
+  repo_root="$(cd "$OPERON_REPO_ROOT" && pwd)"
+else
+  repo_root="$(cd "$script_dir/.." && pwd)"
+fi
+
+dist_dir="${OPERON_DIST_DIR:-$repo_root/dist}"
+canary_app="${OPERON_CANARY_APP:-$dist_dir/Operon.app}"
+stable_app="${OPERON_STABLE_APP:-/Applications/Operon Stable.app}"
+stable_prev_app="${OPERON_STABLE_PREVIOUS_APP:-$dist_dir/Operon.stable-previous.app}"
+installed_app="${OPERON_INSTALLED_APP:-/Applications/Operon.app}"
+
+packager="${OPERON_PACKAGER:-${OPERON_PACKAGE_SCRIPT:-$repo_root/scripts/package-macos.sh}}"
+replace_script="${OPERON_REPLACE_SCRIPT:-$script_dir/replace-macos-bundle.sh}"
+check_script="${OPERON_CHECK_SCRIPT:-$repo_root/scripts/check-installed-build.sh}"
+quit_wait_seconds="${OPERON_QUIT_WAIT_SECONDS:-10}"
+
+case "$quit_wait_seconds" in
+  ''|*[!0-9]*)
+    echo "error: OPERON_QUIT_WAIT_SECONDS must be a non-negative integer (got '$quit_wait_seconds')" >&2
+    exit 64
+    ;;
+esac
+
+# Read the Info.plist commit stamp key from scripts/package-macos.sh (SSOT).
+stamp_key=""
+for candidate_packager in "$packager" "$repo_root/scripts/package-macos.sh" "$script_dir/package-macos.sh"; do
+  if [ -f "$candidate_packager" ]; then
+    candidate_key="$(sed -n 's/^source_commit_key="\([^"]*\)"$/\1/p' "$candidate_packager" 2>/dev/null | head -1 || true)"
+    case "$candidate_key" in
+      ''|*[!A-Za-z0-9_]*) candidate_key="" ;;
+    esac
+    if [ -n "$candidate_key" ]; then
+      stamp_key="$candidate_key"
+      break
+    fi
+  fi
+done
+if [ -z "$stamp_key" ]; then
+  echo "error: could not read valid source_commit_key from $packager" >&2
+  exit 66
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: operon-channel.sh [subcommand] [options]
+
+Subcommands:
+  status                           Show repo HEAD, running process, and channel bundles (default)
+  canary [--build|-b] [--full] [--no-open]
+                                   Build (when --build is passed or bundle is missing) and open canary
+  promote [--open]                 Atomically promote canary (dist/Operon.app) to stable
+  stable [--no-open]               Switch to the promoted stable bundle (/Applications/Operon Stable.app)
+  rollback [--no-open]             Restore stable from the previous promoted bundle
+  dev [-- <args...>]               Quit running Operon and run `cargo run --release --locked`
+  quit                             Quit running Operon and wait for lock release
+  help, --help, -h                 Show this help
+
+Environment overrides:
+  OPERON_DIST_DIR                  Directory for canary and rollback bundles (default: <repo>/dist)
+  OPERON_CANARY_APP                Canary bundle path (default: $OPERON_DIST_DIR/Operon.app)
+  OPERON_STABLE_APP                Stable bundle path (default: /Applications/Operon Stable.app)
+  OPERON_STABLE_PREVIOUS_APP       Stable rollback bundle path (default: $OPERON_DIST_DIR/Operon.stable-previous.app)
+  OPERON_INSTALLED_APP             Installed bundle path (default: /Applications/Operon.app)
+  OPERON_QUIT_WAIT_SECONDS         Seconds to wait for running Operon to exit (default: 10)
+EOF
+}
+
+bundle_commit() {
+  local plist="$1/Contents/Info.plist"
+  if [ -f "$plist" ]; then
+    /usr/libexec/PlistBuddy -c "Print :$stamp_key" "$plist" 2>/dev/null || printf 'unstamped'
+  else
+    printf 'unstamped'
+  fi
+}
+
+installed_build_freshness() {
+  local checker="$check_script"
+  if [ ! -f "$checker" ] && [ -f "$script_dir/check-installed-build.sh" ]; then
+    checker="$script_dir/check-installed-build.sh"
+  fi
+  if [ ! -f "$checker" ]; then
+    printf 'UNVERIFIED'
+    return
+  fi
+  local rc=0
+  OPERON_INSTALLED_APP="$installed_app" bash "$checker" "$installed_app" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) printf 'CURRENT' ;;
+    1) printf 'STALE' ;;
+    *) printf 'UNVERIFIED' ;;
+  esac
+}
+
+print_channel_line() {
+  local label="$1"
+  local app="$2"
+  if [ ! -d "$app" ]; then
+    printf '%s: %s (missing)\n' "$label" "$app"
+    return
+  fi
+  local commit
+  commit="$(bundle_commit "$app")"
+  printf '%s: %s (%s)\n' "$label" "$app" "$commit"
+}
+
+# Match both packaged `.app` bundles (`Contents/MacOS/Operon`) and cargo builds (`operon`).
+running_operon_pids() {
+  local names="${OPERON_PROCESS_NAMES:-Operon operon}"
+  local name
+  for name in $names; do
+    pgrep -x "$name" 2>/dev/null || true
+  done | awk '!seen[$0]++'
+}
+
+open_bundle() {
+  local app="$1"
+  if [ -n "${OPERON_CHANNEL_OPEN_CMD:-}" ]; then
+    "$OPERON_CHANNEL_OPEN_CMD" "$app"
+  else
+    open -a "$app"
+  fi
+}
+
+quit_running_operon() {
+  if [ -n "${OPERON_CHANNEL_QUIT_HOOK:-}" ]; then
+    "$OPERON_CHANNEL_QUIT_HOOK"
+    return 0
+  fi
+
+  local pids
+  pids="$(running_operon_pids)"
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+
+  if [ -z "${OPERON_PROCESS_NAMES:-}" ] && command -v osascript >/dev/null 2>&1; then
+    osascript -e 'tell application id "local.operon" to quit' >/dev/null 2>&1 || true
+  fi
+  # shellcheck disable=SC2086
+  kill -TERM $pids 2>/dev/null || true
+
+  local max_ticks=$((quit_wait_seconds * 10))
+  local tick=0
+  while [ "$tick" -lt "$max_ticks" ]; do
+    if [ -z "$(running_operon_pids)" ]; then
+      return 0
+    fi
+    sleep 0.1
+    tick=$((tick + 1))
+  done
+
+  if [ -z "$(running_operon_pids)" ]; then
+    return 0
+  fi
+
+  echo "error: operon is still running after ${quit_wait_seconds}s; close it before switching channels" >&2
+  exit 75
+}
+
+cmd_status() {
+  if [ "$#" -gt 0 ]; then
+    echo "error: 'status' takes no arguments" >&2
+    usage >&2
+    exit 64
+  fi
+
+  local head_sha="unknown"
+  local tree_state="unknown"
+  if git -C "$repo_root" rev-parse HEAD >/dev/null 2>&1; then
+    head_sha="$(git -C "$repo_root" rev-parse HEAD)"
+    if [ -n "$(git -C "$repo_root" status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then
+      tree_state="dirty"
+    else
+      tree_state="clean"
+    fi
+  fi
+  printf 'head: %s (%s)\n' "$head_sha" "$tree_state"
+
+  if [ -n "${OPERON_CHANNEL_RUNNING_OVERRIDE:-}" ]; then
+    printf 'running: %s\n' "$OPERON_CHANNEL_RUNNING_OVERRIDE"
+  else
+    local pids
+    pids="$(running_operon_pids | tr '\n' ' ' | sed 's/ *$//')"
+    if [ -z "$pids" ]; then
+      printf 'running: none\n'
+    else
+      printf 'running: pid %s\n' "$pids"
+    fi
+  fi
+
+  print_channel_line "canary" "$canary_app"
+  print_channel_line "stable" "$stable_app"
+  print_channel_line "stable-previous" "$stable_prev_app"
+  print_channel_line "installed" "$installed_app"
+  printf 'installed build: %s\n' "$(installed_build_freshness)"
+}
+
+cmd_canary() {
+  local need_build=0
+  local full_build=0
+  local no_open=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --build|-b) need_build=1 ;;
+      --full) need_build=1; full_build=1 ;;
+      --no-open) no_open=1 ;;
+      *)
+        echo "error: unknown option for canary: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
+    shift
+  done
+
+  if [ "$need_build" -eq 1 ] || [ ! -d "$canary_app" ]; then
+    if [ ! -f "$packager" ]; then
+      echo "error: packager script not found at $packager" >&2
+      exit 66
+    fi
+    if [ "$full_build" -eq 1 ]; then
+      OPERON_DIST_DIR="$dist_dir" OPERON_LOCKED=1 OPERON_FAST_PACKAGE=0 bash "$packager" --full
+    else
+      OPERON_DIST_DIR="$dist_dir" OPERON_LOCKED=1 OPERON_FAST_PACKAGE=1 bash "$packager"
+    fi
+  fi
+
+  if [ ! -d "$canary_app" ]; then
+    echo "error: canary bundle is missing at $canary_app" >&2
+    exit 66
+  fi
+
+  if [ "$no_open" -eq 1 ]; then
+    printf 'Canary ready: %s (%s)\n' "$canary_app" "$(bundle_commit "$canary_app")"
+  else
+    quit_running_operon
+    open_bundle "$canary_app"
+    printf 'Opened canary: %s (%s)\n' "$canary_app" "$(bundle_commit "$canary_app")"
+  fi
+}
+
+cmd_promote() {
+  local open_after=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --open) open_after=1 ;;
+      *)
+        echo "error: unknown option for promote: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
+    shift
+  done
+
+  if [ ! -d "$canary_app" ]; then
+    echo "error: canary bundle not found at $canary_app — run 'operon-channel.sh canary --build' first" >&2
+    exit 66
+  fi
+  if [ ! -f "$replace_script" ]; then
+    echo "error: bundle replacement helper not found at $replace_script" >&2
+    exit 66
+  fi
+
+  mkdir -p "$(dirname "$stable_app")" "$(dirname "$stable_prev_app")"
+  stage_app="${stable_app}.staging.$$"
+  rm -rf "$stage_app"
+  cp -R "$canary_app" "$stage_app"
+
+  if ! bash "$replace_script" "$stage_app" "$stable_app" "$stable_prev_app"; then
+    rm -rf "$stage_app"
+    stage_app=""
+    echo "error: failed to promote $canary_app to $stable_app" >&2
+    exit 1
+  fi
+  stage_app=""
+
+  printf 'Promoted canary -> stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+
+  if [ "$open_after" -eq 1 ]; then
+    quit_running_operon
+    open_bundle "$stable_app"
+    printf 'Opened stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  fi
+}
+
+cmd_stable() {
+  local no_open=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-open) no_open=1 ;;
+      *)
+        echo "error: unknown option for stable: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
+    shift
+  done
+
+  if [ ! -d "$stable_app" ]; then
+    echo "error: stable bundle not found at $stable_app — run 'operon-channel.sh promote' after verifying canary" >&2
+    exit 66
+  fi
+
+  if [ "$no_open" -eq 1 ]; then
+    printf 'Stable ready: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  else
+    quit_running_operon
+    open_bundle "$stable_app"
+    printf 'Opened stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  fi
+}
+
+cmd_rollback() {
+  local no_open=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-open) no_open=1 ;;
+      *)
+        echo "error: unknown option for rollback: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
+    shift
+  done
+
+  if [ ! -d "$stable_prev_app" ]; then
+    echo "error: rollback bundle not found at $stable_prev_app" >&2
+    exit 66
+  fi
+  if [ ! -f "$replace_script" ]; then
+    echo "error: bundle replacement helper not found at $replace_script" >&2
+    exit 66
+  fi
+
+  quit_running_operon
+
+  mkdir -p "$(dirname "$stable_app")"
+  stage_app="${stable_app}.rollback-staging.$$"
+  scratch_backup="${stable_app}.rolled-back.$$"
+  rm -rf "$stage_app" "$scratch_backup"
+  cp -R "$stable_prev_app" "$stage_app"
+
+  if ! bash "$replace_script" "$stage_app" "$stable_app" "$scratch_backup"; then
+    rm -rf "$stage_app" "$scratch_backup"
+    stage_app=""
+    scratch_backup=""
+    echo "error: failed to roll back $stable_app from $stable_prev_app" >&2
+    exit 1
+  fi
+  rm -rf "$scratch_backup"
+  stage_app=""
+  scratch_backup=""
+
+  if [ "$no_open" -eq 1 ]; then
+    printf 'Rolled back stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  else
+    open_bundle "$stable_app"
+    printf 'Rolled back stable and opened: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  fi
+}
+
+cmd_dev() {
+  if [ "${1:-}" = "--" ]; then
+    shift
+  fi
+  quit_running_operon
+  (cd "$repo_root" && cargo run --release --locked "$@")
+}
+
+cmd_quit() {
+  if [ "$#" -gt 0 ]; then
+    echo "error: 'quit' takes no arguments" >&2
+    usage >&2
+    exit 64
+  fi
+  quit_running_operon
+  printf 'Operon stopped\n'
+}
+
+subcmd="${1:-status}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "$subcmd" in
+  status)
+    cmd_status "$@"
+    ;;
+  canary)
+    cmd_canary "$@"
+    ;;
+  promote)
+    cmd_promote "$@"
+    ;;
+  stable)
+    cmd_stable "$@"
+    ;;
+  rollback)
+    cmd_rollback "$@"
+    ;;
+  dev)
+    cmd_dev "$@"
+    ;;
+  quit)
+    cmd_quit "$@"
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  *)
+    echo "error: unknown subcommand '$subcmd'" >&2
+    usage >&2
+    exit 64
+    ;;
+esac

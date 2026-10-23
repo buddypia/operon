@@ -368,6 +368,22 @@ bash scripts/package-macos.sh
 ad-hoc 署名です。他の Mac への配布には Apple Developer ID 証明書と notarization
 が必要で、それまでは Gatekeeper の明示的な承認が必要になることがあります。
 
+### バトルテスト用（canary）と安定版（stable）の切り替え
+
+普段使いの安定版を `/Applications/Operon Stable.app` に固定したまま、新しい変更を
+`dist/Operon.app` で反復検証するには `scripts/operon-channel.sh` を使います。
+
+```sh
+bash scripts/operon-channel.sh status          # HEAD・起動中プロセス・各チャネルのコミットを表示
+bash scripts/operon-channel.sh canary --build  # dist/Operon.app をビルドして canary に切り替え
+bash scripts/operon-channel.sh promote         # 検証済み canary を /Applications/Operon Stable.app へアトミックに昇格
+bash scripts/operon-channel.sh stable          # canary を終了して /Applications/Operon Stable.app に戻す
+bash scripts/operon-channel.sh rollback        # 直前の stable バンドルへロールバック
+```
+
+エージェントのセッションは `tmux` 側で生き続けるため、`canary` と `stable` を
+切り替えても実行中のセッションはそのまま再接続されます。
+
 ## プライバシー
 
 Operon 自身はテレメトリ・アカウント・クラウドサービスを一切使いません。

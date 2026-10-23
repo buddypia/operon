@@ -1,0 +1,45 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/215-switching-between-canary-and-stable-builds-is-manual.
+#
+# The person asked how to separate a battle-test build (repeatedly rebuilt and
+# verified) from a stable release build (kept unchanged for daily work), and
+# then asked to have that workflow built as a CLI ("CLIとして作っておいて").
+#
+# Route: modify (placement EXTEND — extends the existing macOS packaging and
+# bundle-swap scripts under scripts/ with a channel CLI wrapper
+# scripts/operon-channel.sh that delegates to scripts/package-macos.sh,
+# scripts/replace-macos-bundle.sh, and scripts/check-installed-build.sh).
+#
+# Risk: scripts/operon-channel.sh, src/tests.rs, and README*.md match no
+# paused or supervised surface in docs/sdlc/risk.yaml. No GUI drawing:
+# screen n/a.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Change 215 is complete and ready to merge into main."
+
+contract:
+  failing-test-first: "machine passed 5 channel_cli tests failed before scripts/operon-channel.sh and README updates existed"
+  three-gates: "machine passed make q.fast && cargo test --locked channel_cli"
+  bands: "machine passed bash scripts/check-bands.sh (0 stop, 2 warn on baseline metrics)"
+  release-binary: "machine passed no: touches scripts/operon-channel.sh, src/tests.rs, and READMEs only; /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed 7 of 7 caught by docs/sdlc/changes/215-switching-between-canary-and-stable-builds-is-manual/mutations.py"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer approved round 2 at digest 2ba192df21e12173"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -58275,3 +58275,565 @@ pub(crate) fn every_japanese_literal_is_a_message_or_named_data() {
         "もう使われていない除外があります: {stale:?}"
     );
 }
+
+#[test]
+pub(crate) fn the_channel_cli_reports_status_and_reads_its_stamp_key_from_the_packager() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script_path = repo_root.join("scripts/operon-channel.sh");
+    let script = fs::read_to_string(&script_path)
+        .expect("scripts/operon-channel.sh が存在しなければなりません");
+    assert!(
+        !script.contains("OperonSourceCommit"),
+        "scripts/operon-channel.sh が OperonSourceCommit を直書きしています — scripts/package-macos.sh から読み取ってください"
+    );
+    assert!(
+        script.contains(r#"sed -n 's/^source_commit_key="\([^"]*\)"$/\1/p'"#),
+        "scripts/operon-channel.sh が scripts/package-macos.sh から source_commit_key を抽出していません"
+    );
+
+    let root = temporary_directory("channel-cli-status");
+    let scripts_dir = root.join("scripts");
+    fs::create_dir_all(&scripts_dir).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    for name in [
+        "package-macos.sh",
+        "check-installed-build.sh",
+        "replace-macos-bundle.sh",
+        "operon-channel.sh",
+    ] {
+        fs::copy(repo_root.join("scripts").join(name), scripts_dir.join(name)).unwrap();
+    }
+    let packager = fs::read_to_string(scripts_dir.join("package-macos.sh")).unwrap();
+    fs::write(
+        scripts_dir.join("package-macos.sh"),
+        packager.replace(
+            "source_commit_key=\"OperonSourceCommit\"",
+            "source_commit_key=\"CustomChannelStamp\"",
+        ),
+    )
+    .unwrap();
+
+    fs::write(root.join("Cargo.toml"), "[package]\nname = \"operon\"\n").unwrap();
+    fs::write(root.join("Cargo.lock"), "").unwrap();
+    fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+
+    for args in [
+        &["init"][..],
+        &["config", "user.email", "test@example.invalid"][..],
+        &["config", "user.name", "Operon test"][..],
+        &["add", "."][..],
+        &["commit", "-m", "initial"][..],
+    ] {
+        let status = git_command(&root).args(args).status().unwrap();
+        assert!(status.success());
+    }
+    let head_output = git_command(&root)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    let head = String::from_utf8_lossy(&head_output.stdout)
+        .trim()
+        .to_owned();
+
+    let dist_dir = root.join("dist");
+    let canary_bundle = dist_dir.join("Operon.app");
+    let stable_bundle = root.join("Apps/Operon Stable.app");
+    let installed_bundle = root.join("Apps/Operon.app");
+    for bundle in [&canary_bundle, &stable_bundle] {
+        let contents = bundle.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        let plist = contents.join("Info.plist");
+        assert!(Command::new("plutil")
+            .args(["-create", "xml1"])
+            .arg(&plist)
+            .status()
+            .unwrap()
+            .success());
+        assert!(Command::new("plutil")
+            .args(["-insert", "CustomChannelStamp", "-string", &head])
+            .arg(&plist)
+            .status()
+            .unwrap()
+            .success());
+    }
+
+    let run_status = |extra_arg: Option<&str>| {
+        let mut cmd = Command::new("bash");
+        cmd.arg(scripts_dir.join("operon-channel.sh"));
+        if let Some(arg) = extra_arg {
+            cmd.arg(arg);
+        }
+        cmd.env("OPERON_REPO_ROOT", &root)
+            .env("OPERON_DIST_DIR", &dist_dir)
+            .env("OPERON_STABLE_APP", &stable_bundle)
+            .env("OPERON_INSTALLED_APP", &installed_bundle)
+            .env("OPERON_CHANNEL_RUNNING_OVERRIDE", "none")
+            .output()
+            .unwrap()
+    };
+
+    let explicit = run_status(Some("status"));
+    let implicit = run_status(None);
+    assert!(
+        explicit.status.success(),
+        "status failed: {}",
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+    assert_eq!(explicit.stdout, implicit.stdout);
+    let stdout = String::from_utf8_lossy(&explicit.stdout);
+    assert!(stdout.contains(&format!("head: {head}")), "{stdout}");
+    assert!(stdout.contains("running: none"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("canary: {} ({head})", canary_bundle.display())),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("stable: {} ({head})", stable_bundle.display())),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("stable-previous:") && stdout.contains("(missing)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "installed: {} (missing)",
+            installed_bundle.display()
+        )),
+        "{stdout}"
+    );
+    assert!(stdout.contains("installed build: CURRENT"), "{stdout}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_channel_cli_builds_and_launches_canary_without_touching_stable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = temporary_directory("channel-cli-canary");
+    let dist_dir = root.join("dist");
+    let stable_bundle = root.join("Apps/Operon Stable.app");
+    fs::create_dir_all(&stable_bundle).unwrap();
+    fs::write(stable_bundle.join("marker"), "pinned-stable").unwrap();
+
+    let events = root.join("events.log");
+    let fake_packager = root.join("fake-packager.sh");
+    fs::write(
+        &fake_packager,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'package:%s\\n' \"$*\" >> \"$OPERON_TEST_EVENTS\"\nmkdir -p \"$OPERON_DIST_DIR/Operon.app\"\nprintf 'canary-built' > \"$OPERON_DIST_DIR/Operon.app/marker\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_packager, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let fake_open = root.join("fake-open.sh");
+    fs::write(
+        &fake_open,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'open:%s\\n' \"$1\" >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_open, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let fake_quit = root.join("fake-quit.sh");
+    fs::write(
+        &fake_quit,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'quit\\n' >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_quit, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .args(["canary", "--build", "--full"])
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_PACKAGER", &fake_packager)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "canary failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let logged = fs::read_to_string(&events).unwrap();
+    let expected_events = format!(
+        "package:--full\nquit\nopen:{}\n",
+        dist_dir.join("Operon.app").display()
+    );
+    assert_eq!(logged, expected_events);
+    assert_eq!(
+        fs::read_to_string(stable_bundle.join("marker")).unwrap(),
+        "pinned-stable"
+    );
+
+    fs::write(&events, "").unwrap();
+    let no_open = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .args(["canary", "--no-open"])
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_PACKAGER", &fake_packager)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(no_open.status.success());
+    assert_eq!(fs::read_to_string(&events).unwrap(), "");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_channel_cli_promotes_canary_to_stable_and_rolls_back() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = temporary_directory("channel-cli-promote");
+    let dist_dir = root.join("dist");
+    let canary_bundle = dist_dir.join("Operon.app");
+    let stable_bundle = root.join("Apps/Operon Stable.app");
+    let previous_stable = dist_dir.join("Operon.stable-previous.app");
+    fs::create_dir_all(&canary_bundle).unwrap();
+    fs::create_dir_all(&stable_bundle).unwrap();
+    fs::write(canary_bundle.join("marker"), "canary-v2").unwrap();
+    fs::write(stable_bundle.join("marker"), "stable-v1").unwrap();
+
+    let events = root.join("events.log");
+    let fake_open = root.join("fake-open.sh");
+    fs::write(
+        &fake_open,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'open:%s\\n' \"$1\" >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_open, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let fake_quit = root.join("fake-quit.sh");
+    fs::write(
+        &fake_quit,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'quit\\n' >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_quit, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let promote = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("promote")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(
+        promote.status.success(),
+        "promote failed: {}",
+        String::from_utf8_lossy(&promote.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&promote.stdout).contains("Promoted canary"),
+        "{}",
+        String::from_utf8_lossy(&promote.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(canary_bundle.join("marker")).unwrap(),
+        "canary-v2",
+        "promote must stage a copy and keep dist/Operon.app intact"
+    );
+    assert_eq!(
+        fs::read_to_string(stable_bundle.join("marker")).unwrap(),
+        "canary-v2"
+    );
+    assert_eq!(
+        fs::read_to_string(previous_stable.join("marker")).unwrap(),
+        "stable-v1"
+    );
+
+    let launch_stable = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("stable")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(launch_stable.status.success());
+    assert_eq!(
+        fs::read_to_string(&events).unwrap(),
+        format!("quit\nopen:{}\n", stable_bundle.display())
+    );
+
+    fs::write(&events, "").unwrap();
+    let rollback = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("rollback")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(
+        rollback.status.success(),
+        "rollback failed: {}",
+        String::from_utf8_lossy(&rollback.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&rollback.stdout).contains("Rolled back stable"),
+        "{}",
+        String::from_utf8_lossy(&rollback.stdout)
+    );
+    assert_eq!(
+        fs::read_to_string(stable_bundle.join("marker")).unwrap(),
+        "stable-v1"
+    );
+    assert_eq!(
+        fs::read_to_string(&events).unwrap(),
+        format!("quit\nopen:{}\n", stable_bundle.display())
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = temporary_directory("channel-cli-refusals");
+    let dist_dir = root.join("dist");
+    let stable_bundle = root.join("Apps/Operon Stable.app");
+
+    for (subcommand, expected_hint) in [
+        ("promote", "canary --build"),
+        ("stable", "promote"),
+        ("rollback", "Operon.stable-previous.app"),
+    ] {
+        let output = Command::new("bash")
+            .arg(repo_root.join("scripts/operon-channel.sh"))
+            .arg(subcommand)
+            .env("OPERON_DIST_DIR", &dist_dir)
+            .env("OPERON_STABLE_APP", &stable_bundle)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(66),
+            "{subcommand} should exit 66 when bundle is missing"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(expected_hint),
+            "{subcommand} stderr missing `{expected_hint}`: {stderr}"
+        );
+    }
+
+    let help = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: operon-channel.sh"));
+
+    let unknown = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("not-a-subcommand")
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(64));
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("Usage: operon-channel.sh"));
+
+    let events = root.join("events.log");
+    let fake_quit = root.join("fake-quit.sh");
+    fs::write(
+        &fake_quit,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'quit\\n' >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_quit, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let fake_bin = root.join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let fake_cargo = fake_bin.join("cargo");
+    fs::write(
+        &fake_cargo,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'cargo:%s\\n' \"$*\" >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let quit_out = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("quit")
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(quit_out.status.success());
+    assert_eq!(fs::read_to_string(&events).unwrap(), "quit\n");
+
+    fs::write(&events, "").unwrap();
+    let dev_out = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("dev")
+        .env("OPERON_REPO_ROOT", &root)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(dev_out.status.success());
+    assert_eq!(
+        fs::read_to_string(&events).unwrap(),
+        "quit\ncargo:run --release --locked\n"
+    );
+
+    // Real process detection (`Operon` capital-O bundle binary) + SIGTERM termination + timeout 75.
+    let mut dummy_proc = Command::new("sleep").arg("60").spawn().unwrap();
+    let dummy_pid = dummy_proc.id();
+    let pid_file = root.join("operon.pid");
+    fs::write(&pid_file, format!("{dummy_pid}\n")).unwrap();
+
+    let fake_pgrep = fake_bin.join("pgrep");
+    fs::write(
+        &fake_pgrep,
+        "#!/usr/bin/env bash\nset -euo pipefail\nif [ \"${1:-}\" = \"-x\" ] && [ \"${2:-}\" = \"Operon\" ] && [ -f \"$OPERON_TEST_PID_FILE\" ]; then\n  pid=\"$(cat \"$OPERON_TEST_PID_FILE\")\"\n  if [ \"$pid\" = \"stuck\" ]; then\n    printf '999999\\n'\n    exit 0\n  fi\n  state=\"$(ps -o state= -p \"$pid\" 2>/dev/null | tr -d '[:space:]' || true)\"\n  case \"$state\" in\n    ''|Z*) exit 1 ;;\n    *) printf '%s\\n' \"$pid\"; exit 0 ;;\n  esac\nfi\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_pgrep, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let fake_osascript = fake_bin.join("osascript");
+    fs::write(
+        &fake_osascript,
+        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'osascript:%s\\n' \"$*\" >> \"$OPERON_TEST_EVENTS\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_osascript, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let path_with_fake = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let live_status = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("status")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_TEST_PID_FILE", &pid_file)
+        .env("PATH", &path_with_fake)
+        .output()
+        .unwrap();
+    assert!(live_status.status.success());
+    assert!(
+        String::from_utf8_lossy(&live_status.stdout).contains(&format!("running: pid {dummy_pid}")),
+        "status must detect capital-O `Operon` bundle process: {}",
+        String::from_utf8_lossy(&live_status.stdout)
+    );
+
+    fs::write(&events, "").unwrap();
+    let real_quit = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("quit")
+        .env("OPERON_TEST_PID_FILE", &pid_file)
+        .env("OPERON_TEST_EVENTS", &events)
+        .env("OPERON_QUIT_WAIT_SECONDS", "2")
+        .env("PATH", &path_with_fake)
+        .output()
+        .unwrap();
+    let _ = dummy_proc.wait();
+    assert!(
+        real_quit.status.success(),
+        "real quit failed: {}",
+        String::from_utf8_lossy(&real_quit.stderr)
+    );
+    assert!(
+        fs::read_to_string(&events)
+            .unwrap()
+            .contains("osascript:-e tell application id \"local.operon\" to quit"),
+        "quit must target bundle id local.operon"
+    );
+
+    fs::write(&pid_file, "stuck\n").unwrap();
+    let stuck_quit = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("quit")
+        .env("OPERON_TEST_PID_FILE", &pid_file)
+        .env("OPERON_TEST_EVENTS", &events)
+        .env("OPERON_QUIT_WAIT_SECONDS", "0")
+        .env("PATH", &path_with_fake)
+        .output()
+        .unwrap();
+    assert_eq!(stuck_quit.status.code(), Some(75));
+    assert!(
+        String::from_utf8_lossy(&stuck_quit.stderr).contains("still running after 0s"),
+        "{}",
+        String::from_utf8_lossy(&stuck_quit.stderr)
+    );
+
+    // Verify staging cleanup trap removes `.staging.$$` when `cp -R` fails mid-promote.
+    fs::create_dir_all(dist_dir.join("Operon.app")).unwrap();
+    fs::create_dir_all(root.join("Apps")).unwrap();
+    let fake_cp = fake_bin.join("cp");
+    fs::write(
+        &fake_cp,
+        "#!/usr/bin/env bash\nset -euo pipefail\nmkdir -p \"$3\"\nprintf 'partial' > \"$3/partial\"\nexit 1\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_cp, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let failed_promote = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("promote")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("PATH", &path_with_fake)
+        .output()
+        .unwrap();
+    assert!(!failed_promote.status.success());
+    let apps_entries: Vec<_> = fs::read_dir(root.join("Apps"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        apps_entries.iter().all(|name| !name.contains(".staging.")),
+        "cleanup trap must remove partial staging directory, found: {apps_entries:?}"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_readmes_document_the_channel_cli() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for readme in ["README.md", "README.ja.md", "README.ko.md"] {
+        let text = fs::read_to_string(root.join(readme)).unwrap();
+        for required in [
+            "bash scripts/operon-channel.sh",
+            "operon-channel.sh canary",
+            "operon-channel.sh promote",
+            "operon-channel.sh stable",
+            "operon-channel.sh rollback",
+            "operon-channel.sh status",
+        ] {
+            assert!(
+                text.contains(required),
+                "{readme} に `{required}` の説明がありません"
+            );
+        }
+    }
+}
