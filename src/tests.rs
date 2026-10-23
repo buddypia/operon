@@ -58486,9 +58486,7 @@ pub(crate) fn the_channel_cli_promotes_canary_to_stable_and_rolls_back() {
     let stable_bundle = root.join("Apps/Operon Stable.app");
     let previous_stable = dist_dir.join("Operon.stable-previous.app");
     fs::create_dir_all(&canary_bundle).unwrap();
-    fs::create_dir_all(&stable_bundle).unwrap();
-    fs::write(canary_bundle.join("marker"), "canary-v2").unwrap();
-    fs::write(stable_bundle.join("marker"), "stable-v1").unwrap();
+    fs::write(canary_bundle.join("marker"), "stable-v1").unwrap();
 
     let events = root.join("events.log");
     let fake_open = root.join("fake-open.sh");
@@ -58507,6 +58505,51 @@ pub(crate) fn the_channel_cli_promotes_canary_to_stable_and_rolls_back() {
     .unwrap();
     fs::set_permissions(&fake_quit, fs::Permissions::from_mode(0o755)).unwrap();
 
+    let bootstrap_stable = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("stable")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(
+        bootstrap_stable.status.success(),
+        "first-run stable bootstrap failed: {}",
+        String::from_utf8_lossy(&bootstrap_stable.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(stable_bundle.join("marker")).unwrap(),
+        "stable-v1"
+    );
+    assert_eq!(
+        fs::read_to_string(&events).unwrap(),
+        format!("quit\nopen:{}\n", stable_bundle.display())
+    );
+
+    fs::write(canary_bundle.join("marker"), "canary-v2").unwrap();
+    fs::write(&events, "").unwrap();
+
+    let launch_pinned_stable = Command::new("bash")
+        .arg(repo_root.join("scripts/operon-channel.sh"))
+        .arg("stable")
+        .env("OPERON_DIST_DIR", &dist_dir)
+        .env("OPERON_STABLE_APP", &stable_bundle)
+        .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
+        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
+        .env("OPERON_TEST_EVENTS", &events)
+        .output()
+        .unwrap();
+    assert!(launch_pinned_stable.status.success());
+    assert_eq!(
+        fs::read_to_string(stable_bundle.join("marker")).unwrap(),
+        "stable-v1",
+        "plain stable must not overwrite an existing stable bundle"
+    );
+
+    fs::write(&events, "").unwrap();
     let promote = Command::new("bash")
         .arg(repo_root.join("scripts/operon-channel.sh"))
         .args(["stable", "--promote", "--no-open"])
@@ -58600,7 +58643,7 @@ pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() 
 
     for (args, expected_hint) in [
         (&["stable", "--promote"][..], "canary --build"),
-        (&["stable"][..], "stable --promote"),
+        (&["stable"][..], "canary --build"),
         (&["stable", "--rollback"][..], "Operon.stable-previous.app"),
     ] {
         let output = Command::new("bash")

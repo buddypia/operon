@@ -401,7 +401,11 @@ cmd_stable() {
   fi
 
   if [ ! -d "$stable_app" ]; then
-    echo "error: stable bundle not found at $stable_app — run 'operon-channel.sh stable --promote' after verifying canary" >&2
+    if [ -d "$canary_app" ]; then
+      do_promote "$no_open"
+      return 0
+    fi
+    echo "error: stable bundle not found at $stable_app — run 'operon-channel.sh canary --build' first" >&2
     exit 66
   fi
 

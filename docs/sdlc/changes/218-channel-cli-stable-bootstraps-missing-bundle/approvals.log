@@ -1,0 +1,3 @@
+2026-10-23T19:45:54Z auto intent intent.md 957696ec9f259ed9 approve restates quoted user error on operon-channel.sh stable and scopes fix to cmd_stable and channel_cli tests
+2026-10-23T19:45:54Z auto spec spec.md 6bbfea034f9a6365 approve covers all three intent outcomes with matching acceptance criteria and test mappings without touching paused surfaces
+2026-10-23T19:45:54Z auto plan plan.md ef5a793b7b9a4f4a approve implements spec in scripts/operon-channel.sh and src/tests.rs with failing-test-first order and mutation verification

@@ -1,0 +1,39 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/218-channel-cli-stable-bootstraps-missing-bundle.
+#
+# When the person ran `bash scripts/operon-channel.sh stable` with `dist/Operon.app`
+# already present but `/Applications/Operon Stable.app` not yet created, the CLI
+# exited 66 instead of bootstrapping `/Applications/Operon Stable.app` from
+# `dist/Operon.app` and launching it.
+#
+# Route: bugfix (placement EXTEND in scripts/operon-channel.sh and src/tests.rs).
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 5"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Change 218 complete: operon-channel.sh stable bootstraps /Applications/Operon Stable.app from dist/Operon.app when missing."
+
+contract:
+  failing-test-first: "machine passed cargo test --locked channel_cli failed on 2 tests before fix"
+  three-gates: "machine passed make q.fast and cargo test --locked channel_cli"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed no: touches scripts/operon-channel.sh and src/tests.rs only; /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed all 3 mutations in mutations.py killed"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer go"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
