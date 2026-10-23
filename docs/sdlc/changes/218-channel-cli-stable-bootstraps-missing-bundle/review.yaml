@@ -1,0 +1,8 @@
+# Review record for 218-channel-cli-stable-bootstraps-missing-bundle.
+
+digest: "cd35d5e3ef198643"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
