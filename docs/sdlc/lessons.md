@@ -1388,3 +1388,22 @@ the template with a check that is red before any mutation and requires exit 1,
 the words 変異の前から, and no catch; the fixture checks of the three sweep tests
 now react only to the mutation (change 214; watched failing on the runner
 without the baseline, and on each mutation in `mutations.py`).
+
+## 100 — Parallel worktrees repeated trunk git queries, cold builds, and main-only CI jobs
+
+When several AI CLIs worked in parallel across `.worktrees/<branch>`, every
+allowed worktree `Edit` and `Bash` call still spawned `git branch --show-current`
+in the trunk checkout, `loadMergedHookRegistry` deep-cloned the 1,062-line
+registry even without a local overlay, 5-second hook timeouts killed node guards
+under parallel `cargo` builds, `seed-target.sh` left new worktrees cold whenever
+`main/target/debug` was absent even if a sibling worktree had a warm cache, and
+`ci.yml` ran `package` on every branch push. **The rule:** a hook or CI job
+queries git, clones state, or builds a release bundle only on the path that
+reads the answer, and every multi-CLI hook timeout leaves room for parallel
+worktree builds.
+
+**Guard.** `worktree_and_allowlisted_calls_skip_redundant_trunk_git_and_registry_clones`,
+`every_hook_gives_node_guards_time_to_finish_under_load`,
+`a_new_worktree_builds_from_mains_cache_and_formats_its_own_files`, and
+`ci_runs_on_the_branches_the_merge_gate_asks_about` (change 217; watched failing
+before the fixes and against each mutation in `mutations.py`).

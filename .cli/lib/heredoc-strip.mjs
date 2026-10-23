@@ -472,14 +472,29 @@ export function heredocProgramBodies(command) {
   return typeof command === 'string' ? splitHeredocs(command).programBodies : [];
 }
 
-/** Heredoc-free skeleton + bodies read as programs (shared by the two exports above). */
+const EMPTY_BODIES = Object.freeze([]);
+let _lastHeredocCmd = null;
+let _lastHeredocEntry = null;
+
+/** Heredoc-free skeleton + bodies read as programs and expanding bodies (memoized for the active command). */
 function splitHeredocs(command) {
+  if (command === _lastHeredocCmd && _lastHeredocEntry !== null) {
+    return _lastHeredocEntry;
+  }
   // Fast path — bypass the regex when no heredoc opener is present. 95%+ of PreToolUse Bash hook
   // calls (simple git/ls/npm) contain none, and `.includes` is far cheaper than backtracking.
-  if (!command.includes('<<')) return { stripped: command, programBodies: [] };
+  if (!command.includes('<<')) {
+    _lastHeredocCmd = command;
+    _lastHeredocEntry = { stripped: command, programBodies: EMPTY_BODIES, expandingBodies: EMPTY_BODIES };
+    return _lastHeredocEntry;
+  }
 
   const heredocs = findHeredocs(command);
-  if (heredocs.length === 0) return { stripped: command, programBodies: [] };
+  if (heredocs.length === 0) {
+    _lastHeredocCmd = command;
+    _lastHeredocEntry = { stripped: command, programBodies: EMPTY_BODIES, expandingBodies: EMPTY_BODIES };
+    return _lastHeredocEntry;
+  }
   const bodies = heredocs.map((h) => h.body);
   let skeleton = '';
   let last = 0;
@@ -495,8 +510,13 @@ function splitHeredocs(command) {
   for (const stream of lexer.streams) collectPrograms(stream, programs);
 
   const stripped = skeleton.replaceAll(OPENER, '');
-  const programBodies = bodies.filter((body, id) => body && programs.has(id));
-  return { stripped, programBodies };
+  const programBodies = Object.freeze(bodies.filter((body, id) => body && programs.has(id)));
+  const expandingBodies = Object.freeze(
+    heredocs.filter((h) => h.expands && h.body).map((h) => h.body),
+  );
+  _lastHeredocCmd = command;
+  _lastHeredocEntry = { stripped, programBodies, expandingBodies };
+  return _lastHeredocEntry;
 }
 
 /**
@@ -509,10 +529,8 @@ function splitHeredocs(command) {
  * @returns {string[]}
  */
 export function expandingHeredocBodies(command) {
-  if (typeof command !== 'string' || !command.includes('<<')) return [];
-  return findHeredocs(command)
-    .filter((h) => h.expands && h.body)
-    .map((h) => h.body);
+  if (typeof command !== 'string' || !command.includes('<<')) return EMPTY_BODIES;
+  return splitHeredocs(command).expandingBodies;
 }
 
 /**

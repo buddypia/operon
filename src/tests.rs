@@ -49019,6 +49019,19 @@ pub(crate) fn ci_runs_on_the_branches_the_merge_gate_asks_about() {
         test_job.contains("\n    env:\n      RUSTFLAGS: -D warnings\n"),
         "ci.yml の test ジョブが警告をエラーにしていません:\n{test_job}"
     );
+    let package_job: Vec<&str> = workflow
+        .lines()
+        .skip_while(|line| *line != "  package:")
+        .skip(1)
+        .take_while(|line| line.is_empty() || line.starts_with("    "))
+        .collect();
+    let package_job = package_job.join("\n");
+    assert!(
+        package_job
+            .lines()
+            .any(|line| line == "    if: github.ref == 'refs/heads/main'"),
+        "ci.yml の package ジョブが main 以外のブランチでも走り、並列 worktree の macOS ランナー枠を消費しています:\n{package_job}"
+    );
     let script = fs::read_to_string(root.join("scripts/ci-verified.sh")).unwrap();
     assert!(
         script.lines().any(|line| line == "workflow=ci.yml"),
@@ -49051,8 +49064,9 @@ pub(crate) fn a_new_worktree_builds_from_mains_cache_and_formats_its_own_files()
     let cache = fixture.join("target/debug/deps");
     fs::create_dir_all(&cache).unwrap();
     fs::write(cache.join("libcached.rlib"), "built\n").unwrap();
+    fs::write(fixture.join("target/debug/.cargo-lock"), "locked\n").unwrap();
     let mut made = Vec::new();
-    for branch in ["feature/elsewhere", "feature/new"] {
+    for branch in ["feature/elsewhere", "feature/new", "feature/from-sibling"] {
         let worktree = fixture.join(".worktrees").join(branch);
         git_in(
             &fixture,
@@ -49075,12 +49089,33 @@ pub(crate) fn a_new_worktree_builds_from_mains_cache_and_formats_its_own_files()
     let output = run_command_with_timeout(&mut command, Duration::from_secs(60))
         .expect("scripts/seed-target.sh が時間内に終わりませんでした");
     let seeded = made[1].join("target/debug/deps/libcached.rlib").exists();
+    let copied_lock = made[1].join("target/debug/.cargo-lock").exists();
     let elsewhere = made[0].join("target").exists();
+
+    // Change 217: when main's target/debug/deps is absent, a warm sibling
+    // worktree under .worktrees/ seeds the next worktree instead of building
+    // Cargo.lock cold, and drops any .cargo-lock from the sibling clone too.
+    fs::remove_dir_all(fixture.join("target")).unwrap();
+    fs::write(made[1].join("target/debug/.cargo-lock"), "sibling-lock\n").unwrap();
+    let mut sibling_cmd = Command::new("bash");
+    forget_inherited_repository(&mut sibling_cmd)
+        .arg(root.join("scripts/seed-target.sh"))
+        .arg("feature/from-sibling")
+        .current_dir(&made[0]);
+    let sibling_output = run_command_with_timeout(&mut sibling_cmd, Duration::from_secs(60))
+        .expect("scripts/seed-target.sh (sibling fallback) が時間内に終わりませんでした");
+    let sibling_seeded = made[2].join("target/debug/deps/libcached.rlib").exists();
+    let sibling_lock = made[2].join("target/debug/.cargo-lock").exists();
     fs::remove_dir_all(&fixture).ok();
     assert!(
-        output.status.success() && seeded && !elsewhere,
-        "新しい worktree に main の target/debug が複製されていません: {}",
+        output.status.success() && seeded && !copied_lock && !elsewhere,
+        "新しい worktree に main の target/debug が複製されていないか、.cargo-lock が残っています: {}",
         both_streams(&output)
+    );
+    assert!(
+        sibling_output.status.success() && sibling_seeded && !sibling_lock,
+        "main に target/debug がないとき、既存の worktree から target/debug を複製できていません: {}",
+        both_streams(&sibling_output)
     );
 
     // Lesson 086, as a rule over every hook rather than the one that broke it
@@ -58844,4 +58879,319 @@ pub(crate) fn the_readmes_document_the_channel_cli() {
             );
         }
     }
+}
+
+/// Change 217. Under parallel multi-CLI cargo builds, four node PreToolUse
+/// hooks start at once on every Bash call and two on every Edit/Write call. A
+/// 5-second timeout kills the guard before node finishes starting, and on
+/// SessionEnd in `.claude/hooks.json` and `.codex/hooks.json` a 5-second
+/// timeout cuts off `releaseLeases`'s 8,000 ms git budget. Every `.cli/hooks/`
+/// tool guard gets at least 30s, Stop gets at least 15s, and SessionEnd gets
+/// at least 10s across all three CLI hook files and the registry SSOT.
+#[test]
+pub(crate) fn every_hook_gives_node_guards_time_to_finish_under_load() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let floor_for = |event: &str| -> u64 {
+        match event {
+            "SessionEnd" | "Stop" => 10,
+            _ => 30,
+        }
+    };
+    let mut short = Vec::new();
+    for (file, is_antigravity) in [
+        (".claude/settings.json", false),
+        (".codex/hooks.json", false),
+        (".claude/hooks.json", true),
+    ] {
+        let text = fs::read_to_string(root.join(file)).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let tables: Vec<(&str, &serde_json::Map<String, serde_json::Value>)> = if is_antigravity {
+            doc.as_object()
+                .unwrap()
+                .iter()
+                .filter_map(|(k, v)| v.as_object().map(|m| (k.as_str(), m)))
+                .collect()
+        } else {
+            vec![("hooks", doc["hooks"].as_object().unwrap())]
+        };
+        for (_, events) in tables {
+            for (event, entries) in events {
+                let Some(entries) = entries.as_array() else {
+                    continue;
+                };
+                for entry in entries {
+                    let handlers: Vec<&serde_json::Value> =
+                        if let Some(inner) = entry.get("hooks").and_then(|h| h.as_array()) {
+                            inner.iter().collect()
+                        } else {
+                            vec![entry]
+                        };
+                    for handler in handlers {
+                        let Some(command) = handler.get("command").and_then(|c| c.as_str()) else {
+                            continue;
+                        };
+                        if !command.contains(".cli/hooks/") {
+                            continue;
+                        }
+                        let timeout = handler.get("timeout").and_then(|t| t.as_u64()).unwrap_or(0);
+                        let floor = floor_for(event);
+                        if timeout < floor {
+                            short.push(format!(
+                                "{file} {event}: timeout {timeout}s < {floor}s ({command})"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let script = format!(
+        "import {{ existsSync }} from 'node:fs';\n\
+         import {{ join }} from 'node:path';\n\
+         const {{ MANAGED_HOOK_REGISTRY }} = await import({registry:?});\n\
+         const out = [];\n\
+         for (const [event, groups] of Object.entries(MANAGED_HOOK_REGISTRY)) {{\n\
+           for (const group of groups || []) {{\n\
+             for (const hook of group.hooks || []) {{\n\
+               const mod = String(hook.module || '');\n\
+               if (mod.startsWith('.cli/hooks/') && existsSync(join({root:?}, mod))) {{\n\
+                 out.push({{ event, id: hook.id, timeout: hook.timeout ?? 0 }});\n\
+               }}\n\
+             }}\n\
+           }}\n\
+         }}\n\
+         console.log(JSON.stringify(out));",
+        registry = root.join(".cli/lib/hook-registry.mjs").to_str().unwrap(),
+        root = root.to_str().unwrap(),
+    );
+    let mut command = node_in(&root);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+        .expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let entries: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    for entry in entries.as_array().unwrap() {
+        let event = entry["event"].as_str().unwrap_or_default();
+        let id = entry["id"].as_str().unwrap_or_default();
+        let timeout = entry["timeout"].as_u64().unwrap_or(0);
+        let floor = floor_for(event);
+        if timeout < floor {
+            short.push(format!(
+                ".cli/lib/hook-registry.mjs {event}/{id}: timeout {timeout}s < {floor}s"
+            ));
+        }
+    }
+
+    assert!(
+        short.is_empty(),
+        "並列ビルド負荷でタイムアウトする短い hook 設定が残っています:\n{}",
+        short.join("\n")
+    );
+}
+
+/// Change 217. Allowed worktree and trunk calls must not spawn a redundant
+/// `git branch --show-current` in the trunk checkout, `loadMergedHookRegistry`
+/// must not deep-clone `MANAGED_HOOK_REGISTRY` when no local overlay exists,
+/// and `commit-guard.mjs` / `destructive-git-guard.mjs` must reuse the stripped
+/// heredoc representation across the checks of one command.
+#[test]
+pub(crate) fn worktree_and_allowlisted_calls_skip_redundant_trunk_git_and_registry_clones() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("zero-git-worktree-fastpath");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+    let mine = project.join(".worktrees/feature/mine");
+    git_in(
+        &project,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "feature/mine",
+            mine.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    let real_git_out = Command::new("which").arg("git").output().unwrap();
+    let real_git = String::from_utf8_lossy(&real_git_out.stdout)
+        .trim()
+        .to_owned();
+    let fake_bin = project.join(".git/fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let branch_log = project.join(".git/branch-queries.log");
+    let fake_git = fake_bin.join("git");
+    fs::write(
+        &fake_git,
+        format!(
+            "#!/usr/bin/env bash\n\
+             if [ \"${{1:-}}\" = \"branch\" ] && [ \"${{2:-}}\" = \"--show-current\" ]; then\n\
+               printf '%s\\n' \"$PWD\" >> {log:?}\n\
+               exit 1\n\
+             fi\n\
+             exec {real_git:?} \"$@\"\n",
+            log = branch_log,
+            real_git = real_git,
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const fs = await import('node:fs');\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const commitGuard = await import({commit_guard:?});\n\
+         const {{ heredocProgramBodies, expandingHeredocBodies }} = await import({heredoc:?});\n\
+         const {{ MANAGED_HOOK_REGISTRY }} = await import({registry:?});\n\
+         const {{ loadMergedHookRegistry, mergeHookRegistryOverlay }} = await import({overlay:?});\n\
+         const logPath = {log:?};\n\
+         const takeCount = () => {{\n\
+           if (!fs.existsSync(logPath)) return 0;\n\
+           const lines = fs.readFileSync(logPath, 'utf8').trim().split('\\n').filter(Boolean);\n\
+           fs.unlinkSync(logPath);\n\
+           return lines.length;\n\
+         }};\n\
+         const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
+         const call = (tool_name, tool_input, cwd = {project:?}) => ({{ tool_name, tool_input, cwd, session_id: 's1', hook_event_name: 'PreToolUse' }});\n\
+         takeCount();\n\
+         const wtEdit = decide(await policy(call('Edit', {{ file_path: {mine:?} + '/src/main.rs' }})));\n\
+         const wtEditGit = takeCount();\n\
+         const t1Edit = decide(await policy(call('Edit', {{ file_path: '.agents/teamwork/r1/report.md' }})));\n\
+         const t1EditGit = takeCount();\n\
+         const wtBash = decide(await policy(call('Bash', {{ command: 'cd ' + {mine:?} + ' && cargo check' }})));\n\
+         const wtBashGit = takeCount();\n\
+         const allowBash = decide(await policy(call('Bash', {{ command: 'git status' }})));\n\
+         const allowBashGit = takeCount();\n\
+         const t3Edit = decide(await policy(call('Edit', {{ file_path: 'src/main.rs' }})));\n\
+         const t3EditGit = takeCount();\n\
+         const denyBash = decide(await policy(call('Bash', {{ command: 'cargo build' }})));\n\
+         const denyBashGit = takeCount();\n\
+         const wtCommit = decide(await commitGuard.run(call('Bash', {{ command: 'cd ' + {mine:?} + ' && git commit -m ok' }})));\n\
+         const wtCommitGit = takeCount();\n\
+         const trunkCommit = decide(await commitGuard.run(call('Bash', {{ command: 'git commit -m nope' }})));\n\
+         const trunkCommitGit = takeCount();\n\
+         const noOverlay = loadMergedHookRegistry(MANAGED_HOOK_REGISTRY, {project:?});\n\
+         const withOverlay = mergeHookRegistryOverlay(MANAGED_HOOK_REGISTRY, {{ overrides: {{}} }});\n\
+         const sample = \"bash <<EOF\\ngit status\\nEOF\\n\";\n\
+         const memoProgram = heredocProgramBodies(sample) === heredocProgramBodies(sample);\n\
+         const memoExpanding = expandingHeredocBodies(sample) === expandingHeredocBodies(sample);\n\
+         console.log(JSON.stringify({{\n\
+           wtEdit, wtEditGit, t1Edit, t1EditGit, wtBash, wtBashGit, allowBash, allowBashGit,\n\
+           t3Edit, t3EditGit, denyBash, denyBashGit, wtCommit, wtCommitGit, trunkCommit, trunkCommitGit,\n\
+           reusedManaged: noOverlay.registry === MANAGED_HOOK_REGISTRY,\n\
+           clonedOverlay: withOverlay.registry !== MANAGED_HOOK_REGISTRY,\n\
+           memoCommit: memoProgram, memoDestructive: memoExpanding,\n\
+         }}));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        commit_guard = repository
+            .join(".cli/hooks/commit-guard.mjs")
+            .to_str()
+            .unwrap(),
+        heredoc = repository
+            .join(".cli/lib/heredoc-strip.mjs")
+            .to_str()
+            .unwrap(),
+        registry = repository
+            .join(".cli/lib/hook-registry.mjs")
+            .to_str()
+            .unwrap(),
+        overlay = repository
+            .join(".cli/lib/hook-registry-overlay.mjs")
+            .to_str()
+            .unwrap(),
+        log = branch_log.to_str().unwrap(),
+        project = project.to_str().unwrap(),
+        mine = mine.to_str().unwrap(),
+    );
+    let mut command = node_in(&project);
+    command
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake_bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let res: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
+
+    assert_eq!(
+        (res["wtEdit"].as_str(), res["wtEditGit"].as_u64()),
+        (Some("allow"), Some(0)),
+        "worktree 内の Edit が trunk の git branch --show-current を呼んでいます: {res}"
+    );
+    assert_eq!(
+        (res["t1Edit"].as_str(), res["t1EditGit"].as_u64()),
+        (Some("allow"), Some(0)),
+        "Tier 1 の Edit が trunk の git branch --show-current を呼んでいます: {res}"
+    );
+    assert_eq!(
+        (res["wtBash"].as_str(), res["wtBashGit"].as_u64()),
+        (Some("allow"), Some(0)),
+        "worktree 内の Bash が trunk の git branch --show-current を呼んでいます: {res}"
+    );
+    assert_eq!(
+        (res["allowBash"].as_str(), res["allowBashGit"].as_u64()),
+        (Some("allow"), Some(0)),
+        "allowlist 内の Bash が trunk の git branch --show-current を呼んでいます: {res}"
+    );
+    assert_eq!(
+        (res["t3Edit"].as_str(), res["t3EditGit"].as_u64()),
+        (Some("deny"), Some(1)),
+        "trunk の Tier 3 Edit が branch を確認して拒否していません: {res}"
+    );
+    assert_eq!(
+        (res["denyBash"].as_str(), res["denyBashGit"].as_u64()),
+        (Some("deny"), Some(1)),
+        "trunk の非 allowlist Bash が branch を確認して拒否していません: {res}"
+    );
+    assert_eq!(
+        (res["wtCommit"].as_str(), res["wtCommitGit"].as_u64()),
+        (Some("allow"), Some(0)),
+        "worktree 内の commit で commit-guard が trunk の git branch --show-current を呼んでいます: {res}"
+    );
+    assert_eq!(
+        (res["trunkCommit"].as_str(), res["trunkCommitGit"].as_u64()),
+        (Some("deny"), Some(1)),
+        "trunk の commit で commit-guard が branch を確認して拒否していません: {res}"
+    );
+    assert_eq!(
+        res["reusedManaged"].as_bool(),
+        Some(true),
+        "overlay が無いのに loadMergedHookRegistry が MANAGED_HOOK_REGISTRY を deep-clone しています: {res}"
+    );
+    assert_eq!(
+        res["clonedOverlay"].as_bool(),
+        Some(true),
+        "mergeHookRegistryOverlay が MANAGED_HOOK_REGISTRY をそのまま返しています: {res}"
+    );
+    assert_eq!(
+        (
+            res["memoCommit"].as_bool(),
+            res["memoDestructive"].as_bool()
+        ),
+        (Some(true), Some(true)),
+        "stripHeredocData / inspectableCommand が同じコマンド文字列を再利用していません: {res}"
+    );
 }

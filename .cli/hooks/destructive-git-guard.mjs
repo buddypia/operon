@@ -189,8 +189,15 @@ export function stripCommitMessageBody(command) {
  * @param {string} command
  * @returns {string}
  */
+let _lastInspectableRaw = null;
+let _lastInspectableOut = null;
+
 function inspectableCommand(command) {
-  return stripCommitMessageBody(joinLineContinuations(stripHeredocData(command)));
+  if (command === _lastInspectableRaw) return _lastInspectableOut;
+  const out = stripCommitMessageBody(joinLineContinuations(stripHeredocData(command)));
+  _lastInspectableRaw = command;
+  _lastInspectableOut = out;
+  return out;
 }
 
 function shellishTokens(commandSegment) {
@@ -714,7 +721,7 @@ export async function run(data) {
     const command = data.tool_input?.command || '';
 
     const projectDir = process.env.CLAUDE_PROJECT_DIR || '';
-    if (isCreatePrLeaseActive(projectDir) && isCreatePrSafeCommand(command)) {
+    if (isCreatePrSafeCommand(command) && isCreatePrLeaseActive(projectDir)) {
       return HookOutput.passthrough();
     }
 

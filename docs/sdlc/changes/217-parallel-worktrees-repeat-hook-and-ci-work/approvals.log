@@ -1,0 +1,9 @@
+# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>
+#
+# The plan touches gate configuration (hooks, seed-target, and CI workflow), a
+# paused surface in docs/sdlc/risk.yaml. The evaluator, a fresh subagent,
+# approved it on first reading; the person line quotes the owner's explicit
+# instruction to deduplicate verification gate checks across parallel worktrees,
+# share warm state across worktrees, and restrict main-only checks to main.
+2026-10-23T19:20:12Z auto plan plan.md cf86950bf0297287 approve evaluator: Plan accurately diagnoses all five parallel-worktree bottlenecks against the target files, preserves all guard verdicts and branch CI checks (checks + test), tightens hook timeouts under load, and aligns with the owner's explicit request.
+2026-10-23T19:20:12Z person gate-configuration plan.md cf86950bf0297287 approve owner: 병렬로 여러 AI가 worktree를 소유해서 진행하는데 최대한 효율화시키고 싶으니깐 각각 AI가 공유해서 쓸 수 있는 부분이나 모듈화 될 수 있는 부분은 따로 분리시켜서 agent_scratchpad 같은걸 만들어 공유하던가 한군데에서만 체크하록 하던가 아니면 중요도를 체크해서 main에서만 체크되도록 하던가 등등 여러방면에서 최적화하고 최대한 토큰과 리소스, 시간을 절약하고 싶어.

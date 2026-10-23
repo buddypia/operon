@@ -387,21 +387,26 @@ async function runTrunkBash(data, projectDir) {
   const cmd = data?.tool_input?.command;
   if (typeof cmd !== 'string' || !cmd.trim()) return HookOutput.passthrough();
 
+  let segment = null;
+  let parseErr = null;
+  try {
+    segment = findDisallowedTrunkSegment(cmd, data?.cwd || projectDir, projectDir, allowlist);
+  } catch (err) {
+    parseErr = err;
+  }
+  if (!parseErr && segment === null) return HookOutput.passthrough();
+
   const branch = queryBranch(projectDir);
   if (!shouldEvaluateTiers(branch, policy)) return HookOutput.passthrough();
   const branchLabel = branch || 'unresolved branch (query failed/timed out — fail-closed; retry)';
 
-  let segment;
-  try {
-    segment = findDisallowedTrunkSegment(cmd, data?.cwd || projectDir, projectDir, allowlist);
-  } catch (err) {
+  if (parseErr) {
     // Opted in → fail closed: an unparsable command is not evidence of an allowed one.
     return HookOutput.deny(
-      `[Worktree Policy] Could not analyse this command on ${branchLabel} (${err?.message || err}), ` +
+      `[Worktree Policy] Could not analyse this command on ${branchLabel} (${parseErr?.message || parseErr}), ` +
         `so trunk_bash_allowlist denies it. Simplify the command or run it inside a worktree.`,
     );
   }
-  if (segment === null) return HookOutput.passthrough();
   const cwd = data?.cwd ? realPath(data.cwd) : null;
   const worktree = cwd ? worktreeHolding(cwd, projectDir) : null;
   return HookOutput.deny(buildTrunkBashDenyMessage(segment, branchLabel, worktree));
@@ -421,20 +426,16 @@ export async function run(data) {
     }
 
     const projectDir = resolveProjectDir(data);
-    const branch = queryBranch(projectDir); // short budget — rationale at queryBranch
-
     const policy = safeReadJson(
       join(projectDir, '.claude/config/worktree-policy.json'),
       null
     );
     if (!isPolicyUsable(policy)) return HookOutput.passthrough();
 
-    // Non-protected / escape-hatch branches pass; unresolved branch falls through (fail-closed).
-    if (!shouldEvaluateTiers(branch, policy)) return HookOutput.passthrough();
-
     const filePaths = extractFilePaths(toolName, data.tool_input, projectDir);
     if (filePaths.length === 0) return HookOutput.passthrough();
 
+    let deniedRelPath = null;
     for (const filePath of filePaths) {
       const relPath = relative(projectDir, filePath).replace(/\\/g, '/');
       // Exempt paths outside project root
@@ -444,12 +445,18 @@ export async function run(data) {
       const tier = classifyTier(relPath, policy);
       if (tier === 1) continue;
       // tier === 3 (tier 2 has been abolished)
-      return HookOutput.deny(
-        buildDenyMessage(relPath, branch || 'unresolved (branch query failed/timed out — fail-closed; retry)'),
-      );
+      deniedRelPath = relPath;
+      break;
     }
+    if (deniedRelPath === null) return HookOutput.passthrough();
 
-    return HookOutput.passthrough();
+    const branch = queryBranch(projectDir); // short budget — rationale at queryBranch
+    // Non-protected / escape-hatch branches pass; unresolved branch falls through (fail-closed).
+    if (!shouldEvaluateTiers(branch, policy)) return HookOutput.passthrough();
+
+    return HookOutput.deny(
+      buildDenyMessage(deniedRelPath, branch || 'unresolved (branch query failed/timed out — fail-closed; retry)'),
+    );
   } catch (_) {
     return HookOutput.passthrough();
   }

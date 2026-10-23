@@ -33,15 +33,32 @@ main="$main_root/target/debug"
 worktree="$main_root/.worktrees/$branch"
 
 [ -d "$worktree" ] || exit 0
-if [ ! -d "$main/deps" ]; then
+[ -e "$worktree/target" ] && exit 0
+
+source_debug=""
+if [ -d "$main/deps" ]; then
+  if [ -f "$main_root/scripts/prune-target.sh" ]; then
+    (cd "$main_root" && bash scripts/prune-target.sh >/dev/null 2>&1) || true
+  fi
+  source_debug="$main"
+else
+  for candidate in "$main_root"/.worktrees/*/*/target/debug "$main_root"/.worktrees/*/target/debug; do
+    [ -d "$candidate/deps" ] || continue
+    [ "$candidate" = "$worktree/target/debug" ] && continue
+    source_debug="$candidate"
+    break
+  done
+fi
+
+if [ -z "$source_debug" ]; then
   echo "seed-target: $main がないため、初回ビルドは全依存をコンパイルします。" >&2
   exit 0
 fi
-[ -e "$worktree/target" ] && exit 0
 
 mkdir -p "$worktree/target"
-if cp -c -R -p "$main" "$worktree/target/debug" 2>/dev/null; then
-  echo "seed-target: main の target/debug を複製しました。初回ビルドは変更分だけになります。" >&2
+if cp -c -R -p "$source_debug" "$worktree/target/debug" 2>/dev/null; then
+  rm -f "$worktree/target/debug/.cargo-lock"
+  echo "seed-target: $source_debug を複製しました。初回ビルドは変更分だけになります。" >&2
 else
   rm -rf "$worktree/target/debug"
   echo "seed-target: target/debug を複製できませんでした。初回ビルドは全依存をコンパイルします。" >&2

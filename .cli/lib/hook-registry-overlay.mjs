@@ -287,6 +287,16 @@ export function mergeHookRegistryOverlay(managed, overlay, { validEvents = null 
 /** Reads + merges the overlay of rootDir. Never throws; warnings carry every ignored/rejected part. */
 export function loadMergedHookRegistry(managed, rootDir, opts = {}) {
   const read = readHookRegistryOverlay(rootDir);
+  if (!read.overlay) {
+    return {
+      registry: managed,
+      added: [],
+      overridden: [],
+      present: read.present,
+      path: HOOK_REGISTRY_LOCAL_REL,
+      warnings: [...read.warnings],
+    };
+  }
   const m = mergeHookRegistryOverlay(managed, read.overlay, opts);
   return { ...m, present: read.present, path: HOOK_REGISTRY_LOCAL_REL, warnings: [...read.warnings, ...m.warnings] };
 }

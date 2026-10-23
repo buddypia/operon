@@ -1,0 +1,63 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: fix/217-parallel-worktrees-repeat-hook-and-ci-work.
+#
+# Report: parallel AI CLI sessions working across git worktrees run four node
+# PreToolUse hooks on every Bash call and two on every Edit/Write call. Five
+# defects compound across parallel worktrees:
+# 1. worktree-policy-guard.mjs spawns `git branch --show-current` in the trunk
+#    checkout before checking whether a Bash command is already inside a
+#    worktree or on trunk_bash_allowlist, and before checking whether an
+#    Edit/Write target is inside `.worktrees/` or Tier 1, so every allowed
+#    worktree and trunk call pays a redundant git subprocess.
+# 2. commit-guard.mjs spawns `git branch --show-current` in the trunk checkout
+#    even when `isWorktree` is true (where `decide` ignores `branch`), and
+#    commit-guard.mjs / destructive-git-guard.mjs re-run heredoc and comment
+#    stripping 7-8 times on the same command string; loadMergedHookRegistry
+#    deep-clones 1,062 lines of JSON on every hook import even when no local
+#    overlay exists.
+# 3. .claude/hooks.json, .codex/hooks.json, .claude/settings.json, and
+#    .cli/lib/hook-registry.mjs give .cli/hooks/ PreToolUse/PostToolUse/
+#    PermissionRequest entries a 5s timeout (and SessionEnd in hooks.json 5s
+#    over an 8s git budget), killing hooks under parallel cargo build load.
+# 4. scripts/seed-target.sh gives up when main/target/debug/deps is absent even
+#    when a sibling worktree has a warm target/debug/deps, and copies
+#    .cargo-lock and unpruned test binaries into the new worktree.
+# 5. .github/workflows/ci.yml runs the `package` job on every feature/fix
+#    branch push (3 macOS jobs per branch), repeating fmt/clippy and building a
+#    release bundle that only main ships, exhausting the 5-runner macOS limit
+#    when two worktrees push at once.
+#
+# Fix: plan.md.
+#
+# Route: bugfix. The surface is gate configuration, a paused one; the plan is
+# approved by a fresh evaluator subagent and by the owner's explicit request to
+# deduplicate worktree gate checks, share warm state across worktrees, and move
+# main-only checks to main.
+
+state:
+  route: "bugfix"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Reviewed (rust-reviewer and subprocess-safety-reviewer approve 0 0 at digest 04e87ad531d4c448); ready to commit, push, verify CI, and merge into main."
+
+contract:
+  three-gates: "machine passed cargo fmt --check && cargo clippy --locked -- -D warnings && 4 change-217 guard tests passed"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed no: only .cli/, .claude/, .codex/, .github/workflows/ci.yml, scripts/seed-target.sh, src/tests.rs, and docs/sdlc/ change"
+  guards-verified-by-mutation: "human passed 8 of 8 mutations caught by python3 docs/sdlc/changes/217-parallel-worktrees-repeat-hook-and-ci-work/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
