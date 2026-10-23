@@ -1,0 +1,3 @@
+2026-10-23T17:15:21Z auto intent intent.md a40f656a3167bb09 approve Restates the person's quoted request to separate battle-test (canary) and stable builds and provide the workflow as a CLI without opening a new product direction or weakening any protection
+2026-10-23T17:15:21Z auto spec spec.md 41f307eec87c8993 approve Satisfies every outcome and constraint in intent.md with testable requirements, bounded process-quit polling, OperonSourceCommit SSOT from scripts/package-macos.sh, atomic swap delegation to scripts/replace-macos-bundle.sh, and trilingual README coverage
+2026-10-23T17:15:21Z auto plan plan.md d96847459e5608f1 approve Covers all requirements, tests, and Design files in a workable order with honest risks; touches no paused surface

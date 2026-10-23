@@ -1,0 +1,32 @@
+# Review record for change 215-switching-between-canary-and-stable-builds-is-manual.
+#
+# Round 1 (digest 90bd375fb1a0b1c5):
+# - rust-reviewer: approve 0 0
+# - subprocess-safety-reviewer: do-not-approve 2 1
+#   - Important 1: running_operon_pids and quit_running_operon matched only
+#     lowercase `operon` (cargo run) and AppleScript id `com.FlowStandard.Operon`,
+#     missing packaged `.app` bundles (`Contents/MacOS/Operon`, bundle id
+#     `local.operon`), and real process detection/termination was bypassed in tests.
+#   - Important 2: cmd_promote and cmd_rollback had no EXIT/INT/TERM trap to
+#     clean up partial `.staging.$$` / `.rollback-staging.$$` directories.
+#   - Nit 1: stamp_key extracted from $packager was not filtered through an
+#     `[A-Za-z0-9_]` allowlist before PlistBuddy.
+#
+# Round 2 (digest 2ba192df21e12173):
+# - Fixed running_operon_pids to query both `Operon` and `operon` via `pgrep -x`,
+#   targeted `local.operon` in osascript quit, added `cleanup_staging` trap on
+#   EXIT/INT/TERM, validated `stamp_key` against `*[!A-Za-z0-9_]*`, added tests
+#   for capital-O `Operon` detection, SIGTERM quit, exit-75 timeout, and failed
+#   staging cleanup in `src/tests.rs`, and added the
+#   `running-operon-ignores-packaged-capital-o-process` mutation to `mutations.py`
+#   (7 of 7 caught).
+# - rust-reviewer: approve 0 0
+# - subprocess-safety-reviewer: approve 0 0
+
+digest: "2ba192df21e12173"
+
+rounds: 2
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
