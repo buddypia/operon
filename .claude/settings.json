@@ -39,7 +39,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-policy-guard.mjs\"",
-            "timeout": 5
+            "timeout": 30
           },
           {
             "type": "command",
@@ -56,7 +56,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-session-owner-guard.mjs\"",
-            "timeout": 5
+            "timeout": 30
           }
         ]
       },
@@ -65,11 +65,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-policy-guard.mjs\""
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-policy-guard.mjs\"",
+            "timeout": 30
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-session-owner-guard.mjs\""
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-session-owner-guard.mjs\"",
+            "timeout": 30
           }
         ]
       }
@@ -91,7 +93,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-owner-tracker.mjs\"",
-            "timeout": 5
+            "timeout": 30
           }
         ]
       }
@@ -106,7 +108,8 @@
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-shipping-guard.mjs\""
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.cli/hooks/worktree-shipping-guard.mjs\"",
+            "timeout": 10
           }
         ]
       }

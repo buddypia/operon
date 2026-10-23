@@ -1,0 +1,12 @@
+# Review record for change 217-parallel-worktrees-repeat-hook-and-ci-work.
+#
+# Both required reviewers (rust-reviewer 3076b6c3 and subprocess-safety-reviewer
+# 89a979e0) reviewed the staged diff at digest 04e87ad531d4c448 and approved
+# with zero Important findings and zero nits.
+
+digest: "04e87ad531d4c448"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

@@ -457,16 +457,24 @@ function resolveDecisionContext(data, command, projectDir) {
       targets.bases.every((dir) => isForeignRepoTarget(dir, projectDir))
     : isForeignRepoTarget(baseDir, projectDir);
   const policy = loadWorktreePolicy(projectDir);
+  const isCreatePrActive = isCreatePrLeaseActive(PROJECT_DIR);
+  // Worktree evaluation: the commit's actual target only (`git -C` / `cd … &&` / else the start cwd),
+  // resolved to a real path and confirmed as a linked worktree by git (isWorktreeCommit).
+  const isWorktree = isWorktreeCommit(command, data?.cwd, baseDir);
+  // When the commit is inside a worktree, a foreign repo, or under an active create-pr lease,
+  // decide() never reads the trunk branch — skip spawning `git branch --show-current` in projectDir.
+  const branch =
+    isForeignRepo || isCreatePrActive || isWorktree
+      ? null
+      : safeGit('branch --show-current', projectDir);
 
   return {
     command,
     baseDir,
     // No `|| ''` coercion: falsy stays falsy so `decide()` can tell "unresolved" from "not trunk".
-    branch: safeGit('branch --show-current', projectDir),
-    isCreatePrActive: isCreatePrLeaseActive(PROJECT_DIR),
-    // Worktree evaluation: the commit's actual target only (`git -C` / `cd … &&` / else the start cwd),
-    // resolved to a real path and confirmed as a linked worktree by git (isWorktreeCommit).
-    isWorktree: isWorktreeCommit(command, data?.cwd, baseDir),
+    branch,
+    isCreatePrActive,
+    isWorktree,
     // Resolves trunk list from target project policy (fallback to main+master).
     trunkBranches: resolveTrunkBranches(policy),
     policy,

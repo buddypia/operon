@@ -225,6 +225,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "profile": "minimal",
           "description": "Enforce direct main work Tier policy (Tier 1/2/3 + hotfix/* escape hatch). SSOT: .claude/config/worktree-policy.json",
           "orchestrated": true,
+          "timeout": 30,
           "cliTargets": ["codex", "antigravity"],
           "cliMatcherTools": ["Edit", "Write", "MultiEdit"]
         },
@@ -235,6 +236,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "profile": "standard",
           "description": "Block multi-session cross-worktree edits (Layer 1 cwd-confinement + Layer 2 session_id sidecar). Targets Edit|Write|MultiEdit",
           "orchestrated": true,
+          "timeout": 30,
           "cliTargets": ["codex", "antigravity"],
           "cliMatcherTools": ["Edit", "Write", "MultiEdit"]
         },
@@ -303,7 +305,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "profile": "minimal",
           "description": "[opt-in] Trunk Bash allowlist — on trunk, deny Bash commands not listed in worktree-policy.json#trunk_bash_allowlist. Default off: returns after one JSON read. Registered on every Bash (no `if`) because the allowlist must see non-git commands; orchestrated so Claude pays no extra process",
           "orchestrated": true,
-          "timeout": 5,
+          "timeout": 30,
           "cliTargets": ["codex", "antigravity"]
         },
         {
@@ -313,7 +315,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "profile": "standard",
           "description": "Block multi-session cross-worktree git commit (Layer 1 cwd-confinement + Layer 2 lease). Opt-in worktree-policy.json#session_owner_scope=\"all_bash\" widens it to every Bash command, so it is registered without `if: Bash(git *)` and orchestrated (in-process) — the default scope still passes non-commit commands through",
           "orchestrated": true,
-          "timeout": 5,
+          "timeout": 30,
           "cliTargets": ["codex", "antigravity"]
         },
         {
@@ -559,7 +561,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "profile": "standard",
           "description": "Record session ownership sidecar (.session-owner) upon successful worktree creation + announce which test files a successful fix/* or hotfix/* commit just locked (git history is the lock; context only — safeHookMain, profile-independent, never BLOCKs)",
           "orchestrated": true,
-          "timeout": 5,
+          "timeout": 30,
           "profileChecked": false,
           "cliTargets": ["codex", "antigravity"]
         },
@@ -642,6 +644,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "profile": "standard",
           "description": "Automatically guide /create-pr ship-worktree on worktree commit + unmerged (5-minute attempt marker)",
           "orchestrated": true,
+          "timeout": 10,
           "cliTargets": ["codex"],
           "cliTimeout": 10
         },
@@ -921,6 +924,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "id": "destructive-git-guard",
           "module": ".cli/hooks/destructive-git-guard.mjs",
           "priority": 5,
+          "timeout": 30,
           "description": "[PermissionRequest dual-defense] Block approval of destructive git commands like reset --hard / force push (reinforces escalations missed by Codex PreToolUse)",
           "cliTargets": ["codex"]
         },
@@ -935,6 +939,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "id": "commit-guard",
           "module": ".cli/hooks/commit-guard.mjs",
           "priority": 20,
+          "timeout": 30,
           "description": "[PermissionRequest dual-defense] Approval stage validation of Conventional Commits format",
           "cliTargets": ["codex"]
         },
@@ -961,6 +966,7 @@ export const MANAGED_HOOK_REGISTRY = {
           "id": "worktree-policy-guard",
           "module": ".cli/hooks/worktree-policy-guard.mjs",
           "priority": 8,
+          "timeout": 30,
           "description": "[PermissionRequest dual-defense] Block approval under Tier policy for direct main edits",
           "cliTargets": ["codex"]
         }
