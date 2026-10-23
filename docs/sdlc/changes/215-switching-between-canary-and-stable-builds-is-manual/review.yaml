@@ -22,10 +22,19 @@
 #   (7 of 7 caught).
 # - rust-reviewer: approve 0 0
 # - subprocess-safety-reviewer: approve 0 0
+#
+# Round 3 (digest 24245145a728f56d):
+# - Replaced the two raw `Command::new("git")` fixture calls in `src/tests.rs`
+#   with `git_command(&root)` to satisfy
+#   `no_git_command_in_the_crate_can_inherit_the_session_repository`, and set
+#   `state.yaml` `stage` to `"deploy"` to satisfy
+#   `every_state_file_names_a_route_and_a_stage_that_exist`.
+# - rust-reviewer: approve 0 0
+# - subprocess-safety-reviewer: approve 0 0
 
-digest: "2ba192df21e12173"
+digest: "24245145a728f56d"
 
-rounds: 2
+rounds: 1
 
 verdicts:
   rust-reviewer: "approve 0 0"

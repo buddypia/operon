@@ -16,7 +16,7 @@
 
 state:
   route: "modify"
-  stage: "done"
+  stage: "deploy"
   status: "done"
   attempts: "1 3"
   questions: "0 7"

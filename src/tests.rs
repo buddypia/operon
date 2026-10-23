@@ -58324,20 +58324,11 @@ pub(crate) fn the_channel_cli_reports_status_and_reads_its_stamp_key_from_the_pa
         &["add", "."][..],
         &["commit", "-m", "initial"][..],
     ] {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(&root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .status()
-            .unwrap();
+        let status = git_command(&root).args(args).status().unwrap();
         assert!(status.success());
     }
-    let head_output = Command::new("git")
+    let head_output = git_command(&root)
         .args(["rev-parse", "HEAD"])
-        .current_dir(&root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
         .output()
         .unwrap();
     let head = String::from_utf8_lossy(&head_output.stdout)
