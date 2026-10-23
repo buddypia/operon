@@ -1,0 +1,3 @@
+2026-10-23T18:58:08Z auto intent intent.md f82a4256cf1b596c approve Restates the person's quoted request to simplify scripts/operon-channel.sh and READMEs to a two-channel (canary and stable) workflow without touching bundle-swap scripts
+2026-10-23T18:58:08Z auto spec spec.md 0f4ff002bdcd8ddb approve Faithfully specifies the two-channel status output, canary and stable (--promote, --rollback) flags, dev removal, trilingual README sync, failure modes, and acceptance tests matching intent.md
+2026-10-23T18:58:08Z auto plan plan.md 510ab63ab04042aa approve Covers every file and acceptance criterion in spec.md with a test-first order of work, mutation testing, risk checks, and touches no paused surface in docs/sdlc/risk.yaml

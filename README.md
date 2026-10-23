@@ -406,11 +406,11 @@ To verify new changes in `dist/Operon.app` while keeping a proven daily-driver
 bundle at `/Applications/Operon Stable.app`, use `scripts/operon-channel.sh`:
 
 ```sh
-bash scripts/operon-channel.sh status          # show HEAD, running process, and channel commits
-bash scripts/operon-channel.sh canary --build  # package dist/Operon.app and switch to canary
-bash scripts/operon-channel.sh promote         # atomically promote verified canary to /Applications/Operon Stable.app
-bash scripts/operon-channel.sh stable          # quit canary and switch back to /Applications/Operon Stable.app
-bash scripts/operon-channel.sh rollback        # restore the previous stable bundle
+bash scripts/operon-channel.sh status           # show HEAD, running process, and canary/stable commits
+bash scripts/operon-channel.sh canary --build   # package dist/Operon.app and switch to canary
+bash scripts/operon-channel.sh stable           # quit canary and switch back to /Applications/Operon Stable.app
+bash scripts/operon-channel.sh stable --promote # atomically promote verified canary to /Applications/Operon Stable.app
+bash scripts/operon-channel.sh stable --rollback # restore the previous stable bundle
 ```
 
 Because agent sessions run in `tmux`, quitting and switching between `canary`

@@ -4,17 +4,15 @@
 # Channels:
 #   canary           dist/Operon.app (built from the current checkout for live verification)
 #   stable           /Applications/Operon Stable.app (promoted from a verified canary bundle)
-#   stable-previous  dist/Operon.stable-previous.app (retained rollback copy of stable)
-#   installed        /Applications/Operon.app (default macOS install location)
 #
 # Subcommands:
-#   status                           Show repo HEAD, running process, and each channel's stamp
+#   status                           Show repo HEAD, running process, and canary/stable stamps
 #   canary [--build|-b] [--full] [--no-open]
 #                                    Build (if requested or missing) and launch the canary bundle
-#   promote [--open]                 Atomically promote dist/Operon.app to /Applications/Operon Stable.app
-#   stable [--no-open]               Quit any running Operon and launch /Applications/Operon Stable.app
-#   rollback [--no-open]             Atomically restore dist/Operon.stable-previous.app to stable
-#   dev [-- <args...>]               Quit any running Operon and run `cargo run --release --locked`
+#   stable [--promote|-p] [--rollback|-r] [--no-open]
+#                                    Launch stable, promote canary to stable, or roll back stable
+#   promote [--no-open] [--open]     Alias for `stable --promote`
+#   rollback [--no-open]             Alias for `stable --rollback`
 #   quit                             Quit any running Operon and wait for single-instance lock release
 #
 # Exit codes:
@@ -69,11 +67,9 @@ dist_dir="${OPERON_DIST_DIR:-$repo_root/dist}"
 canary_app="${OPERON_CANARY_APP:-$dist_dir/Operon.app}"
 stable_app="${OPERON_STABLE_APP:-/Applications/Operon Stable.app}"
 stable_prev_app="${OPERON_STABLE_PREVIOUS_APP:-$dist_dir/Operon.stable-previous.app}"
-installed_app="${OPERON_INSTALLED_APP:-/Applications/Operon.app}"
 
 packager="${OPERON_PACKAGER:-${OPERON_PACKAGE_SCRIPT:-$repo_root/scripts/package-macos.sh}}"
 replace_script="${OPERON_REPLACE_SCRIPT:-$script_dir/replace-macos-bundle.sh}"
-check_script="${OPERON_CHECK_SCRIPT:-$repo_root/scripts/check-installed-build.sh}"
 quit_wait_seconds="${OPERON_QUIT_WAIT_SECONDS:-10}"
 
 case "$quit_wait_seconds" in
@@ -107,13 +103,13 @@ usage() {
 Usage: operon-channel.sh [subcommand] [options]
 
 Subcommands:
-  status                           Show repo HEAD, running process, and channel bundles (default)
+  status                           Show repo HEAD, running process, and canary/stable bundles (default)
   canary [--build|-b] [--full] [--no-open]
                                    Build (when --build is passed or bundle is missing) and open canary
-  promote [--open]                 Atomically promote canary (dist/Operon.app) to stable
-  stable [--no-open]               Switch to the promoted stable bundle (/Applications/Operon Stable.app)
-  rollback [--no-open]             Restore stable from the previous promoted bundle
-  dev [-- <args...>]               Quit running Operon and run `cargo run --release --locked`
+  stable [--promote|-p] [--rollback|-r] [--no-open]
+                                   Switch to stable, promote canary to stable, or roll back stable
+  promote [--no-open] [--open]     Alias for 'stable --promote'
+  rollback [--no-open]             Alias for 'stable --rollback'
   quit                             Quit running Operon and wait for lock release
   help, --help, -h                 Show this help
 
@@ -122,7 +118,6 @@ Environment overrides:
   OPERON_CANARY_APP                Canary bundle path (default: $OPERON_DIST_DIR/Operon.app)
   OPERON_STABLE_APP                Stable bundle path (default: /Applications/Operon Stable.app)
   OPERON_STABLE_PREVIOUS_APP       Stable rollback bundle path (default: $OPERON_DIST_DIR/Operon.stable-previous.app)
-  OPERON_INSTALLED_APP             Installed bundle path (default: /Applications/Operon.app)
   OPERON_QUIT_WAIT_SECONDS         Seconds to wait for running Operon to exit (default: 10)
 EOF
 }
@@ -134,24 +129,6 @@ bundle_commit() {
   else
     printf 'unstamped'
   fi
-}
-
-installed_build_freshness() {
-  local checker="$check_script"
-  if [ ! -f "$checker" ] && [ -f "$script_dir/check-installed-build.sh" ]; then
-    checker="$script_dir/check-installed-build.sh"
-  fi
-  if [ ! -f "$checker" ]; then
-    printf 'UNVERIFIED'
-    return
-  fi
-  local rc=0
-  OPERON_INSTALLED_APP="$installed_app" bash "$checker" "$installed_app" >/dev/null 2>&1 || rc=$?
-  case "$rc" in
-    0) printf 'CURRENT' ;;
-    1) printf 'STALE' ;;
-    *) printf 'UNVERIFIED' ;;
-  esac
 }
 
 print_channel_line() {
@@ -253,9 +230,6 @@ cmd_status() {
 
   print_channel_line "canary" "$canary_app"
   print_channel_line "stable" "$stable_app"
-  print_channel_line "stable-previous" "$stable_prev_app"
-  print_channel_line "installed" "$installed_app"
-  printf 'installed build: %s\n' "$(installed_build_freshness)"
 }
 
 cmd_canary() {
@@ -302,19 +276,8 @@ cmd_canary() {
   fi
 }
 
-cmd_promote() {
-  local open_after=0
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --open) open_after=1 ;;
-      *)
-        echo "error: unknown option for promote: $1" >&2
-        usage >&2
-        exit 64
-        ;;
-    esac
-    shift
-  done
+do_promote() {
+  local no_open="$1"
 
   if [ ! -d "$canary_app" ]; then
     echo "error: canary bundle not found at $canary_app — run 'operon-channel.sh canary --build' first" >&2
@@ -340,54 +303,15 @@ cmd_promote() {
 
   printf 'Promoted canary -> stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
 
-  if [ "$open_after" -eq 1 ]; then
+  if [ "$no_open" -eq 0 ]; then
     quit_running_operon
     open_bundle "$stable_app"
     printf 'Opened stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
   fi
 }
 
-cmd_stable() {
-  local no_open=0
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --no-open) no_open=1 ;;
-      *)
-        echo "error: unknown option for stable: $1" >&2
-        usage >&2
-        exit 64
-        ;;
-    esac
-    shift
-  done
-
-  if [ ! -d "$stable_app" ]; then
-    echo "error: stable bundle not found at $stable_app — run 'operon-channel.sh promote' after verifying canary" >&2
-    exit 66
-  fi
-
-  if [ "$no_open" -eq 1 ]; then
-    printf 'Stable ready: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
-  else
-    quit_running_operon
-    open_bundle "$stable_app"
-    printf 'Opened stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
-  fi
-}
-
-cmd_rollback() {
-  local no_open=0
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      --no-open) no_open=1 ;;
-      *)
-        echo "error: unknown option for rollback: $1" >&2
-        usage >&2
-        exit 64
-        ;;
-    esac
-    shift
-  done
+do_rollback() {
+  local no_open="$1"
 
   if [ ! -d "$stable_prev_app" ]; then
     echo "error: rollback bundle not found at $stable_prev_app" >&2
@@ -425,12 +349,85 @@ cmd_rollback() {
   fi
 }
 
-cmd_dev() {
-  if [ "${1:-}" = "--" ]; then
+cmd_promote() {
+  local no_open=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --open) no_open=0 ;;
+      --no-open) no_open=1 ;;
+      *)
+        echo "error: unknown option for promote: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
     shift
+  done
+  do_promote "$no_open"
+}
+
+cmd_stable() {
+  local promote=0
+  local rollback=0
+  local no_open=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --promote|-p) promote=1 ;;
+      --rollback|-r) rollback=1 ;;
+      --no-open) no_open=1 ;;
+      *)
+        echo "error: unknown option for stable: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
+    shift
+  done
+
+  if [ "$promote" -eq 1 ] && [ "$rollback" -eq 1 ]; then
+    echo "error: cannot combine --promote and --rollback" >&2
+    usage >&2
+    exit 64
   fi
-  quit_running_operon
-  (cd "$repo_root" && cargo run --release --locked "$@")
+
+  if [ "$promote" -eq 1 ]; then
+    do_promote "$no_open"
+    return 0
+  fi
+
+  if [ "$rollback" -eq 1 ]; then
+    do_rollback "$no_open"
+    return 0
+  fi
+
+  if [ ! -d "$stable_app" ]; then
+    echo "error: stable bundle not found at $stable_app — run 'operon-channel.sh stable --promote' after verifying canary" >&2
+    exit 66
+  fi
+
+  if [ "$no_open" -eq 1 ]; then
+    printf 'Stable ready: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  else
+    quit_running_operon
+    open_bundle "$stable_app"
+    printf 'Opened stable: %s (%s)\n' "$stable_app" "$(bundle_commit "$stable_app")"
+  fi
+}
+
+cmd_rollback() {
+  local no_open=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --no-open) no_open=1 ;;
+      *)
+        echo "error: unknown option for rollback: $1" >&2
+        usage >&2
+        exit 64
+        ;;
+    esac
+    shift
+  done
+  do_rollback "$no_open"
 }
 
 cmd_quit() {
@@ -463,9 +460,6 @@ case "$subcmd" in
     ;;
   rollback)
     cmd_rollback "$@"
-    ;;
-  dev)
-    cmd_dev "$@"
     ;;
   quit)
     cmd_quit "$@"
