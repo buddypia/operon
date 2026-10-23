@@ -364,11 +364,11 @@ bash scripts/package-macos.sh
 `dist/Operon.app`에서 반복 검증하려면 `scripts/operon-channel.sh`를 사용하세요.
 
 ```sh
-bash scripts/operon-channel.sh status          # HEAD, 실행 중인 프로세스, 채널별 커밋 표시
-bash scripts/operon-channel.sh canary --build  # dist/Operon.app을 빌드하고 canary로 전환
-bash scripts/operon-channel.sh promote         # 검증된 canary를 /Applications/Operon Stable.app으로 원자적 승격
-bash scripts/operon-channel.sh stable          # canary를 종료하고 /Applications/Operon Stable.app으로 복귀
-bash scripts/operon-channel.sh rollback        # 이전 stable 번들로 롤백
+bash scripts/operon-channel.sh status            # HEAD, 실행 중인 프로세스, canary/stable 커밋 표시
+bash scripts/operon-channel.sh canary --build    # dist/Operon.app을 빌드하고 canary로 전환
+bash scripts/operon-channel.sh stable            # canary를 종료하고 /Applications/Operon Stable.app으로 복귀
+bash scripts/operon-channel.sh stable --promote  # 검증된 canary를 /Applications/Operon Stable.app으로 원자적 승격
+bash scripts/operon-channel.sh stable --rollback # 이전 stable 번들로 롤백
 ```
 
 에이전트 세션은 `tmux`에서 계속 실행되므로 `canary`와 `stable` 사이를 전환해도

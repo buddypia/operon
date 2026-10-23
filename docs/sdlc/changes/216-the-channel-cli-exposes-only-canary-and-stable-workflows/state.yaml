@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/216-the-channel-cli-exposes-only-canary-and-stable-workflows.
+#
+# After reviewing the channel CLI explanation, the person requested narrowing
+# the workflow to just `stable` and `canary` ("stable, canaryだけで良さそう").
+#
+# Route: modify (placement REPLACE/EXTEND in scripts/operon-channel.sh,
+# src/tests.rs, and README*.md).
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Change 216 complete: channel CLI and READMEs narrowed to canary and stable."
+
+contract:
+  failing-test-first: "machine passed cargo test --locked channel_cli failed on 4 updated tests before implementation"
+  three-gates: "machine passed make q.fast and cargo test --locked channel_cli"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed no: touches scripts/operon-channel.sh, src/tests.rs, and READMEs only; /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed all 4 mutations in mutations.py killed"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer go"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

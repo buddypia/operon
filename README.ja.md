@@ -374,11 +374,11 @@ ad-hoc 署名です。他の Mac への配布には Apple Developer ID 証明書
 `dist/Operon.app` で反復検証するには `scripts/operon-channel.sh` を使います。
 
 ```sh
-bash scripts/operon-channel.sh status          # HEAD・起動中プロセス・各チャネルのコミットを表示
-bash scripts/operon-channel.sh canary --build  # dist/Operon.app をビルドして canary に切り替え
-bash scripts/operon-channel.sh promote         # 検証済み canary を /Applications/Operon Stable.app へアトミックに昇格
-bash scripts/operon-channel.sh stable          # canary を終了して /Applications/Operon Stable.app に戻す
-bash scripts/operon-channel.sh rollback        # 直前の stable バンドルへロールバック
+bash scripts/operon-channel.sh status            # HEAD・起動中プロセス・canary/stable のコミットを表示
+bash scripts/operon-channel.sh canary --build    # dist/Operon.app をビルドして canary に切り替え
+bash scripts/operon-channel.sh stable            # canary を終了して /Applications/Operon Stable.app に戻す
+bash scripts/operon-channel.sh stable --promote  # 検証済み canary を /Applications/Operon Stable.app へアトミックに昇格
+bash scripts/operon-channel.sh stable --rollback # 直前の stable バンドルへロールバック
 ```
 
 エージェントのセッションは `tmux` 側で生き続けるため、`canary` と `stable` を

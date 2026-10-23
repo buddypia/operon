@@ -58297,7 +58297,6 @@ pub(crate) fn the_channel_cli_reports_status_and_reads_its_stamp_key_from_the_pa
     fs::create_dir_all(root.join("src")).unwrap();
     for name in [
         "package-macos.sh",
-        "check-installed-build.sh",
         "replace-macos-bundle.sh",
         "operon-channel.sh",
     ] {
@@ -58338,7 +58337,6 @@ pub(crate) fn the_channel_cli_reports_status_and_reads_its_stamp_key_from_the_pa
     let dist_dir = root.join("dist");
     let canary_bundle = dist_dir.join("Operon.app");
     let stable_bundle = root.join("Apps/Operon Stable.app");
-    let installed_bundle = root.join("Apps/Operon.app");
     for bundle in [&canary_bundle, &stable_bundle] {
         let contents = bundle.join("Contents");
         fs::create_dir_all(&contents).unwrap();
@@ -58366,7 +58364,6 @@ pub(crate) fn the_channel_cli_reports_status_and_reads_its_stamp_key_from_the_pa
         cmd.env("OPERON_REPO_ROOT", &root)
             .env("OPERON_DIST_DIR", &dist_dir)
             .env("OPERON_STABLE_APP", &stable_bundle)
-            .env("OPERON_INSTALLED_APP", &installed_bundle)
             .env("OPERON_CHANNEL_RUNNING_OVERRIDE", "none")
             .output()
             .unwrap()
@@ -58392,17 +58389,9 @@ pub(crate) fn the_channel_cli_reports_status_and_reads_its_stamp_key_from_the_pa
         "{stdout}"
     );
     assert!(
-        stdout.contains("stable-previous:") && stdout.contains("(missing)"),
-        "{stdout}"
+        !stdout.contains("stable-previous:") && !stdout.contains("installed:"),
+        "status must report only canary and stable channels:\n{stdout}"
     );
-    assert!(
-        stdout.contains(&format!(
-            "installed: {} (missing)",
-            installed_bundle.display()
-        )),
-        "{stdout}"
-    );
-    assert!(stdout.contains("installed build: CURRENT"), "{stdout}");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -58520,7 +58509,7 @@ pub(crate) fn the_channel_cli_promotes_canary_to_stable_and_rolls_back() {
 
     let promote = Command::new("bash")
         .arg(repo_root.join("scripts/operon-channel.sh"))
-        .arg("promote")
+        .args(["stable", "--promote", "--no-open"])
         .env("OPERON_DIST_DIR", &dist_dir)
         .env("OPERON_STABLE_APP", &stable_bundle)
         .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
@@ -58571,7 +58560,7 @@ pub(crate) fn the_channel_cli_promotes_canary_to_stable_and_rolls_back() {
     fs::write(&events, "").unwrap();
     let rollback = Command::new("bash")
         .arg(repo_root.join("scripts/operon-channel.sh"))
-        .arg("rollback")
+        .args(["stable", "--rollback"])
         .env("OPERON_DIST_DIR", &dist_dir)
         .env("OPERON_STABLE_APP", &stable_bundle)
         .env("OPERON_CHANNEL_OPEN_CMD", &fake_open)
@@ -58609,14 +58598,14 @@ pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() 
     let dist_dir = root.join("dist");
     let stable_bundle = root.join("Apps/Operon Stable.app");
 
-    for (subcommand, expected_hint) in [
-        ("promote", "canary --build"),
-        ("stable", "promote"),
-        ("rollback", "Operon.stable-previous.app"),
+    for (args, expected_hint) in [
+        (&["stable", "--promote"][..], "canary --build"),
+        (&["stable"][..], "stable --promote"),
+        (&["stable", "--rollback"][..], "Operon.stable-previous.app"),
     ] {
         let output = Command::new("bash")
             .arg(repo_root.join("scripts/operon-channel.sh"))
-            .arg(subcommand)
+            .args(args)
             .env("OPERON_DIST_DIR", &dist_dir)
             .env("OPERON_STABLE_APP", &stable_bundle)
             .output()
@@ -58624,12 +58613,12 @@ pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() 
         assert_eq!(
             output.status.code(),
             Some(66),
-            "{subcommand} should exit 66 when bundle is missing"
+            "{args:?} should exit 66 when bundle is missing"
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
             stderr.contains(expected_hint),
-            "{subcommand} stderr missing `{expected_hint}`: {stderr}"
+            "{args:?} stderr missing `{expected_hint}`: {stderr}"
         );
     }
 
@@ -58641,13 +58630,19 @@ pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() 
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("Usage: operon-channel.sh"));
 
-    let unknown = Command::new("bash")
-        .arg(repo_root.join("scripts/operon-channel.sh"))
-        .arg("not-a-subcommand")
-        .output()
-        .unwrap();
-    assert_eq!(unknown.status.code(), Some(64));
-    assert!(String::from_utf8_lossy(&unknown.stderr).contains("Usage: operon-channel.sh"));
+    for bad_args in [
+        &["not-a-subcommand"][..],
+        &["dev"][..],
+        &["stable", "--promote", "--rollback"][..],
+    ] {
+        let unknown = Command::new("bash")
+            .arg(repo_root.join("scripts/operon-channel.sh"))
+            .args(bad_args)
+            .output()
+            .unwrap();
+        assert_eq!(unknown.status.code(), Some(64), "{bad_args:?} must exit 64");
+        assert!(String::from_utf8_lossy(&unknown.stderr).contains("Usage: operon-channel.sh"));
+    }
 
     let events = root.join("events.log");
     let fake_quit = root.join("fake-quit.sh");
@@ -58660,13 +58655,6 @@ pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() 
 
     let fake_bin = root.join("fake-bin");
     fs::create_dir_all(&fake_bin).unwrap();
-    let fake_cargo = fake_bin.join("cargo");
-    fs::write(
-        &fake_cargo,
-        "#!/usr/bin/env bash\nset -euo pipefail\nprintf 'cargo:%s\\n' \"$*\" >> \"$OPERON_TEST_EVENTS\"\n",
-    )
-    .unwrap();
-    fs::set_permissions(&fake_cargo, fs::Permissions::from_mode(0o755)).unwrap();
 
     let quit_out = Command::new("bash")
         .arg(repo_root.join("scripts/operon-channel.sh"))
@@ -58677,29 +58665,6 @@ pub(crate) fn the_channel_cli_refuses_missing_bundles_and_unknown_subcommands() 
         .unwrap();
     assert!(quit_out.status.success());
     assert_eq!(fs::read_to_string(&events).unwrap(), "quit\n");
-
-    fs::write(&events, "").unwrap();
-    let dev_out = Command::new("bash")
-        .arg(repo_root.join("scripts/operon-channel.sh"))
-        .arg("dev")
-        .env("OPERON_REPO_ROOT", &root)
-        .env("OPERON_CHANNEL_QUIT_HOOK", &fake_quit)
-        .env("OPERON_TEST_EVENTS", &events)
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                fake_bin.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .output()
-        .unwrap();
-    assert!(dev_out.status.success());
-    assert_eq!(
-        fs::read_to_string(&events).unwrap(),
-        "quit\ncargo:run --release --locked\n"
-    );
 
     // Real process detection (`Operon` capital-O bundle binary) + SIGTERM termination + timeout 75.
     let mut dummy_proc = Command::new("sleep").arg("60").spawn().unwrap();
@@ -58825,9 +58790,9 @@ pub(crate) fn the_readmes_document_the_channel_cli() {
         for required in [
             "bash scripts/operon-channel.sh",
             "operon-channel.sh canary",
-            "operon-channel.sh promote",
             "operon-channel.sh stable",
-            "operon-channel.sh rollback",
+            "operon-channel.sh stable --promote",
+            "operon-channel.sh stable --rollback",
             "operon-channel.sh status",
         ] {
             assert!(

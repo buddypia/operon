@@ -1,0 +1,8 @@
+# Review record for 216-the-channel-cli-exposes-only-canary-and-stable-workflows.
+
+digest: "843fc558321e8e1d"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
