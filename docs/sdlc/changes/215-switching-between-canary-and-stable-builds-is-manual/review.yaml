@@ -32,9 +32,9 @@
 # - rust-reviewer: approve 0 0
 # - subprocess-safety-reviewer: approve 0 0
 
-digest: "24245145a728f56d"
+digest: "7e95bfecfd9a01d7"
 
-rounds: 1
+rounds: 2
 
 verdicts:
   rust-reviewer: "approve 0 0"
