@@ -1,0 +1,4 @@
+2026-10-24T03:49:32Z auto intent intent.md 41bc5487c39c0102 approve evaluator (b2a053e1): verified intent against user request and src/app.rs + src/tmux.rs launch/trust-poll call paths; no open questions
+2026-10-24T03:49:32Z auto spec spec.md 891c621b04fe28ce approve evaluator (b2a053e1): verified 4 requirements, 4 states, REPLACE design, policy conformance, and flagged concerns against intent.md and codebase
+2026-10-24T03:49:32Z auto screen screen.md 0b8452dc1eaf35eb approve evaluator (b2a053e1): verified Before/After ASCII layouts, Japanese copy, 520px failure modal, and loading/empty/active/error states against screen-approval.md and spec.md
+2026-10-24T03:49:32Z auto plan plan.md 34f5aa46714ee0b0 approve evaluator (b2a053e1): verified file scope, failing-test-first order, risk mitigations, and mutation-checked proof of completion against spec.md and state.yaml

@@ -107,6 +107,7 @@ pub(crate) fn tmux_error_state(stderr: &str) -> TmuxState {
     if [
         "can't find session",
         "can't find window",
+        "can't find pane",
         "no server running",
         "no such session",
         "error connecting to",
@@ -279,8 +280,10 @@ pub(crate) fn launch_stored_session(
         )
         .map_err(|error| error.to_string())?;
         if auto_approve_workspace_prompts {
-            auto_approve_workspace_trust_prompt(&session.tmux_name)
-                .map_err(|error| error.to_string())?;
+            let tmux_name = session.tmux_name.clone();
+            thread::spawn(move || {
+                let _ = auto_approve_workspace_trust_prompt(&tmux_name);
+            });
         }
     }
     Ok(git_branch(&worktree_path).ok())
@@ -1325,22 +1328,28 @@ pub(crate) fn auto_approve_workspace_trust_prompt(name: &str) -> Result<bool> {
     // would then land in a live agent's composer.
     let deadline = Instant::now() + Duration::from_secs(8);
     while Instant::now() < deadline {
-        if let Ok(output) = tmux_capture_visible_screen(name) {
-            if let Some(keys) = workspace_trust_answer_keys(&output) {
-                // Through `tmux_send_input` rather than a second `send-keys`
-                // loop beside it: it is already the one place that knows how a
-                // run of keys reaches a pane in a single tmux invocation, which
-                // is what keeps the move and the confirm from being split by a
-                // redraw in between.
-                tmux_send_input(
-                    name,
-                    &keys
-                        .into_iter()
-                        .map(|key| TerminalInput::Key(key.to_owned()))
-                        .collect::<Vec<_>>(),
-                )?;
-                return Ok(true);
+        match tmux_capture_visible_screen(name) {
+            Ok(output) => {
+                if let Some(keys) = workspace_trust_answer_keys(&output) {
+                    // Through `tmux_send_input` rather than a second `send-keys`
+                    // loop beside it: it is already the one place that knows how a
+                    // run of keys reaches a pane in a single tmux invocation, which
+                    // is what keeps the move and the confirm from being split by a
+                    // redraw in between.
+                    tmux_send_input(
+                        name,
+                        &keys
+                            .into_iter()
+                            .map(|key| TerminalInput::Key(key.to_owned()))
+                            .collect::<Vec<_>>(),
+                    )?;
+                    return Ok(true);
+                }
             }
+            Err(error) if tmux_error_state(&error.to_string()) == TmuxState::Gone => {
+                return Ok(false);
+            }
+            Err(_) => {}
         }
         thread::sleep(Duration::from_millis(160));
     }
