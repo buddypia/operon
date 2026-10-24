@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/221-labels-and-launch-button-break-the-design-rules.
+#
+# Three small places where the screen says something other than what the
+# product's own documents promise: the Git sub-tabs are English in a Japanese
+# window, the idle group is named like a queued session, and the launch button
+# changes colour with the agent that is picked.
+#
+# Route: modify (placement EXTEND in src/app.rs, src/app/screens.rs,
+# src/ui/widgets.rs, src/i18n_tables.rs, the READMEs and the manual).
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the four failing tests in src/tests.rs named in spec.md, watch them fail, then make the edits in plan.md order."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: touches src/app.rs, src/app/screens.rs, src/ui/widgets.rs and src/i18n_tables.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
