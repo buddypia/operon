@@ -1,30 +1,51 @@
 #!/usr/bin/env bash
-# Usage: bash scripts/prune-target.sh [--dry-run] [--target-dir <path>]
+# Usage: bash scripts/prune-target.sh [--dry-run] [--all-worktrees] [--if-idle]
+#                                     [--target-dir <path>]...
 # Prunes obsolete test binaries and stale incremental cache under target/.
 #
 # Cargo never garbage-collects old binaries with past hash fingerprints, which
 # causes target/ to grow to tens or hundreds of gigabytes over frequent test runs.
 # This script identifies and purges obsolete build artifacts while keeping the
 # latest build artifacts and dependencies intact.
+#
+# With no flag it trims one directory (--target-dir, else CARGO_TARGET_DIR, else
+# <repo>/target); scripts/seed-target.sh relies on that. --all-worktrees trims
+# the target/ of every worktree `git worktree list` reports, and is what the
+# weekly launchd agent from scripts/install-prune-schedule.sh runs. --if-idle
+# stops without deleting anything further once a cargo or rustc process is seen.
+# Change 220.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 dry_run=0
+all_worktrees=0
+if_idle=0
+explicit_dirs=()
+# The command that answers "is this process running": exit status 0 is a match.
+# A single command with no arguments, so a test can stand in a stub for it.
+pgrep_command="${PRUNE_PGREP:-pgrep}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dry-run)
       dry_run=1
       ;;
+    --all-worktrees)
+      all_worktrees=1
+      ;;
+    --if-idle)
+      if_idle=1
+      ;;
     --target-dir)
       shift
-      target_dir="${1:-}"
+      explicit_dirs+=("${1:-}")
       ;;
     -h|--help)
-      echo "Usage: bash scripts/prune-target.sh [--dry-run] [--target-dir <dir>]"
+      echo "Usage: bash scripts/prune-target.sh [--dry-run] [--all-worktrees] [--if-idle] [--target-dir <dir>]..."
       echo "  --dry-run          Preview files to delete and calculated space without deleting"
-      echo "  --target-dir <dir> Specify target directory (default: target/ or CARGO_TARGET_DIR)"
+      echo "  --target-dir <dir> Trim <dir> (repeatable; default: target/ or CARGO_TARGET_DIR)"
+      echo "  --all-worktrees    Trim the target/ of every git worktree of this repository"
+      echo "  --if-idle          Skip, deleting nothing further, while cargo or rustc is running"
       exit 0
       ;;
     *)
@@ -35,10 +56,23 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
-if [ ! -d "$target_dir" ]; then
-  echo "Target directory does not exist: $target_dir"
-  echo "Nothing to prune."
-  exit 0
+if [ "$all_worktrees" -eq 1 ] && [ "${#explicit_dirs[@]}" -gt 0 ]; then
+  echo "--all-worktrees and --target-dir cannot be combined" >&2
+  exit 1
+fi
+
+target_dirs=()
+if [ "$all_worktrees" -eq 1 ]; then
+  # --porcelain prints `worktree <path>`; cutting the prefix keeps spaces in a path.
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) target_dirs+=("${line#worktree }/target") ;;
+    esac
+  done < <(git -C "$repo_root" worktree list --porcelain 2>/dev/null || true)
+elif [ "${#explicit_dirs[@]}" -gt 0 ]; then
+  target_dirs=("${explicit_dirs[@]}")
+else
+  target_dirs=("${CARGO_TARGET_DIR:-$repo_root/target}")
 fi
 
 total_bytes=0
@@ -68,97 +102,132 @@ get_size_bytes() {
   fi
 }
 
-# 1. Prune obsolete test executables and dSYM directories under deps/
-# Find test executables matching `operon-*` (excluding .d, .rmeta, .rlib)
-for profile in debug release; do
-  deps_dir="$target_dir/$profile/deps"
-  [ -d "$deps_dir" ] || continue
+build_is_running() {
+  "$pgrep_command" -x cargo >/dev/null 2>&1 || "$pgrep_command" -x rustc >/dev/null 2>&1
+}
 
-  # List test binaries sorted by modification time (newest first)
-  # We keep the newest test binary for each test group and prune older ones.
-  # Operon tests typically produce binaries named operon-<hash> or similar.
-  test_binaries=$(find "$deps_dir" -maxdepth 1 -type f -perm +111 -name "operon-*" ! -name "*.d" ! -name "*.rmeta" ! -name "*.rlib" 2>/dev/null || true)
-  if [ -n "$test_binaries" ]; then
-    newest_binary=""
-    newest_mtime=0
-    while IFS= read -r bin; do
-      [ -n "$bin" ] || continue
-      mtime=$(/usr/bin/stat -f "%m" "$bin" 2>/dev/null || stat -c "%Y" "$bin" 2>/dev/null || echo 0)
-      if [ "$mtime" -gt "$newest_mtime" ]; then
-        newest_mtime="$mtime"
-        newest_binary="$bin"
-      fi
-    done <<< "$test_binaries"
+# Trims one target directory. A directory that is not there is skipped with
+# `return`, never `exit`: one worktree without a target/ must not end a pass
+# over the rest.
+prune_one() {
+  local target_dir="$1"
 
-    while IFS= read -r bin; do
-      [ -n "$bin" ] || continue
-      if [ "$bin" != "$newest_binary" ]; then
-        sz=$(get_size_bytes "$bin")
+  if [ "$if_idle" -eq 1 ] && build_is_running; then
+    echo "prune-target: build in progress, skipped"
+    [ "$pruned_count" -eq 0 ] || finish
+    exit 0
+  fi
+
+  if [ ! -d "$target_dir" ]; then
+    echo "Target directory does not exist: $target_dir"
+    echo "Nothing to prune."
+    return 0
+  fi
+
+  local profile deps_dir test_binaries newest_binary newest_mtime bin mtime sz
+  local dsym dsz dfile inc_dir old_sessions session_dir
+
+  # 1. Prune obsolete test executables and dSYM directories under deps/
+  # Find test executables matching `operon-*` (excluding .d, .rmeta, .rlib)
+  for profile in debug release; do
+    deps_dir="$target_dir/$profile/deps"
+    [ -d "$deps_dir" ] || continue
+
+    # List test binaries sorted by modification time (newest first)
+    # We keep the newest test binary for each test group and prune older ones.
+    # Operon tests typically produce binaries named operon-<hash> or similar.
+    test_binaries=$(find "$deps_dir" -maxdepth 1 -type f -perm +111 -name "operon-*" ! -name "*.d" ! -name "*.rmeta" ! -name "*.rlib" 2>/dev/null || true)
+    if [ -n "$test_binaries" ]; then
+      newest_binary=""
+      newest_mtime=0
+      while IFS= read -r bin; do
+        [ -n "$bin" ] || continue
+        mtime=$(/usr/bin/stat -f "%m" "$bin" 2>/dev/null || stat -c "%Y" "$bin" 2>/dev/null || echo 0)
+        if [ "$mtime" -gt "$newest_mtime" ]; then
+          newest_mtime="$mtime"
+          newest_binary="$bin"
+        fi
+      done <<< "$test_binaries"
+
+      while IFS= read -r bin; do
+        [ -n "$bin" ] || continue
+        if [ "$bin" != "$newest_binary" ]; then
+          sz=$(get_size_bytes "$bin")
+          total_bytes=$((total_bytes + sz))
+          pruned_count=$((pruned_count + 1))
+          if [ "$dry_run" -eq 1 ]; then
+            echo "[dry-run] Would prune stale test binary: $bin ($(format_bytes "$sz"))"
+          else
+            rm -f "$bin"
+            echo "Pruned stale test binary: $bin ($(format_bytes "$sz"))"
+          fi
+
+          # Associated dSYM directory if present
+          dsym="${bin}.dSYM"
+          if [ -d "$dsym" ]; then
+            dsz=$(get_size_bytes "$dsym")
+            total_bytes=$((total_bytes + dsz))
+            pruned_count=$((pruned_count + 1))
+            if [ "$dry_run" -eq 1 ]; then
+              echo "[dry-run] Would prune test dSYM: $dsym ($(format_bytes "$dsz"))"
+            else
+              rm -rf "$dsym"
+              echo "Pruned test dSYM: $dsym ($(format_bytes "$dsz"))"
+            fi
+          fi
+
+          # Associated .d file if present
+          dfile="${bin}.d"
+          if [ -f "$dfile" ]; then
+            rm -f "$dfile" 2>/dev/null || true
+          fi
+        fi
+      done <<< "$test_binaries"
+    fi
+  done
+
+  # 2. Prune old incremental compilation directories older than 7 days
+  for profile in debug release; do
+    inc_dir="$target_dir/$profile/incremental"
+    [ -d "$inc_dir" ] || continue
+
+    # Find sessions inside incremental directory older than 7 days
+    old_sessions=$(find "$inc_dir" -mindepth 2 -maxdepth 2 -type d -mtime +7 2>/dev/null || true)
+    if [ -n "$old_sessions" ]; then
+      while IFS= read -r session_dir; do
+        [ -n "$session_dir" ] || continue
+        sz=$(get_size_bytes "$session_dir")
         total_bytes=$((total_bytes + sz))
         pruned_count=$((pruned_count + 1))
         if [ "$dry_run" -eq 1 ]; then
-          echo "[dry-run] Would prune stale test binary: $bin ($(format_bytes "$sz"))"
+          echo "[dry-run] Would prune old incremental session: $session_dir ($(format_bytes "$sz"))"
         else
-          rm -f "$bin"
-          echo "Pruned stale test binary: $bin ($(format_bytes "$sz"))"
+          rm -rf "$session_dir"
+          echo "Pruned old incremental session: $session_dir ($(format_bytes "$sz"))"
         fi
+      done <<< "$old_sessions"
+    fi
+  done
+}
 
-        # Associated dSYM directory if present
-        dsym="${bin}.dSYM"
-        if [ -d "$dsym" ]; then
-          dsz=$(get_size_bytes "$dsym")
-          total_bytes=$((total_bytes + dsz))
-          pruned_count=$((pruned_count + 1))
-          if [ "$dry_run" -eq 1 ]; then
-            echo "[dry-run] Would prune test dSYM: $dsym ($(format_bytes "$dsz"))"
-          else
-            rm -rf "$dsym"
-            echo "Pruned test dSYM: $dsym ($(format_bytes "$dsz"))"
-          fi
-        fi
-
-        # Associated .d file if present
-        dfile="${bin}.d"
-        if [ -f "$dfile" ]; then
-          rm -f "$dfile" 2>/dev/null || true
-        fi
-      fi
-    done <<< "$test_binaries"
-  fi
-done
-
-# 2. Prune old incremental compilation directories older than 7 days
-for profile in debug release; do
-  inc_dir="$target_dir/$profile/incremental"
-  [ -d "$inc_dir" ] || continue
-
-  # Find sessions inside incremental directory older than 7 days
-  old_sessions=$(find "$inc_dir" -mindepth 2 -maxdepth 2 -type d -mtime +7 2>/dev/null || true)
-  if [ -n "$old_sessions" ]; then
-    while IFS= read -r session_dir; do
-      [ -n "$session_dir" ] || continue
-      sz=$(get_size_bytes "$session_dir")
-      total_bytes=$((total_bytes + sz))
-      pruned_count=$((pruned_count + 1))
-      if [ "$dry_run" -eq 1 ]; then
-        echo "[dry-run] Would prune old incremental session: $session_dir ($(format_bytes "$sz"))"
-      else
-        rm -rf "$session_dir"
-        echo "Pruned old incremental session: $session_dir ($(format_bytes "$sz"))"
-      fi
-    done <<< "$old_sessions"
-  fi
-done
-
-formatted_total=$(format_bytes "$total_bytes")
-if [ "$dry_run" -eq 1 ]; then
-  echo "Dry-run complete: $pruned_count item(s) would be pruned, reclaiming approximately $formatted_total."
-else
-  if [ "$pruned_count" -gt 0 ]; then
-    echo "Prune complete: $pruned_count item(s) pruned, reclaimed approximately $formatted_total."
+finish() {
+  local formatted_total
+  formatted_total=$(format_bytes "$total_bytes")
+  if [ "$dry_run" -eq 1 ]; then
+    echo "Dry-run complete: $pruned_count item(s) would be pruned, reclaiming approximately $formatted_total."
   else
-    echo "Target directory is clean. No obsolete artifacts found (0 B reclaimed)."
+    if [ "$pruned_count" -gt 0 ]; then
+      echo "Prune complete: $pruned_count item(s) pruned, reclaimed approximately $formatted_total."
+    else
+      echo "Target directory is clean. No obsolete artifacts found (0 B reclaimed)."
+    fi
   fi
-fi
+}
+
+echo "prune-target: $(date '+%Y-%m-%d %H:%M:%S')"
+for target_dir in "${target_dirs[@]}"; do
+  prune_one "$target_dir"
+done
+finish
 
 # operon: end of scripts/prune-target.sh

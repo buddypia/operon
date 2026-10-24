@@ -39610,6 +39610,294 @@ pub(crate) fn prune_target_script_runs_dry_run_cleanly() {
     );
 }
 
+/// Change 220. Every prune test runs a copy of the script inside a throwaway git
+/// repository, so "the repo the script lives in" is the fixture and the run can
+/// never reach the real checkout's build output.
+fn prune_fixture_repository(label: &str) -> PathBuf {
+    let repo = worktree_fixture_repository(label);
+    let scripts = repo.join("scripts");
+    fs::create_dir_all(&scripts).unwrap();
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts");
+    for name in ["prune-target.sh", "install-prune-schedule.sh"] {
+        if source.join(name).exists() {
+            fs::copy(source.join(name), scripts.join(name)).unwrap();
+        }
+    }
+    repo
+}
+
+/// A stale test program with its `.dSYM`, and a newer one that must stay.
+fn plant_test_programs(target: &Path) -> (PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let deps = target.join("debug/deps");
+    fs::create_dir_all(&deps).unwrap();
+    let stale = deps.join("operon-1111111111111111");
+    let newest = deps.join("operon-2222222222222222");
+    for program in [&stale, &newest] {
+        fs::write(program, b"#!/bin/sh\n").unwrap();
+        fs::set_permissions(program, PermissionsExt::from_mode(0o755)).unwrap();
+    }
+    let dsym = deps.join("operon-1111111111111111.dSYM");
+    fs::create_dir_all(&dsym).unwrap();
+    fs::write(dsym.join("payload"), b"debug info").unwrap();
+    assert!(std::process::Command::new("touch")
+        .args(["-t", "202001010000"])
+        .arg(&stale)
+        .status()
+        .unwrap()
+        .success());
+    (stale, newest)
+}
+
+fn stale_dsym(stale: &Path) -> PathBuf {
+    PathBuf::from(format!("{}.dSYM", stale.display()))
+}
+
+fn run_prune_script(
+    repo: &Path,
+    arguments: &[&str],
+    environment: &[(&str, &str)],
+) -> (Option<i32>, String) {
+    let mut command = std::process::Command::new("bash");
+    command
+        .arg(repo.join("scripts/prune-target.sh"))
+        .args(arguments)
+        .current_dir(repo)
+        .env_remove("CARGO_TARGET_DIR")
+        .env_remove("PRUNE_PGREP");
+    for (key, value) in environment {
+        command.env(key, value);
+    }
+    let output = command.output().expect("prune-target.sh did not start");
+    (
+        output.status.code(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    )
+}
+
+#[test]
+pub(crate) fn prune_target_trims_every_target_dir_it_is_given() {
+    let repo = prune_fixture_repository("prune-many");
+    let first = temporary_directory("prune-many-a");
+    let second = temporary_directory("prune-many-b");
+    let (stale_a, newest_a) = plant_test_programs(&first);
+    let (stale_b, newest_b) = plant_test_programs(&second);
+    let (code, log) = run_prune_script(
+        &repo,
+        &[
+            "--target-dir",
+            first.to_str().unwrap(),
+            "--target-dir",
+            second.to_str().unwrap(),
+        ],
+        &[],
+    );
+    assert_eq!(code, Some(0), "{log}");
+    for (stale, newest) in [(stale_a, newest_a), (stale_b, newest_b)] {
+        assert!(!stale.exists(), "stale program survived: {log}");
+        assert!(!stale_dsym(&stale).exists(), "its dSYM survived: {log}");
+        assert!(newest.exists(), "the newest program was removed: {log}");
+    }
+}
+
+#[test]
+pub(crate) fn prune_target_all_worktrees_trims_each_worktrees_target() {
+    let repo = prune_fixture_repository("prune-all");
+    // Worktrees without a target/ sit on both sides of the one that has it, so
+    // that whichever order git lists them in, one comes before a directory that
+    // still has to be trimmed.
+    let linked = repo.join(".worktrees/mmm-with-target");
+    let bare = repo.join(".worktrees/aaa-without-target");
+    let bare_last = repo.join(".worktrees/zzz-without-target");
+    for (path, branch) in [
+        (&linked, "mmm-with-target"),
+        (&bare, "aaa-without-target"),
+        (&bare_last, "zzz-without-target"),
+    ] {
+        git_in(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                path.to_str().unwrap(),
+                "-b",
+                branch,
+            ],
+        );
+    }
+    let (main_stale, main_newest) = plant_test_programs(&repo.join("target"));
+    let (linked_stale, linked_newest) = plant_test_programs(&linked.join("target"));
+    let (code, log) = run_prune_script(&repo, &["--all-worktrees"], &[]);
+    assert_eq!(
+        code,
+        Some(0),
+        "a worktree without target/ must not abort: {log}"
+    );
+    assert!(!main_stale.exists(), "main checkout not trimmed: {log}");
+    assert!(!linked_stale.exists(), "linked worktree not trimmed: {log}");
+    assert!(main_newest.exists() && linked_newest.exists(), "{log}");
+    let other = temporary_directory("prune-all-explicit");
+    let (code, log) = run_prune_script(
+        &repo,
+        &["--all-worktrees", "--target-dir", other.to_str().unwrap()],
+        &[],
+    );
+    assert_eq!(code, Some(1), "the two flags must be refused: {log}");
+}
+
+#[test]
+pub(crate) fn prune_target_without_flags_trims_one_directory() {
+    let repo = prune_fixture_repository("prune-default");
+    let linked = repo.join(".worktrees/sibling");
+    git_in(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked.to_str().unwrap(),
+            "-b",
+            "sibling",
+        ],
+    );
+    let (main_stale, main_newest) = plant_test_programs(&repo.join("target"));
+    let (sibling_stale, _) = plant_test_programs(&linked.join("target"));
+    let (code, log) = run_prune_script(&repo, &[], &[]);
+    assert_eq!(code, Some(0), "{log}");
+    assert!(!main_stale.exists() && main_newest.exists(), "{log}");
+    assert!(
+        sibling_stale.exists(),
+        "a run with no flags must leave other worktrees alone: {log}"
+    );
+    let custom = temporary_directory("prune-default-env");
+    let (custom_stale, custom_newest) = plant_test_programs(&custom);
+    let (code, log) = run_prune_script(
+        &repo,
+        &[],
+        &[("CARGO_TARGET_DIR", custom.to_str().unwrap())],
+    );
+    assert_eq!(code, Some(0), "{log}");
+    assert!(!custom_stale.exists() && custom_newest.exists(), "{log}");
+}
+
+#[test]
+pub(crate) fn prune_target_if_idle_skips_while_a_build_runs() {
+    use std::os::unix::fs::PermissionsExt;
+    let repo = prune_fixture_repository("prune-idle");
+    let (stale, _) = plant_test_programs(&repo.join("target"));
+    let stubs = temporary_directory("prune-idle-stubs");
+    let stub = |name: &str, status: u8| -> String {
+        let path = stubs.join(name);
+        fs::write(&path, format!("#!/bin/sh\nexit {status}\n")).unwrap();
+        fs::set_permissions(&path, PermissionsExt::from_mode(0o755)).unwrap();
+        path.to_str().unwrap().to_owned()
+    };
+    let busy = stub("pgrep-busy", 0);
+    let (code, log) = run_prune_script(&repo, &["--if-idle"], &[("PRUNE_PGREP", &busy)]);
+    assert_eq!(code, Some(0), "{log}");
+    assert!(
+        log.contains("prune-target: build in progress, skipped"),
+        "{log}"
+    );
+    assert!(
+        stale.exists(),
+        "nothing may be deleted while a build runs: {log}"
+    );
+    let idle = stub("pgrep-idle", 1);
+    let (code, log) = run_prune_script(&repo, &["--if-idle"], &[("PRUNE_PGREP", &idle)]);
+    assert_eq!(code, Some(0), "{log}");
+    assert!(!stale.exists(), "an idle machine must be trimmed: {log}");
+}
+
+#[test]
+pub(crate) fn prune_schedule_plist_is_valid_and_weekly() {
+    let repo = prune_fixture_repository("prune-plist");
+    let output = std::process::Command::new("bash")
+        .arg(repo.join("scripts/install-prune-schedule.sh"))
+        .arg("--print")
+        .current_dir(&repo)
+        .output()
+        .expect("install-prune-schedule.sh did not start");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let plist = temporary_directory("prune-plist-out").join("agent.plist");
+    fs::write(&plist, &output.stdout).unwrap();
+    let plutil = |arguments: &[&str]| -> String {
+        let out = std::process::Command::new("plutil")
+            .args(arguments)
+            .arg(&plist)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "plutil {arguments:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    plutil(&["-lint"]);
+    let extract = |key: &str| plutil(&["-extract", key, "raw", "-o", "-"]);
+    assert_eq!(extract("Label"), "com.buddypia.operon-prune-target");
+    assert_eq!(extract("StartCalendarInterval.Weekday"), "1");
+    assert_eq!(extract("StartCalendarInterval.Hour"), "10");
+    assert_eq!(
+        extract("StartCalendarInterval.Minute"),
+        "0",
+        "an omitted Minute fires every minute of the hour"
+    );
+    for key in ["StandardOutPath", "StandardErrorPath"] {
+        let path = extract(key);
+        assert!(
+            path.starts_with('/') && path.ends_with("Library/Logs/operon-prune-target.log"),
+            "{key} = {path}"
+        );
+    }
+    let main_checkout = repo.canonicalize().unwrap();
+    let arguments: Vec<String> = (0..4)
+        .map(|index| extract(&format!("ProgramArguments.{index}")))
+        .collect();
+    assert_eq!(
+        arguments,
+        [
+            "/bin/bash".to_owned(),
+            format!("{}/scripts/prune-target.sh", main_checkout.display()),
+            "--all-worktrees".to_owned(),
+            "--if-idle".to_owned(),
+        ]
+    );
+    assert_eq!(extract("ProgramArguments"), "4", "exactly four arguments");
+    // The sentence the installer prints promises the schedule the plist holds.
+    let installer = fs::read_to_string(repo.join("scripts/install-prune-schedule.sh")).unwrap();
+    assert!(
+        installer.contains("毎週月曜 10:00 に"),
+        "the installer's message must state Monday 10:00"
+    );
+}
+
+#[test]
+pub(crate) fn prune_make_targets_exist_for_the_schedule() {
+    let makefile =
+        fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Makefile")).unwrap();
+    assert!(
+        makefile.contains("prune.schedule:"),
+        "prune.schedule is missing"
+    );
+    assert!(
+        makefile.contains("prune.unschedule:"),
+        "prune.unschedule is missing"
+    );
+    assert!(makefile.contains("scripts/install-prune-schedule.sh --uninstall"));
+    assert!(makefile.contains("bash scripts/install-prune-schedule.sh\n"));
+}
+
 /// A pane with an active session, drawn alone in a 900×600 window, for driving
 /// the keyboard and the IME through `ui_terminal_panel`. The tmux name is
 /// unique so that a key the pane forwards cannot reach a real session.
