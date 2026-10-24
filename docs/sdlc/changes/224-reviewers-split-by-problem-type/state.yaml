@@ -41,7 +41,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "awaiting-user"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "paused"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Asked twice with no answer: build and verify on the branch, which a revert undoes, and merge into main only after the person accepts dropping durability-reviewer."
+resume: "Built, reviewed and green in CI on the branch; once the person accepts dropping durability-reviewer, close state.yaml and merge it from main with git merge --no-ff --no-edit."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,8 +70,8 @@ resume: "Asked twice with no answer: build and verify on the branch, which a rev
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh admitted 739a3b0, and CI run 40123770880 passed on it"
+  bands: "machine passed bash scripts/check-bands.sh exits 0; subagents reads 2 against a baseline of 3 at warn, which is this change's deliberate fold rather than a mechanism lost"
   release-binary: "machine passed no: under src/ it touches only src/tests.rs, so /Applications/Operon.app stays current"
   guards-verified-by-mutation: "human passed 5 of 5 mutations caught by docs/sdlc/changes/224-reviewers-split-by-problem-type/mutations.py; the full-route one goes red where the gate's refusal stops naming a digest, because it asks for a reviewer with no definition"
 
