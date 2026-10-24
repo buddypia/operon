@@ -1,0 +1,31 @@
+# Review record for 220-build-output-grows-without-bound.
+#
+# The change: scripts/prune-target.sh trims several target dirs, every worktree's
+# target/ (--all-worktrees) and skips while cargo or rustc runs (--if-idle); the new
+# scripts/install-prune-schedule.sh registers it as a weekly per-user launchd agent;
+# Makefile gains prune.schedule and prune.unschedule.
+#
+# Round 1: rust-reviewer approve 0 5 and subprocess-safety-reviewer approve 0 5, both
+# read from a snapshot because the session lease on the worktree stopped them reading
+# it in place. Neither found a way for a deletion to leave <target>/{debug,release}/
+# {deps,incremental}. The ten remarks overlap and are carried as five.
+
+digest: "17071f3bb4c99ea7"
+
+rounds: 1
+
+carried:
+  - subprocess-safety-reviewer/2, rust-reviewer/4 · scripts/prune-target.sh build_is_running: any pgrep status other than 0 reads as "no build", so a missing pgrep or a mistyped PRUNE_PGREP deletes while a build runs; PATH is not pinned for launchd.
+    person: "掃除の直前に cargo が動いているかを調べるコマンドが見つからない・壊れている場合、動いていないものとして掃除が進みます。通常の macOS では起きませんが、起きたときの影響は、走っているビルドが一部やり直しになる程度です。対応は不要です。"
+  - subprocess-safety-reviewer/4, rust-reviewer/5 · scripts/install-prune-schedule.sh: --uninstall swallows every bootout error and still prints the success line; install runs bootstrap straight after bootout and can fail with Input/output error on a second run.
+    person: "週次の登録を解除したのに、実際には登録が残ったまま「解除しました」と表示されることがあります(ssh 経由で実行したときなど)。また、`make prune.schedule` を続けて 2 回実行すると、まれに登録に失敗します。失敗しても掃除が壊れることはなく、少し待って実行し直せば通ります。"
+  - subprocess-safety-reviewer/5, rust-reviewer/4 · scripts/prune-target.sh: --target-dir with no value exits silently or names the directory "" ; an empty worktree list is an unbound-variable abort on bash 3.2; du output on a vanished file breaks the byte sum.
+    person: "`--target-dir` の後ろに値を付け忘れると、わかりにくい終わり方をします。掃除されないだけで、何も消えません。対応は不要です。"
+  - subprocess-safety-reviewer/3, subprocess-safety-reviewer/1 · scripts/install-prune-schedule.sh, scripts/prune-target.sh: paths with & or < are not XML-escaped and the plist is rewritten in place before it is checked; file names holding a newline would split the find lists.
+    person: "チェックアウトの場所や自分のホームの名前に & や < が含まれていると、週次の登録が壊れた設定で上書きされます。そのような名前はこのリポジトリにはありません。通常は対応不要です。"
+  - rust-reviewer/1, rust-reviewer/2, rust-reviewer/3 · src/tests.rs prune_* tests: CARGO_TARGET_DIR under --all-worktrees, a worktree path with a space, the rustc half of the idle check, and which Makefile recipe holds which command are not pinned; fixtures are not discarded; a freshly written stub can occasionally fail to execute under load.
+    person: "掃除のテストのうち、一部の条件(パスに空白がある場合など)は確かめていません。また、負荷が高いときにテストが 1 回だけ失敗することがあります。その場合は再実行すれば通ります。"
+
+verdicts:
+  rust-reviewer: "approve 0 5"
+  subprocess-safety-reviewer: "approve 0 5"

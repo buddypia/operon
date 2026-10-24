@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-24
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -49,4 +49,11 @@
 
 ## Departures from the plan
 
-Filled in during implementation.
+- The all-worktrees test uses three linked worktrees, two without a `target/`
+  (named so that one sorts before and one after the worktree that has it), not
+  one. The first sweep let "a worktree without target/ ends the whole pass" survive
+  because the only such worktree was listed last; the mutation sweep is what found it.
+- The weekly agent's own run on an already-trimmed machine reclaims nothing: `make
+  wt.new` trims main's `target/` each time, so main held one build generation when
+  measured (2.9G, all live). The change prevents regrowth in the other worktrees;
+  it does not shrink what is live.

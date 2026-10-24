@@ -11,8 +11,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -20,13 +20,14 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Write the six failing tests in src/tests.rs, watch them fail, then edit scripts/prune-target.sh, add scripts/install-prune-schedule.sh and the Makefile targets."
+resume: "Landed work: after merge run `make prune.schedule` once from a worktree to register the weekly trim; the carried findings in review.yaml are the follow-up."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending no: touches scripts/, Makefile, src/tests.rs and docs only; /Applications/Operon.app is not made stale"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed make q.fast and cargo test --locked prune_ (9 passed)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0 (two warn-tier readings, recorded, no action)"
+  release-binary: "machine passed no: touches scripts/, Makefile, src/tests.rs and docs only; /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed 12 of 12 mutations caught by python3 docs/sdlc/changes/220-build-output-grows-without-bound/mutations.py"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer approve 0 5 each; five carried findings in review.yaml"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
