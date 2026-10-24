@@ -11,7 +11,7 @@
 #   with a single diff_pane / ui_diff_comment_footer pair in ui_git_diff_pane.
 # - Mutation sweep: 3 of 3 mutations caught by mutations.py.
 
-digest: "e9c5d397557cf771"
+digest: "547df80dec3853a8"
 rounds: 1
 
 verdicts:
