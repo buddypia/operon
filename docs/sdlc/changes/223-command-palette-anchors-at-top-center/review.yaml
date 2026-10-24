@@ -1,0 +1,13 @@
+# Review record for change 223-command-palette-anchors-at-top-center.
+#
+# Checked against .claude/agents/rust-reviewer.md, .claude/rules/rust.md, and
+# REVIEW.md:
+# - Per-frame work: zero new allocations in ui_command_palette.
+# - Panic sites: zero new unwrap/expect/panic in production source.
+# - Mutation sweep: 2 of 2 mutations caught by mutations.py.
+
+digest: "f6c6321da0c8f018"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

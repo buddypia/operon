@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/223-command-palette-anchors-at-top-center.
+#
+# OperonApp::ui_command_palette constructs egui::Window::new(tr("検索・操作"))
+# without an anchor, so pressing ⌘K opens the palette near the top-left corner
+# over the left navigation rail. Anchoring at egui::Align2::CENTER_TOP with
+# offset [0.0, 68.0] and default_width(520.0) places it centered near the top
+# of the viewport.
+#
+# Route: modify (placement EXTEND in src/app/screens.rs).
+
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Closed: ui_command_palette anchors the 検索・操作 window at egui::Align2::CENTER_TOP, [0.0, 68.0] with default_width(520.0)."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed yes: touches src/app/screens.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed 2 of 2 mutations caught by docs/sdlc/changes/223-command-palette-anchors-at-top-center/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

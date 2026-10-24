@@ -60227,3 +60227,46 @@ pub(crate) fn clicking_a_changed_file_filters_the_diff_without_leaving_the_chang
     );
     fs::remove_dir_all(&root).ok();
 }
+
+#[test]
+pub(crate) fn the_command_palette_sits_centered_near_the_top_of_the_window() {
+    let root = temporary_directory("command-palette-top-center");
+    let (mut app, ..) = app_with_palette_content(&root);
+    app.command_palette_open = true;
+
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 800.0),
+        )),
+        ..Default::default()
+    };
+    let mut output = egui::FullOutput::default();
+    for _ in 0..2 {
+        output = ctx.run(raw_input.clone(), |ctx| {
+            app.ui_command_palette(ctx);
+        });
+    }
+
+    let title_rect = drawn_text_rect(&output, |text| text == "検索・操作")
+        .expect("the command palette window title must be drawn");
+    let action_rect = drawn_text_rect(&output, |text| text == "ワークスペースをスキャン…")
+        .expect("the command palette action rows must be drawn");
+
+    assert!(
+        (title_rect.center().x - 640.0).abs() < 24.0,
+        "command palette title must sit horizontally centered in a 1280px viewport (title_rect={title_rect:?})"
+    );
+    assert!(
+        title_rect.top() > 60.0 && title_rect.top() < 120.0,
+        "command palette must sit near the top of the viewport at y=68 (title_rect={title_rect:?})"
+    );
+    assert!(
+        action_rect.left() > 350.0
+            && action_rect.left() < 415.0
+            && action_rect.top() > title_rect.bottom(),
+        "command palette action rows must sit inside the 520px centered window below the title (action_rect={action_rect:?}, title_rect={title_rect:?})"
+    );
+    fs::remove_dir_all(&root).ok();
+}
