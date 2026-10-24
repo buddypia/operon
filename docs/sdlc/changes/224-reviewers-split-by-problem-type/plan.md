@@ -1,8 +1,8 @@
 # Plan: fold the durability reviewer into the Rust reviewer and the durability skill
 
 - **Spec**: `./spec.md`
-- **Approved**: pending — a person's, because the change relaxes a gate; built on the branch meanwhile, not landed
-- **Status**: in progress
+- **Approved**: 2026-10-25, by the person's request to apply the article (see `approvals.log`)
+- **Status**: done
 
 ## Files that change
 
