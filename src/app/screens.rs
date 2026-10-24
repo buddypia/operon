@@ -2437,26 +2437,15 @@ impl OperonApp {
                 }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let accent = palette.agent_accent(&self.selected_agent);
                 let label = tf!(
                     "{p0} を起動  ⌘↩",
                     p0 = agent_choice_copy(&self.selected_agent).0
                 );
-                if ui
-                    .add_enabled(
-                        launch_ready,
-                        egui::Button::new(
-                            RichText::new(label)
-                                .strong()
-                                .color(readable_text_on(accent, palette)),
-                        )
-                        .fill(accent)
-                        .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
-                    )
-                    .clicked()
-                {
-                    launch = true;
-                }
+                ui.add_enabled_ui(launch_ready, |ui| {
+                    if primary_button(ui, palette, ICON_START, &label).clicked() {
+                        launch = true;
+                    }
+                });
             });
         });
         (launch, terminal_only)

@@ -1086,7 +1086,7 @@ impl SessionStatusGroup {
     pub(crate) fn message_id(self) -> &'static str {
         match self {
             SessionStatusGroup::NeedsYou => "要対応",
-            SessionStatusGroup::Free => "待機中",
+            SessionStatusGroup::Free => "指示待ち",
             SessionStatusGroup::Busy => "実行中",
             SessionStatusGroup::Finished => "終了",
         }

@@ -11,8 +11,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "close"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -20,13 +20,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the four failing tests in src/tests.rs named in spec.md, watch them fail, then make the edits in plan.md order."
+resume: "Closed: the Git sub-tabs use translated message ids, the idle group is worded 指示待ち, and the launch button uses primary_button with palette.accent."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: touches src/app.rs, src/app/screens.rs, src/ui/widgets.rs and src/i18n_tables.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed yes: touches src/app.rs, src/app/screens.rs, src/ui/widgets.rs and src/i18n_tables.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed 5 of 5 mutations caught by docs/sdlc/changes/221-labels-and-launch-button-break-the-design-rules/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

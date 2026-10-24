@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-24
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -50,4 +50,4 @@
 
 ## Departures from the plan
 
-None yet.
+- `the_launch_button_sits_at_the_sheets_bottom_right` in `src/tests.rs` was also updated to include `{ICON_START}  ` in the expected button label, matching `primary_button`'s formatting.

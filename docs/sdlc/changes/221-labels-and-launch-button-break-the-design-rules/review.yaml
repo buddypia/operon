@@ -1,0 +1,22 @@
+# Review record for change 221-labels-and-launch-button-break-the-design-rules.
+#
+# Checked against .claude/agents/rust-reviewer.md, .claude/rules/rust.md, and
+# REVIEW.md:
+# - Per-frame work: GitView::label calls tr(...) (binary search over static
+#   tables), SessionStatusGroup::message_id returns a 'static literal, and
+#   ui_launch_footer delegates to primary_button inside add_enabled_ui (matching
+#   line 2434 above it). No child process, I/O, or uncached scan in the draw path.
+# - Panic sites: zero new unwrap/expect/panic in production source.
+# - i18n and docs: EN_TABLE and KO_TABLE remain sorted; all three new message
+#   ids have rows in both tables and the unused bare "待機中" row is removed
+#   while queued-session sentences remain intact. README.{md,ja.md,ko.md} and
+#   docs/MANUAL.{ja.md,ko.md} update the idle filter lines while preserving the
+#   queued-session paragraphs in MANUAL.{ja.md,ko.md}.
+# - Mutation sweep: 5 of 5 mutations caught by mutations.py, including claim
+#   mutations on README.ja.md and docs/MANUAL.ja.md.
+
+digest: "02f49f1eb8c720ba"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
