@@ -59491,6 +59491,13 @@ pub(crate) fn launch_failure_surfaces_diagnostic_modal_after_starting_in_termina
 
 #[test]
 pub(crate) fn launch_stored_session_does_not_block_on_workspace_trust_polling() {
+    assert_eq!(
+        tmux_error_state("can't find pane: operon-123"),
+        TmuxState::Gone
+    );
+    if !tool_available("tmux") {
+        return;
+    }
     let missing_name = format!("operon-missing-trust-{}", Uuid::new_v4().simple());
     let started = Instant::now();
     let approved = auto_approve_workspace_trust_prompt(&missing_name).unwrap();

@@ -1,7 +1,7 @@
 # Review record for 219-launch-modal-hides-starting-terminal.
 
-digest: "49a739e0ef5ce0fc"
-rounds: 1
+digest: "0aaec566a0134c8c"
+rounds: 2
 
 verdicts:
   rust-reviewer: "approve 0 0"
