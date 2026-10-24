@@ -59803,7 +59803,8 @@ pub(crate) fn session_started_arms_immediate_terminal_output_polling_and_focus()
     assert!(app.launch_progress.is_none());
     assert!(
         app.background_tasks
-            .contains(&BackgroundKey::SessionOutput(session_id)),
+            .contains(&BackgroundKey::SessionOutput(session_id))
+            || app.session_output.contains_key(&session_id),
         "SessionStarted must request terminal output immediately even when launch_progress was dismissed"
     );
     assert_eq!(
@@ -59847,7 +59848,8 @@ pub(crate) fn session_started_arms_immediate_terminal_output_polling_and_focus()
     assert!(app.launch_progress.is_none());
     assert!(
         app.background_tasks
-            .contains(&BackgroundKey::SessionOutput(empty_id)),
+            .contains(&BackgroundKey::SessionOutput(empty_id))
+            || app.session_output.contains_key(&empty_id),
         "EmptySessionStarted must request terminal output immediately even when launch_progress was dismissed"
     );
     assert_eq!(

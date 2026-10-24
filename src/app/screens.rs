@@ -3168,13 +3168,13 @@ impl OperonApp {
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             ui.set_width(right_width);
-                            self.ui_git_diff_pane(ui, project, palette);
+                            self.ui_git_diff_view(ui, project, palette);
                         },
                     );
                 });
             }
             GitView::Diff => {
-                self.ui_git_diff_pane(ui, project, palette);
+                self.ui_git_diff_view(ui, project, palette);
             }
             GitView::History => {
                 ui.label(RichText::new(tr("最近のコミット")).strong());
@@ -3198,7 +3198,7 @@ impl OperonApp {
         }
     }
 
-    pub(crate) fn ui_git_diff_pane(
+    pub(crate) fn ui_git_diff_view(
         &mut self,
         ui: &mut egui::Ui,
         project: &Project,

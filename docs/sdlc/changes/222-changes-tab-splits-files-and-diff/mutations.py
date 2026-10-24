@@ -19,7 +19,7 @@ CHECKS = [
 MUTATIONS = {
     "changes-tab-omits-right-diff-pane": (
         ROOT / "src/app/screens.rs",
-        "                            ui.set_width(right_width);\n                            self.ui_git_diff_pane(ui, project, palette);",
+        "                            ui.set_width(right_width);\n                            self.ui_git_diff_view(ui, project, palette);",
         "                            ui.set_width(right_width);",
     ),
     "clicking-file-switches-to-diff-tab": (
