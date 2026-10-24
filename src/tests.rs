@@ -25019,7 +25019,7 @@ pub(crate) fn the_stop_gate_refuses_a_branch_carrying_an_unjudged_commit() {
     f.git(&["checkout", "-q", "main"]);
 
     // A record about the commit's own diff, amended in, is what it lacked.
-    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n";
     f.append("docs/sdlc/changes/900-fixture/state.yaml", "# slipped\n");
     f.git(&["add", "-A"]);
     let digest = f.current_digest_with(&["--against", "HEAD^"]);
@@ -25193,7 +25193,6 @@ impl ReviewGateFixture {
             "docs/sdlc/risk.yaml",
             ".claude/agents/rust-reviewer.md",
             ".claude/agents/subprocess-safety-reviewer.md",
-            ".claude/agents/durability-reviewer.md",
             ".githooks/reference-transaction",
             ".githooks/installed/reference-transaction",
         ] {
@@ -25424,7 +25423,8 @@ impl ReviewGateFixture {
     }
 }
 
-const REVIEW_GATE_ALL_APPROVE: &str = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+const REVIEW_GATE_ALL_APPROVE: &str =
+    "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n";
 
 /// The gate runs a scenario through, collected so one failure does not hide
 /// the rest.
@@ -25504,7 +25504,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
         "no record",
         f.gate(&[]),
         1,
-        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer durability-reviewer\n",
+        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer\n",
     );
 
     // A record about some other diff.
@@ -25543,7 +25543,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     c.check("missing reviewer", f.gate(&[]), 1, "の判定がありません");
     f.record(
         &digest,
-        "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+        "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
     c.check(
@@ -25554,7 +25554,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses() {
     );
     f.record(
         &digest,
-        "  rust-reviewer: \"approve-with-nits 2 1\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+        "  rust-reviewer: \"approve-with-nits 2 1\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
     c.check(
@@ -25660,7 +25660,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_after_a_landing() 
     );
     f.record(
         &against_main,
-        "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+        "  rust-reviewer: \"do-not-approve 1 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
     c.check(
@@ -25791,19 +25791,19 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_after_a_landing() 
     );
     f.record(
         &digest,
-        "  rust-reviewer: \"approve 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+        "  rust-reviewer: \"approve 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
     c.check("two-value line", f.gate(&[]), 1, "3 値ではありません");
     f.record(
         &digest,
-        "  rust-reviewer: \"approve 0x 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+        "  rust-reviewer: \"approve 0x 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
     c.check("non-numeric count", f.gate(&[]), 1, "数字ではありません");
     f.record(
         &digest,
-        "  rust-reviewer: \"lgtm 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n",
+        "  rust-reviewer: \"lgtm 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n",
     );
     f.git(&["add", "-A"]);
     c.check(
@@ -26317,7 +26317,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_when_a_table_is_lo
         "a commit that lowers the risk table is still classified by it",
         f.commit(&["commit", "-q", "-m", "lower the table"], None),
         1,
-        "必要なレビュアー: subprocess-safety-reviewer durability-reviewer\n",
+        "必要なレビュアー: subprocess-safety-reviewer rust-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
     // The table from before the gate, on both sides: the first commit this
@@ -26365,7 +26365,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_when_a_table_is_lo
         "the old table's `no` is still widened by the surface",
         f.gate(&[]),
         1,
-        "必要なレビュアー: durability-reviewer\n",
+        "必要なレビュアー: rust-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
     f.set_route("security");
@@ -26376,7 +26376,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_when_a_table_is_lo
         "the old table's `yes` is `full`",
         f.gate(&[]),
         1,
-        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer durability-reviewer\n",
+        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
     f.git(&["config", "--unset", "core.hooksPath"]);
@@ -26412,7 +26412,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_when_a_table_is_lo
         "a commit that lowers its own route is still judged by the higher side",
         f.gate(&[]),
         1,
-        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer durability-reviewer\n",
+        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
 
@@ -26523,7 +26523,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_by_route_and_base(
         "none route still widened by the surface",
         f.gate(&[]),
         1,
-        "必要なレビュアー: durability-reviewer\n",
+        "必要なレビュアー: rust-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
     // `full` on a low surface is the route alone asking for all three.
@@ -26535,7 +26535,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_by_route_and_base(
         "full route on a low surface requires all three",
         f.gate(&[]),
         1,
-        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer durability-reviewer\n",
+        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
     // A file outside `src/`: the dependencies surface, and a digest that
@@ -26563,7 +26563,7 @@ pub(crate) fn the_review_gate_refuses_what_it_says_it_refuses_by_route_and_base(
         "a risk table removed from the index still classifies through the base",
         f.gate(&[]),
         1,
-        "durability-reviewer",
+        "必要なレビュアー: rust-reviewer subprocess-safety-reviewer\n",
     );
     f.git(&["reset", "-q", "--hard"]);
 
@@ -27216,7 +27216,7 @@ fn review_gate_sed_shim(f: &ReviewGateFixture, broken: &str) -> String {
 /// stops as it does when `git diff` fails, instead of hashing empty input —
 /// whose digest a record could carry and stay fresh for every diff.
 pub(crate) fn the_review_gate_stops_when_normalizing_the_diff_fails() {
-    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n";
     // sha256 of empty input, which a normaliser that printed nothing yields.
     let empty = "e3b0c44298fc1c14";
     for (mode, broken) in [
@@ -27380,7 +27380,7 @@ pub(crate) fn a_review_survives_main_moving_the_lines_above_it() {
 /// for byte. It still counts: a byte-identical diff is the strictest match
 /// there is, and sessions mid-review elsewhere must not be sent back by this.
 pub(crate) fn a_review_recorded_before_change_162_still_counts() {
-    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n  durability-reviewer: \"approve 0 0\"\n";
+    let all = "  rust-reviewer: \"approve 0 0\"\n  subprocess-safety-reviewer: \"approve 0 0\"\n";
     let f = ReviewGateFixture::new();
     f.append("src/store.rs", "// change\n");
     f.append(
@@ -27702,6 +27702,40 @@ pub(crate) fn the_review_gate_requires_the_reviewers_review_md_names() {
             == "[ \"$spawns_or_unsafe\" -eq 1 ] && need subprocess-safety-reviewer"),
         "check-review.sh の内容トリガーが required set に届いていません"
     );
+}
+
+/// Change 224 folded the durability reviewer into whichever reviewer the gate
+/// asks for the store: the guarantees and the order to check them in live in
+/// one section of the durability skill, and that reviewer reads it when the
+/// diff reaches the store. Re-pointing the surface at a reviewer that does not
+/// read the section, or cutting the section, would leave every store diff
+/// approved by a reviewer that was never told what to check.
+#[test]
+pub(crate) fn the_reviewer_the_store_asks_for_reads_the_durability_procedure() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = fs::read_to_string(root.join("scripts/check-review.sh")).unwrap();
+    let skill_path = ".claude/skills/durability-invariants/SKILL.md";
+    let section = "Reviewing a diff against this";
+    let skill = fs::read_to_string(root.join(skill_path)).unwrap();
+    assert!(
+        skill.contains(&format!("\n## {section}\n")),
+        "{skill_path} に「## {section}」がありません — ストアのレビュー手順の置き場です"
+    );
+    let mapping = review_gate_surface_mapping(&script);
+    for surface in ["store", "bundle-swap"] {
+        let (_, reviewer) = mapping
+            .iter()
+            .find(|(name, _)| name == surface)
+            .unwrap_or_else(|| {
+                panic!("check-review.sh が {surface} にレビュアーを割り当てていません")
+            });
+        let definition = fs::read_to_string(root.join(format!(".claude/agents/{reviewer}.md")))
+            .unwrap_or_else(|_| panic!("{surface} のレビュアー {reviewer} の定義がありません"));
+        assert!(
+            definition.contains(skill_path) && definition.contains(section),
+            "{surface} のレビュアー {reviewer} が {skill_path} の「{section}」を読むよう書かれていません"
+        );
+    }
 }
 
 /// A table is searched with `binary_search_by`, so an id out of order does not

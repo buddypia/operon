@@ -173,10 +173,12 @@ script, a subagent, a hook, and the always-on file last, paid for by a cut — a
   needs a paper trail; `root-cause` before a bug is fixed; `ship` when a build is
   released. `harness_agents_md_says_when_to_read_every_skill` refuses a skill
   with no such line.
-- `.claude/agents/` — a scoped reviewer with its own context.
-  `durability-reviewer` and `subprocess-safety-reviewer` are the two surfaces
-  where a mistake is unrecoverable rather than merely wrong; `rust-reviewer`
-  covers the craft axes no test can see.
+- `.claude/agents/` — a scoped reviewer with its own context, kept only where a
+  measured fold into a skill scored worse (change 224's `eval.md` is the
+  method). `subprocess-safety-reviewer` covers the surface where a mistake is
+  unrecoverable rather than merely wrong; `rust-reviewer` covers the craft axes
+  no test can see, and durability through the review section of the
+  `durability-invariants` skill.
 
 A path rule fires when Claude **reads** a matching file, not when it writes one.
 Editing an existing file is covered, because a read comes first. Creating a
