@@ -1,0 +1,3 @@
+2026-10-24T03:10:33Z auto intent intent.md de094c4818218a33 approve restates the person quoted request and answer; only regenerable build output; no paused surface
+2026-10-24T03:10:33Z auto spec spec.md d9d330dfde3b8b63 approve six requirements each with a named test; no-flags default pinned; Minute 0 and log keys asserted
+2026-10-24T03:10:33Z auto plan plan.md 9a1f2f7694521759 approve covers spec reqs 1-6 with tests first and a pin through the refactor; risks name their catches

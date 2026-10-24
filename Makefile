@@ -52,4 +52,11 @@ q.fix:
 prune.target:
 	@bash scripts/prune-target.sh $(if $(DRY),--dry-run)
 
+# Weekly trim of every worktree's build output (change 220).
+.PHONY: prune.schedule prune.unschedule
+prune.schedule:
+	@bash scripts/install-prune-schedule.sh
+prune.unschedule:
+	@bash scripts/install-prune-schedule.sh --uninstall
+
 # --- end worktree-isolation ---

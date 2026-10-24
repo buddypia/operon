@@ -1,0 +1,39 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/220-build-output-grows-without-bound.
+#
+# Request: the person found the packaged-app folder and the cargo build output
+# taking a lot of disk and asked for them to be cleaned on a schedule. Measured: the
+# main checkout's build output is 2.9G after the existing trim; the packaged-app
+# folder holds only one current and one previous bundle by construction, so the growth
+# is the build output of every worktree. Placement: EXTEND scripts/prune-target.sh.
+#
+# Route: modify.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Landed work: after merge run `make prune.schedule` once from a worktree to register the weekly trim; the carried findings in review.yaml are the follow-up."
+
+contract:
+  three-gates: "machine passed make q.fast and cargo test --locked prune_ (9 passed)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0 (two warn-tier readings, recorded, no action)"
+  release-binary: "machine passed no: touches scripts/, Makefile, src/tests.rs and docs only; /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human passed 12 of 12 mutations caught by python3 docs/sdlc/changes/220-build-output-grows-without-bound/mutations.py"
+  review: "human passed rust-reviewer and subprocess-safety-reviewer approve 0 5 each; five carried findings in review.yaml"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
