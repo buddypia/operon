@@ -32449,7 +32449,7 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
     assert_eq!(
         SessionStatusKind::Idle.group(),
         SessionStatusGroup::Free,
-        "an idle agent is the one thing 待機中 is for"
+        "an idle agent is the one thing 指示待ち is for"
     );
     assert_eq!(
         SessionStatusKind::Waiting.group(),
@@ -46254,7 +46254,7 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         false,
         Some(AgentActivity::Idle),
     );
-    assert_eq!(view.label, tr("待機中"));
+    assert_eq!(view.label, tr("指示待ち"));
     let mut ids: Vec<&str> = SessionStatusGroup::GROUPS
         .iter()
         .map(|group| group.message_id())
@@ -46829,7 +46829,10 @@ pub(crate) fn the_launch_button_sits_at_the_sheets_bottom_right() {
     app.open_project_session_setup(project.id);
     let _ = sheet_frame(&mut app, &context, Vec::new(), egui::Modifiers::NONE);
     let drawn = sheet_frame(&mut app, &context, Vec::new(), egui::Modifiers::NONE);
-    let label = tf!("{p0} を起動  ⌘↩", p0 = agent_choice_copy("gemini").0);
+    let label = format!(
+        "{ICON_START}  {}",
+        tf!("{p0} を起動  ⌘↩", p0 = agent_choice_copy("gemini").0)
+    );
     let button = drawn_text_rect(&drawn, |text| text == label).expect("launch button drawn");
     let request = drawn_text_rect(&drawn, |text| text == tr("依頼（任意）")).expect("request");
     let close = drawn_text_rect(&drawn, |text| text == ICON_CLOSE).expect("✕");
@@ -59481,6 +59484,173 @@ pub(crate) fn worktree_and_allowlisted_calls_skip_redundant_trunk_git_and_regist
         ),
         (Some(true), Some(true)),
         "stripHeredocData / inspectableCommand が同じコマンド文字列を再利用していません: {res}"
+    );
+}
+
+/// Change 221: the three sub-tabs under a project's changes tab are translated
+/// message ids rather than English literals in a Japanese window.
+#[test]
+pub(crate) fn the_git_sub_tabs_are_translated_message_ids() {
+    for (view, ja, en, ko) in [
+        (
+            GitView::Changes,
+            "変更ファイル",
+            "Changed files",
+            "변경된 파일",
+        ),
+        (GitView::Diff, "差分", "Diff", "차이점"),
+        (
+            GitView::History,
+            "コミット履歴",
+            "Commit history",
+            "커밋 기록",
+        ),
+    ] {
+        assert_eq!(
+            view.label(),
+            ja,
+            "{view:?} must draw its Japanese message id"
+        );
+        assert!(!view.label().is_ascii(), "{view:?} is still an ASCII word");
+        assert_eq!(translation_for(Language::En, ja), Some(en));
+        assert_eq!(translation_for(Language::Ko, ja), Some(ko));
+    }
+}
+
+/// Change 221: the idle status group is worded 「指示待ち」 so it does not share
+/// the word 「待機中」 with queued sessions waiting behind a prerequisite.
+#[test]
+pub(crate) fn the_idle_group_word_is_not_the_queued_session_word() {
+    assert_eq!(SessionStatusGroup::Free.message_id(), "指示待ち");
+    assert_ne!(SessionStatusGroup::Free.message_id(), "待機中");
+    assert_eq!(SessionStatusKind::Idle.label(), "指示待ち");
+    assert_eq!(translation_for(Language::En, "指示待ち"), Some("Idle"));
+    assert_eq!(translation_for(Language::Ko, "指示待ち"), Some("지시 대기"));
+    assert!(
+        translation_for(Language::En, "待機中").is_none(),
+        "the bare group row for 待機中 must be gone while queued-session sentences remain"
+    );
+}
+
+/// Change 221: the launch sheet's primary button is filled with `palette.accent`
+/// whichever agent is selected, instead of painting the vendor's accent colour.
+#[test]
+pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
+    fn button_fills_at(shape: &egui::epaint::Shape, point: egui::Pos2, out: &mut Vec<Color32>) {
+        match shape {
+            egui::epaint::Shape::Rect(rect)
+                if rect.rect.contains(point) && rect.fill != Color32::TRANSPARENT =>
+            {
+                out.push(rect.fill);
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    button_fills_at(child, point, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let (mut app, project, root) = launch_screen_fixture("sheet-button-accent");
+    let palette = app.store.theme.palette();
+    let context = egui::Context::default();
+    context.style_mut(|style| style.animation_time = 0.0);
+    app.open_project_session_setup(project.id);
+    for agent in ["claude", "codex", "gemini"] {
+        app.select_agent(agent);
+        app.acknowledged_launch = Some(app.pending_launch());
+        let _ = sheet_frame(&mut app, &context, Vec::new(), egui::Modifiers::NONE);
+        let drawn = sheet_frame(&mut app, &context, Vec::new(), egui::Modifiers::NONE);
+        let copy = tf!("{p0} を起動  ⌘↩", p0 = agent_choice_copy(agent).0);
+        let button = drawn_text_rect(&drawn, |text| text.ends_with(&copy))
+            .unwrap_or_else(|| panic!("{agent}: launch button not drawn"));
+        let mut fills = Vec::new();
+        for clipped in &drawn.shapes {
+            button_fills_at(&clipped.shape, button.center(), &mut fills);
+        }
+        let button_fill = fills
+            .last()
+            .copied()
+            .unwrap_or_else(|| panic!("{agent}: no filled rect behind launch button"));
+        assert_eq!(
+            button_fill, palette.accent,
+            "{agent}: launch button fill must be palette.accent, not vendor accent"
+        );
+        let expected = format!("{ICON_START}  {copy}");
+        assert!(
+            drawn_text_rect(&drawn, |text| text == expected).is_some(),
+            "{agent}: launch button must be drawn by primary_button with ICON_START"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 221: the documents that name the idle filter use 「指示待ち」 / 「지시 대기」,
+/// while the sentences about queued sessions in the manual keep 「待機中」 / 「대기 중」.
+#[test]
+pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
+    let readme = fs::read_to_string("README.md").unwrap();
+    assert!(
+        readme.contains("header — **要対応**, **実行中**, **指示待ち**, **終了** —"),
+        "README.md must name the idle filter 指示待ち"
+    );
+
+    let readme_ja = fs::read_to_string("README.ja.md").unwrap();
+    assert!(
+        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・指示待ち・終了で一覧"),
+        "README.ja.md hero caption must name 指示待ち"
+    );
+    assert!(
+        readme_ja.contains("**要対応**・**実行中**・**指示待ち**・**終了** の 4 つのトグル"),
+        "README.ja.md filter toggles must name 指示待ち"
+    );
+
+    let readme_ko = fs::read_to_string("README.ko.md").unwrap();
+    assert!(
+        readme_ko.contains("모든 프로젝트의 세션을 대응 필요·실행 중·지시 대기·종료로 한눈에"),
+        "README.ko.md hero caption must name 지시 대기"
+    );
+    assert!(
+        readme_ko.contains("**대응 필요**·**실행 중**·**지시 대기**·**종료** 네 개의 토글"),
+        "README.ko.md filter toggles must name 지시 대기"
+    );
+
+    let manual_ja = fs::read_to_string("docs/MANUAL.ja.md").unwrap();
+    assert!(
+        manual_ja.contains("| **指示待ち** | 起動していて、次の依頼を待っている |"),
+        "docs/MANUAL.ja.md state table must name 指示待ち"
+    );
+    assert!(
+        manual_ja.contains("**要対応**・**実行中**・**指示待ち**・**終了** の 4 つのトグル"),
+        "docs/MANUAL.ja.md filter toggles must name 指示待ち"
+    );
+    assert!(
+        manual_ja.contains("**状態が「実行中」のまま変わらない／「指示待ち」のまま**"),
+        "docs/MANUAL.ja.md troubleshooting must name 指示待ち"
+    );
+    assert!(
+        manual_ja.contains("待機中のセッションには **今すぐ開始** が出て"),
+        "docs/MANUAL.ja.md queued-session sentence must keep 待機中"
+    );
+
+    let manual_ko = fs::read_to_string("docs/MANUAL.ko.md").unwrap();
+    assert!(
+        manual_ko.contains("| **지시 대기** | 실행 중이며 다음 요청을 기다리는 상태 |"),
+        "docs/MANUAL.ko.md state table must name 지시 대기"
+    );
+    assert!(
+        manual_ko.contains("**대응 필요**, **실행 중**, **지시 대기**, **종료** 네 개의 토글 칩"),
+        "docs/MANUAL.ko.md filter toggles must name 지시 대기"
+    );
+    assert!(
+        manual_ko.contains("**상태가 \"실행 중\"에서 바뀌지 않거나 \"지시 대기\"로 남음**"),
+        "docs/MANUAL.ko.md troubleshooting must name 지시 대기"
+    );
+    assert!(
+        manual_ko.contains(
+            "대기 중인 세션에는 바로 실행하는 **今すぐ開始**(지금 바로 시작)가 나옵니다."
+        ),
+        "docs/MANUAL.ko.md queued-session sentence must keep 대기 중인 세션"
     );
 }
 

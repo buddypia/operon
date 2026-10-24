@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/221-labels-and-launch-button-break-the-design-rules.
+#
+# Three small places where the screen says something other than what the
+# product's own documents promise: the Git sub-tabs are English in a Japanese
+# window, the idle group is named like a queued session, and the launch button
+# changes colour with the agent that is picked.
+#
+# Route: modify (placement EXTEND in src/app.rs, src/app/screens.rs,
+# src/ui/widgets.rs, src/i18n_tables.rs, the READMEs and the manual).
+
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Closed: the Git sub-tabs use translated message ids, the idle group is worded 指示待ち, and the launch button uses primary_button with palette.accent."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed yes: touches src/app.rs, src/app/screens.rs, src/ui/widgets.rs and src/i18n_tables.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed 5 of 5 mutations caught by docs/sdlc/changes/221-labels-and-launch-button-break-the-design-rules/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

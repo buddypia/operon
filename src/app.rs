@@ -7258,9 +7258,9 @@ impl GitView {
     }
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Changes => "Changes",
-            Self::Diff => "Diff",
-            Self::History => "History",
+            Self::Changes => tr("変更ファイル"),
+            Self::Diff => tr("差分"),
+            Self::History => tr("コミット履歴"),
         }
     }
 }
