@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/220-build-output-grows-without-bound.
+#
+# Request: the person found the packaged-app folder and the cargo build output
+# taking a lot of disk and asked for them to be cleaned on a schedule. Measured: the
+# main checkout's build output is 2.9G after the existing trim; the packaged-app
+# folder holds only one current and one previous bundle by construction, so the growth
+# is the build output of every worktree. Placement: EXTEND scripts/prune-target.sh.
+#
+# Route: modify.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Write the six failing tests in src/tests.rs, watch them fail, then edit scripts/prune-target.sh, add scripts/install-prune-schedule.sh and the Makefile targets."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending no: touches scripts/, Makefile, src/tests.rs and docs only; /Applications/Operon.app is not made stale"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
