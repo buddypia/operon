@@ -15,7 +15,7 @@
 # - Mutation sweep: 5 of 5 mutations caught by mutations.py, including claim
 #   mutations on README.ja.md and docs/MANUAL.ja.md.
 
-digest: "02f49f1eb8c720ba"
+digest: "cbae1b9dc2bb1dae"
 rounds: 1
 
 verdicts:

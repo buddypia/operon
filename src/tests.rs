@@ -59653,3 +59653,340 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         "docs/MANUAL.ko.md queued-session sentence must keep 대기 중인 세션"
     );
 }
+
+#[test]
+pub(crate) fn launch_opens_terminal_screen_immediately_without_progress_modal() {
+    let temp = temporary_directory("launch-opens-terminal-screen");
+    let unlinked = temp.join("unlinked-subdir");
+    fs::create_dir_all(&unlinked).unwrap();
+    let data_file = temp.join("store.json");
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, Store::default(), tools, None);
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "operon".into(),
+        path: temp.clone(),
+        added_at: now(),
+    };
+    app.store.projects.push(project.clone());
+    app.select_project(Some(project.id));
+    app.session_path_project = Some(project.id);
+    app.session_path_input = unlinked.display().to_string();
+
+    app.page = Page::Home;
+    app.session_library_open = true;
+    app.select_agent("claude");
+    app.goal_input = "Show terminal immediately".into();
+    app.launch_session();
+
+    let agent_session_id = app.store.sessions.last().expect("agent session created").id;
+    assert_eq!(app.selected_session, Some(agent_session_id));
+    assert_eq!(app.page, Page::Sessions);
+    assert!(!app.session_library_open);
+    assert!(
+        app.launch_progress
+            .as_ref()
+            .is_some_and(|p| p.session_id == agent_session_id && p.dismissed),
+        "launch_session must keep launch_progress dismissed while starting so the modal does not cover the terminal screen"
+    );
+
+    app.page = Page::Home;
+    app.session_library_open = true;
+    app.launch_empty_session();
+
+    let empty_session_id = app.store.sessions.last().expect("empty session created").id;
+    assert_eq!(app.selected_session, Some(empty_session_id));
+    assert_eq!(app.page, Page::Sessions);
+    assert!(!app.session_library_open);
+    assert!(
+        app.launch_progress
+            .as_ref()
+            .is_some_and(|p| p.session_id == empty_session_id && p.dismissed),
+        "launch_empty_session must keep launch_progress dismissed while starting"
+    );
+
+    let retry_session_id = Uuid::new_v4();
+    let mut retry_session = test_session(retry_session_id, SessionStatus::Failed);
+    retry_session.project_id = project.id;
+    retry_session.worktree_path = Some(unlinked.clone());
+    app.store.sessions.push(retry_session);
+    app.page = Page::Home;
+    app.session_library_open = true;
+    app.launch_progress = Some(LaunchProgress {
+        session_id: retry_session_id,
+        project_name: project.name.clone(),
+        worktree_path: unlinked,
+        agent: "claude".into(),
+        agent_command: "claude".into(),
+        goal: "Retry".into(),
+        started_at: Instant::now(),
+        failure: Some("previous error".into()),
+        dismissed: false,
+    });
+    app.start_session(retry_session_id);
+
+    assert_eq!(app.selected_session, Some(retry_session_id));
+    assert_eq!(app.page, Page::Sessions);
+    assert!(!app.session_library_open);
+    assert!(
+        app.launch_progress.as_ref().is_some_and(|p| {
+            p.session_id == retry_session_id && p.dismissed && p.failure.is_none()
+        }),
+        "start_session must clear any prior failure and keep launch_progress dismissed while starting"
+    );
+
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(agent_session_id),
+        Duration::from_secs(5),
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::EmptySessionStart(empty_session_id),
+        Duration::from_secs(5),
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(retry_session_id),
+        Duration::from_secs(5),
+    );
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
+pub(crate) fn session_started_arms_immediate_terminal_output_polling_and_focus() {
+    let temp = temporary_directory("session-started-immediate-poll");
+    let data_file = temp.join("store.json");
+    let session_id = Uuid::new_v4();
+    let empty_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        data_file,
+        Store {
+            sessions: vec![
+                test_session(session_id, SessionStatus::Starting),
+                test_session(empty_id, SessionStatus::Starting),
+            ],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+    app.select_session(session_id);
+    app.page = Page::Sessions;
+    app.launch_progress = Some(LaunchProgress {
+        session_id,
+        project_name: "operon".into(),
+        worktree_path: temp.clone(),
+        agent: "claude".into(),
+        agent_command: "claude".into(),
+        goal: "Test".into(),
+        started_at: Instant::now(),
+        failure: None,
+        dismissed: true,
+    });
+    app.background_tasks
+        .insert(BackgroundKey::SessionStart(session_id));
+    app.background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id,
+            result: Ok(Some("main".into())),
+        })
+        .unwrap();
+
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Active);
+    assert!(app.launch_progress.is_none());
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(session_id)),
+        "SessionStarted must request terminal output immediately even when launch_progress was dismissed"
+    );
+    assert_eq!(
+        terminal_echo_poll_wait(app.last_terminal_input, None, Instant::now()),
+        Some(Duration::ZERO),
+        "SessionStarted must arm the fast terminal echo poll window so startup output streams immediately"
+    );
+    assert_eq!(
+        app.terminal_focus_request,
+        Some(session_id),
+        "SessionStarted must request keyboard focus for the newly active terminal pane"
+    );
+
+    // Repeat for EmptySessionStarted.
+    app.select_session(empty_id);
+    app.last_terminal_input = None;
+    app.terminal_focus_request = None;
+    app.launch_progress = Some(LaunchProgress {
+        session_id: empty_id,
+        project_name: "operon".into(),
+        worktree_path: temp.clone(),
+        agent: "terminal".into(),
+        agent_command: String::new(),
+        goal: String::new(),
+        started_at: Instant::now(),
+        failure: None,
+        dismissed: true,
+    });
+    app.background_tasks
+        .insert(BackgroundKey::EmptySessionStart(empty_id));
+    app.background_sender
+        .send(BackgroundResult::EmptySessionStarted {
+            session_id: empty_id,
+            result: Ok(Some("main".into())),
+        })
+        .unwrap();
+
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions[1].status, SessionStatus::Active);
+    assert!(app.launch_progress.is_none());
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(empty_id)),
+        "EmptySessionStarted must request terminal output immediately even when launch_progress was dismissed"
+    );
+    assert_eq!(
+        terminal_echo_poll_wait(app.last_terminal_input, None, Instant::now()),
+        Some(Duration::ZERO),
+        "EmptySessionStarted must arm the fast terminal echo poll window"
+    );
+    assert_eq!(
+        app.terminal_focus_request,
+        Some(empty_id),
+        "EmptySessionStarted must request keyboard focus for the newly active plain terminal pane"
+    );
+
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
+pub(crate) fn launch_failure_surfaces_diagnostic_modal_after_starting_in_terminal() {
+    let temp = temporary_directory("launch-failure-modal");
+    let data_file = temp.join("store.json");
+    let session_id = Uuid::new_v4();
+    let empty_id = Uuid::new_v4();
+    let mut app = OperonApp::from_state(
+        data_file,
+        Store {
+            sessions: vec![
+                test_session(session_id, SessionStatus::Starting),
+                test_session(empty_id, SessionStatus::Starting),
+            ],
+            ..Store::default()
+        },
+        ToolStatus::default(),
+        None,
+    );
+    app.launch_progress = Some(LaunchProgress {
+        session_id,
+        project_name: "operon".into(),
+        worktree_path: temp.clone(),
+        agent: "claude".into(),
+        agent_command: "claude".into(),
+        goal: "Test".into(),
+        started_at: Instant::now(),
+        failure: None,
+        dismissed: true,
+    });
+    app.background_tasks
+        .insert(BackgroundKey::SessionStart(session_id));
+    app.background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id,
+            result: Err("tmux が必要です".into()),
+        })
+        .unwrap();
+
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Failed);
+    assert!(
+        app.launch_progress.as_ref().is_some_and(|p| {
+            p.session_id == session_id
+                && !p.dismissed
+                && p.failure.as_deref() == Some("tmux が必要です")
+        }),
+        "SessionStarted Err must un-dismiss launch_progress so the diagnostic error modal appears"
+    );
+
+    app.launch_progress = Some(LaunchProgress {
+        session_id: empty_id,
+        project_name: "operon".into(),
+        worktree_path: temp.clone(),
+        agent: "terminal".into(),
+        agent_command: String::new(),
+        goal: String::new(),
+        started_at: Instant::now(),
+        failure: None,
+        dismissed: true,
+    });
+    app.background_tasks
+        .insert(BackgroundKey::EmptySessionStart(empty_id));
+    app.background_sender
+        .send(BackgroundResult::EmptySessionStarted {
+            session_id: empty_id,
+            result: Err("tmux が必要です".into()),
+        })
+        .unwrap();
+
+    app.process_background_results();
+
+    assert_eq!(app.store.sessions[1].status, SessionStatus::Failed);
+    assert!(
+        app.launch_progress.as_ref().is_some_and(|p| {
+            p.session_id == empty_id && !p.dismissed && p.failure.as_deref() == Some("tmux が必要です")
+        }),
+        "EmptySessionStarted Err must un-dismiss launch_progress so the diagnostic error modal appears"
+    );
+
+    let _ = fs::remove_dir_all(temp);
+}
+
+#[test]
+pub(crate) fn launch_stored_session_does_not_block_on_workspace_trust_polling() {
+    assert_eq!(
+        tmux_error_state("can't find pane: operon-123"),
+        TmuxState::Gone
+    );
+    if !tool_available("tmux") {
+        return;
+    }
+    let missing_name = format!("operon-missing-trust-{}", Uuid::new_v4().simple());
+    let started = Instant::now();
+    let approved = auto_approve_workspace_trust_prompt(&missing_name).unwrap();
+    assert!(!approved);
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "auto_approve_workspace_trust_prompt must exit early when the tmux session is gone instead of polling for 8s (took {:?})",
+        started.elapsed()
+    );
+
+    let temp = temporary_directory("launch-nonblocking-trust");
+    let session_id = Uuid::new_v4();
+    let tmux_name = format!("operon-nonblock-{}", session_id.simple());
+    let mut session = test_session(session_id, SessionStatus::Starting);
+    session.tmux_name = tmux_name.clone();
+    session.worktree_path = Some(temp.clone());
+    session.agent = "custom".into();
+    session.agent_command = "sh".into();
+    session.goal = String::new();
+
+    let launch_started = Instant::now();
+    let result = launch_stored_session(&session, &temp, false, true, None, &[]);
+    let launch_elapsed = launch_started.elapsed();
+    let _ = tmux_command()
+        .args(["kill-session", "-t", &tmux_name])
+        .output();
+    let _ = fs::remove_dir_all(temp);
+
+    assert!(result.is_ok(), "launch_stored_session failed: {result:?}");
+    assert!(
+        launch_elapsed < Duration::from_secs(2),
+        "launch_stored_session must return immediately after starting tmux instead of blocking 8s on auto_approve_workspace_trust_prompt (took {launch_elapsed:?})"
+    );
+}

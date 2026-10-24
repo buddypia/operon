@@ -1620,10 +1620,6 @@ impl OperonApp {
                             // The inspector captures tmux output and sends user input back
                             // to the same pane, so Claude's first-run prompt and later
                             // conversation remain usable without a separate Terminal window.
-                            let was_dismissed = self
-                                .launch_progress
-                                .as_ref()
-                                .is_some_and(|p| p.session_id == session_id && p.dismissed);
                             if self
                                 .launch_progress
                                 .as_ref()
@@ -1631,11 +1627,15 @@ impl OperonApp {
                             {
                                 self.launch_progress = None;
                             }
-                            if !was_dismissed {
+                            if self.selected_session.is_none()
+                                || self.selected_session == Some(session_id)
+                            {
                                 self.select_session(session_id);
                                 self.page = Page::Sessions;
                                 self.session_library_open = false;
                                 self.request_session_output(session_id);
+                                self.last_terminal_input = Some(Instant::now());
+                                self.terminal_focus_request = Some(session_id);
                             }
                             self.persist_external_transition(
                                 tr("エージェントセッションを起動し、アプリ内ターミナルで開きました。"),
@@ -1658,6 +1658,7 @@ impl OperonApp {
                                 .filter(|p| p.session_id == session_id)
                             {
                                 progress.failure = Some(error.clone());
+                                progress.dismissed = false;
                             }
                             if self.persist() {
                                 self.notice = Some(tf!(
@@ -1686,10 +1687,6 @@ impl OperonApp {
                                 session.status = SessionStatus::Active;
                                 session.branch = branch;
                             }
-                            let was_dismissed = self
-                                .launch_progress
-                                .as_ref()
-                                .is_some_and(|p| p.session_id == session_id && p.dismissed);
                             if self
                                 .launch_progress
                                 .as_ref()
@@ -1697,11 +1694,15 @@ impl OperonApp {
                             {
                                 self.launch_progress = None;
                             }
-                            if !was_dismissed {
+                            if self.selected_session.is_none()
+                                || self.selected_session == Some(session_id)
+                            {
                                 self.select_session(session_id);
                                 self.page = Page::Sessions;
                                 self.session_library_open = false;
                                 self.request_session_output(session_id);
+                                self.last_terminal_input = Some(Instant::now());
+                                self.terminal_focus_request = Some(session_id);
                             }
                             self.persist_external_transition(
                                 tr("空のターミナルセッションを tmux で起動しました。"),
@@ -1723,6 +1724,7 @@ impl OperonApp {
                                 .filter(|p| p.session_id == session_id)
                             {
                                 progress.failure = Some(error.clone());
+                                progress.dismissed = false;
                             }
                             if self.persist() {
                                 self.notice = Some(tf!(
@@ -4315,7 +4317,7 @@ impl OperonApp {
                 goal: user_goal.clone(),
                 started_at: Instant::now(),
                 failure: None,
-                dismissed: false,
+                dismissed: true,
             });
             self.start_session(id);
         }
@@ -4384,8 +4386,11 @@ impl OperonApp {
             goal: String::new(),
             started_at: Instant::now(),
             failure: None,
-            dismissed: false,
+            dismissed: true,
         });
+        self.select_session(id);
+        self.page = Page::Sessions;
+        self.session_library_open = false;
         self.spawn_background(BackgroundKey::EmptySessionStart(id), move || {
             let result = (|| {
                 if !is_allowed_session_path(&project_path, &worktree_path) {
@@ -6007,11 +6012,15 @@ impl OperonApp {
             return;
         }
         let account = account_variables(&self.accounts, account);
-        if self
+        if let Some(progress) = self
             .launch_progress
-            .as_ref()
-            .is_none_or(|p| p.session_id != session_id)
+            .as_mut()
+            .filter(|p| p.session_id == session_id)
         {
+            progress.started_at = Instant::now();
+            progress.failure = None;
+            progress.dismissed = true;
+        } else {
             let project_name = self
                 .store
                 .projects
@@ -6031,9 +6040,12 @@ impl OperonApp {
                 goal: session.goal.clone(),
                 started_at: Instant::now(),
                 failure: None,
-                dismissed: false,
+                dismissed: true,
             });
         }
+        self.select_session(session_id);
+        self.page = Page::Sessions;
+        self.session_library_open = false;
         self.spawn_background(BackgroundKey::SessionStart(session_id), move || {
             let result = launch_stored_session(
                 &session,
