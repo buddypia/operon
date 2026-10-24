@@ -1,0 +1,4 @@
+2026-10-24T06:45:00Z auto intent intent.md 15c58f630c470a4c approve states the tab-switching friction in ui_git and the master-detail outcome without touching unrelated git features
+2026-10-24T06:45:00Z auto spec spec.md 276af5aaae675d26 approve covers every intent outcome; preserves every_diff_pane_has_a_comment_footer_below_it via ui_git_diff_pane
+2026-10-24T06:45:00Z auto screen screen.md d3d7779f6fe1aaab approve 2-pane split mirrors ui_files in the same file; empty, loading, error and selected-file states specified
+2026-10-24T06:45:00Z auto plan plan.md 5c519a2f0dd339e1 approve tests written and watched failing first; risks and proof of completion match spec
