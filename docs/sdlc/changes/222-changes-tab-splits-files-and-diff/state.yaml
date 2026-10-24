@@ -1,0 +1,39 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/222-changes-tab-splits-files-and-diff.
+#
+# In the project's 変更 (Git) tab, reviewing a file's diff and staging/committing
+# it currently live on two separate sub-tabs (変更ファイル and 差分), so clicking
+# a file hides the file list, stage checkboxes, and commit box. Placing the file
+# list + commit box on the left and the diff pane on the right in GitView::Changes
+# lets a person click through files, read diffs, tick checkboxes, and commit on
+# one screen.
+#
+# Route: modify (placement EXTEND in src/app/screens.rs).
+
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Closed: GitView::Changes renders the changed file list and commit box on the left and ui_git_diff_pane on the right."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed yes: touches src/app/screens.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed 3 of 3 mutations caught by docs/sdlc/changes/222-changes-tab-splits-files-and-diff/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

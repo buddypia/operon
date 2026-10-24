@@ -1,0 +1,18 @@
+# Review record for change 222-changes-tab-splits-files-and-diff.
+#
+# Checked against .claude/agents/rust-reviewer.md, .claude/rules/rust.md, and
+# REVIEW.md:
+# - Per-frame work: ui_git borrows git_changes_cache without cloning (verified
+#   by the_staged_selection_is_settled_when_the_changes_arrive) and delegates
+#   the right pane to ui_git_diff_pane, which reads diff_file_cache and requests
+#   background work only on cache miss or explicit refresh.
+# - Panic sites: zero new unwrap/expect/panic in production source.
+# - Diff pane invariant: every_diff_pane_has_a_comment_footer_below_it passes
+#   with a single diff_pane / ui_diff_comment_footer pair in ui_git_diff_pane.
+# - Mutation sweep: 3 of 3 mutations caught by mutations.py.
+
+digest: "2fcdd75fceb494ef"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"

@@ -3047,7 +3047,10 @@ impl OperonApp {
             }
             if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 match self.git_view {
-                    GitView::Changes => self.request_git_changes(project),
+                    GitView::Changes => {
+                        self.request_git_changes(project);
+                        self.request_git_diff(project, self.git_selected_file.clone());
+                    }
                     GitView::Diff => self.request_git_diff(project, self.git_selected_file.clone()),
                     GitView::History => self.request_git_history(project),
                 }
@@ -3056,185 +3059,122 @@ impl OperonApp {
         ui.separator();
         match self.git_view {
             GitView::Changes => {
-                if !self.git_changes_cache.contains_key(&project.id) {
-                    self.request_git_changes(project);
-                }
-                if self
-                    .background_tasks
-                    .contains(&BackgroundKey::GitChanges(project.id))
-                {
-                    ui.label(RichText::new(tr("Git の状態を更新しています…")).weak());
-                }
-                // Borrowed, not cloned: the list is drawn every frame. What a
-                // click changes is done after the loop (change 208).
-                match self.git_changes_cache.get(&project.id) {
-                    Some(Ok(snapshot)) => {
-                        let mut toggled = None;
-                        let mut chosen = None;
-                        let mut opened = None;
-                        ui.label(RichText::new(tr("変更されたファイル")).strong());
-                        if snapshot.files.is_empty() {
-                            ui.label(RichText::new(tr("作業ツリーに変更はありません。")).weak());
-                        }
-                        for file in &snapshot.files {
-                            ui.horizontal(|ui| {
-                                let mut ticked = self
-                                    .git_staged_files
-                                    .get(&project.id)
-                                    .is_some_and(|selected| selected.contains(&file.path));
-                                if ui
-                                    .checkbox(&mut ticked, "")
-                                    .on_hover_text(tr("次のコミットに含めます"))
-                                    .changed()
-                                {
-                                    toggled = Some((file.path.clone(), ticked));
-                                }
-                                let (mark, colour) = git_status_badge(&file.status, palette);
-                                ui.label(RichText::new(mark).size(12.0).color(colour))
-                                    .on_hover_text(git_status_wording(&file.status));
-                                if ui
-                                    .selectable_label(
-                                        self.git_selected_file.as_deref()
-                                            == Some(file.path.as_str()),
-                                        &file.path,
-                                    )
-                                    .on_hover_text(tr("このファイルの差分だけを表示します"))
-                                    .clicked()
-                                {
-                                    chosen = Some(file.path.clone());
-                                }
-                                // Reviewing a change is usually the step before
-                                // editing it, so the file is one click from the
-                                // editor rather than a hunt through the tree.
-                                if icon_button(ui, palette, ICON_EDIT, tr("エディタで開く"))
-                                    .clicked()
-                                {
-                                    opened = Some(PathBuf::from(&file.path));
-                                }
-                            });
-                        }
-                        let has_files = !snapshot.files.is_empty();
-                        if let Some((path, ticked)) = toggled {
-                            self.toggle_staged_file(project.id, &path, ticked);
-                        }
-                        if let Some(path) = chosen {
-                            self.git_selected_file = Some(path);
-                            self.git_view = GitView::Diff;
-                        }
-                        if let Some(path) = opened {
-                            self.open_document(project, path);
-                        }
-                        if has_files {
-                            ui.add_space(SPACE_SM);
-                            self.ui_commit_box(ui, palette, project);
-                        }
-                        ui.add_space(SPACE_SM);
-                        self.ui_push_row(ui, palette, project);
-                    }
-                    Some(Err(error)) => {
-                        ui.label(tf!("Git の状態を取得できません: {error}", error = error));
-                    }
-                    None => {}
-                }
-            }
-            GitView::Diff => {
-                let file = self.git_selected_file.clone();
-                self.ensure_diff_parsed(project, file.clone());
-                let key = (project.id, file.clone());
-                let totals = self
-                    .diff_file_cache
-                    .get(&key)
-                    .map(|files| (files.len(), diff_totals(files)));
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(tr("作業ツリーの差分")).strong());
-                    if let Some((count, (added, removed))) = totals {
-                        ui.label(
-                            RichText::new(tf!("{count} ファイル", count = count))
-                                .size(12.0)
-                                .color(palette.text_muted),
-                        );
-                        diff_counts(ui, added, removed, palette);
-                    }
-                    if file.is_some() && ui.button(tr("すべて表示")).clicked() {
-                        self.git_selected_file = None;
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let reviewing = self
-                            .background_tasks
-                            .contains(&BackgroundKey::AiDiffReview(project.id));
-                        if reviewing {
-                            ui.add_enabled(false, egui::Button::new(tr("AIレビュー中…")));
-                        } else if ui.button(tr("AIレビュー")).clicked() {
-                            self.request_ai_diff_review(project);
-                        }
-                    });
-                });
-                if let Some(review) = self.diff_ai_review.get(&project.id).cloned() {
-                    ui.add_space(SPACE_XS);
-                    ui.group(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(tr("AIコードレビュー評価"))
-                                    .strong()
-                                    .color(palette.accent),
-                            );
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.button(tr("閉じる")).clicked() {
-                                        self.diff_ai_review.remove(&project.id);
-                                    }
-                                    if ui.button(tr("コピー")).clicked() {
-                                        ui.ctx().copy_text(review.clone());
-                                        self.notice = Some(
-                                            tr("AIレビュー結果をクリップボードにコピーしました。")
-                                                .into(),
+                let left_width = 280.0_f32.min((ui.available_width() * 0.4).max(200.0));
+                ui.horizontal_top(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(left_width, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_width(left_width);
+                            if !self.git_changes_cache.contains_key(&project.id) {
+                                self.request_git_changes(project);
+                            }
+                            if self
+                                .background_tasks
+                                .contains(&BackgroundKey::GitChanges(project.id))
+                            {
+                                ui.label(RichText::new(tr("Git の状態を更新しています…")).weak());
+                            }
+                            // Borrowed, not cloned: the list is drawn every frame. What a
+                            // click changes is done after the loop (change 208).
+                            match self.git_changes_cache.get(&project.id) {
+                                Some(Ok(snapshot)) => {
+                                    let mut toggled = None;
+                                    let mut chosen = None;
+                                    let mut opened = None;
+                                    ui.label(RichText::new(tr("変更されたファイル")).strong());
+                                    if snapshot.files.is_empty() {
+                                        ui.label(
+                                            RichText::new(tr("作業ツリーに変更はありません。"))
+                                                .weak(),
                                         );
                                     }
-                                },
-                            );
-                        });
-                        egui::ScrollArea::vertical()
-                            .id_salt("ai_diff_review_scroll")
-                            .max_height(140.0)
-                            .show(ui, |ui| {
-                                code_block(ui, &review);
-                            });
-                    });
-                }
-                if self
-                    .background_tasks
-                    .contains(&BackgroundKey::GitDiff(project.id, file))
-                {
-                    ui.label(RichText::new(tr("差分を読み込んでいます…")).weak());
-                }
-                if let Some(Err(error)) = self.git_diff_cache.get(&key) {
-                    ui.label(tf!("Git の差分を取得できません: {error}", error = error));
-                    return;
-                }
-                if let Some(files) = self.diff_file_cache.get(&key) {
-                    // The footer takes a row when there is anything to say, so
-                    // the pane above it is measured with that row already spent
-                    // rather than being pushed off the bottom by it.
-                    let footer = if self.diff_annotations.count(project.id) > 0 {
-                        34.0
-                    } else {
-                        0.0
-                    };
-                    let height = (ui.available_height() - 6.0 - footer).max(160.0);
-                    if diff_pane(
-                        ui,
-                        files,
-                        &mut self.collapsed_diff_files,
-                        palette,
-                        height,
-                        project.id,
-                        &mut self.diff_annotations,
-                    ) {
-                        self.diff_comments_dirty = true;
-                    }
-                }
-                self.ui_diff_comment_footer(ui, palette, project.id);
+                                    for file in &snapshot.files {
+                                        ui.horizontal(|ui| {
+                                            let mut ticked =
+                                                self.git_staged_files.get(&project.id).is_some_and(
+                                                    |selected| selected.contains(&file.path),
+                                                );
+                                            if ui
+                                                .checkbox(&mut ticked, "")
+                                                .on_hover_text(tr("次のコミットに含めます"))
+                                                .changed()
+                                            {
+                                                toggled = Some((file.path.clone(), ticked));
+                                            }
+                                            let (mark, colour) =
+                                                git_status_badge(&file.status, palette);
+                                            ui.label(RichText::new(mark).size(12.0).color(colour))
+                                                .on_hover_text(git_status_wording(&file.status));
+                                            if ui
+                                                .selectable_label(
+                                                    self.git_selected_file.as_deref()
+                                                        == Some(file.path.as_str()),
+                                                    &file.path,
+                                                )
+                                                .on_hover_text(tr(
+                                                    "このファイルの差分だけを表示します",
+                                                ))
+                                                .clicked()
+                                            {
+                                                chosen = Some(file.path.clone());
+                                            }
+                                            // Reviewing a change is usually the step before
+                                            // editing it, so the file is one click from the
+                                            // editor rather than a hunt through the tree.
+                                            if icon_button(
+                                                ui,
+                                                palette,
+                                                ICON_EDIT,
+                                                tr("エディタで開く"),
+                                            )
+                                            .clicked()
+                                            {
+                                                opened = Some(PathBuf::from(&file.path));
+                                            }
+                                        });
+                                    }
+                                    let has_files = !snapshot.files.is_empty();
+                                    if let Some((path, ticked)) = toggled {
+                                        self.toggle_staged_file(project.id, &path, ticked);
+                                    }
+                                    if let Some(path) = chosen {
+                                        self.git_selected_file = Some(path);
+                                    }
+                                    if let Some(path) = opened {
+                                        self.open_document(project, path);
+                                    }
+                                    if has_files {
+                                        ui.add_space(SPACE_SM);
+                                        self.ui_commit_box(ui, palette, project);
+                                    }
+                                    ui.add_space(SPACE_SM);
+                                    self.ui_push_row(ui, palette, project);
+                                }
+                                Some(Err(error)) => {
+                                    ui.label(tf!(
+                                        "Git の状態を取得できません: {error}",
+                                        error = error
+                                    ));
+                                }
+                                None => {}
+                            }
+                        },
+                    );
+                    ui.separator();
+                    let right_width = ui.available_width().max(240.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(right_width, 0.0),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            ui.set_width(right_width);
+                            self.ui_git_diff_pane(ui, project, palette);
+                        },
+                    );
+                });
+            }
+            GitView::Diff => {
+                self.ui_git_diff_pane(ui, project, palette);
             }
             GitView::History => {
                 ui.label(RichText::new(tr("最近のコミット")).strong());
@@ -3256,6 +3196,106 @@ impl OperonApp {
                 }
             }
         }
+    }
+
+    pub(crate) fn ui_git_diff_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        project: &Project,
+        palette: &Palette,
+    ) {
+        let file = self.git_selected_file.clone();
+        self.ensure_diff_parsed(project, file.clone());
+        let key = (project.id, file.clone());
+        let totals = self
+            .diff_file_cache
+            .get(&key)
+            .map(|files| (files.len(), diff_totals(files)));
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("作業ツリーの差分")).strong());
+            if let Some((count, (added, removed))) = totals {
+                ui.label(
+                    RichText::new(tf!("{count} ファイル", count = count))
+                        .size(12.0)
+                        .color(palette.text_muted),
+                );
+                diff_counts(ui, added, removed, palette);
+            }
+            if file.is_some() && ui.button(tr("すべて表示")).clicked() {
+                self.git_selected_file = None;
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let reviewing = self
+                    .background_tasks
+                    .contains(&BackgroundKey::AiDiffReview(project.id));
+                if reviewing {
+                    ui.add_enabled(false, egui::Button::new(tr("AIレビュー中…")));
+                } else if ui.button(tr("AIレビュー")).clicked() {
+                    self.request_ai_diff_review(project);
+                }
+            });
+        });
+        if let Some(review) = self.diff_ai_review.get(&project.id).cloned() {
+            ui.add_space(SPACE_XS);
+            ui.group(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(tr("AIコードレビュー評価"))
+                            .strong()
+                            .color(palette.accent),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(tr("閉じる")).clicked() {
+                            self.diff_ai_review.remove(&project.id);
+                        }
+                        if ui.button(tr("コピー")).clicked() {
+                            ui.ctx().copy_text(review.clone());
+                            self.notice =
+                                Some(tr("AIレビュー結果をクリップボードにコピーしました。").into());
+                        }
+                    });
+                });
+                egui::ScrollArea::vertical()
+                    .id_salt("ai_diff_review_scroll")
+                    .max_height(140.0)
+                    .show(ui, |ui| {
+                        code_block(ui, &review);
+                    });
+            });
+        }
+        if self
+            .background_tasks
+            .contains(&BackgroundKey::GitDiff(project.id, file))
+        {
+            ui.label(RichText::new(tr("差分を読み込んでいます…")).weak());
+        }
+        if let Some(Err(error)) = self.git_diff_cache.get(&key) {
+            ui.label(tf!("Git の差分を取得できません: {error}", error = error));
+            return;
+        }
+        if let Some(files) = self.diff_file_cache.get(&key) {
+            // The footer takes a row when there is anything to say, so
+            // the pane above it is measured with that row already spent
+            // rather than being pushed off the bottom by it.
+            let footer = if self.diff_annotations.count(project.id) > 0 {
+                34.0
+            } else {
+                0.0
+            };
+            let height = (ui.available_height() - 6.0 - footer).max(160.0);
+            if diff_pane(
+                ui,
+                files,
+                &mut self.collapsed_diff_files,
+                palette,
+                height,
+                project.id,
+                &mut self.diff_annotations,
+            ) {
+                self.diff_comments_dirty = true;
+            }
+        }
+        self.ui_diff_comment_footer(ui, palette, project.id);
     }
 
     pub(crate) fn ui_worktrees(&mut self, ui: &mut egui::Ui, project: &Project) {

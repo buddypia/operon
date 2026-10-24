@@ -59990,3 +59990,230 @@ pub(crate) fn launch_stored_session_does_not_block_on_workspace_trust_polling() 
         "launch_stored_session must return immediately after starting tmux instead of blocking 8s on auto_approve_workspace_trust_prompt (took {launch_elapsed:?})"
     );
 }
+
+/// Change 222: `GitView::Changes` lays out the changed file list and commit box
+/// in a left column and the working-tree diff pane in a right column beside it.
+#[test]
+pub(crate) fn the_changes_sub_tab_draws_the_file_list_and_commit_box_beside_the_diff_pane() {
+    let root = temporary_directory("changes-split-panes");
+    let mut app = test_app(root.join("store.json"));
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.clone(),
+        name: "acme".into(),
+        added_at: 0,
+    };
+    app.apply_git_changes(
+        project.id,
+        Ok(GitChangesSnapshot {
+            status: " M src/app.rs\n M src/ui/widgets.rs\n".into(),
+            files: vec![
+                ChangedFile {
+                    status: "M".into(),
+                    path: "src/app.rs".into(),
+                },
+                ChangedFile {
+                    status: "M".into(),
+                    path: "src/ui/widgets.rs".into(),
+                },
+            ],
+        }),
+    );
+    app.git_diff_cache.insert(
+        (project.id, None),
+        Ok(concat!(
+            "diff --git a/src/app.rs b/src/app.rs\n",
+            "--- a/src/app.rs\n",
+            "+++ b/src/app.rs\n",
+            "@@ -1,2 +1,3 @@\n",
+            " line one\n",
+            "+added in app\n",
+        )
+        .into()),
+    );
+    app.upstream_cache.insert(
+        project.id,
+        UpstreamState {
+            upstream: Some("origin/main".into()),
+            ahead: 0,
+            behind: 0,
+        },
+    );
+    app.git_view = GitView::Changes;
+
+    let ctx = egui::Context::default();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1200.0, 800.0),
+        )),
+        ..Default::default()
+    };
+    let _ = ctx.run(input.clone(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            app.ui_git(ui, &project);
+        });
+    });
+    let drawn = ctx.run(input, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            app.ui_git(ui, &project);
+        });
+    });
+
+    let files_heading = drawn_text_rect(&drawn, |text| text == "変更されたファイル")
+        .expect("変更されたファイル heading must be drawn on GitView::Changes");
+    let commit_button = drawn_text_rect(&drawn, |text| text == "2 ファイルをコミット")
+        .expect("commit button must be drawn under the file list on GitView::Changes");
+    let diff_heading = drawn_text_rect(&drawn, |text| text == "作業ツリーの差分")
+        .expect("作業ツリーの差分 heading must be drawn beside the file list on GitView::Changes");
+    let diff_line = drawn_text_rect(&drawn, |text| text.contains("added in app"))
+        .expect("diff hunk line must be drawn in the right pane on GitView::Changes");
+
+    assert!(
+        diff_heading.left() > files_heading.right(),
+        "diff pane heading ({diff_heading:?}) must sit to the right of the file list heading ({files_heading:?})"
+    );
+    assert!(
+        diff_line.left() > commit_button.right(),
+        "diff hunk ({diff_line:?}) must sit to the right of the commit box ({commit_button:?})"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 222: clicking a file in `GitView::Changes` filters the right diff pane
+/// to that file while keeping `app.git_view == GitView::Changes` so the file list
+/// and commit box stay on screen, and clicking refresh reloads both panes.
+#[test]
+pub(crate) fn clicking_a_changed_file_filters_the_diff_without_leaving_the_changes_sub_tab() {
+    let root = temporary_directory("changes-click-keeps-tab");
+    let mut app = test_app(root.join("store.json"));
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.clone(),
+        name: "acme".into(),
+        added_at: 0,
+    };
+    app.apply_git_changes(
+        project.id,
+        Ok(GitChangesSnapshot {
+            status: " M src/app.rs\n M src/ui/widgets.rs\n".into(),
+            files: vec![
+                ChangedFile {
+                    status: "M".into(),
+                    path: "src/app.rs".into(),
+                },
+                ChangedFile {
+                    status: "M".into(),
+                    path: "src/ui/widgets.rs".into(),
+                },
+            ],
+        }),
+    );
+    for selected in [None, Some("src/app.rs".to_owned())] {
+        app.git_diff_cache.insert(
+            (project.id, selected),
+            Ok(concat!(
+                "diff --git a/src/app.rs b/src/app.rs\n",
+                "--- a/src/app.rs\n",
+                "+++ b/src/app.rs\n",
+                "@@ -1,2 +1,3 @@\n",
+                " line one\n",
+                "+selected file diff\n",
+            )
+            .into()),
+        );
+    }
+    app.upstream_cache.insert(
+        project.id,
+        UpstreamState {
+            upstream: Some("origin/main".into()),
+            ahead: 0,
+            behind: 0,
+        },
+    );
+    app.git_view = GitView::Changes;
+
+    let ctx = egui::Context::default();
+    let run_pass = |app: &mut OperonApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.ui_git(ui, &project);
+            });
+        })
+    };
+
+    let drawn = run_pass(&mut app, Vec::new());
+    let file_row = drawn_text_rects(&drawn, |text| text == "src/app.rs")
+        .into_iter()
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("src/app.rs row must be drawn in the left column");
+    let click = |pos: egui::Pos2| {
+        vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]
+    };
+
+    let _ = run_pass(&mut app, click(file_row.center()));
+    assert_eq!(
+        app.git_selected_file.as_deref(),
+        Some("src/app.rs"),
+        "clicking a file row must select that file for the diff pane"
+    );
+    assert_eq!(
+        app.git_view,
+        GitView::Changes,
+        "clicking a file row must keep GitView::Changes active instead of switching to GitView::Diff"
+    );
+
+    let drawn_after = run_pass(&mut app, Vec::new());
+    assert!(
+        drawn_text_rect(&drawn_after, |text| text == "変更されたファイル").is_some(),
+        "file list heading must remain visible after clicking a file"
+    );
+    assert!(
+        drawn_text_rect(&drawn_after, |text| text == "2 ファイルをコミット").is_some(),
+        "commit box must remain visible after clicking a file"
+    );
+    assert!(
+        drawn_text_rect(&drawn_after, |text| text == "すべて表示").is_some(),
+        "すべて表示 filter reset button must appear in the right diff pane when a file is selected"
+    );
+
+    let refresh_btn = drawn_text_rect(&drawn_after, |text| text == ICON_REFRESH)
+        .expect("refresh icon button must be drawn");
+    app.background_tasks.clear();
+    let _ = run_pass(&mut app, click(refresh_btn.center()));
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::GitChanges(project.id)),
+        "clicking refresh on GitView::Changes must request git changes"
+    );
+    assert!(
+        app.background_tasks.contains(&BackgroundKey::GitDiff(
+            project.id,
+            Some("src/app.rs".to_owned()),
+        )),
+        "clicking refresh on GitView::Changes must also request the visible diff"
+    );
+    fs::remove_dir_all(&root).ok();
+}
