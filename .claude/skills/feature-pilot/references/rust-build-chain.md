@@ -39,8 +39,7 @@ Read with `CLAUDE.md` open for the module map and conventions.
   `SQLITE_OPEN_READ_ONLY` except inside the restore transaction.
 - `src/exec.rs`, `src/agents.rs`, `src/tmux.rs`, and `src/git.rs` pull in
   `.claude/agents/subprocess-safety-reviewer.md` (`scripts/check-review.sh`).
-  `src/history.rs` is classified under `foreign-store` (`durability-reviewer` +
-  `rust-reviewer`), so when `src/history.rs` changes child-process spawning or
+  `src/history.rs` is classified under `foreign-store` (`rust-reviewer`), so when `src/history.rs` changes child-process spawning or
   termination, invoke `subprocess-safety-reviewer` manually in addition.
 
 ## 2. Tests

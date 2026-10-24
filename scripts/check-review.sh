@@ -315,9 +315,15 @@ changed=$(run_diff --name-only)
 # guards is a surface added to risk.yaml with no reviewer at all — that is a
 # policy decision, made in REVIEW.md's table, and the second guard then makes
 # this file follow it.
+#
+# The store and the bundle swap went to a reviewer of their own until change
+# 224 folded it into rust-reviewer, which reads the review section of
+# .claude/skills/durability-invariants/SKILL.md on those surfaces;
+# `the_reviewer_the_store_asks_for_reads_the_durability_procedure` holds
+# whichever reviewer this names to that section.
 reviewer_for_surface() {
   case "$1" in
-    store | bundle-swap) echo durability-reviewer ;;
+    store | bundle-swap) echo rust-reviewer ;;
     unsafe-and-path | subprocess | gate-configuration) echo subprocess-safety-reviewer ;;
     dependencies) echo rust-reviewer ;;
     *) echo "" ;;
@@ -635,7 +641,7 @@ required=""
 need() { case " $required " in *" $1 "*) ;; *) required="$required $1" ;; esac; }
 
 case "$reviewer_set" in
-  full) need rust-reviewer; need subprocess-safety-reviewer; need durability-reviewer ;;
+  full) need rust-reviewer; need subprocess-safety-reviewer ;;
   craft) need rust-reviewer ;;
   none) ;;
   *) echo "route \`$route\` names reviewer set \`$reviewer_set\`, which is not full/craft/none"; exit 2 ;;

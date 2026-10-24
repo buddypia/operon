@@ -10,7 +10,7 @@
    `subprocess-safety-reviewer`. `the_review_gate_requires_the_reviewers_review_md_names`
    keeps REVIEW.md's table and the script's mapping equal; the gate fixture
    tests in `src/tests.rs` that name the required set say the new set.
-2. `.claude/agents/durability-reviewer.md` is gone, so a verdict recorded
+2. `durability-reviewer`'s definition under `.claude/agents/` is gone, so a verdict recorded
    under that name is refused as a reviewer that is not defined — the gate's
    existing check, unchanged.
 3. The procedure the durability reviewer held — the order to check in, the

@@ -1,0 +1,41 @@
+# Review record for change 224-reviewers-split-by-problem-type.
+#
+# Route `modify` asks for rust-reviewer; the diff is on `gate-configuration`,
+# which adds subprocess-safety-reviewer. The subprocess reviewer ran main's
+# judge (`git show refs/heads/main:scripts/check-review.sh | bash -s -- --index`)
+# against the staged diff: it asks for these two and nothing else, so the
+# deleted definition is never required by the judge that actually runs.
+#
+# Round 1, at this digest: rust-reviewer approve-with-nits 0 4 — the moved
+# procedure keeps every check the deleted definition held (order, schema rule,
+# README interruption cases, timeline format, sync-injection test); four nits.
+# subprocess-safety-reviewer approve-with-nits 0 3 — no path asks for or
+# accepts a reviewer with no definition, and no store or bundle-swap diff can
+# land with no reviewer; three nits. All carried.
+#
+# Not landed: dropping a required reviewer is a relaxation the person decides
+# (approval.md), and the person has not answered. The merge into main waits.
+
+digest: "366bae3f3df33a62"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/tests.rs the case "a risk table removed from the index still classifies through the base" asserts a set the fixture's route alone already yields after the reset, so a gate that stopped reading the base table would stay green; the old `durability-reviewer` assertion had the same blind spot under `security`
+    person: "保存処理の分類を確かめるテストの一つは、ある壊れ方を見逃します。今のゲートの動作には影響しません。対応は不要です。"
+  - rust-reviewer/2 · src/tests.rs the_reviewer_the_store_asks_for_reads_the_durability_procedure checks the section heading and that the reviewer names it, not the section body; an emptied section stays green
+    person: "保存処理のレビュー手順を確かめる新しいテストは、手順の見出しがあるかだけを見ます。中身が消されても気づきません。今は中身がそろっているので、対応は不要です。"
+  - rust-reviewer/3 · .claude/agents/rust-reviewer.md the deleted definition's "Skip style preferences" was not carried over; the five-item cap bounds it
+    person: "保存処理のレビューで、書き方の好みについての指摘が少し増えるかもしれません。指摘の数には上限があるので、対応は不要です。"
+  - rust-reviewer/4 · .claude/skills/feature-pilot/references/rust-build-chain.md:42 over-long line, and an orphan short line in rust-reviewer.md "What not to report"
+    person: "手順書の 2 か所で改行の位置が不揃いです。読む分には問題なく、対応は不要です。"
+  - subprocess-safety-reviewer/1 · state.yaml the merge into main relaxes the gate and must wait for the person's acceptance, which plan.md records as pending
+    person: "この変更は、あなたが了承するまで main に取り込みません。取り込んでよければ、そう伝えてください。"
+  - subprocess-safety-reviewer/2 · scripts/check-review.sh closed records with a `durability-reviewer:` line are refused as an undefined reviewer if a later commit edits them, and a branch in flight that recorded one must re-record after merging main; no such branch exists now
+    person: "過去の変更記録のうち、廃止したレビュアーの判定を含むものを後で書き換えると、コミットが止まります。今そのような作業中のブランチはなく、対応は不要です。"
+  - subprocess-safety-reviewer/3 · rust-build-chain.md:42 still says `foreign-store` maps to a reviewer, which reviewer_for_surface never did; and the gate proves a verdict exists, not that the procedure was read, which eval.md names as the measured risk
+    person: "手順書に、外部の保存形式を扱うファイルにもレビュアーが割り当てられているという、以前から正しくない一文が残っています。動作には影響しません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 3"

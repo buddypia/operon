@@ -70,14 +70,14 @@ jobs:
             and which changes a human must look at. Do not invent passes it does
             not list, and do not report findings in the paths it excludes.
 
-            Three surfaces have dedicated reviewers rather than summaries —
-            read them before judging those surfaces:
-            .claude/agents/durability-reviewer.md for persistence, cancellation,
-            migration, byte budgets, and the bundle swap;
+            Two reviewer definitions hold what a summary would lose — read
+            them before judging those surfaces:
             .claude/agents/subprocess-safety-reviewer.md for Command::new call
             sites, child lifecycle, PATH resolution, and unsafe; and
             .claude/agents/rust-reviewer.md for per-frame draw-path work, panic
-            sites, and pinned-crate APIs.
+            sites, and pinned-crate APIs, and, through the section it names in
+            .claude/skills/durability-invariants/SKILL.md, persistence,
+            cancellation, migration, byte budgets, and the bundle swap.
 
             Rank findings most severe first. Anchor every one at file:line and
             state the failure as inputs or state → wrong outcome. If a check in

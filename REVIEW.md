@@ -130,10 +130,14 @@ review the diff, not the file.
 
 ### 2. Durability and subprocess safety
 
-The two surfaces where a mistake is unrecoverable rather than merely wrong. Each
-has a dedicated reviewer — `.claude/agents/durability-reviewer.md` and
-`.claude/agents/subprocess-safety-reviewer.md`; delegate rather than duplicate,
-and see the table under **What the gate requires** for which diff pulls in which.
+The two surfaces where a mistake is unrecoverable rather than merely wrong.
+Subprocess safety has a dedicated reviewer,
+`.claude/agents/subprocess-safety-reviewer.md`. Durability is checked by
+`.claude/agents/rust-reviewer.md` against the **Reviewing a diff against this**
+section of `.claude/skills/durability-invariants/SKILL.md` — a reviewer of its
+own until change 224 measured the fold and found it no worse. Delegate rather
+than duplicate, and see the table under **What the gate requires** for which
+diff pulls in which.
 
 ### 2b. Rust craft
 
@@ -297,7 +301,7 @@ the one that counts.
 
 | Surface | Reviewer it adds |
 |---|---|
-| `store`, `bundle-swap` — persistence, migration, cancellation, the packaging and swap scripts, against `.claude/skills/durability-invariants/SKILL.md` | `durability-reviewer` |
+| `store`, `bundle-swap` — persistence, migration, cancellation, the packaging and swap scripts, against `.claude/skills/durability-invariants/SKILL.md` | `rust-reviewer` |
 | `unsafe-and-path`, `subprocess`, `gate-configuration` — `unsafe`, the `PATH` setup, `Command::new`, child lifecycle, and the hooks and settings that decide what every other gate permits | `subprocess-safety-reviewer` |
 | `dependencies` — `Cargo.toml`, `Cargo.lock`: local-first is a promise a crate can break on its own | `rust-reviewer` |
 

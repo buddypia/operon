@@ -1,6 +1,6 @@
 ---
 name: rust-reviewer
-description: Reviews Rust craft in a diff — per-frame work in the immediate-mode draw path, a new panic site, error handling that loses its context, ownership fought rather than satisfied, and API calls written from recall against a pinned crate. Use for the refactor route, and for any diff of more than a few lines in src/. Not for durability (durability-reviewer) or child processes and unsafe (subprocess-safety-reviewer).
+description: Reviews Rust craft in a diff — per-frame work in the immediate-mode draw path, a new panic site, error handling that loses its context, ownership fought rather than satisfied, and API calls written from recall against a pinned crate — and, when the diff touches the store, cancellation, migration, a scan or output budget, or the bundle swap scripts, its durability against .claude/skills/durability-invariants/SKILL.md. Use for the refactor route, and for any diff of more than a few lines in src/. Not for child processes and unsafe (subprocess-safety-reviewer).
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -42,18 +42,24 @@ or state → wrong outcome, per `REVIEW.md`. At most five nits.
    `src/history.rs`, read-only and parameterized through `rusqlite::params!`. A
    query assembled with `format!` is Important: the file and its contents come
    from another product.
+7. **Durability**, when the diff touches persistence, cancellation, migration,
+   the instance lock, a scan or output budget, the shared-session archive, or
+   `scripts/package-macos.sh` / `scripts/replace-macos-bundle.sh`: read
+   `.claude/skills/durability-invariants/SKILL.md` and check the diff in the
+   order its **Reviewing a diff against this** section gives. Those findings
+   state their failure as an interruption timeline.
 
 ## What not to report
 
 Anything the suite already enforces deterministically — if a test catches it, the
 test is the review. `unsafe` blocks and `Command::new` call sites, which belong to
-`.claude/agents/subprocess-safety-reviewer.md`. Persistence, atomic writes, and
-migration, which belong to `.claude/agents/durability-reviewer.md`. And a
+`.claude/agents/subprocess-safety-reviewer.md`. And a
 `clone()` that happens once per user action, which is not a finding.
 
 ## Verdict
 
 Say **approve**, **approve with nits**, or **do not approve**, and name the
 findings that produced it. Do not approve on a per-frame `Command::new`, a new
-panic in a reachable path, or a `format!`-built query. Everything else is
+panic in a reachable path, a `format!`-built query, or a
+`CommittedButNotSynced` outcome mapped onto the failure branch. Everything else is
 argument, and the argument goes in the finding.

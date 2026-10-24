@@ -23,7 +23,7 @@
 #   gate      the check that closes the route
 #   requires  a document that must be satisfied on top of the gate, or `-`
 #   review    which reviewers must return a verdict on the diff before it merges:
-#             full  = all three definitions in .claude/agents/
+#             full  = both definitions in .claude/agents/
 #             craft = rust-reviewer
 #             none  = the deterministic checks alone
 #             scripts/check-review.sh widens this by the surfaces the diff
@@ -55,7 +55,7 @@
 # cannot.
 
 routes:
-  # Adds behaviour a user can see. The full pipeline, and all three reviewers.
+  # Adds behaviour a user can see. The full pipeline, and both reviewers.
   feature: "plan,design,build,test,deploy 3 .claude/hooks/gate-commit.sh - full"
 
   # Changes behaviour that already exists. No deploy stage of its own: it ships

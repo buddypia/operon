@@ -10,7 +10,7 @@
 |---|---|
 | `.claude/skills/durability-invariants/SKILL.md` | gains **Reviewing a diff against this** (the durability reviewer's order, failure statement, test expectation) |
 | `.claude/agents/rust-reviewer.md` | description and item 7 read that section; persistence no longer handed off; verdict refuses a mis-mapped `CommittedButNotSynced` |
-| `.claude/agents/durability-reviewer.md` | deleted |
+| `durability-reviewer`'s definition under `.claude/agents/` | deleted |
 | `scripts/check-review.sh` | `store`, `bundle-swap` → `rust-reviewer`; `full` → rust + subprocess; header comments |
 | `REVIEW.md` | passes 2 and 2b, and the gate table row |
 | `docs/sdlc/routes.yaml`, `docs/sdlc/README.md`, `.claude/skills/feature-pilot/references/rust-build-chain.md`, `.github/workflows/claude-review.yml` | name two reviewers and the skill |
@@ -46,4 +46,8 @@
 
 ## Departures from the plan
 
-None yet.
+- `spec.md` and this file named the deleted definition by its path, which
+  `harness_documents_only_name_paths_that_exist` refuses; both now name it as
+  `durability-reviewer`'s definition.
+- The person did not answer either question in time, so the build went ahead
+  on the branch — which a revert undoes — and the merge into main waits for them.

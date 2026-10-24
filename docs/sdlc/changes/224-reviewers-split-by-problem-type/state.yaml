@@ -40,10 +40,10 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "awaiting-user"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
-  questions: "1 7"
+  questions: "2 7"
   autonomy: "paused"
   risk: "high"
   readiness: "go"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Asked once with no answer, so build on the branch per plan.md and land only after the person accepts dropping durability-reviewer."
+resume: "Asked twice with no answer: build and verify on the branch, which a revert undoes, and merge into main only after the person accepts dropping durability-reviewer."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -73,7 +73,7 @@ contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine passed no: under src/ it touches only src/tests.rs, so /Applications/Operon.app stays current"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed 5 of 5 mutations caught by docs/sdlc/changes/224-reviewers-split-by-problem-type/mutations.py; the full-route one goes red where the gate's refusal stops naming a digest, because it asks for a reviewer with no definition"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
