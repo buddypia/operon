@@ -452,7 +452,8 @@ impl OperonApp {
             .open(&mut open)
             .collapsible(false)
             .resizable(false)
-            .default_width(420.0)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 68.0])
+            .default_width(520.0)
             .show(ctx, |ui| {
                 let search = ui.add(
                     egui::TextEdit::singleline(&mut self.command_search)
