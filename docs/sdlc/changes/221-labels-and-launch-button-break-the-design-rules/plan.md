@@ -13,7 +13,7 @@
 | `src/ui/widgets.rs` | `SessionStatusGroup::message_id` for `Free` |
 | `src/app/screens.rs` | launch button through `primary_button` |
 | `src/i18n_tables.rs` | rows for 「変更ファイル」, 「コミット履歴」, 「指示待ち」; drop 「待機中」; sorted |
-| `README.md:108`, `README.ja.md:22,99`, `README.ko.md:22,97`, `docs/MANUAL.ja.md:202,205,435`, `docs/MANUAL.ko.md:201,204,436` | the idle filter's word; `MANUAL.ja.md:152-153` and `MANUAL.ko.md:150-151` mean queued sessions and stay |
+| `README.md:108`, `README.ja.md`, `README.ko.md`, `docs/MANUAL.ja.md`, `docs/MANUAL.ko.md` | the idle filter's word; `MANUAL.ja.md:152-153` and `MANUAL.ko.md:150-151` mean queued sessions and stay |
 | `docs/sdlc/changes/221-…/` | this change's record |
 
 ## Order of work

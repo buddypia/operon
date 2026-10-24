@@ -11,7 +11,7 @@
 
 state:
   route: "modify"
-  stage: "close"
+  stage: "maintain"
   status: "done"
   attempts: "0 3"
   questions: "0 7"
