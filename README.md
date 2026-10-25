@@ -305,9 +305,9 @@ Settings.
   run in-process on the GPU through llama.cpp's Metal backend. The 310 MB model
   is fetched once from a pinned Hugging Face revision, checked against its
   SHA-256, and can be removed again from Settings › データ.
-- Exchanges are ranked locally first; only the few worth keeping go to the CLI
-  that held the conversation, for a read-only, ephemeral summary — at most 30
-  calls a day, run outside the project's tree.
+- Exchanges are ranked locally first; only the few worth keeping go to an
+  available CLI (Claude Code, Codex, or Antigravity) for a read-only, ephemeral
+  summary — at most 30 calls a day, run outside the project's tree.
 - Notes that recur are reinforced rather than duplicated. Notes nobody reads
   fade with a 30-day freshness clock and are removed; referenced or pinned
   notes stay.

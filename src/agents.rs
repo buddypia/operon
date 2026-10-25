@@ -1803,13 +1803,26 @@ pub(crate) fn knowledge_judge_command(
                 "--ephemeral".to_owned(),
             ],
         ),
+        // `agy --print` consumes the immediately following token as the prompt,
+        // so `--sandbox` must come before `--print`.
         CliProvider::Gemini => (
             ANTIGRAVITY_COMMAND,
-            vec!["--print".to_owned(), "--sandbox".to_owned()],
+            vec!["--sandbox".to_owned(), "--print".to_owned()],
         ),
     };
     arguments.push(prompt.to_owned());
     (program.to_owned(), arguments)
+}
+
+/// The order in which `CliJudge` tries agent CLIs to summarise knowledge
+/// candidates: the conversation's own CLI first, then the remaining supported
+/// CLIs in `commit_message_agent` order (`claude`, `codex`, `agy`).
+pub(crate) fn knowledge_judge_providers(preferred: CliProvider) -> [CliProvider; 3] {
+    match preferred {
+        CliProvider::Claude => [CliProvider::Claude, CliProvider::Codex, CliProvider::Gemini],
+        CliProvider::Codex => [CliProvider::Codex, CliProvider::Claude, CliProvider::Gemini],
+        CliProvider::Gemini => [CliProvider::Gemini, CliProvider::Claude, CliProvider::Codex],
+    }
 }
 
 /// One CLI's own non-interactive, read-only form, plus the prompt.
@@ -1842,7 +1855,7 @@ pub(crate) fn commit_message_command(agent: &str, prompt: &str) -> Option<(Strin
         ),
         "gemini" => (
             ANTIGRAVITY_COMMAND,
-            vec!["--print".to_owned(), "--sandbox".to_owned()],
+            vec!["--sandbox".to_owned(), "--print".to_owned()],
         ),
         _ => return None,
     };

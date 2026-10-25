@@ -1207,14 +1207,24 @@ pub(crate) trait Judge {
     fn judge(&self, provider: CliProvider, prompt: &str) -> JudgeOutcome;
 }
 
-/// The production judge: the conversation's own CLI, read-only and ephemeral,
-/// run in `knowledge_judge_directory` so it never becomes a conversation of the
+/// The production judge: the conversation's own CLI first when available and
+/// healthy, falling back to any other installed CLI in
+/// `knowledge_judge_providers` order, read-only and ephemeral, run in
+/// `knowledge_judge_directory` so it never becomes a conversation of the
 /// project it is judging.
 pub(crate) struct CliJudge {
     pub(crate) directory: PathBuf,
+    failed: std::sync::Mutex<Vec<CliProvider>>,
 }
 
 impl CliJudge {
+    pub(crate) fn new(directory: PathBuf) -> Self {
+        Self {
+            directory,
+            failed: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
     /// The child a judge call runs: the provider's read-only, ephemeral
     /// invocation, inside the judge directory rather than any project's tree.
     pub(crate) fn command(&self, provider: CliProvider, prompt: &str) -> Command {
@@ -1223,6 +1233,47 @@ impl CliJudge {
         command.args(arguments).current_dir(&self.directory);
         command
     }
+
+    /// Try `preferred` first, then the remaining supported CLIs in
+    /// `knowledge_judge_providers` order, skipping any CLI that is not
+    /// installed or that has already returned `Pause` earlier in this run.
+    pub(crate) fn judge_with(
+        &self,
+        preferred: CliProvider,
+        prompt: &str,
+        available: impl Fn(CliProvider) -> bool,
+        mut run_one: impl FnMut(CliProvider, &str) -> JudgeOutcome,
+    ) -> JudgeOutcome {
+        let mut first_pause = None;
+        for candidate in knowledge_judge_providers(preferred) {
+            if self
+                .failed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains(&candidate)
+            {
+                continue;
+            }
+            if !available(candidate) {
+                continue;
+            }
+            match run_one(candidate, prompt) {
+                JudgeOutcome::Answer(answer) => return JudgeOutcome::Answer(answer),
+                JudgeOutcome::Pause(reason) => {
+                    let mut failed = self
+                        .failed
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if !failed.contains(&candidate) {
+                        failed.push(candidate);
+                    }
+                    drop(failed);
+                    first_pause.get_or_insert(reason);
+                }
+            }
+        }
+        JudgeOutcome::Pause(first_pause.unwrap_or_default())
+    }
 }
 
 impl Judge for CliJudge {
@@ -1230,25 +1281,35 @@ impl Judge for CliJudge {
         if let Err(error) = create_private_knowledge_directory(&self.directory) {
             return JudgeOutcome::Pause(error.to_string());
         }
-        let mut command = self.command(provider, prompt);
-        match run_command_with_output_limit(
-            &mut command,
-            Duration::from_secs(KNOWLEDGE_JUDGE_SECONDS),
-            KNOWLEDGE_JUDGE_ANSWER_MAX_BYTES,
-            COMMAND_ERROR_MAX_BYTES,
-        ) {
-            Ok(output) if output.output.status.success() => {
-                JudgeOutcome::Answer(String::from_utf8_lossy(&output.output.stdout).into_owned())
-            }
-            Ok(output) => JudgeOutcome::Pause(
-                String::from_utf8_lossy(&output.output.stderr)
-                    .trim()
-                    .chars()
-                    .take(200)
-                    .collect(),
-            ),
-            Err(error) => JudgeOutcome::Pause(error.to_string()),
-        }
+        self.judge_with(
+            provider,
+            prompt,
+            |candidate| {
+                let (program, _) = knowledge_judge_command(candidate, "");
+                tool_available(&program)
+            },
+            |candidate, prompt| {
+                let mut command = self.command(candidate, prompt);
+                match run_command_with_output_limit(
+                    &mut command,
+                    Duration::from_secs(KNOWLEDGE_JUDGE_SECONDS),
+                    KNOWLEDGE_JUDGE_ANSWER_MAX_BYTES,
+                    COMMAND_ERROR_MAX_BYTES,
+                ) {
+                    Ok(output) if output.output.status.success() => JudgeOutcome::Answer(
+                        String::from_utf8_lossy(&output.output.stdout).into_owned(),
+                    ),
+                    Ok(output) => JudgeOutcome::Pause(
+                        String::from_utf8_lossy(&output.output.stderr)
+                            .trim()
+                            .chars()
+                            .take(200)
+                            .collect(),
+                    ),
+                    Err(error) => JudgeOutcome::Pause(error.to_string()),
+                }
+            },
+        )
     }
 }
 
@@ -1381,7 +1442,7 @@ pub(crate) fn run_project(
         let row = database.conversation(session.provider, &session.id)?;
         queue.push((session.clone(), row.and_then(|row| row.paused_at)));
     }
-    let mut judging = true;
+    let mut paused_providers = Vec::new();
     let ordered = order_for_run(queue);
     let total = ordered.len().min(limits.processed);
     for session in ordered {
@@ -1399,7 +1460,7 @@ pub(crate) fn run_project(
             &mut budget,
             now,
             limits,
-            &mut judging,
+            &mut paused_providers,
             &mut report,
         )?;
         match outcome {
@@ -1434,7 +1495,7 @@ fn process_conversation(
     budget: &mut Budget,
     now: u64,
     limits: RunLimits,
-    judging: &mut bool,
+    paused_providers: &mut Vec<CliProvider>,
     report: &mut RunReport,
 ) -> Result<Processed> {
     let existing = database.conversation(session.provider, &session.id)?;
@@ -1596,19 +1657,18 @@ fn process_conversation(
         }
         return Ok(Processed::Read);
     }
-    if !*judging {
+    if report.capped || paused_providers.contains(&session.provider) {
         return Ok(Processed::Skipped);
     }
     if database.judge_calls_on(utc_day(now))? >= KNOWLEDGE_DAILY_JUDGE_CALLS {
         report.capped = true;
-        *judging = false;
         return Ok(Processed::Skipped);
     }
     let prompt = judge_prompt(&candidates);
     let answer = match judge.judge(session.provider, &prompt) {
         JudgeOutcome::Pause(_) => {
-            report.paused = Some(session.provider);
-            *judging = false;
+            report.paused.get_or_insert(session.provider);
+            paused_providers.push(session.provider);
             row.paused_at = Some(now);
             if database
                 .write_if_enabled(|database| database.save_conversation(&row))?

@@ -1,0 +1,24 @@
+# Review record for change 225-knowledge-depends-on-agent-cli.
+#
+# Both rust-reviewer and subprocess-safety-reviewer inspected the diff across
+# src/agents.rs, src/knowledge.rs, src/app/knowledge.rs, src/i18n_tables.rs,
+# src/tests.rs, and README*.md:
+# - Argument construction puts `--sandbox` before `--print` for `agy` in both
+#   `knowledge_judge_command` and `commit_message_command`, passing discrete
+#   argv elements via `Command::args`.
+# - `CliJudge::judge_with` tries `knowledge_judge_providers(preferred)` in
+#   order, checking `tool_available` and memoising failed providers in
+#   `self.failed` (`Mutex<Vec<CliProvider>>`) so broken CLIs are not retried on
+#   every conversation in the same run.
+# - `run_project` / `process_conversation` isolate pauses per `CliProvider` in
+#   `paused_providers` while preserving `report.capped`.
+# - UI draw paths (`ui_model_block`, `ui_knowledge_disabled`,
+#   `knowledge_status_line`) do no per-frame I/O or subprocess work and all
+#   JA/EN/KO rows in `src/i18n_tables.rs` are byte-sorted and covered by tests.
+
+digest: "67e5f65eba70e089"
+rounds: 1
+
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
