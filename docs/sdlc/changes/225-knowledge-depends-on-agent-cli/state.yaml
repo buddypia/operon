@@ -1,0 +1,18 @@
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Change 225 is verified, reviewed, and ready to land and ship."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed python3 docs/sdlc/changes/225-knowledge-depends-on-agent-cli/mutations.py"

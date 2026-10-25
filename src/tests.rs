@@ -34284,7 +34284,9 @@ pub(crate) fn builds_a_read_only_draft_command_for_every_agent_operon_launches()
         let read_only = match *agent {
             "claude" => flags.contains("-p") && flags.contains("--permission-mode plan"),
             "codex" => flags.contains("exec") && flags.contains("-s read-only"),
-            "gemini" => flags.contains("--print") && flags.contains("--sandbox"),
+            // `agy --print` takes the immediately following token as its prompt,
+            // so `--sandbox` must come before `--print`.
+            "gemini" => flags == "--sandbox --print",
             other => panic!("{other} の読み取り専用の形が決まっていません"),
         };
         assert!(
@@ -54123,14 +54125,12 @@ pub(crate) fn judge_command_is_read_only_ephemeral_and_runs_outside_the_project(
     );
     let (program, arguments) = knowledge_judge_command(CliProvider::Gemini, "P");
     assert_eq!(program, ANTIGRAVITY_COMMAND);
-    assert_eq!(arguments, ["--print", "--sandbox", "P"]);
+    assert_eq!(arguments, ["--sandbox", "--print", "P"]);
     // The judge runs inside the knowledge directory, which is inside the app
     // data directory — never a project's tree.
     let judge_directory = knowledge_judge_directory(&knowledge_root());
     assert!(judge_directory.starts_with(app_data_directory()));
-    let judge = CliJudge {
-        directory: judge_directory.clone(),
-    };
+    let judge = CliJudge::new(judge_directory.clone());
     let command = judge.command(CliProvider::Codex, "P");
     assert_eq!(command.get_current_dir(), Some(judge_directory.as_path()));
     assert_eq!(command.get_program(), "codex");
@@ -54605,6 +54605,189 @@ pub(crate) fn an_unavailable_judge_pauses_without_spending_attempts() {
         None,
     );
     assert!(warn && line.contains(CliProvider::Claude.label()), "{line}");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn cli_judge_falls_back_to_an_available_cli_and_skips_failed_ones() {
+    assert_eq!(
+        knowledge_judge_providers(CliProvider::Claude),
+        [CliProvider::Claude, CliProvider::Codex, CliProvider::Gemini]
+    );
+    assert_eq!(
+        knowledge_judge_providers(CliProvider::Codex),
+        [CliProvider::Codex, CliProvider::Claude, CliProvider::Gemini]
+    );
+    assert_eq!(
+        knowledge_judge_providers(CliProvider::Gemini),
+        [CliProvider::Gemini, CliProvider::Claude, CliProvider::Codex]
+    );
+
+    let root = temporary_directory("kn-fallback");
+    let cli_judge = CliJudge::new(root.join("judge"));
+    let mut tried = Vec::new();
+    let outcome = cli_judge.judge_with(
+        CliProvider::Gemini,
+        "P",
+        |candidate| candidate != CliProvider::Codex,
+        |candidate, prompt| {
+            tried.push((candidate, prompt.to_owned()));
+            match candidate {
+                CliProvider::Gemini => JudgeOutcome::Pause("agy failed".to_owned()),
+                CliProvider::Claude => JudgeOutcome::Answer("[]".to_owned()),
+                CliProvider::Codex => unreachable!("unavailable CLI must not be run"),
+            }
+        },
+    );
+    assert_eq!(outcome, JudgeOutcome::Answer("[]".to_owned()));
+    assert_eq!(
+        tried,
+        vec![
+            (CliProvider::Gemini, "P".to_owned()),
+            (CliProvider::Claude, "P".to_owned())
+        ]
+    );
+    // A second Gemini conversation in the same run skips Gemini immediately
+    // because it already paused once in this CliJudge instance.
+    tried.clear();
+    let second = cli_judge.judge_with(
+        CliProvider::Gemini,
+        "P2",
+        |_| true,
+        |candidate, prompt| {
+            tried.push((candidate, prompt.to_owned()));
+            JudgeOutcome::Answer("[]".to_owned())
+        },
+    );
+    assert_eq!(second, JudgeOutcome::Answer("[]".to_owned()));
+    assert_eq!(tried, vec![(CliProvider::Claude, "P2".to_owned())]);
+
+    // When every available CLI pauses, judge_with returns the first pause reason.
+    let all_paused = CliJudge::new(root.join("judge-paused")).judge_with(
+        CliProvider::Gemini,
+        "P3",
+        |candidate| candidate == CliProvider::Gemini,
+        |_, _| JudgeOutcome::Pause("no cli ready".to_owned()),
+    );
+    assert_eq!(all_paused, JudgeOutcome::Pause("no cli ready".to_owned()));
+
+    // And inside `run_project`, a pause on one provider (Gemini) does not stop
+    // a subsequent conversation of another provider (Claude) from being judged.
+    let gemini_transcript = root.join(ANTIGRAVITY_TRANSCRIPT_FILE_NAME);
+    let (person, agent) = HELD_OUT_KEEP[0].split_once("\n\n").unwrap();
+    let gemini_lines = format!(
+        "{}\n{}\n",
+        serde_json::json!({"source": "USER_EXPLICIT", "type": "USER_INPUT", "content": person}),
+        serde_json::json!({"source": "MODEL", "type": "PLANNER_RESPONSE", "content": agent}),
+    );
+    fs::write(&gemini_transcript, gemini_lines).unwrap();
+    let claude_transcript = root.join("c.jsonl");
+    write_claude_transcript(&claude_transcript, &[HELD_OUT_KEEP[0]]);
+    let gemini_session = CliSession {
+        provider: CliProvider::Gemini,
+        ..claude_session(&gemini_transcript, "g")
+    };
+    let claude = claude_session(&claude_transcript, "c");
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![
+        JudgeOutcome::Pause("gemini unavailable".to_owned()),
+        judged_answer(&[("decision", ENTRY_RETRY, 1)]),
+    ]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let now = now();
+    let report = run_project(
+        &mut database,
+        &[gemini_session, claude],
+        &embedder,
+        &judge,
+        now,
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(report.paused, Some(CliProvider::Gemini));
+    assert_eq!(
+        report.added, 1,
+        "Claude conversation still distilled after Gemini paused"
+    );
+    assert_eq!(judge.calls(), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_ui_shows_embedding_gemma_device_and_available_cli_summary() {
+    let (line, warn) = knowledge_status_line(
+        &KnowledgeSnapshot {
+            enabled: true,
+            updated_at: Some(now()),
+            judge_calls_today: 2,
+            ..KnowledgeSnapshot::default()
+        },
+        &ModelState::Ready {
+            device: Device::Metal,
+        },
+        None,
+    );
+    assert!(!warn);
+    assert!(
+        line.contains("EmbeddingGemma 2 (GPU (Metal))"),
+        "active status line must name EmbeddingGemma 2 and its device: {line}"
+    );
+
+    let root = temporary_directory("kn-ui-copy");
+    let mut app = test_app(root.join("store.json"));
+    app.knowledge.model = ModelState::Ready {
+        device: Device::Metal,
+    };
+    let project = Project {
+        id: Uuid::new_v4(),
+        path: root.clone(),
+        name: "p".to_owned(),
+        added_at: 0,
+    };
+    app.knowledge.views.insert(
+        project.id,
+        KnowledgeView {
+            snapshot: Some(Arc::new(KnowledgeSnapshot::default())),
+            ..KnowledgeView::default()
+        },
+    );
+    let context = egui::Context::default();
+    let mut disabled_output = None;
+    let mut settings_output = None;
+    for _ in 0..2 {
+        disabled_output = Some(context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
+        }));
+        settings_output = Some(context.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_model_block(ui));
+        }));
+    }
+    let disabled_texts = painted_texts(disabled_output.as_ref().unwrap());
+    assert!(
+        disabled_texts.iter().any(|text| text
+            == tr("・残す候補だけを、利用可能な CLI (Claude Code・Codex・Antigravity) で要約します (1日 30 回まで)。")),
+        "{disabled_texts:?}"
+    );
+    assert!(
+        disabled_texts
+            .iter()
+            .any(|text| text == "使用可能 (GPU (Metal) / 310MB)"),
+        "{disabled_texts:?}"
+    );
+
+    let settings_texts = painted_texts(settings_output.as_ref().unwrap());
+    assert!(
+        settings_texts.iter().any(|text| text
+            == tr("この Mac 上で動くモデルです。会話の内容は外部に送りません。プロジェクトのナレッジではモデルがあればそのまま使われます。")),
+        "{settings_texts:?}"
+    );
+    assert!(
+        settings_texts
+            .iter()
+            .any(|text| text == tr("ローカル履歴の検索")),
+        "{settings_texts:?}"
+    );
     fs::remove_dir_all(root).unwrap();
 }
 

@@ -388,9 +388,7 @@ impl OperonApp {
             .collect();
         self.spawn_background(BackgroundKey::KnowledgeRun, move || {
             let embedder = SharedEmbedder { path: model };
-            let judge = CliJudge {
-                directory: knowledge_judge_directory(&root),
-            };
+            let judge = CliJudge::new(knowledge_judge_directory(&root));
             let set_progress = |value: Option<(Uuid, usize, usize)>| {
                 *progress
                     .lock()
@@ -649,14 +647,14 @@ impl OperonApp {
         ui.label(RichText::new(tr("意味検索（EmbeddingGemma 2）")).strong());
         ui.label(
             RichText::new(tr(
-                "この Mac 上で動くモデルです。会話の内容は外部に送りません。",
+                "この Mac 上で動くモデルです。会話の内容は外部に送りません。プロジェクトのナレッジではモデルがあればそのまま使われます。",
             ))
             .size(12.5)
             .color(palette.text_muted),
         );
         ui.add_space(SPACE_SM);
         ui.horizontal(|ui| {
-            ui.label(tr("検索"));
+            ui.label(tr("ローカル履歴の検索"));
             let previous = self.store.search_engine_mode;
             ui.radio_value(
                 &mut self.store.search_engine_mode,
@@ -880,18 +878,32 @@ impl OperonApp {
                 ui.add_space(SPACE_SM);
                 for line in [
                     tr("・意味の判定は、この Mac 上の EmbeddingGemma 2 で行います。"),
-                    tr("・残す候補だけを、その会話を行った CLI に要約させます (1日 30 回まで)。"),
+                    tr("・残す候補だけを、利用可能な CLI (Claude Code・Codex・Antigravity) で要約します (1日 30 回まで)。"),
                     tr("・ナレッジはこの Mac の Operon データフォルダに保存し、リポジトリには書きません。"),
                 ] {
                     ui.label(RichText::new(line).color(palette.text_muted));
                 }
                 ui.add_space(SPACE_MD);
-                if self.knowledge.model_ready() {
-                    if primary_button(ui, palette, ICON_KNOWLEDGE, tr("このプロジェクトでナレッジを集める"))
+                if let ModelState::Ready { device } = self.knowledge.model.clone() {
+                    ui.horizontal(|ui| {
+                        if primary_button(
+                            ui,
+                            palette,
+                            ICON_KNOWLEDGE,
+                            tr("このプロジェクトでナレッジを集める"),
+                        )
                         .clicked()
-                    {
-                        self.edit_knowledge(project.id, KnowledgeEdit::Enable);
-                    }
+                        {
+                            self.edit_knowledge(project.id, KnowledgeEdit::Enable);
+                        }
+                        ui.label(
+                            RichText::new(tf!(
+                                "使用可能 ({device} / 310MB)",
+                                device = device.label()
+                            ))
+                            .color(palette.success),
+                        );
+                    });
                 } else if matches!(self.knowledge.model, ModelState::Missing) {
                     if primary_button(ui, palette, ICON_KNOWLEDGE, tr("モデルを取得して始める (310MB)"))
                         .clicked()
@@ -1539,9 +1551,9 @@ pub(crate) fn knowledge_status_line(
             false,
         );
     }
-    if !matches!(model, ModelState::Ready { .. }) {
+    let ModelState::Ready { device } = model else {
         return (tr("モデルがないため停止中").to_owned(), true);
-    }
+    };
     if let Some(report) = &snapshot.last_report {
         if let Some((done, total)) = report.rebuilding {
             return (
@@ -1581,9 +1593,10 @@ pub(crate) fn knowledge_status_line(
         .map_or_else(|| tr("未実行").to_owned(), relative_time);
     (
         tf!(
-            "{n} 件 ・ 最終更新 {updated} ・ 本日の判定 {used}/{cap} 回",
+            "{n} 件 ・ 最終更新 {updated} ・ EmbeddingGemma 2 ({device}) ・ 本日の判定 {used}/{cap} 回",
             n = snapshot.entries.len(),
             updated = updated,
+            device = device.label(),
             used = snapshot.judge_calls_today,
             cap = KNOWLEDGE_DAILY_JUDGE_CALLS
         ),
