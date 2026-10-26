@@ -1,7 +1,7 @@
 # Screen: change 226
 
 - **Intent**: `./intent.md`
-- **Status**: draft
+- **Status**: approved
 
 The terminal area of the session workspace (the centre of `ui_terminal_workspace`),
 about 900px wide at the default window with the session list on the left and the

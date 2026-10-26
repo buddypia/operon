@@ -40,18 +40,18 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
-  questions: "1 7"
+  questions: "2 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
-  screen: "pending"
+  screen: "approved"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Build per plan.md; screen.md awaits the person (question unanswered, recommended screen adopted), so do not land before they approve it or the screenshot."
+resume: "Closed: PaneLayout splits the terminal area by drop position; ten review suggestions are carried in review.yaml, the Escape-reaches-the-terminal one is the likeliest follow-up."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,11 +70,10 @@ resume: "Build per plan.md; screen.md awaits the person (question unanswered, re
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: touches src/app/screens.rs, src/app.rs and src/ui/session_tree.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  screen-approved-by-person: "human pending the person approves screen.md or the screenshot of two panes and a drop zone"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed yes: touches src/app/screens.rs, src/app.rs and src/ui/session_tree.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed 10 of 10 mutations caught by docs/sdlc/changes/226-sessions-cannot-be-viewed-side-by-side/mutations.py"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

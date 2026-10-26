@@ -9198,7 +9198,7 @@ pub(crate) fn failed_poll_persistence_rolls_back_and_does_not_release_queue() {
         )],
         Vec::new(),
         Vec::new(),
-        None,
+        Vec::new(),
     );
     assert_eq!(app.store.sessions[0].status, SessionStatus::Active);
     assert_eq!(app.store.sessions[1].status, SessionStatus::Queued);
@@ -9278,7 +9278,7 @@ pub(crate) fn cancellation_intent_survives_restart_before_external_stop_result_i
         )],
         Vec::new(),
         Vec::new(),
-        None,
+        Vec::new(),
     );
     let persisted = load_store(&data_file).unwrap();
     assert_eq!(persisted.sessions[0].status, SessionStatus::Cancelled);
@@ -9310,7 +9310,7 @@ pub(crate) fn stop_error_never_reverses_a_cancelled_poll_result() {
         )],
         Vec::new(),
         Vec::new(),
-        None,
+        Vec::new(),
     );
     app.background_tasks
         .insert(BackgroundKey::SessionStop(session_id));
@@ -9364,7 +9364,7 @@ pub(crate) fn stop_error_keeps_intent_until_a_later_gone_poll_cancels_it() {
         )],
         Vec::new(),
         Vec::new(),
-        None,
+        Vec::new(),
     );
 
     assert_eq!(app.store.sessions[0].status, SessionStatus::Cancelled);
@@ -13805,7 +13805,7 @@ pub(crate) fn session_poll_persists_nonzero_exit_as_failure() {
         )],
         Vec::new(),
         Vec::new(),
-        None,
+        Vec::new(),
     );
     assert_eq!(app.store.sessions[0].status, SessionStatus::Failed);
     assert_eq!(
@@ -13985,7 +13985,7 @@ pub(crate) fn a_poll_that_loses_a_terminal_persists_it_without_reporting_a_failu
         )],
         Vec::new(),
         Vec::new(),
-        None,
+        Vec::new(),
     );
     assert_eq!(app.store.sessions[0].status, SessionStatus::Lost);
     assert_eq!(
@@ -60485,5 +60485,372 @@ pub(crate) fn the_command_palette_sits_centered_near_the_top_of_the_window() {
             && action_rect.top() > title_rect.bottom(),
         "command palette action rows must sit inside the 520px centered window below the title (action_rect={action_rect:?}, title_rect={title_rect:?})"
     );
+    fs::remove_dir_all(&root).ok();
+}
+
+// --- Change 226: a session dropped on a terminal splits it ------------------
+
+/// The terminal area at the default window, as the pane tests divide it.
+fn pane_area() -> egui::Rect {
+    egui::Rect::from_min_size(egui::pos2(300.0, 40.0), egui::vec2(900.0, 600.0))
+}
+
+#[test]
+/// Like an editor group: near an edge is that edge, the rest is the middle,
+/// and outside the terminal is nothing.
+pub(crate) fn pane_drop_follows_the_pointer_like_an_editor_group() {
+    let area = pane_area();
+    let at = |x: f32, y: f32| pane_drop(area.min + egui::vec2(x, y), area);
+    assert_eq!(at(20.0, 300.0), Some(PaneDrop::Left));
+    assert_eq!(at(880.0, 300.0), Some(PaneDrop::Right));
+    assert_eq!(at(450.0, 20.0), Some(PaneDrop::Top));
+    assert_eq!(at(450.0, 580.0), Some(PaneDrop::Bottom));
+    assert_eq!(at(450.0, 300.0), Some(PaneDrop::Center));
+    // In a corner both edges qualify, and the nearer one wins.
+    assert_eq!(at(10.0, 100.0), Some(PaneDrop::Left));
+    assert_eq!(at(200.0, 10.0), Some(PaneDrop::Top));
+    // The band is DOCK_DROP_BAND of the span, read from the constant.
+    let inside = area.width() * DOCK_DROP_BAND - 1.0;
+    assert_eq!(at(inside, 300.0), Some(PaneDrop::Left));
+    assert_eq!(at(inside + 2.0, 300.0), Some(PaneDrop::Center));
+    assert_eq!(pane_drop(egui::pos2(10.0, 10.0), area), None);
+}
+
+#[test]
+/// Left and right put the two side by side, top and bottom stack them, each
+/// taking half, and the dropped one is on the side it was dropped.
+pub(crate) fn dropping_on_an_edge_splits_the_terminal_on_that_side() {
+    let area = pane_area();
+    let (shown, dropped) = (Uuid::new_v4(), Uuid::new_v4());
+    for (drop, side_by_side, dropped_first) in [
+        (PaneDrop::Left, true, true),
+        (PaneDrop::Right, true, false),
+        (PaneDrop::Top, false, true),
+        (PaneDrop::Bottom, false, false),
+    ] {
+        let layout = PaneLayout::default()
+            .placed(dropped, shown, drop)
+            .expect("a drop on another terminal's edge changes the layout");
+        assert!(layout.is_split(), "{drop:?}");
+        let rects = layout.rects(area).panes;
+        assert_eq!(rects.len(), 2, "{drop:?}");
+        let rect_of = |id: Uuid| rects.iter().find(|(pane, _)| *pane == id).unwrap().1;
+        let (a, b) = if dropped_first {
+            (rect_of(dropped), rect_of(shown))
+        } else {
+            (rect_of(shown), rect_of(dropped))
+        };
+        if side_by_side {
+            assert!(a.right() <= b.left(), "{drop:?}: {a:?} {b:?}");
+            assert_eq!(a.height(), area.height(), "{drop:?}");
+            assert!((a.width() - b.width()).abs() < 1.0, "{drop:?}: halves");
+        } else {
+            assert!(a.bottom() <= b.top(), "{drop:?}: {a:?} {b:?}");
+            assert_eq!(a.width(), area.width(), "{drop:?}");
+            assert!((a.height() - b.height()).abs() < 1.0, "{drop:?}: halves");
+        }
+        assert!(area.contains_rect(a) && area.contains_rect(b), "{drop:?}");
+    }
+    // The zone painted for each drop is the room the dropped session takes.
+    let half = pane_drop_zone(area, PaneDrop::Right);
+    assert_eq!(half.left(), area.center().x);
+    assert_eq!(half.right(), area.right());
+    assert_eq!(pane_drop_zone(area, PaneDrop::Center), area);
+}
+
+#[test]
+/// A session is never on screen twice: dropped again it moves, a terminal
+/// dropped on another's middle trades places with it, and one not on screen
+/// replaces what the middle showed.
+pub(crate) fn a_session_dropped_twice_moves_rather_than_copies() {
+    let area = pane_area();
+    let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let layout = PaneLayout::default()
+        .placed(b, a, PaneDrop::Right)
+        .unwrap()
+        .placed(c, b, PaneDrop::Bottom)
+        .unwrap();
+    assert_eq!(layout.sessions(), vec![a, b, c]);
+
+    // `a` dropped under `c`: it leaves the left, and `b` and `c` share the screen.
+    let moved = layout.placed(a, c, PaneDrop::Bottom).unwrap();
+    let mut shown = moved.sessions();
+    shown.sort();
+    let mut expected = vec![a, b, c];
+    expected.sort();
+    assert_eq!(shown, expected, "moved, not copied");
+    assert_eq!(moved.rects(area).panes.len(), 3);
+
+    // On the middle of another terminal it trades places.
+    let swapped = layout.placed(a, c, PaneDrop::Center).unwrap();
+    assert_eq!(swapped.sessions(), vec![c, b, a]);
+
+    // A session not on screen replaces what the middle showed.
+    let d = Uuid::new_v4();
+    let replaced = layout.placed(d, b, PaneDrop::Center).unwrap();
+    assert_eq!(replaced.sessions(), vec![a, d, c]);
+
+    // On itself, nothing.
+    assert_eq!(layout.placed(b, b, PaneDrop::Left), None);
+}
+
+#[test]
+/// Four terminals at most, none under the minimum: past either the layout
+/// does not fit, and the drop is refused.
+pub(crate) fn a_split_past_four_or_too_small_is_refused() {
+    let area = pane_area();
+    let ids = [(); 5].map(|_| Uuid::new_v4());
+    let two = PaneLayout::default()
+        .placed(ids[1], ids[0], PaneDrop::Right)
+        .unwrap();
+    assert!(two.fits(area));
+    // A third column in 900px leaves each under PANE_MIN_W.
+    assert!(3.0 * PANE_MIN_W + 2.0 * DOCK_GAP > area.width());
+    let three_columns = two.placed(ids[2], ids[1], PaneDrop::Right).unwrap();
+    assert!(!three_columns.fits(area));
+    // A 2×2 fits.
+    let four = two
+        .placed(ids[2], ids[0], PaneDrop::Bottom)
+        .unwrap()
+        .placed(ids[3], ids[1], PaneDrop::Bottom)
+        .unwrap();
+    assert_eq!(four.sessions().len(), PANE_MAX);
+    assert!(four.fits(area));
+    for (_, rect) in four.rects(area).panes {
+        assert!(
+            rect.width() >= PANE_MIN_W && rect.height() >= PANE_MIN_H,
+            "{rect:?}"
+        );
+    }
+    // A fifth does not, wherever it goes.
+    let big = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(4000.0, 4000.0));
+    let five = four.placed(ids[4], ids[3], PaneDrop::Right).unwrap();
+    assert!(!five.fits(big));
+    // Moving one already on screen is not a fifth.
+    let moved = four.placed(ids[0], ids[3], PaneDrop::Right).unwrap();
+    assert!(moved.fits(big));
+}
+
+#[test]
+/// Off the screen, or out of the store, a terminal's room goes to its
+/// neighbour; down to one, the layout is the single terminal again.
+pub(crate) fn closing_a_terminal_gives_its_room_to_the_neighbour() {
+    let area = pane_area();
+    let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let mut layout = PaneLayout::default()
+        .placed(b, a, PaneDrop::Right)
+        .unwrap()
+        .placed(c, b, PaneDrop::Bottom)
+        .unwrap();
+    layout.remove(c);
+    let rects = layout.rects(area).panes;
+    assert_eq!(
+        rects.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        vec![a, b]
+    );
+    assert_eq!(rects[1].1.height(), area.height(), "b takes c's room");
+    layout.retain(|id| id != b);
+    assert!(!layout.is_split());
+    assert_eq!(layout.single(), Some(a));
+
+    // Through the app: ✕ leaves the session running, and the one left is
+    // the selected single terminal.
+    let root = temporary_directory("pane-close");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.panes = PaneLayout::default()
+        .placed(second, first, PaneDrop::Right)
+        .unwrap();
+    app.select_session(second);
+    app.close_pane(second);
+    assert!(!app.panes.is_split());
+    assert_eq!(app.selected_session, Some(first));
+    assert!(app
+        .store
+        .sessions
+        .iter()
+        .any(|session| session.id == second && session.status == SessionStatus::Active));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A selection made anywhere lands in the terminal holding the keyboard, or
+/// moves the keyboard to the terminal already showing it.
+pub(crate) fn selecting_a_session_replaces_the_focused_terminal_only() {
+    let root = temporary_directory("pane-select");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    let third = Uuid::new_v4();
+    let mut session = app.store.sessions[0].clone();
+    session.id = third;
+    app.store.sessions.push(session);
+
+    // One terminal: selection is what it always was.
+    app.select_session(first);
+    app.select_session(second);
+    assert!(!app.panes.is_split());
+    assert_eq!(app.selected_session, Some(second));
+
+    app.panes = PaneLayout::default()
+        .placed(first, second, PaneDrop::Left)
+        .unwrap();
+    app.select_session(first);
+    assert_eq!(
+        app.panes.sessions(),
+        vec![first, second],
+        "already shown: focus only"
+    );
+    app.select_session(third);
+    assert_eq!(
+        app.panes.sessions(),
+        vec![third, second],
+        "replaces the focused one"
+    );
+    assert_eq!(app.selected_session, Some(third));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Two terminals in the layout are two drawn: each title on screen, the
+/// dropped one to the right.
+pub(crate) fn two_split_sessions_are_both_drawn() {
+    let root = temporary_directory("pane-draw");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.select_session(first);
+    app.panes = PaneLayout::default()
+        .placed(second, first, PaneDrop::Right)
+        .unwrap();
+    let context = egui::Context::default();
+    let texts = workspace_texts_at_click_size(&mut app, &context);
+    // The list draws each name too; a terminal's title is the rightmost copy.
+    let title = |name: &str| {
+        texts
+            .iter()
+            .filter(|(text, _)| text == name)
+            .map(|(_, pos)| *pos)
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+    };
+    let (left, right) = (title("first").unwrap(), title("second").unwrap());
+    assert!(right.x > left.x + PANE_MIN_W / 2.0, "{left:?} {right:?}");
+    assert!(
+        (right.y - left.y).abs() < 1.0,
+        "side by side: {left:?} {right:?}"
+    );
+    assert!(texts.iter().any(|(text, _)| text == ICON_DRAG_HANDLE));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Every terminal on screen is polled and counts as read, not only the one
+/// with the keyboard.
+pub(crate) fn every_terminal_on_screen_is_polled_and_read() {
+    let root = temporary_directory("pane-poll");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.select_session(first);
+    assert_eq!(app.terminals_on_screen(), vec![first]);
+    app.note_session_activity_change(second);
+    assert!(app.is_session_unread(second));
+
+    app.panes = PaneLayout::default()
+        .placed(second, first, PaneDrop::Bottom)
+        .unwrap();
+    app.select_session(second);
+    app.select_session(first);
+    assert_eq!(app.terminals_on_screen(), vec![first, second]);
+    app.note_session_activity_change(second);
+    assert!(
+        !app.is_session_unread(second),
+        "on screen beside the focused one"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// The hint beside the pointer names the zone, or says the split is refused.
+pub(crate) fn pane_drop_hint_names_the_zone() {
+    for (drop, hint) in [
+        (PaneDrop::Left, "左に分割"),
+        (PaneDrop::Right, "右に分割"),
+        (PaneDrop::Top, "上に分割"),
+        (PaneDrop::Bottom, "下に分割"),
+        (PaneDrop::Center, "ここに表示"),
+    ] {
+        assert_eq!(pane_drop_hint(drop, false), hint);
+        assert_eq!(pane_drop_hint(drop, true), "これ以上分割できません");
+    }
+}
+
+#[test]
+/// The whole gesture through egui: a row pressed in the session list, carried
+/// to the right edge of the terminal, says where it will land, and released
+/// there it sits to the right of the terminal it was dropped on.
+pub(crate) fn dragging_a_row_onto_a_terminal_splits_it() {
+    let root = temporary_directory("pane-drag");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.select_session(first);
+    let context = egui::Context::default();
+    // The window's default size: at 900px the terminal has no room for two
+    // side by side, and the drop would be refused.
+    let frame = |app: &mut OperonApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 820.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        text_positions(&context.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        }))
+    };
+    frame(&mut app, Vec::new());
+    let texts = frame(&mut app, Vec::new());
+    // The list's copy of the name is the leftmost one.
+    let row = texts
+        .iter()
+        .filter(|(text, _)| text == "second")
+        .map(|(_, pos)| *pos + egui::vec2(4.0, 4.0))
+        .min_by(|a, b| a.x.total_cmp(&b.x))
+        .expect("the list draws the second session's row");
+    let target = egui::pos2(1260.0, 420.0);
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    frame(
+        &mut app,
+        vec![egui::Event::PointerMoved(row), button(row, true)],
+    );
+    frame(
+        &mut app,
+        vec![egui::Event::PointerMoved(row + egui::vec2(24.0, 0.0))],
+    );
+    assert!(
+        matches!(app.column_drag, Some(ColumnDrag::Session { session, .. }) if session == second),
+        "the row is being dragged"
+    );
+    // A tooltip is measured on its first frame and painted from the second.
+    frame(&mut app, vec![egui::Event::PointerMoved(target)]);
+    let held = frame(&mut app, Vec::new());
+    assert!(
+        held.iter().any(|(text, _)| text == "右に分割"),
+        "the hint names the zone before the release: {:?}",
+        held.iter().map(|(text, _)| text).collect::<Vec<_>>()
+    );
+    assert!(!app.panes.is_split(), "nothing moves before the release");
+    frame(&mut app, vec![button(target, false)]);
+    assert_eq!(app.panes.sessions(), vec![first, second]);
+    assert_eq!(
+        app.selected_session,
+        Some(second),
+        "the dropped one takes the keyboard"
+    );
+    assert_eq!(app.column_drag, None);
     fs::remove_dir_all(&root).ok();
 }

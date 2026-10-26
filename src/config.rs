@@ -131,6 +131,13 @@ pub(crate) const DOCK_CENTER_MIN_H: f32 = 360.0;
 pub(crate) const DOCK_DROP_BAND: f32 = 0.3;
 /// The rule between an edge and the terminal, or two sections on one edge.
 pub(crate) const DOCK_GAP: f32 = 6.0;
+/// The most terminals the workspace shows at once (change 226). Each one on
+/// screen is captured on every session poll, so this also bounds that.
+pub(crate) const PANE_MAX: usize = 4;
+/// Least width of one terminal among several, header included.
+pub(crate) const PANE_MIN_W: f32 = 320.0;
+/// Least height of one terminal among several, header included.
+pub(crate) const PANE_MIN_H: f32 = 200.0;
 pub(crate) const FILE_SCAN_VISIT_LIMIT: usize = 100_000;
 pub(crate) const DIRECTORY_ENTRY_BUFFER_LIMIT: usize = 10_000;
 pub(crate) const COMMAND_OUTPUT_MAX_BYTES: usize = 8 * 1024 * 1024;

@@ -626,6 +626,397 @@ pub(crate) fn stacked_sidebar_heights(total_h: f32, split: f32) -> (f32, f32) {
     split_lengths(total_h, split, SIDEBAR_SECTION_MIN_H, SIDEBAR_PANEL_MIN_H)
 }
 
+/// Where on a terminal a dragged session lands (change 226): beside it on one
+/// side, or in its place — as an editor tab is dropped on an editor group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PaneDrop {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Center,
+}
+
+impl PaneDrop {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Left => tr("左に分割"),
+            Self::Right => tr("右に分割"),
+            Self::Top => tr("上に分割"),
+            Self::Bottom => tr("下に分割"),
+            Self::Center => tr("ここに表示"),
+        }
+    }
+}
+
+/// One terminal, or two arrangements sharing a rect: side by side or stacked,
+/// the first taking `share` of it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum PaneNode {
+    Leaf(Uuid),
+    Split {
+        side_by_side: bool,
+        share: f32,
+        first: Box<PaneNode>,
+        second: Box<PaneNode>,
+    },
+}
+
+impl PaneNode {
+    fn leaves(&self, out: &mut Vec<Uuid>) {
+        match self {
+            Self::Leaf(id) => out.push(*id),
+            Self::Split { first, second, .. } => {
+                first.leaves(out);
+                second.leaves(out);
+            }
+        }
+    }
+
+    fn for_each_leaf_mut(&mut self, f: &mut impl FnMut(&mut Uuid)) {
+        match self {
+            Self::Leaf(id) => f(id),
+            Self::Split { first, second, .. } => {
+                first.for_each_leaf_mut(f);
+                second.for_each_leaf_mut(f);
+            }
+        }
+    }
+
+    /// This arrangement without the terminals `keep` refuses; a split that
+    /// loses one side becomes the other.
+    fn retained(self, keep: &impl Fn(Uuid) -> bool) -> Option<Self> {
+        match self {
+            Self::Leaf(id) => keep(id).then_some(self),
+            Self::Split {
+                side_by_side,
+                share,
+                first,
+                second,
+            } => match (first.retained(keep), second.retained(keep)) {
+                (Some(first), Some(second)) => Some(Self::Split {
+                    side_by_side,
+                    share,
+                    first: Box::new(first),
+                    second: Box::new(second),
+                }),
+                (Some(only), None) | (None, Some(only)) => Some(only),
+                (None, None) => None,
+            },
+        }
+    }
+
+    /// Puts `moved` beside the terminal showing `target`, on `drop`'s side.
+    fn split_at(&mut self, target: Uuid, moved: Uuid, drop: PaneDrop) -> bool {
+        match self {
+            Self::Leaf(id) if *id == target => {
+                let (side_by_side, moved_first) = match drop {
+                    PaneDrop::Left => (true, true),
+                    PaneDrop::Right => (true, false),
+                    PaneDrop::Top => (false, true),
+                    PaneDrop::Bottom | PaneDrop::Center => (false, false),
+                };
+                let (first, second) = if moved_first {
+                    (moved, target)
+                } else {
+                    (target, moved)
+                };
+                *self = Self::Split {
+                    side_by_side,
+                    share: 0.5,
+                    first: Box::new(Self::Leaf(first)),
+                    second: Box::new(Self::Leaf(second)),
+                };
+                true
+            }
+            Self::Leaf(_) => false,
+            Self::Split { first, second, .. } => {
+                first.split_at(target, moved, drop) || second.split_at(target, moved, drop)
+            }
+        }
+    }
+
+    /// The least size this arrangement is drawn at without a terminal under
+    /// `PANE_MIN_W` × `PANE_MIN_H`.
+    fn min_size(&self) -> egui::Vec2 {
+        match self {
+            Self::Leaf(_) => egui::vec2(PANE_MIN_W, PANE_MIN_H),
+            Self::Split {
+                side_by_side,
+                first,
+                second,
+                ..
+            } => {
+                let (a, b) = (first.min_size(), second.min_size());
+                if *side_by_side {
+                    egui::vec2(a.x + DOCK_GAP + b.x, a.y.max(b.y))
+                } else {
+                    egui::vec2(a.x.max(b.x), a.y + DOCK_GAP + b.y)
+                }
+            }
+        }
+    }
+
+    fn layout(&self, rect: egui::Rect, out: &mut PaneRects) {
+        match self {
+            Self::Leaf(id) => out.panes.push((*id, rect)),
+            Self::Split {
+                side_by_side,
+                share,
+                first,
+                second,
+            } => {
+                let index = out.rules.len();
+                let (min_first, min_second) = (first.min_size(), second.min_size());
+                let (first_rect, rule, second_rect) = if *side_by_side {
+                    let (a, _) =
+                        split_lengths(rect.width() - DOCK_GAP, *share, min_first.x, min_second.x);
+                    let rule_left = rect.left() + a;
+                    (
+                        rect.with_max_x(rule_left),
+                        rect.with_min_x(rule_left).with_max_x(rule_left + DOCK_GAP),
+                        rect.with_min_x(rule_left + DOCK_GAP),
+                    )
+                } else {
+                    let (a, _) =
+                        split_lengths(rect.height() - DOCK_GAP, *share, min_first.y, min_second.y);
+                    let rule_top = rect.top() + a;
+                    (
+                        rect.with_max_y(rule_top),
+                        rect.with_min_y(rule_top).with_max_y(rule_top + DOCK_GAP),
+                        rect.with_min_y(rule_top + DOCK_GAP),
+                    )
+                };
+                out.rules.push(PaneRule {
+                    index,
+                    rect: rule,
+                    span: rect,
+                    side_by_side: *side_by_side,
+                });
+                first.layout(first_rect, out);
+                second.layout(second_rect, out);
+            }
+        }
+    }
+
+    /// Sets the share of the split numbered `index` in `layout`'s order, and
+    /// counts the splits passed on the way.
+    fn set_share(&mut self, index: usize, value: f32, seen: &mut usize) -> bool {
+        let Self::Split {
+            share,
+            first,
+            second,
+            ..
+        } = self
+        else {
+            return false;
+        };
+        if *seen == index {
+            *share = value;
+            return true;
+        }
+        *seen += 1;
+        first.set_share(index, value, seen) || second.set_share(index, value, seen)
+    }
+}
+
+/// The rule between the two sides of one split, as drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PaneRule {
+    /// The split's number, for `PaneLayout::set_share`.
+    pub(crate) index: usize,
+    pub(crate) rect: egui::Rect,
+    /// The whole rect the split divides, which a drag's share is read against.
+    pub(crate) span: egui::Rect,
+    pub(crate) side_by_side: bool,
+}
+
+/// The terminal area divided: each terminal's rect in reading order, and the
+/// rules between them.
+#[derive(Debug, Default)]
+pub(crate) struct PaneRects {
+    pub(crate) panes: Vec<(Uuid, egui::Rect)>,
+    pub(crate) rules: Vec<PaneRule>,
+}
+
+/// The terminals the session workspace shows, and how they share it
+/// (change 226). Empty or a single terminal means the workspace shows the
+/// selected session, as it did before; only a split is a layout. In memory,
+/// as `DockLayout` is.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PaneLayout {
+    root: Option<PaneNode>,
+}
+
+impl PaneLayout {
+    pub(crate) fn is_split(&self) -> bool {
+        matches!(self.root, Some(PaneNode::Split { .. }))
+    }
+
+    /// The one terminal left when the layout is not a split.
+    pub(crate) fn single(&self) -> Option<Uuid> {
+        match self.root {
+            Some(PaneNode::Leaf(id)) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The sessions on screen in reading order: left before right, top
+    /// before bottom.
+    pub(crate) fn sessions(&self) -> Vec<Uuid> {
+        let mut out = Vec::new();
+        if let Some(root) = &self.root {
+            root.leaves(&mut out);
+        }
+        out
+    }
+
+    pub(crate) fn contains(&self, id: Uuid) -> bool {
+        self.sessions().contains(&id)
+    }
+
+    /// A session selected while `focused` holds the keyboard: shown in the
+    /// focused terminal, unless a terminal already shows it.
+    pub(crate) fn show(&mut self, focused: Option<Uuid>, id: Uuid) {
+        if !self.is_split() {
+            self.root = None;
+            return;
+        }
+        let shown = self.sessions();
+        if shown.contains(&id) {
+            return;
+        }
+        let Some(target) = focused
+            .filter(|focused| shown.contains(focused))
+            .or_else(|| shown.first().copied())
+        else {
+            return;
+        };
+        self.replace(target, id);
+    }
+
+    fn replace(&mut self, from: Uuid, to: Uuid) {
+        if let Some(root) = &mut self.root {
+            root.for_each_leaf_mut(&mut |id| {
+                if *id == from {
+                    *id = to;
+                }
+            });
+        }
+    }
+
+    /// The layout after `moved` is dropped on the terminal showing `target`
+    /// — which, while the layout is not a split, is the one terminal on
+    /// screen. `None` when the drop changes nothing. Whether the result has
+    /// room is `fits`'s question.
+    pub(crate) fn placed(&self, moved: Uuid, target: Uuid, drop: PaneDrop) -> Option<Self> {
+        if moved == target {
+            return None;
+        }
+        let mut after = self.clone();
+        if !after.is_split() {
+            after.root = Some(PaneNode::Leaf(target));
+        }
+        if !after.contains(target) {
+            return None;
+        }
+        if drop == PaneDrop::Center {
+            if after.contains(moved) {
+                if let Some(root) = &mut after.root {
+                    root.for_each_leaf_mut(&mut |id| {
+                        if *id == moved {
+                            *id = target;
+                        } else if *id == target {
+                            *id = moved;
+                        }
+                    });
+                }
+            } else {
+                after.replace(target, moved);
+            }
+            return Some(after);
+        }
+        after.remove(moved);
+        after.root.as_mut()?.split_at(target, moved, drop);
+        Some(after)
+    }
+
+    pub(crate) fn remove(&mut self, id: Uuid) {
+        self.retain(|candidate| candidate != id);
+    }
+
+    pub(crate) fn retain(&mut self, keep: impl Fn(Uuid) -> bool) {
+        self.root = self.root.take().and_then(|root| root.retained(&keep));
+    }
+
+    pub(crate) fn rects(&self, area: egui::Rect) -> PaneRects {
+        let mut out = PaneRects::default();
+        if let Some(root) = &self.root {
+            root.layout(area, &mut out);
+        }
+        out
+    }
+
+    /// Sets the first side's share of the split `PaneRule::index` names.
+    pub(crate) fn set_share(&mut self, index: usize, share: f32) {
+        if let Some(root) = &mut self.root {
+            root.set_share(index, share.clamp(0.0, 1.0), &mut 0);
+        }
+    }
+
+    /// Whether `area` holds this layout: at most `PANE_MAX` terminals, none
+    /// under its minimum size.
+    pub(crate) fn fits(&self, area: egui::Rect) -> bool {
+        let Some(root) = &self.root else {
+            return true;
+        };
+        let min = root.min_size();
+        self.sessions().len() <= PANE_MAX && area.width() >= min.x && area.height() >= min.y
+    }
+}
+
+/// Where a session released at `pos` over the terminal in `rect` goes: the
+/// nearer edge within `DOCK_DROP_BAND` of it, else the middle; outside the
+/// terminal, nowhere.
+pub(crate) fn pane_drop(pos: egui::Pos2, rect: egui::Rect) -> Option<PaneDrop> {
+    if !rect.contains(pos) || rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return None;
+    }
+    Some(
+        [
+            (PaneDrop::Left, (pos.x - rect.left()) / rect.width()),
+            (PaneDrop::Right, (rect.right() - pos.x) / rect.width()),
+            (PaneDrop::Top, (pos.y - rect.top()) / rect.height()),
+            (PaneDrop::Bottom, (rect.bottom() - pos.y) / rect.height()),
+        ]
+        .into_iter()
+        .filter(|(_, share)| *share <= DOCK_DROP_BAND)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map_or(PaneDrop::Center, |(drop, _)| drop),
+    )
+}
+
+/// The part of the terminal in `rect` a session dropped at `drop` takes.
+pub(crate) fn pane_drop_zone(rect: egui::Rect, drop: PaneDrop) -> egui::Rect {
+    let center = rect.center();
+    match drop {
+        PaneDrop::Left => rect.with_max_x(center.x),
+        PaneDrop::Right => rect.with_min_x(center.x),
+        PaneDrop::Top => rect.with_max_y(center.y),
+        PaneDrop::Bottom => rect.with_min_y(center.y),
+        PaneDrop::Center => rect,
+    }
+}
+
+/// What the hint beside the pointer says over `drop`.
+pub(crate) fn pane_drop_hint(drop: PaneDrop, refused: bool) -> &'static str {
+    if refused {
+        tr("これ以上分割できません")
+    } else {
+        drop.label()
+    }
+}
+
 /// The top level of a tree, split into what is shown and the entries whose
 /// name starts with a dot. A repository's root is where the dot folders
 /// gather — `.git`, `.claude`, `.github`, `.worktrees` — and listed first they

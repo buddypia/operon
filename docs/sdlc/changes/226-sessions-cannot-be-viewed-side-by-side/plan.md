@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-10-26
-- **Status**: in progress
+- **Status**: done
 
 ## Files that change
 
@@ -49,4 +49,18 @@
 
 ## Departures from the plan
 
-Filled in during implementation.
+- **A tenth test, `dragging_a_row_onto_a_terminal_splits_it`.** It drives the
+  whole gesture through egui input (press a list row, carry it to the
+  terminal's right edge, read the hint, release). It found what the nine did
+  not: the session list ends its own drag on any release, before the terminals
+  draw, so the release never reached the drop. `ui_terminal_workspace` now reads
+  the dragged session at the top of the frame and hands it to `ui_pane_drop`.
+- **Step 7 (look at the running app) was replaced by that test.** Driving a real
+  drag means posting mouse events on the person's live screen; the person checks
+  the installed build instead.
+- **What the minimums mean on screen.** Side by side needs 646px of terminal
+  area: at the default 1280px window with both side panels open it fits; at
+  900px it is refused with 「これ以上分割できません」 while a top or bottom
+  split still fits.
+- **`ui_terminal_panel` kept its signature** for its six test callers; the
+  split-aware body is `ui_terminal_pane(ui, session, split)`.
