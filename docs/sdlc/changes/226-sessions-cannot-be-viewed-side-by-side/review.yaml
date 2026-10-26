@@ -1,0 +1,39 @@
+# Review record for change 226-sessions-cannot-be-viewed-side-by-side.
+#
+# rust-reviewer: no new panic sites; no disk or process work in the draw path;
+# per-frame allocations bounded by PANE_MAX; keys and IME stay inside
+# has_focus() and unfocused panes surrender focus; only the focused pane feeds
+# the path cache; drag lifecycle (Escape, lost release, the list clearing
+# column_drag before the centre draws) holds.
+# subprocess-safety-reviewer: one SessionPoll at a time (BackgroundKey); at
+# most PANE_MAX sequential captures, each through run_command_with_timeout;
+# a failed capture is skipped per pane; no new Command::new or unsafe.
+
+digest: "2c7d960e9ab9b4d8"
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · src/app/screens.rs ui_terminal_panes: a Session is cloned per pane per frame; only ids are needed until the pane draws.
+    person: "分割表示中は毎フレーム少し余分なコピーが走りますが、体感できる差はありません。対応は不要です。"
+  - rust-reviewer/2 · src/app.rs is_session_on_screen builds a Vec through terminals_on_screen() just to call contains.
+    person: "未読判定のたびに小さな一時リストを作っています。動作は正しく、対応は不要です。"
+  - rust-reviewer/3 · src/app/screens.rs ui_pane_drop: a Center swap or replace needs no extra room but is refused when the window has shrunk below the layout's minimum.
+    person: "ウィンドウを分割表示の最小サイズより小さく縮めると、中央へのドロップ（入れ替え）も「これ以上分割できません」になります。ウィンドウを広げれば使えます。"
+  - rust-reviewer/4 · src/app/screens.rs: Escape that cancels a drag is also forwarded to the focused terminal (focus filter escape: true), which can interrupt an agent mid-turn; the dock drag behaves the same way.
+    person: "ドラッグを Esc で取り消すと、その Esc がキーボードを持つターミナルにも届き、実行中のエージェントを中断することがあります。取り消しはターミナルの外でボタンを離す方が安全です。"
+  - rust-reviewer/5 · src/app/screens.rs: drop zones also appear over the terminals while a row is only being reordered inside the list.
+    person: "一覧の並べ替え中にポインタがターミナル上に出ると分割の案内が表示されます。そこで離した時だけ分割されます。対応は不要です。"
+  - subprocess-safety-reviewer/1 · src/app.rs request_session_poll: the PANE_MAX bound rests on the layout invariant alone; a .take(PANE_MAX) would make it local.
+    person: "同時に読み取るターミナルは今も最大4枚です。対応は不要です。"
+  - subprocess-safety-reviewer/2 · src/app.rs: worst-case poll time rises from 1×5s to 4×5s when tmux stalls, delaying state updates in the same result.
+    person: "tmux が固まった時に限り、状態表示の更新が最大20秒ほど遅れることがあります。普段は影響ありません。"
+  - subprocess-safety-reviewer/3 · src/app.rs apply_session_poll: a failed capture leaves the pane's last output on screen with no sign it is stale.
+    person: "読み取りに失敗したターミナルは最後の表示のまま止まって見えることがあります（以前の1枚表示と同じ）。対応は不要です。"
+  - subprocess-safety-reviewer/4 · src/app.rs: set_session_output parses ANSI on the UI thread; four streaming panes parse four buffers in one frame.
+    person: "4枚すべてが大量に出力している時だけ描画が少し重くなる可能性があります。対応は不要です。"
+  - subprocess-safety-reviewer/5 · src/tests.rs: nothing covers request_session_poll building the on_screen list (active filter).
+    person: "表示中ターミナルの読み取り対象を選ぶ部分に専用のテストがありません。動作への影響はありません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"

@@ -6040,10 +6040,20 @@ impl OperonApp {
     }
 
     pub(crate) fn ui_terminal_panel(&mut self, ui: &mut egui::Ui, session: &Session) {
+        self.ui_terminal_pane(ui, session, false);
+    }
+
+    /// One terminal with its header. `split` when it is one of several
+    /// (change 226): it then carries a grip and ✕, the focused one is framed,
+    /// and only the focused one types, polls for its echo, and resolves paths.
+    fn ui_terminal_pane(&mut self, ui: &mut egui::Ui, session: &Session, split: bool) {
         let palette = self.store.theme.palette();
         let session_id = session.id;
-        if let Some(wait) = self.poll_terminal_echo(session_id, Instant::now()) {
-            ui.ctx().request_repaint_after(wait);
+        let focused = !split || self.selected_session == Some(session_id);
+        if focused {
+            if let Some(wait) = self.poll_terminal_echo(session_id, Instant::now()) {
+                ui.ctx().request_repaint_after(wait);
+            }
         }
         let cancellation_pending = self.cancellation_pending(session_id);
         let project = self
@@ -6091,6 +6101,10 @@ impl OperonApp {
                             }
                         }
                     }
+                }
+                if split && small_icon_button(ui, palette, ICON_CLOSE, tr("画面から外す")).clicked()
+                {
+                    self.close_pane(session_id);
                 }
                 let _ = ui
                     .menu_button(RichText::new(ICON_MORE).size(16.0), |ui| {
@@ -6239,6 +6253,27 @@ impl OperonApp {
                 ui.add_space(SPACE_SM);
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.spacing_mut().item_spacing.x = SPACE_XS;
+                    if split {
+                        let grip = ui
+                            .add(
+                                egui::Label::new(
+                                    RichText::new(ICON_DRAG_HANDLE)
+                                        .size(13.5)
+                                        .color(palette.text_muted),
+                                )
+                                .selectable(false)
+                                .sense(egui::Sense::click_and_drag()),
+                            )
+                            .on_hover_text(tr("ドラッグして分割位置を変更"));
+                        if grip.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        } else if grip.hovered() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+                        if grip.drag_started() {
+                            self.pane_drag = Some(session_id);
+                        }
+                    }
                     agent_chip(ui, &session.agent, 12.0, palette);
                     let goal = session_display_goal(&session.goal);
                     ui.add(
@@ -6296,17 +6331,25 @@ impl OperonApp {
                     // and therefore share `ui.id`, so anything hashed off it is
                     // one careless key away from colliding with the other pane.
                     let terminal_id = egui::Id::new(("terminal-pane", session_id));
-                    let terminal_height = ui.available_height().max(320.0);
+                    // Among several, each terminal is already held to its
+                    // minimum by the layout; the floor is the single one's.
+                    let terminal_height =
+                        ui.available_height().max(if split { 0.0 } else { 320.0 });
                     ui.set_min_width(terminal_w);
                     let cell = terminal_cell_size(ui);
-                    if self.resolved_paths_session.is_some()
-                        && self.resolved_paths_session != Some(session_id)
-                    {
-                        self.resolved_paths.clear();
-                        self.resolved_paths_generation += 1;
-                        self.unresolved_paths.clear();
+                    // The path cache is the focused terminal's: two terminals
+                    // taking turns at it would empty it every frame.
+                    if focused {
+                        if self.resolved_paths_session.is_some()
+                            && self.resolved_paths_session != Some(session_id)
+                        {
+                            self.resolved_paths.clear();
+                            self.resolved_paths_generation += 1;
+                            self.unresolved_paths.clear();
+                        }
+                        self.resolved_paths_session = Some(session_id);
                     }
-                    self.resolved_paths_session = Some(session_id);
+                    let no_paths = HashMap::new();
                     if self.selected_session.is_none() {
                         self.selected_session = Some(session_id);
                     }
@@ -6315,9 +6358,14 @@ impl OperonApp {
                     let cursor = self.terminal_cursors.get(&session_id).copied();
                     let (terminal_rect, (hovered_target, unresolved, caret)) = {
                         let lines = self.terminal_layouts.get(&session_id);
+                        let border = if split && focused {
+                            egui::Stroke::new(2.0, palette.accent)
+                        } else {
+                            egui::Stroke::new(1.0, palette.terminal_border)
+                        };
                         let terminal = egui::Frame::default()
                             .fill(palette.terminal_bg)
-                            .stroke(egui::Stroke::new(1.0, palette.terminal_border))
+                            .stroke(border)
                             .inner_margin(egui::Margin::same(8))
                             .show(ui, |ui| {
                                 let viewport = egui::vec2(
@@ -6335,7 +6383,11 @@ impl OperonApp {
                                             cell.y,
                                             self.terminal_search_overlay(session_id, palette),
                                             &mut TerminalLinkOverlay {
-                                                resolved: &self.resolved_paths,
+                                                resolved: if focused {
+                                                    &self.resolved_paths
+                                                } else {
+                                                    &no_paths
+                                                },
                                                 unresolved: &mut unresolved,
                                                 palette,
                                             },
@@ -6364,11 +6416,18 @@ impl OperonApp {
                         session_id,
                         terminal_grid_size(terminal_rect.size(), cell),
                     );
-                    self.unresolved_paths.extend(unresolved);
+                    if focused {
+                        self.unresolved_paths.extend(unresolved);
+                    }
                     let terminal_response =
                         ui.interact(terminal_rect, terminal_id, egui::Sense::click());
                     let modifiers = ui.input(|input| input.modifiers);
                     let has_open_modifier = is_terminal_open_modifier(&modifiers);
+                    // Keys go to the focused terminal only, whichever egui
+                    // last gave the keyboard to.
+                    if !focused && terminal_response.has_focus() {
+                        terminal_response.surrender_focus();
+                    }
 
                     // The pane owns typing, so an ordinary click still only takes focus: an
                     // agent being talked to must not lose the keyboard because a stack
@@ -6581,7 +6640,14 @@ impl OperonApp {
     /// The session workspace: the terminal in the middle and every panel on
     /// the edge it is docked to (change 145).
     pub(crate) fn ui_terminal_workspace(&mut self, ui: &mut egui::Ui) {
+        self.settle_panes();
         self.select_default_terminal_session();
+        // Read before the list draws: it ends its own drag on any release,
+        // and the release is the frame a drop on a terminal lands in.
+        let carried = self.pane_drag.or(match self.column_drag {
+            Some(ColumnDrag::Session { session, .. }) => Some(session),
+            _ => None,
+        });
         let palette = self.store.theme.palette();
         let (area, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
         let selected = (!self.session_library_open)
@@ -6638,14 +6704,212 @@ impl OperonApp {
             center.separator();
             self.ui_history_cli_section(&mut center);
             self.ui_sessions(&mut center);
-        } else if let Some(session) = &selected {
-            self.ui_terminal_panel(&mut center, session);
-        } else {
-            center.add_space(36.0);
-            center.heading(tr("セッションを選択"));
-            center.label(tr("一覧からセッションを選んでください。"));
         }
+        // The terminals a dragged session can land on, as drawn this frame.
+        let split = (!self.session_library_open && self.panes.is_split())
+            .then(|| self.ui_terminal_panes(&mut center, rects.center, palette));
+        let single;
+        let panes: &[(Uuid, egui::Rect)] = match (&split, &selected) {
+            (Some(split), _) => &split.panes,
+            (None, Some(session)) => {
+                self.ui_terminal_panel(&mut center, session);
+                single = [(session.id, rects.center)];
+                &single
+            }
+            (None, None) => {
+                if !self.session_library_open {
+                    center.add_space(36.0);
+                    center.heading(tr("セッションを選択"));
+                    center.label(tr("一覧からセッションを選んでください。"));
+                }
+                &[]
+            }
+        };
         self.ui_dock_drop(ui, area, palette);
+        if let Some(moved) = carried {
+            self.ui_pane_drop(ui, moved, panes, rects.center, palette);
+        }
+    }
+
+    /// Drops the terminals whose session left the store, back to the single
+    /// terminal when one is left, and keeps the keyboard on one shown.
+    fn settle_panes(&mut self) {
+        if !self.panes.is_split() {
+            return;
+        }
+        let sessions = &self.store.sessions;
+        self.panes
+            .retain(|id| sessions.iter().any(|session| session.id == id));
+        if let Some(only) = self.panes.single() {
+            self.panes = PaneLayout::default();
+            self.select_session(only);
+            return;
+        }
+        let shown = self.panes.sessions();
+        if !self
+            .selected_session
+            .is_some_and(|selected| shown.contains(&selected))
+        {
+            if let Some(first) = shown.first() {
+                self.select_session(*first);
+            }
+        }
+    }
+
+    /// Every terminal of a split in its rect, the rules between them, and a
+    /// press in one giving it the keyboard (change 226).
+    fn ui_terminal_panes(
+        &mut self,
+        ui: &mut egui::Ui,
+        area: egui::Rect,
+        palette: &Palette,
+    ) -> PaneRects {
+        let layout = self.panes.rects(area);
+        for rule in &layout.rules {
+            let response = ui
+                .interact(
+                    rule.rect,
+                    egui::Id::new(("pane-rule", rule.index)),
+                    egui::Sense::drag(),
+                )
+                .on_hover_text(tr("ドラッグして大きさを調整"));
+            let active = response.hovered() || response.dragged();
+            if active {
+                ui.ctx().set_cursor_icon(if rule.side_by_side {
+                    egui::CursorIcon::ResizeHorizontal
+                } else {
+                    egui::CursorIcon::ResizeVertical
+                });
+            }
+            if let Some(pos) = response
+                .dragged()
+                .then(|| response.interact_pointer_pos())
+                .flatten()
+            {
+                let share = if rule.side_by_side {
+                    (pos.x - rule.span.left()) / (rule.span.width() - DOCK_GAP)
+                } else {
+                    (pos.y - rule.span.top()) / (rule.span.height() - DOCK_GAP)
+                };
+                if share.is_finite() {
+                    self.panes.set_share(rule.index, share);
+                }
+            }
+            if rule.side_by_side {
+                paint_splitter_v(ui, rule.rect, palette, active);
+            } else {
+                paint_splitter_h(ui, rule.rect, palette, active);
+            }
+        }
+        let pressed = ui.input(|input| {
+            input
+                .pointer
+                .primary_pressed()
+                .then(|| input.pointer.interact_pos())
+                .flatten()
+        });
+        for (session_id, rect) in &layout.panes {
+            let Some(session) = self
+                .store
+                .sessions
+                .iter()
+                .find(|session| session.id == *session_id)
+                .cloned()
+            else {
+                continue;
+            };
+            if pressed.is_some_and(|pos| rect.contains(pos))
+                && self.selected_session != Some(*session_id)
+            {
+                self.select_session(*session_id);
+            }
+            // Named by the session, so its scroll and search survive a move.
+            let mut pane = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt(("terminal-pane-slot", *session_id))
+                    .max_rect(*rect)
+                    .layout(egui::Layout::top_down(egui::Align::LEFT)),
+            );
+            pane.shrink_clip_rect(*rect);
+            self.ui_terminal_pane(&mut pane, &session, true);
+        }
+        layout
+    }
+
+    /// A session dragged over the terminals — a row of the list, or a
+    /// terminal by its grip: the part of the terminal under the pointer a
+    /// release would fill, a hint beside the pointer, and on release the
+    /// split. Escape, or a release anywhere else, changes nothing.
+    fn ui_pane_drop(
+        &mut self,
+        ui: &egui::Ui,
+        moved: Uuid,
+        panes: &[(Uuid, egui::Rect)],
+        area: egui::Rect,
+        palette: &Palette,
+    ) {
+        let (escaped, released, lost) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Escape),
+                i.pointer.primary_released(),
+                !i.pointer.primary_down() && !i.pointer.primary_released(),
+            )
+        });
+        if escaped || lost {
+            self.pane_drag = None;
+            return;
+        }
+        if self.pane_drag.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        }
+        // Not on the terminal already showing it: there is nowhere to go.
+        let landing =
+            ui.input(|i| i.pointer.hover_pos()).and_then(|pos| {
+                let (target, rect, drop) =
+                    panes.iter().filter(|(shown, _)| *shown != moved).find_map(
+                        |(shown, rect)| pane_drop(pos, *rect).map(|drop| (*shown, *rect, drop)),
+                    )?;
+                let after = self.panes.placed(moved, target, drop)?;
+                let fits = after.fits(area);
+                Some((rect, drop, after, fits))
+            });
+        if let Some((rect, drop, _, fits)) = &landing {
+            let (fill, stroke) = if *fits {
+                (palette.accent.gamma_multiply(0.12), palette.accent)
+            } else {
+                (palette.raised.gamma_multiply(0.04), palette.warning)
+            };
+            ui.ctx()
+                .layer_painter(egui::LayerId::new(
+                    egui::Order::Foreground,
+                    egui::Id::new("pane-drop-zone"),
+                ))
+                .rect(
+                    pane_drop_zone(*rect, *drop).shrink(SPACE_XS),
+                    egui::CornerRadius::same(RADIUS_CARD),
+                    fill,
+                    egui::Stroke::new(2.0, stroke),
+                    egui::StrokeKind::Inside,
+                );
+            egui::show_tooltip(
+                ui.ctx(),
+                ui.layer_id(),
+                egui::Id::new("pane-drag-tooltip"),
+                |ui| {
+                    ui.label(
+                        RichText::new(pane_drop_hint(*drop, !*fits)).color(palette.text_strong),
+                    );
+                },
+            );
+        }
+        if !released {
+            return;
+        }
+        self.pane_drag = None;
+        if let Some((_, _, after, true)) = landing {
+            self.panes = after;
+            self.select_session(moved);
+        }
     }
 
     /// One edge: the session list, a group of views, or both split by a

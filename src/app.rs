@@ -179,7 +179,7 @@ pub(crate) enum BackgroundResult {
         states: Vec<(Uuid, TmuxObservation)>,
         activities: Vec<(Uuid, AgentActivity)>,
         previews: Vec<(Uuid, ConversationPreview)>,
-        output: Option<(Uuid, UiResult<TerminalCapture>)>,
+        output: Vec<(Uuid, UiResult<TerminalCapture>)>,
     },
     CliSessions {
         project_id: Uuid,
@@ -694,6 +694,10 @@ pub(crate) struct OperonApp {
     /// The project or session being dragged inside the session column, if
     /// any. In memory, as `dock_drag` is.
     pub(crate) column_drag: Option<ColumnDrag>,
+    /// The terminals on screen beside the selected one (change 226).
+    pub(crate) panes: PaneLayout,
+    /// The terminal being dragged by its header grip, if any.
+    pub(crate) pane_drag: Option<Uuid>,
     /// The rect the session workspace was last drawn into; a dock move is
     /// judged against it (change 146).
     pub(crate) dock_area: Option<egui::Rect>,
@@ -1066,6 +1070,8 @@ impl OperonApp {
             dock_drag: None,
             session_arrangement,
             column_drag: None,
+            panes: PaneLayout::default(),
+            pane_drag: None,
             dock_area: None,
             session_file_filter: String::new(),
             session_filter_results: None,
@@ -3205,9 +3211,12 @@ impl OperonApp {
         if active.is_empty() {
             return;
         }
-        let selected = self
-            .selected_session
-            .and_then(|selected| active.iter().find(|(id, ..)| *id == selected).cloned());
+        // Every terminal on screen, at most `PANE_MAX` (change 226).
+        let on_screen = self
+            .terminals_on_screen()
+            .into_iter()
+            .filter_map(|shown| active.iter().find(|(id, ..)| *id == shown).cloned())
+            .collect::<Vec<_>>();
         self.spawn_background(BackgroundKey::SessionPoll, move || {
             let mut states = Vec::with_capacity(active.len());
             let mut activities = Vec::new();
@@ -3250,12 +3259,15 @@ impl OperonApp {
                     }
                 });
             }
-            let output = selected.map(|(id, name, _)| {
-                (
-                    id,
-                    tmux_capture_with_cursor(&name).map_err(|error| error.to_string()),
-                )
-            });
+            let output = on_screen
+                .into_iter()
+                .map(|(id, name, _)| {
+                    (
+                        id,
+                        tmux_capture_with_cursor(&name).map_err(|error| error.to_string()),
+                    )
+                })
+                .collect();
             BackgroundResult::SessionPoll {
                 states,
                 activities,
@@ -3270,7 +3282,7 @@ impl OperonApp {
         states: Vec<(Uuid, TmuxObservation)>,
         activities: Vec<(Uuid, AgentActivity)>,
         previews: Vec<(Uuid, ConversationPreview)>,
-        output: Option<(Uuid, UiResult<TerminalCapture>)>,
+        output: Vec<(Uuid, UiResult<TerminalCapture>)>,
     ) {
         self.apply_session_previews(previews);
         let mut previous_store = None;
@@ -3326,7 +3338,10 @@ impl OperonApp {
                 .pending_cancellations
                 .retain(|pending| !completed_cancellations.contains(pending));
         }
-        if let Some((id, Ok(capture))) = output {
+        for (id, capture) in output {
+            let Ok(capture) = capture else {
+                continue;
+            };
             self.set_session_output(id, capture.output, capture.cursor);
         }
         if changed && !self.persist() {
@@ -6371,6 +6386,7 @@ impl OperonApp {
             self.unresolved_paths.clear();
             self.resolved_paths_session = Some(session_id);
         }
+        self.panes.show(self.selected_session, session_id);
         self.selected_session = Some(session_id);
         if self.unread_hold != Some(session_id) {
             self.unread_sessions.remove(&session_id);
@@ -6394,7 +6410,31 @@ impl OperonApp {
     pub(crate) fn is_session_on_screen(&self, session_id: Uuid) -> bool {
         self.page == Page::Sessions
             && !self.session_library_open
-            && self.selected_session == Some(session_id)
+            && self.terminals_on_screen().contains(&session_id)
+    }
+
+    /// The sessions the workspace draws a terminal for: every terminal of a
+    /// split, else the selected one.
+    pub(crate) fn terminals_on_screen(&self) -> Vec<Uuid> {
+        if self.panes.is_split() {
+            self.panes.sessions()
+        } else {
+            self.selected_session.into_iter().collect()
+        }
+    }
+
+    /// Takes a terminal off the screen; its session keeps running. Its
+    /// neighbour takes the room and, when it held the keyboard, the keyboard.
+    pub(crate) fn close_pane(&mut self, session_id: Uuid) {
+        self.panes.remove(session_id);
+        if let Some(only) = self.panes.single() {
+            self.panes = PaneLayout::default();
+            self.select_session(only);
+        } else if self.selected_session == Some(session_id) {
+            if let Some(next) = self.panes.sessions().first().copied() {
+                self.select_session(next);
+            }
+        }
     }
 
     /// Both paths that decide a session changed state call this, at the point
