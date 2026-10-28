@@ -1,6 +1,6 @@
 # Intent: A memory review cannot show exactly which sessions informed it
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-28
 
 ## Problem

@@ -1,12 +1,12 @@
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 resume: "Evaluate the bounded memory-review source manifest before implementation, then complete the third-folder audit."
 contract:
@@ -14,6 +14,6 @@ contract:
   three-gates: "machine pending make q.fast"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine waived scripts, skill reference and src/tests.rs only"
-  source-coverage: "human pending independently audit third-folder mapping"
+  source-coverage: "human passed independent source audit aeb76fd22e3137b9 found no further material applicable gap"
   real-batch: "human pending independent read-only review of selected changes 227 to 230 with evidence and prevalence"
   guards-verified-by-mutation: "human pending scope, snapshot, budget and claim mutants caught"
