@@ -47,8 +47,8 @@
 #
 #   EVAL_AGENT    the agent command, default `claude`. The runner's own tests
 #                 point it at a stub.
-#   EVAL_TIMEOUT  seconds one agent run may take, default 1800. Applied when
-#                 `timeout` or `gtimeout` exists.
+#   EVAL_TIMEOUT  positive integer seconds (1..2147483647), default 1800.
+#                 Always enforced by the portable process-group deadline helper.
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -144,14 +144,14 @@ if ! command -v "$agent" >/dev/null 2>&1; then
   exit 3
 fi
 
-limit="${EVAL_TIMEOUT:-1800}"
-bound=""
-if command -v timeout >/dev/null 2>&1; then
-  bound="timeout $limit"
-elif command -v gtimeout >/dev/null 2>&1; then
-  bound="gtimeout $limit"
-else
-  echo "note: no timeout command, so agent runs are unbounded" >&2
+limit="${EVAL_TIMEOUT-1800}"
+case "$limit" in
+  ''|*[!0-9]*|0*) limit_valid=0 ;;
+  *) limit_valid=1 ;;
+esac
+if [ "$limit_valid" -ne 1 ] || [ "${#limit}" -gt 10 ] || [ "$limit" -gt 2147483647 ]; then
+  echo "EVAL_TIMEOUT needs integer seconds from 1 to 2147483647" >&2
+  exit 2
 fi
 
 agent_options=(--permission-mode acceptEdits --output-format stream-json --verbose)
@@ -163,7 +163,7 @@ if [ -n "$effort" ]; then agent_options+=(--effort "$effort"); fi
 # summaries are only comparable when this line matches (change 189).
 conditions="agent $(basename "$agent") · model ${model:-default} · effort ${effort:-default}"
 conditions="$conditions · split ${split:-both} · recheck $([ "$recheck" -eq 1 ] && echo on || echo off)"
-conditions="$conditions · timeout $([ -n "$bound" ] && echo "${limit}s" || echo none)"
+conditions="$conditions · timeout ${limit}s"
 
 # --- run ----------------------------------------------------------------------
 
@@ -232,7 +232,7 @@ for file in $evals; do
     fi
 
     if [ -z "$outcome" ]; then
-      ( cd "$worktree" && $bound "$agent" -p "$prompt" "${agent_options[@]}" ) \
+      ( cd "$worktree" && bash "$repo_root/scripts/run-bounded.sh" "$limit" "$agent" -p "$prompt" "${agent_options[@]}" ) \
         > "$out/transcript.jsonl" 2> "$out/agent.stderr"
       agent_status=$?
     fi

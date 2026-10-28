@@ -1,0 +1,8 @@
+# Round 1 approved implementation at 879553a15b6a01e7.
+# Final checking exposed lesson101 missing the required watched-failing record.
+# Round 2 approved that Important gate fix; no runtime/test code changed.
+digest: "40207f546c49163c"
+rounds: 2
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
