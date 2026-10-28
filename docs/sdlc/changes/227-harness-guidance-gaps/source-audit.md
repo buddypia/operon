@@ -14,7 +14,7 @@ The post's linked summary.md and video/ are absent; their contents are not assum
 | Permissions outside the model | git reference-transaction hook, risk.yaml and approval.md; no new bypass |
 | Traces and local recovery | git, review digests, mutations, root-cause skill, resume and atomic bundle rollback |
 | Instructions as infrastructure | src/tests.rs invariant checks, readiness/review/CI gates and lessons with required guards |
-| Bounded retries and escalation | routes.yaml attempts, review-rounds.yaml, state questions, handoff.md |
+| Bounded retries and escalation | routes.yaml attempts, review-rounds.yaml, state questions, handoff.md; GAP: run-evals.sh runs unbounded without timeout/gtimeout (portable run-bounded.sh already exists) |
 | Failure improves the system | sdlc Close the loop, root-cause and lessons.md guard requirement |
 | Separate reasoning, tools, history | external agent CLIs, Operon launch/exec, archived sessions and git |
 | Per-change receipt | GAP: read-only committed-state JSON joining existing records to artifact/policy hashes and rollback parent |
@@ -28,5 +28,6 @@ requirements for a single-user terminal manager. No vendor service is added.
 
 ## Sequence still to do
 
-After this folder's application is verified and landed, read hanakoxbt_article,
+After the receipt lands, close the eval timeout gap in this first folder before
+reading hanakoxbt_article,
 apply its relevant gaps and verify; then do the same for kyr0stack_video.

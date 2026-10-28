@@ -131,6 +131,10 @@ the earlier sections stay as they were.
   The remote branch is not deleted by hand: on that push
   `.github/workflows/prune-landed-branches.yml` deletes every landed branch.
   No pull request.
+- **Receipt** after committing: `python3 scripts/change-receipt.py NNN-slug HEAD`
+  reconstructs change records, selected policy hashes and the previous snapshot
+  from that commit; it reports recorded claims, not fresh verification, and leaves
+  unavailable run telemetry null. Generate on demand rather than keeping a second ledger.
 - **Package** when the `release-binary` contract item says so:
   `bash scripts/package-macos.sh`, then the swap in `.claude/skills/ship/SKILL.md`.
 
