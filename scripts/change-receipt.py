@@ -84,13 +84,21 @@ def blob(commit, path):
     return git("cat-file", "blob", object_id)
 
 
-def receipt(change, revision):
+def validate_change(change):
     if not re.fullmatch(r"[0-9]{3}-[a-z0-9]+(?:-[a-z0-9]+)*", change):
         raise ReceiptError("expected a numbered change name, not a path")
+
+
+def resolve_commit(revision):
     if not revision or revision.startswith("-") or len(revision) > 200:
         raise ReceiptError("invalid revision")
-    commit = git("rev-parse", "--verify", "--end-of-options",
-                 revision + "^{commit}").decode("ascii").strip()
+    return git("rev-parse", "--verify", "--end-of-options",
+               revision + "^{commit}").decode("ascii").strip()
+
+
+def receipt(change, revision):
+    validate_change(change)
+    commit = resolve_commit(revision)
     # Read the object itself: rev-list hides parents at a shallow boundary.
     header = git("cat-file", "commit", commit).split(b"\n\n", 1)[0]
     parents = [line[7:].decode("ascii") for line in header.splitlines()

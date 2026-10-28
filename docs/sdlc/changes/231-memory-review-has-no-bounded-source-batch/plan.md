@@ -1,7 +1,7 @@
 # Plan: Make cross-session memory review inspectable
 
 - **Spec**: `./spec.md`
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
