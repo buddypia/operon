@@ -1422,3 +1422,17 @@ agent child; `the_eval_runner_refuses_invalid_deadlines_before_starting_agents`
 checks invalid and overflowing limits before any agent starts (change 228; both
 watched failing before the fix: the unbounded run reached its outer safety
 deadline and the invalid-limit run started the probe agent).
+
+## 102 — A moved CMake cache still configured the old directory
+
+Seeding a worktree copied native CMakeCache.txt files along with Cargo objects.
+CMake then skipped configuration and used the main checkout's absolute paths,
+including a removed OpenSSL version. Fixing one hash missed the clippy variant.
+**The rule:** relocate compiled artifacts, but regenerate native configuration
+for the destination; preserve the old configuration and never mutate source or
+shared caches while doing so.
+
+**Guard.** `cloned_native_cache_is_reconfigured_without_changing_its_source`
+checks two native variants, retained compiled objects, recovery bytes, untouched
+source/shared caches and real minimal CMake configuration at the destination
+(change 230; watched failing with an active cloned CMakeCache.txt before the fix).

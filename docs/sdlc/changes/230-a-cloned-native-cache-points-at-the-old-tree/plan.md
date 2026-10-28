@@ -1,6 +1,6 @@
 # Plan: Native CMake configuration must not move between worktrees
 
-- **Status**: approved
+- **Status**: done
 
 ## Named cause and evidence
 
@@ -54,4 +54,8 @@ mutations caught; independent review and branch CI passed before landing.
 
 ## Departures from the plan
 
-None.
+The first post-fix fixture reached successful reconfiguration but compared
+macOS's /var path spelling with /private/var. Compare both physical paths instead;
+this is a fixture correction, not acceptance of an old build location. The real
+229 clippy failure passed after preserving only its stale CMakeCache.txt and
+letting CMake reconfigure; compiled objects remained in place (1m46s).
