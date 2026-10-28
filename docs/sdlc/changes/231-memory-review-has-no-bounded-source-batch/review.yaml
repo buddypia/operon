@@ -1,0 +1,5 @@
+digest: "80534542dce5caa5"
+rounds: 1
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

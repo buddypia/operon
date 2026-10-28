@@ -21,6 +21,7 @@ Detail lives beside this file and loads only when it is needed:
 | `.claude/skills/sdlc/references/readiness-gate.md` | before entering stage 3, or interpreting a No-Go |
 | `.claude/skills/sdlc/references/screen-approval.md` | the change paints |
 | `.claude/skills/sdlc/references/approval.md` | anything is about to be called approved — it decides person or evaluator |
+| `.claude/skills/sdlc/references/memory-review.md` | a dedicated maintenance review of repository memory across completed changes |
 
 ## 0. Is this already in flight?
 
