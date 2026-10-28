@@ -61212,3 +61212,118 @@ pub(crate) fn the_eval_runner_refuses_invalid_deadlines_before_starting_agents()
     }
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+pub(crate) fn cloned_native_cache_is_reconfigured_without_changing_its_source() {
+    let fixture = worktree_fixture_repository("cloned-native-cache");
+    let project = fixture.join("native-project");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("CMakeLists.txt"),
+        r#"cmake_minimum_required(VERSION 3.18)
+project(SeedCache NONE)
+file(WRITE "${CMAKE_BINARY_DIR}/configured-for.txt" "${CMAKE_BINARY_DIR}")
+"#,
+    )
+    .unwrap();
+    let configure = |build: &Path| {
+        let mut command = Command::new("cmake");
+        command.args(["-S"]).arg(&project).arg("-B").arg(build);
+        let output =
+            run_command_with_output_limit(&mut command, Duration::from_secs(30), 8192, 8192)
+                .unwrap();
+        assert!(
+            output.output.status.success(),
+            "{}",
+            both_streams(&output.output)
+        );
+    };
+    fs::create_dir_all(fixture.join("target/debug/deps")).unwrap();
+    fs::write(
+        fixture.join("target/debug/deps/retained.rlib"),
+        "compiled objects",
+    )
+    .unwrap();
+    let mut original = Vec::new();
+    for variant in ["native-test", "native-check"] {
+        let relative = format!("target/debug/build/{variant}/out/build");
+        let build = fixture.join(&relative);
+        configure(&build);
+        original.push((relative, fs::read(build.join("CMakeCache.txt")).unwrap()));
+    }
+    let outside = temporary_directory("native-shared-outside");
+    fs::write(
+        outside.join("CMakeCache.txt"),
+        "outside must stay unchanged",
+    )
+    .unwrap();
+    let linked = fixture.join("target/debug/build/native-linked/out");
+    fs::create_dir_all(&linked).unwrap();
+    std::os::unix::fs::symlink(&outside, linked.join("build")).unwrap();
+    let destination = fixture.join(".worktrees/feature/native");
+    git_in(
+        &fixture,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "feature/native",
+            destination.to_str().unwrap(),
+            "main",
+        ],
+    );
+    let mut seed = Command::new("bash");
+    forget_inherited_repository(&mut seed)
+        .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/seed-target.sh"))
+        .arg("feature/native")
+        .current_dir(&fixture);
+    let output =
+        run_command_with_output_limit(&mut seed, Duration::from_secs(60), 8192, 8192).unwrap();
+    assert!(
+        output.output.status.success(),
+        "{}",
+        both_streams(&output.output)
+    );
+    assert_eq!(
+        fs::read_to_string(destination.join("target/debug/deps/retained.rlib")).unwrap(),
+        "compiled objects"
+    );
+    for (relative, bytes) in original {
+        let source = fixture.join(&relative).join("CMakeCache.txt");
+        let moved = destination.join(&relative);
+        assert!(
+            !moved.join("CMakeCache.txt").exists(),
+            "cloned native configuration is still active: {}",
+            moved.display()
+        );
+        assert_eq!(
+            fs::read(&source).unwrap(),
+            bytes,
+            "source cache was changed"
+        );
+        let recovery = fs::read_dir(&moved)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| {
+                entry.path().is_file() && fs::read(entry.path()).is_ok_and(|data| data == bytes)
+            });
+        assert!(recovery, "old configuration has no recovery copy");
+        configure(&moved);
+        let configured = fs::read_to_string(moved.join("configured-for.txt")).unwrap();
+        assert_eq!(
+            fs::canonicalize(configured).unwrap(),
+            fs::canonicalize(&moved).unwrap()
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(outside.join("CMakeCache.txt")).unwrap(),
+        "outside must stay unchanged"
+    );
+    assert!(
+        !both_streams(&output.output).contains("変更分だけ"),
+        "seeding claims native reconfiguration cannot rebuild work"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+    fs::remove_dir_all(outside).unwrap();
+}

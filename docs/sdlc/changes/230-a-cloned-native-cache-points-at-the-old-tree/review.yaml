@@ -1,0 +1,5 @@
+digest: "5944b4a68dd2a927"
+rounds: 1
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

@@ -12,9 +12,9 @@
 #
 # `cp -c` is an APFS clone, copy-on-write: no bytes are copied until one side
 # writes, and the worktree's target/ is its own from then on, so concurrent
-# worktrees never contend for one build lock. Cargo carries a moved target dir
-# itself (each build script's `root-output` records the old OUT_DIR); a stale
-# dependency is rebuilt as it would be in any target dir.
+# worktrees never contend for one build lock. Cargo relocates its own metadata,
+# but native CMake caches contain absolute build and dependency paths. Keep a
+# recovery copy of each cloned cache and let CMake configure the new location.
 #
 # Both ends are found from git, not from the working directory: worktree-new.mjs
 # puts the worktree at <main checkout>/.worktrees/<branch> wherever `make wt.new`
@@ -58,7 +58,23 @@ fi
 mkdir -p "$worktree/target"
 if cp -c -R -p "$source_debug" "$worktree/target/debug" 2>/dev/null; then
   rm -f "$worktree/target/debug/.cargo-lock"
-  echo "seed-target: $source_debug を複製しました。初回ビルドは変更分だけになります。" >&2
+  worktree_real=$(cd "$worktree" && pwd -P)
+  for cache in "$worktree"/target/debug/build/*/out/build/CMakeCache.txt; do
+    [ -f "$cache" ] || continue
+    # A copied build directory may be a symlink into another tree. Reset only
+    # configuration physically inside this newly owned worktree.
+    parent=$(cd "$(dirname "$cache")" && pwd -P) || exit 1
+    case "$parent" in
+      "$worktree_real"/target/debug/build/*) ;;
+      *) echo "seed-target: 共有ネイティブ構成は変更しません: $cache" >&2; continue ;;
+    esac
+    backup=$(mktemp "${cache}.operon-seeded.XXXXXX") || exit 1
+    if ! mv "$cache" "$backup"; then
+      rm "$backup"
+      exit 1
+    fi
+  done
+  echo "seed-target: $source_debug を複製しました。ネイティブ構成は必要に応じて再生成されます。" >&2
 else
   rm -rf "$worktree/target/debug"
   echo "seed-target: target/debug を複製できませんでした。初回ビルドは全依存をコンパイルします。" >&2
