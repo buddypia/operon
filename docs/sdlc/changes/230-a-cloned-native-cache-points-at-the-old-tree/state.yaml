@@ -1,0 +1,18 @@
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "conditional"
+  screen: "n/a"
+resume: "Approve the cache repair plan, watch the relocation fixture fail, then invalidate cloned native configuration without changing source caches."
+contract:
+  native-cache: "machine pending cargo test --locked cloned_native_cache"
+  seed-regression: "machine pending cargo test --locked a_new_worktree_builds_from_mains_cache_and_formats_its_own_files"
+  three-gates: "machine pending make q.fast"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine waived scripts and src/tests.rs only"
+  guards-verified-by-mutation: "human pending cloned config, source preservation and claim mutants caught"
