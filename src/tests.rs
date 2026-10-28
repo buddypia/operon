@@ -60854,3 +60854,239 @@ pub(crate) fn dragging_a_row_onto_a_terminal_splits_it() {
     assert_eq!(app.column_drag, None);
     fs::remove_dir_all(&root).ok();
 }
+
+fn change_receipt_fixture() -> PathBuf {
+    let root = worktree_fixture_repository("change-receipt");
+    fs::create_dir_all(root.join("docs/sdlc/changes/999-receipt-fixture")).unwrap();
+    ci_gate_commit(&root, "AGENTS.md", "fixture policy\n");
+    ci_gate_commit(
+        &root,
+        "docs/sdlc/changes/999-receipt-fixture/state.yaml",
+        "state:\n  status: \"done\"\ncontract:\n  test: \"machine pending never run\"\n",
+    );
+    root
+}
+
+fn change_receipt_run(root: &Path, change: &str, revision: &str) -> std::process::Output {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/change-receipt.py");
+    let mut command = Command::new("python3");
+    command
+        .current_dir(root)
+        .arg(script)
+        .args([change, revision]);
+    let result =
+        run_command_with_output_limit(&mut command, Duration::from_secs(60), 2 * 1024 * 1024, 8192)
+            .unwrap();
+    assert!(!result.stdout_truncated && !result.stderr_truncated);
+    result.output
+}
+
+#[test]
+pub(crate) fn change_receipt_uses_committed_evidence_and_exposes_unknowns() {
+    let root = change_receipt_fixture();
+    let revision = ci_gate_git(&root, &["rev-parse", "HEAD"]);
+    let parent = ci_gate_git(&root, &["rev-parse", "HEAD^"]);
+    let read = || {
+        let output = change_receipt_run(&root, "999-receipt-fixture", &revision);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let receipt = read();
+    assert_eq!(receipt["snapshot"], revision);
+    assert_eq!(receipt["previous_snapshot"], parent);
+    assert_eq!(
+        receipt["rollback_scope"],
+        "previous snapshot only; not a whole-change revert"
+    );
+    assert_eq!(
+        receipt["evidence_scope"],
+        "committed records; not fresh verification"
+    );
+    assert_eq!(
+        receipt["policies"]["AGENTS.md"],
+        sha256_hex(b"fixture policy\n")
+    );
+    assert!(receipt["policies"]["REVIEW.md"].is_null());
+    let state = &receipt["records"]["state.yaml"];
+    assert_eq!(
+        state["sha256"],
+        sha256_hex(state["text"].as_str().unwrap().as_bytes())
+    );
+    assert!(state["text"]
+        .as_str()
+        .unwrap()
+        .contains("machine pending never run"));
+    assert!(receipt["records"]["review.yaml"].is_null());
+    for key in [
+        "model_route",
+        "tools_used",
+        "tests",
+        "cost_usd",
+        "human_corrections",
+    ] {
+        assert!(receipt["telemetry"].as_object().unwrap().contains_key(key));
+        assert!(receipt["telemetry"][key].is_null(), "{key} was invented");
+    }
+    fs::write(root.join("AGENTS.md"), "dirty policy").unwrap();
+    fs::write(
+        root.join("docs/sdlc/changes/999-receipt-fixture/state.yaml"),
+        "dirty state",
+    )
+    .unwrap();
+    assert_eq!(read(), receipt, "worktree edits changed immutable evidence");
+    // A replace ref must not change the commit we report on.
+    ci_gate_git(&root, &["replace", &revision, &parent]);
+    assert_eq!(read(), receipt, "git replace rewrote evidence");
+    let skill = fs::read_to_string(".claude/skills/feature-pilot/SKILL.md").unwrap();
+    assert!(skill.contains("python3 scripts/change-receipt.py"));
+    ci_gate_git(&root, &["replace", "-d", &revision]);
+    let root_commit = ci_gate_git(&root, &["commit-tree", "HEAD^{tree}", "-m", "root receipt"]);
+    let output = change_receipt_run(&root, "999-receipt-fixture", &root_commit);
+    assert!(output.status.success());
+    let root_receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(root_receipt["previous_snapshot"].is_null());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn change_receipt_rejects_invalid_missing_and_oversized_records() {
+    let root = change_receipt_fixture();
+    let baseline = change_receipt_run(&root, "999-receipt-fixture", "HEAD");
+    assert!(
+        baseline.status.success(),
+        "{}",
+        String::from_utf8_lossy(&baseline.stderr)
+    );
+    let refuses = |change: &str, revision: &str| {
+        let output = change_receipt_run(&root, change, revision);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.stdout.is_empty(),
+            "partial receipt escaped on failure"
+        );
+        assert!(!output.stderr.is_empty());
+    };
+    for change in ["../AGENTS.md", "999-../escape", "--help", "998-absent"] {
+        refuses(change, "HEAD");
+    }
+    refuses("999-receipt-fixture", "does-not-exist");
+    refuses("999-receipt-fixture", "--all");
+    let path = "docs/sdlc/changes/999-receipt-fixture/review.yaml";
+    ci_gate_commit(&root, path, &"x".repeat(64 * 1024 + 1));
+    refuses("999-receipt-fixture", "HEAD");
+    fs::write(root.join(path), [0xff, 0xfe]).unwrap();
+    ci_gate_git(&root, &["add", path]);
+    ci_gate_git(&root, &["commit", "-q", "-m", "invalid utf8"]);
+    refuses("999-receipt-fixture", "HEAD");
+    // Present but empty mandatory state is not evidence.
+    ci_gate_commit(&root, path, "review restored\n");
+    ci_gate_commit(
+        &root,
+        "docs/sdlc/changes/999-receipt-fixture/state.yaml",
+        "",
+    );
+    refuses("999-receipt-fixture", "HEAD");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn change_receipt_never_fetches_missing_promisor_objects() {
+    let root = change_receipt_fixture();
+    ci_gate_git(&root, &["config", "uploadpack.allowFilter", "true"]);
+    let partial = root.join("partial");
+    ci_gate_git(
+        &root,
+        &[
+            "clone",
+            "-q",
+            "--no-checkout",
+            "--filter=blob:none",
+            &format!("file://{}", root.display()),
+            partial.to_str().unwrap(),
+        ],
+    );
+    let marker = root.join("transport-invoked");
+    let upload = root.join("upload-pack-probe.sh");
+    fs::write(
+        &upload,
+        format!(
+            "#!/bin/sh\n: > {}\nexit 1\n",
+            shell_quote(marker.to_str().unwrap())
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&upload, fs::Permissions::from_mode(0o755)).unwrap();
+    ci_gate_git(
+        &partial,
+        &[
+            "config",
+            "remote.origin.uploadpack",
+            upload.to_str().unwrap(),
+        ],
+    );
+    let output = change_receipt_run(&partial, "999-receipt-fixture", "HEAD");
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(!marker.exists(), "receipt invoked a promisor transport");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn change_receipt_stops_git_on_stream_overflow_and_deadline() {
+    let root = temporary_directory("receipt-process-budget");
+    let fake_bin = root.join("bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let fake_git = fake_bin.join("git");
+    let pid_file = root.join("child-pid");
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/change-receipt.py");
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    for (body, expected) in [
+        ("exec head -c 65537 /dev/zero", "git output exceeds 64 KiB"),
+        ("exec sleep 60", "git exceeded its ten-second deadline"),
+    ] {
+        fs::write(
+            &fake_git,
+            format!(
+                "#!/bin/sh\nprintf '%s' $$ > {}\n{body}\n",
+                shell_quote(pid_file.to_str().unwrap())
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&fake_git, fs::Permissions::from_mode(0o755)).unwrap();
+        let mut command = Command::new("python3");
+        command
+            .current_dir(&root)
+            .env("PATH", &path)
+            .arg(&script)
+            .args(["999-fixture", "HEAD"]);
+        let result =
+            run_command_with_output_limit(&mut command, Duration::from_secs(45), 1024, 8192)
+                .unwrap();
+        assert_eq!(result.output.status.code(), Some(2));
+        assert!(result.output.stdout.is_empty());
+        assert!(String::from_utf8_lossy(&result.output.stderr).contains(expected));
+        let pid = fs::read_to_string(&pid_file).unwrap();
+        let mut probe = Command::new("/bin/kill");
+        probe.args(["-0", &pid]);
+        let probe =
+            run_command_with_output_limit(&mut probe, Duration::from_secs(5), 1024, 1024).unwrap();
+        assert!(
+            !probe.output.status.success(),
+            "receipt left its child running"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}

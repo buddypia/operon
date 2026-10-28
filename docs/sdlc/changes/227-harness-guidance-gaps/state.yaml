@@ -1,0 +1,18 @@
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+resume: "Fix the first folder's unbounded eval fallback after receipt CI and landing, before reading folder two."
+contract:
+  receipt: "machine passed cargo test --locked change_receipt: four passed"
+  three-gates: "machine passed make q.fast: fmt and clippy exit 0"
+  bands: "machine passed bash scripts/check-bands.sh: exit 0 with three existing warn tiers"
+  release-binary: "machine waived only scripts, skill prose and src/tests.rs change"
+  source-audit: "human passed independent evaluator approved mapping ed58a7bb0218f921 with eval timeout gap explicitly pending before folder two"
+  guards-verified-by-mutation: "human passed seven of seven mutations caught, including historical claims, actual stream overflow and lazy fetch; source restored"

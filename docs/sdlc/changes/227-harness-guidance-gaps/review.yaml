@@ -1,0 +1,8 @@
+# Both reviewers read the staged index, never the mutation worktree.
+# Round 1 at 8e33d620604cb8e9 refused lazy fetching in partial clones.
+# Round 2 verified the no-lazy-fetch fix and new transport/process probes.
+digest: "cd1ffcb3f6a34acb"
+rounds: 2
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"
