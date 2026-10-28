@@ -187,6 +187,24 @@ The procedure:
 A round is a change of its own, through the pipeline in `docs/sdlc/README.md`;
 the route's attempt ceiling is the round ceiling.
 
+Keep the experiment's evidence in its change's `eval.md`, using
+`docs/sdlc/templates/eval.md` (change 224 already keeps a measured comparison in
+that location). Before the first run, read related experiment records and freeze
+the hypothesis, input revisions/coverage, comparison criterion, split, conditions
+and run budget. For a parameter-dependent claim, choose the full grid and nearby
+settings before seeing the winning cell; preserve every cell, including failures
+and missing results. Inspect one real result before expanding the grid.
+
+Record VALIDATED, TRADE_OFF, NO_GAIN or INCONCLUSIVE against the frozen criterion
+before summarizing; these experiment verdicts do not replace per-run outcomes or
+`state.yaml`. Name the independent evaluator, weakest held-out case and attacks
+tried. Preserve rejected configurations and the new evidence required to reopen
+them, including a flat result: a new model, corrected input or repaired check is
+a reason to reconsider, repeating the same run without new evidence is not.
+Keep compact measured tables and evidence hashes in git, not sensitive raw
+transcripts or keys. Do not run extra paid experiments just to populate a record.
+
+
 ## Adding one
 
 An eval earns its place when a mistake happened twice, or once expensively. Write
