@@ -1407,3 +1407,18 @@ worktree builds.
 `a_new_worktree_builds_from_mains_cache_and_formats_its_own_files`, and
 `ci_runs_on_the_branches_the_merge_gate_asks_about` (change 217; watched failing
 before the fixes and against each mutation in `mutations.py`).
+
+## 101 — An optional timeout command made the eval budget optional
+
+The first harness source audit found that run-evals.sh launched agents without
+any deadline when GNU timeout was absent. Invalid limits were not refused
+before starting the agent, and zero could disable an available timeout. **The rule:** availability of an optional utility must not decide
+whether a paid agent has a deadline; use the existing portable process-group
+runner and reject invalid limits before starting an agent.
+
+**Guard.** `the_eval_runner_enforces_deadlines_without_gnu_timeout` exercises a
+PATH without either GNU command, verifies infra classification and a stopped
+agent child; `the_eval_runner_refuses_invalid_deadlines_before_starting_agents`
+checks invalid and overflowing limits before any agent starts (change 228; both
+watched failing before the fix: the unbounded run reached its outer safety
+deadline and the invalid-limit run started the probe agent).

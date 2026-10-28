@@ -25,6 +25,13 @@ bash scripts/run-evals.sh --runs 3 --recheck        # a baseline
 bash scripts/run-evals.sh --split train --runs 3    # one hillclimb round
 ```
 
+Each agent run has a process-group deadline, including on stock macOS without
+GNU timeout. `EVAL_TIMEOUT` defaults to 1800 seconds; an explicit value must be
+an integer from 1 to 2147483647, without leading zeroes. The portable
+`scripts/run-bounded.sh` sends TERM and then KILL to the agent and its descendants.
+A deadline hit is `infra`, excluded from the pass rate, and the conditions line
+always records the enforced timeout.
+
 ## When to run them
 
 When the thing being changed is the steering itself: `CLAUDE.md`, `AGENTS.md`,

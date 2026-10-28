@@ -47877,8 +47877,14 @@ fn eval_runner_fixture(label: &str, evals: &[FixtureEval]) -> PathBuf {
     let root = temporary_directory(label);
     fs::create_dir_all(root.join("scripts")).unwrap();
     fs::create_dir_all(root.join("evals")).unwrap();
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/run-evals.sh");
-    fs::copy(source, root.join("scripts/run-evals.sh")).unwrap();
+    for name in ["run-evals.sh", "run-bounded.sh"] {
+        let relative = format!("scripts/{name}");
+        fs::copy(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(&relative),
+            root.join(&relative),
+        )
+        .unwrap();
+    }
     for eval in evals {
         fs::write(
             root.join("evals").join(format!("{}.md", eval.0)),
@@ -48332,7 +48338,7 @@ pub(crate) fn the_eval_runner_passes_the_model_and_effort_through() {
 
     // Change 189: Harness² records the configuration an experiment ran under,
     // and a summary that does not cannot be compared with another.
-    let timeout = eval_timeout_field("60");
+    let timeout = "60s";
     let named = format!(
         "conditions: agent stub-agent.sh · model model-x · effort effort-y · split both · recheck off · timeout {timeout}\n"
     );
@@ -48373,25 +48379,6 @@ pub(crate) fn the_eval_runner_passes_the_model_and_effort_through() {
         "`{selected}` がありません:\n{printed}"
     );
     fs::remove_dir_all(&root).ok();
-}
-
-/// The `timeout` field the runner prints for `EVAL_TIMEOUT=seconds`, read from
-/// the same `PATH` check the runner makes: bounded only when `timeout` or
-/// `gtimeout` exists.
-fn eval_timeout_field(seconds: &str) -> String {
-    let bounded = Command::new("/bin/sh")
-        .args([
-            "-c",
-            "command -v timeout >/dev/null 2>&1 || command -v gtimeout >/dev/null 2>&1",
-        ])
-        .status()
-        .unwrap()
-        .success();
-    if bounded {
-        format!("{seconds}s")
-    } else {
-        "none".to_owned()
-    }
 }
 
 #[test]
@@ -61087,6 +61074,141 @@ pub(crate) fn change_receipt_stops_git_on_stream_overflow_and_deadline() {
             !probe.output.status.success(),
             "receipt left its child running"
         );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn eval_path_without_gnu_timeout(root: &Path) -> PathBuf {
+    let bin = root.join("portable-bin");
+    fs::create_dir_all(&bin).unwrap();
+    for name in [
+        "basename", "mktemp", "rmdir", "bash", "git", "perl", "dirname", "date", "cut", "tr", "ls",
+        "sed", "head", "awk", "mkdir", "mv", "grep", "tail", "rm", "cat", "sort", "wc", "sleep",
+    ] {
+        let source = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|dir| dir.join(name))
+            .find(|path| path.is_file())
+            .unwrap();
+        std::os::unix::fs::symlink(source, bin.join(name)).unwrap();
+    }
+    bin
+}
+
+#[test]
+pub(crate) fn the_eval_runner_enforces_deadlines_without_gnu_timeout() {
+    let root = eval_runner_fixture(
+        "eval-portable-deadline",
+        &[("001-deadline", "train", "DEADLINE", "exit 0")],
+    );
+    let path = eval_path_without_gnu_timeout(&root);
+    assert!(!path.join("timeout").exists() && !path.join("gtimeout").exists());
+    let child_pid = root.join("agent-child-pid");
+    let stub = root.join("stub-agent.sh");
+    fs::write(
+        &stub,
+        r#"#!/bin/sh
+trap 'kill "$worker" 2>/dev/null; wait "$worker" 2>/dev/null; exit 143' TERM
+sleep 20 &
+worker=$!
+printf '%s' "$worker" > "$DEADLINE_CHILD_PID_FILE"
+printf '%s\n' '{"type":"result","is_error":false}'
+wait "$worker"
+"#,
+    )
+    .unwrap();
+    let mut command = Command::new("/bin/bash");
+    command
+        .arg(root.join("scripts/run-evals.sh"))
+        .current_dir(&root)
+        .env("PATH", &path)
+        .env("EVAL_AGENT", &stub)
+        .env("EVAL_TIMEOUT", "5")
+        .env("DEADLINE_CHILD_PID_FILE", &child_pid);
+    forget_inherited_repository(&mut command);
+    let output =
+        run_command_with_output_limit(&mut command, Duration::from_secs(30), 128 * 1024, 8192)
+            .expect("eval ignored its five-second deadline and hit the outer test safety bound");
+    let printed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.output.stdout),
+        String::from_utf8_lossy(&output.output.stderr)
+    );
+    assert_eq!(output.output.status.code(), Some(1), "{printed}");
+    assert!(
+        printed.contains("the agent timed out after 5s"),
+        "{printed}"
+    );
+    assert!(printed.contains("timeout 5s"), "{printed}");
+    let results = eval_results_directory(&printed);
+    let table = fs::read_to_string(results.join("results.tsv")).unwrap();
+    assert!(
+        table
+            .lines()
+            .any(|line| line.starts_with("001\t1\tinfra\t")),
+        "{table}"
+    );
+    assert!(printed.contains("0/0 passed"), "{printed}");
+    let pid = fs::read_to_string(&child_pid).expect("agent never started its child");
+    let mut probe = Command::new("ps");
+    probe.args(["-o", "stat=", "-p", &pid]);
+    let probe =
+        run_command_with_output_limit(&mut probe, Duration::from_secs(5), 1024, 1024).unwrap();
+    let state = String::from_utf8_lossy(&probe.output.stdout);
+    assert!(
+        state.trim().is_empty() || state.trim().starts_with('Z'),
+        "agent child still runs: {state}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn the_eval_runner_refuses_invalid_deadlines_before_starting_agents() {
+    let root = eval_runner_fixture(
+        "eval-invalid-deadline",
+        &[("001-deadline", "train", "DEADLINE", "exit 0")],
+    );
+    let stub = root.join("stub-agent.sh");
+    let marker = root.join("agent-started");
+    fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\n: > {}\nprintf '%s\\n' '{{\"type\":\"result\",\"is_error\":false}}'\n",
+            shell_quote(marker.to_str().unwrap())
+        ),
+    )
+    .unwrap();
+    for limit in [
+        "",
+        "0",
+        "00",
+        "-1",
+        "no",
+        "1.5",
+        "2147483648",
+        "999999999999999999999",
+    ] {
+        let mut command = Command::new("/bin/bash");
+        command
+            .arg(root.join("scripts/run-evals.sh"))
+            .current_dir(&root)
+            .env("EVAL_AGENT", &stub)
+            .env("EVAL_TIMEOUT", limit);
+        forget_inherited_repository(&mut command);
+        let result =
+            run_command_with_output_limit(&mut command, Duration::from_secs(30), 128 * 1024, 8192)
+                .unwrap();
+        let printed = format!(
+            "{}{}",
+            String::from_utf8_lossy(&result.output.stdout),
+            String::from_utf8_lossy(&result.output.stderr)
+        );
+        assert_eq!(
+            result.output.status.code(),
+            Some(2),
+            "limit {limit:?}: {printed}"
+        );
+        assert!(printed.contains("EVAL_TIMEOUT"), "{printed}");
+        assert!(!marker.exists(), "invalid deadline started a paid agent");
     }
     fs::remove_dir_all(root).unwrap();
 }

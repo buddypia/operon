@@ -1,6 +1,6 @@
 # Plan: Eval runs must have a deadline on stock macOS
 
-- **Status**: approved
+- **Status**: done
 - **Referent**: previous change's source-audit.md and the first input folder's bounded-loop recommendation.
 
 ## Problem and cause
@@ -51,3 +51,20 @@ This worktree branches from change 227 while its CI runs. Local builds are
 serialized using that worktree's already repaired target cache; its cleanup waits
 until this change no longer uses the cache. This avoids reusing the stale seeded
 CMake/OpenSSL cache and does not touch the main checkout's build output.
+
+Record this recurring class in docs/sdlc/lessons.md as entry 101 with the new
+guards. The first PATH fixture omitted basename/mktemp/rmdir and failed before
+agent launch; those required utilities were added before accepting reproduction.
+The actual unbounded run then reached its 30-second outer bound. With the fix,
+the one-second probe passed alone but could expire before child startup under
+parallel tests; use five seconds and a twenty-second self-ending probe child so
+the test checks cancellation, not machine startup speed, and mutants self-end.
+
+The probe emits an apparently successful result before waiting for its child;
+timeout must still be infra, rather than accepting that early result as a pass.
+The branch incorporates the landed main commit before implementation review.
+
+Final review also ran the lesson-admission gate. It refused entry 101 because the
+guard paragraph omitted the required watched-failing evidence. Add the observed
+pre-fix failures and rerun that gate; this is an Important failing gate fix and
+requires the second review digest. No implementation code changed in that round.
