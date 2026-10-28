@@ -1,0 +1,18 @@
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+resume: "Implement and verify the first folder's missing change receipt before reading the second folder."
+contract:
+  receipt: "machine pending cargo test --locked change_receipt"
+  three-gates: "machine pending make q.fast"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine waived only scripts, skill prose and src/tests.rs change"
+  source-audit: "human pending compare the first folder against source-audit.md"
+  guards-verified-by-mutation: "human pending receipt guards watched failing"
