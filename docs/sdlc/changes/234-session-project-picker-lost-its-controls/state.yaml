@@ -42,23 +42,23 @@ state:
   route: "bugfix"
   stage: "deploy"
   status: "done"
-  attempts: "0 3"
+  attempts: "1 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
   readiness: "conditional"
   screen: "approved"
 
-resume: "Require exact-head CI before merging, then ship from main and record installed project-switch verification."
+resume: "Require corrected exact-head CI before merging, then ship from main and record installed project-switch verification."
 
 contract:
-  three-gates: "machine passed final q.fast; workspace28/28, history28/28 and project9/9 guards; source restored after bounded sweep"
+  three-gates: "machine passed final q.fast and corrected CI four plus project nine tests13/13; preceding workspace28/28 and history28/28 passed; source restored after bounded sweeps"
   bands: "machine passed check-bands.sh with four warn-only metrics and no validation changes"
   full-ci: "machine waived pre-push execution only: exact branch head must pass CI via scripts/ci-verified.sh before main merge"
   release-binary: "machine waived pre-merge execution only because ship runs from main; installed-app remains mandatory below"
   installed-app: "human pending main-checkout package, authorized replacement/restart and installed-build CURRENT"
   project-navigation: "human passed independent native A-to-B-to-A inspection with saved ordering, live counts, project-local launch controls, focused tabs, dirty buffer and exact split-layout restoration"
-  guards-verified-by-mutation: "human passed 10 of 10 bounded mutations caught by behavioral assertions including the live-count wording claim; exact source restoration verified"
+  guards-verified-by-mutation: "human passed initial10/10 plus post-CI supplemental3/3 bounded mutations caught by behavioral assertions including wording, focus and removal cleanup; exact source restoration verified"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

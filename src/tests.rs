@@ -36387,6 +36387,12 @@ pub(crate) fn test_remove_project_cleans_session_selection_and_path_cache() {
     app.remove_project(project.id);
 
     assert_eq!(app.selected_session, None);
+    assert!(
+        app.workspace.groups.is_empty(),
+        "deleted project cannot retain visible tabs"
+    );
+    assert_eq!(app.workspace_project, None);
+    assert!(!app.project_workspaces.contains_key(&project.id));
     assert!(app.resolved_paths.is_empty());
     assert!(app.unresolved_paths.is_empty());
     assert_eq!(app.resolved_paths_session, None);
@@ -53386,10 +53392,15 @@ pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
         }
     }
     let painted = column_painted(&mut app, &egui::Context::default());
-    let history_right = app.dock.rects(app.dock_area.unwrap(), None).center.right();
+    let history = app.dock.rects(app.dock_area.unwrap(), None).center;
+    let history_right = history.right();
     let (count, _) = painted
-        .in_column("1 件")
-        .expect("長い名前のプロジェクトの「1 件」が描かれていません");
+        .texts
+        .iter()
+        .filter(|(text, rect, _)| text == "1 件" && rect.left() >= history.left())
+        .map(|(_, rect, size)| (*rect, *size))
+        .min_by(|a, b| a.0.left().total_cmp(&b.0.left()))
+        .expect("長い名前のプロジェクトの「1 件」が履歴に描かれていません");
     assert!(
         count.max.x <= history_right + 0.5,
         "「1 件」が列の右端を越えています ({} > {})",
@@ -53401,6 +53412,7 @@ pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
         .iter()
         .filter(|(text, rect, _)| {
             text == ICON_ADD
+                && rect.left() >= history.left()
                 && (rect.center().y - count.center().y).abs() < CONTROL_HEIGHT_SMALL / 2.0
         })
         .map(|(_, rect, _)| *rect)
@@ -53418,7 +53430,7 @@ pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
     let name = painted
         .texts
         .iter()
-        .filter(|(text, rect, _)| text.starts_with("rrrr") && rect.min.x >= SIDEBAR_MIN_W)
+        .filter(|(text, rect, _)| text.starts_with("rrrr") && rect.min.x >= history.left())
         .map(|(_, rect, _)| *rect)
         .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
         .expect("長い名前が描かれていません");

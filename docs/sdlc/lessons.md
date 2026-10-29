@@ -1475,3 +1475,8 @@ independent release handling. The count tooltip claim is checked with rendered
 hover text and a mixed-status count. The launcher-handler target and hidden
 History unread guards were also watched failing after independent review found
 that later frames could change the launch project or mark an unseen terminal read.
+
+The post-CI integration check also includes the existing target-session focus,
+project-removal cache cleanup, history long-name bounds and translation-order
+guards. All four were watched failing before the corresponding caller or lookup
+correction; the original geometry and focus guarantees remain asserted.

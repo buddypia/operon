@@ -4165,11 +4165,18 @@ impl OperonApp {
             self.store = previous_store;
             return;
         }
-        self.select_project(None);
-        if self
+        // Capture this before select_project clears selected_session: project
+        // selection now follows terminal focus as well as the Projects page.
+        let selected_removed = self
             .selected_session
-            .is_some_and(|id| self.store.sessions.iter().all(|session| session.id != id))
-        {
+            .is_some_and(|id| self.store.sessions.iter().all(|session| session.id != id));
+        self.select_project(None);
+        self.project_workspaces.remove(&project_id);
+        if self.workspace_project == Some(project_id) {
+            self.workspace = WorkspaceTabs::default();
+            self.workspace_project = None;
+        }
+        if selected_removed {
             self.selected_session = None;
             self.resolved_paths.clear();
             self.resolved_paths_generation += 1;
@@ -6554,6 +6561,7 @@ impl OperonApp {
     /// Opening a session selects its project's workspace and marks that visible
     /// session read. History may explicitly open a finished record here.
     pub(crate) fn select_session(&mut self, session_id: Uuid) {
+        let focus_requested = self.terminal_focus_request == Some(session_id);
         if let Some(project) = self
             .store
             .sessions
@@ -6564,6 +6572,9 @@ impl OperonApp {
             self.switch_workspace_project(project);
         }
         self.set_terminal_session_context(Some(session_id));
+        if focus_requested {
+            self.terminal_focus_request = Some(session_id);
+        }
         self.workspace.open(WorkspaceTab::Session(session_id));
         self.workspace_initialized = true;
         if self.unread_hold != Some(session_id) {

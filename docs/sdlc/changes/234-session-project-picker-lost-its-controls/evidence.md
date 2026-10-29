@@ -99,3 +99,37 @@ independent rust_review approved waiving only pre-push execution while keeping
 scripts/ci-verified.sh mandatory on the exact branch head before main merge.
 Installation remains mandatory after main-checkout packaging. No guard or
 requested deliverable is waived by this phase record.
+
+## CI integration correction
+
+CI40923306331 on e0270c3 completed1081passed,4failed,6ignored. The full failed
+log is /var/folders/29/1fj7pwg51hb3g8s6lyy_rldw945t4y/T/operon-234-ci-sw5jcns5.log.
+All four named failures reproduced locally before correction:
+
+- The new tooltip row preceded an earlier lexical Japanese ID in EN/KO tables;
+  both rows are now ordered correctly for lookup.
+- Initial project switching cleared a focus request for the very session being
+  selected. select_session now preserves that exact target request while still
+  clearing a request for another session.
+- remove_project called select_project(None) before testing whether its session
+  was removed. With synchronized project selection that first call cleared the
+  session field, so the later cache cleanup did not run. Capture the predicate
+  before reset, then clean paths/menu and removed runtime workspace after the
+  store write succeeds. Persistence order and rollback are unchanged.
+- The old History long-name guard used a minimum sidebar width as its boundary,
+  accidentally selecting a restored left-side live count. It now uses the actual
+  central rectangle for count, add and name selection; frame, right-edge and
+  name/count non-overlap guarantees remain intact.
+
+The four corrected tests plus all9 project tests passed13/13; q.fast passed.
+Independent rust_review confirmed digest990e2dc0ec3f918f. This is deterministic
+post-CI integration verification under the existing second review round, not a
+new reviewer feedback/nit cycle or a renumbered change. The failed CI consumes
+attempt1of3. Exact-head CI must pass before landing. A supplemental bounded
+sweep targets target-focus preservation and both project-removal cleanup paths.
+
+Supplemental sweep:3/3 caught by the existing focus-request and strengthened
+project-removal assertions, without compiler errors or timeouts. The runner
+restored source and git diff --exit-code confirmed exact approved-index bytes.
+The original10-case sweep remains recorded above; only the newly corrected
+lifecycle concerns required this additional sweep.

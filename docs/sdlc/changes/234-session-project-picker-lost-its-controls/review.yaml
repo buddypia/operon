@@ -1,4 +1,5 @@
-digest: "a9598ba09f0fb5f0"
+# Round 2 post-CI integration re-verification preserves the original review history.
+digest: "990e2dc0ec3f918f"
 rounds: 2
 verdicts:
   rust-reviewer: "approve 0 0"
