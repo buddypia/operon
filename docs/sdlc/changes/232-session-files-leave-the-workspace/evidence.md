@@ -69,3 +69,13 @@ states, not every interaction or window size.
 The initial review identified parser-cache eviction between visible files, an untargeted line jump, and Escape/release ordering. `workspace_visible_documents_do_not_reparse_unchanged_frames` was observed failing with source syntax builds 8 vs 4 and Markdown builds 10 vs 6 before cache loans. It passes after per-group cache loans. `workspace_line_jump_waits_for_its_target_document` verifies that an earlier editor cannot spend a loading target's pending jump, then that the loaded target consumes it. Actual pointer Escape/release was observed reordering before its condition was fixed. The independent reviewer confirmed all three fixes against the staged index before final formatting.
 
 Final verification: `make q.fast` passed. The workspace-filter run passed 17 tests, targeted file-open and branch-tab checks passed, 28 existing file/navigation tests passed, and the official bounded sweep caught 13/13 mutations across model, geometry, cache, jump, cancellation and user-facing claims. Test counts grew from 1061 to 1075; ignore count remains 8. Independent final approval binds staged digest 4024105707b46a6b. CI and installation evidence follows after source landing.
+
+## Post-merge installation
+
+Source and documentation passed CI40907460785 and CI40909080208 before main
+merge3eadf48. The shared installation is now complete: main-checkout packaging
+passed fmt/clippy/release/signing; the user authorized quit/swap/restart; the
+installed app reached Home and opened a file centrally beside its session while
+remaining on Sessions. check-installed-build.sh reports CURRENT at stamp3eadf48
+including release source fb9a652. Details and limits of native interaction proof
+are in change233 evidence.md. The obsolete previous bundle was moved to Trash.
