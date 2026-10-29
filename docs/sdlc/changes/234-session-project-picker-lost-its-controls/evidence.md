@@ -133,3 +133,42 @@ project-removal assertions, without compiler errors or timeouts. The runner
 restored source and git diff --exit-code confirmed exact approved-index bytes.
 The original10-case sweep remains recorded above; only the newly corrected
 lifecycle concerns required this additional sweep.
+
+## Landing and installation completed
+
+CI40925516308 passed corrected source8db6593386d1efe5837e89e179cefc519005e222.
+The first landing was refused because the incremental review record described
+only the last corrective commit. Its generated merge was aborted with main
+clean and unchanged. The independent reviewer confirmed the assembled change
+against main at dd23c8b00361ef52; a review.yaml-only commit fd04e2b bound that
+complete change. State ee7f49e records attempt2of3 (CI failure and refused
+landing). No code or test changed for this re-binding. CI40926879569 passed on
+that exact head, ci-verified passed, and the main merge7e77767 succeeded.
+
+From main7e77767f3251bdd277005566b80f5826b09ba8ce, package-macos.sh passed
+fmt/clippy, release compilation (1m23s), signing and plist validation. Strict
+codesign and candidate CURRENT checks passed. Under the existing explicit user
+quit/update/restart authorization, Operon quit; both process lookups returned
+no process; replace-macos-bundle.sh installed the candidate and open launched it.
+The installed checker reports CURRENT at stamp7e77767 including latest release
+source8db6593. Installed strict codesign also passed. Old backup bundle was
+moved to Trash; no rollback bundle was requested or retained in dist.
+
+Actual installed native verification through CUA:
+
+1. The app reached Home, then Sessions. Left project cards show design-lookbook
+   with1live session and EmbeddingGemma2-ultrafast with0, both with local+controls.
+2. Files→CONTRIBUTING.md opened centrally beside the existing session tab while
+   Sessions remained active; Preview was selected and Save disabled.
+3. Selecting the empty project showed its own セッションを選択 state, without
+   the other project's document or terminal. Its+opened the launch form; Escape
+   closed that form without starting any agent.
+4. Selecting design-lookbook again restored the same CONTRIBUTING.md tab and
+   Preview selection beside its retained session tab. Left selection, live
+   counts and project-local launch controls remain visible.
+
+No file was edited and no command was sent to a real agent. Real UI verification
+establishes the installed identity and project/file-tab roundtrip. Exact dirty
+buffer and split-layout roundtrip remain established by the independent native
+synthetic harness and permanent whole-workspace integration guards above; no
+claim is made that a live-agent native split drag was operated here.
