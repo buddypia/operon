@@ -1,0 +1,3 @@
+2026-10-29T17:06:15Z auto plan plan.md a09df592c57198d8 approve Independent rust_review evaluated against bug.md and explicit user-confirmed project-scoped tabs; restores existing project controls while preserving central mixed tabs, files and split state.
+2026-10-29T17:06:42Z auto plan plan.md db503277574dc289 approve Independent rust_review reconfirmed approval-date metadata only; approved project navigation and project-scoped central tab behavior is unchanged.
+2026-10-29T17:07:13Z person screen screen.md 7bb7f4b341e02dff approve User explicitly directs restoring left selection and confirmed per-project central tabs preserving opened tabs and splits.
