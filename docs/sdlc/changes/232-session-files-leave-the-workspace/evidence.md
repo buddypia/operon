@@ -51,8 +51,8 @@ native pixels and corrected before the latest run.
 Vertical: session tabs and terminal occupy the upper half, with the file tab and
 source editor below. The horizontal divider and its handle are visible. Tab
 strips, terminal content and editor controls remain within their respective
-group rectangles. Root's final image inspection confirmed readable compact
-header metadata with the action controls separated.
+group rectangles. The compact header's visible agent/status icons and action
+controls are separated; this image does not establish all metadata labels.
 
 ## Limits of this evidence
 
