@@ -42,7 +42,7 @@ state:
   route: "bugfix"
   stage: "deploy"
   status: "done"
-  attempts: "0 3"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Wait for full CI on the corrected stacked branch, land it, and install the verified main build before closing deployment tracking."
+resume: "Merge after the documentation CI pass, then run the required main-checkout ship and verify the installed app."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -71,8 +71,10 @@ resume: "Wait for full CI on the corrected stacked branch, land it, and install 
 # is what says whether the bundle on this machine is behind.
 contract:
   three-gates: "machine passed make q.fast and 55 named tests including all 28 initial CI failures and new workspace/history guards"
-  full-ci: "machine pending successful CI on corrected branch head"
-  release-binary: "machine pending package and install merged workspace after this follow-up"
+  full-ci: "machine passed CI 40907460785 on fb9a652da6a0f73a668c23dddbe83507320434ec; documentation-only closeout will receive its own CI run"
+  release-binary: "machine waived pre-merge execution only: ship requires main, so package/install verification follows merge and remains mandatory under installed-app below"
+  installed-app: "human pending package from main, replace /Applications/Operon.app after applicable approval, launch it, and verify check-installed-build reports CURRENT"
+  central-divider-input: "human passed production egui pointer probe resizes both central axes from half to 65 percent, bounded and non-overlapping; evidence.md records exact restored-source check"
   guards-verified-by-mutation: "human passed all 8 bounded mutations detected by behavioral assertions, including strengthened compact-sidebar height guard"
 
 sets:

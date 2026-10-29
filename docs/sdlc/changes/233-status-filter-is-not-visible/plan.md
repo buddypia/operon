@@ -44,3 +44,9 @@ existing details menu. Preserving both title navigation and double-click rename
 required a small egui-time pending-click state; no worker or durable state was
 added. These are recoverable corrections to the intended navigation and existing
 control reachability, with focused interaction tests.
+
+The pre-merge gate refused the original pending release command although ship
+requires the main checkout after merge. Records now waive pre-merge execution
+only, with its reason, while retaining installed-app as a mandatory pending
+human contract. Actual main-checkout packaging, authorized replacement, launch
+and installed-build CURRENT remain required before goal completion.
