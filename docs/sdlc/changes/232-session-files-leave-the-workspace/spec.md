@@ -7,20 +7,22 @@
 
 1. Opening a file from a session keeps Page::Sessions and adds/selects a document
    tab without discarding its buffer; reopening selects the existing tab.
-   Proof: `workspace_open_file_stays_in_sessions` and `workspace_tabs_reopen_selects_existing`.
+   Proof: `workspace_open_file_stays_in_sessions` and `workspace_tabs_preserve_mixed_tabs_and_document_identity`.
 2. Sessions use central tabs, switching preserves other open sessions and files,
    and the session page left sidebar lists projects rather than session rows.
-   Proof: `workspace_session_tabs_preserve_other_tabs` plus rendered inspection.
+   Proof: `workspace_tabs_preserve_mixed_tabs_and_document_identity` plus rendered inspection.
 3. Both tab kinds can move between groups or create left/right and top/bottom
    splits, initially half-size, with draggable dividers and accessible tabs.
-   Proof: `workspace_tabs_move_and_split_both_axes` and rendered drag inspection.
+   Proof: `workspace_tabs_split_both_axes_and_resize`,
+   `workspace_tabs_reorder_and_retain_active_identity`,
+   `workspace_tabs_refuse_invalid_or_too_small_drop_atomically` and rendered drag inspection.
 4. Closing a session tab never stops its process; closing the last tab of a
    group collapses that group and keeps a valid focus. Dirty files retain the
-   existing close refusal and save errors. Proof: `workspace_tabs_close_collapses_group`
+   existing close refusal and save errors. Proof: `workspace_tabs_move_merge_and_close_collapse_groups`
    and `workspace_dirty_document_close_is_refused`.
 5. Only visible session tabs count as on-screen for activity/unread and terminal
    polling. Stale sessions/documents are removed from groups without invalid focus.
-   Proof: `workspace_tabs_visible_sessions_and_retain`.
+   Proof: `workspace_tabs_reorder_and_retain_active_identity`.
 
 ## Behaviour
 
