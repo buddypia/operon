@@ -40,24 +40,25 @@
 
 state:
   route: "bugfix"
-  stage: "plan"
-  status: "ready"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "go"
+  readiness: "conditional"
   screen: "approved"
 
-resume: "Reproduce the named project-control and project-context regressions before implementing the approved correction."
+resume: "Require exact-head CI before merging, then ship from main and record installed project-switch verification."
 
 contract:
-  three-gates: "machine pending make q.fast and named workspace/project-selection regression tests"
-  full-ci: "machine pending branch CI before main merge"
+  three-gates: "machine passed final q.fast; workspace28/28, history28/28 and project9/9 guards; source restored after bounded sweep"
+  bands: "machine passed check-bands.sh with four warn-only metrics and no validation changes"
+  full-ci: "machine waived pre-push execution only: exact branch head must pass CI via scripts/ci-verified.sh before main merge"
   release-binary: "machine waived pre-merge execution only because ship runs from main; installed-app remains mandatory below"
   installed-app: "human pending main-checkout package, authorized replacement/restart and installed-build CURRENT"
-  project-navigation: "human pending native inspection of restored project selection controls and central live-session/file tabs"
-  guards-verified-by-mutation: "human pending bounded mutations of lost controls, archived-tab selection and focused-project identity"
+  project-navigation: "human passed independent native A-to-B-to-A inspection with saved ordering, live counts, project-local launch controls, focused tabs, dirty buffer and exact split-layout restoration"
+  guards-verified-by-mutation: "human passed 10 of 10 bounded mutations caught by behavioral assertions including the live-count wording claim; exact source restoration verified"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

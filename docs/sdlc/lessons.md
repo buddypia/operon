@@ -1452,3 +1452,26 @@ checks the Home entry and actual rendered filter controls;
 The migrated CI cases retain pointer actions and geometry checks in their new
 history or central-tab home (change 233). Both history guards were watched failing
 in change 233's bounded mutation sweep.
+
+
+## 104 — Central tabs replaced project selection instead of preserving it
+
+The workspace move replaced the project navigator with bare unsorted buttons,
+removed project counts and individual launch controls, and batch-opened finished
+records. Central tab focus left the project highlight stale. A screenshot with
+a file tab proved file navigation, but did not prove the selection workflow.
+**The rule:** move the requested content, preserve its surrounding selection
+operations, and exercise project-to-project round trips with mixed live/history
+records, a dirty file and a split layout before calling the migration complete.
+
+**Guard.** `workspace_project_picker_keeps_saved_order_counts_and_per_project_launch`,
+`workspace_project_picker_initializes_only_live_sessions_and_keeps_focus`,
+`workspace_project_picker_follows_session_and_document_focus`,
+`workspace_project_picker_empty_project_has_no_foreign_terminal` and
+`workspace_project_picker_roundtrip_preserves_dirty_file_split_and_closed_tabs`
+were all watched failing before the fix in change234. Actual whole-workspace
+project and history-session drag guards additionally hold both callers to their
+independent release handling. The count tooltip claim is checked with rendered
+hover text and a mixed-status count. The launcher-handler target and hidden
+History unread guards were also watched failing after independent review found
+that later frames could change the launch project or mark an unseen terminal read.

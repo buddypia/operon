@@ -6457,10 +6457,35 @@ impl OperonApp {
             self.pending_history_open = None;
         }
         if !self.workspace_initialized {
-            self.workspace_initialized = true;
             self.select_default_terminal_session();
-            if let Some(id) = self.selected_session {
-                self.workspace.open(WorkspaceTab::Session(id));
+        }
+        if self.workspace_project.is_none() {
+            let project = self
+                .workspace
+                .active()
+                .and_then(|tab| self.workspace_tab_project(tab))
+                .or_else(|| {
+                    self.selected_session.and_then(|id| {
+                        self.store
+                            .sessions
+                            .iter()
+                            .find(|session| session.id == id)
+                            .map(|session| session.project_id)
+                    })
+                })
+                .or(self.selected_project)
+                .or_else(|| self.store.projects.first().map(|project| project.id));
+            if let Some(project) = project {
+                self.switch_workspace_project(project);
+            }
+            self.workspace_initialized = true;
+        }
+        self.sync_workspace_live_sessions();
+        if !self.session_library_open {
+            if let Some(WorkspaceTab::Session(id)) = self.workspace.active().cloned() {
+                if self.selected_session != Some(id) {
+                    self.select_session(id);
+                }
             }
         }
         let sessions = &self.store.sessions;
@@ -6548,52 +6573,7 @@ impl OperonApp {
                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
         );
         left.shrink_clip_rect(sidebar);
-        left.heading(tr("プロジェクト"));
-        if left.button(tr("新しいセッション")).clicked() {
-            self.pending_history_open = None;
-            if let Some(project) = self.selected_project {
-                self.open_project_session_setup(project);
-            } else {
-                self.open_new_session();
-            }
-        }
-        if left.button(tr("履歴")).clicked() {
-            self.session_library_open = !self.session_library_open;
-        }
-        let projects = self.store.projects.clone();
-        egui::ScrollArea::vertical()
-            .id_salt("workspace-project-scroll")
-            .show(&mut left, |ui| {
-                for project in projects {
-                    if ui
-                        .add(
-                            egui::Button::new(&project.name)
-                                .selected(self.selected_project == Some(project.id))
-                                .min_size(egui::vec2(0.0, CONTROL_HEIGHT))
-                                .truncate(),
-                        )
-                        .on_hover_text(project.path.display().to_string())
-                        .clicked()
-                    {
-                        self.pending_history_open = None;
-                        self.session_library_open = false;
-                        self.selected_project = Some(project.id);
-                        let ids: Vec<_> = self
-                            .store
-                            .sessions
-                            .iter()
-                            .filter(|s| s.project_id == project.id)
-                            .map(|s| s.id)
-                            .collect();
-                        for id in ids {
-                            self.workspace.open(WorkspaceTab::Session(id));
-                        }
-                        if let Some(WorkspaceTab::Session(id)) = self.workspace.active().cloned() {
-                            self.select_session(id);
-                        }
-                    }
-                }
-            });
+        self.ui_workspace_projects(&mut left);
         let mut body = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("workspace-body")
@@ -6920,6 +6900,159 @@ impl OperonApp {
                     self.workspace_drag = None;
                 }
             }
+        }
+    }
+
+    fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
+        let palette = self.store.theme.palette();
+        ui.heading(tr("プロジェクト"));
+        ui.horizontal_wrapped(|ui| {
+            if ui.button(tr("新しいセッション")).clicked() {
+                self.pending_history_open = None;
+                if let Some(project) = self.selected_project {
+                    self.open_project_session_setup(project);
+                } else {
+                    self.open_new_session();
+                }
+            }
+            if ui.button(tr("履歴")).clicked() {
+                self.session_library_open = !self.session_library_open;
+            }
+        });
+        if self.workspace_project_drag.is_some()
+            && ui.input(|i| {
+                i.key_pressed(egui::Key::Escape)
+                    || (!i.pointer.primary_down() && !i.pointer.primary_released())
+            })
+        {
+            self.workspace_project_drag = None;
+        }
+        let drag = self.workspace_project_drag.map(ColumnDrag::Project);
+        let pointer = ui.input(|i| i.pointer.latest_pos());
+        let mut projects = self.store.projects.clone();
+        sort_column_projects(&mut projects, &self.session_arrangement);
+        egui::ScrollArea::vertical()
+            .id_salt("workspace-project-scroll")
+            .show(ui, |ui| {
+                let view = ui.clip_rect();
+                if let Some(pos) =
+                    pointer.filter(|pos| drag.is_some() && view.x_range().contains(pos.x))
+                {
+                    let step = if pos.y < view.top() + COLUMN_DRAG_EDGE {
+                        COLUMN_DRAG_SCROLL_STEP
+                    } else if pos.y > view.bottom() - COLUMN_DRAG_EDGE {
+                        -COLUMN_DRAG_SCROLL_STEP
+                    } else {
+                        0.0
+                    };
+                    if step != 0.0 {
+                        ui.scroll_with_delta_animation(
+                            egui::vec2(0.0, step),
+                            egui::style::ScrollAnimation::none(),
+                        );
+                        ui.ctx().request_repaint();
+                    }
+                }
+                let mut targets = ColumnTargets::default();
+                for project in projects {
+                    let count = self
+                        .store
+                        .sessions
+                        .iter()
+                        .filter(|session| {
+                            session.project_id == project.id
+                                && matches!(
+                                    session.status,
+                                    SessionStatus::Starting
+                                        | SessionStatus::Active
+                                        | SessionStatus::Unknown
+                                )
+                        })
+                        .count();
+                    let selected = self.selected_project == Some(project.id);
+                    let card = card_frame(palette)
+                        .fill(if selected {
+                            palette.row_selected
+                        } else {
+                            palette.card
+                        })
+                        .inner_margin(egui::Margin::same(SPACE_SM as i8))
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if small_icon_button(
+                                            ui,
+                                            palette,
+                                            ICON_ADD,
+                                            tr("セッションを開始"),
+                                        )
+                                        .clicked()
+                                        {
+                                            self.open_project_session_setup(project.id);
+                                        }
+                                        ui.label(
+                                            RichText::new(tf!("{p0} 件", p0 = count))
+                                                .small()
+                                                .weak(),
+                                        )
+                                        .on_hover_text(tr("起動中のセッション"));
+                                        ui.with_layout(
+                                            egui::Layout::left_to_right(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    RichText::new(ICON_PROJECT)
+                                                        .color(palette.accent_text),
+                                                );
+                                                let response = ui
+                                                    .add(
+                                                        egui::Label::new(
+                                                            RichText::new(&project.name)
+                                                                .size(15.0)
+                                                                .strong()
+                                                                .color(palette.text_strong),
+                                                        )
+                                                        .truncate()
+                                                        .selectable(false)
+                                                        .sense(egui::Sense::click_and_drag()),
+                                                    )
+                                                    .on_hover_ui(|ui| {
+                                                        ui.label(&project.name);
+                                                        ui.label(
+                                                            project.path.display().to_string(),
+                                                        );
+                                                        ui.label(tr("ドラッグで並べ替え"));
+                                                    });
+                                                if response.clicked() {
+                                                    self.select_workspace_project(project.id);
+                                                }
+                                                if response.hovered() && drag.is_none() {
+                                                    ui.ctx()
+                                                        .set_cursor_icon(egui::CursorIcon::Grab);
+                                                }
+                                                if response.drag_started() {
+                                                    self.workspace_project_drag = Some(project.id);
+                                                }
+                                            },
+                                        );
+                                    },
+                                );
+                            });
+                        });
+                    targets.push(project.id, card.response.rect);
+                    ui.add_space(SPACE_SM);
+                }
+                if let Some(drag @ ColumnDrag::Project(_)) = drag {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    let slot =
+                        targets.slot(drag.moved(), pointer.filter(|pos| view.contains(*pos)));
+                    self.ui_column_drop(ui, drag, &targets, slot, view.x_range(), SPACE_SM);
+                }
+            });
+        if ui.input(|i| i.pointer.primary_released()) {
+            self.workspace_project_drag = None;
         }
     }
 

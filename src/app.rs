@@ -698,6 +698,12 @@ pub(crate) struct OperonApp {
     pub(crate) column_drag: Option<ColumnDrag>,
     pub(crate) workspace: WorkspaceTabs,
     pub(crate) workspace_initialized: bool,
+    /// Runtime tab layouts and terminal context belong to the selected project.
+    pub(crate) workspace_project: Option<Uuid>,
+    pub(crate) workspace_project_drag: Option<Uuid>,
+    pub(crate) project_workspaces: HashMap<Uuid, (WorkspaceTabs, Option<Uuid>)>,
+    /// A tab closed by the person stays closed when that project is revisited.
+    pub(crate) workspace_seen_sessions: HashSet<Uuid>,
     pub(crate) workspace_drag: Option<WorkspaceTab>,
     pub(crate) workspace_editor_views: HashMap<DocumentId, EditorView>,
     /// One syntax/preview cache per visible group, bounded by PANE_MAX.
@@ -1079,6 +1085,10 @@ impl OperonApp {
             column_drag: None,
             workspace: WorkspaceTabs::default(),
             workspace_initialized: false,
+            workspace_project: None,
+            workspace_project_drag: None,
+            project_workspaces: HashMap::new(),
+            workspace_seen_sessions: HashSet::new(),
             workspace_drag: None,
             workspace_editor_views: HashMap::new(),
             workspace_editor_caches: HashMap::new(),
@@ -2861,11 +2871,11 @@ impl OperonApp {
             path: file.clone(),
         };
         self.project_tab = ProjectTab::Files;
-        self.active_document = Some(id.clone());
         if self.page == Page::Sessions {
-            self.workspace_initialized = true;
+            self.switch_workspace_project(project.id);
             self.workspace.open(WorkspaceTab::Document(id.clone()));
         }
+        self.active_document = Some(id.clone());
         if self.document_index(&id).is_some() {
             return;
         }
@@ -5487,7 +5497,14 @@ impl OperonApp {
     /// Open the launch sheet for a project over the current page. Every way
     /// to start a session comes here, so none of them navigates away.
     pub(crate) fn open_project_session_setup(&mut self, project_id: Uuid) {
+        let workspace_context = self.selected_session;
         self.select_project(Some(project_id));
+        if self.page == Page::Sessions {
+            // select_project resets the launch draft. Preserve the old
+            // workspace's terminal context before saving its tab layout.
+            self.set_terminal_session_context(workspace_context);
+            self.select_workspace_project(project_id);
+        }
         self.apply_pinned_launch();
         self.launch_sheet_open = true;
         self.launch_sheet_needs_focus = true;
@@ -6383,33 +6400,172 @@ impl OperonApp {
         self.refresh_session_output(session_id);
     }
 
-    /// The one place the selected session changes.
-    ///
-    /// Reading a session is what clears its mark, and "reading" is exactly this
-    /// call — so a second site assigning the field directly would leave a
-    /// session bold after it had been read, which is the shape of bug this
-    /// entry point exists to prevent.
-    pub(crate) fn select_session(&mut self, session_id: Uuid) {
-        if self.unread_hold.is_some_and(|held| held != session_id) {
+    pub(crate) fn workspace_tab_project(&self, tab: &WorkspaceTab) -> Option<Uuid> {
+        match tab {
+            WorkspaceTab::Session(id) => self
+                .store
+                .sessions
+                .iter()
+                .find(|session| session.id == *id)
+                .map(|session| session.project_id),
+            WorkspaceTab::Document(id) => Some(id.project),
+        }
+    }
+
+    /// Swap only view state. Document buffers remain in open_documents, including
+    /// unsaved edits; this does not write or change a session's lifetime.
+    fn switch_workspace_project(&mut self, project: Uuid) {
+        let previous_project = self.workspace_project.or_else(|| {
+            self.workspace
+                .active()
+                .and_then(|tab| self.workspace_tab_project(tab))
+        });
+        if previous_project != Some(project) {
+            let (next, context) = self.project_workspaces.remove(&project).unwrap_or_default();
+            let context = context.or_else(|| {
+                previous_project
+                    .is_none()
+                    .then_some(self.selected_session)
+                    .flatten()
+            });
+            let previous = std::mem::replace(&mut self.workspace, next);
+            if let Some(previous_project) = previous_project {
+                self.project_workspaces
+                    .insert(previous_project, (previous, self.selected_session));
+            }
+            let context = context.filter(|id| {
+                self.store
+                    .sessions
+                    .iter()
+                    .any(|session| session.id == *id && session.project_id == project)
+            });
+            self.set_terminal_session_context(context);
+            self.workspace_drag = None;
+            self.terminal_focus_request = None;
+            self.active_document = match self.workspace.active() {
+                Some(WorkspaceTab::Document(id)) => Some(id.clone()),
+                _ => None,
+            };
+        }
+        self.workspace_project = Some(project);
+        self.selected_project = Some(project);
+        self.workspace_initialized = true;
+    }
+
+    pub(crate) fn select_workspace_project(&mut self, project: Uuid) {
+        self.pending_history_open = None;
+        self.session_library_open = false;
+        self.switch_workspace_project(project);
+        self.sync_workspace_live_sessions();
+        if let Some(tab) = self.workspace.active().cloned() {
+            self.activate_workspace_tab(&tab);
+        } else {
+            self.set_terminal_session_context(None);
+            self.active_document = None;
+        }
+    }
+
+    /// Add newly available live sessions once. Preserve every group's active
+    /// tab, focused file, and intentional closes across project switches.
+    pub(crate) fn sync_workspace_live_sessions(&mut self) {
+        let Some(project) = self.workspace_project else {
+            return;
+        };
+        self.project_workspaces
+            .retain(|id, _| self.store.projects.iter().any(|p| p.id == *id));
+        self.workspace_seen_sessions
+            .retain(|id| self.store.sessions.iter().any(|s| s.id == *id));
+        for group in &self.workspace.groups {
+            for tab in &group.tabs {
+                if let WorkspaceTab::Session(id) = tab {
+                    self.workspace_seen_sessions.insert(*id);
+                }
+            }
+        }
+        let focus = self.workspace.focused.zip(self.workspace.active().cloned());
+        let mut sessions = self
+            .store
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.project_id == project
+                    && matches!(
+                        session.status,
+                        SessionStatus::Starting | SessionStatus::Active | SessionStatus::Unknown
+                    )
+            })
+            .collect::<Vec<_>>();
+        sort_column_sessions(&mut sessions, &self.session_arrangement);
+        let preferred = self
+            .selected_session
+            .filter(|id| sessions.iter().any(|s| s.id == *id))
+            .or_else(|| sessions.first().map(|session| session.id));
+        let new = sessions
+            .iter()
+            .filter_map(|session| {
+                self.workspace_seen_sessions
+                    .insert(session.id)
+                    .then_some(session.id)
+            })
+            .collect::<Vec<_>>();
+        for id in new {
+            self.workspace.open(WorkspaceTab::Session(id));
+        }
+        if let Some((group, tab)) = focus {
+            self.workspace.select(group, &tab);
+        } else if let Some(id) = preferred {
+            // Select only a present tab: a closed live session is not reopened.
+            if let Some(group) = self
+                .workspace
+                .groups
+                .iter()
+                .find(|g| g.tabs.contains(&WorkspaceTab::Session(id)))
+                .map(|g| g.id)
+            {
+                self.workspace.select(group, &WorkspaceTab::Session(id));
+            }
+        }
+    }
+
+    /// The one place terminal context changes, also used when switching to an
+    /// empty project. Merely restoring a file must not mark its session read.
+    fn set_terminal_session_context(&mut self, session_id: Option<Uuid>) {
+        if self
+            .unread_hold
+            .is_some_and(|held| Some(held) != session_id)
+        {
             self.unread_hold = None;
         }
-        // A focus request is for the session it was made for; one left
-        // pending would take the keyboard on some later visit.
         if self
             .terminal_focus_request
-            .is_some_and(|wanted| wanted != session_id)
+            .is_some_and(|wanted| Some(wanted) != session_id)
         {
             self.terminal_focus_request = None;
         }
-        if self.selected_session != Some(session_id) {
+        if self.selected_session != session_id {
             self.resolved_paths.clear();
             self.resolved_paths_generation += 1;
             self.unresolved_paths.clear();
-            self.resolved_paths_session = Some(session_id);
+            self.resolved_paths_session = session_id;
         }
+        self.selected_session = session_id;
+    }
+
+    /// Opening a session selects its project's workspace and marks that visible
+    /// session read. History may explicitly open a finished record here.
+    pub(crate) fn select_session(&mut self, session_id: Uuid) {
+        if let Some(project) = self
+            .store
+            .sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .map(|s| s.project_id)
+        {
+            self.switch_workspace_project(project);
+        }
+        self.set_terminal_session_context(Some(session_id));
         self.workspace.open(WorkspaceTab::Session(session_id));
         self.workspace_initialized = true;
-        self.selected_session = Some(session_id);
         if self.unread_hold != Some(session_id) {
             self.unread_sessions.remove(&session_id);
         }
@@ -6462,6 +6618,8 @@ impl OperonApp {
         match tab {
             WorkspaceTab::Session(id) => self.select_session(*id),
             WorkspaceTab::Document(id) => {
+                self.switch_workspace_project(id.project);
+                self.workspace.open(WorkspaceTab::Document(id.clone()));
                 self.active_document = Some(id.clone());
                 self.terminal_focus_request = None;
             }

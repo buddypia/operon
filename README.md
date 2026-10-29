@@ -95,7 +95,7 @@ Settings.
 
 ### Supervision
 
-- The session workspace lists projects on the left and opens sessions and files in central tabs. Drag a tab to another group or an edge to work side by side or above and below; drag a divider to resize. Closing a session tab leaves its agent running.
+- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below; drag a divider to resize. Closing a session tab leaves its agent running.
 - Inspect and message a live agent session without leaving the app.
 - A turn that finishes, or stops to ask, while you are reading another session
   leaves that session marked in the list until you open it, and the banner at

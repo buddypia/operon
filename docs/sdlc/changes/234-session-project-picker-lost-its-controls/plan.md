@@ -2,7 +2,7 @@
 
 - **Spec**: `./bug.md` (bugfix skips intent and spec)
 - **Approved**: 2026-10-30, independent rust_review evaluator
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -33,4 +33,10 @@ navigation belongs there, while running sessions and files occupy central tabs.
 
 ## Departures from the plan
 
-None.
+Whole-workspace pointer checks required separate project-navigation and History
+drag payloads, preserving both callers' release handling. Startup initializes
+workspace context without closing History. Independent review added multi-frame
+launcher-target and hidden-History unread guards; both were observed failing,
+and corrected without changing the agreed layout. A first order mutation was
+not a defect because reversing fixture order coincidentally matched its saved
+order, so it now removes ordering rather than accidentally keeping it.
