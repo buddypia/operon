@@ -129,3 +129,32 @@ The source records now explicitly defer only pre-merge release execution and
 retain installed-app as a mandatory pending human contract. The goal remains
 incomplete until packaging, authorized replacement, launch and installed-build
 verification really succeed. No source check or workflow was removed.
+
+## Installed application verification
+
+The user explicitly approved quitting, replacing and restarting the running
+Operon (「終了して更新・再起動する」). From main at
+3eadf483c56d2409754dd6992b80b607e71edc15, package-macos.sh completed fmt, clippy,
+release compilation, signing and plist checks. codesign --verify --deep --strict
+also passed. After a clean quit (both Operon and operon process lookups empty),
+replace-macos-bundle.sh installed /Applications/Operon.app and open launched it.
+check-installed-build.sh reports CURRENT: stamp 3eadf48 includes latest
+release source fb9a652. The installed native window reached Home. Clicking
+Sessions, Files and CONTRIBUTING.md opened that file as a central document tab
+beside the retained session tab, with Sessions still active and projects in the
+left column. No file was edited and no command was sent to a live agent.
+
+Native automation confirmed that installed file-opening path and rendered state.
+Its drag attempts did not establish a split, so they are not counted as native
+drag evidence. Both split orientations are covered by the rendered native
+harness states and production egui pointer tests; the divider probe above proves
+resizing through actual egui input on both axes.
+
+The local native CMake configuration initially referenced OpenSSL4.0.3 after the
+machine moved to4.1.0. Only three generated CMakeCache.txt files were moved
+unchanged into a mktemp backup directory; source and compiled objects were kept.
+Regeneration made the same main-checkout packaging command succeed. Backups and
+their verified hashes are in
+/var/folders/29/1fj7pwg51hb3g8s6lyy_rldw945t4y/T/tmp.NBFAgSFgsr/.
+The installed app remains CURRENT. The obsolete dist/Operon.previous.app was
+moved to Trash, and no rollback bundle was requested.

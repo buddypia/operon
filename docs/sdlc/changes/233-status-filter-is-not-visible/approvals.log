@@ -3,3 +3,5 @@
 2026-10-29T15:34:04Z auto plan plan.md 4a0316c6c4feba1e approve Independent rust_review reconfirmed metadata-only approval date update against bug and user request.
 2026-10-29T15:34:04Z auto contract evidence.md 176fb638ff07676f approve Independent rust_review inspected four native screenshots and separated geometry from interaction timing coverage.
 2026-10-29T16:10:38Z auto contract evidence.md 0bc5275651caf2b8 approve Independent rust_review confirmed CI source success and correct post-merge installation phase; installed-app remains mandatory pending.
+2026-10-29T16:38:33Z person bundle-swap plan.md 4a0316c6c4feba1e approve User explicitly authorized quit, replacement and restart of the verified new Operon; action completed and installed build is CURRENT.
+2026-10-29T16:39:26Z auto contract evidence.md 02ee43821ed54bb0 approve Independent rust_review verified installed CURRENT stamp 3eadf48 including release source fb9a652 and strict codesign; recorded Home and central file-tab observations support installed-app while native drag limits remain explicit.
