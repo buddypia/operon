@@ -779,7 +779,12 @@ impl OperonApp {
     ///
     /// `list` salts the ids: a waiting session is usually a recent one too,
     /// and is drawn in both lists on the same frame.
-    fn home_session_row(&mut self, ui: &mut egui::Ui, session: &Session, list: &'static str) {
+    pub(crate) fn home_session_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &Session,
+        list: &'static str,
+    ) {
         let palette = self.store.theme.palette();
         let status = self.status_view(session);
         let title = session_title(session);
@@ -933,7 +938,7 @@ impl OperonApp {
             &session.native_session_id,
         ) {
             // The same command the card printed and the resume verb runs,
-            // launch options included; see `session_card`.
+            // launch options included.
             ui.label(
                 RichText::new(format!(
                     "native resume: {}",
@@ -2868,172 +2873,6 @@ impl OperonApp {
         }
     }
 
-    pub(crate) fn session_card(&mut self, ui: &mut egui::Ui, session: &Session) {
-        let palette = self.store.theme.palette();
-        let failed_dependency = blocking_dependency_label(&self.store.sessions, session);
-        let project_name = self
-            .store
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id)
-            .map(|project| project.name.clone())
-            .unwrap_or_else(|| tr("登録されていないプロジェクト").into());
-        let status = self.status_view(session);
-        let title = session_title(session);
-        let mut removal_requested = false;
-        let row = clickable_card(ui, palette, ("session-row", session.id), true, |ui| {
-            ui.horizontal(|ui| {
-                status_chip(ui, &status, 13.5, palette);
-                ui.label(RichText::new(&title).strong());
-                agent_chip(ui, &session.agent, 12.0, palette);
-                ui.label(
-                    RichText::new(relative_time(session.created_at))
-                        .size(12.0)
-                        .color(palette.text_muted),
-                );
-                ui.label(
-                    RichText::new(format!("{ICON_PROJECT} {project_name}"))
-                        .size(12.0)
-                        .color(palette.text_muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if small_icon_button(ui, palette, ICON_CLOSE, tr("セッションを削除")).clicked()
-                    {
-                        removal_requested = true;
-                    }
-                });
-            });
-            ui.horizontal_wrapped(|ui| {
-                // This row is read while deciding which session to look at, so
-                // it carries one way in. Attaching from Terminal.app is a
-                // choice about a session already open, and lives there.
-                if icon_button(ui, palette, ICON_SHOW, tr("ターミナルを表示")).clicked() {
-                    self.open_session_in_terminal(session.id);
-                }
-                if matches!(
-                    session.status,
-                    SessionStatus::Exited | SessionStatus::Failed
-                ) && icon_button(
-                    ui,
-                    palette,
-                    ICON_CLOSE,
-                    if session.status == SessionStatus::Failed {
-                        tr("残ったターミナルを閉じる")
-                    } else {
-                        tr("ターミナルを閉じる")
-                    },
-                )
-                .clicked()
-                {
-                    self.close_completed_terminal(session.id);
-                }
-                // The state verb closes the row: same word, same place, on
-                // every surface that acts on a session.
-                if let Some(verb) = session_verb(session, self.cancellation_pending(session.id)) {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let response = verb_button(ui, palette, verb.icon, verb.label, verb.danger)
-                            .on_hover_text(verb.hint);
-                        if response.clicked() {
-                            match verb.action {
-                                SessionVerbAction::Stop => self.stop_session(session.id),
-                                SessionVerbAction::Start => self.start_session(session.id),
-                                SessionVerbAction::ResumeNative => {
-                                    self.resume_managed_native_session(session.id)
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-            let goal = session_display_goal(&session.goal);
-            if goal != title && !goal.trim().is_empty() {
-                ui.label(RichText::new(goal).color(palette.text));
-            }
-            if let Some(branch) = &session.branch {
-                ui.label(
-                    RichText::new(format!("{ICON_BRANCH} {branch}"))
-                        .size(12.5)
-                        .color(palette.branch),
-                );
-            }
-            ui.label(
-                RichText::new(format!("tmux: {}", session.tmux_name))
-                    .small()
-                    .weak(),
-            );
-            if let Some(path) = &session.worktree_path {
-                ui.label(
-                    RichText::new(format!("cwd: {}", path.display()))
-                        .small()
-                        .weak(),
-                );
-            }
-            if let (Some(provider), Some(native_session_id)) = (
-                cli_provider_for_agent(&session.agent),
-                &session.native_session_id,
-            ) {
-                // The command the 会話 ID から再開 button above will run, not a
-                // shorter one that resembles it. `native_resume_display` answers
-                // a different question — "how would I resume this from a shell",
-                // which is what the two call sites for a conversation Operon did
-                // not launch are asking — and it cannot carry launch options
-                // because those sessions have no launch command.
-                //
-                // This one does, and printing it without them meant the line
-                // that looks most like evidence was the one that dropped the
-                // switch a person had acknowledged in writing: the hover said
-                // 権限確認をすべてスキップする would be carried and the line
-                // underneath spelled a command without it.
-                ui.label(
-                    RichText::new(format!(
-                        "native resume: {}",
-                        resume_command_with_launch_options(
-                            provider,
-                            &session.agent,
-                            &session.agent_command,
-                            native_session_id,
-                        )
-                    ))
-                    .small()
-                    .weak(),
-                );
-            } else if cli_provider_for_agent(&session.agent).is_some() {
-                ui.label(
-                    RichText::new(tr("ネイティブ再開 ID を待機中"))
-                        .small()
-                        .weak(),
-                );
-            }
-            if !session.depends_on.is_empty() {
-                ui.label(
-                    RichText::new(tf!(
-                        "{p0} 件のセッションに依存",
-                        p0 = session.depends_on.len()
-                    ))
-                    .small()
-                    .weak(),
-                );
-            }
-            if let Some(parent) = &failed_dependency {
-                ui.label(
-                    RichText::new(tf!(
-                        "ブロック中: 前提 “{parent}” が完了していません。",
-                        parent = parent
-                    ))
-                    .small()
-                    .color(palette.accent_soft),
-                );
-            }
-            self.session_removal_confirmation(ui, session.id);
-        });
-        if removal_requested {
-            self.request_session_removal(session.id);
-        } else if row.response.clicked() {
-            self.open_session_in_terminal(session.id);
-        }
-        ui.add_space(6.0);
-    }
-
     pub(crate) fn ui_git(&mut self, ui: &mut egui::Ui, project: &Project) {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
@@ -3702,7 +3541,9 @@ impl OperonApp {
         palette: &'static Palette,
         height: f32,
     ) {
-        self.ui_editor_tabs(ui, project, palette);
+        if self.page != Page::Sessions {
+            self.ui_editor_tabs(ui, project, palette);
+        }
         let Some(document) = self.active_document.clone() else {
             ui.add_space(28.0);
             ui.vertical_centered(|ui| {
@@ -4331,6 +4172,7 @@ impl OperonApp {
                     .selectable_label(self.session_view == view, label)
                     .clicked()
                 {
+                    self.pending_history_open = None;
                     self.session_view = view;
                 }
             }
@@ -4435,80 +4277,7 @@ impl OperonApp {
             self.ui_session_grid(ui);
             return;
         }
-        self.ui_project_session_list(ui);
-    }
-
-    fn ui_project_session_list(&mut self, ui: &mut egui::Ui) {
-        let palette = self.store.theme.palette();
-        let projects = self.store.projects.clone();
-        let sessions = self.store.sessions.clone();
-        let needle = self.search.to_lowercase();
-        let mut matched_sessions = 0;
-        if projects.is_empty() {
-            ui.label(
-                RichText::new(tr(
-                    "プロジェクトがありません。先にプロジェクトを追加してください。",
-                ))
-                .weak(),
-            );
-            return;
-        }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for project in projects {
-                let mut project_sessions = sessions
-                    .iter()
-                    .filter(|session| {
-                        session.project_id == project.id
-                            && (needle.is_empty()
-                                || format!("{} {} {}", session.name, session.goal, session.agent)
-                                    .to_lowercase()
-                                    .contains(&needle))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                project_sessions.sort_by_key(|session| Reverse(session.created_at));
-                matched_sessions += project_sessions.len();
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(ICON_PROJECT).color(palette.accent_text));
-                        ui.label(RichText::new(&project.name).strong());
-                        ui.label(
-                            RichText::new(tf!("{p0} 件", p0 = project_sessions.len()))
-                                .small()
-                                .weak(),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始"))
-                                .clicked()
-                            {
-                                self.open_project_session_setup(project.id);
-                            }
-                        });
-                    });
-                    ui.label(
-                        RichText::new(project.path.display().to_string())
-                            .small()
-                            .weak(),
-                    );
-                    ui.add_space(4.0);
-                    // Under a search, what is missing is a match, not a session.
-                    if project_sessions.is_empty() && !needle.is_empty() {
-                        ui.label(
-                            RichText::new(tr("一致するセッションはありません。"))
-                                .small()
-                                .weak(),
-                        );
-                    }
-                    for session in project_sessions {
-                        self.session_card(ui, &session);
-                    }
-                });
-                ui.add_space(8.0);
-            }
-            if matched_sessions == 0 && !needle.is_empty() {
-                ui.label(RichText::new(tr("検索条件に一致するセッションはありません。")).weak());
-            }
-        });
+        self.ui_terminal_session_tabs(ui);
     }
 
     fn ui_session_grid(&mut self, ui: &mut egui::Ui) {
@@ -4541,7 +4310,16 @@ impl OperonApp {
                 project_sessions.sort_by_key(|session| session.created_at);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&project.name).strong());
+                        // A long name shares this row with two actions and
+                        // the path; it cannot claim their space first.
+                        let name_width = ui.available_width() * 0.45;
+                        ui.scope(|ui| {
+                            ui.set_max_width(name_width);
+                            ui.add(
+                                egui::Label::new(RichText::new(&project.name).strong()).truncate(),
+                            )
+                            .on_hover_text(&project.name);
+                        });
                         // Beside the name, ahead of the path: pinned right, the
                         // cards below widen the scroll area past the view and a
                         // later project's ＋ lands off screen; after the path, a
@@ -5393,44 +5171,24 @@ impl OperonApp {
         let palette = self.store.theme.palette();
         let mut projects = self.store.projects.clone();
         sort_column_projects(&mut projects, &self.session_arrangement);
-        let sessions = self.store.sessions.clone();
+        let needle = self.search.trim().to_lowercase();
+        let sessions = self
+            .store
+            .sessions
+            .iter()
+            .filter(|session| {
+                needle.is_empty()
+                    || format!("{} {} {}", session.name, session.goal, session.agent)
+                        .to_lowercase()
+                        .contains(&needle)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         // One pass over the sessions for all four numbers. `status_view` would
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
         let group_counts = self.status_group_counts();
-        // Laid out from the right, and the chips below wrap: a row wider
-        // than the column widened everything drawn after it, and the column
-        // then cut each row's time at its edge (change 163).
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // New sessions start from the toolbar and search is ⌘K; what
-                // the magnifier here used to open is the history, and says so.
-                // No count here: 「すべて n」 below says it, and the room it
-                // took is what kept the heading whole at the default width.
-                if quiet_button(ui, palette, tr("履歴")).clicked() {
-                    self.session_library_open = true;
-                }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    // The heading is the list's grip: it is dragged to an
-                    // edge the way a view's tab is (change 145).
-                    let grip = ui
-                        .add(
-                            egui::Label::new(
-                                RichText::new(format!(
-                                    "{ICON_DRAG_HANDLE} {}",
-                                    tr("プロジェクト別セッション")
-                                ))
-                                .strong(),
-                            )
-                            .selectable(false)
-                            .truncate()
-                            .sense(egui::Sense::click_and_drag()),
-                        )
-                        .on_hover_text(tr("ドラッグして移動"));
-                    self.dock_grip(ui, &grip, DockPanel::Sessions);
-                });
-            });
-        });
+        ui.heading(tr("プロジェクト別セッション"));
         // The four things a person can do about a session, as four independent
         // toggles on one row, behind a 「すべて」 that says no filter is on and
         // clears one that is. The icon each group used to carry is the status
@@ -5611,6 +5369,9 @@ impl OperonApp {
                     });
                 });
                 if project_sessions.is_empty() {
+                    if !needle.is_empty() && pinned_here == 0 {
+                        ui.label(RichText::new(tr("一致するセッションはありません。")).small().weak());
+                    }
                     // The header's ＋ is the whole offer: its count says 0 件,
                     // and a second start below it would say the same twice.
                     return;
@@ -5657,6 +5418,7 @@ impl OperonApp {
                     );
                     let renaming = self.renaming_session == Some(candidate.id);
                     let mut rename_requested = false;
+                    let mut title_clicked = false;
                     let mut rename_finished = None;
                     let render_restore_options = |ui: &mut egui::Ui, handoff_target: &mut Option<String>| {
                         if cli_provider_for_agent(&candidate.agent).is_some() {
@@ -5858,7 +5620,13 @@ impl OperonApp {
                                             tf!("{title}\n\nダブルクリックで名前を変更", title = title)
                                         });
                                     if title.double_clicked() {
+                                        self.pending_history_open = None;
                                         rename_requested = true;
+                                    } else if title.clicked() {
+                                        title_clicked = true;
+                                        let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
+                                        self.pending_history_open = Some((candidate.id, ui.input(|input| input.time) + delay));
+                                        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(delay));
                                     }
                                     // The title takes clicks for its rename,
                                     // so a right click on it would otherwise
@@ -5945,6 +5713,9 @@ impl OperonApp {
                         menu_used = true;
                         row_menu(ui, &mut row_choice, &mut requested_handoff);
                     });
+                    if menu_used {
+                        self.pending_history_open = None;
+                    }
                     match row_choice {
                         Some(SessionRowChoice::Rename) => rename_requested = true,
                         Some(SessionRowChoice::Worktree) => worktree_requested = true,
@@ -5954,6 +5725,7 @@ impl OperonApp {
                         None => {}
                     }
                     if session_card_response.clicked()
+                        && !title_clicked
                         && !close_requested
                         && !stop_requested
                         && !worktree_requested
@@ -5969,6 +5741,7 @@ impl OperonApp {
                         None => {}
                     }
                     if rename_requested {
+                        self.pending_history_open = None;
                         self.begin_session_rename(&candidate);
                     }
                     if unread_requested {
@@ -6008,7 +5781,9 @@ impl OperonApp {
                 let slot = project_targets.slot(drag.moved(), inside);
                 self.ui_column_drop(ui, drag, &project_targets, slot, view.x_range(), SPACE_SM);
             }
-            if sessions.is_empty() {
+            if !needle.is_empty() && sessions.is_empty() {
+                ui.label(RichText::new(tr("検索条件に一致するセッションはありません。")).weak());
+            } else if sessions.is_empty() {
                 // A person with no sessions is not being filtered, so this
                 // wins over anything the filter would have said.
                 ui.label(RichText::new(tr("セッションはまだありません。プロジェクトから起動してください。")).weak());
@@ -6033,6 +5808,18 @@ impl OperonApp {
                 }
             }
         });
+        if let Some((session, deadline)) = self.pending_history_open {
+            let now = ui.input(|input| input.time);
+            if !self.session_library_open {
+                self.pending_history_open = None;
+            } else if now >= deadline {
+                self.pending_history_open = None;
+                self.open_session_in_terminal(session);
+            } else {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f64(deadline - now));
+            }
+        }
         // Wherever it was released, the drag is over.
         if self.column_drag.is_some() && ui.input(|i| i.pointer.primary_released()) {
             self.column_drag = None;
@@ -6049,7 +5836,11 @@ impl OperonApp {
     fn ui_terminal_pane(&mut self, ui: &mut egui::Ui, session: &Session, split: bool) {
         let palette = self.store.theme.palette();
         let session_id = session.id;
-        let focused = !split || self.selected_session == Some(session_id);
+        let focused = if self.workspace_initialized {
+            self.workspace.active() == Some(&WorkspaceTab::Session(session_id))
+        } else {
+            !split || self.selected_session == Some(session_id)
+        };
         if focused {
             if let Some(wait) = self.poll_terminal_echo(session_id, Instant::now()) {
                 ui.ctx().request_repaint_after(wait);
@@ -6271,43 +6062,58 @@ impl OperonApp {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
                         if grip.drag_started() {
-                            self.pane_drag = Some(session_id);
+                            self.workspace_drag = Some(WorkspaceTab::Session(session_id));
                         }
                     }
                     agent_chip(ui, &session.agent, 12.0, palette);
-                    let goal = session_display_goal(&session.goal);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&title)
-                                .size(15.0)
-                                .strong()
-                                .color(palette.text_strong),
+                    if split {
+                        // The tab already names the session. Keep a narrow
+                        // group's action row bounded instead of repeating it.
+                        status_chip(ui, &status, 12.5, palette);
+                        if let Some(branch) = &session.branch {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(branch).size(12.0).color(palette.branch),
+                                )
+                                .truncate(),
+                            )
+                            .on_hover_text(format!("{project_name} / {branch}"));
+                        }
+                    } else {
+                        let goal = session_display_goal(&session.goal);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(&title)
+                                    .size(15.0)
+                                    .strong()
+                                    .color(palette.text_strong),
+                            )
+                            .truncate(),
                         )
-                        .truncate(),
-                    )
-                    .on_hover_ui(|ui| {
-                        ui.label(if goal.trim().is_empty() {
-                            &title
-                        } else {
-                            &goal
+                        .on_hover_ui(|ui| {
+                            ui.label(if goal.trim().is_empty() {
+                                &title
+                            } else {
+                                &goal
+                            });
                         });
-                    });
-                    status_chip(ui, &status, 12.5, palette);
-                    meta_separator(ui, palette);
-                    ui.label(
-                        RichText::new(&project_name)
-                            .size(12.0)
-                            .color(palette.text_muted),
-                    );
-                    if let Some(branch) = &session.branch {
-                        ui.label(RichText::new("/").size(12.0).color(palette.text_faint));
+                        status_chip(ui, &status, 12.5, palette);
+                        meta_separator(ui, palette);
                         ui.label(
-                            RichText::new(format!("{ICON_BRANCH} {branch}"))
+                            RichText::new(&project_name)
                                 .size(12.0)
-                                .color(palette.branch),
+                                .color(palette.text_muted),
                         );
+                        if let Some(branch) = &session.branch {
+                            ui.label(RichText::new("/").size(12.0).color(palette.text_faint));
+                            ui.label(
+                                RichText::new(format!("{ICON_BRANCH} {branch}"))
+                                    .size(12.0)
+                                    .color(palette.branch),
+                            );
+                        }
+                        self.ui_session_ports(ui, palette, session);
                     }
-                    self.ui_session_ports(ui, palette, session);
                 });
             });
         });
@@ -6640,275 +6446,517 @@ impl OperonApp {
     /// The session workspace: the terminal in the middle and every panel on
     /// the edge it is docked to (change 145).
     pub(crate) fn ui_terminal_workspace(&mut self, ui: &mut egui::Ui) {
-        self.settle_panes();
-        self.select_default_terminal_session();
-        // Read before the list draws: it ends its own drag on any release,
-        // and the release is the frame a drop on a terminal lands in.
-        let carried = self.pane_drag.or(match self.column_drag {
-            Some(ColumnDrag::Session { session, .. }) => Some(session),
-            _ => None,
+        self.ui_tab_workspace(ui);
+    }
+
+    /// The central workspace shares one navigation model for sessions and files.
+    fn ui_tab_workspace(&mut self, ui: &mut egui::Ui) {
+        if !self.session_library_open
+            || ui.input(|input| input.pointer.any_pressed() || input.key_pressed(egui::Key::Escape))
+        {
+            self.pending_history_open = None;
+        }
+        if !self.workspace_initialized {
+            self.workspace_initialized = true;
+            self.select_default_terminal_session();
+            if let Some(id) = self.selected_session {
+                self.workspace.open(WorkspaceTab::Session(id));
+            }
+        }
+        let sessions = &self.store.sessions;
+        let documents = &self.open_documents;
+        self.workspace.retain(|tab| match tab {
+            WorkspaceTab::Session(id) => sessions.iter().any(|s| s.id == *id),
+            WorkspaceTab::Document(id) => documents.iter().any(|d| d.id() == *id),
         });
+        self.workspace_editor_caches
+            .retain(|id, _| self.workspace.groups.iter().any(|group| group.id == *id));
         let palette = self.store.theme.palette();
-        let (area, _) = ui.allocate_exact_size(ui.available_size(), egui::Sense::hover());
-        let selected = (!self.session_library_open)
-            .then(|| {
-                self.selected_session.and_then(|id| {
-                    self.store
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == id)
-                        .cloned()
-                })
-            })
-            .flatten();
+        let area = ui.available_rect_before_wrap();
+        // The project column stays on the left; inspector views retain their
+        // existing movable docks and shared geometry/size checks.
+        self.dock.move_panel(DockPanel::Sessions, DockEdge::Left);
+        let selected = self.selected_session.and_then(|id| {
+            self.store
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .cloned()
+        });
         let has_project = selected.as_ref().is_some_and(|session| {
             self.store
                 .projects
                 .iter()
                 .any(|project| project.id == session.project_id)
         });
-        let views_open = self.show_session_inspector && selected.is_some();
-        if views_open {
-            if let Some(session) = &selected {
-                self.ensure_initial_prompt_turn(session.id);
-            }
-        }
-        let sessions_edge = self.dock.edge_of(DockPanel::Sessions);
-        let views = views_open.then_some(has_project);
-        let shown = DockEdge::ALL
-            .map(|edge| views.and_then(|has_project| self.dock.shown_view(edge, has_project)));
+        let views =
+            (self.show_session_inspector && !self.session_library_open && selected.is_some())
+                .then_some(has_project);
         self.dock_area = Some(area);
         let rects = self.dock.rects(area, views);
+        let center = rects.center;
+        let mut sidebar =
+            rects.edges[DockEdge::Left.index()].unwrap_or_else(|| area.with_max_x(area.left()));
         for edge in DockEdge::ALL {
             let Some(rect) = rects.edges[edge.index()] else {
                 continue;
             };
-            let view = shown[edge.index()].zip(selected.as_ref());
-            self.ui_dock_edge(ui, edge, rect, edge == sessions_edge, view, palette);
+            let view = views
+                .and_then(|has_project| self.dock.shown_view(edge, has_project))
+                .zip(selected.as_ref());
+            if edge == DockEdge::Left {
+                if let Some(view) = view {
+                    let length = rect.height() - DOCK_GAP;
+                    let (height, _) =
+                        stacked_sidebar_heights(length, self.dock.splits[edge.index()]);
+                    sidebar = rect.with_max_y(rect.top() + height);
+                    let rule = egui::Rect::from_min_size(
+                        sidebar.left_bottom(),
+                        egui::vec2(rect.width(), DOCK_GAP),
+                    );
+                    let inspector = rect.with_min_y(rule.bottom());
+                    let response = ui
+                        .interact(
+                            rule,
+                            egui::Id::new(("dock-split", edge.index())),
+                            egui::Sense::drag(),
+                        )
+                        .on_hover_text(tr("ドラッグして大きさを調整"));
+                    let active = response.hovered() || response.dragged();
+                    if active {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                    }
+                    if response.dragged() && length >= SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H {
+                        let delta = response.drag_delta().y;
+                        if delta.is_finite() {
+                            self.dock.splits[edge.index()] =
+                                ((height + delta) / length).clamp(0.0, 1.0);
+                        }
+                    }
+                    paint_splitter_h(ui, rule, palette, active);
+                    self.ui_dock_edge(ui, edge, inspector, false, Some(view), palette);
+                }
+            } else {
+                self.ui_dock_edge(ui, edge, rect, false, view, palette);
+            }
             self.ui_dock_edge_rule(ui, edge, rect, palette);
         }
-        let mut center = ui.new_child(
+        let mut left = ui.new_child(
             egui::UiBuilder::new()
-                .id_salt("dock-center")
-                .max_rect(rects.center)
+                .id_salt("workspace-projects")
+                .max_rect(sidebar)
                 .layout(egui::Layout::top_down(egui::Align::LEFT)),
         );
-        center.shrink_clip_rect(rects.center);
-        if self.session_library_open {
-            center.horizontal(|ui| {
-                ui.heading(tr("履歴"));
-                if ui.button(tr("ターミナルに戻る")).clicked() {
-                    self.session_library_open = false;
+        left.shrink_clip_rect(sidebar);
+        left.heading(tr("プロジェクト"));
+        if left.button(tr("新しいセッション")).clicked() {
+            self.pending_history_open = None;
+            if let Some(project) = self.selected_project {
+                self.open_project_session_setup(project);
+            } else {
+                self.open_new_session();
+            }
+        }
+        if left.button(tr("履歴")).clicked() {
+            self.session_library_open = !self.session_library_open;
+        }
+        let projects = self.store.projects.clone();
+        egui::ScrollArea::vertical()
+            .id_salt("workspace-project-scroll")
+            .show(&mut left, |ui| {
+                for project in projects {
+                    if ui
+                        .add(
+                            egui::Button::new(&project.name)
+                                .selected(self.selected_project == Some(project.id))
+                                .min_size(egui::vec2(0.0, CONTROL_HEIGHT))
+                                .truncate(),
+                        )
+                        .on_hover_text(project.path.display().to_string())
+                        .clicked()
+                    {
+                        self.pending_history_open = None;
+                        self.session_library_open = false;
+                        self.selected_project = Some(project.id);
+                        let ids: Vec<_> = self
+                            .store
+                            .sessions
+                            .iter()
+                            .filter(|s| s.project_id == project.id)
+                            .map(|s| s.id)
+                            .collect();
+                        for id in ids {
+                            self.workspace.open(WorkspaceTab::Session(id));
+                        }
+                        if let Some(WorkspaceTab::Session(id)) = self.workspace.active().cloned() {
+                            self.select_session(id);
+                        }
+                    }
                 }
             });
-            center.separator();
-            self.ui_history_cli_section(&mut center);
-            self.ui_sessions(&mut center);
-        }
-        // The terminals a dragged session can land on, as drawn this frame.
-        let split = (!self.session_library_open && self.panes.is_split())
-            .then(|| self.ui_terminal_panes(&mut center, rects.center, palette));
-        let single;
-        let panes: &[(Uuid, egui::Rect)] = match (&split, &selected) {
-            (Some(split), _) => &split.panes,
-            (None, Some(session)) => {
-                self.ui_terminal_panel(&mut center, session);
-                single = [(session.id, rects.center)];
-                &single
+        let mut body = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("workspace-body")
+                .max_rect(center)
+                .layout(egui::Layout::top_down(egui::Align::LEFT)),
+        );
+        body.shrink_clip_rect(center);
+        if self.session_library_open {
+            if body.button(tr("ターミナルに戻る")).clicked() {
+                self.session_library_open = false;
             }
-            (None, None) => {
-                if !self.session_library_open {
-                    center.add_space(36.0);
-                    center.heading(tr("セッションを選択"));
-                    center.label(tr("一覧からセッションを選んでください。"));
-                }
-                &[]
-            }
-        };
-        self.ui_dock_drop(ui, area, palette);
-        if let Some(moved) = carried {
-            self.ui_pane_drop(ui, moved, panes, rects.center, palette);
-        }
-    }
-
-    /// Drops the terminals whose session left the store, back to the single
-    /// terminal when one is left, and keeps the keyboard on one shown.
-    fn settle_panes(&mut self) {
-        if !self.panes.is_split() {
+            self.ui_history_cli_section(&mut body);
+            self.ui_sessions(&mut body);
+            self.ui_dock_drop(ui, area, palette);
             return;
         }
-        let sessions = &self.store.sessions;
-        self.panes
-            .retain(|id| sessions.iter().any(|session| session.id == id));
-        if let Some(only) = self.panes.single() {
-            self.panes = PaneLayout::default();
-            self.select_session(only);
-            return;
-        }
-        let shown = self.panes.sessions();
-        if !self
-            .selected_session
-            .is_some_and(|selected| shown.contains(&selected))
-        {
-            if let Some(first) = shown.first() {
-                self.select_session(*first);
+        let close_key = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::W));
+        if close_key {
+            if let Some(tab) = self.workspace.active().cloned() {
+                self.close_workspace_tab(&tab);
             }
         }
-    }
-
-    /// Every terminal of a split in its rect, the rules between them, and a
-    /// press in one giving it the keyboard (change 226).
-    fn ui_terminal_panes(
-        &mut self,
-        ui: &mut egui::Ui,
-        area: egui::Rect,
-        palette: &Palette,
-    ) -> PaneRects {
-        let layout = self.panes.rects(area);
+        let next_key = ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));
+        let prev_key = ui.input_mut(|i| {
+            i.consume_key(
+                egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+                egui::Key::Tab,
+            )
+        });
+        if next_key || prev_key {
+            if let Some(group) = self
+                .workspace
+                .groups
+                .iter()
+                .find(|g| Some(g.id) == self.workspace.focused)
+            {
+                let index = if prev_key {
+                    (group.active + group.tabs.len() - 1) % group.tabs.len()
+                } else {
+                    (group.active + 1) % group.tabs.len()
+                };
+                let id = group.id;
+                let tab = group.tabs[index].clone();
+                self.workspace.select(id, &tab);
+                self.activate_workspace_tab(&tab);
+            }
+        }
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
+            if let Some(WorkspaceTab::Document(id)) = self.workspace.active().cloned() {
+                self.active_document = Some(id);
+                self.save_active_document();
+            }
+        }
+        let layout = self.workspace.rects(center);
+        if layout.panes.is_empty() {
+            body.heading(tr("セッションを選択"));
+            body.label(tr("一覧からセッションを選んでください。"));
+        }
         for rule in &layout.rules {
             let response = ui
                 .interact(
                     rule.rect,
-                    egui::Id::new(("pane-rule", rule.index)),
+                    egui::Id::new(("workspace-divider", rule.index)),
                     egui::Sense::drag(),
                 )
                 .on_hover_text(tr("ドラッグして大きさを調整"));
-            let active = response.hovered() || response.dragged();
-            if active {
+            if response.hovered() || response.dragged() {
                 ui.ctx().set_cursor_icon(if rule.side_by_side {
                     egui::CursorIcon::ResizeHorizontal
                 } else {
                     egui::CursorIcon::ResizeVertical
                 });
             }
-            if let Some(pos) = response
-                .dragged()
-                .then(|| response.interact_pointer_pos())
-                .flatten()
-            {
-                let share = if rule.side_by_side {
-                    (pos.x - rule.span.left()) / (rule.span.width() - DOCK_GAP)
-                } else {
-                    (pos.y - rule.span.top()) / (rule.span.height() - DOCK_GAP)
-                };
-                if share.is_finite() {
-                    self.panes.set_share(rule.index, share);
+            if response.dragged() {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let share = if rule.side_by_side {
+                        (pos.x - rule.span.left()) / (rule.span.width() - DOCK_GAP)
+                    } else {
+                        (pos.y - rule.span.top()) / (rule.span.height() - DOCK_GAP)
+                    };
+                    if share.is_finite() {
+                        self.workspace.layout.set_share(rule.index, share);
+                    }
                 }
             }
             if rule.side_by_side {
-                paint_splitter_v(ui, rule.rect, palette, active);
+                paint_splitter_v(
+                    ui,
+                    rule.rect,
+                    palette,
+                    response.hovered() || response.dragged(),
+                );
             } else {
-                paint_splitter_h(ui, rule.rect, palette, active);
+                paint_splitter_h(
+                    ui,
+                    rule.rect,
+                    palette,
+                    response.hovered() || response.dragged(),
+                );
             }
         }
-        let pressed = ui.input(|input| {
-            input
-                .pointer
-                .primary_pressed()
-                .then(|| input.pointer.interact_pos())
-                .flatten()
-        });
-        for (session_id, rect) in &layout.panes {
-            let Some(session) = self
-                .store
-                .sessions
-                .iter()
-                .find(|session| session.id == *session_id)
-                .cloned()
-            else {
-                continue;
-            };
-            if pressed.is_some_and(|pos| rect.contains(pos))
-                && self.selected_session != Some(*session_id)
-            {
-                self.select_session(*session_id);
-            }
-            // Named by the session, so its scroll and search survive a move.
+        for (group, rect) in &layout.panes {
             let mut pane = ui.new_child(
                 egui::UiBuilder::new()
-                    .id_salt(("terminal-pane-slot", *session_id))
+                    .id_salt(("workspace-group", group))
                     .max_rect(*rect)
                     .layout(egui::Layout::top_down(egui::Align::LEFT)),
             );
             pane.shrink_clip_rect(*rect);
-            self.ui_terminal_pane(&mut pane, &session, true);
+            let Some(tabs) = self
+                .workspace
+                .groups
+                .iter()
+                .find(|g| g.id == *group)
+                .cloned()
+            else {
+                continue;
+            };
+            let mut chosen = None;
+            let mut close = None;
+            egui::ScrollArea::horizontal()
+                .id_salt(("workspace-tabs", group))
+                .auto_shrink([false, true])
+                .show(&mut pane, |ui| {
+                    ui.horizontal(|ui| {
+                        for (index, tab) in tabs.tabs.iter().enumerate() {
+                            let (title, hover, dirty) = self.workspace_tab_title(tab);
+                            let active = tabs.active == index;
+                            egui::Frame::new()
+                                .fill(if active { palette.raised } else { palette.card })
+                                .inner_margin(egui::Margin::symmetric(8, 4))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        let label = ui
+                                            .add_sized(
+                                                egui::vec2(160.0, CONTROL_HEIGHT_SMALL),
+                                                egui::Label::new(
+                                                    RichText::new(&title).size(12.5).color(
+                                                        if active {
+                                                            palette.text_strong
+                                                        } else {
+                                                            palette.text
+                                                        },
+                                                    ),
+                                                )
+                                                .truncate()
+                                                .sense(egui::Sense::click_and_drag()),
+                                            )
+                                            .on_hover_text(hover);
+                                        if label.clicked() {
+                                            chosen = Some(tab.clone());
+                                        }
+                                        if label.drag_started() {
+                                            self.workspace_drag = Some(tab.clone());
+                                        }
+                                        if self.workspace_drag.is_some()
+                                            && ui.input(|i| {
+                                                i.pointer
+                                                    .hover_pos()
+                                                    .is_some_and(|pos| label.rect.contains(pos))
+                                                    && i.pointer.primary_released()
+                                                    && !i.key_pressed(egui::Key::Escape)
+                                            })
+                                        {
+                                            if let Some(moved) = self.workspace_drag.take() {
+                                                if self.workspace.insert_tab(&moved, *group, index)
+                                                {
+                                                    self.activate_workspace_tab(&moved);
+                                                }
+                                            }
+                                        }
+                                        if dirty {
+                                            ui.label(
+                                                RichText::new(ICON_UNSAVED)
+                                                    .color(palette.accent_text),
+                                            );
+                                        }
+                                        if small_icon_button(
+                                            ui,
+                                            palette,
+                                            ICON_CLOSE,
+                                            tr("タブを閉じる"),
+                                        )
+                                        .clicked()
+                                        {
+                                            close = Some(tab.clone());
+                                        }
+                                    });
+                                });
+                        }
+                    });
+                });
+            if let Some(tab) = chosen {
+                self.workspace.select(*group, &tab);
+                self.activate_workspace_tab(&tab);
+            }
+            if let Some(tab) = close {
+                self.close_workspace_tab(&tab);
+            }
+            hairline(&mut pane, palette);
+            let active = self
+                .workspace
+                .groups
+                .iter()
+                .find(|g| g.id == *group)
+                .and_then(|g| g.tabs.get(g.active))
+                .cloned();
+            if pane.input(|i| {
+                i.pointer.primary_pressed()
+                    && i.pointer.interact_pos().is_some_and(|p| rect.contains(p))
+            }) {
+                if let Some(tab) = &active {
+                    self.workspace.select(*group, tab);
+                    self.activate_workspace_tab(tab);
+                }
+            }
+            match active {
+                Some(WorkspaceTab::Session(id)) => {
+                    if let Some(session) = self.store.sessions.iter().find(|s| s.id == id).cloned()
+                    {
+                        if layout.panes.len() == 1 {
+                            self.ui_terminal_panel(&mut pane, &session);
+                        } else {
+                            self.ui_terminal_pane(&mut pane, &session, true);
+                        }
+                    }
+                }
+                Some(WorkspaceTab::Document(id)) => {
+                    self.active_document = Some(id.clone());
+                    self.editor_view = self
+                        .workspace_editor_views
+                        .get(&id)
+                        .copied()
+                        .unwrap_or_else(|| {
+                            if is_markdown(&id.path) || is_image(&id.path) {
+                                EditorView::Preview
+                            } else {
+                                EditorView::Edit
+                            }
+                        });
+                    if let Some(project) = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|p| p.id == id.project)
+                        .cloned()
+                    {
+                        if self.workspace.active() == Some(&WorkspaceTab::Document(id.clone())) {
+                            self.watch_active_document(&project);
+                        }
+                        let height = pane.available_height();
+                        // Existing editor code uses one cache; each visible
+                        // group loans its own so siblings cannot evict it.
+                        let caches = self.workspace_editor_caches.entry(*group).or_default();
+                        std::mem::swap(&mut self.editor_text_layout_cache, &mut caches.0);
+                        std::mem::swap(&mut self.markdown_preview_cache, &mut caches.1);
+                        self.editor_jump_line = self.workspace_editor_jumps.remove(&id);
+                        self.ui_editor(&mut pane, &project, palette, height);
+                        if let Some(line) = self.editor_jump_line.take() {
+                            self.workspace_editor_jumps.insert(id.clone(), line);
+                        }
+                        let caches = self.workspace_editor_caches.entry(*group).or_default();
+                        std::mem::swap(&mut self.editor_text_layout_cache, &mut caches.0);
+                        std::mem::swap(&mut self.markdown_preview_cache, &mut caches.1);
+                        self.workspace_editor_views.insert(id, self.editor_view);
+                    }
+                }
+                None => {}
+            }
         }
-        layout
+        self.ui_dock_drop(ui, area, palette);
+        if let Some(WorkspaceTab::Document(id)) = self.workspace.active().cloned() {
+            self.active_document = Some(id);
+        }
+        if let Some(tab) = self.workspace_drag.clone() {
+            let (cancel, released, pos) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::Escape)
+                        || (!i.pointer.primary_down() && !i.pointer.primary_released()),
+                    i.pointer.primary_released(),
+                    i.pointer.hover_pos(),
+                )
+            });
+            if cancel {
+                self.workspace_drag = None;
+            } else {
+                let landing = pos.and_then(|p| {
+                    layout
+                        .panes
+                        .iter()
+                        .find_map(|(id, r)| pane_drop(p, *r).map(|drop| (*id, *r, drop)))
+                });
+                if let Some((id, rect, drop)) = landing {
+                    let mut preview = self.workspace.clone();
+                    let fits = preview.move_tab(&tab, id, drop, center);
+                    ui.ctx()
+                        .layer_painter(egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("workspace-drop"),
+                        ))
+                        .rect_filled(
+                            pane_drop_zone(rect, drop).shrink(SPACE_XS),
+                            RADIUS_CARD,
+                            if fits {
+                                palette.accent.gamma_multiply(0.12)
+                            } else {
+                                palette.warning.gamma_multiply(0.12)
+                            },
+                        );
+                    egui::show_tooltip(
+                        ui.ctx(),
+                        ui.layer_id(),
+                        egui::Id::new("workspace-drop-tip"),
+                        |ui| {
+                            ui.label(pane_drop_hint(drop, !fits));
+                        },
+                    );
+                    if released && fits {
+                        self.workspace = preview;
+                        self.activate_workspace_tab(&tab);
+                    }
+                }
+                if released {
+                    self.workspace_drag = None;
+                }
+            }
+        }
     }
 
-    /// A session dragged over the terminals — a row of the list, or a
-    /// terminal by its grip: the part of the terminal under the pointer a
-    /// release would fill, a hint beside the pointer, and on release the
-    /// split. Escape, or a release anywhere else, changes nothing.
-    fn ui_pane_drop(
-        &mut self,
-        ui: &egui::Ui,
-        moved: Uuid,
-        panes: &[(Uuid, egui::Rect)],
-        area: egui::Rect,
-        palette: &Palette,
-    ) {
-        let (escaped, released, lost) = ui.input(|i| {
-            (
-                i.key_pressed(egui::Key::Escape),
-                i.pointer.primary_released(),
-                !i.pointer.primary_down() && !i.pointer.primary_released(),
-            )
-        });
-        if escaped || lost {
-            self.pane_drag = None;
-            return;
-        }
-        if self.pane_drag.is_some() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-        }
-        // Not on the terminal already showing it: there is nowhere to go.
-        let landing =
-            ui.input(|i| i.pointer.hover_pos()).and_then(|pos| {
-                let (target, rect, drop) =
-                    panes.iter().filter(|(shown, _)| *shown != moved).find_map(
-                        |(shown, rect)| pane_drop(pos, *rect).map(|drop| (*shown, *rect, drop)),
-                    )?;
-                let after = self.panes.placed(moved, target, drop)?;
-                let fits = after.fits(area);
-                Some((rect, drop, after, fits))
-            });
-        if let Some((rect, drop, _, fits)) = &landing {
-            let (fill, stroke) = if *fits {
-                (palette.accent.gamma_multiply(0.12), palette.accent)
-            } else {
-                (palette.raised.gamma_multiply(0.04), palette.warning)
-            };
-            ui.ctx()
-                .layer_painter(egui::LayerId::new(
-                    egui::Order::Foreground,
-                    egui::Id::new("pane-drop-zone"),
-                ))
-                .rect(
-                    pane_drop_zone(*rect, *drop).shrink(SPACE_XS),
-                    egui::CornerRadius::same(RADIUS_CARD),
-                    fill,
-                    egui::Stroke::new(2.0, stroke),
-                    egui::StrokeKind::Inside,
-                );
-            egui::show_tooltip(
-                ui.ctx(),
-                ui.layer_id(),
-                egui::Id::new("pane-drag-tooltip"),
-                |ui| {
-                    ui.label(
-                        RichText::new(pane_drop_hint(*drop, !*fits)).color(palette.text_strong),
-                    );
-                },
-            );
-        }
-        if !released {
-            return;
-        }
-        self.pane_drag = None;
-        if let Some((_, _, after, true)) = landing {
-            self.panes = after;
-            self.select_session(moved);
+    fn workspace_tab_title(&self, tab: &WorkspaceTab) -> (String, String, bool) {
+        match tab {
+            WorkspaceTab::Session(id) => {
+                let title = self
+                    .store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == *id)
+                    .map(|s| {
+                        session_list_title(
+                            s,
+                            self.session_prompt_turns
+                                .get(id)
+                                .and_then(|turns| turns.first())
+                                .map(|turn| turn.prompt.as_str()),
+                        )
+                    })
+                    .unwrap_or_default();
+                (title.clone(), title, false)
+            }
+            WorkspaceTab::Document(id) => {
+                let mut name = id
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let index = self.document_index(id);
+                if let Some(branch) = index.and_then(|i| self.open_documents[i].branch.as_ref()) {
+                    name.push_str(" / ");
+                    name.push_str(branch);
+                }
+                let dirty = index.is_some_and(|i| self.open_documents[i].modified());
+                (name, id.absolute_display(), dirty)
+            }
         }
     }
 

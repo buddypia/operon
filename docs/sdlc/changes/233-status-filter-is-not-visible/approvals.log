@@ -1,0 +1,5 @@
+2026-10-29T15:17:09Z auto plan plan.md 17c2b276a5d2032f approve Independent rust_review evaluator approved preserving requested workspace and existing history operations.
+2026-10-29T15:17:09Z person screen screen.md c7ce932db1b7eb04 approve Existing explicit user direction authorizes project-only left and central session content; history correction restores controls within that structure.
+2026-10-29T15:34:04Z auto plan plan.md 4a0316c6c4feba1e approve Independent rust_review reconfirmed metadata-only approval date update against bug and user request.
+2026-10-29T15:34:04Z auto contract evidence.md 176fb638ff07676f approve Independent rust_review inspected four native screenshots and separated geometry from interaction timing coverage.
+2026-10-29T16:10:38Z auto contract evidence.md 0bc5275651caf2b8 approve Independent rust_review confirmed CI source success and correct post-merge installation phase; installed-app remains mandatory pending.

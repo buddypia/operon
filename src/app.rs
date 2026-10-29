@@ -390,6 +390,8 @@ pub(crate) struct OperonApp {
     pub(crate) git_view: GitView,
     pub(crate) session_view: SessionView,
     pub(crate) session_library_open: bool,
+    /// A history title waits for a possible rename double click before opening.
+    pub(crate) pending_history_open: Option<(Uuid, f64)>,
     /// Which status groups the session list is narrowed to, indexed by
     /// `SessionStatusGroup::index`. All false means no narrowing at all, which
     /// is why it is a set of independent toggles and not a selected index.
@@ -694,10 +696,14 @@ pub(crate) struct OperonApp {
     /// The project or session being dragged inside the session column, if
     /// any. In memory, as `dock_drag` is.
     pub(crate) column_drag: Option<ColumnDrag>,
-    /// The terminals on screen beside the selected one (change 226).
-    pub(crate) panes: PaneLayout,
-    /// The terminal being dragged by its header grip, if any.
-    pub(crate) pane_drag: Option<Uuid>,
+    pub(crate) workspace: WorkspaceTabs,
+    pub(crate) workspace_initialized: bool,
+    pub(crate) workspace_drag: Option<WorkspaceTab>,
+    pub(crate) workspace_editor_views: HashMap<DocumentId, EditorView>,
+    /// One syntax/preview cache per visible group, bounded by PANE_MAX.
+    pub(crate) workspace_editor_caches:
+        HashMap<Uuid, (EditorTextLayoutCache, MarkdownPreviewCache)>,
+    pub(crate) workspace_editor_jumps: HashMap<DocumentId, usize>,
     /// The rect the session workspace was last drawn into; a dock move is
     /// judged against it (change 146).
     pub(crate) dock_area: Option<egui::Rect>,
@@ -934,6 +940,7 @@ impl OperonApp {
             git_view: GitView::Changes,
             session_view: SessionView::List,
             session_library_open: false,
+            pending_history_open: None,
             status_filter: [false; 4],
             git_selected_file: None,
             selected_file: None,
@@ -1070,8 +1077,12 @@ impl OperonApp {
             dock_drag: None,
             session_arrangement,
             column_drag: None,
-            panes: PaneLayout::default(),
-            pane_drag: None,
+            workspace: WorkspaceTabs::default(),
+            workspace_initialized: false,
+            workspace_drag: None,
+            workspace_editor_views: HashMap::new(),
+            workspace_editor_caches: HashMap::new(),
+            workspace_editor_jumps: HashMap::new(),
             dock_area: None,
             session_file_filter: String::new(),
             session_filter_results: None,
@@ -2851,6 +2862,10 @@ impl OperonApp {
         };
         self.project_tab = ProjectTab::Files;
         self.active_document = Some(id.clone());
+        if self.page == Page::Sessions {
+            self.workspace_initialized = true;
+            self.workspace.open(WorkspaceTab::Document(id.clone()));
+        }
         if self.document_index(&id).is_some() {
             return;
         }
@@ -5838,6 +5853,10 @@ impl OperonApp {
     /// opens, so the tile and the chip it lands on count the same thing.
     pub(crate) fn show_status_group(&mut self, group: SessionStatusGroup) {
         self.page = Page::Sessions;
+        self.session_library_open = true;
+        self.session_view = SessionView::List;
+        self.search.clear();
+        self.pending_history_open = None;
         self.status_filter = [false; 4];
         self.status_filter[group.index()] = true;
         self.forget_pending_session_close();
@@ -5859,6 +5878,7 @@ impl OperonApp {
     /// removal only happens on the confirm click.
     fn forget_pending_session_close(&mut self) {
         self.pending_session_close = None;
+        self.pending_history_open = None;
     }
 
     /// The state to show for a session, including the live agent activity the
@@ -6354,6 +6374,7 @@ impl OperonApp {
         {
             return;
         }
+        self.pending_history_open = None;
         self.select_session(session_id);
         self.page = Page::Sessions;
         self.session_library_open = false;
@@ -6386,7 +6407,8 @@ impl OperonApp {
             self.unresolved_paths.clear();
             self.resolved_paths_session = Some(session_id);
         }
-        self.panes.show(self.selected_session, session_id);
+        self.workspace.open(WorkspaceTab::Session(session_id));
+        self.workspace_initialized = true;
         self.selected_session = Some(session_id);
         if self.unread_hold != Some(session_id) {
             self.unread_sessions.remove(&session_id);
@@ -6416,8 +6438,15 @@ impl OperonApp {
     /// The sessions the workspace draws a terminal for: every terminal of a
     /// split, else the selected one.
     pub(crate) fn terminals_on_screen(&self) -> Vec<Uuid> {
-        if self.panes.is_split() {
-            self.panes.sessions()
+        if !self.workspace.groups.is_empty() || self.workspace_initialized {
+            self.workspace
+                .visible()
+                .into_iter()
+                .filter_map(|tab| match tab {
+                    WorkspaceTab::Session(id) => Some(id),
+                    WorkspaceTab::Document(_) => None,
+                })
+                .collect()
         } else {
             self.selected_session.into_iter().collect()
         }
@@ -6426,14 +6455,35 @@ impl OperonApp {
     /// Takes a terminal off the screen; its session keeps running. Its
     /// neighbour takes the room and, when it held the keyboard, the keyboard.
     pub(crate) fn close_pane(&mut self, session_id: Uuid) {
-        self.panes.remove(session_id);
-        if let Some(only) = self.panes.single() {
-            self.panes = PaneLayout::default();
-            self.select_session(only);
-        } else if self.selected_session == Some(session_id) {
-            if let Some(next) = self.panes.sessions().first().copied() {
-                self.select_session(next);
+        self.close_workspace_tab(&WorkspaceTab::Session(session_id));
+    }
+
+    pub(crate) fn activate_workspace_tab(&mut self, tab: &WorkspaceTab) {
+        match tab {
+            WorkspaceTab::Session(id) => self.select_session(*id),
+            WorkspaceTab::Document(id) => {
+                self.active_document = Some(id.clone());
+                self.terminal_focus_request = None;
             }
+        }
+    }
+
+    pub(crate) fn close_workspace_tab(&mut self, tab: &WorkspaceTab) {
+        if let WorkspaceTab::Document(id) = tab {
+            if self
+                .document_index(id)
+                .is_some_and(|i| self.open_documents[i].modified())
+            {
+                self.notice = Some(tr("未保存の変更があります。保存するか、ディスクから読み直してから閉じてください。").into());
+                return;
+            }
+            self.close_document(id);
+            self.workspace_editor_views.remove(id);
+            self.workspace_editor_jumps.remove(id);
+        }
+        self.workspace.close(tab);
+        if let Some(next) = self.workspace.active().cloned() {
+            self.activate_workspace_tab(&next);
         }
     }
 
@@ -6702,6 +6752,10 @@ impl eframe::App for OperonApp {
             ctx.request_repaint_after(remaining);
         }
         self.ui_topbar(ctx);
+        // A delayed history click belongs to the page where it was made.
+        if self.page != Page::Sessions {
+            self.pending_history_open = None;
+        }
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
             // Two screens hold something that is as wide as it is and take the
@@ -8915,12 +8969,30 @@ impl OperonApp {
         path: PathBuf,
         line: Option<usize>,
     ) {
-        self.editor_jump_line = line;
+        self.editor_jump_line = if self.page == Page::Sessions {
+            None
+        } else {
+            line
+        };
         self.open_document_at(project, root, path);
         if line.is_some() {
             self.editor_view = EditorView::Edit;
+            if let Some(id) = &self.active_document {
+                self.workspace_editor_views
+                    .insert(id.clone(), EditorView::Edit);
+            }
         }
-        self.page = Page::Projects;
+        if self.page == Page::Sessions {
+            if let Some(id) = &self.active_document {
+                self.workspace_editor_jumps.remove(id);
+                if let Some(line) = line {
+                    self.workspace_editor_jumps.insert(id.clone(), line);
+                }
+            }
+        }
+        if self.page != Page::Sessions {
+            self.page = Page::Projects;
+        }
         self.selected_project = Some(project.id);
         self.project_tab = ProjectTab::Files;
     }
