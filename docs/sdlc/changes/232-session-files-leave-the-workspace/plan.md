@@ -55,4 +55,6 @@ the spec and the explicitly requested screen structure.
 
 ## Departures from the plan
 
-None yet.
+Runtime documentation was updated in all three README languages and CHANGELOG.md to describe central tabs and move session filtering to history. Legacy pane-selection tests now exercise WorkspaceTabs; the shared egui fixture uses select_session instead of assigning selected_session so it follows the public navigation path.
+
+Independent review found three multi-group cases missing from the initial plan: shared parser caches evicted siblings each frame, a global line jump could be consumed by the wrong file, and simultaneous Escape/release could reorder a tab. Each received a render/input regression guard. The editor now loans caches per group (bounded by PANE_MAX), pending jumps use DocumentId, and tab-label drops check cancellation before committing.

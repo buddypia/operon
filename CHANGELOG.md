@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended `.gitignore` to cover macOS metadata (`._*`, `.Spotlight-V100`, `.Trashes`), editor configurations (`.idea/`, `.vscode/`, `*.swp`), and Rust tooling artifacts (`*.rs.bk`, `*.profraw`, `*.profdata`).
 
 ### Changed
+- Sessions and files share central workspace tabs with draggable horizontal and vertical groups; the session sidebar lists projects. Internal file opens keep the session page, and closing a session tab leaves its agent running.
 - Cleaned up redundant `.tmp/` entry in `.gitignore`.
 
 ### Fixed

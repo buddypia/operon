@@ -35155,7 +35155,7 @@ pub(crate) fn test_terminal_open_modifier_detection_and_focus_isolation() {
 }
 
 /// Acceptance Criterion R1.1 & R1.2:
-/// ⌘+Clicking a file with a line number (e.g. `src/main.rs:42`) switches to `Page::Projects`,
+/// Internally opening a file with a line number stays in `Page::Sessions`,
 /// selects `ProjectTab::Files`, sets `editor_jump_line = Some(42)`, and forces `EditorView::Edit`
 /// so the cursor jumps to line 42 in the editor buffer.
 #[test]
@@ -35202,8 +35202,8 @@ pub(crate) fn test_open_terminal_target_navigates_and_jumps_to_line() {
 
     assert_eq!(
         app.page,
-        Page::Projects,
-        "clicking a terminal path must switch page to Page::Projects"
+        Page::Sessions,
+        "clicking a terminal path must stay in the session workspace"
     );
     assert_eq!(
         app.project_tab,
@@ -35277,7 +35277,7 @@ pub(crate) fn test_open_terminal_target_without_line_number() {
         line: None,
     });
 
-    assert_eq!(app.page, Page::Projects);
+    assert_eq!(app.page, Page::Sessions);
     assert_eq!(app.project_tab, ProjectTab::Files);
     assert_eq!(
         app.editor_jump_line, None,
@@ -35484,7 +35484,7 @@ pub(crate) fn test_open_terminal_target_in_worktree_opens_under_worktree_root() 
         line: Some(15),
     });
 
-    assert_eq!(app.page, Page::Projects);
+    assert_eq!(app.page, Page::Sessions);
     assert_eq!(app.project_tab, ProjectTab::Files);
     assert_eq!(app.editor_jump_line, Some(15));
     let doc = app.active_document.expect("document must be open");
@@ -36028,8 +36028,8 @@ pub(crate) fn test_terminal_click_interaction_modifier_routing() {
     }
     assert_eq!(
         app.page,
-        Page::Projects,
-        "Option+click must trigger internal editor open, navigating to Page::Projects"
+        Page::Sessions,
+        "Option+click must open the internal editor in the session workspace"
     );
     assert_eq!(app.project_tab, ProjectTab::Files);
     assert_eq!(app.editor_jump_line, Some(10));
@@ -36475,7 +36475,7 @@ pub(crate) fn test_terminal_panel_pointer_event_e2e_cmd_click_and_plain_click() 
 
     // Simulation B: Option + click routes to internal editor
     app.open_terminal_target(target.clone());
-    assert_eq!(app.page, Page::Projects);
+    assert_eq!(app.page, Page::Sessions);
     assert_eq!(app.project_tab, ProjectTab::Files);
     assert_eq!(app.editor_jump_line, Some(10));
     assert!(app.active_document.is_some());
@@ -42651,7 +42651,7 @@ fn render_workspace_output(
     width: f32,
     height: f32,
 ) -> egui::FullOutput {
-    app.selected_session = Some(session.id);
+    app.select_session(session.id);
     app.session_library_open = false;
     let context = egui::Context::default();
     let screen = egui::RawInput {
@@ -42967,7 +42967,7 @@ pub(crate) fn test_session_file_tree_click_navigates_to_editor() {
         None,
     );
 
-    assert_eq!(fixture.app.page, Page::Projects);
+    assert_eq!(fixture.app.page, Page::Sessions);
     assert_eq!(fixture.app.project_tab, ProjectTab::Files);
     assert_eq!(fixture.app.selected_project, Some(fixture.project.id));
     assert_eq!(fixture.app.editor_jump_line, None);
@@ -42991,7 +42991,7 @@ pub(crate) fn test_session_file_tree_click_navigates_to_editor() {
         None,
     );
 
-    assert_eq!(fixture.app.page, Page::Projects);
+    assert_eq!(fixture.app.page, Page::Sessions);
     assert_eq!(fixture.app.project_tab, ProjectTab::Files);
     assert_eq!(fixture.app.selected_project, Some(fixture.project.id));
     assert_eq!(fixture.app.editor_jump_line, None);
@@ -43097,7 +43097,7 @@ pub(crate) fn test_session_file_tree_real_world_workload_scenarios() {
         PathBuf::from("src/main.rs"),
         None,
     );
-    assert_eq!(fixture.app.page, Page::Projects);
+    assert_eq!(fixture.app.page, Page::Sessions);
     assert_eq!(fixture.app.project_tab, ProjectTab::Files);
     assert_eq!(fixture.app.editor_jump_line, None);
     assert_eq!(
@@ -43482,7 +43482,7 @@ pub(crate) fn test_open_terminal_target_dynamic_fallback_resolution() {
     });
 
     // Verify dynamic fallback successfully resolved the path and navigated to editor
-    assert_eq!(fixture.app.page, Page::Projects);
+    assert_eq!(fixture.app.page, Page::Sessions);
     assert_eq!(fixture.app.project_tab, ProjectTab::Files);
     assert_eq!(fixture.app.selected_project, Some(fixture.project.id));
     assert!(fixture.app.active_document.is_some());
@@ -60645,12 +60645,17 @@ pub(crate) fn closing_a_terminal_gives_its_room_to_the_neighbour() {
     let root = temporary_directory("pane-close");
     let (mut app, first, second) = app_with_two_sessions(&root);
     app.select_session(first);
-    app.panes = PaneLayout::default()
-        .placed(second, first, PaneDrop::Right)
-        .unwrap();
+    let group = app.workspace.open(WorkspaceTab::Session(first));
+    app.workspace.open(WorkspaceTab::Session(second));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(second),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
     app.select_session(second);
     app.close_pane(second);
-    assert!(!app.panes.is_split());
+    assert!(!app.workspace.layout.is_split());
     assert_eq!(app.selected_session, Some(first));
     assert!(app
         .store
@@ -60663,36 +60668,33 @@ pub(crate) fn closing_a_terminal_gives_its_room_to_the_neighbour() {
 #[test]
 /// A selection made anywhere lands in the terminal holding the keyboard, or
 /// moves the keyboard to the terminal already showing it.
-pub(crate) fn selecting_a_session_replaces_the_focused_terminal_only() {
+pub(crate) fn selecting_a_session_preserves_the_focused_groups_other_tabs() {
     let root = temporary_directory("pane-select");
     let (mut app, first, second) = app_with_two_sessions(&root);
     let third = Uuid::new_v4();
     let mut session = app.store.sessions[0].clone();
     session.id = third;
     app.store.sessions.push(session);
-
-    // One terminal: selection is what it always was.
     app.select_session(first);
     app.select_session(second);
-    assert!(!app.panes.is_split());
-    assert_eq!(app.selected_session, Some(second));
-
-    app.panes = PaneLayout::default()
-        .placed(first, second, PaneDrop::Left)
-        .unwrap();
+    assert_eq!(app.workspace.groups[0].tabs.len(), 2);
+    let group = app.workspace.groups[0].id;
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(second),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
     app.select_session(first);
-    assert_eq!(
-        app.panes.sessions(),
-        vec![first, second],
-        "already shown: focus only"
-    );
     app.select_session(third);
+    assert_eq!(app.terminals_on_screen(), vec![third, second]);
     assert_eq!(
-        app.panes.sessions(),
-        vec![third, second],
-        "replaces the focused one"
+        app.workspace.groups[0].tabs,
+        vec![WorkspaceTab::Session(first), WorkspaceTab::Session(third)]
     );
-    assert_eq!(app.selected_session, Some(third));
+    app.select_session(first);
+    assert_eq!(app.terminals_on_screen(), vec![first, second]);
+    assert_eq!(app.selected_session, Some(first));
     fs::remove_dir_all(&root).ok();
 }
 
@@ -60704,9 +60706,14 @@ pub(crate) fn two_split_sessions_are_both_drawn() {
     let (mut app, first, second) = app_with_two_sessions(&root);
     app.show_session_inspector = false;
     app.select_session(first);
-    app.panes = PaneLayout::default()
-        .placed(second, first, PaneDrop::Right)
-        .unwrap();
+    let group = app.workspace.open(WorkspaceTab::Session(first));
+    app.workspace.open(WorkspaceTab::Session(second));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(second),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
     let context = egui::Context::default();
     let texts = workspace_texts_at_click_size(&mut app, &context);
     // The list draws each name too; a terminal's title is the rightmost copy.
@@ -60723,7 +60730,7 @@ pub(crate) fn two_split_sessions_are_both_drawn() {
         (right.y - left.y).abs() < 1.0,
         "side by side: {left:?} {right:?}"
     );
-    assert!(texts.iter().any(|(text, _)| text == ICON_DRAG_HANDLE));
+    assert!(texts.iter().any(|(text, _)| text == ICON_CLOSE));
     fs::remove_dir_all(&root).ok();
 }
 
@@ -60738,9 +60745,14 @@ pub(crate) fn every_terminal_on_screen_is_polled_and_read() {
     app.note_session_activity_change(second);
     assert!(app.is_session_unread(second));
 
-    app.panes = PaneLayout::default()
-        .placed(second, first, PaneDrop::Bottom)
-        .unwrap();
+    let group = app.workspace.open(WorkspaceTab::Session(first));
+    app.workspace.open(WorkspaceTab::Session(second));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(second),
+        group,
+        PaneDrop::Bottom,
+        pane_area()
+    ));
     app.select_session(second);
     app.select_session(first);
     assert_eq!(app.terminals_on_screen(), vec![first, second]);
@@ -60768,13 +60780,14 @@ pub(crate) fn pane_drop_hint_names_the_zone() {
 }
 
 #[test]
-/// The whole gesture through egui: a row pressed in the session list, carried
+/// The whole gesture through egui: a central session tab pressed, carried
 /// to the right edge of the terminal, says where it will land, and released
 /// there it sits to the right of the terminal it was dropped on.
-pub(crate) fn dragging_a_row_onto_a_terminal_splits_it() {
+pub(crate) fn dragging_a_central_tab_onto_a_terminal_splits_it() {
     let root = temporary_directory("pane-drag");
     let (mut app, first, second) = app_with_two_sessions(&root);
     app.show_session_inspector = false;
+    app.select_session(second);
     app.select_session(first);
     let context = egui::Context::default();
     // The window's default size: at 900px the terminal has no room for two
@@ -60796,13 +60809,13 @@ pub(crate) fn dragging_a_row_onto_a_terminal_splits_it() {
     };
     frame(&mut app, Vec::new());
     let texts = frame(&mut app, Vec::new());
-    // The list's copy of the name is the leftmost one.
+    // The inactive tab remains available in the central tab strip.
     let row = texts
         .iter()
         .filter(|(text, _)| text == "second")
         .map(|(_, pos)| *pos + egui::vec2(4.0, 4.0))
         .min_by(|a, b| a.x.total_cmp(&b.x))
-        .expect("the list draws the second session's row");
+        .expect("the central strip draws the second session tab");
     let target = egui::pos2(1260.0, 420.0);
     let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
         pos,
@@ -60819,8 +60832,8 @@ pub(crate) fn dragging_a_row_onto_a_terminal_splits_it() {
         vec![egui::Event::PointerMoved(row + egui::vec2(24.0, 0.0))],
     );
     assert!(
-        matches!(app.column_drag, Some(ColumnDrag::Session { session, .. }) if session == second),
-        "the row is being dragged"
+        app.workspace_drag == Some(WorkspaceTab::Session(second)),
+        "the central tab is being dragged"
     );
     // A tooltip is measured on its first frame and painted from the second.
     frame(&mut app, vec![egui::Event::PointerMoved(target)]);
@@ -60830,15 +60843,18 @@ pub(crate) fn dragging_a_row_onto_a_terminal_splits_it() {
         "the hint names the zone before the release: {:?}",
         held.iter().map(|(text, _)| text).collect::<Vec<_>>()
     );
-    assert!(!app.panes.is_split(), "nothing moves before the release");
+    assert!(
+        !app.workspace.layout.is_split(),
+        "nothing moves before the release"
+    );
     frame(&mut app, vec![button(target, false)]);
-    assert_eq!(app.panes.sessions(), vec![first, second]);
+    assert_eq!(app.terminals_on_screen(), vec![first, second]);
     assert_eq!(
         app.selected_session,
         Some(second),
         "the dropped one takes the keyboard"
     );
-    assert_eq!(app.column_drag, None);
+    assert_eq!(app.workspace_drag, None);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -61499,5 +61515,704 @@ pub(crate) fn memory_review_batch_refuses_unscoped_and_oversized_evidence() {
     refuses(&["901-case", "902-case", "903-case", "904-case"], "128 KiB");
     ci_gate_commit(&root, "docs/sdlc/changes/901-case/state.yaml", "");
     refuses(&["901-case"], "state.yaml");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_file_opens_in_central_workspace() {
+    let (mut app, project, root) = app_with_open_document("workspace-file", "original\n");
+    app.page = Page::Sessions;
+    app.open_documents[0].buffer = "unsaved\n".into();
+    app.navigate_to_file(
+        &project,
+        project.path.clone(),
+        PathBuf::from("plan.md"),
+        Some(2),
+    );
+    assert_eq!(
+        app.page,
+        Page::Sessions,
+        "an internal file stays beside its session"
+    );
+    assert_eq!(app.open_documents.len(), 1, "reopening reuses the buffer");
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Document(app.open_documents[0].id()))
+    );
+    assert_eq!(app.open_documents[0].buffer, "unsaved\n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn workspace_test_document(root: &str) -> WorkspaceTab {
+    WorkspaceTab::Document(DocumentId {
+        project: Uuid::nil(),
+        root: PathBuf::from(root),
+        path: PathBuf::from("src/app.rs"),
+    })
+}
+
+#[test]
+fn workspace_tabs_preserve_mixed_tabs_and_document_identity() {
+    let mut workspace = WorkspaceTabs::default();
+    let session = WorkspaceTab::Session(Uuid::new_v4());
+    let project_file = workspace_test_document("/project");
+    let worktree_file = workspace_test_document("/worktree");
+    let group = workspace.open(session.clone());
+    assert_eq!(workspace.open(project_file.clone()), group);
+    assert_eq!(workspace.open(worktree_file.clone()), group);
+    assert_eq!(workspace.open(project_file.clone()), group);
+    assert_eq!(
+        workspace.groups[0].tabs,
+        vec![session.clone(), project_file.clone(), worktree_file]
+    );
+    assert_eq!(workspace.active(), Some(&project_file));
+    assert!(workspace.select(group, &session));
+    assert_eq!(workspace.visible(), vec![session]);
+    assert_eq!(
+        workspace.rects(pane_area()).panes,
+        vec![(group, pane_area())]
+    );
+}
+
+#[test]
+fn workspace_tabs_split_both_axes_and_resize() {
+    for drop in [
+        PaneDrop::Left,
+        PaneDrop::Right,
+        PaneDrop::Top,
+        PaneDrop::Bottom,
+    ] {
+        let mut workspace = WorkspaceTabs::default();
+        let session = WorkspaceTab::Session(Uuid::new_v4());
+        let file = workspace_test_document("/worktree");
+        let group = workspace.open(session.clone());
+        workspace.open(file.clone());
+        assert!(workspace.move_tab(&file, group, drop, pane_area()));
+        let rects = workspace.rects(pane_area());
+        assert_eq!(rects.panes.len(), 2);
+        assert_eq!(workspace.groups.len(), 2);
+        let a = rects.panes[0].1;
+        let b = rects.panes[1].1;
+        if matches!(drop, PaneDrop::Left | PaneDrop::Right) {
+            assert!(a.right() <= b.left());
+            assert!((a.width() - b.width()).abs() < 1.0);
+        } else {
+            assert!(a.bottom() <= b.top());
+            assert!((a.height() - b.height()).abs() < 1.0);
+        }
+        workspace.layout.set_share(0, 0.6);
+        assert_ne!(workspace.rects(pane_area()).panes[0].1, a);
+        assert!(workspace.visible().contains(&session));
+        assert!(workspace.visible().contains(&file));
+    }
+}
+
+#[test]
+fn workspace_tabs_move_merge_and_close_collapse_groups() {
+    let mut workspace = WorkspaceTabs::default();
+    let session = WorkspaceTab::Session(Uuid::new_v4());
+    let file = workspace_test_document("/worktree");
+    let group = workspace.open(session.clone());
+    workspace.open(file.clone());
+    assert!(workspace.move_tab(&file, group, PaneDrop::Right, pane_area()));
+    assert!(workspace.move_tab(&file, group, PaneDrop::Center, pane_area()));
+    assert_eq!(workspace.groups.len(), 1);
+    assert_eq!(
+        workspace.rects(pane_area()).panes,
+        vec![(group, pane_area())]
+    );
+    assert_eq!(workspace.groups[0].tabs.len(), 2);
+    assert!(workspace.move_tab(&file, group, PaneDrop::Bottom, pane_area()));
+    assert!(workspace.close(&file));
+    assert_eq!(workspace.active(), Some(&session));
+    assert_eq!(workspace.visible(), vec![session.clone()]);
+    assert!(workspace.close(&session));
+    assert!(workspace.groups.is_empty());
+    assert!(workspace.active().is_none());
+    assert!(workspace.rects(pane_area()).panes.is_empty());
+}
+
+#[test]
+fn workspace_tabs_reorder_and_retain_active_identity() {
+    let mut workspace = WorkspaceTabs::default();
+    let a = WorkspaceTab::Session(Uuid::new_v4());
+    let b = WorkspaceTab::Session(Uuid::new_v4());
+    let c = workspace_test_document("/worktree");
+    let group = workspace.open(a.clone());
+    workspace.open(b.clone());
+    workspace.open(c.clone());
+    assert!(workspace.insert_tab(&c, group, 0));
+    assert_eq!(
+        workspace.groups[0].tabs,
+        vec![c.clone(), a.clone(), b.clone()]
+    );
+    assert!(workspace.select(group, &b));
+    assert!(workspace.close(&a));
+    assert_eq!(
+        workspace.active(),
+        Some(&b),
+        "removing an earlier sibling preserves selection"
+    );
+    workspace.retain(|tab| tab != &c);
+    assert_eq!(workspace.active(), Some(&b));
+    workspace.retain(|_| false);
+    assert!(workspace.groups.is_empty());
+    assert!(workspace.focused.is_none());
+}
+
+#[test]
+fn workspace_tabs_refuse_invalid_or_too_small_drop_atomically() {
+    let mut workspace = WorkspaceTabs::default();
+    let a = WorkspaceTab::Session(Uuid::new_v4());
+    let b = workspace_test_document("/worktree");
+    let group = workspace.open(a.clone());
+    workspace.open(b.clone());
+    let before = workspace.clone();
+    let tiny = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100.0, 100.0));
+    assert!(!workspace.move_tab(&b, group, PaneDrop::Right, tiny));
+    assert_eq!(workspace, before);
+    assert!(!workspace.move_tab(&b, Uuid::new_v4(), PaneDrop::Right, pane_area()));
+    assert_eq!(workspace, before);
+    assert!(!workspace.move_tab(
+        &WorkspaceTab::Session(Uuid::new_v4()),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
+    assert_eq!(workspace, before);
+    assert!(workspace.close(&b));
+    let before = workspace.clone();
+    assert!(!workspace.move_tab(&a, group, PaneDrop::Right, pane_area()));
+    assert_eq!(workspace, before, "cannot split the only tab onto itself");
+}
+
+#[test]
+fn workspace_dirty_document_close_is_refused() {
+    let (mut app, project, root) = app_with_open_document("workspace-dirty", "original\n");
+    app.page = Page::Sessions;
+    app.navigate_to_file(
+        &project,
+        project.path.clone(),
+        PathBuf::from("plan.md"),
+        None,
+    );
+    let document = app.active_document.clone().unwrap();
+    app.open_documents[0].buffer = "unsaved\n".into();
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Document(document.clone()))
+    );
+    assert_eq!(app.open_documents[0].buffer, "unsaved\n");
+    assert!(app
+        .notice
+        .as_deref()
+        .is_some_and(|notice| notice.contains("未保存")));
+    app.open_documents[0].buffer = app.open_documents[0].disk.clone();
+    app.close_workspace_tab(&WorkspaceTab::Document(document));
+    assert!(app.workspace.groups.is_empty());
+    assert!(app.open_documents.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_hidden_session_is_not_polled_or_read() {
+    let root = temporary_directory("workspace-hidden");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.page = Page::Sessions;
+    app.select_session(first);
+    app.select_session(second);
+    assert_eq!(app.terminals_on_screen(), vec![second]);
+    app.note_session_activity_change(first);
+    assert!(app.is_session_unread(first));
+    app.workspace.open(workspace_test_document("/project"));
+    assert!(app.terminals_on_screen().is_empty());
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    assert!(app
+        .store
+        .sessions
+        .iter()
+        .any(|session| session.id == second && session.status == SessionStatus::Active));
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn workspace_pointer_frame(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    context.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 820.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        },
+    )
+}
+
+#[test]
+fn workspace_split_headers_keep_long_metadata_clear_of_controls() {
+    let root = temporary_directory("workspace-header-bounds");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.store.projects[0].name = "a-project-with-a-very-long-name-".repeat(8);
+    for (index, session) in app.store.sessions.iter_mut().enumerate() {
+        session.name = format!("session-{index}-{}", "long-name-".repeat(15));
+        session.goal = format!("task-{index}-{}", "long-goal-".repeat(15));
+        session.branch = Some(format!("branch-{index}-{}", "long-branch-".repeat(15)));
+    }
+    app.select_session(first);
+    let group = app.workspace.groups[0].id;
+    app.select_session(second);
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(second),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
+    let context = egui::Context::default();
+    workspace_pointer_frame(&mut app, &context, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let center = app.dock.rects(app.dock_area.unwrap(), None).center;
+    let panes = app.workspace.rects(center).panes;
+    fn collect(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                out.push((text.galley.text().to_owned(), text.visual_bounding_rect()))
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut texts = Vec::new();
+    for shape in &output.shapes {
+        collect(&shape.shape, &mut texts);
+    }
+    for (_, pane) in panes {
+        let more = texts
+            .iter()
+            .find(|(text, rect)| text == ICON_MORE && pane.contains(rect.center()))
+            .expect("each pane keeps its more control")
+            .1;
+        let metadata: Vec<_> = texts
+            .iter()
+            .filter(|(text, rect)| {
+                pane.contains(rect.center())
+                    && (rect.center().y - more.center().y).abs() < 12.0
+                    && text != ICON_MORE
+                    && text != ICON_CLOSE
+                    && text != ICON_FOLDER_OPEN
+                    && !text.contains(tr("停止"))
+            })
+            .collect();
+        assert!(
+            metadata.iter().any(|(text, _)| text.contains("branch-")),
+            "the branch remains identifiable"
+        );
+        for (text, rect) in metadata {
+            assert!(
+                rect.left() >= pane.left() - 1.0 && rect.right() <= pane.right() + 1.0,
+                "header text escaped its group: {text} {rect:?} {pane:?}"
+            );
+            assert!(
+                rect.right() < more.left(),
+                "metadata overlaps the action controls: {text} {rect:?} {more:?}"
+            );
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_pointer_switch_reorder_split_and_close_document() {
+    let root = temporary_directory("workspace-mixed-pointer");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.page = Page::Sessions;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    let project = app.store.projects[0].clone();
+    fs::write(root.join("note.md"), "# original\n").unwrap();
+    app.navigate_to_file(&project, root.clone(), PathBuf::from("note.md"), None);
+    let document = app.active_document.clone().unwrap();
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::FileOpen(document.clone()),
+        Duration::from_secs(10),
+    );
+    let tab = WorkspaceTab::Document(document.clone());
+    app.select_session(first);
+    let context = egui::Context::default();
+    workspace_pointer_frame(&mut app, &context, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let position = |output: &egui::FullOutput, title: &str| {
+        text_positions(output)
+            .into_iter()
+            .find(|(text, _)| text == title)
+            .unwrap_or_else(|| panic!("missing tab {title}: {:?}", text_positions(output)))
+            .1
+            + egui::vec2(4.0, 4.0)
+    };
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    let file = position(&output, "note.md");
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(file), button(file, true)],
+    );
+    workspace_pointer_frame(&mut app, &context, vec![button(file, false)]);
+    assert_eq!(app.workspace.active(), Some(&tab));
+    assert_eq!(app.page, Page::Sessions);
+
+    // Reorder by releasing the file tab on the session tab, rather than using
+    // the model directly: the tab strip owns this drop before the pane does.
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let file = position(&output, "note.md");
+    let session = position(&output, "first");
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(file), button(file, true)],
+    );
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(file + egui::vec2(24.0, 0.0))],
+    );
+    workspace_pointer_frame(&mut app, &context, vec![egui::Event::PointerMoved(session)]);
+    workspace_pointer_frame(&mut app, &context, vec![button(session, false)]);
+    assert_eq!(app.workspace.groups[0].tabs[0], tab);
+    assert_eq!(app.workspace.active(), Some(&tab));
+
+    // The document moves into the lower half, leaving its session above it.
+    app.select_session(first);
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let file = position(&output, "note.md");
+    let target = egui::pos2(820.0, 805.0);
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(file), button(file, true)],
+    );
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(file + egui::vec2(24.0, 0.0))],
+    );
+    workspace_pointer_frame(&mut app, &context, vec![egui::Event::PointerMoved(target)]);
+    workspace_pointer_frame(&mut app, &context, vec![button(target, false)]);
+    assert_eq!(app.workspace.groups.len(), 2);
+    assert_eq!(app.workspace.active(), Some(&tab));
+    let center = app.dock.rects(app.dock_area.unwrap(), None).center;
+    let rects = app.workspace.rects(center).panes;
+    assert!(rects[0].1.bottom() <= rects[1].1.top());
+    assert_eq!(
+        app.workspace.visible(),
+        vec![WorkspaceTab::Session(first), tab.clone()]
+    );
+
+    let index = app.document_index(&document).unwrap();
+    app.open_documents[index].buffer = "unsaved edits\n".into();
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let file = position(&output, "note.md");
+    let close = text_positions(&output)
+        .into_iter()
+        .find(|(text, pos)| text == ICON_CLOSE && pos.x > file.x && (pos.y - file.y).abs() < 12.0)
+        .expect("document tab has its close control")
+        .1
+        + egui::vec2(4.0, 4.0);
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(close), button(close, true)],
+    );
+    workspace_pointer_frame(&mut app, &context, vec![button(close, false)]);
+    assert_eq!(
+        app.workspace.active(),
+        Some(&tab),
+        "dirty close retains the tab"
+    );
+    assert_eq!(app.open_documents[index].buffer, "unsaved edits\n");
+    assert!(app
+        .notice
+        .as_deref()
+        .is_some_and(|notice| notice.contains("未保存")));
+    app.open_documents[index].buffer = app.open_documents[index].disk.clone();
+    // Saving removes the dirty marker, so resolve the control's new position.
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let file = position(&output, "note.md");
+    let close = text_positions(&output)
+        .into_iter()
+        .find(|(text, pos)| text == ICON_CLOSE && pos.x > file.x && (pos.y - file.y).abs() < 12.0)
+        .expect("clean tab keeps its close control")
+        .1
+        + egui::vec2(4.0, 4.0);
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(close), button(close, true)],
+    );
+    workspace_pointer_frame(&mut app, &context, vec![button(close, false)]);
+    assert_eq!(app.workspace.groups.len(), 1);
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(first)));
+    assert!(app.document_index(&document).is_none());
+    assert_eq!(app.page, Page::Sessions);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_visible_documents_do_not_reparse_unchanged_frames() {
+    let (mut app, project, root) = app_with_open_document("workspace-cache", "fn first() {}\n");
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+    app.open_documents[0].path = PathBuf::from("first.rs");
+    fs::write(project.path.join("first.rs"), &app.open_documents[0].buffer).unwrap();
+    let first = app.open_documents[0].id();
+    let mut second = app.open_documents[0].clone();
+    second.path = PathBuf::from("second.rs");
+    second.disk = "fn second() {}\n".into();
+    second.buffer = second.disk.clone();
+    fs::write(project.path.join("second.rs"), &second.disk).unwrap();
+    let second_id = second.id();
+    app.open_documents.push(second);
+    let group = app.workspace.open(WorkspaceTab::Document(first.clone()));
+    app.workspace
+        .open(WorkspaceTab::Document(second_id.clone()));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Document(second_id.clone()),
+        group,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0))
+    ));
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+    let builds = |app: &OperonApp| {
+        app.editor_text_layout_cache.builds()
+            + app.markdown_preview_cache.builds()
+            + app
+                .workspace_editor_caches
+                .values()
+                .map(|caches| caches.0.builds() + caches.1.builds())
+                .sum::<usize>()
+    };
+    frame(&mut app);
+    frame(&mut app);
+    let warm = builds(&app);
+    frame(&mut app);
+    frame(&mut app);
+    assert_eq!(
+        builds(&app),
+        warm,
+        "unchanged visible source documents must keep independent syntax caches"
+    );
+    for doc in &mut app.open_documents {
+        doc.path.set_extension("md");
+        doc.buffer = format!(
+            "# {}\n\n```rust\nfn example() {{}}\n```\n",
+            doc.path.display()
+        );
+        doc.disk = doc.buffer.clone();
+    }
+    app.workspace = WorkspaceTabs::default();
+    let a = WorkspaceTab::Document(app.open_documents[0].id());
+    let b = WorkspaceTab::Document(app.open_documents[1].id());
+    let group = app.workspace.open(a);
+    app.workspace.open(b.clone());
+    assert!(app.workspace.move_tab(
+        &b,
+        group,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0))
+    ));
+    frame(&mut app);
+    frame(&mut app);
+    let warm = builds(&app);
+    frame(&mut app);
+    frame(&mut app);
+    assert_eq!(
+        builds(&app),
+        warm,
+        "unchanged visible Markdown documents must keep independent parse caches"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_escape_and_release_over_tab_cancel_reordering() {
+    let root = temporary_directory("workspace-escape-release");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.select_session(first);
+    app.select_session(second);
+    let original = app.workspace.groups[0].tabs.clone();
+    let context = egui::Context::default();
+    workspace_pointer_frame(&mut app, &context, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &context, Vec::new());
+    let texts = text_positions(&output);
+    let position = |title: &str| {
+        texts.iter().find(|(text, _)| text == title).unwrap().1 + egui::vec2(4.0, 4.0)
+    };
+    let (source, target) = (position("second"), position("first"));
+    let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(source), button(source, true)],
+    );
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![egui::Event::PointerMoved(source + egui::vec2(24.0, 0.0))],
+    );
+    assert_eq!(app.workspace_drag, Some(WorkspaceTab::Session(second)));
+    workspace_pointer_frame(
+        &mut app,
+        &context,
+        vec![
+            egui::Event::PointerMoved(target),
+            egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::default(),
+            },
+            button(target, false),
+        ],
+    );
+    assert_eq!(
+        app.workspace.groups[0].tabs, original,
+        "Escape cancels even when pointer release lands on another tab in the same frame"
+    );
+    assert_eq!(app.workspace_drag, None);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_line_jump_waits_for_its_target_document() {
+    let (mut app, project, root) = app_with_open_document("workspace-jump", "first document\n");
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+    let first = app.open_documents[0].id();
+    let mut target = app.open_documents[0].clone();
+    target.path = PathBuf::from("target.rs");
+    target.buffer = (1..=200).map(|n| format!("// target line {n}\n")).collect();
+    target.disk = target.buffer.clone();
+    fs::write(project.path.join("target.rs"), &target.disk).unwrap();
+    target.read_only = Some(tr("読み込んでいます…").into());
+    let id = target.id();
+    app.open_documents.push(target);
+    let group = app.workspace.open(WorkspaceTab::Document(first.clone()));
+    app.workspace_editor_views.insert(first, EditorView::Edit);
+    app.workspace.open(WorkspaceTab::Document(id.clone()));
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Document(id.clone()),
+        group,
+        PaneDrop::Right,
+        area
+    ));
+    app.navigate_to_file(&project, project.path.clone(), id.path.clone(), Some(120));
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(area),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+    frame(&mut app);
+    frame(&mut app);
+    assert_eq!(
+        app.workspace_editor_jumps.get(&id),
+        Some(&120),
+        "the earlier editor must not spend the loading target's jump"
+    );
+    assert_eq!(
+        app.editor_jump_line, None,
+        "no pending jump can leak into sibling rendering"
+    );
+    app.open_documents[1].read_only = None;
+    frame(&mut app);
+    assert!(
+        !app.workspace_editor_jumps.contains_key(&id),
+        "only the loaded target spends its jump"
+    );
+    assert_eq!(app.workspace_editor_views.get(&id), Some(&EditorView::Edit));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_worktree_document_tab_keeps_its_branch() {
+    let (mut app, _, root) = app_with_open_document("workspace-branch", "worktree file\n");
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.open_documents[0].branch = Some("feature/worktree-copy".into());
+    app.open_documents[0].project_rooted = false;
+    app.workspace
+        .open(WorkspaceTab::Document(app.open_documents[0].id()));
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        )
+    };
+    frame(&mut app);
+    let output = frame(&mut app);
+    assert!(
+        text_positions(&output)
+            .iter()
+            .any(|(text, _)| text.contains("plan.md / feature/worktree-copy")),
+        "the tab identifies the worktree copy without needing the project editor"
+    );
     fs::remove_dir_all(root).unwrap();
 }

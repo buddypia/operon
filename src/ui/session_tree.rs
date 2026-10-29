@@ -875,26 +875,6 @@ impl PaneLayout {
         self.sessions().contains(&id)
     }
 
-    /// A session selected while `focused` holds the keyboard: shown in the
-    /// focused terminal, unless a terminal already shows it.
-    pub(crate) fn show(&mut self, focused: Option<Uuid>, id: Uuid) {
-        if !self.is_split() {
-            self.root = None;
-            return;
-        }
-        let shown = self.sessions();
-        if shown.contains(&id) {
-            return;
-        }
-        let Some(target) = focused
-            .filter(|focused| shown.contains(focused))
-            .or_else(|| shown.first().copied())
-        else {
-            return;
-        };
-        self.replace(target, id);
-    }
-
     fn replace(&mut self, from: Uuid, to: Uuid) {
         if let Some(root) = &mut self.root {
             root.for_each_leaf_mut(&mut |id| {
@@ -972,6 +952,229 @@ impl PaneLayout {
         };
         let min = root.min_size();
         self.sessions().len() <= PANE_MAX && area.width() >= min.x && area.height() >= min.y
+    }
+}
+
+/// A view in the central workspace. Documents keep their exact worktree identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WorkspaceTab {
+    Session(Uuid),
+    Document(DocumentId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkspaceGroup {
+    pub(crate) id: Uuid,
+    pub(crate) tabs: Vec<WorkspaceTab>,
+    pub(crate) active: usize,
+}
+
+/// Ordered tabs in independently selectable groups; closing a view never owns
+/// the lifetime of its session or document buffer.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct WorkspaceTabs {
+    pub(crate) groups: Vec<WorkspaceGroup>,
+    pub(crate) focused: Option<Uuid>,
+    pub(crate) layout: PaneLayout,
+}
+
+impl WorkspaceTabs {
+    pub(crate) fn open(&mut self, tab: WorkspaceTab) -> Uuid {
+        if let Some(group) = self
+            .groups
+            .iter_mut()
+            .find(|group| group.tabs.contains(&tab))
+        {
+            group.active = group
+                .tabs
+                .iter()
+                .position(|candidate| candidate == &tab)
+                .unwrap_or(0);
+            self.focused = Some(group.id);
+            return group.id;
+        }
+        let index = self
+            .focused
+            .and_then(|id| self.groups.iter().position(|group| group.id == id));
+        let index = index.unwrap_or_else(|| {
+            if self.groups.is_empty() {
+                let id = Uuid::new_v4();
+                self.groups.push(WorkspaceGroup {
+                    id,
+                    tabs: Vec::new(),
+                    active: 0,
+                });
+                self.layout.root = Some(PaneNode::Leaf(id));
+            }
+            0
+        });
+        let group = &mut self.groups[index];
+        group.tabs.push(tab);
+        group.active = group.tabs.len() - 1;
+        self.focused = Some(group.id);
+        group.id
+    }
+
+    pub(crate) fn select(&mut self, id: Uuid, tab: &WorkspaceTab) -> bool {
+        let Some(group) = self.groups.iter_mut().find(|group| group.id == id) else {
+            return false;
+        };
+        let Some(index) = group.tabs.iter().position(|candidate| candidate == tab) else {
+            return false;
+        };
+        group.active = index;
+        self.focused = Some(id);
+        true
+    }
+
+    pub(crate) fn active(&self) -> Option<&WorkspaceTab> {
+        let group = self
+            .groups
+            .iter()
+            .find(|group| Some(group.id) == self.focused)?;
+        group.tabs.get(group.active)
+    }
+
+    pub(crate) fn visible(&self) -> Vec<WorkspaceTab> {
+        self.layout
+            .sessions()
+            .into_iter()
+            .filter_map(|id| {
+                let group = self.groups.iter().find(|group| group.id == id)?;
+                group.tabs.get(group.active).cloned()
+            })
+            .collect()
+    }
+
+    pub(crate) fn rects(&self, area: egui::Rect) -> PaneRects {
+        self.layout.rects(area)
+    }
+
+    pub(crate) fn close(&mut self, tab: &WorkspaceTab) -> bool {
+        let Some(index) = self
+            .groups
+            .iter()
+            .position(|group| group.tabs.contains(tab))
+        else {
+            return false;
+        };
+        let group = &mut self.groups[index];
+        let old_active = group.tabs.get(group.active).cloned();
+        group.tabs.retain(|candidate| candidate != tab);
+        group.active = old_active
+            .and_then(|active| group.tabs.iter().position(|candidate| *candidate == active))
+            .unwrap_or_else(|| group.active.min(group.tabs.len().saturating_sub(1)));
+        self.settle(index);
+        true
+    }
+
+    fn settle(&mut self, old_index: usize) {
+        self.groups.retain(|group| !group.tabs.is_empty());
+        self.layout
+            .retain(|id| self.groups.iter().any(|group| group.id == id));
+        if !self
+            .groups
+            .iter()
+            .any(|group| Some(group.id) == self.focused)
+        {
+            self.focused = self
+                .groups
+                .get(old_index.min(self.groups.len().saturating_sub(1)))
+                .map(|group| group.id);
+        }
+        // A singleton still needs a rect, unlike the legacy terminal-only
+        // arrangement whose caller drew the selected session separately.
+        if self.groups.len() == 1 && self.layout.single().is_none() {
+            self.layout.root = Some(PaneNode::Leaf(self.groups[0].id));
+        }
+    }
+
+    /// Move to a final tab index, preserving every other group's selection.
+    pub(crate) fn insert_tab(&mut self, tab: &WorkspaceTab, target: Uuid, index: usize) -> bool {
+        if !self.groups.iter().any(|group| group.id == target) {
+            return false;
+        }
+        let Some(source) = self
+            .groups
+            .iter()
+            .position(|group| group.tabs.contains(tab))
+        else {
+            return false;
+        };
+        if self.groups[source].id == target {
+            let group = &mut self.groups[source];
+            let Some(from) = group.tabs.iter().position(|candidate| candidate == tab) else {
+                return false;
+            };
+            let value = group.tabs.remove(from);
+            let index = index.min(group.tabs.len());
+            group.tabs.insert(index, value);
+            group.active = index;
+            self.focused = Some(target);
+            return from != index;
+        }
+        self.close(tab);
+        let Some(group) = self.groups.iter_mut().find(|group| group.id == target) else {
+            return false;
+        };
+        let index = index.min(group.tabs.len());
+        group.tabs.insert(index, tab.clone());
+        group.active = index;
+        self.focused = Some(target);
+        true
+    }
+
+    /// Check the complete resulting arrangement before accepting a drop.
+    /// Refused drops leave focus, order and geometry untouched.
+    pub(crate) fn move_tab(
+        &mut self,
+        tab: &WorkspaceTab,
+        target: Uuid,
+        drop: PaneDrop,
+        area: egui::Rect,
+    ) -> bool {
+        let Some(source) = self.groups.iter().find(|group| group.tabs.contains(tab)) else {
+            return false;
+        };
+        let Some(destination) = self.groups.iter().find(|group| group.id == target) else {
+            return false;
+        };
+        if drop == PaneDrop::Center {
+            let index = destination.tabs.len();
+            return self.insert_tab(tab, target, index);
+        }
+        if source.id == target && source.tabs.len() == 1 {
+            return false;
+        }
+        let mut after = self.clone();
+        after.close(tab);
+        let id = Uuid::new_v4();
+        let Some(layout) = after.layout.placed(id, target, drop) else {
+            return false;
+        };
+        if !layout.fits(area) {
+            return false;
+        }
+        after.layout = layout;
+        after.groups.push(WorkspaceGroup {
+            id,
+            tabs: vec![tab.clone()],
+            active: 0,
+        });
+        after.focused = Some(id);
+        *self = after;
+        true
+    }
+
+    pub(crate) fn retain(&mut self, keep: impl Fn(&WorkspaceTab) -> bool) {
+        for group in &mut self.groups {
+            let old_active = group.tabs.get(group.active).cloned();
+            group.tabs.retain(&keep);
+            group.active = old_active
+                .and_then(|active| group.tabs.iter().position(|candidate| *candidate == active))
+                .unwrap_or_else(|| group.active.min(group.tabs.len().saturating_sub(1)));
+        }
+        self.settle(0);
     }
 }
 

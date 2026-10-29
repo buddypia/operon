@@ -40,8 +40,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Implement and test the approved shared session and document workspace."
+resume: "Land after successful CI, then package from main and install the verified app before settling release-binary."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,11 +70,11 @@ resume: "Implement and test the approved shared session and document workspace."
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending make q.fast and named workspace tests"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast; 17 workspace-filter tests, targeted file/branch navigation and 28 existing file navigation/tree tests pass; no test/ignore erosion"
+  bands: "machine passed bash scripts/check-bands.sh (three warn-only baseline breaches)"
   release-binary: "machine pending yes: src/app.rs, src/app/screens.rs and src/ui/session_tree.rs change; package and install after landing"
-  guards-verified-by-mutation: "human pending new workspace guards watched failing"
-  workspace-screen: "human pending inspect central session/file tabs, project-only sidebar, and both split orientations"
+  guards-verified-by-mutation: "human passed 13 of 13 bounded mutations detected, including file page navigation and split label claim"
+  workspace-screen: "human passed isolated native screenshots in evidence.md show central session/file tabs, project-only left column and both split orientations; actual egui pointer tests cover switching, reorder, vertical file split and close"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

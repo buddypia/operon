@@ -1,0 +1,8 @@
+# Independent rust-reviewer read the staged index, not the mutable working tree.
+# Round 1 found shared parser cache eviction, an untargeted line jump, and
+# Escape/release ordering. Round 2 confirmed all three fixes and guards.
+# Final confirmation includes the worktree branch identity regression.
+digest: "4024105707b46a6b"
+rounds: 2
+verdicts:
+  rust-reviewer: "approve 0 0"
