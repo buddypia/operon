@@ -2,7 +2,7 @@
 
 - **Spec**: `./bug.md` (bugfix route skips intent/spec)
 - **Approved**: pending independent evaluation
-- **Status**: draft
+- **Status**: approved
 
 ## Files that change
 

@@ -39,15 +39,15 @@
 #              `screen yes` surface in docs/sdlc/risk.yaml.
 
 state:
-  route: "modify"
-  stage: "plan"
-  status: "planning"
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
-  autonomy: "supervised"
+  autonomy: "full"
   risk: "low"
   readiness: "go"
-  screen: "n/a"
+  screen: "approved"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
