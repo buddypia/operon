@@ -1,13 +1,13 @@
 # Spec: Keep sessions and files in the central workspace
 
 - **Intent**: `./intent.md`
-- **Status**: draft
+- **Status**: approved
 
 ## Requirements
 
 1. Opening a file from a session keeps Page::Sessions and adds/selects a document
    tab without discarding its buffer; reopening selects the existing tab.
-   Proof: `workspace_open_file_stays_in_sessions` and `workspace_tabs_preserve_mixed_tabs_and_document_identity`.
+   Proof: `session_file_opens_in_central_workspace` and `workspace_tabs_preserve_mixed_tabs_and_document_identity`.
 2. Sessions use central tabs, switching preserves other open sessions and files,
    and the session page left sidebar lists projects rather than session rows.
    Proof: `workspace_tabs_preserve_mixed_tabs_and_document_identity` plus rendered inspection.

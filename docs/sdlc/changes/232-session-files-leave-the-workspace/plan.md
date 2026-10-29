@@ -1,8 +1,8 @@
 # Plan: Keep sessions and files in the central workspace
 
 - **Spec**: `./spec.md`
-- **Approved**: pending independent evaluation
-- **Status**: draft
+- **Approved**: 2026-10-29
+- **Status**: approved
 
 Committed before source implementation; independent evaluation follows against
 the spec and the explicitly requested screen structure.

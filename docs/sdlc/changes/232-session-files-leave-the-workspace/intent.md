@@ -1,6 +1,6 @@
 # Intent: Opening a session file leaves the session workspace
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-10-29
 
 ## Problem

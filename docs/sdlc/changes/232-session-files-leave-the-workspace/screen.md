@@ -1,6 +1,6 @@
 # Session workspace layout
 
-- **Status**: draft
+- **Status**: approved
 
 The user already requested this structural change in the active task:
 “セッションページの中央ウィンドウに新しいタブとして表示されるべき” and
