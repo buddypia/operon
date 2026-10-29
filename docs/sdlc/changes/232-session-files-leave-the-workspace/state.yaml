@@ -40,7 +40,7 @@
 
 state:
   route: "modify"
-  stage: "deploy"
+  stage: "maintain"
   status: "done"
   attempts: "0 3"
   questions: "0 7"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Merge after the documentation CI pass, then run the required main-checkout ship and verify the installed app."
+resume: "Closed after installation and native file-tab verification; no further implementation work is required."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -72,8 +72,8 @@ resume: "Merge after the documentation CI pass, then run the required main-check
 contract:
   three-gates: "machine passed make q.fast; 17 workspace-filter tests, targeted file/branch navigation and 28 existing file navigation/tree tests pass; no test/ignore erosion"
   bands: "machine passed bash scripts/check-bands.sh (three warn-only baseline breaches)"
-  release-binary: "machine waived pre-merge execution only: ship requires main, so package/install verification follows merge and remains mandatory under installed-app below"
-  installed-app: "human pending package from main, replace /Applications/Operon.app after applicable approval, launch it, and verify check-installed-build reports CURRENT"
+  release-binary: "machine passed main-checkout package-macos.sh fmt/clippy/release/signing and check-installed-build.sh CURRENT at installed stamp 3eadf483c56d2409754dd6992b80b607e71edc15 including release source fb9a652"
+  installed-app: "human passed user-authorized quit/swap/restart, actual Home dashboard, and Files click opens CONTRIBUTING.md centrally beside the retained session tab with Sessions active and project-only left column"
   guards-verified-by-mutation: "human passed 13 of 13 bounded mutations detected, including file page navigation and split label claim"
   workspace-screen: "human passed isolated native screenshots in evidence.md show central session/file tabs, project-only left column and both split orientations; actual egui pointer tests cover switching, reorder, vertical file split and close"
 
