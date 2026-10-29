@@ -1436,3 +1436,18 @@ shared caches while doing so.
 checks two native variants, retained compiled objects, recovery bytes, untouched
 source/shared caches and real minimal CMake configuration at the destination
 (change 230; watched failing with an active cloned CMakeCache.txt before the fix).
+
+## 103 — Moving session navigation left the old caller tests behind
+
+The central-tab change passed focused model and file tests, while full CI still
+expected session rows on the left. The same move left Home's status-group entry
+opening a workspace with no filter controls, and history drew two session views.
+**The rule:** when navigation moves, preserve each operation through its new
+production caller; migrate the old caller assertions rather than deleting their
+rename, stop, remove, identity, ordering and bounds guarantees.
+
+**Guard.** `home_status_entry_opens_filtered_history_with_visible_controls`
+checks the Home entry and actual rendered filter controls;
+`history_renders_each_session_once_in_the_chosen_view` checks List/Grid rendering.
+The migrated CI cases retain pointer actions and geometry checks in their new
+history or central-tab home (change 233).

@@ -1,8 +1,8 @@
 # Plan: Preserve history access after central tab migration
 
 - **Spec**: `./bug.md` (bugfix route skips intent/spec)
-- **Approved**: pending independent evaluation
-- **Status**: approved
+- **Approved**: 2026-10-30, independent rust_review evaluator
+- **Status**: done
 
 ## Files that change
 
@@ -34,4 +34,13 @@ All 28 named CI failures pass with their behavior guarantees preserved; Home sta
 
 ## Departures from the plan
 
-None yet.
+Native rendering exposed an additional grid-header width defect for long project
+names, so the name is bounded/truncated while keeping add/open controls visible.
+Project selection now exits history to reveal the newly opened tabs, and the
+project-column new-session action explicitly uses the selected project rather
+than the project of an older active session tab. The old simple list/card were
+removed after tracing their controls to the advanced history rows and Home's
+existing details menu. Preserving both title navigation and double-click rename
+required a small egui-time pending-click state; no worker or durable state was
+added. These are recoverable corrections to the intended navigation and existing
+control reachability, with focused interaction tests.

@@ -1,0 +1,6 @@
+# Independent rust_review read the final staged index and confirmed the
+# stronger compact-sidebar height guard after the mutation survivor was closed.
+digest: "65d730dd42224cdf"
+rounds: 1
+verdicts:
+  rust-reviewer: "approve 0 0"

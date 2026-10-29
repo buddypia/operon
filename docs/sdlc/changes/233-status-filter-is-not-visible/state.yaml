@@ -40,8 +40,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Reproduce CI failures, restore filtered history entry and migrate obsolete sidebar assertions without losing behavior coverage."
+resume: "Wait for full CI on the corrected stacked branch, land it, and install the verified main build before closing deployment tracking."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,10 +70,10 @@ resume: "Reproduce CI failures, restore filtered history entry and migrate obsol
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending make q.fast and named CI-failed tests"
+  three-gates: "machine passed make q.fast and 55 named tests including all 28 initial CI failures and new workspace/history guards"
   full-ci: "machine pending successful CI on corrected branch head"
   release-binary: "machine pending package and install merged workspace after this follow-up"
-  guards-verified-by-mutation: "human pending Home filter and history visibility guards watched failing"
+  guards-verified-by-mutation: "human passed all 8 bounded mutations detected by behavioral assertions, including strengthened compact-sidebar height guard"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

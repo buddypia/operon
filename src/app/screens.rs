@@ -779,7 +779,12 @@ impl OperonApp {
     ///
     /// `list` salts the ids: a waiting session is usually a recent one too,
     /// and is drawn in both lists on the same frame.
-    fn home_session_row(&mut self, ui: &mut egui::Ui, session: &Session, list: &'static str) {
+    pub(crate) fn home_session_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &Session,
+        list: &'static str,
+    ) {
         let palette = self.store.theme.palette();
         let status = self.status_view(session);
         let title = session_title(session);
@@ -933,7 +938,7 @@ impl OperonApp {
             &session.native_session_id,
         ) {
             // The same command the card printed and the resume verb runs,
-            // launch options included; see `session_card`.
+            // launch options included.
             ui.label(
                 RichText::new(format!(
                     "native resume: {}",
@@ -2868,172 +2873,6 @@ impl OperonApp {
         }
     }
 
-    pub(crate) fn session_card(&mut self, ui: &mut egui::Ui, session: &Session) {
-        let palette = self.store.theme.palette();
-        let failed_dependency = blocking_dependency_label(&self.store.sessions, session);
-        let project_name = self
-            .store
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id)
-            .map(|project| project.name.clone())
-            .unwrap_or_else(|| tr("登録されていないプロジェクト").into());
-        let status = self.status_view(session);
-        let title = session_title(session);
-        let mut removal_requested = false;
-        let row = clickable_card(ui, palette, ("session-row", session.id), true, |ui| {
-            ui.horizontal(|ui| {
-                status_chip(ui, &status, 13.5, palette);
-                ui.label(RichText::new(&title).strong());
-                agent_chip(ui, &session.agent, 12.0, palette);
-                ui.label(
-                    RichText::new(relative_time(session.created_at))
-                        .size(12.0)
-                        .color(palette.text_muted),
-                );
-                ui.label(
-                    RichText::new(format!("{ICON_PROJECT} {project_name}"))
-                        .size(12.0)
-                        .color(palette.text_muted),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if small_icon_button(ui, palette, ICON_CLOSE, tr("セッションを削除")).clicked()
-                    {
-                        removal_requested = true;
-                    }
-                });
-            });
-            ui.horizontal_wrapped(|ui| {
-                // This row is read while deciding which session to look at, so
-                // it carries one way in. Attaching from Terminal.app is a
-                // choice about a session already open, and lives there.
-                if icon_button(ui, palette, ICON_SHOW, tr("ターミナルを表示")).clicked() {
-                    self.open_session_in_terminal(session.id);
-                }
-                if matches!(
-                    session.status,
-                    SessionStatus::Exited | SessionStatus::Failed
-                ) && icon_button(
-                    ui,
-                    palette,
-                    ICON_CLOSE,
-                    if session.status == SessionStatus::Failed {
-                        tr("残ったターミナルを閉じる")
-                    } else {
-                        tr("ターミナルを閉じる")
-                    },
-                )
-                .clicked()
-                {
-                    self.close_completed_terminal(session.id);
-                }
-                // The state verb closes the row: same word, same place, on
-                // every surface that acts on a session.
-                if let Some(verb) = session_verb(session, self.cancellation_pending(session.id)) {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let response = verb_button(ui, palette, verb.icon, verb.label, verb.danger)
-                            .on_hover_text(verb.hint);
-                        if response.clicked() {
-                            match verb.action {
-                                SessionVerbAction::Stop => self.stop_session(session.id),
-                                SessionVerbAction::Start => self.start_session(session.id),
-                                SessionVerbAction::ResumeNative => {
-                                    self.resume_managed_native_session(session.id)
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-            let goal = session_display_goal(&session.goal);
-            if goal != title && !goal.trim().is_empty() {
-                ui.label(RichText::new(goal).color(palette.text));
-            }
-            if let Some(branch) = &session.branch {
-                ui.label(
-                    RichText::new(format!("{ICON_BRANCH} {branch}"))
-                        .size(12.5)
-                        .color(palette.branch),
-                );
-            }
-            ui.label(
-                RichText::new(format!("tmux: {}", session.tmux_name))
-                    .small()
-                    .weak(),
-            );
-            if let Some(path) = &session.worktree_path {
-                ui.label(
-                    RichText::new(format!("cwd: {}", path.display()))
-                        .small()
-                        .weak(),
-                );
-            }
-            if let (Some(provider), Some(native_session_id)) = (
-                cli_provider_for_agent(&session.agent),
-                &session.native_session_id,
-            ) {
-                // The command the 会話 ID から再開 button above will run, not a
-                // shorter one that resembles it. `native_resume_display` answers
-                // a different question — "how would I resume this from a shell",
-                // which is what the two call sites for a conversation Operon did
-                // not launch are asking — and it cannot carry launch options
-                // because those sessions have no launch command.
-                //
-                // This one does, and printing it without them meant the line
-                // that looks most like evidence was the one that dropped the
-                // switch a person had acknowledged in writing: the hover said
-                // 権限確認をすべてスキップする would be carried and the line
-                // underneath spelled a command without it.
-                ui.label(
-                    RichText::new(format!(
-                        "native resume: {}",
-                        resume_command_with_launch_options(
-                            provider,
-                            &session.agent,
-                            &session.agent_command,
-                            native_session_id,
-                        )
-                    ))
-                    .small()
-                    .weak(),
-                );
-            } else if cli_provider_for_agent(&session.agent).is_some() {
-                ui.label(
-                    RichText::new(tr("ネイティブ再開 ID を待機中"))
-                        .small()
-                        .weak(),
-                );
-            }
-            if !session.depends_on.is_empty() {
-                ui.label(
-                    RichText::new(tf!(
-                        "{p0} 件のセッションに依存",
-                        p0 = session.depends_on.len()
-                    ))
-                    .small()
-                    .weak(),
-                );
-            }
-            if let Some(parent) = &failed_dependency {
-                ui.label(
-                    RichText::new(tf!(
-                        "ブロック中: 前提 “{parent}” が完了していません。",
-                        parent = parent
-                    ))
-                    .small()
-                    .color(palette.accent_soft),
-                );
-            }
-            self.session_removal_confirmation(ui, session.id);
-        });
-        if removal_requested {
-            self.request_session_removal(session.id);
-        } else if row.response.clicked() {
-            self.open_session_in_terminal(session.id);
-        }
-        ui.add_space(6.0);
-    }
-
     pub(crate) fn ui_git(&mut self, ui: &mut egui::Ui, project: &Project) {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
@@ -4333,6 +4172,7 @@ impl OperonApp {
                     .selectable_label(self.session_view == view, label)
                     .clicked()
                 {
+                    self.pending_history_open = None;
                     self.session_view = view;
                 }
             }
@@ -4437,80 +4277,7 @@ impl OperonApp {
             self.ui_session_grid(ui);
             return;
         }
-        self.ui_project_session_list(ui);
-    }
-
-    fn ui_project_session_list(&mut self, ui: &mut egui::Ui) {
-        let palette = self.store.theme.palette();
-        let projects = self.store.projects.clone();
-        let sessions = self.store.sessions.clone();
-        let needle = self.search.to_lowercase();
-        let mut matched_sessions = 0;
-        if projects.is_empty() {
-            ui.label(
-                RichText::new(tr(
-                    "プロジェクトがありません。先にプロジェクトを追加してください。",
-                ))
-                .weak(),
-            );
-            return;
-        }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for project in projects {
-                let mut project_sessions = sessions
-                    .iter()
-                    .filter(|session| {
-                        session.project_id == project.id
-                            && (needle.is_empty()
-                                || format!("{} {} {}", session.name, session.goal, session.agent)
-                                    .to_lowercase()
-                                    .contains(&needle))
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                project_sessions.sort_by_key(|session| Reverse(session.created_at));
-                matched_sessions += project_sessions.len();
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new(ICON_PROJECT).color(palette.accent_text));
-                        ui.label(RichText::new(&project.name).strong());
-                        ui.label(
-                            RichText::new(tf!("{p0} 件", p0 = project_sessions.len()))
-                                .small()
-                                .weak(),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始"))
-                                .clicked()
-                            {
-                                self.open_project_session_setup(project.id);
-                            }
-                        });
-                    });
-                    ui.label(
-                        RichText::new(project.path.display().to_string())
-                            .small()
-                            .weak(),
-                    );
-                    ui.add_space(4.0);
-                    // Under a search, what is missing is a match, not a session.
-                    if project_sessions.is_empty() && !needle.is_empty() {
-                        ui.label(
-                            RichText::new(tr("一致するセッションはありません。"))
-                                .small()
-                                .weak(),
-                        );
-                    }
-                    for session in project_sessions {
-                        self.session_card(ui, &session);
-                    }
-                });
-                ui.add_space(8.0);
-            }
-            if matched_sessions == 0 && !needle.is_empty() {
-                ui.label(RichText::new(tr("検索条件に一致するセッションはありません。")).weak());
-            }
-        });
+        self.ui_terminal_session_tabs(ui);
     }
 
     fn ui_session_grid(&mut self, ui: &mut egui::Ui) {
@@ -4543,7 +4310,16 @@ impl OperonApp {
                 project_sessions.sort_by_key(|session| session.created_at);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(&project.name).strong());
+                        // A long name shares this row with two actions and
+                        // the path; it cannot claim their space first.
+                        let name_width = ui.available_width() * 0.45;
+                        ui.scope(|ui| {
+                            ui.set_max_width(name_width);
+                            ui.add(
+                                egui::Label::new(RichText::new(&project.name).strong()).truncate(),
+                            )
+                            .on_hover_text(&project.name);
+                        });
                         // Beside the name, ahead of the path: pinned right, the
                         // cards below widen the scroll area past the view and a
                         // later project's ＋ lands off screen; after the path, a
@@ -5395,44 +5171,24 @@ impl OperonApp {
         let palette = self.store.theme.palette();
         let mut projects = self.store.projects.clone();
         sort_column_projects(&mut projects, &self.session_arrangement);
-        let sessions = self.store.sessions.clone();
+        let needle = self.search.trim().to_lowercase();
+        let sessions = self
+            .store
+            .sessions
+            .iter()
+            .filter(|session| {
+                needle.is_empty()
+                    || format!("{} {} {}", session.name, session.goal, session.agent)
+                        .to_lowercase()
+                        .contains(&needle)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
         // One pass over the sessions for all four numbers. `status_view` would
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
         let group_counts = self.status_group_counts();
-        // Laid out from the right, and the chips below wrap: a row wider
-        // than the column widened everything drawn after it, and the column
-        // then cut each row's time at its edge (change 163).
-        ui.horizontal(|ui| {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                // New sessions start from the toolbar and search is ⌘K; what
-                // the magnifier here used to open is the history, and says so.
-                // No count here: 「すべて n」 below says it, and the room it
-                // took is what kept the heading whole at the default width.
-                if quiet_button(ui, palette, tr("履歴")).clicked() {
-                    self.session_library_open = true;
-                }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    // The heading is the list's grip: it is dragged to an
-                    // edge the way a view's tab is (change 145).
-                    let grip = ui
-                        .add(
-                            egui::Label::new(
-                                RichText::new(format!(
-                                    "{ICON_DRAG_HANDLE} {}",
-                                    tr("プロジェクト別セッション")
-                                ))
-                                .strong(),
-                            )
-                            .selectable(false)
-                            .truncate()
-                            .sense(egui::Sense::click_and_drag()),
-                        )
-                        .on_hover_text(tr("ドラッグして移動"));
-                    self.dock_grip(ui, &grip, DockPanel::Sessions);
-                });
-            });
-        });
+        ui.heading(tr("プロジェクト別セッション"));
         // The four things a person can do about a session, as four independent
         // toggles on one row, behind a 「すべて」 that says no filter is on and
         // clears one that is. The icon each group used to carry is the status
@@ -5613,6 +5369,9 @@ impl OperonApp {
                     });
                 });
                 if project_sessions.is_empty() {
+                    if !needle.is_empty() && pinned_here == 0 {
+                        ui.label(RichText::new(tr("一致するセッションはありません。")).small().weak());
+                    }
                     // The header's ＋ is the whole offer: its count says 0 件,
                     // and a second start below it would say the same twice.
                     return;
@@ -5659,6 +5418,7 @@ impl OperonApp {
                     );
                     let renaming = self.renaming_session == Some(candidate.id);
                     let mut rename_requested = false;
+                    let mut title_clicked = false;
                     let mut rename_finished = None;
                     let render_restore_options = |ui: &mut egui::Ui, handoff_target: &mut Option<String>| {
                         if cli_provider_for_agent(&candidate.agent).is_some() {
@@ -5860,7 +5620,13 @@ impl OperonApp {
                                             tf!("{title}\n\nダブルクリックで名前を変更", title = title)
                                         });
                                     if title.double_clicked() {
+                                        self.pending_history_open = None;
                                         rename_requested = true;
+                                    } else if title.clicked() {
+                                        title_clicked = true;
+                                        let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
+                                        self.pending_history_open = Some((candidate.id, ui.input(|input| input.time) + delay));
+                                        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(delay));
                                     }
                                     // The title takes clicks for its rename,
                                     // so a right click on it would otherwise
@@ -5947,6 +5713,9 @@ impl OperonApp {
                         menu_used = true;
                         row_menu(ui, &mut row_choice, &mut requested_handoff);
                     });
+                    if menu_used {
+                        self.pending_history_open = None;
+                    }
                     match row_choice {
                         Some(SessionRowChoice::Rename) => rename_requested = true,
                         Some(SessionRowChoice::Worktree) => worktree_requested = true,
@@ -5956,6 +5725,7 @@ impl OperonApp {
                         None => {}
                     }
                     if session_card_response.clicked()
+                        && !title_clicked
                         && !close_requested
                         && !stop_requested
                         && !worktree_requested
@@ -5971,6 +5741,7 @@ impl OperonApp {
                         None => {}
                     }
                     if rename_requested {
+                        self.pending_history_open = None;
                         self.begin_session_rename(&candidate);
                     }
                     if unread_requested {
@@ -6010,7 +5781,9 @@ impl OperonApp {
                 let slot = project_targets.slot(drag.moved(), inside);
                 self.ui_column_drop(ui, drag, &project_targets, slot, view.x_range(), SPACE_SM);
             }
-            if sessions.is_empty() {
+            if !needle.is_empty() && sessions.is_empty() {
+                ui.label(RichText::new(tr("検索条件に一致するセッションはありません。")).weak());
+            } else if sessions.is_empty() {
                 // A person with no sessions is not being filtered, so this
                 // wins over anything the filter would have said.
                 ui.label(RichText::new(tr("セッションはまだありません。プロジェクトから起動してください。")).weak());
@@ -6035,6 +5808,18 @@ impl OperonApp {
                 }
             }
         });
+        if let Some((session, deadline)) = self.pending_history_open {
+            let now = ui.input(|input| input.time);
+            if !self.session_library_open {
+                self.pending_history_open = None;
+            } else if now >= deadline {
+                self.pending_history_open = None;
+                self.open_session_in_terminal(session);
+            } else {
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs_f64(deadline - now));
+            }
+        }
         // Wherever it was released, the drag is over.
         if self.column_drag.is_some() && ui.input(|i| i.pointer.primary_released()) {
             self.column_drag = None;
@@ -6666,6 +6451,11 @@ impl OperonApp {
 
     /// The central workspace shares one navigation model for sessions and files.
     fn ui_tab_workspace(&mut self, ui: &mut egui::Ui) {
+        if !self.session_library_open
+            || ui.input(|input| input.pointer.any_pressed() || input.key_pressed(egui::Key::Escape))
+        {
+            self.pending_history_open = None;
+        }
         if !self.workspace_initialized {
             self.workspace_initialized = true;
             self.select_default_terminal_session();
@@ -6760,7 +6550,12 @@ impl OperonApp {
         left.shrink_clip_rect(sidebar);
         left.heading(tr("プロジェクト"));
         if left.button(tr("新しいセッション")).clicked() {
-            self.open_new_session();
+            self.pending_history_open = None;
+            if let Some(project) = self.selected_project {
+                self.open_project_session_setup(project);
+            } else {
+                self.open_new_session();
+            }
         }
         if left.button(tr("履歴")).clicked() {
             self.session_library_open = !self.session_library_open;
@@ -6771,10 +6566,17 @@ impl OperonApp {
             .show(&mut left, |ui| {
                 for project in projects {
                     if ui
-                        .selectable_label(self.selected_project == Some(project.id), &project.name)
+                        .add(
+                            egui::Button::new(&project.name)
+                                .selected(self.selected_project == Some(project.id))
+                                .min_size(egui::vec2(0.0, CONTROL_HEIGHT))
+                                .truncate(),
+                        )
                         .on_hover_text(project.path.display().to_string())
                         .clicked()
                     {
+                        self.pending_history_open = None;
+                        self.session_library_open = false;
                         self.selected_project = Some(project.id);
                         let ids: Vec<_> = self
                             .store
@@ -6805,7 +6607,6 @@ impl OperonApp {
             }
             self.ui_history_cli_section(&mut body);
             self.ui_sessions(&mut body);
-            self.ui_terminal_session_tabs(&mut body);
             self.ui_dock_drop(ui, area, palette);
             return;
         }

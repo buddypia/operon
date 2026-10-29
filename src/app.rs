@@ -390,6 +390,8 @@ pub(crate) struct OperonApp {
     pub(crate) git_view: GitView,
     pub(crate) session_view: SessionView,
     pub(crate) session_library_open: bool,
+    /// A history title waits for a possible rename double click before opening.
+    pub(crate) pending_history_open: Option<(Uuid, f64)>,
     /// Which status groups the session list is narrowed to, indexed by
     /// `SessionStatusGroup::index`. All false means no narrowing at all, which
     /// is why it is a set of independent toggles and not a selected index.
@@ -938,6 +940,7 @@ impl OperonApp {
             git_view: GitView::Changes,
             session_view: SessionView::List,
             session_library_open: false,
+            pending_history_open: None,
             status_filter: [false; 4],
             git_selected_file: None,
             selected_file: None,
@@ -5850,6 +5853,10 @@ impl OperonApp {
     /// opens, so the tile and the chip it lands on count the same thing.
     pub(crate) fn show_status_group(&mut self, group: SessionStatusGroup) {
         self.page = Page::Sessions;
+        self.session_library_open = true;
+        self.session_view = SessionView::List;
+        self.search.clear();
+        self.pending_history_open = None;
         self.status_filter = [false; 4];
         self.status_filter[group.index()] = true;
         self.forget_pending_session_close();
@@ -5871,6 +5878,7 @@ impl OperonApp {
     /// removal only happens on the confirm click.
     fn forget_pending_session_close(&mut self) {
         self.pending_session_close = None;
+        self.pending_history_open = None;
     }
 
     /// The state to show for a session, including the live agent activity the
@@ -6366,6 +6374,7 @@ impl OperonApp {
         {
             return;
         }
+        self.pending_history_open = None;
         self.select_session(session_id);
         self.page = Page::Sessions;
         self.session_library_open = false;
@@ -6743,6 +6752,10 @@ impl eframe::App for OperonApp {
             ctx.request_repaint_after(remaining);
         }
         self.ui_topbar(ctx);
+        // A delayed history click belongs to the page where it was made.
+        if self.page != Page::Sessions {
+            self.pending_history_open = None;
+        }
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
             // Two screens hold something that is as wide as it is and take the
