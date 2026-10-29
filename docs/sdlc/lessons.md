@@ -1450,4 +1450,5 @@ rename, stop, remove, identity, ordering and bounds guarantees.
 checks the Home entry and actual rendered filter controls;
 `history_renders_each_session_once_in_the_chosen_view` checks List/Grid rendering.
 The migrated CI cases retain pointer actions and geometry checks in their new
-history or central-tab home (change 233).
+history or central-tab home (change 233). Both history guards were watched failing
+in change 233's bounded mutation sweep.

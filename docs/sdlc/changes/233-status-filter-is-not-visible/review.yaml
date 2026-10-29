@@ -1,6 +1,6 @@
-# Independent rust_review read the final staged index and confirmed the
-# stronger compact-sidebar height guard after the mutation survivor was closed.
-digest: "65d730dd42224cdf"
-rounds: 1
+# Independent rust_review approved this incremental policy correction.
+# The original workspace/history behavior is recorded by the preceding commit.
+digest: "dad046a54f1eff7d"
+rounds: 2
 verdicts:
   rust-reviewer: "approve 0 0"
