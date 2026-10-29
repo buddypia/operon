@@ -36387,6 +36387,12 @@ pub(crate) fn test_remove_project_cleans_session_selection_and_path_cache() {
     app.remove_project(project.id);
 
     assert_eq!(app.selected_session, None);
+    assert!(
+        app.workspace.groups.is_empty(),
+        "deleted project cannot retain visible tabs"
+    );
+    assert_eq!(app.workspace_project, None);
+    assert!(!app.project_workspaces.contains_key(&project.id));
     assert!(app.resolved_paths.is_empty());
     assert!(app.unresolved_paths.is_empty());
     assert_eq!(app.resolved_paths_session, None);
@@ -53386,10 +53392,15 @@ pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
         }
     }
     let painted = column_painted(&mut app, &egui::Context::default());
-    let history_right = app.dock.rects(app.dock_area.unwrap(), None).center.right();
+    let history = app.dock.rects(app.dock_area.unwrap(), None).center;
+    let history_right = history.right();
     let (count, _) = painted
-        .in_column("1 件")
-        .expect("長い名前のプロジェクトの「1 件」が描かれていません");
+        .texts
+        .iter()
+        .filter(|(text, rect, _)| text == "1 件" && rect.left() >= history.left())
+        .map(|(_, rect, size)| (*rect, *size))
+        .min_by(|a, b| a.0.left().total_cmp(&b.0.left()))
+        .expect("長い名前のプロジェクトの「1 件」が履歴に描かれていません");
     assert!(
         count.max.x <= history_right + 0.5,
         "「1 件」が列の右端を越えています ({} > {})",
@@ -53401,6 +53412,7 @@ pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
         .iter()
         .filter(|(text, rect, _)| {
             text == ICON_ADD
+                && rect.left() >= history.left()
                 && (rect.center().y - count.center().y).abs() < CONTROL_HEIGHT_SMALL / 2.0
         })
         .map(|(_, rect, _)| *rect)
@@ -53418,7 +53430,7 @@ pub(crate) fn a_long_project_name_keeps_its_count_and_add_inside_its_block() {
     let name = painted
         .texts
         .iter()
-        .filter(|(text, rect, _)| text.starts_with("rrrr") && rect.min.x >= SIDEBAR_MIN_W)
+        .filter(|(text, rect, _)| text.starts_with("rrrr") && rect.min.x >= history.left())
         .map(|(_, rect, _)| *rect)
         .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
         .expect("長い名前が描かれていません");
@@ -62605,5 +62617,420 @@ fn history_pending_title_is_cancelled_when_the_app_leaves_sessions() {
         );
         assert_eq!(app.selected_session, Some(second));
     }
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn workspace_click_position(app: &mut OperonApp, ctx: &egui::Context, pos: egui::Pos2) {
+    for pressed in [true, false] {
+        workspace_pointer_frame(
+            app,
+            ctx,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+    }
+}
+
+fn workspace_choose_project(app: &mut OperonApp, ctx: &egui::Context, name: &str) {
+    workspace_pointer_frame(app, ctx, Vec::new());
+    let output = workspace_pointer_frame(app, ctx, Vec::new());
+    let pos = drawn_text_rects(&output, |text| text == name)
+        .into_iter()
+        .min_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("left project row")
+        .center();
+    workspace_click_position(app, ctx, pos);
+}
+
+#[test]
+fn workspace_project_picker_keeps_saved_order_counts_and_per_project_launch() {
+    let root = temporary_directory("workspace-project-controls");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    let populated = app.store.projects[0].id;
+    app.store.sessions[1].status = SessionStatus::Exited;
+    app.select_session(app.store.sessions[0].id);
+    app.session_library_open = false;
+    app.show_session_inspector = false;
+    app.session_arrangement.projects = vec![empty, populated];
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let row = |name: &str| {
+        drawn_text_rects(&output, |text| text == name)
+            .into_iter()
+            .min_by(|a, b| a.left().total_cmp(&b.left()))
+            .unwrap()
+    };
+    assert!(
+        row("q").top() < row("p").top(),
+        "project picker must retain saved order"
+    );
+    let count = drawn_text_rects(&output, |text| text == "0 件")
+        .into_iter()
+        .find(|r| r.left() < 400.0 && (r.center().y - row("q").center().y).abs() < CONTROL_HEIGHT)
+        .expect("empty project retains its visible count");
+    let plus = drawn_text_rects(&output, |text| text == ICON_ADD)
+        .into_iter()
+        .find(|r| {
+            r.left() < 400.0 && (r.center().y - count.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .expect("project-local launch remains beside its count");
+    let live_count = drawn_text_rects(&output, |text| text == "1 件")
+        .into_iter()
+        .find(|r| r.left() < 400.0 && (r.center().y - row("p").center().y).abs() < CONTROL_HEIGHT)
+        .expect("project count excludes finished history");
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(live_count.center())],
+    );
+    let hovered = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        drawn_text_rect(&hovered, |text| text == "起動中のセッション").is_some(),
+        "the visible count must explain that it represents live sessions"
+    );
+    assert!(
+        matches!(app.workspace.active(), Some(WorkspaceTab::Session(_))),
+        "launcher test starts over an active terminal"
+    );
+    workspace_click_position(&mut app, &ctx, plus.center());
+
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.selected_project, Some(empty));
+    assert_eq!(
+        app.workspace_project,
+        Some(empty),
+        "project-local launch must select the same central workspace"
+    );
+    for _ in 0..3 {
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        assert!(app.launch_sheet_open);
+        assert_eq!(
+            app.selected_project().map(|p| p.id),
+            Some(empty),
+            "the launcher must retain the chosen project after later workspace frames"
+        );
+    }
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_picker_initializes_only_live_sessions_and_keeps_focus() {
+    let root = temporary_directory("workspace-live-tabs");
+    let (mut app, first, archived) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.store.sessions[1].status = SessionStatus::Exited;
+    let mut starting = app.store.sessions[0].clone();
+    starting.id = Uuid::new_v4();
+    starting.status = SessionStatus::Starting;
+    starting.name = "starting".into();
+    let live = starting.id;
+    app.store.sessions.push(starting);
+    let mut unknown = app.store.sessions[0].clone();
+    unknown.id = Uuid::new_v4();
+    unknown.status = SessionStatus::Unknown;
+    unknown.name = "unknown".into();
+    let unknown_id = unknown.id;
+    app.store.sessions.push(unknown);
+
+    let mut queued = app.store.sessions[0].clone();
+    queued.id = Uuid::new_v4();
+    queued.status = SessionStatus::Queued;
+    let queued_id = queued.id;
+    app.store.sessions.push(queued);
+    app.selected_session = Some(live);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let tabs = app
+        .workspace
+        .groups
+        .iter()
+        .flat_map(|g| g.tabs.iter())
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(
+        tabs.contains(&WorkspaceTab::Session(live)),
+        "every live session is a central tab on entry"
+    );
+    assert!(tabs.contains(&WorkspaceTab::Session(first)));
+    assert!(
+        tabs.contains(&WorkspaceTab::Session(unknown_id)),
+        "unknown-but-live session remains available"
+    );
+    assert!(!tabs.contains(&WorkspaceTab::Session(archived)));
+    assert!(!tabs.contains(&WorkspaceTab::Session(queued_id)));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(live)));
+    workspace_choose_project(&mut app, &ctx, "p");
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Session(live)),
+        "repeat selection preserves focused tab"
+    );
+    let tabs = app
+        .workspace
+        .groups
+        .iter()
+        .flat_map(|g| g.tabs.iter())
+        .collect::<Vec<_>>();
+    assert!(
+        !tabs.contains(&&WorkspaceTab::Session(archived)),
+        "project click must not reopen archived history"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_picker_roundtrip_preserves_dirty_file_split_and_closed_tabs() {
+    let (mut app, project, root) =
+        app_with_open_document("workspace-project-roundtrip", "original\n");
+    app.page = Page::Sessions;
+    app.show_session_inspector = false;
+    let first = Uuid::new_v4();
+    let mut session = test_session(first, SessionStatus::Active);
+    session.project_id = project.id;
+    session.name = "first-live".into();
+    app.store.sessions.push(session.clone());
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        name: "other-project".into(),
+        path: root.join("other"),
+        added_at: now(),
+    });
+    session.id = Uuid::new_v4();
+    session.project_id = other;
+    session.name = "other-live".into();
+    let second = session.id;
+    app.store.sessions.push(session);
+    app.select_session(first);
+    app.open_document(&project, app.open_documents[0].path.clone());
+    let doc = app.open_documents[0].id();
+    app.open_documents[0].buffer = "unsaved draft".into();
+    let group = app.workspace.groups[0].id;
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 820.0));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Document(doc.clone()),
+        group,
+        PaneDrop::Bottom,
+        area
+    ));
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let saved = app.workspace.clone();
+    workspace_choose_project(&mut app, &ctx, "other-project");
+    assert_eq!(app.selected_project, Some(other));
+    assert!(
+        app.workspace
+            .groups
+            .iter()
+            .all(|g| g.tabs.iter().all(|t| *t == WorkspaceTab::Session(second))),
+        "other project must have its own central tabs"
+    );
+    workspace_choose_project(&mut app, &ctx, &project.name);
+    assert_eq!(
+        app.workspace, saved,
+        "project roundtrip preserves focused document and split layout"
+    );
+    assert_eq!(app.active_document, Some(doc.clone()));
+    assert_eq!(app.open_documents[0].buffer, "unsaved draft");
+    app.close_workspace_tab(&WorkspaceTab::Session(first));
+    workspace_choose_project(&mut app, &ctx, "other-project");
+    workspace_choose_project(&mut app, &ctx, &project.name);
+    assert!(
+        !app.workspace
+            .groups
+            .iter()
+            .any(|g| g.tabs.contains(&WorkspaceTab::Session(first))),
+        "closed live tabs must stay closed on project roundtrip"
+    );
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Active);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_picker_follows_session_and_document_focus() {
+    let (mut app, project, root) = app_with_open_document("workspace-project-focus", "contents\n");
+    app.page = Page::Sessions;
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        name: "other".into(),
+        path: root.join("other"),
+        added_at: now(),
+    });
+    let id = Uuid::new_v4();
+    let mut session = test_session(id, SessionStatus::Active);
+    session.project_id = other;
+    app.store.sessions.push(session);
+    let document = app.open_documents[0].id();
+    app.open_document(&project, document.path.clone());
+    app.activate_workspace_tab(&WorkspaceTab::Session(id));
+    assert_eq!(
+        app.selected_project,
+        Some(other),
+        "focused session must select its own project"
+    );
+    app.activate_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    assert_eq!(
+        app.selected_project,
+        Some(project.id),
+        "focused document must select its own project"
+    );
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Document(document))
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_picker_empty_project_has_no_foreign_terminal() {
+    let root = temporary_directory("workspace-empty-project");
+    let (mut app, empty) = app_with_an_empty_second_project(&root);
+    app.session_library_open = false;
+    app.show_session_inspector = false;
+    let first = app.store.sessions[0].id;
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    workspace_choose_project(&mut app, &ctx, "q");
+    assert_eq!(app.selected_project, Some(empty));
+    assert!(
+        app.workspace.groups.is_empty(),
+        "empty project cannot display another project's terminal"
+    );
+    assert_eq!(app.selected_session, None);
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn workspace_drag_positions(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    from: egui::Pos2,
+    to: egui::Pos2,
+) {
+    workspace_pointer_frame(
+        app,
+        ctx,
+        vec![
+            egui::Event::PointerMoved(from),
+            column_181_button(from, true),
+        ],
+    );
+    for step in 1..=4 {
+        workspace_pointer_frame(
+            app,
+            ctx,
+            vec![egui::Event::PointerMoved(
+                from + (to - from) * (step as f32 / 4.0),
+            )],
+        );
+    }
+    workspace_pointer_frame(app, ctx, vec![column_181_button(to, false)]);
+}
+
+#[test]
+fn workspace_project_picker_drag_saves_order_in_the_real_sidebar() {
+    let mut column = ArrangedColumn::new("workspace-project-real-drag");
+    column.app.page = Page::Sessions;
+    column.app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut column.app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut column.app, &ctx, Vec::new());
+    let rect = |name: &str| {
+        drawn_text_rects(&out, |text| text == name)
+            .into_iter()
+            .min_by(|a, b| a.left().total_cmp(&b.left()))
+            .unwrap()
+    };
+    let from = rect("beta").center();
+    let to = rect("alpha").left_top() - egui::vec2(0.0, 5.0);
+    workspace_drag_positions(&mut column.app, &ctx, from, to);
+    assert_eq!(
+        column.app.session_arrangement.projects,
+        vec![column.beta, column.alpha],
+        "sidebar drag must reach the existing arrangement writer"
+    );
+    assert_eq!(
+        load_session_arrangement(&column.data_file).projects,
+        vec![column.beta, column.alpha]
+    );
+}
+
+#[test]
+fn workspace_project_picker_does_not_consume_history_session_drag_release() {
+    let mut column = ArrangedColumn::new("workspace-history-drag-release");
+    column.app.page = Page::Sessions;
+    column.app.session_library_open = true;
+    column.app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut column.app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut column.app, &ctx, Vec::new());
+    let texts = text_positions(&out);
+    let from = column_181_grip(&texts, "一番目");
+    let to = column_181_at(&texts, "三番目") - egui::vec2(0.0, 4.0);
+    workspace_drag_positions(&mut column.app, &ctx, from, to);
+    assert_eq!(
+        column.app.session_arrangement.sessions,
+        vec![column.first, column.third, column.second],
+        "left project navigation must not consume the central history drag's release"
+    );
+}
+
+#[test]
+fn workspace_project_picker_history_does_not_mark_a_hidden_terminal_read() {
+    let root = temporary_directory("workspace-hidden-history-unread");
+    let (mut app, other) = app_with_an_empty_second_project(&root);
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+    app.show_session_inspector = false;
+    let first = app.store.sessions[0].id;
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    app.page = Page::Projects;
+    app.select_project(Some(other));
+    assert_eq!(app.selected_session, None);
+    app.unread_sessions.insert(first);
+    app.page = Page::Sessions;
+    app.session_library_open = true;
+    for _ in 0..3 {
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        assert!(!app.is_session_on_screen(first));
+        assert!(
+            app.is_session_unread(first),
+            "History is visible; its hidden workspace must not clear unread state"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_picker_launcher_handler_retains_target_on_the_next_frame() {
+    let root = temporary_directory("workspace-launch-handler-target");
+    let (mut app, other) = app_with_an_empty_second_project(&root);
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+    app.show_session_inspector = false;
+    app.select_session(app.store.sessions[0].id);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    app.open_project_session_setup(other);
+    assert_eq!(app.selected_project().map(|p| p.id), Some(other));
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert_eq!(
+        app.selected_project().map(|p| p.id),
+        Some(other),
+        "workspace rendering cannot replace the launch target"
+    );
+    assert_eq!(app.workspace_project, Some(other));
     fs::remove_dir_all(root).unwrap();
 }
