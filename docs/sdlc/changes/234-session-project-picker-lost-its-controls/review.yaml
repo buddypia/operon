@@ -1,5 +1,6 @@
+# Aggregate landing binding against main recomposes the approved source and post-CI correction; no code changes or new finding cycle.
 # Round 2 post-CI integration re-verification preserves the original review history.
-digest: "990e2dc0ec3f918f"
+digest: "dd23c8b00361ef52"
 rounds: 2
 verdicts:
   rust-reviewer: "approve 0 0"
