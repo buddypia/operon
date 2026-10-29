@@ -40,7 +40,7 @@
 
 state:
   route: "bugfix"
-  stage: "deploy"
+  stage: "maintain"
   status: "done"
   attempts: "2 3"
   questions: "1 7"
@@ -49,14 +49,14 @@ state:
   readiness: "conditional"
   screen: "approved"
 
-resume: "Require exact-head CI for the aggregate-bound review record, then merge and verify the installed project-scoped workspace."
+resume: "Closed after installed project-switch and central file-tab verification; no further implementation is required."
 
 contract:
   three-gates: "machine passed final q.fast and corrected CI four plus project nine tests13/13; preceding workspace28/28 and history28/28 passed; source restored after bounded sweeps"
   bands: "machine passed check-bands.sh with four warn-only metrics and no validation changes"
-  full-ci: "machine waived pre-push execution only: exact branch head must pass CI via scripts/ci-verified.sh before main merge"
-  release-binary: "machine waived pre-merge execution only because ship runs from main; installed-app remains mandatory below"
-  installed-app: "human pending main-checkout package, authorized replacement/restart and installed-build CURRENT"
+  full-ci: "machine passed CI40925516308 on source8db6593 and CI40926879569 on aggregate-reviewed head ee7f49e; ci-verified passed before main merge7e77767"
+  release-binary: "machine passed package-macos.sh on main7e77767, candidate and installed strict codesign verification, and check-installed-build.sh CURRENT including latest release source8db6593"
+  installed-app: "human passed authorized quit/swap/restart and Home launch; actual Sessions file opens centrally, empty-project switch removes foreign content, project-local plus opens setup without launching, return restores the same file tab and Preview; installed build CURRENT"
   project-navigation: "human passed independent native A-to-B-to-A inspection with saved ordering, live counts, project-local launch controls, focused tabs, dirty buffer and exact split-layout restoration"
   guards-verified-by-mutation: "human passed initial10/10 plus post-CI supplemental3/3 bounded mutations caught by behavioral assertions including wording, focus and removal cleanup; exact source restoration verified"
 
