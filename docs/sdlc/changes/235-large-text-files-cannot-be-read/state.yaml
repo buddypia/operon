@@ -2,24 +2,24 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
-  attempts: "0 3"
-  questions: "0 7"
+  stage: "test"
+  status: "reviewing"
+  attempts: "1 3"
+  questions: "1 7"
   autonomy: "supervised"
   risk: "medium"
   readiness: "go"
   screen: "approved"
 
-resume: "Build per plan.md order of work, tests first."
+resume: "Get the person's approval line for spec.md (the spec category is demoted), push, wait for CI, then land and package."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
   bands: "machine pending bash scripts/check-bands.sh"
-  named-tests: "machine pending cargo test --locked for the seven new and two updated tests in spec.md"
+  named-tests: "machine passed seven new and two updated tests plus 214 editor, document, file and policy tests locally"
   release-binary: "machine pending touches src/ beyond src/tests.rs, so /Applications/Operon.app goes stale; ends with bash scripts/package-macos.sh and the ship swap"
   installed-app: "human pending a 748 KiB HTML file opened from the Sessions Files tab shows numbered, coloured, read-only source and scrolls to its end"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 10/10 caught, including the row-height and two claim mutations; source restored"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
