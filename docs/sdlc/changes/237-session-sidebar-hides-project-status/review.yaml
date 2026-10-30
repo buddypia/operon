@@ -1,8 +1,8 @@
 # Change 237 review. rust-reviewer read the staged diff: no per-frame I/O, no
 # new panic site, failed fold save reaches the person as the existing notice,
 # arrangement field is additive with a serde default and an old-file test.
-digest: "65ef0bb58a040157"
-rounds: 2
+digest: "a73518ce40a50302"
+rounds: 3
 carried:
   - rust-reviewer/1 · ordered and live are rebuilt every frame from all sessions; queued sessions walk dependencies per frame; could be cached on session change
     person: "セッションが数百件・順番待ちが多いと、左の一覧の描画で少し CPU を使います。普段の件数では体感できず、対応は不要です。"

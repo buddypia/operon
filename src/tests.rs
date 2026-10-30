@@ -60841,6 +60841,63 @@ pub(crate) fn pane_drop_hint_names_the_zone() {
 }
 
 #[test]
+/// Change 236: a truncated label already carries its full text as egui's own
+/// tooltip, so a session tab hovered names its title once, not twice.
+pub(crate) fn a_truncated_session_tab_names_its_title_once_on_hover() {
+    let root = temporary_directory("tab-tooltip");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    let long = "a session title far too long for the hundred and sixty pixel tab";
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == second)
+        .unwrap()
+        .name = long.to_owned();
+    app.show_session_inspector = false;
+    app.select_session(second);
+    app.select_session(first);
+    let context = egui::Context::default();
+    context.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let frame = |app: &mut OperonApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 820.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        text_positions(&context.run(input, |ctx| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        }))
+    };
+    let count = |texts: &[(String, egui::Pos2)]| texts.iter().filter(|(t, _)| t == long).count();
+    frame(&mut app, Vec::new());
+    let resting = frame(&mut app, Vec::new());
+    let tab = resting
+        .iter()
+        .filter(|(text, _)| text.starts_with("a session title"))
+        .map(|(_, pos)| *pos + egui::vec2(4.0, 4.0))
+        .min_by(|a, b| a.y.total_cmp(&b.y))
+        .expect("the central strip draws the long session tab");
+    // A tooltip is measured on its first frame and painted from the second.
+    frame(&mut app, vec![egui::Event::PointerMoved(tab)]);
+    let hovered = frame(&mut app, vec![egui::Event::PointerMoved(tab)]);
+    assert_eq!(
+        count(&hovered),
+        count(&resting) + 1,
+        "the hover adds the full title exactly once: {:?}",
+        hovered.iter().map(|(text, _)| text).collect::<Vec<_>>()
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 /// The whole gesture through egui: a central session tab pressed, carried
 /// to the right edge of the terminal, says where it will land, and released
 /// there it sits to the right of the terminal it was dropped on.
