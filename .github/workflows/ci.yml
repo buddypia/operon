@@ -28,6 +28,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+# llama-cpp-sys-2 runs CMake on bundled llama.cpp, whose optional cpp-httplib
+# calls find_package(OpenSSL). Operon never uses llama.cpp's HTTP transport,
+# and caching a Homebrew Cellar path (/opt/homebrew/Cellar/openssl@4/<ver>)
+# breaks incremental builds whenever the macOS runner image bumps OpenSSL.
+env:
+  CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: ON
+
 jobs:
   checks:
     name: fmt / clippy / bands
@@ -39,6 +46,10 @@ jobs:
           toolchain: 1.88.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.ImageOS }}-${{ env.ImageVersion }}-no-openssl
+      - name: Reset restored native CMake caches
+        run: bash scripts/seed-target.sh --reset-only .
       - run: cargo fmt --check
       - run: cargo clippy --locked -- -D warnings
       - name: Hook scripts are executable
@@ -83,6 +94,10 @@ jobs:
         with:
           toolchain: 1.88.0
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.ImageOS }}-${{ env.ImageVersion }}-no-openssl
+      - name: Reset restored native CMake caches
+        run: bash scripts/seed-target.sh --reset-only .
       - name: Full locked test suite
         run: cargo test --locked
 
@@ -97,5 +112,9 @@ jobs:
           toolchain: 1.88.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.ImageOS }}-${{ env.ImageVersion }}-no-openssl
+      - name: Reset restored native CMake caches
+        run: bash scripts/seed-target.sh --reset-only .
       - name: Package macOS app
         run: bash scripts/package-macos.sh

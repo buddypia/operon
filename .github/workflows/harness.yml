@@ -45,6 +45,9 @@ on:
       - '.github/workflows/harness.yml'
   workflow_dispatch:
 
+env:
+  CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: ON
+
 jobs:
   evals:
     name: eval suite
@@ -58,6 +61,10 @@ jobs:
         with:
           toolchain: 1.88.0
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.ImageOS }}-${{ env.ImageVersion }}-no-openssl
+      - name: Reset restored native CMake caches
+        run: bash scripts/seed-target.sh --reset-only .
 
       - name: Is an agent available
         id: agent

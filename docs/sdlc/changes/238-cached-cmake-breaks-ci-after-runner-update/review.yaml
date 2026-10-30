@@ -1,0 +1,15 @@
+# Both rust-reviewer and subprocess-safety-reviewer inspected the staged diff
+# (digest e12ea01d149021ec) and approved with 0 Important findings and 0 nits.
+#
+# - rust-reviewer: verified CMake environment variable forwarding via llama-cpp-sys-2
+#   and cmake crate (CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON), per-profile CMakeCache.txt
+#   reset in scripts/seed-target.sh, lesson 105 admission, and 9/9 killed mutants.
+# - subprocess-safety-reviewer: verified budgeted subprocess execution via
+#   run_command_with_timeout and forget_inherited_repository in src/tests.rs,
+#   argument quoting and file/parent symlink traversal guards in scripts/seed-target.sh,
+#   and CI workflow step ordering in ci.yml and harness.yml.
+digest: "e12ea01d149021ec"
+rounds: 1
+verdicts:
+  rust-reviewer: "approve 0 0"
+  subprocess-safety-reviewer: "approve 0 0"

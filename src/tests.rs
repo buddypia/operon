@@ -63729,3 +63729,235 @@ fn workspace_session_tab_shows_its_status_glyph() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_cmake() {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for (rel, expected_jobs) in [
+        (
+            ".github/workflows/ci.yml",
+            &["checks", "test", "package"][..],
+        ),
+        (".github/workflows/harness.yml", &["evals"][..]),
+    ] {
+        let workflow = fs::read_to_string(repo_root.join(rel))
+            .unwrap_or_else(|err| panic!("{rel} を読めません: {err}"));
+        assert!(
+            workflow.contains("CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: ON"),
+            "{rel} は不要な OpenSSL 検出を無効化する CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: ON を宣言する必要があります"
+        );
+        let cache_count = workflow.matches("uses: Swatinem/rust-cache@v2").count();
+        assert_eq!(
+            cache_count,
+            expected_jobs.len(),
+            "{rel} の Swatinem/rust-cache@v2 ステップ数が想定と一致しません"
+        );
+        let image_key_count = workflow
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                trimmed.starts_with("key:")
+                    && trimmed.contains("${{ env.ImageOS }}-${{ env.ImageVersion }}")
+            })
+            .count();
+        assert_eq!(
+            image_key_count,
+            expected_jobs.len(),
+            "{rel} のすべての rust-cache ステップはランナーイメージ更新でキャッシュを分離するため key に ImageOS と ImageVersion を含める必要があります"
+        );
+        let reset_count = workflow
+            .matches("bash scripts/seed-target.sh --reset-only .")
+            .count();
+        assert_eq!(
+            reset_count,
+            expected_jobs.len(),
+            "{rel} のすべての rust-cache ステップ直後に bash scripts/seed-target.sh --reset-only . を実行する必要があります"
+        );
+        for segment in workflow.split("uses: Swatinem/rust-cache@v2").skip(1) {
+            let key_pos = segment
+                .find("${{ env.ImageOS }}-${{ env.ImageVersion }}")
+                .unwrap_or_else(|| {
+                    panic!("{rel} の rust-cache ステップに ImageOS/ImageVersion key がありません")
+                });
+            let reset_pos = segment
+                .find("bash scripts/seed-target.sh --reset-only .")
+                .unwrap_or_else(|| panic!("{rel} の rust-cache ステップ後に seed-target.sh --reset-only . がありません"));
+            let build_pos = ["cargo ", "scripts/package-macos.sh", "scripts/run-evals.sh"]
+                .iter()
+                .filter_map(|needle| segment.find(needle))
+                .min()
+                .unwrap_or_else(|| {
+                    panic!("{rel} の rust-cache ステップ後にビルドまたは実行コマンドがありません")
+                });
+            assert!(
+                key_pos < reset_pos && reset_pos < build_pos,
+                "{rel} では rust-cache の key 設定 → seed-target.sh --reset-only . → ビルド実行の順序である必要があります"
+            );
+        }
+    }
+
+    let mut cmake_check = Command::new("cmake");
+    cmake_check.arg("--version");
+    forget_inherited_repository(&mut cmake_check);
+    let cmake_version = run_command_with_timeout(&mut cmake_check, Duration::from_secs(10))
+        .expect("cmake がテスト環境に存在する必要があります");
+    assert!(
+        cmake_version.status.success(),
+        "cmake --version が成功する必要があります"
+    );
+
+    let root = temporary_directory("ci-cmake-runner-drift");
+    let cmake_src = root.join("cmake-src");
+    let cellar_old = root.join("cellar/openssl@4/4.0.3");
+    let worktree = root.join("worktree");
+    let debug_build = worktree.join("target/debug/build/llama-cpp-sys-2-123/out/build");
+    let release_build = worktree.join("target/release/build/llama-cpp-sys-2-123/out/build");
+    let external_build = root.join("external-build");
+    let symlink_parent = worktree.join("target/debug/build/symlinked-crate/out");
+    let symlink_file_build = worktree.join("target/debug/build/symlinked-file-crate/out/build");
+
+    fs::create_dir_all(&cmake_src).unwrap();
+    fs::create_dir_all(cellar_old.join("include/openssl")).unwrap();
+    fs::create_dir_all(cellar_old.join("lib")).unwrap();
+    fs::create_dir_all(&debug_build).unwrap();
+    fs::create_dir_all(&release_build).unwrap();
+    fs::create_dir_all(&external_build).unwrap();
+    fs::create_dir_all(&symlink_parent).unwrap();
+    fs::create_dir_all(&symlink_file_build).unwrap();
+
+    fs::write(
+        cmake_src.join("probe.c"),
+        "int operon_probe(void) { return 0; }\n",
+    )
+    .unwrap();
+    fs::write(
+        cmake_src.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.14)\n\
+         project(operon_cached_openssl C)\n\
+         find_package(OpenSSL)\n\
+         add_library(httplib_probe STATIC probe.c)\n\
+         if(OPENSSL_FOUND)\n\
+           target_link_libraries(httplib_probe PUBLIC OpenSSL::SSL OpenSSL::Crypto)\n\
+         endif()\n",
+    )
+    .unwrap();
+    fs::write(
+        cellar_old.join("include/openssl/opensslv.h"),
+        "#define OPENSSL_VERSION_NUMBER 0x40000030L\n\
+         #define OPENSSL_VERSION_TEXT \"OpenSSL 4.0.3 1 Jan 2026\"\n\
+         #define OPENSSL_VERSION_MAJOR 4\n\
+         #define OPENSSL_VERSION_MINOR 0\n\
+         #define OPENSSL_VERSION_PATCH 3\n",
+    )
+    .unwrap();
+    fs::write(cellar_old.join("lib/libssl.dylib"), "fake").unwrap();
+    fs::write(cellar_old.join("lib/libcrypto.dylib"), "fake").unwrap();
+    fs::write(external_build.join("CMakeCache.txt"), "external=true\n").unwrap();
+    std::os::unix::fs::symlink(&external_build, symlink_parent.join("build")).unwrap();
+    std::os::unix::fs::symlink(
+        external_build.join("CMakeCache.txt"),
+        symlink_file_build.join("CMakeCache.txt"),
+    )
+    .unwrap();
+
+    let run_cmake = |build_dir: &Path, extra_args: &[&str]| -> (bool, String) {
+        let mut cmd = Command::new("cmake");
+        cmd.arg("-S").arg(&cmake_src).arg("-B").arg(build_dir);
+        for arg in extra_args {
+            cmd.arg(arg);
+        }
+        forget_inherited_repository(&mut cmd);
+        let output = run_command_with_timeout(&mut cmd, Duration::from_secs(60))
+            .expect("cmake の実行に成功する必要があります");
+        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+        combined.push_str(&String::from_utf8_lossy(&output.stderr));
+        (output.status.success(), combined)
+    };
+
+    let openssl_root_arg = format!("-DOPENSSL_ROOT_DIR={}", cellar_old.display());
+    let include_arg = format!(
+        "-DOPENSSL_INCLUDE_DIR={}",
+        cellar_old.join("include").display()
+    );
+    let ssl_arg = format!(
+        "-DOPENSSL_SSL_LIBRARY={}",
+        cellar_old.join("lib/libssl.dylib").display()
+    );
+    let crypto_arg = format!(
+        "-DOPENSSL_CRYPTO_LIBRARY={}",
+        cellar_old.join("lib/libcrypto.dylib").display()
+    );
+    for build_dir in [&debug_build, &release_build] {
+        let (ok, out) = run_cmake(
+            build_dir,
+            &[&openssl_root_arg, &include_arg, &ssl_arg, &crypto_arg],
+        );
+        assert!(ok, "初回 CMake 構成が失敗しました:\n{out}");
+        let cache_text = fs::read_to_string(build_dir.join("CMakeCache.txt")).unwrap();
+        assert!(
+            cache_text.contains("4.0.3/lib/libssl.dylib"),
+            "初回キャッシュに旧 OpenSSL パスが記録されている必要があります"
+        );
+    }
+
+    // Simulate runner image upgrade: Homebrew removes openssl@4/4.0.3.
+    fs::remove_dir_all(&cellar_old).unwrap();
+
+    // Without resetting CMakeCache.txt, a cached build fails with missing OpenSSL::SSL target.
+    let (stale_ok, stale_out) = run_cmake(&debug_build, &[]);
+    assert!(
+        !stale_ok && stale_out.contains("OpenSSL::SSL"),
+        "消失した OpenSSL パスを持つ CMakeCache.txt は OpenSSL::SSL 未検出で失敗する必要があります:\n{stale_out}"
+    );
+
+    let mut reset = Command::new("/bin/bash");
+    reset
+        .arg(repo_root.join("scripts/seed-target.sh"))
+        .arg("--reset-only")
+        .arg(&worktree);
+    forget_inherited_repository(&mut reset);
+    let reset_out = run_command_with_timeout(&mut reset, Duration::from_secs(30))
+        .expect("seed-target.sh --reset-only を実行できる必要があります");
+    assert!(
+        reset_out.status.success(),
+        "seed-target.sh --reset-only が失敗しました: {}",
+        String::from_utf8_lossy(&reset_out.stderr)
+    );
+
+    for build_dir in [&debug_build, &release_build] {
+        assert!(
+            !build_dir.join("CMakeCache.txt").exists(),
+            "{} の CMakeCache.txt が退避されていません",
+            build_dir.display()
+        );
+        let (reconfigured_ok, reconfigured_out) =
+            run_cmake(build_dir, &["-DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON"]);
+        assert!(
+            reconfigured_ok,
+            "退避後の再構成が失敗しました ({}):\n{reconfigured_out}",
+            build_dir.display()
+        );
+        let new_cache = fs::read_to_string(build_dir.join("CMakeCache.txt")).unwrap();
+        assert!(
+            !new_cache.contains("4.0.3/lib/libssl.dylib"),
+            "再構成後の CMakeCache.txt に旧 OpenSSL パスが残っています"
+        );
+    }
+
+    assert_eq!(
+        fs::read_to_string(external_build.join("CMakeCache.txt")).unwrap(),
+        "external=true\n",
+        "シンボリックリンク先の外部 CMakeCache.txt を書き換えてはなりません"
+    );
+    assert!(
+        symlink_file_build
+            .join("CMakeCache.txt")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "CMakeCache.txt 自体がシンボリックリンクの場合は移動せず保持する必要があります"
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}

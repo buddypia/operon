@@ -1,0 +1,22 @@
+state:
+  route: "bugfix"
+  stage: "maintain"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "After branch CI passes, merge fix/238-cached-cmake-breaks-ci-after-runner-update into main with --no-ff and clean up the worktree."
+
+decisions:
+  - "2026-10-30 · .github/workflows/ci.yml と .github/workflows/harness.yml の全ジョブで CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON を設定し、Swatinem/rust-cache@v2 の key に runner の ImageOS と ImageVersion を含め、キャッシュ復元直後に bash scripts/seed-target.sh --reset-only . で target/*/build/*/out/build/CMakeCache.txt を退避する — macOS ランナーイメージ 20261026.0455.2 で Homebrew の OpenSSL が 4.0.3 から 4.1.0 に更新された際、Rust ツールチェーン版数が 20261021.0445.8 と同一なため Swatinem/rust-cache@v2 のキャッシュキー v0-rust-test-Darwin-arm64-014c4b9f-a449688a が完全一致でヒットし、復元された CMakeCache.txt の /opt/homebrew/Cellar/openssl@4/4.0.3/lib/libssl.dylib が存在せず OpenSSL::SSL ターゲット未検出で cpp-httplib のリンク構成が失敗していたため"
+  - "2026-10-30 · scripts/seed-target.sh に --reset-only <root> モードを追加し、target/debug だけでなく target/*/build/*/out/build/CMakeCache.txt を退避対象にする — ローカル worktree の clone キャッシュ（change 230）と CI の復元キャッシュ（debug / release 両プロファイル）で同一の CMake キャッシュ退避ロジックを共有するため"
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine waived touches .github/workflows, scripts/seed-target.sh, docs/sdlc, and src/tests.rs only"
+  guards-verified-by-mutation: "human passed ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_cmake watched failing before fix and across all 9 mutants in mutations.py"
