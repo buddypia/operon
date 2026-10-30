@@ -2,3 +2,4 @@
 2026-10-30T05:54:58Z auto spec spec.md 97a507af3e20942b approve Independent evaluator after one revise round: preview coercion, viewer reset in every arm, 4-byte row table, bounded read, jump line all specified with tests.
 2026-10-30T05:54:58Z auto screen screen.md 5503cb6b26c71f18 approve Independent evaluator: existing pane in a new state with existing palette roles; over-8-MiB keeps the edit label consistent with the spec.
 2026-10-30T05:54:58Z auto plan plan.md 8fbe589cfdf371b9 approve Independent evaluator: plan matches the revised spec; no preview path for viewer documents; risks name their catching tests.
+2026-10-30T06:25:11Z person spec spec.md 97a507af3e20942b approve User approved the read-only viewer spec (128 KiB to 8 MiB, highlighted virtual rows, no save, large Markdown as source, over 8 MiB points to the default app) and asked to land and install it.

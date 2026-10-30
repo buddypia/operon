@@ -11,7 +11,7 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Get the person's approval line for spec.md (the spec category is demoted), push, wait for CI, then land and package."
+resume: "Wait for CI on the branch head, land on main, then package and swap the installed app (the person approved both)."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
