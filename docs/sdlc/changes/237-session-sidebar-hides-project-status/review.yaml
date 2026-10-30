@@ -1,0 +1,16 @@
+# Change 237 review. rust-reviewer read the staged diff: no per-frame I/O, no
+# new panic site, failed fold save reaches the person as the existing notice,
+# arrangement field is additive with a serde default and an old-file test.
+digest: "a73518ce40a50302"
+rounds: 3
+carried:
+  - rust-reviewer/1 · ordered and live are rebuilt every frame from all sessions; queued sessions walk dependencies per frame; could be cached on session change
+    person: "セッションが数百件・順番待ちが多いと、左の一覧の描画で少し CPU を使います。普段の件数では体感できず、対応は不要です。"
+  - rust-reviewer/2 · chip format! and session_list_title allocate a String per chip and per row each frame
+    person: "左の一覧が毎回文字列を作り直しています。表示や速度への影響は通常ありません。対応は不要です。"
+  - rust-reviewer/3 · per-row find over store.sessions and per-group filter over live are O(projects × live) per frame
+    person: "プロジェクトと起動中のセッションがとても多いと、左の一覧の描画が少し重くなる可能性があります。普段は対応不要です。"
+  - rust-reviewer/4 · toggle_project_fold prunes folded to current store.projects, so a toggle during a transient empty project list would drop other folds
+    person: "プロジェクト一覧の読み込み中にちょうど折りたたみを押すと、他のプロジェクトの折りたたみ状態が消えることがあります。起きても押し直せば戻ります。"
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"

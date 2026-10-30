@@ -1092,6 +1092,18 @@ impl SessionStatusGroup {
         }
     }
 
+    /// The mark a project's count for this group carries in the session
+    /// page's column: the glyph of the state that most often puts a session
+    /// there.
+    pub(crate) fn icon(self) -> &'static str {
+        match self {
+            SessionStatusGroup::NeedsYou => ICON_ATTENTION,
+            SessionStatusGroup::Free => ICON_STATUS_IDLE,
+            SessionStatusGroup::Busy => ICON_STATUS_RUNNING,
+            SessionStatusGroup::Finished => ICON_STATUS_DONE,
+        }
+    }
+
     pub(crate) fn tone(self) -> StatusTone {
         match self {
             SessionStatusGroup::NeedsYou => StatusTone::Attention,

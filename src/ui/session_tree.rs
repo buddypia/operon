@@ -115,6 +115,10 @@ pub(crate) struct SessionArrangement {
     pub(crate) projects: Vec<Uuid>,
     #[serde(default)]
     pub(crate) sessions: Vec<Uuid>,
+    /// Projects folded in the session page's column (change 237). A file
+    /// written before the field existed unfolds everything.
+    #[serde(default)]
+    pub(crate) folded: Vec<Uuid>,
 }
 
 pub(crate) fn session_arrangement_path(data_file: &Path) -> PathBuf {
