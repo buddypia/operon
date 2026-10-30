@@ -4400,8 +4400,7 @@ impl OperonApp {
                             ui.set_max_width(name_width);
                             ui.add(
                                 egui::Label::new(RichText::new(&project.name).strong()).truncate(),
-                            )
-                            .on_hover_text(&project.name);
+                            );
                         });
                         // Beside the name, ahead of the path: pinned right, the
                         // cards below widen the scroll area past the view and a
@@ -5438,7 +5437,6 @@ impl OperonApp {
                                     .sense(egui::Sense::drag()),
                                 )
                                 .on_hover_ui(|ui| {
-                                    ui.label(&project.name);
                                     ui.label(project.path.display().to_string());
                                     ui.label(tr("ドラッグで並べ替え"));
                                 });
@@ -6164,7 +6162,7 @@ impl OperonApp {
                         }
                     } else {
                         let goal = session_display_goal(&session.goal);
-                        ui.add(
+                        let heading = ui.add(
                             egui::Label::new(
                                 RichText::new(&title)
                                     .size(15.0)
@@ -6172,14 +6170,11 @@ impl OperonApp {
                                     .color(palette.text_strong),
                             )
                             .truncate(),
-                        )
-                        .on_hover_ui(|ui| {
-                            ui.label(if goal.trim().is_empty() {
-                                &title
-                            } else {
-                                &goal
-                            });
-                        });
+                        );
+                        // Truncated, the label shows the title itself.
+                        if !goal.trim().is_empty() && goal != title {
+                            heading.on_hover_text(goal);
+                        }
                         status_chip(ui, &status, 12.5, palette);
                         meta_separator(ui, palette);
                         ui.label(
@@ -6790,22 +6785,24 @@ impl OperonApp {
                                 .inner_margin(egui::Margin::symmetric(8, 4))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        let label = ui
-                                            .add_sized(
-                                                egui::vec2(160.0, CONTROL_HEIGHT_SMALL),
-                                                egui::Label::new(
-                                                    RichText::new(&title).size(12.5).color(
-                                                        if active {
-                                                            palette.text_strong
-                                                        } else {
-                                                            palette.text
-                                                        },
-                                                    ),
-                                                )
-                                                .truncate()
-                                                .sense(egui::Sense::click_and_drag()),
+                                        let mut label = ui.add_sized(
+                                            egui::vec2(160.0, CONTROL_HEIGHT_SMALL),
+                                            egui::Label::new(
+                                                RichText::new(&title).size(12.5).color(if active {
+                                                    palette.text_strong
+                                                } else {
+                                                    palette.text
+                                                }),
                                             )
-                                            .on_hover_text(hover);
+                                            .truncate()
+                                            .sense(egui::Sense::click_and_drag()),
+                                        );
+                                        // A truncated label already shows its
+                                        // full text on hover; add only what it
+                                        // does not say.
+                                        if let Some(hover) = hover {
+                                            label = label.on_hover_text(hover);
+                                        }
                                         if label.clicked() {
                                             chosen = Some(tab.clone());
                                         }
@@ -7139,7 +7136,7 @@ impl OperonApp {
         }
     }
 
-    fn workspace_tab_title(&self, tab: &WorkspaceTab) -> (String, String, bool) {
+    fn workspace_tab_title(&self, tab: &WorkspaceTab) -> (String, Option<String>, bool) {
         match tab {
             WorkspaceTab::Session(id) => {
                 let title = self
@@ -7157,7 +7154,7 @@ impl OperonApp {
                         )
                     })
                     .unwrap_or_default();
-                (title.clone(), title, false)
+                (title, None, false)
             }
             WorkspaceTab::Document(id) => {
                 let mut name = id
@@ -7171,7 +7168,7 @@ impl OperonApp {
                     name.push_str(branch);
                 }
                 let dirty = index.is_some_and(|i| self.open_documents[i].modified());
-                (name, id.absolute_display(), dirty)
+                (name, Some(id.absolute_display()), dirty)
             }
         }
     }

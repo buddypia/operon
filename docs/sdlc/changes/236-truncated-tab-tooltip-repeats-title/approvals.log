@@ -1,0 +1,2 @@
+2026-10-30T05:50:30Z auto plan plan.md 98ab5c8c05e80f55 approve Independent rust_review confirmed the egui elision tooltip cause, all three sibling sites, and the failing-first test.
+2026-10-30T05:50:30Z auto screen screen.md d91ee4cd494dc7f6 approve Independent rust_review: tooltip wording only, no layout change; revised text matches the code.

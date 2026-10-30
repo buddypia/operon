@@ -1,0 +1,13 @@
+# Independent rust_review read the diff and egui 0.31 label.rs: document tabs
+# keep their path hover, every dropped hover is restored by egui's own elision
+# tooltip, and the draw path gains no work. The test fails on a doubled (+2)
+# and on a missing (+0) tooltip.
+digest: "bfc1916d2eeadac6"
+rounds: 1
+carried:
+  - the test depends on egui tooltip timing (two PointerMoved frames, delay overrides)
+    person: "将来 egui のツールチップ表示タイミングが変わると、アプリに問題がなくてもこのテストが失敗することがあります。今は対応不要です。"
+  - rustfmt re-indented the add_sized block, enlarging the diff
+    person: "整形でコードの差分が実際より大きく見えますが、アプリへの影響はなく対応不要です。"
+verdicts:
+  rust-reviewer: "approve 0 2"
