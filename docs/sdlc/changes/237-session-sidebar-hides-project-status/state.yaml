@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Landed; package and swap the installed app from main, then record release-binary and installed-app on this branch and merge it again."
+resume: "Installed; the person checks the project column and tab glyphs in Operon (installed-app)."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -73,7 +73,7 @@ contract:
   three-gates: "machine passed make q.fast clean; full cargo test 1092 passed 0 failed before round-2 chip fix, 160 named tests after"
   bands: "machine passed bash scripts/check-bands.sh exit 0"
   full-ci: "machine passed CI 41014913006 on 1d1822f (failed-job rerun after a SIGTERM timing flake in an untouched sweep test)"
-  release-binary: "machine waived pre-merge execution only because ship runs from main; src/app/screens.rs and src/ui/session_tree.rs change, so package-macos.sh and the person-approved swap follow the landing; installed-app remains mandatory below"
+  release-binary: "machine passed main-checkout package-macos.sh fmt/clippy/release/signing, person-approved swap, check-installed-build.sh CURRENT at 51fd890"
   named-tests: "machine passed cargo test --locked workspace_ session_arrangement history_ every_ 160 passed"
   installed-app: "human pending the person sees per-project counts, folding, tap-to-open, and tab glyphs in the installed app"
   guards-verified-by-mutation: "human passed 4 of 4 mutations caught: serde default removed, fold ignored, status ordering removed, tab glyph blanked"
