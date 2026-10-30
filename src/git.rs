@@ -817,14 +817,28 @@ pub(crate) fn read_file_for_editing(root: &Path, relative: &Path) -> Result<File
             )),
         };
     }
-    if metadata.len() > EDITOR_FILE_MAX_BYTES as u64 {
-        return Ok(FileOpenOutcome::Unopenable(tf!(
-            "{p0} KiB のファイルです。エディタで開けるのは {p1} KiB までです。",
-            p0 = metadata.len() / 1024,
-            p1 = EDITOR_FILE_MAX_BYTES / 1024
-        )));
+    // Past the editable ceiling a text file is still read, and the document
+    // shows it read-only (`OpenDocument::viewer`); only past the viewer's
+    // ceiling is it not read at all.
+    let too_large = |size: u64| {
+        FileOpenOutcome::Unopenable(tf!(
+            "{p0} MiB のファイルです。表示できるのは {p1} MiB までです。右上の「既定のアプリで開く」から開けます。",
+            p0 = size.div_ceil(1024 * 1024),
+            p1 = VIEWER_FILE_MAX_BYTES / (1024 * 1024)
+        ))
+    };
+    if metadata.len() > VIEWER_FILE_MAX_BYTES as u64 {
+        return Ok(too_large(metadata.len()));
     }
-    let bytes = fs::read(&path)?;
+    // Bounded by the read rather than by the metadata alone: an agent can be
+    // appending to the file between the two calls.
+    let mut bytes = Vec::new();
+    fs::File::open(&path)?
+        .take(VIEWER_FILE_MAX_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > VIEWER_FILE_MAX_BYTES {
+        return Ok(too_large(bytes.len() as u64));
+    }
     if bytes.contains(&0) {
         return Ok(FileOpenOutcome::Unopenable(
             tr("バイナリファイルはエディタで開けません。").into(),

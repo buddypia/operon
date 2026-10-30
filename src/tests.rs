@@ -5334,6 +5334,7 @@ pub(crate) fn switching_projects_clears_project_scoped_launch_state() {
         save_error: None,
         external_change: false,
         image_data: None,
+        viewer: None,
     });
     app.active_document = Some(DocumentId {
         project: first,
@@ -10548,10 +10549,10 @@ pub(crate) fn a_changed_file_is_reported_and_an_unchanged_one_is_not() {
     );
     // A file that became unopenable while it was open is a change too: it has
     // something to say that the buffer on screen does not.
-    fs::write(&note, "x".repeat(EDITOR_FILE_MAX_BYTES + 1)).unwrap();
+    fs::write(&note, "x".repeat(VIEWER_FILE_MAX_BYTES + 1)).unwrap();
     assert!(matches!(
         read_file_for_editing_if_changed(&root, Path::new("plan.md"), "# Plan\n").unwrap(),
-        Some(FileOpenOutcome::Unopenable(reason)) if reason.contains("KiB")
+        Some(FileOpenOutcome::Unopenable(reason)) if reason.contains("MiB")
     ));
     fs::remove_dir_all(root).unwrap();
 }
@@ -10559,9 +10560,15 @@ pub(crate) fn a_changed_file_is_reported_and_an_unchanged_one_is_not() {
 /// Open a document in a throwaway project and let the read land, so a watch
 /// test starts from the state the editor is actually in.
 fn app_with_open_document(name: &str, contents: &str) -> (OperonApp, Project, PathBuf) {
+    app_with_open_file(name, "plan.md", contents)
+}
+
+/// `app_with_open_document` for a file of any name, so its kind is the one
+/// under test.
+fn app_with_open_file(name: &str, file: &str, contents: &str) -> (OperonApp, Project, PathBuf) {
     let root = temporary_root().join(format!("operon-{name}-{}", Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
-    fs::write(root.join("plan.md"), contents).unwrap();
+    fs::write(root.join(file), contents).unwrap();
     let mut app = test_app(root.join("store.json"));
     let project = Project {
         id: Uuid::new_v4(),
@@ -10572,10 +10579,10 @@ fn app_with_open_document(name: &str, contents: &str) -> (OperonApp, Project, Pa
     app.store.projects.push(project.clone());
     app.select_project(Some(project.id));
     app.project_tab = ProjectTab::Files;
-    app.open_document(&project, PathBuf::from("plan.md"));
+    app.open_document(&project, PathBuf::from(file));
     wait_for_background_task(
         &mut app,
-        &BackgroundKey::FileOpen(project_document(&project, "plan.md")),
+        &BackgroundKey::FileOpen(project_document(&project, file)),
         Duration::from_secs(10),
     );
     (app, project, root)
@@ -10802,6 +10809,7 @@ pub(crate) fn a_file_the_editor_cannot_edit_says_so_instead_of_failing() {
     )
     .unwrap();
     fs::write(root.join("huge.log"), "x".repeat(EDITOR_FILE_MAX_BYTES + 1)).unwrap();
+    fs::write(root.join("huge.bin"), vec![0u8; EDITOR_FILE_MAX_BYTES + 1]).unwrap();
 
     assert_eq!(
         read_file_for_editing(&root, Path::new("note.md")).unwrap(),
@@ -10815,10 +10823,311 @@ pub(crate) fn a_file_the_editor_cannot_edit_says_so_instead_of_failing() {
         read_file_for_editing(&root, Path::new("corrupt.png")).unwrap(),
         FileOpenOutcome::Unopenable(reason) if reason.contains("デコード")
     ));
+    // Past the editable ceiling a text file is read, for the viewer; a binary
+    // one that size is still refused for being binary.
     assert!(matches!(
         read_file_for_editing(&root, Path::new("huge.log")).unwrap(),
-        FileOpenOutcome::Unopenable(reason) if reason.contains("KiB")
+        FileOpenOutcome::Text(text) if text.len() == EDITOR_FILE_MAX_BYTES + 1
     ));
+    assert!(matches!(
+        read_file_for_editing(&root, Path::new("huge.bin")).unwrap(),
+        FileOpenOutcome::Unopenable(reason) if reason.contains("バイナリ")
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// An HTML report past 128 KiB: `{lines}` lines of markup, each one short.
+fn large_html(lines: usize) -> String {
+    let mut html = String::from("<!DOCTYPE html>\n<html lang=\"ja\">\n<body>\n");
+    for index in 0..lines {
+        html.push_str(&format!("<div class=\"row\">item {index}</div>\n"));
+    }
+    html.push_str("</body>\n</html>\n");
+    html
+}
+
+/// The reported case: an agent's 748 KiB HTML report opened from the Files
+/// tab. Its text reaches the document and the pane, and nothing done there can
+/// write it back.
+#[test]
+pub(crate) fn a_text_file_past_the_editable_ceiling_opens_read_only() {
+    let html = large_html(8_000);
+    assert!(html.len() > EDITOR_FILE_MAX_BYTES);
+    let (mut app, project, root) = app_with_open_file("viewer", "report.html", &html);
+    let document = &app.open_documents[0];
+    assert_eq!(document.disk, html, "the whole file reaches the document");
+    assert!(document.read_only.is_none(), "{:?}", document.read_only);
+    let rows = document.viewer.clone().expect("shown by the viewer");
+    assert_eq!(rows.lines, html.lines().count());
+    assert!(document.buffer.is_empty(), "nothing is editable");
+
+    let labels = editor_view_labels(&mut app, &project);
+    let notice = tf!(
+        "{p0} KiB のファイルのため、読み取り専用で表示しています。編集できるのは {p1} KiB までです。",
+        p0 = html.len() / 1024,
+        p1 = EDITOR_FILE_MAX_BYTES / 1024
+    );
+    assert!(labels.iter().any(|label| label == &notice), "{labels:?}");
+    assert!(
+        labels.iter().any(|label| label.contains(tr("表示"))),
+        "the view is named for what it does: {labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("item 0")),
+        "the file's own text is on screen: {labels:?}"
+    );
+    assert!(
+        !labels.iter().any(|label| label.contains(tr("保存"))),
+        "no save is offered: {labels:?}"
+    );
+    // Rows are one line of text apart, which is the height `show_rows`
+    // scrolls by: a taller row would push the last rows out of reach.
+    let (tops, line) = editor_text_tops(&mut app, &project);
+    let top_of = |label: &str| {
+        tops.iter()
+            .find(|(text, _)| text.contains(label))
+            .map(|(_, top)| *top)
+            .unwrap_or_else(|| panic!("{label} is not on screen: {tops:?}"))
+    };
+    assert!(
+        (top_of("item 1<") - top_of("item 0<") - line).abs() < 0.5,
+        "{tops:?}"
+    );
+
+    // Even a buffer that somehow holds text is never written over the file.
+    let id = app.open_documents[0].id();
+    app.open_documents[0].buffer = "overwritten".into();
+    app.save_active_document();
+    assert!(!app.background_tasks.contains(&BackgroundKey::FileSave(id)));
+    assert_eq!(fs::read_to_string(root.join("report.html")).unwrap(), html);
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Past the viewer's ceiling the file is not read, and the pane says where it
+/// can be opened instead.
+#[test]
+pub(crate) fn a_text_file_past_the_viewer_ceiling_says_how_to_open_it() {
+    let root = temporary_root().join(format!("operon-too-large-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("dump.json"),
+        "x".repeat(VIEWER_FILE_MAX_BYTES + 1),
+    )
+    .unwrap();
+    let expected = tf!(
+        "{p0} MiB のファイルです。表示できるのは {p1} MiB までです。右上の「既定のアプリで開く」から開けます。",
+        p0 = VIEWER_FILE_MAX_BYTES / (1024 * 1024) + 1,
+        p1 = VIEWER_FILE_MAX_BYTES / (1024 * 1024)
+    );
+    assert_eq!(
+        read_file_for_editing(&root, Path::new("dump.json")).unwrap(),
+        FileOpenOutcome::Unopenable(expected.clone())
+    );
+    assert!(expected.contains(tr("既定のアプリで開く")));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Rows are lines, a line too long for one row continues unnumbered, and no
+/// range splits a character or keeps a line ending.
+#[test]
+pub(crate) fn viewer_rows_wrap_long_lines_and_number_only_their_first_row() {
+    let long = "あ".repeat(VIEWER_ROW_MAX_CHARS + 5);
+    let text = format!("ab\n{long}\r\n\nlast");
+    let rows = viewer_rows(&text);
+    assert_eq!(rows.len(), 5);
+    assert_eq!(rows.lines, 4);
+    assert_eq!(rows.widest, VIEWER_ROW_MAX_CHARS);
+    let shown = (0..rows.len())
+        .map(|row| &text[rows.row_range(&text, row)])
+        .collect::<Vec<_>>();
+    assert_eq!(
+        shown,
+        vec![
+            "ab",
+            "あ".repeat(VIEWER_ROW_MAX_CHARS).as_str(),
+            "あああああ",
+            "",
+            "last"
+        ]
+    );
+    let layouts = viewer_chunk_layout(&rows, &text, 0, EditorLanguage::Plain, &DARK_PALETTE);
+    let gutters = layouts.iter().map(|row| row.gutter()).collect::<Vec<_>>();
+    assert_eq!(gutters, vec!["1", "2", " ", "3", "4"]);
+    assert_eq!(rows.row_of_line(&text, 1), 0);
+    assert_eq!(rows.row_of_line(&text, 3), 3);
+    assert_eq!(rows.row_of_line(&text, 4), 4);
+    assert_eq!(
+        rows.row_of_line(&text, 99),
+        4,
+        "past the end is the last row"
+    );
+
+    // A trailing newline does not make an extra row, and nothing is one row.
+    assert_eq!(viewer_rows("a\n").len(), 1);
+    assert_eq!(viewer_rows("").len(), 1);
+    assert_eq!(viewer_rows("").lines, 1);
+
+    // Each chunk knows the line its first row is on, so it numbers alone.
+    let many = "x\n".repeat(200);
+    let rows = viewer_rows(&many);
+    assert_eq!(
+        rows.chunk_lines,
+        (0..200)
+            .step_by(VIEWER_CHUNK_ROWS)
+            .map(|row| row as u32 + 1)
+            .collect::<Vec<_>>()
+    );
+    let second = viewer_chunk_layout(&rows, &many, 1, EditorLanguage::Plain, &DARK_PALETTE);
+    assert_eq!(
+        second[0].gutter().trim(),
+        (VIEWER_CHUNK_ROWS + 1).to_string()
+    );
+    assert_eq!(rows.row_of_line(&many, 150), 149);
+}
+
+/// The frame asks for the rows on screen; only their chunks are highlighted,
+/// and only once while the read they belong to is the same read.
+#[test]
+pub(crate) fn the_viewer_highlights_only_the_chunks_it_draws() {
+    let text = large_html(1_000);
+    let rows = Arc::new(viewer_rows(&text));
+    let mut cache = ViewerLayoutCache::default();
+    let row = |cache: &mut ViewerLayoutCache, rows: &Arc<ViewerRows>, row: usize| {
+        cache
+            .row(rows, &text, EditorLanguage::Html, &DARK_PALETTE, row)
+            .map(|layout| layout.text().to_owned())
+    };
+    assert_eq!(
+        row(&mut cache, &rows, 0).as_deref(),
+        Some("<!DOCTYPE html>")
+    );
+    for visible in 1..40 {
+        row(&mut cache, &rows, visible);
+    }
+    assert_eq!(cache.builds(), 1, "one screen is one chunk");
+    assert_eq!(
+        row(&mut cache, &rows, 500).as_deref(),
+        Some("<div class=\"row\">item 497</div>")
+    );
+    assert_eq!(cache.builds(), 2, "a far row costs its own chunk only");
+    row(&mut cache, &rows, 0);
+    assert_eq!(cache.builds(), 2, "a drawn chunk is not highlighted again");
+    assert_eq!(row(&mut cache, &rows, rows.len()), None);
+
+    // A reread is a new read even with the same bytes.
+    let reread = Arc::new(viewer_rows(&text));
+    row(&mut cache, &reread, 0);
+    assert_eq!(cache.builds(), 3);
+    // And so is a theme change.
+    cache.row(&reread, &text, EditorLanguage::Html, &LIGHT_PALETTE, 0);
+    assert_eq!(cache.builds(), 4);
+}
+
+/// Each row's layout is exactly its own text, coloured by its language.
+#[test]
+pub(crate) fn viewer_rows_keep_the_colours_of_their_language() {
+    let text = large_html(100);
+    let rows = viewer_rows(&text);
+    let layouts = viewer_chunk_layout(&rows, &text, 0, EditorLanguage::Html, &DARK_PALETTE);
+    assert_eq!(layouts.len(), VIEWER_CHUNK_ROWS);
+    let gutter_len = layouts[0].job.text.len() - layouts[0].text().len();
+    for (row, layout) in layouts.iter().enumerate() {
+        assert_eq!(layout.text(), &text[rows.row_range(&text, row)]);
+        let mut covered = 0;
+        for section in &layout.job.sections {
+            assert_eq!(
+                section.byte_range.start, covered,
+                "row {row}: sections are contiguous"
+            );
+            covered = section.byte_range.end;
+        }
+        assert_eq!(
+            covered,
+            layout.job.text.len(),
+            "row {row}: and cover the row"
+        );
+    }
+    // The text's own sections: the ones past the line number.
+    let own = |layout: &ViewerRowLayout| {
+        layout
+            .job
+            .sections
+            .iter()
+            .filter(|section| section.byte_range.start >= gutter_len)
+            .map(|section| section.format.color)
+            .collect::<Vec<_>>()
+    };
+    assert!(layouts[3].text().starts_with("<div"));
+    assert!(
+        own(&layouts[3])
+            .iter()
+            .any(|colour| *colour != DARK_PALETTE.text),
+        "an HTML tag is not drawn as plain text"
+    );
+    let plain = viewer_chunk_layout(&rows, &text, 0, EditorLanguage::Plain, &DARK_PALETTE);
+    assert!(own(&plain[3])
+        .iter()
+        .all(|colour| *colour == DARK_PALETTE.text));
+}
+
+/// A Markdown tab opens in Preview before its size is known. Past the editable
+/// ceiling it is drawn as highlighted source, and the rendered preview — which
+/// lays out every block each frame — is never built for it.
+#[test]
+pub(crate) fn a_large_markdown_file_is_shown_as_source_not_preview() {
+    let notes = "# Notes\n\n- an item\n".repeat(EDITOR_FILE_MAX_BYTES / 10);
+    let (mut app, project, root) = app_with_open_file("large-markdown", "notes.md", &notes);
+    assert!(app.open_documents[0].viewer.is_some());
+    app.editor_view = EditorView::Preview;
+    let labels = editor_view_labels(&mut app, &project);
+    assert_eq!(app.editor_view, EditorView::Edit);
+    assert!(
+        !labels
+            .iter()
+            .any(|label| label.contains(EditorView::Preview.label())),
+        "{labels:?}"
+    );
+    assert!(
+        labels.iter().any(|label| label.contains("# Notes")),
+        "{labels:?}"
+    );
+    assert_eq!(app.markdown_preview_cache.builds(), 0);
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Every read decides the viewer afresh: a file that shrinks back under the
+/// ceiling is editable again, and one that becomes unopenable is not drawn
+/// from rows of a text that is gone.
+#[test]
+pub(crate) fn a_document_that_shrinks_under_the_ceiling_becomes_editable_again() {
+    let html = large_html(8_000);
+    let (mut app, _project, root) = app_with_open_file("shrinks", "report.html", &html);
+    let id = app.open_documents[0].id();
+    assert!(app.open_documents[0].viewer.is_some());
+
+    app.apply_opened_file(&id, Ok(FileOpenOutcome::Text("<p>small</p>\n".into())));
+    assert!(app.open_documents[0].viewer.is_none());
+    assert_eq!(app.open_documents[0].buffer, "<p>small</p>\n");
+    app.open_documents[0].buffer.push_str("<p>typed</p>\n");
+    app.save_active_document();
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::FileSave(id.clone())),
+        "a small file saves again"
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::FileSave(id.clone()),
+        Duration::from_secs(10),
+    );
+
+    app.apply_opened_file(&id, Ok(FileOpenOutcome::Text(html.clone())));
+    assert!(app.open_documents[0].viewer.is_some());
+    app.apply_opened_file(&id, Ok(FileOpenOutcome::Unopenable("too large".into())));
+    assert!(app.open_documents[0].viewer.is_none());
+    app.apply_opened_file(&id, Ok(FileOpenOutcome::Text(html)));
+    app.apply_opened_file(&id, Err("gone".into()));
+    assert!(app.open_documents[0].viewer.is_none());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -11111,6 +11420,7 @@ pub(crate) fn changed_working_tree_invalidates_an_open_editor_diff() {
         save_error: None,
         external_change: false,
         image_data: None,
+        viewer: None,
     });
     app.active_document = Some(DocumentId {
         project: project_id,
@@ -33983,6 +34293,7 @@ fn show_document(app: &mut OperonApp, project: &Project, path: &str) {
         save_error: None,
         external_change: false,
         image_data: None,
+        viewer: None,
     });
     app.active_document = Some(id);
 }
@@ -38413,6 +38724,31 @@ pub(crate) fn a_document_rooted_outside_the_project_is_not_offered_a_diff() {
     );
 
     fs::remove_dir_all(&root).ok();
+}
+
+/// Every text the editor draws for the document in front, with where its top
+/// is, by running the real screen — and the height of one monospaced line.
+fn editor_text_tops(app: &mut OperonApp, project: &Project) -> (Vec<(String, f32)>, f32) {
+    let context = egui::Context::default();
+    let mut line = 0.0;
+    let mut draw = || {
+        context.run(Default::default(), |ctx| {
+            line = ctx.fonts(|fonts| fonts.row_height(&FontId::monospace(MONOSPACE_SIZE)));
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.ui_editor(ui, project, app.store.theme.palette(), 600.0);
+            });
+        })
+    };
+    let _ = draw();
+    let tops = draw()
+        .shapes
+        .into_iter()
+        .filter_map(|shape| match shape.shape {
+            egui::epaint::Shape::Text(text) => Some((text.galley.text().to_owned(), text.pos.y)),
+            _ => None,
+        })
+        .collect();
+    (tops, line)
 }
 
 /// The labels the editor's view switcher draws for whatever document is in

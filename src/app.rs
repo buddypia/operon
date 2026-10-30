@@ -2897,6 +2897,7 @@ impl OperonApp {
             save_error: None,
             external_change: false,
             image_data: None,
+            viewer: None,
         });
         // Markdown and images open rendered in Preview mode.
         // Everything else opens as text, which is the only way it can be read.
@@ -2935,7 +2936,17 @@ impl OperonApp {
         // Whatever the read says is now what the editor knows, so the warning
         // that the editor's copy was out of date has been answered.
         document.external_change = false;
+        document.viewer = None;
         match result {
+            // Past the editable ceiling the text is shown, not edited. The rows
+            // are one pass over at most `VIEWER_FILE_MAX_BYTES`, once per read.
+            Ok(FileOpenOutcome::Text(text)) if text.len() > EDITOR_FILE_MAX_BYTES => {
+                document.viewer = Some(Arc::new(viewer_rows(&text)));
+                document.disk = text;
+                document.buffer = String::new();
+                document.read_only = None;
+                document.image_data = None;
+            }
             Ok(FileOpenOutcome::Text(text)) => {
                 document.disk = text.clone();
                 document.buffer = text;
@@ -7339,6 +7350,12 @@ pub(crate) struct OpenDocument {
     pub(crate) external_change: bool,
     /// Decoded image data when the open document is a viewable image format.
     pub(crate) image_data: Option<ImageDocumentData>,
+    /// The rows of a text file past `EDITOR_FILE_MAX_BYTES`, which is shown
+    /// read-only from `disk` rather than edited: its `buffer` stays empty and
+    /// it is never `modified`, so it cannot be saved over the file. Set or
+    /// cleared by every read, so a file that shrinks back under the ceiling is
+    /// editable again.
+    pub(crate) viewer: Option<Arc<ViewerRows>>,
 }
 
 /// What an agent CLI or terminal launch is doing while it prepares in the background.
@@ -7380,7 +7397,7 @@ pub(crate) enum Page {
 
 impl OpenDocument {
     fn modified(&self) -> bool {
-        self.read_only.is_none() && self.buffer != self.disk
+        self.read_only.is_none() && self.viewer.is_none() && self.buffer != self.disk
     }
 
     /// Where a root meets a path.
