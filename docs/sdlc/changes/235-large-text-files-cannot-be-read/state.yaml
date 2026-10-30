@@ -17,7 +17,7 @@ contract:
   three-gates: "machine passed gate-commit fmt and clippy on cf830a5 and the main merge; CI41013986352 full suite green on 3442bcc after a rerun of a cached CMake/OpenSSL build failure"
   bands: "machine passed CI control bands on 3442bcc"
   named-tests: "machine passed seven new and two updated tests plus 214 editor, document, file and policy tests locally"
-  release-binary: "machine pending touches src/ beyond src/tests.rs, so /Applications/Operon.app goes stale; ends with bash scripts/package-macos.sh and the ship swap"
+  release-binary: "machine waived pre-merge execution only because ship runs from main; touches src/ beyond src/tests.rs, so package-macos.sh and the person-approved swap follow the landing; installed-app remains mandatory below"
   installed-app: "human pending a 748 KiB HTML file opened from the Sessions Files tab shows numbered, coloured, read-only source and scrolls to its end"
   guards-verified-by-mutation: "human passed mutations.py 10/10 caught, including the row-height and two claim mutations; source restored"
 
