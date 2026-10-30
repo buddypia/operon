@@ -1,7 +1,7 @@
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "full"
@@ -9,13 +9,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the failing tab tooltip test, then drop the repeated hovers in src/app/screens.rs."
+resume: "Wait for CI on the branch head, then land it from main and package."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed make q.fast and 13 named tests including the new tab tooltip test"
   full-ci: "machine pending CI on the branch head"
   release-binary: "machine pending touches src/app/screens.rs, so the installed app goes stale; bash scripts/package-macos.sh from the main checkout after landing"
-  guards-verified-by-mutation: "human pending the new test watched failing on the unfixed tab strip"
+  guards-verified-by-mutation: "human passed the new test failed 3 vs 2 on the unfixed tab strip and passes after"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
