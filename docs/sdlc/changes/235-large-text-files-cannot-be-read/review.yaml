@@ -1,0 +1,29 @@
+# Review record for change 235. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: rust-reviewer request-changes 1 2 — viewer rows were drawn with
+# ui.horizontal, which allocates interact_size.y (28 px) per row while
+# show_rows placed rows at one monospace line, so the last rows of a long file
+# were out of reach and jumps landed on the wrong line. Fixed by drawing each
+# row as one LayoutJob in one Label; a render assertion checks row spacing, and
+# the mutation restoring ui.horizontal is caught. The stale syntax_layout
+# comment was also corrected. subprocess-safety-reviewer approve-with-nits 0 2.
+# Round 2: both reviewers re-read the diff at the digest below.
+digest: "097962dec0874f41"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/1 · layout.job.clone() still copies each visible row's text and sections every frame; Arc<LayoutJob> would remove it
+    person: "大きなファイルの表示中、画面に見えている行ぶんの小さなコピーが毎フレーム発生します。体感できる遅さではなく、対応は不要です。"
+  - rust-reviewer/2 · viewer_rows splits up to 8 MiB on the UI thread each time the file is re-adopted by the watch
+    person: "8 MiB 近いファイルをエージェントが書き続けている間、2 秒ごとの読み直しで一瞬だけ画面が引っかかることがあります。対応は不要です。"
+  - rust-reviewer/3 · a chunk of minified single-line text is highlighted synchronously the first time it is drawn
+    person: "1 行に詰め込まれた巨大な HTML や JSON を速くスクロールすると、初めて表示する部分で一瞬止まることがあります。対応は不要です。"
+  - rust-reviewer/4 · width formula uses widest * 2, doubling the sideways scroll extent for ASCII-only files
+    person: "英数字だけのファイルでは横スクロールの右端に余白が余分に出ます。表示内容に影響はなく、対応は不要です。"
+  - subprocess-safety-reviewer/1 · a FIFO or device inside the project passes the size gate (length 0) and File::open can block; pre-existing as fs::read
+    person: "プロジェクト内の特殊なファイル（名前付きパイプ等）を開くと読み込み中のまま止まることがあります。以前からの挙動で、普通のファイルでは起きません。対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 2"

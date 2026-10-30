@@ -356,7 +356,7 @@ Settings.
   outside the app is recorded as 結果不明 rather than 失敗.
 - Scans are bounded and honest about it: the editor tree caps itself (and
   skips `.git`, `node_modules`, `target`, `.next`), files beyond 128 KiB open
-  read-only, diff capture shares a fixed budget with explicit truncation
+  read-only up to 8 MiB, diff capture shares a fixed budget with explicit truncation
   notices, transcript search caps candidates, bytes, and lines, and the handoff
   archive sweep looks at 4,096 entries and 256 KiB of each manifest per pass. Use an
   external editor for a complete view of very large repositories.

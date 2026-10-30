@@ -3591,10 +3591,17 @@ impl OperonApp {
         let read_only = self.open_documents[index].read_only.clone();
         let save_error = self.open_documents[index].save_error.clone();
         let external_change = self.open_documents[index].external_change;
+        let viewer = self.open_documents[index].viewer.clone();
 
         // An image document is rendered visually in Preview mode and cannot be edited.
         if is_img && self.editor_view != EditorView::Preview {
             self.editor_view = EditorView::Preview;
+        }
+        // A Markdown tab opens in Preview before its size is known. Past the
+        // editable ceiling it is read as source: the rendered view lays out
+        // every block on every frame.
+        if viewer.is_some() && self.editor_view == EditorView::Preview {
+            self.editor_view = EditorView::Edit;
         }
 
         // The diff is read from the project's working tree, and its cache is
@@ -3614,7 +3621,7 @@ impl OperonApp {
             for view in [EditorView::Edit, EditorView::Preview, EditorView::Diff] {
                 // A file that is not Markdown and not an image has nothing to preview: the
                 // rendered form and the source would be the same text.
-                if view == EditorView::Preview && !markdown && !is_img {
+                if view == EditorView::Preview && (viewer.is_some() || !markdown && !is_img) {
                     continue;
                 }
                 // An image cannot be edited as text or shown as unified text diff.
@@ -3624,11 +3631,15 @@ impl OperonApp {
                 if view == EditorView::Diff && !project_rooted {
                     continue;
                 }
+                // A file past the editable ceiling is read here, not edited, and
+                // its first view says so.
+                let (icon, label) = if view == EditorView::Edit && viewer.is_some() {
+                    (ICON_PREVIEW, tr("表示"))
+                } else {
+                    (view.icon(), view.label())
+                };
                 if ui
-                    .selectable_label(
-                        self.editor_view == view,
-                        format!("{}  {}", view.icon(), view.label()),
-                    )
+                    .selectable_label(self.editor_view == view, format!("{icon}  {label}"))
                     .clicked()
                 {
                     self.editor_view = view;
@@ -3662,6 +3673,7 @@ impl OperonApp {
                             .color(palette.text_muted),
                     );
                 } else if read_only.is_none()
+                    && viewer.is_none()
                     && ui
                         .add_enabled(
                             modified,
@@ -3730,7 +3742,10 @@ impl OperonApp {
         }
         let remaining = (height - 84.0).max(120.0);
         match self.editor_view {
-            EditorView::Edit => self.ui_editor_text(ui, index, palette, remaining),
+            EditorView::Edit => match viewer {
+                Some(rows) => self.ui_editor_viewer(ui, index, &rows, palette, remaining),
+                None => self.ui_editor_text(ui, index, palette, remaining),
+            },
             EditorView::Preview => {
                 if let Some(image_data) = self.open_documents[index].image_data.clone() {
                     self.ui_editor_image_preview(ui, &document, &image_data, palette, remaining);
@@ -3860,6 +3875,74 @@ impl OperonApp {
                         .size(11.5)
                         .color(palette.text_muted),
                     );
+                });
+            });
+    }
+
+    /// The read-only pane for a text file past `EDITOR_FILE_MAX_BYTES`.
+    ///
+    /// The editable pane lays out its whole buffer as one galley, which is why
+    /// it has a ceiling at all. This one lays out only the rows on screen, each
+    /// already highlighted by its chunk, so its cost is the viewport whatever
+    /// the file's size. A long line arrives as several rows, which is what
+    /// keeps a minified file readable.
+    pub(crate) fn ui_editor_viewer(
+        &mut self,
+        ui: &mut egui::Ui,
+        index: usize,
+        rows: &Arc<ViewerRows>,
+        palette: &'static Palette,
+        height: f32,
+    ) {
+        ui.label(
+            RichText::new(tf!(
+                "{p0} KiB のファイルのため、読み取り専用で表示しています。編集できるのは {p1} KiB までです。",
+                p0 = self.open_documents[index].disk.len() / 1024,
+                p1 = EDITOR_FILE_MAX_BYTES / 1024
+            ))
+            .size(12.0)
+            .color(palette.text_muted),
+        );
+        let height = (height - 24.0).max(120.0);
+        let language = editor_language(&self.open_documents[index].path);
+        let cell = monospace_cell_size(ui);
+        let digits = rows.lines.checked_ilog10().unwrap_or(0) as usize + 1;
+        // A row is at most `VIEWER_ROW_MAX_CHARS` characters, and a CJK one is
+        // two cells wide: the width the widest row could need, so the sideways
+        // scroll does not change length as rows come and go.
+        let width = cell.x * (digits + 1 + rows.widest * 2) as f32;
+        let text = &self.open_documents[index].disk;
+        // Spent by this frame, as in the editable pane.
+        let jump = self
+            .editor_jump_line
+            .take()
+            .map(|line| (rows.row_of_line(text, line) as f32 * cell.y - height / 3.0).max(0.0));
+        let cache = &mut self.editor_text_layout_cache.viewer;
+        egui::Frame::new()
+            .fill(palette.inset)
+            .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+            .inner_margin(egui::Margin::same(4))
+            .show(ui, |ui| {
+                // Rows sit directly on one another; `show_rows` counts this
+                // spacing into every row's height.
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let mut area = egui::ScrollArea::both()
+                    .auto_shrink([false, false])
+                    .max_height(height);
+                if let Some(offset) = jump {
+                    area = area.vertical_scroll_offset(offset);
+                }
+                area.show_rows(ui, cell.y, rows.len(), |ui, visible| {
+                    ui.set_min_width(width);
+                    for row in visible {
+                        let Some(layout) = cache.row(rows, text, language, palette, row) else {
+                            break;
+                        };
+                        ui.add(
+                            egui::Label::new(layout.job.clone())
+                                .wrap_mode(egui::TextWrapMode::Extend),
+                        );
+                    }
                 });
             });
     }
