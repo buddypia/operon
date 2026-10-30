@@ -1,0 +1,31 @@
+# The state of one change. Field meanings: docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Build per plan.md order of work, tests first."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  named-tests: "machine pending cargo test --locked for the seven new and two updated tests in spec.md"
+  release-binary: "machine pending touches src/ beyond src/tests.rs, so /Applications/Operon.app goes stale; ends with bash scripts/package-macos.sh and the ship swap"
+  installed-app: "human pending a 748 KiB HTML file opened from the Sessions Files tab shows numbered, coloured, read-only source and scrolls to its end"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
