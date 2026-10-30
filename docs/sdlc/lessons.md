@@ -1480,3 +1480,20 @@ The post-CI integration check also includes the existing target-session focus,
 project-removal cache cleanup, history long-name bounds and translation-order
 guards. All four were watched failing before the corresponding caller or lookup
 correction; the original geometry and focus guarantees remain asserted.
+
+## 105 — A restored CI cache carried an old runner image's Homebrew paths
+
+Change 230 reset `CMakeCache.txt` when cloning `target/debug` into a local
+worktree, but CI restored `target/` across runner images whose Rust toolchain
+stayed identical while Homebrew upgraded `/opt/homebrew/Cellar/openssl@4/4.0.3`
+to `4.1.0`. `Swatinem/rust-cache@v2` matched the old primary key, CMake kept the
+cached `OPENSSL_SSL_LIBRARY` path that no longer existed on disk, and `cpp-httplib`
+failed to link `OpenSSL::SSL`. **The rule:** disable optional CMake package
+probes that the binary does not use (`CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON`),
+key CI build caches on the runner image version (`ImageOS` and `ImageVersion`),
+and reset restored native `CMakeCache.txt` files across every `target/*` profile
+before building.
+
+**Guard.** `ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_cmake`
+(watched failing before the fix and across all nine mutants in
+`docs/sdlc/changes/238-cached-cmake-breaks-ci-after-runner-update/mutations.py`).

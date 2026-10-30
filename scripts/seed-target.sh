@@ -25,6 +25,39 @@
 # worktree to build cold, as it did before this script.
 set -uo pipefail
 
+reset_seeded_cmake_caches() {
+  local root_dir="$1"
+  local root_real
+  root_real=$(cd -- "$root_dir" && pwd -P) || exit 1
+  local cache parent backup
+  for cache in "$root_dir"/target/*/build/*/out/build/CMakeCache.txt; do
+    [ -f "$cache" ] || continue
+    # A copied or restored build directory (or the file itself) may be a symlink
+    # into another tree. Reset only configuration physically inside this tree.
+    if [ -L "$cache" ]; then
+      echo "seed-target: 共有ネイティブ構成は変更しません: $cache" >&2
+      continue
+    fi
+    parent=$(cd -- "$(dirname -- "$cache")" && pwd -P) || exit 1
+    case "$parent" in
+      "$root_real"/target/*/build/*) ;;
+      *) echo "seed-target: 共有ネイティブ構成は変更しません: $cache" >&2; continue ;;
+    esac
+    backup=$(mktemp "${cache}.operon-seeded.XXXXXX") || exit 1
+    if ! mv -- "$cache" "$backup"; then
+      rm -f -- "$backup"
+      exit 1
+    fi
+  done
+}
+
+if [ "${1:-}" = "--reset-only" ]; then
+  target_root="${2:-.}"
+  [ -d "$target_root" ] || exit 0
+  reset_seeded_cmake_caches "$target_root"
+  exit 0
+fi
+
 branch="${1:-}"
 [ -n "$branch" ] || { echo "usage: seed-target.sh <branch>" >&2; exit 2; }
 common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || exit 0
@@ -58,22 +91,7 @@ fi
 mkdir -p "$worktree/target"
 if cp -c -R -p "$source_debug" "$worktree/target/debug" 2>/dev/null; then
   rm -f "$worktree/target/debug/.cargo-lock"
-  worktree_real=$(cd "$worktree" && pwd -P)
-  for cache in "$worktree"/target/debug/build/*/out/build/CMakeCache.txt; do
-    [ -f "$cache" ] || continue
-    # A copied build directory may be a symlink into another tree. Reset only
-    # configuration physically inside this newly owned worktree.
-    parent=$(cd "$(dirname "$cache")" && pwd -P) || exit 1
-    case "$parent" in
-      "$worktree_real"/target/debug/build/*) ;;
-      *) echo "seed-target: 共有ネイティブ構成は変更しません: $cache" >&2; continue ;;
-    esac
-    backup=$(mktemp "${cache}.operon-seeded.XXXXXX") || exit 1
-    if ! mv "$cache" "$backup"; then
-      rm "$backup"
-      exit 1
-    fi
-  done
+  reset_seeded_cmake_caches "$worktree"
   echo "seed-target: $source_debug を複製しました。ネイティブ構成は必要に応じて再生成されます。" >&2
 else
   rm -rf "$worktree/target/debug"
