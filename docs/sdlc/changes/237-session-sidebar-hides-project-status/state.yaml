@@ -40,8 +40,8 @@
 
 state:
   route: "modify"
-  stage: "test"
-  status: "in-progress"
+  stage: "deploy"
+  status: "done"
   attempts: "1 3"
   questions: "1 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Push the branch and wait for CI; the person still approves spec.md and confirms the screen in the installed app."
+resume: "Landed; package and swap the installed app from main, then the person checks the column in Operon."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -71,11 +71,12 @@ resume: "Push the branch and wait for CI; the person still approves spec.md and 
 # is what says whether the bundle on this machine is behind.
 contract:
   three-gates: "machine passed make q.fast clean; full cargo test 1092 passed 0 failed before round-2 chip fix, 160 named tests after"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh exit 0"
+  full-ci: "machine passed CI 41014913006 on 1d1822f (failed-job rerun after a SIGTERM timing flake in an untouched sweep test)"
   release-binary: "machine pending yes: src/app/screens.rs and src/ui/session_tree.rs change, so bash scripts/package-macos.sh and the ship swap follow landing"
   named-tests: "machine passed cargo test --locked workspace_ session_arrangement history_ every_ 160 passed"
   installed-app: "human pending the person sees per-project counts, folding, tap-to-open, and tab glyphs in the installed app"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed 4 of 4 mutations caught: serde default removed, fold ignored, status ordering removed, tab glyph blanked"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
