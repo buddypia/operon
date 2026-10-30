@@ -6707,6 +6707,29 @@ impl OperonApp {
                                 .inner_margin(egui::Margin::symmetric(8, 4))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
+                                        // A session's state in one glyph
+                                        // (change 237); the words on hover.
+                                        if let WorkspaceTab::Session(id) = tab {
+                                            if let Some(session) =
+                                                self.store.sessions.iter().find(|s| s.id == *id)
+                                            {
+                                                let kind = self.session_status_kind_for(session);
+                                                ui.label(
+                                                    RichText::new(kind.icon())
+                                                        .color(palette.status(kind.tone())),
+                                                )
+                                                .on_hover_ui(|ui| {
+                                                    let view = session_status_view(
+                                                        &self.store.sessions,
+                                                        session,
+                                                        self.cancellation_pending(*id),
+                                                        self.session_activity_for(*id),
+                                                    );
+                                                    ui.label(&view.label);
+                                                    ui.label(&view.hint);
+                                                });
+                                            }
+                                        }
                                         let label = ui
                                             .add_sized(
                                                 egui::vec2(160.0, CONTROL_HEIGHT_SMALL),
@@ -6905,19 +6928,15 @@ impl OperonApp {
 
     fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
-        ui.heading(tr("プロジェクト"));
-        ui.horizontal_wrapped(|ui| {
-            if ui.button(tr("新しいセッション")).clicked() {
-                self.pending_history_open = None;
-                if let Some(project) = self.selected_project {
-                    self.open_project_session_setup(project);
-                } else {
-                    self.open_new_session();
+        // One start per project, on its own header: the toolbar holds the
+        // column-wide one (change 237).
+        ui.horizontal(|ui| {
+            ui.heading(tr("プロジェクト"));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(tr("履歴")).clicked() {
+                    self.session_library_open = !self.session_library_open;
                 }
-            }
-            if ui.button(tr("履歴")).clicked() {
-                self.session_library_open = !self.session_library_open;
-            }
+            });
         });
         if self.workspace_project_drag.is_some()
             && ui.input(|i| {
@@ -6931,6 +6950,34 @@ impl OperonApp {
         let pointer = ui.input(|i| i.pointer.latest_pos());
         let mut projects = self.store.projects.clone();
         sort_column_projects(&mut projects, &self.session_arrangement);
+        // Every session someone may act on, once per frame: what needs the
+        // person first, then what is moving, then what is free, each in the
+        // column's own order. Finished sessions stay in 履歴 unless unread.
+        let mut ordered = self.store.sessions.iter().collect::<Vec<_>>();
+        sort_column_sessions(&mut ordered, &self.session_arrangement);
+        let mut live = ordered
+            .into_iter()
+            .filter_map(|session| {
+                let kind = self.session_status_kind_for(session);
+                let group = if self.is_session_unread(session.id) {
+                    SessionStatusGroup::NeedsYou
+                } else {
+                    kind.group()
+                };
+                (group != SessionStatusGroup::Finished).then_some((
+                    session.project_id,
+                    group,
+                    kind,
+                    session.id,
+                ))
+            })
+            .collect::<Vec<_>>();
+        live.sort_by_key(|(_, group, _, _)| group.index());
+        let mut open = None;
+        let mut fold = None;
+        if projects.is_empty() {
+            ui.label(RichText::new(tr("プロジェクトがありません")).weak());
+        }
         egui::ScrollArea::vertical()
             .id_salt("workspace-project-scroll")
             .show(ui, |ui| {
@@ -6955,20 +7002,7 @@ impl OperonApp {
                 }
                 let mut targets = ColumnTargets::default();
                 for project in projects {
-                    let count = self
-                        .store
-                        .sessions
-                        .iter()
-                        .filter(|session| {
-                            session.project_id == project.id
-                                && matches!(
-                                    session.status,
-                                    SessionStatus::Starting
-                                        | SessionStatus::Active
-                                        | SessionStatus::Unknown
-                                )
-                        })
-                        .count();
+                    let folded = self.session_arrangement.folded.contains(&project.id);
                     let selected = self.selected_project == Some(project.id);
                     let card = card_frame(palette)
                         .fill(if selected {
@@ -6980,6 +7014,14 @@ impl OperonApp {
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
+                                let (icon, tip) = if folded {
+                                    (ICON_DISCLOSURE_CLOSED, tr("展開する"))
+                                } else {
+                                    (ICON_DISCLOSURE_OPEN, tr("折りたたむ"))
+                                };
+                                if small_icon_button(ui, palette, icon, tip).clicked() {
+                                    fold = Some(project.id);
+                                }
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
                                     |ui| {
@@ -6993,12 +7035,51 @@ impl OperonApp {
                                         {
                                             self.open_project_session_setup(project.id);
                                         }
-                                        ui.label(
-                                            RichText::new(tf!("{p0} 件", p0 = count))
-                                                .small()
-                                                .weak(),
-                                        )
-                                        .on_hover_text(tr("起動中のセッション"));
+                                        // Drawn right to left, so 要対応
+                                        // lands leftmost, nearest the name.
+                                        for group in [
+                                            SessionStatusGroup::Free,
+                                            SessionStatusGroup::Busy,
+                                            SessionStatusGroup::NeedsYou,
+                                        ] {
+                                            let mut members =
+                                                live.iter().filter(|(owner, member, _, _)| {
+                                                    *owner == project.id && *member == group
+                                                });
+                                            let Some(&(_, _, _, first)) = members.next() else {
+                                                continue;
+                                            };
+                                            let count = members.count() + 1;
+                                            let chip = ui
+                                                .add(
+                                                    egui::Label::new(
+                                                        // Tight, so a short name stays
+                                                        // whole beside three counts.
+                                                        RichText::new(format!(
+                                                            "{}{}",
+                                                            group.icon(),
+                                                            count
+                                                        ))
+                                                        .size(12.5)
+                                                        .strong()
+                                                        .color(palette.status(group.tone())),
+                                                    )
+                                                    .selectable(false)
+                                                    .sense(egui::Sense::click()),
+                                                )
+                                                .on_hover_ui(|ui| {
+                                                    ui.label(tr(group.message_id()));
+                                                    ui.label(tf!("{p0} 件", p0 = count));
+                                                });
+                                            if chip.hovered() {
+                                                ui.ctx().set_cursor_icon(
+                                                    egui::CursorIcon::PointingHand,
+                                                );
+                                            }
+                                            if chip.clicked() {
+                                                open = Some(first);
+                                            }
+                                        }
                                         ui.with_layout(
                                             egui::Layout::left_to_right(egui::Align::Center),
                                             |ui| {
@@ -7040,6 +7121,83 @@ impl OperonApp {
                                     },
                                 );
                             });
+                            if folded {
+                                return;
+                            }
+                            let mut any = false;
+                            for &(_, _, kind, id) in
+                                live.iter().filter(|(owner, ..)| *owner == project.id)
+                            {
+                                let Some(session) = self.store.sessions.iter().find(|s| s.id == id)
+                                else {
+                                    continue;
+                                };
+                                any = true;
+                                let title = session_list_title(
+                                    session,
+                                    self.session_prompt_turns
+                                        .get(&id)
+                                        .and_then(|turns| turns.first())
+                                        .map(|turn| turn.prompt.as_str()),
+                                );
+                                let row = egui::Frame::new()
+                                    .fill(if self.selected_session == Some(id) {
+                                        palette.raised
+                                    } else {
+                                        Color32::TRANSPARENT
+                                    })
+                                    .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
+                                    .inner_margin(egui::Margin::symmetric(SPACE_SM as i8, 2))
+                                    .show(ui, |ui| {
+                                        ui.set_min_width(ui.available_width());
+                                        ui.horizontal(|ui| {
+                                            ui.label(
+                                                RichText::new(kind.icon())
+                                                    .color(palette.status(kind.tone())),
+                                            );
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(&title)
+                                                        .size(12.5)
+                                                        .color(palette.text),
+                                                )
+                                                .truncate()
+                                                .selectable(false),
+                                            );
+                                        });
+                                    })
+                                    .response;
+                                let row = ui
+                                    .interact(
+                                        row.rect,
+                                        egui::Id::new(("workspace-project-session", id)),
+                                        egui::Sense::click(),
+                                    )
+                                    .on_hover_ui(|ui| {
+                                        let view = session_status_view(
+                                            &self.store.sessions,
+                                            session,
+                                            self.cancellation_pending(id),
+                                            self.session_activity_for(id),
+                                        );
+                                        ui.label(&title);
+                                        ui.label(&view.label);
+                                        ui.label(&view.hint);
+                                    });
+                                if row.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                if row.clicked() {
+                                    open = Some(id);
+                                }
+                            }
+                            if !any {
+                                ui.label(
+                                    RichText::new(tr("起動中のセッションはありません"))
+                                        .small()
+                                        .weak(),
+                                );
+                            }
                         });
                     targets.push(project.id, card.response.rect);
                     ui.add_space(SPACE_SM);
@@ -7053,6 +7211,29 @@ impl OperonApp {
             });
         if ui.input(|i| i.pointer.primary_released()) {
             self.workspace_project_drag = None;
+        }
+        if let Some(project) = fold {
+            self.toggle_project_fold(project);
+        }
+        if let Some(id) = open {
+            self.open_waiting_session(id);
+        }
+    }
+
+    /// Folds or unfolds one project in the session page's column, and saves
+    /// it with the column's order. A failed write leaves the fold in effect
+    /// for this run and says so.
+    pub(crate) fn toggle_project_fold(&mut self, project: Uuid) {
+        let folded = &mut self.session_arrangement.folded;
+        if let Some(at) = folded.iter().position(|id| *id == project) {
+            folded.remove(at);
+        } else {
+            folded.push(project);
+        }
+        let projects = &self.store.projects;
+        folded.retain(|id| projects.iter().any(|project| project.id == *id));
+        if let Err(error) = save_session_arrangement(&self.data_file, &self.session_arrangement) {
+            self.notice = Some(tf!("並び順を保存できませんでした: {error}", error = error));
         }
     }
 
@@ -7460,6 +7641,9 @@ impl OperonApp {
         arrangement
             .sessions
             .retain(|id| sessions.iter().any(|session| session.id == *id));
+        arrangement
+            .folded
+            .retain(|id| projects.iter().any(|project| project.id == *id));
         self.session_arrangement = arrangement;
         if let Err(error) = save_session_arrangement(&self.data_file, &self.session_arrangement) {
             self.notice = Some(tf!("並び順を保存できませんでした: {error}", error = error));

@@ -50470,9 +50470,10 @@ pub(crate) fn the_terminal_starts_directly_under_the_session_header() {
     for shape in render_workspace_output(&mut fixture.app, &session, 1200.0, 800.0).shapes {
         collect(&shape.shape, fill, &mut texts, &mut frames);
     }
+    let right = project_column_right(&fixture.app);
     let header = texts
         .iter()
-        .filter(|(text, _)| *text == title)
+        .filter(|(text, rect)| *text == title && rect.left() > right)
         .map(|(_, rect)| *rect)
         .max_by(|a, b| a.top().total_cmp(&b.top()))
         .expect("the terminal header names the session below its tab");
@@ -50515,7 +50516,9 @@ pub(crate) fn clicking_a_pinned_rows_title_opens_the_session() {
     };
     let _ = render(&mut app, vec![]);
     let layout = render(&mut app, vec![]);
-    let at = drawn_text_rect(&layout, |text| text == "first")
+    let at = drawn_text_rects(&layout, |text| text == "first")
+        .into_iter()
+        .find(|rect| rect.left() > project_column_right(&app))
         .expect("the pinned title is drawn")
         .center();
     let press = |pressed: bool| egui::Event::PointerButton {
@@ -53163,7 +53166,9 @@ pub(crate) fn a_session_rows_corner_stays_inside_its_block() {
     let (title, _) = painted
         .texts
         .iter()
-        .filter(|(text, _, _)| text.starts_with("long-title"))
+        .filter(|(text, rect, _)| {
+            text.starts_with("long-title") && rect.left() > project_column_right(&app)
+        })
         .map(|(_, rect, size)| (*rect, *size))
         .min_by(|a, b| a.0.min.x.total_cmp(&b.0.min.x))
         .expect("長いタイトルが描かれていません");
@@ -56951,6 +56956,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
     let arrangement = SessionArrangement {
         projects: vec![projects[2].id, projects[0].id],
         sessions: Vec::new(),
+        folded: Vec::new(),
     };
     sort_column_projects(&mut projects, &arrangement);
     assert_eq!(
@@ -56972,6 +56978,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
     let arrangement = SessionArrangement {
         projects: Vec::new(),
         sessions: vec![one.id, three.id],
+        folded: Vec::new(),
     };
     sort_column_sessions(&mut sessions, &arrangement);
     assert_eq!(ids(&sessions), [two.id, one.id, three.id]);
@@ -56992,6 +56999,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
     column.app.session_arrangement = SessionArrangement {
         projects: vec![column.beta, column.alpha],
         sessions: vec![column.second, column.first, column.third],
+        folded: Vec::new(),
     };
     let texts = column_181_settled(&mut column.app, &context, 700.0);
     assert_eq!(
@@ -57306,6 +57314,7 @@ pub(crate) fn test_change_181_arrangement_file_is_bounded_and_fails_towards_defa
     let arrangement = SessionArrangement {
         projects: vec![Uuid::new_v4()],
         sessions: vec![Uuid::new_v4(), Uuid::new_v4()],
+        folded: vec![Uuid::new_v4()],
     };
     save_session_arrangement(&data_file, &arrangement).unwrap();
     assert_eq!(load_session_arrangement(&data_file), arrangement);
@@ -60864,7 +60873,7 @@ pub(crate) fn dragging_a_central_tab_onto_a_terminal_splits_it() {
     // The inactive tab remains available in the central tab strip.
     let row = texts
         .iter()
-        .filter(|(text, _)| text == "second")
+        .filter(|(text, pos)| text == "second" && pos.x > project_column_right(&app))
         .map(|(_, pos)| *pos + egui::vec2(4.0, 4.0))
         .min_by(|a, b| a.x.total_cmp(&b.x))
         .expect("the central strip draws the second session tab");
@@ -61909,9 +61918,10 @@ fn workspace_pointer_switch_reorder_split_and_close_document() {
     workspace_pointer_frame(&mut app, &context, Vec::new());
     let output = workspace_pointer_frame(&mut app, &context, Vec::new());
     let position = |output: &egui::FullOutput, title: &str| {
+        // Right of the project column, which lists the same titles (237).
         text_positions(output)
             .into_iter()
-            .find(|(text, _)| text == title)
+            .find(|(text, pos)| text == title && pos.x > column_right(output))
             .unwrap_or_else(|| panic!("missing tab {title}: {:?}", text_positions(output)))
             .1
             + egui::vec2(4.0, 4.0)
@@ -62131,8 +62141,14 @@ fn workspace_escape_and_release_over_tab_cancel_reordering() {
     workspace_pointer_frame(&mut app, &context, Vec::new());
     let output = workspace_pointer_frame(&mut app, &context, Vec::new());
     let texts = text_positions(&output);
+    let right = column_right(&output);
     let position = |title: &str| {
-        texts.iter().find(|(text, _)| text == title).unwrap().1 + egui::vec2(4.0, 4.0)
+        texts
+            .iter()
+            .find(|(text, pos)| text == title && pos.x > right)
+            .unwrap()
+            .1
+            + egui::vec2(4.0, 4.0)
     };
     let (source, target) = (position("second"), position("first"));
     let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
@@ -62322,7 +62338,10 @@ fn history_renders_each_session_once_in_the_chosen_view() {
         let texts = text_positions(&output);
         for title in ["first", "second"] {
             assert_eq!(
-                texts.iter().filter(|(text, _)| text == title).count(),
+                texts
+                    .iter()
+                    .filter(|(text, pos)| text == title && pos.x > project_column_right(&app))
+                    .count(),
                 1,
                 "the chosen {view:?} must render {title} exactly once"
             );
@@ -62356,7 +62375,9 @@ fn history_title_single_click_opens_after_the_double_click_window() {
     };
     frame(&mut app, 10.0, Vec::new());
     let output = frame(&mut app, 10.01, Vec::new());
-    let title = drawn_text_rect(&output, |text| text == "first")
+    let title = drawn_text_rects(&output, |text| text == "first")
+        .into_iter()
+        .find(|rect| rect.left() > project_column_right(&app))
         .unwrap()
         .center();
     let button = |pressed| egui::Event::PointerButton {
@@ -62502,13 +62523,17 @@ fn workspace_project_selection_leaves_history_and_new_session_uses_selected_proj
         !app.session_library_open,
         "selecting a project returns to its central workspace"
     );
+    // Change 237: the project's own `+` is the column's only start.
     let output = workspace_pointer_frame(&mut app, &context, Vec::new());
-    let at = text_positions(&output)
+    let header = column_rect(&output, "q").unwrap();
+    let at = drawn_text_rects(&output, |text| text == ICON_ADD)
         .into_iter()
-        .find(|(text, _)| text == "新しいセッション")
-        .unwrap()
-        .1
-        + egui::vec2(4.0, 4.0);
+        .find(|rect| {
+            rect.left() < column_right(&output)
+                && (rect.center().y - header.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .expect("q's start control")
+        .center();
     workspace_pointer_frame(
         &mut app,
         &context,
@@ -62673,19 +62698,29 @@ fn workspace_project_picker_keeps_saved_order_counts_and_per_project_launch() {
         row("q").top() < row("p").top(),
         "project picker must retain saved order"
     );
-    let count = drawn_text_rects(&output, |text| text == "0 件")
-        .into_iter()
-        .find(|r| r.left() < 400.0 && (r.center().y - row("q").center().y).abs() < CONTROL_HEIGHT)
-        .expect("empty project retains its visible count");
+    // Change 237: counts are per status group; an empty project has none,
+    // and its `+` sits on its own header line.
+    let empty_line = column_line(&output, row("q"));
+    assert!(
+        !empty_line
+            .iter()
+            .any(|text| text.ends_with('1') || text.ends_with('0')),
+        "an empty project draws no counts: {empty_line:?}"
+    );
     let plus = drawn_text_rects(&output, |text| text == ICON_ADD)
         .into_iter()
         .find(|r| {
-            r.left() < 400.0 && (r.center().y - count.center().y).abs() < CONTROL_HEIGHT / 2.0
+            r.left() < column_right(&output)
+                && (r.center().y - row("q").center().y).abs() < CONTROL_HEIGHT / 2.0
         })
-        .expect("project-local launch remains beside its count");
-    let live_count = drawn_text_rects(&output, |text| text == "1 件")
+        .expect("project-local launch remains on its header");
+    let busy = format!("{ICON_STATUS_RUNNING}1");
+    let live_count = drawn_text_rects(&output, |text| text == busy)
         .into_iter()
-        .find(|r| r.left() < 400.0 && (r.center().y - row("p").center().y).abs() < CONTROL_HEIGHT)
+        .find(|r| {
+            r.left() < column_right(&output)
+                && (r.center().y - row("p").center().y).abs() < CONTROL_HEIGHT
+        })
         .expect("project count excludes finished history");
     workspace_pointer_frame(
         &mut app,
@@ -62694,8 +62729,9 @@ fn workspace_project_picker_keeps_saved_order_counts_and_per_project_launch() {
     );
     let hovered = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert!(
-        drawn_text_rect(&hovered, |text| text == "起動中のセッション").is_some(),
-        "the visible count must explain that it represents live sessions"
+        drawn_text_rect(&hovered, |text| text == "実行中").is_some()
+            && drawn_text_rect(&hovered, |text| text == "1 件").is_some(),
+        "the visible count must name its group and how many it counts"
     );
     assert!(
         matches!(app.workspace.active(), Some(WorkspaceTab::Session(_))),
@@ -63032,5 +63068,271 @@ fn workspace_project_picker_launcher_handler_retains_target_on_the_next_frame() 
         "workspace rendering cannot replace the launch target"
     );
     assert_eq!(app.workspace_project, Some(other));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 237's fixture: project "p" holds `first` (busy, no activity
+/// reading) and `second` (waiting on a permission); project "q" is empty.
+fn status_column_fixture(root: &Path) -> (OperonApp, Uuid, Uuid, Uuid, Uuid) {
+    let (mut app, empty) = app_with_an_empty_second_project(root);
+    let populated = app.store.projects[0].id;
+    let (first, second) = (app.store.sessions[0].id, app.store.sessions[1].id);
+    app.session_activity.insert(
+        second,
+        ActivityTracker {
+            settled: Some(AgentActivity::AwaitingInput),
+            candidate: None,
+        },
+    );
+    app.session_library_open = false;
+    app.show_session_inspector = false;
+    (app, populated, empty, first, second)
+}
+
+/// Where the project column ends, from the layout the last frame used. Since
+/// change 237 it lists live session titles, so a test that looks for a title
+/// in the centre looks right of this.
+fn project_column_right(app: &OperonApp) -> f32 {
+    let area = app.dock_area.expect("a drawn workspace");
+    app.dock.rects(area, None).edges[DockEdge::Left.index()].map_or(area.left(), |r| r.right())
+}
+
+/// Where the left column ends: the right edge of its 「履歴」 button, which
+/// sits at the column's right margin.
+fn column_right(output: &egui::FullOutput) -> f32 {
+    drawn_text_rects(output, |text| text == "履歴")
+        .into_iter()
+        .map(|rect| rect.right())
+        .fold(f32::INFINITY, f32::min)
+        + SPACE_SM
+}
+
+/// The left column's texts on one line with `anchor`, left to right.
+fn column_line(output: &egui::FullOutput, anchor: egui::Rect) -> Vec<String> {
+    let right = column_right(output);
+    let mut line = text_positions(output)
+        .into_iter()
+        .filter(|(_, pos)| pos.x < right && (pos.y - anchor.top()).abs() < CONTROL_HEIGHT / 2.0)
+        .collect::<Vec<_>>();
+    line.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+    line.into_iter().map(|(text, _)| text).collect()
+}
+
+fn column_rect(output: &egui::FullOutput, name: &str) -> Option<egui::Rect> {
+    let right = column_right(output);
+    drawn_text_rects(output, |text| text == name)
+        .into_iter()
+        .filter(|rect| rect.left() < right)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+}
+
+#[test]
+fn workspace_project_column_has_one_start_per_project() {
+    let root = temporary_directory("workspace-one-start");
+    let (mut app, ..) = status_column_fixture(&root);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "新しいセッション").is_none(),
+        "the column draws no column-wide start beside the toolbar's"
+    );
+    let starts = drawn_text_rects(&output, |text| text == ICON_ADD)
+        .into_iter()
+        .filter(|rect| rect.left() < column_right(&output))
+        .count();
+    assert_eq!(starts, app.store.projects.len(), "one start per project");
+    assert!(
+        column_rect(&output, "履歴").is_some(),
+        "history stays reachable"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_header_counts_sessions_by_status_group() {
+    let root = temporary_directory("workspace-status-counts");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    let mut finished = app.store.sessions[0].clone();
+    finished.id = Uuid::new_v4();
+    finished.status = SessionStatus::Exited;
+    app.store.sessions.push(finished);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let waiting = format!("{ICON_ATTENTION}1");
+    let busy = format!("{ICON_STATUS_RUNNING}1");
+    let header = column_line(&output, column_rect(&output, "p").unwrap());
+    let at = |text: &str| header.iter().position(|t| t == text);
+    assert!(
+        at(&waiting).is_some() && at(&busy).is_some(),
+        "p shows 要対応 1 and 実行中 1, finished not counted: {header:?}"
+    );
+    assert!(at(&waiting) < at(&busy), "要対応 comes first: {header:?}");
+    assert!(
+        !header.iter().any(|t| t.starts_with(ICON_STATUS_IDLE)),
+        "a group with nobody in it draws no count: {header:?}"
+    );
+    let empty = column_line(&output, column_rect(&output, "q").unwrap());
+    assert!(
+        !empty.iter().any(|t| t == &waiting || t == &busy),
+        "an empty project draws no counts: {empty:?}"
+    );
+    app.toggle_project_fold(populated);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let header = column_line(&output, column_rect(&output, "p").unwrap());
+    assert!(
+        header.contains(&waiting) && header.contains(&busy),
+        "a folded project keeps its counts: {header:?}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_count_click_opens_first_session_of_its_group() {
+    let root = temporary_directory("workspace-count-click");
+    let (mut app, populated, empty, _first, second) = status_column_fixture(&root);
+    app.select_workspace_project(empty);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let chip = drawn_text_rects(&output, |text| text == format!("{ICON_ATTENTION}1"))
+        .into_iter()
+        .find(|rect| rect.left() < column_right(&output))
+        .expect("p's 要対応 count");
+    workspace_click_position(&mut app, &ctx, chip.center());
+    assert_eq!(app.selected_project, Some(populated));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    assert_eq!(app.selected_session, Some(second));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_rows_order_by_status_and_open_on_click() {
+    let root = temporary_directory("workspace-status-rows");
+    let (mut app, _populated, _empty, first, second) = status_column_fixture(&root);
+    app.select_session(second);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let (row_first, row_second) = (
+        column_rect(&output, "first").expect("first row"),
+        column_rect(&output, "second").expect("second row"),
+    );
+    assert!(
+        row_second.top() < row_first.top(),
+        "the session waiting on a permission is listed first"
+    );
+    let glyph = column_line(&output, row_second);
+    assert_eq!(glyph.first().map(String::as_str), Some(ICON_ATTENTION));
+    assert!(
+        column_rect(&output, "起動中のセッションはありません")
+            .is_some_and(|rect| rect.top() > column_rect(&output, "q").unwrap().top()),
+        "the empty project says it has nothing running"
+    );
+    workspace_click_position(&mut app, &ctx, row_first.center());
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(first)));
+    assert_eq!(app.selected_session, Some(first));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_project_fold_hides_rows_and_survives_reload() {
+    let root = temporary_directory("workspace-project-fold");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(column_rect(&output, "first").is_some());
+    let header = column_rect(&output, "p").unwrap();
+    let disclosure = drawn_text_rects(&output, |text| text == ICON_DISCLOSURE_OPEN)
+        .into_iter()
+        .find(|rect| {
+            rect.left() < header.left()
+                && (rect.center().y - header.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .expect("p's fold control");
+    workspace_click_position(&mut app, &ctx, disclosure.center());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "first").is_none() && column_rect(&output, "second").is_none(),
+        "a folded project lists no sessions"
+    );
+    assert!(drawn_text_rect(&output, |text| text == ICON_DISCLOSURE_CLOSED).is_some());
+    assert_eq!(app.session_arrangement.folded, vec![populated]);
+    assert_eq!(
+        load_session_arrangement(&app.data_file).folded,
+        vec![populated],
+        "the fold is written with the column's order"
+    );
+    assert_eq!(
+        test_app(app.data_file.clone()).session_arrangement.folded,
+        vec![populated]
+    );
+    app.toggle_project_fold(populated);
+    assert!(load_session_arrangement(&app.data_file).folded.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_arrangement_without_folded_projects_still_loads() {
+    let root = temporary_directory("arrangement-without-folded");
+    let data_file = root.join("store-v2.json");
+    let project = Uuid::new_v4();
+    fs::write(
+        session_arrangement_path(&data_file),
+        format!("{{\"projects\":[\"{project}\"],\"sessions\":[]}}\n"),
+    )
+    .unwrap();
+    let arrangement = load_session_arrangement(&data_file);
+    assert_eq!(arrangement.projects, vec![project]);
+    assert!(
+        arrangement.folded.is_empty(),
+        "an older file unfolds everything"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn workspace_session_tab_shows_its_status_glyph() {
+    let root = temporary_directory("workspace-tab-glyph");
+    let (mut app, _populated, _empty, first, _second) = status_column_fixture(&root);
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let tab = |output: &egui::FullOutput, title: &str| {
+        drawn_text_rects(output, |text| text == title)
+            .into_iter()
+            .filter(|rect| rect.left() >= column_right(output))
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("central tab title")
+    };
+    let glyph_before = |output: &egui::FullOutput, title: &str, glyph: &str| {
+        let title = tab(output, title);
+        drawn_text_rects(output, |text| text == glyph)
+            .into_iter()
+            .find(|rect| {
+                rect.right() <= title.left() + 1.0
+                    && rect.left() >= column_right(output)
+                    && title.left() - rect.right() < 160.0
+                    && (rect.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
+            })
+    };
+    assert!(glyph_before(&output, "second", ICON_ATTENTION).is_some());
+    let busy = glyph_before(&output, "first", ICON_STATUS_RUNNING).expect("busy glyph");
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(busy.center())],
+    );
+    let hovered = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        drawn_text_rect(&hovered, |text| text == "実行中").is_some()
+            && drawn_text_rect(&hovered, |text| text == "ターミナル稼働中").is_some(),
+        "hovering the glyph names the state and what it means"
+    );
     fs::remove_dir_all(root).unwrap();
 }
