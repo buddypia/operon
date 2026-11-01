@@ -174,7 +174,9 @@ function buildDenyMessage(relPath, branch = 'main') {
 // argument tools (`dd of=`); allowlisted tools that execute project config (make targets, cargo
 // build scripts) run whatever that config says; an inherited `CDPATH` (set outside the command)
 // changes `cd`; git global options are stripped before matching, so `git -c core.sshCommand=…`
-// in front of a listed `git push` or `git log` runs the program it names (refused for `fetch`). Keep such commands off the allowlist rather than relying on the guard to see
+// in front of a listed `git push` or `git log` runs the program it names (refused for `fetch`, `pull`
+// and `ls-remote`). A `PATH`, `TMPDIR`, `PYTHON*` or `RIPGREP_CONFIG_PATH` assignment in the command
+// is refused on trunk (change 239); the same variables inherited from the session are not seen. Keep such commands off the allowlist rather than relying on the guard to see
 // inside them.
 
 /**
@@ -296,11 +298,26 @@ function judgedWords(seg) {
 }
 
 /**
- * `git fetch` reached through git's own options (`-c core.sshCommand=…`, `-C`, `--git-dir`): the
- * patterns never see those, and fetch is the listed command that starts a transport program.
+ * Assignments that change which program a listed command runs or where it writes (change 239):
+ * `PATH` picks the binary, `PYTHON*` the modules the redact filter imports, `TMPDIR` where `mktemp`
+ * creates, `RIPGREP_CONFIG_PATH` a file that can carry `--pre`. Only an assignment in the command
+ * itself is seen; one inherited from the session is not (as `CDPATH`, header).
  */
-function isFetchWithGitOptions(words, text) {
-  return /^git\s+fetch(?:\s|$)/.test(text) && !/^(?:\S*\/)?git\s+fetch(?:\s|$)/.test(words.join(' '));
+const STEERING_ENV_RE = /^(?:PATH|TMPDIR|PYTHON\w*|RIPGREP_CONFIG_PATH)$/;
+
+/**
+ * A listed command that runs another program through something its pattern cannot see:
+ *   - `git fetch` / `pull` / `ls-remote` reached through git's own options (`-c core.sshCommand=…`,
+ *     `-C`, `--git-dir`): the patterns never see those, and these are the listed commands that start
+ *     a transport program (pull and ls-remote since change 239);
+ *   - a `STEERING_ENV_RE` assignment in front of any command.
+ */
+function runsProgramUnseen(seg, words, text) {
+  const transport = /^git\s+(?:fetch|pull|ls-remote)(?:\s|$)/;
+  if (transport.test(text) && !/^(?:\S*\/)?git\s+(?:fetch|pull|ls-remote)(?:\s|$)/.test(words.join(' '))) {
+    return true;
+  }
+  return seg.assigns.some((n) => STEERING_ENV_RE.test(n));
 }
 
 /**
@@ -329,7 +346,7 @@ export function findDisallowedTrunkSegment(cmd, cwd, projectDir, allowlist, link
     if (seg.redirect) return refused(seg);
     const words = judgedWords(seg);
     const text = commandText(words);
-    if (isFetchWithGitOptions(words, text)) return refused(seg);
+    if (runsProgramUnseen(seg, words, text)) return refused(seg);
     if (!allowlist.some((re) => re.test(text))) return refused(seg);
   }
   return null;

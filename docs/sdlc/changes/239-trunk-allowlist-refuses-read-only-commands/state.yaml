@@ -1,0 +1,52 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. Since the allowlist last moved (change 173, 2026-10-17),
+#    .claude/state/governance-events.jsonl holds 439 trunk-allowlist refusals.
+#    Replayed through the current policy, 6 pass; most of the rest are
+#    correct (writes on main, interpreters, `$VAR` paths). About 85 are reads
+#    that change nothing, each a retry or a detour for the session:
+#    `rg` (15), `git ls-remote --heads origin` (12), `git pull --ff-only`
+#    on landing (9), `git branch -r|-a --list`, `--contains`, `--format` (8),
+#    `sleep` (8), `mktemp -d` (5), `tr` (5), `readlink`, `paste`, `du`,
+#    `strings`, `md5`, `sha256sum`, the secret-guard redact filter the
+#    person's own instructions require after `ps` (3), `gh api` reads (3),
+#    `bash scripts/check-approvals.sh --list` (3).
+#    The person asked for it on 2026-11-01 (「一つずつやって」, answering the
+#    mechanism audit's first proposal).
+# 2. Cause: the list never named these reads, and the `git branch` patterns
+#    take `--list` only first and no `-r`/`-a` before it.
+# 3. Kept out on purpose, as 095 and 131 decided: awk and sed beyond line or
+#    regex prints (their scripts write and run programs), `python3`/`node`
+#    payloads, redirects into files, `git -C <dir>` in front of a transport
+#    (also when the dir is the trunk itself: 14 refusals, recorded in resume).
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Person approved the final plan 2026-11-01 (approvals.log). Lands after CI. Open: git options naming the trunk directory in front of fetch, pull, ls-remote are still refused (backlog 20261101-0d4sr7qm)."
+
+contract:
+  three-gates: "machine passed gate-commit.sh admitted 21573e4 (fmt, clippy, record tests); guard test groups worktree, trunk, guard, hook, gate, policy passed locally; full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh — warn rows only, recorded"
+  failing-test-first: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refused git branch -r --list origin/fix/236* on the unedited policy"
+  release-binary: "machine waived touches .claude/config, .cli, docs/sdlc, and src/tests.rs only"
+  guards-verified-by-mutation: "human passed mutations.py 14 of 14 caught; replay of 440 logged refusals admits 95 (6 before), every admitted line a read"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
