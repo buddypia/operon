@@ -24,23 +24,23 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
-  attempts: "0 3"
+  stage: "test"
+  status: "awaiting-user"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
   risk: "high"
   readiness: "go"
   screen: "n/a"
 
-resume: "plan.md written and approved by the person's choice; next: the failing test, then policy, guard, deletions."
+resume: "Built, reviewed (both approve-with-nits, round 2 of 2), mutations 6 of 6, committed and pushed. Waiting on a person: plan.md was reworded after the 2026-11-01 approval (Files-that-change rows without brace-glob paths, for harness_documents_only_name_paths_that_exist), so plan and gate-configuration need a person approve at digest 42786e928981d2ea. Then plan Status done, status done, wait for CI, land, clean up."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  failing-test-first: "machine pending the new shipping-guard test fails on the unedited guard"
+  three-gates: "machine passed fmt and clippy at commit; groups worktree, guard, hook, stop, gate, policy, ship passed locally; full suite in CI"
+  bands: "machine passed bash scripts/check-bands.sh — warn rows only, recorded"
+  failing-test-first: "machine passed the_stop_notice_names_this_repositorys_landing failed on the unedited guard (no git merge --no-ff line)"
   release-binary: "machine waived touches .claude/config, .claude/scripts, .cli, docs/sdlc, and src/tests.rs only"
-  guards-verified-by-mutation: "human pending each new assertion watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 6 of 6 caught; reachability rerun leaves only the two kept on purpose"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

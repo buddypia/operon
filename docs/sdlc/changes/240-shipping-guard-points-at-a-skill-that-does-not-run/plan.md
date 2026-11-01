@@ -2,7 +2,7 @@
 
 - **Spec**: n/a (`bugfix` route — the bug report is in `./state.yaml`)
 - **Approved**: 2026-11-01
-- **Status**: approved
+- **Status**: draft
 
 ## Root cause
 
@@ -40,8 +40,8 @@ Change 073's rule: what is Operon's goes declaratively in
 |---|---|
 | `.claude/config/worktree-policy.json` | `landing_steps` |
 | `.cli/hooks/worktree-shipping-guard.mjs` | read `landing_steps`; print them instead of the ship-worktree flow |
-| `.claude/scripts/{review-deck,ship-deck,ship-deck-bridge,followup-debt-tracker}.mjs` | deleted |
-| `.claude/scripts/lib/{debt-resolution,deck-visuals,doc-outline,doc-section-render,review-deck-core,review-deck-render,review-origin,ship-deck-render}.mjs` | deleted |
+| the four entry scripts under .claude/scripts named in state.yaml (review-deck, ship-deck, ship-deck-bridge, followup-debt-tracker) | deleted |
+| the eight libs under .claude/scripts/lib only they import (debt-resolution, deck-visuals, doc-outline, doc-section-render, review-deck-core, review-deck-render, review-origin, ship-deck-render) | deleted |
 | `.claude/.bundle-receipt.json` | entries for the twelve removed; `$comment` names them |
 | `src/tests.rs` | a test that renders the notice with this repository's policy |
 
