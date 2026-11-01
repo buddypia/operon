@@ -36,7 +36,7 @@ state:
 resume: "Built, reviewed (both approve-with-nits), mutations 14 of 14. Waiting on a person: plan.md changed after the 2026-11-01 approval (the policy path written without its #anchor so harness_documents_only_name_paths_that_exist passes, plus the review departures), and gate-configuration needs a person approve at digest 5b6ddef854e9dac9. Then set plan Status done, status done, push, wait for CI, land. Open: git options naming the trunk directory in front of fetch, pull, ls-remote are still refused (14 logged)."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed gate-commit.sh admitted 21573e4 (fmt, clippy, record tests); guard test groups worktree, trunk, guard, hook, gate, policy passed locally; full suite runs in CI"
   bands: "machine passed bash scripts/check-bands.sh — warn rows only, recorded"
   failing-test-first: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refused git branch -r --list origin/fix/236* on the unedited policy"
   release-binary: "machine waived touches .claude/config, .cli, docs/sdlc, and src/tests.rs only"
