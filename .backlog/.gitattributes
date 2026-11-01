@@ -1,0 +1,2 @@
+# Status changes are append-only lines; keep both sides of a merge.
+events/*.jsonl merge=union
