@@ -34,14 +34,14 @@
   "session_owner_scope": "all_bash",
   "trunk_bash_allowlist": {
     "enabled": true,
-    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, and the gates and release scripts that follow it, with quitting and reopening the installed app around the swap (change 173). Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
+    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, and the gates and release scripts that follow it, with quitting and reopening the installed app around the swap (change 173), and the reads change 239 counted among its refusals: rg, a remote's branches, landing's fast-forward pull, small text tools, scratch, the secret-guard redact filter, GitHub API reads. Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
     "patterns": [
       "make\\s+(?:-C\\s+[\\w./-]+\\s+)?(?:wt\\.new(?:\\s+(?:BR|BASE|DRY)=[\\w./-]+)*|q\\.check|q\\.fast)(?:\\s+\\d*>\\s*(?:&\\d+|/dev/null))*\\s*$",
       "node\\s+(?:-v|(?:\\S*/)?\\.claude/scripts/(?:worktree-new|create-pr/ops)\\.mjs)",
       "git\\s+worktree(?!\\s+remove)",
       "git\\s+(?:status|log|diff|show|rev-parse)(?![\\s\\S]*\\s(?:--out|--ext))",
       "git\\s+grep(?![\\s\\S]*\\s(?:-O|--op))",
-      "git\\s+branch(?:\\s+-(?:a|r|v|vv|-list|-all|-remotes|-verbose|-show-current|-merged|-no-merged))*\\s*$",
+      "git\\s+branch(?:\\s+(?:-(?:a|r|v|vv|-list|-all|-remotes|-verbose|-show-current|-merged|-no-merged)|--format=\\S+))*\\s*$",
       "git\\s+remote(?:\\s+(?:-v|--verbose))?\\s*$",
       "git\\s+(?:stash\\s+(?:list|show)|config\\s+--(?:get|list)|--version)",
       "git\\s+merge\\s+(?:--no-ff|--ff-only)",
@@ -56,7 +56,7 @@
       "uniq(?:[ \\t]+-[a-zA-Z]+)*(?:[ \\t]+(?!-)[^\\s]+)?[ \\t]*$",
       "date(?![\\s\\S]*\\s(?:-s|--se))",
       "for\\s+[A-Za-z_]\\w*\\s+in",
-      "git\\s+branch\\s+--list(?:[ \\t]+(?!-)[\\w./*-]+)+[ \\t]*$",
+      "git\\s+branch(?:\\s+(?:-(?:a|r|v|vv|-all|-remotes|-verbose)|--format=\\S+))*\\s+--(?:list|contains|no-contains|merged|no-merged)(?:[ \\t]+(?!-)[\\w./*\\[\\]-]+)+[ \\t]*$",
       "git\\s+(?:for-each-ref|merge-base|ls-files|ls-tree|cat-file|rev-list|show-ref|blame)(?![\\s\\S]*\\s--(?:te|fi|out))",
       "find(?![\\s\\S]*\\s-(?:delete|exec|execdir|ok|okdir|fprint|fprintf|fls)(?:\\s|$))",
       "cargo\\s+(?:fmt\\s+--check|test\\s+--locked|clippy\\s+--locked)(?![\\s\\S]*\\s--fix)",
@@ -68,7 +68,14 @@
       "git\\s+fetch(?:\\s+(?:-q|--quiet|-p|--prune))*(?:\\s+origin)?\\s*$",
       "osascript[ \\t]+-e[ \\t]+tell application \"Operon\" to quit[ \\t]*$",
       "open[ \\t]+/Applications/Operon\\.app[ \\t]*$",
-      "bash\\s+scripts/(?:package-macos|replace-macos-bundle|check-installed-build|check-readiness|check-bands|harness-metrics|run-evals|check-review|pipeline-indicators|ci-verified|check-transcript-vocabulary)\\.sh"
+      "bash\\s+scripts/(?:package-macos|replace-macos-bundle|check-installed-build|check-readiness|check-bands|harness-metrics|run-evals|check-review|pipeline-indicators|ci-verified|check-transcript-vocabulary|check-approvals)\\.sh",
+      "git\\s+ls-remote(?:\\s+(?:-q|--quiet|-h|--heads|-t|--tags|--refs|-b|--branches))*\\s+origin(?:[ \\t]+(?!-)[\\w./*\\[\\]-]+)*[ \\t]*$",
+      "git\\s+pull(?:\\s+(?:-q|--quiet))*\\s+--ff-only(?:\\s+(?:-q|--quiet))*(?:\\s+origin(?:\\s+main)?)?\\s*$",
+      "rg(?![\\s\\S]*\\s(?:--(?:pre|hostname-bin|search-zip)|-[a-zA-Z]*z))",
+      "(?:sleep|tr|dirname|readlink|paste|du|strings|md5|md5sum|sha256sum)",
+      "mktemp(?:\\s+-d)?(?:\\s+-q)?\\s*$",
+      "(?:/usr/bin/)?python3\\s+~/\\.claude/hooks/secret-guard\\.py\\s+redact\\s*$",
+      "gh\\s+api(?:\\s+(?:--jq|-q)\\s+\\S+|\\s+(?:--paginate|--slurp|--include|-i|--silent)|\\s+(?!-)\\S+)*\\s*$"
     ]
   }
 }

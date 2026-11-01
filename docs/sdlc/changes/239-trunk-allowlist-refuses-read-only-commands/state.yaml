@@ -24,23 +24,23 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
-  attempts: "0 3"
+  stage: "test"
+  status: "awaiting-user"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
   risk: "high"
   readiness: "go"
   screen: "n/a"
 
-resume: "Plan approved (approvals.log). Next: extend the test, watch it fail, then edit the policy and the guard."
+resume: "Built, reviewed (both approve-with-nits), mutations 14 of 14. Waiting on a person: plan.md changed after the 2026-11-01 approval (the policy path written without its #anchor so harness_documents_only_name_paths_that_exist passes, plus the review departures), and gate-configuration needs a person approve at digest 5b6ddef854e9dac9. Then set plan Status done, status done, push, wait for CI, land. Open: git options naming the trunk directory in front of fetch, pull, ls-remote are still refused (14 logged)."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  failing-test-first: "machine pending the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refuses a listed read on the unedited policy"
+  bands: "machine passed bash scripts/check-bands.sh — warn rows only, recorded"
+  failing-test-first: "machine passed the_trunk_allowlist_and_the_ownership_check_are_switched_on_here refused git branch -r --list origin/fix/236* on the unedited policy"
   release-binary: "machine waived touches .claude/config, .cli, docs/sdlc, and src/tests.rs only"
-  guards-verified-by-mutation: "human pending each new exclusion watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 14 of 14 caught; replay of 440 logged refusals admits 95 (6 before), every admitted line a read"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

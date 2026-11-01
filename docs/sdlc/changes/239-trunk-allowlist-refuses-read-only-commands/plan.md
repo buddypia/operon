@@ -6,7 +6,7 @@
 
 ## Root cause
 
-`.claude/config/worktree-policy.json#trunk_bash_allowlist` names what runs on
+The `trunk_bash_allowlist` in `.claude/config/worktree-policy.json` names what runs on
 `main`. Since change 173 it has refused 439 commands; about 85 of them read and
 change nothing (counts in `state.yaml`). The list never named them, and the two
 `git branch` patterns accept `--list` only as the first option, with no `-r` or
@@ -76,4 +76,14 @@ redirects, `git -C <trunk>` in front of a transport. Each was decided by 095 or
 
 ## Departures from the plan
 
-None yet.
+- Review round 1 (both reviewers): the `gh api` lookahead missed bundled short
+  flags — `gh api -iX DELETE …` and `-if a=b` passed. `gh api` now admits only
+  listed read flags (`--jq`/`-q <expr>`, `--paginate`, `--slurp`, `-i`,
+  `--include`, `--silent`) and non-dash words; `-H` is out with the rest, since
+  `X-HTTP-Method-Override` can turn a read into a write.
+- Round 1 nits, taken because each was a way past the plan's own claims:
+  `rg -z`/`--search-zip` refused (starts a decompressor); the guard refuses a
+  `PATH`, `TMPDIR`, `PYTHON*` or `RIPGREP_CONFIG_PATH` assignment in front of
+  any trunk command (`TMPDIR=. mktemp` wrote into the trunk), which replaces
+  the rg-only `RIPGREP_CONFIG_PATH` check; the guard header names both rules.
+- Mutation sweep: 14 of 14 caught.

@@ -41425,8 +41425,9 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
     // options macOS `sort` and git accept abbreviated. sed is let in only as a
     // line-range print: its script can write (`w`) wherever it appears. awk
     // is left out: it is an interpreter (`system()`, `print >`), like `node -e`.
-    // rg is left out too: `--pre`, `--hostname-bin` and a config file named
-    // by the environment each run a program, and `grep` already reads.
+    // rg was left out too: `--pre`, `--hostname-bin` and a config file named
+    // by the environment each run a program. Change 239 lets it in without
+    // those three, and without `-z`, which starts a decompressor.
     let reads_allowed = [
         "sed -n 1,5p src/main.rs",
         "sed -n 1,60p $W/src/app.rs",
@@ -41466,6 +41467,31 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "sed -n '/^contract:/,$p' docs/sdlc/changes/096-x/state.yaml",
         "sed -n '/## Acceptance/,/## Rejected/p' $W/spec.md",
         "bash scripts/check-transcript-vocabulary.sh",
+        // Change 239: reads refused on the trunk since 173 — a remote's
+        // branches, landing's fast-forward, branch listings past `--list`,
+        // rg, small text tools, scratch, the redact filter after `ps`, and
+        // a GitHub API read.
+        "git branch -r --list origin/fix/236*",
+        "git branch -a --list '*17[5-9]-*' '*18[0-9]-*'",
+        "git branch --contains e37c065",
+        "git branch -a --format='%(refname:short)'",
+        "git ls-remote --heads origin feature/x",
+        "git ls-remote --heads origin",
+        "git pull --ff-only",
+        "git pull -q --ff-only origin main 2>&1",
+        "rg -n 'SessionStatus::Starting' src/app.rs src/tmux.rs",
+        "rg -n \"fn is_valid_branch_name\" -A25 src/git.rs",
+        "tr '\\n' ' '",
+        "sleep 5",
+        "dirname src/main.rs",
+        "readlink .agents",
+        "du -sh docs",
+        "sha256sum Cargo.lock",
+        "mktemp -d",
+        "ps -o pid=,etime=,comm= | /usr/bin/python3 ~/.claude/hooks/secret-guard.py redact",
+        "gh api repos/buddypia/operon/branches/feature/x --jq .name",
+        "gh api --paginate -i repos/o/r/branches -q '.[].name'",
+        "bash scripts/check-approvals.sh --list 2>&1",
     ];
     let writes_denied = [
         "sed -n 1w src/main.rs README.md",
@@ -41475,8 +41501,51 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "sed -i '' s/a/b/ src/main.rs",
         "sed -ni p src/main.rs",
         "sed --in-place s/a/b/ src/main.rs",
-        "rg -n foo src",
         "rg --hostname-bin=./x.sh foo",
+        "rg --pre ./x foo",
+        "rg --pre=./x foo",
+        "rg --pre-glob '*' foo",
+        "RIPGREP_CONFIG_PATH=./rc rg foo",
+        "git branch newbranch",
+        "git branch -a newbranch",
+        "git branch --contains x --force",
+        "git branch -r --list x -D",
+        "git branch --set-upstream-to=origin/x",
+        "git ls-remote --upload-pack=./x origin",
+        "git ls-remote /tmp/other",
+        "git -c core.sshCommand=./x ls-remote origin",
+        "git -c core.sshCommand=./x pull --ff-only",
+        "git -C /tmp/elsewhere pull --ff-only",
+        "git pull",
+        "git pull origin main",
+        "git pull --rebase origin main",
+        "git pull --ff-only origin main:main",
+        "git pull --ff-only /tmp/other",
+        "mktemp foo.XXXX",
+        "mktemp -d ./x.XXXX",
+        "python3 ~/.claude/hooks/secret-guard.py scan",
+        "python3 ~/.claude/hooks/secret-guard.py redact > out",
+        "gh api -X DELETE repos/o/r/git/refs/heads/x",
+        "gh api --method POST repos/o/r",
+        "gh api repos/o/r -f a=b",
+        "gh api graphql -F query=@q",
+        "gh api repos/o/r --field a=b",
+        "gh api repos/o/r --raw-field a=b",
+        "gh api repos/o/r --input body.json",
+        // Review of 239: gh bundles short flags, and a header can override the
+        // method, so only listed read flags pass.
+        "gh api -iX DELETE repos/o/r/git/refs/heads/x",
+        "gh api repos/o/r/issues -if title=x",
+        "gh api repos/o/r/issues -pF title=x",
+        "gh api -H 'X-HTTP-Method-Override: DELETE' repos/o/r",
+        "rg -z foo",
+        "rg -nz foo",
+        "rg --search-zip foo",
+        "TMPDIR=. mktemp",
+        "PATH=./bin sleep 1",
+        "PYTHONPATH=. python3 ~/.claude/hooks/secret-guard.py redact",
+        "env RIPGREP_CONFIG_PATH=./rc rg foo",
+        "tr a b > out",
         "sort -o out x",
         "sort --output=out x",
         "sort --compress-program=sh x",

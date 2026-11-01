@@ -1,0 +1,26 @@
+# Review of change 239. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1: both reviewers found that the `gh api` lookahead missed bundled
+# short flags (`-iX DELETE`, `-if a=b`). Fixed with a positive list of read
+# flags; the nits that were ways past the plan's own claims (rg -z, TMPDIR=.
+# mktemp, PYTHONPATH=/PATH= assignments, stale guard header) were taken in the
+# same round, since the Important finding moved the digest anyway.
+# Round 2: both approve-with-nits, about 50 spellings probed per reviewer.
+
+digest: "23f915da54e43c9d"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1 · gh api's generic word (?!-)\S+ is judged before expansion, so $(echo -X) POST, {-X,POST} and $'-X' reach gh as flags; same class as the known git log $(echo --output=f) limit
+    person: "main の上で、シェル展開を細工した gh api の書き方をすると GitHub への書き込みが通る抜け道が残っています。通常の使い方では起きず、対応は不要です。"
+  - subprocess-safety-reviewer/2 · STEERING_ENV_RE omits DYLD_*, LD_*, BASH_ENV, HOME, XDG_*, GH_*, PAGER in front of a listed command
+    person: "main の上でコマンドの前に特殊な環境変数を付けると、許可済みの読み取りコマンドの動きを変えられます。普段の作業では起きず、対応は不要です。"
+  - rust-reviewer/1 · plan.md tables above Departures still describe the round-1 gh api lookahead, rg without -z, and isFetchWithGitOptions; Departures records the change
+    person: "計画書の表に修正前の記述が残っています。修正の内容は同じ計画書の後半に記録してあり、動作への影響はありません。"
+  - rust-reviewer/2 · gh api -H is refused (method override); note it as a known exclusion so a later widening does not re-add it
+    person: "main の上では、ヘッダー付きの gh api 呼び出しは今後も止まります。AI は作業用の worktree 側で実行するので、あなたの対応は不要です。"
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 2"
+  rust-reviewer: "approve-with-nits 0 2"
