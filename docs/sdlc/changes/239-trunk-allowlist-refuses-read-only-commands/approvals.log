@@ -1,0 +1,2 @@
+2026-11-01T14:06:44Z person plan plan.md c69d04541e125510 approve user 2026-11-01: 「一つずつやって」 — reply to the mechanism audit, whose first item proposed adding read-only commands to the trunk allowlist; this plan admits a narrower set (no awk) and keeps every write and program-starting spelling refused
+2026-11-01T14:06:44Z person gate-configuration plan.md c69d04541e125510 approve user 2026-11-01: 「一つずつやって」 — the same reply; the relaxation is the audit's own first proposal, reversible by one revert
