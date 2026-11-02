@@ -25,7 +25,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "awaiting-user"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
@@ -33,7 +33,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Built, reviewed (both approve-with-nits, round 2 of 2), mutations 6 of 6, committed and pushed. Waiting on a person: plan.md was reworded after the 2026-11-01 approval (Files-that-change rows without brace-glob paths, for harness_documents_only_name_paths_that_exist), so plan and gate-configuration need a person approve at digest 42786e928981d2ea. Then plan Status done, status done, wait for CI, land, clean up."
+resume: "Done. Person approved the reworded plan 2026-11-02. Nine review findings carried in review.yaml, none needing action. A resync from the bundle source would restore the twelve deleted modules (receipt removed_locally names them)."
 
 contract:
   three-gates: "machine passed fmt and clippy at commit; groups worktree, guard, hook, stop, gate, policy, ship passed locally; full suite in CI"

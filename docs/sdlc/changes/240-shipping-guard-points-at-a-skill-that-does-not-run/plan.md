@@ -2,7 +2,7 @@
 
 - **Spec**: n/a (`bugfix` route — the bug report is in `./state.yaml`)
 - **Approved**: 2026-11-01
-- **Status**: draft
+- **Status**: done
 
 ## Root cause
 
