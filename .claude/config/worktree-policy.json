@@ -32,6 +32,12 @@
     "description": "Emergency bypass for urgent hotfixes or when hook/worktree infrastructure itself is broken"
   },
   "session_owner_scope": "all_bash",
+  "landing_steps": [
+    "1. In the worktree: git push -u origin {branch}, then wait for CI (gh run watch).",
+    "2. From the main checkout: git merge --no-ff --no-edit {branch} (.claude/hooks/gate-merge.sh admits it once CI passed), then git push origin main.",
+    "3. From the main checkout: node .claude/scripts/create-pr/ops.mjs cleanup-worktree --worktree \"{worktree}\"",
+    "Order, review record and when main moved: .claude/skills/feature-pilot/SKILL.md section 4. No pull request."
+  ],
   "trunk_bash_allowlist": {
     "enabled": true,
     "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, and the gates and release scripts that follow it, with quitting and reopening the installed app around the swap (change 173), and the reads change 239 counted among its refusals: rg, a remote's branches, landing's fast-forward pull, small text tools, scratch, the secret-guard redact filter, GitHub API reads. Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",

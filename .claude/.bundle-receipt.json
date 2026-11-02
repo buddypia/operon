@@ -45,11 +45,6 @@
           "sha256": "6fc861ab1b61033eb75a08d4d41f3b433d2f91b90b565f2ac733acc155ddf0f6"
         },
         {
-          "path": ".claude/scripts/followup-debt-tracker.mjs",
-          "role": "managed",
-          "sha256": "ad601b59060563a2fba2d1f325c1072e9c7e3d7d250f286b17ba4e4142ea52b1"
-        },
-        {
           "path": ".claude/scripts/lib/approval-policy.mjs",
           "role": "managed",
           "sha256": "641186416159945a7e085498aaad43067a7bc212adecdb8484ec8c2314c05f7a"
@@ -90,11 +85,6 @@
           "sha256": "bd193ea65baf57d50a63e414888750923c8008c87d53c8fb57df541bda8980ab"
         },
         {
-          "path": ".claude/scripts/lib/debt-resolution.mjs",
-          "role": "managed",
-          "sha256": "5a74a15a4559e00dd2cda5a0e34231c59f36e1a3559c21a666f2053126e7264c"
-        },
-        {
           "path": ".claude/scripts/lib/deck-impact.mjs",
           "role": "managed",
           "sha256": "a3f713a25dbb068a446fc77a6343c15e1e1454b0fccfc113dac4ef548ffe833f"
@@ -103,21 +93,6 @@
           "path": ".claude/scripts/lib/deck-signals.mjs",
           "role": "managed",
           "sha256": "de8434ddee2729dbcf17df15d49ed0503c93bd8b13122260539f538003bee82b"
-        },
-        {
-          "path": ".claude/scripts/lib/deck-visuals.mjs",
-          "role": "managed",
-          "sha256": "ad653fd59457a6d887a1c1faccf1afe4f7e1e193ed2c85f95a788ca804dbba08"
-        },
-        {
-          "path": ".claude/scripts/lib/doc-outline.mjs",
-          "role": "managed",
-          "sha256": "6c8caec37f02669a41a8e007bbaae1bf7d6f638bc34a6699980804cf4eb0d46b"
-        },
-        {
-          "path": ".claude/scripts/lib/doc-section-render.mjs",
-          "role": "managed",
-          "sha256": "6e1e8976eef6303396d652a060ee1e5a16e0d87fd7006a47cab32bb551bb56f8"
         },
         {
           "path": ".claude/scripts/lib/governance-writer.mjs",
@@ -145,34 +120,14 @@
           "sha256": "503c54656664b9e216fe2d401ab5cabda6612f8346f170958b446ffb273417b9"
         },
         {
-          "path": ".claude/scripts/lib/review-deck-core.mjs",
-          "role": "managed",
-          "sha256": "9b87b57fbd905db32f74e49198370cffc9af4a3a556eaffb613e157c9e857782"
-        },
-        {
-          "path": ".claude/scripts/lib/review-deck-render.mjs",
-          "role": "managed",
-          "sha256": "f9b7c27682cc8f24d370ae423cdc9357dd965e348e8be4f7d6502e64e018591e"
-        },
-        {
           "path": ".claude/scripts/lib/review-narrative.mjs",
           "role": "managed",
           "sha256": "2473b993d92109eb078fc85d686a7b7823fadbc5a486c262a8c0747b988b9f4e"
         },
         {
-          "path": ".claude/scripts/lib/review-origin.mjs",
-          "role": "managed",
-          "sha256": "b06321cebb35e35affd48c626ee3614cb1b443868a27e2f197861d96b7b6a437"
-        },
-        {
           "path": ".claude/scripts/lib/ship-deck-core.mjs",
           "role": "managed",
           "sha256": "5d1c45271eebfc76018e2823dfb5bfdd1b52c019f37cbed83e0f5822dc06463d"
-        },
-        {
-          "path": ".claude/scripts/lib/ship-deck-render.mjs",
-          "role": "managed",
-          "sha256": "1e35d97ed1a045673398a23cc5c889056a5468cd4be30026c283e61572f9e17f"
         },
         {
           "path": ".claude/scripts/lib/task-acceptance.mjs",
@@ -208,21 +163,6 @@
           "path": ".claude/scripts/regression-test-lock.mjs",
           "role": "managed",
           "sha256": "2f2ff58a6e94b5bc041b97dcc6cad3eb99d8ffa0bd422172c9806e2b378cebb6"
-        },
-        {
-          "path": ".claude/scripts/review-deck.mjs",
-          "role": "managed",
-          "sha256": "8c0fdda0d9910e6e16521cf9f1fe1f0c1fcb9e070f733e4b93f656f8a5b368f6"
-        },
-        {
-          "path": ".claude/scripts/ship-deck-bridge.mjs",
-          "role": "managed",
-          "sha256": "5bc51b45250afd546fe2967d4f16631bc8e65dc96cffe5242c6c71bd8e2aad13"
-        },
-        {
-          "path": ".claude/scripts/ship-deck.mjs",
-          "role": "managed",
-          "sha256": "008b29a864479020390003e943afa6fcaaaa07fa52b53ce95793ca4e9382b37d"
         },
         {
           "path": ".claude/scripts/task-interpretation.mjs",
@@ -474,7 +414,24 @@
           "sha256": "e8544a281303baf4b58315cb8f58337ad66de4a95670e9c20b8985b15b248b67"
         }
       ],
-      "target_notes": []
+      "target_notes": [],
+      "removed_locally": {
+        "$comment": "Removed by Operon change 240: reached by nothing outside the bundle (the review-deck / PR flow Operon does not run). A resync from the bundle source brings them back; drop them again.",
+        "paths": [
+          ".claude/scripts/followup-debt-tracker.mjs",
+          ".claude/scripts/lib/debt-resolution.mjs",
+          ".claude/scripts/lib/deck-visuals.mjs",
+          ".claude/scripts/lib/doc-outline.mjs",
+          ".claude/scripts/lib/doc-section-render.mjs",
+          ".claude/scripts/lib/review-deck-core.mjs",
+          ".claude/scripts/lib/review-deck-render.mjs",
+          ".claude/scripts/lib/review-origin.mjs",
+          ".claude/scripts/lib/ship-deck-render.mjs",
+          ".claude/scripts/review-deck.mjs",
+          ".claude/scripts/ship-deck-bridge.mjs",
+          ".claude/scripts/ship-deck.mjs"
+        ]
+      }
     }
   },
   "target_owned": [

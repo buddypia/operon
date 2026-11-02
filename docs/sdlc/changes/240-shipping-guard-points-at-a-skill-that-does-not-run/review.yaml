@@ -1,0 +1,38 @@
+# Review of change 240. Shape: docs/sdlc/templates/review.yaml.
+#
+# Round 1, both approve-with-nits. subprocess-safety-reviewer imported all 66
+# remaining bundle modules in fresh node processes (no missing module), ran
+# ops.mjs cleanup-worktree --help, searched every hook registration, workflow,
+# skill and test for the deleted names, and ran the stop and worktree groups.
+# rust-reviewer checked the landing steps against AGENTS.md and feature-pilot
+# section 4 and the test against its sibling.
+# Round 2: a comment in src/tests.rs gained its .claude/ prefix (the commit
+# gate's path check); both re-read that line and kept their verdicts.
+
+digest: "df940d01948aa265"
+
+rounds: 2
+
+carried:
+  - subprocess-safety-reviewer/1 · ops.mjs:382 runFollowupDebtRegister spawns the deleted followup-debt-tracker.mjs by name on the PR-merge path; its existsSync guard turns that into a skip warning
+    person: "プルリクエスト経由で取り込んだときだけ「tracker script not found」という警告が出ます。このリポジトリではプルリクエストを使わないので、対応は不要です。"
+  - subprocess-safety-reviewer/2 · ops.mjs:1433, pre-ship-steps.mjs:296/308/440, narrative-quality.mjs:575, ship-scale.mjs:64 still name review-deck.mjs / ship-deck.mjs in remedy text on the unused ship path
+    person: "使っていない出荷手順の案内文に、削除したスクリプトの名前が残っています。その手順はこのリポジトリでは動かないので、対応は不要です。"
+  - subprocess-safety-reviewer/3 · landing_steps substitutes {branch} unquoted and {worktree} inside double quotes, so a branch or path holding ; $ or backticks would print a line that runs more than it says if pasted; shellWord was used before
+    person: "記号を含む変わったブランチ名を作ると、案内に表示されるコマンドがそのまま実行してはいけない形になります。普段のブランチ名では起きず、対応は不要です。"
+  - subprocess-safety-reviewer/4 · in landing mode step 1 (push, wait for CI) also prints for a worktree that only has uncommitted changes; the commit-required block above covers it
+    person: "まだコミットしていない作業がある worktree にも、取り込み手順の最初の行が表示されます。直前にコミットを促す案内が出るので、対応は不要です。"
+  - rust-reviewer/1 · worktree-shipping-guard.mjs:783-787 landing mode leaves two consecutive blank lines before the closing line
+    person: "終了時の案内に空行が1行多く入ります。見た目だけの問題で、対応は不要です。"
+  - rust-reviewer/2 · the Policy line says the steps are listed under To land even when every candidate is already merged and no such section prints
+    person: "すべて取り込み済みのときも、案内に「下の手順を見て」という一文が残ります。実際の片付け手順は別の欄に正しく出るので、対応は不要です。"
+  - rust-reviewer/3 · worktree-shipping-guard.mjs:755 landing mode still says before shipping in the uncommitted-work hint; the test fixture is clean so it would not catch it
+    person: "コミットを促す一文に、このリポジトリでは使わない「出荷」という言葉が残っています。意味は通じるので、対応は不要です。"
+  - rust-reviewer/4 · replaceAll with a string replacement expands $& and $' in a branch or path; a function replacer would not
+    person: "名前に特殊な記号の並びを含むブランチだと、案内の表示が崩れることがあります。普段の名前では起きず、対応は不要です。"
+  - rust-reviewer/5 · src/tests.rs the new test covers only the key present, clean and not stale; key absent, stale base, malformed key and an in-project relative path are not asserted
+    person: "設定が無いときや古いブランチのときの案内は、自動テストで確かめていません。今回変えたのは設定があるときの表示だけなので、対応は不要です。"
+
+verdicts:
+  subprocess-safety-reviewer: "approve-with-nits 0 4"
+  rust-reviewer: "approve-with-nits 0 5"

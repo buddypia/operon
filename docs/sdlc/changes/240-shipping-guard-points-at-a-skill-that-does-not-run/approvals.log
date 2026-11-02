@@ -1,0 +1,4 @@
+2026-11-01T15:00:59Z person plan plan.md 816953e6f1055cb5 approve user 2026-11-01: 「文言の修正と削除の両方」 — chosen over wording-only and skip; the option read: fix the guard's notice to this repository's landing (git merge --no-ff and cleanup-worktree), delete the unused review-deck / ship-deck / debt-tracker scripts and their libs, keep create-pr/ops.mjs
+2026-11-01T15:00:59Z person gate-configuration plan.md 816953e6f1055cb5 approve user 2026-11-01: 「文言の修正と削除の両方」 — the same choice; the deletion was described to the person as hard to undo and chosen
+2026-11-02T08:12:49Z person plan plan.md 42786e928981d2ea approve user 2026-11-02: 「承認」 — answering the request to approve the plan reworded only in its Files-that-change rows
+2026-11-02T08:12:49Z person gate-configuration plan.md 42786e928981d2ea approve user 2026-11-02: 「承認」 — the landing notice and the twelve deletions as built and reviewed

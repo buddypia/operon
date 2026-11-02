@@ -692,9 +692,34 @@ function buildLandedSection(projectDir, landed, shipBase) {
   return lines;
 }
 
+/**
+ * The project's own landing (change 240): `landing_steps` in worktree-policy.json, one line each,
+ * with `{worktree}` and `{branch}` substituted. A project that names its landing is told that,
+ * instead of the ship-worktree flow with its PLAN.md checklist and review panel. Absent → null, and
+ * the notice is unchanged.
+ */
+export function loadLandingSteps(projectDir) {
+  const steps = loadWorktreePolicy(projectDir)?.landing_steps;
+  return Array.isArray(steps) && steps.length > 0 && steps.every((s) => typeof s === 'string') ? steps : null;
+}
+
+function buildLandingSection(projectDir, unlanded, steps) {
+  if (unlanded.length === 0) return [];
+  const lines = ['', 'To land:'];
+  for (const c of unlanded) {
+    const rel = relativizePath(c.path, projectDir);
+    lines.push(`  - ${rel}  (branch=${c.branch})`);
+    for (const step of steps) {
+      lines.push(`    ${step.replaceAll('{worktree}', rel).replaceAll('{branch}', c.branch)}`);
+    }
+  }
+  return lines;
+}
+
 export function buildBlockMessage(projectDir, candidates) {
   // Fallback base named in the panel / rebase hint — the configured ship base, never a literal.
   const shipBase = resolveShipBaseBranch(projectDir);
+  const landingSteps = loadLandingSteps(projectDir);
   // Project panel config (sections / labels / approval choices / line budget); absent → built-in.
   const panel = loadReviewPanelConfig(projectDir);
   const isReviewReady = (c) =>
@@ -708,14 +733,16 @@ export function buildBlockMessage(projectDir, candidates) {
     '[worktree-shipping-guard] Uncompleted worktree work remains (advisory — the session is not blocked).',
     '',
     'Policy : worktree changes should be committed promptly — uncommitted work is not safe against loss.',
-    'Committed work ships via /create-pr ship-worktree once the approval step passes (human for T2 one-way doors, automatic for reviewed T0/T1 — internal-rule) → squash merge → cleanup.',
+    landingSteps
+      ? 'Committed work lands by this project\'s steps (worktree-policy.json landing_steps), listed under "To land".'
+      : 'Committed work ships via /create-pr ship-worktree once the approval step passes (human for T2 one-way doors, automatic for reviewed T0/T1 — internal-rule) → squash merge → cleanup.',
     'False-positive prevention: Only worktrees owned by this session with uncommitted changes or unmerged commits are targeted. READ-ONLY sessions with no changes/commits pass through.',
     '',
     'Target worktree(s):',
   ];
   for (const c of unlanded) {
     const rel = relativizePath(c.path, projectDir);
-    const planTag = c.plan_missing ? ' [PLAN.md missing — authoring required]' : '';
+    const planTag = c.plan_missing && !landingSteps ? ' [PLAN.md missing — authoring required]' : '';
     const dirtyTag = c.uncommitted > 0 ? `, uncommitted=${c.uncommitted} file(s)` : '';
     const actionTag = c.commit_required ? ' [commit required]' : '';
     lines.push(`  - ${rel}  (branch=${c.branch}, unmerged=${c.commits} commit${dirtyTag})${actionTag}${planTag}`);
@@ -730,7 +757,9 @@ export function buildBlockMessage(projectDir, candidates) {
     lines.push('  Commit only the files you own before shipping, e.g. inside that worktree:');
     lines.push('    git status --short && git add <owned-files-only> && git commit -m "<Conventional Commits>"');
   }
-  if (candidates.some((c) => c.plan_missing)) {
+  if (landingSteps) {
+    lines.push(...buildLandingSection(projectDir, unlanded, landingSteps));
+  } else if (candidates.some((c) => c.plan_missing)) {
     lines.push('');
     lines.push('Worktrees missing PLAN.md (M1 stop loop avoidance):');
     lines.push('  - ship-worktree performs PLAN.md unchecked checkbox validation — rejects if PLAN.md is missing.');
@@ -738,7 +767,7 @@ export function buildBlockMessage(projectDir, candidates) {
     lines.push('  - Author PLAN.md first (goals / checklist / verification / handoff) before calling ship.');
     lines.push('  - Alternatively, discard the worktree after confirming user intent.');
   }
-  if (planBlocked.length > 0) {
+  if (!landingSteps && planBlocked.length > 0) {
     lines.push('');
     lines.push('Worktrees with incomplete/unverified PLAN.md checklists:');
     for (const c of planBlocked) {
@@ -752,7 +781,9 @@ export function buildBlockMessage(projectDir, candidates) {
     lines.push('  → Complete or drop items in PLAN.md first, then call Stop again or run verify-plan.');
   }
   lines.push('');
-  if (reviewReady.length > 0) {
+  if (landingSteps) {
+    // The steps above are the whole landing; the review panel belongs to the ship-worktree flow.
+  } else if (reviewReady.length > 0) {
     // "output the review below" only holds when a panel actually follows. Emitting it when
     // every candidate resolved to resume guidance would point at a panel that is not there.
     if (reviewReady.some((c) => !c.human_flow_started)) {
@@ -814,14 +845,20 @@ export function buildBlockMessage(projectDir, candidates) {
   const stale = candidates.filter((c) => Array.isArray(c.stale_reasons) && c.stale_reasons.length);
   if (stale.length > 0) {
     lines.push('');
-    lines.push('base freshness warning (Layer 2 — non-blocking, post-gate handled by ship-worktree non-FF check):');
+    lines.push(
+      landingSteps
+        ? 'base freshness warning (non-blocking):'
+        : 'base freshness warning (Layer 2 — non-blocking, post-gate handled by ship-worktree non-FF check):',
+    );
     for (const c of stale) {
       lines.push(`  - ${relativizePath(c.path, projectDir)}: ${c.stale_reasons.join(', ')}`);
     }
     lines.push('  → Use standard entry point for next worktree: make wt.new BR=<branch> (or node .claude/scripts/worktree-new.mjs --branch <branch>)');
-    lines.push(
-      `  → Recommend rebasing current worktree before ship: git fetch origin ${shellWord(shipBase)} && git rebase ${shellWord(`origin/${shipBase}`)}`,
-    );
+    if (!landingSteps) {
+      lines.push(
+        `  → Recommend rebasing current worktree before ship: git fetch origin ${shellWord(shipBase)} && git rebase ${shellWord(`origin/${shipBase}`)}`,
+      );
+    }
   }
   lines.push('');
   lines.push('This notice is suppressed for 5 minutes after it is shown (attempt marker).');

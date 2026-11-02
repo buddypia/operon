@@ -41131,6 +41131,67 @@ pub(crate) fn the_stop_guard_names_a_merged_worktree_the_session_still_owns() {
     );
 }
 
+/// Change 240. The Stop notice for an unlanded worktree sent every Operon
+/// session to a `.tmp/.../PLAN.md` checklist and `/create-pr ship-worktree`,
+/// a skill the settings deny. With this repository's policy it names the
+/// landing AGENTS.md describes, for that worktree and branch.
+#[test]
+pub(crate) fn the_stop_notice_names_this_repositorys_landing() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("stop-landing");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let guard = repository.join(".cli/hooks/worktree-shipping-guard.mjs");
+    let unlanded = fixture_worktree_with_a_commit(&root, "feature/unlanded");
+    let project = fs::canonicalize(&root).unwrap();
+
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ evaluate, buildBlockMessage }} = await import({guard:?});\n\
+         const verdict = evaluate({root:?}, {{\n\
+           _classifyOwnership: () => 'owned',\n\
+           _isFresh: () => false,\n\
+           _isPipelineRunActive: () => false,\n\
+         }});\n\
+         console.log(verdict.block ? buildBlockMessage({root:?}, verdict.candidates) : '');",
+        guard = guard.to_str().unwrap(),
+        root = project.to_str().unwrap(),
+    );
+    let output = node_in(&root)
+        .args(["--input-type=module", "-e", &script])
+        .output()
+        .expect("node が見つかりません");
+    let unlanded = fs::canonicalize(&unlanded).unwrap();
+    discard_worktree_fixture(&root);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{}", both_streams(&output));
+    for wanted in [
+        "git merge --no-ff --no-edit feature/unlanded".to_owned(),
+        "git push -u origin feature/unlanded".to_owned(),
+        format!(
+            "cleanup-worktree --worktree \"{}\"",
+            unlanded.to_str().unwrap()
+        ),
+    ] {
+        assert!(
+            stdout.contains(&wanted),
+            "Stop の案内がこのリポジトリの着地手順 ({wanted}) を言っていません: {stdout}"
+        );
+    }
+    // ` /create-pr` is the skill; `.claude/scripts/create-pr/ops.mjs` is the cleanup it still names.
+    for unwanted in [" /create-pr", "ship-worktree", "PLAN.md"] {
+        assert!(
+            !stdout.contains(unwanted),
+            "Stop の案内が、ここでは動かない手順 ({unwanted}) を勧めています: {stdout}"
+        );
+    }
+}
+
 /// Change 071. The landing sentence ended at the merge, so nothing an agent
 /// read told it the worktree was still its to remove.
 #[test]

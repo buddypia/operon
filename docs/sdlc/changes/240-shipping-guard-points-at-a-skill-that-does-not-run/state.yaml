@@ -1,0 +1,52 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. .cli/hooks/worktree-shipping-guard.mjs is Operon's Stop notice for a
+#    worktree left unlanded. It fired 39 times since 2026-09-24, and every
+#    time it told the session to author `.tmp/worktree-<branch>/PLAN.md` and
+#    land through `/create-pr ship-worktree` with a squash merge. In Operon
+#    `Skill(create-pr)` is denied (.claude/settings.json), AGENTS.md says the
+#    skill does not run here, the plan lives in docs/sdlc/changes, and landing
+#    is a `--no-ff` merge on main after CI. A session that follows the notice
+#    walks into a refusal; one that ignores it learns to ignore the notice.
+# 2. Twelve bundle modules are reached by nothing outside the bundle (import
+#    closure from every tracked file outside .claude/scripts and .cli):
+#    review-deck, ship-deck, ship-deck-bridge, followup-debt-tracker and the
+#    eight libs only they import. They serve the review-deck / PR flow Operon
+#    does not run.
+#    The person asked for both on 2026-11-01 (「文言の修正と削除の両方」).
+# 3. Kept on purpose: regression-test-lock.mjs and trunk-ref-guard.mjs (named
+#    in live guards' messages as the release path), task-interpretation and
+#    mark-pre-ship-confirmed (named by the shipping guard and pre-ship-steps),
+#    ship-deck-core.mjs (imported by ops.mjs and .cli/lib/ship-scale.mjs),
+#    create-pr/ops.mjs (cleanup-worktree).
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Person approved the reworded plan 2026-11-02. Nine review findings carried in review.yaml, none needing action. A resync from the bundle source would restore the twelve deleted modules (receipt removed_locally names them)."
+
+contract:
+  three-gates: "machine passed fmt and clippy at commit; groups worktree, guard, hook, stop, gate, policy, ship passed locally; full suite in CI"
+  bands: "machine passed bash scripts/check-bands.sh — warn rows only, recorded"
+  failing-test-first: "machine passed the_stop_notice_names_this_repositorys_landing failed on the unedited guard (no git merge --no-ff line)"
+  release-binary: "machine waived touches .claude/config, .claude/scripts, .cli, docs/sdlc, and src/tests.rs only"
+  guards-verified-by-mutation: "human passed mutations.py 6 of 6 caught; reachability rerun leaves only the two kept on purpose"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
