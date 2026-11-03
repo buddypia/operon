@@ -35,8 +35,9 @@
 .claude/.bundle-backup/
 # --- end worktree-isolation ---
 
-# Hook runtime state written by the worktree guards.
+# Hook and teamwork runtime state written at runtime, never committed.
 .claude/state/
+.claude/teamwork/
 
 # CLI local configuration files (injected env for worktrees)
 .claude/config.json
