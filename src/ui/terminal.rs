@@ -566,6 +566,7 @@ pub(crate) fn terminal_grid_size(viewport: egui::Vec2, cell: egui::Vec2) -> (u16
 /// sight, and this buffer is thousands of lines long. tmux has already wrapped
 /// each line to the width it was told the pane has, so a captured line is one
 /// row: re-wrapping here would split a line the terminal considers finished.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn terminal_rows(
     ui: &mut egui::Ui,
     lines: &[LayoutJob],
@@ -574,6 +575,7 @@ pub(crate) fn terminal_rows(
     search: TerminalSearchOverlay<'_>,
     links: &mut TerminalLinkOverlay<'_>,
     cursor: Option<TerminalCursor>,
+    context: Option<TerminalPaneContext<'_>>,
 ) -> TerminalRowsResult {
     // Terminal rows sit directly on top of each other. Any spacing here would
     // also be counted twice: `show_rows` reserves height per row from it.
@@ -586,17 +588,14 @@ pub(crate) fn terminal_rows(
     let caret_row: Option<Option<(usize, u16)>> = cursor.map(|cursor| {
         terminal_cursor_row(lines.len(), cursor.pane_rows, cursor.y).map(|row| (row, cursor.x))
     });
-    // Named, never auto-numbered. Two sibling `allocate_ui_with_layout` children
+    // Named and salted per session. Two sibling `allocate_ui_with_layout` children
     // of one row share a `Ui::id` in egui 0.31 — `new_child` salts every
     // anonymous child with the same constant — so two unnamed scroll areas, this
-    // one and the prompt timeline's, hash to the same `Id`. One id is one
-    // persisted state, and the drag-to-scroll widget that state registers once
-    // the content outgrows the viewport is then registered a second time, on
-    // top of this pane's own click interaction. egui hands a pointer that lands
-    // on a drag-only widget back as no click at all, so the pane stops taking
-    // the keyboard the moment an agent fills a screen.
+    // one and the prompt timeline's, hash to the same `Id`. Salting by session_id
+    // isolates persistent scroll positions between workspace tabs.
+    let session_salt = context.as_ref().map(|c| c.session_id);
     let mut area = egui::ScrollArea::vertical()
-        .id_salt("terminal-rows")
+        .id_salt(("terminal-rows", session_salt))
         .auto_shrink([false, false])
         .max_height(viewport.y)
         .stick_to_bottom(search.scroll_to.is_none());
@@ -620,7 +619,7 @@ pub(crate) fn terminal_rows(
         // The caret is a row of this buffer now, so it anchors exactly where a
         // highlighted match anchors — and `show_rows` only ever shows rows that
         // are visible, so a caret the person scrolled away reports none.
-        if let Some(Some((row, column))) = caret_row {
+        let computed_caret = if let Some(Some((row, column))) = caret_row {
             // A caret scrolled above the viewport has its row before the band's
             // start (egui's end-of-content clamp can put a full-screen TUI's
             // cursor there): offset_rows must abort rather than underflow.
@@ -652,18 +651,64 @@ pub(crate) fn terminal_rows(
                     && rect.min.x >= clip.min.x
                     && rect.max.x <= inner_right + slack
                 {
-                    caret = Some(rect);
+                    Some(rect)
+                } else {
+                    None
                 }
+            } else {
+                None
             }
-        }
+        } else {
+            None
+        };
+
+        let (cached_galleys_storage, cached_caret) = match context {
+            Some(ctx) => {
+                let key = TerminalPaneKey {
+                    session_id: ctx.session_id,
+                    rect_size: (viewport.x.round() as u32, viewport.y.round() as u32),
+                    visible_rows: (rows.start, rows.end),
+                    output_generation: ctx.output_generation,
+                    cursor,
+                    theme: ctx.theme,
+                    search_query: search.query.map(|q| q.to_string()),
+                    search_current: search.current,
+                };
+                let ctx_fonts = ui.ctx().clone();
+                let (galleys, caret_res) = ctx.cache.get_or_render(ctx.session_id, &key, || {
+                    let galleys: Vec<Option<Arc<egui::Galley>>> = rows
+                        .clone()
+                        .map(|idx| {
+                            let line = &lines[idx];
+                            if line.is_empty() {
+                                None
+                            } else {
+                                Some(ctx_fonts.fonts(|fonts| fonts.layout_job(line.clone())))
+                            }
+                        })
+                        .collect();
+                    (galleys, computed_caret)
+                });
+                (Some(galleys), caret_res)
+            }
+            None => (None, computed_caret),
+        };
+
+        caret = cached_caret;
+
         for (offset, line) in lines[rows.clone()].iter().enumerate() {
+            let line_idx = first + offset;
+            let y = top + offset as f32 * row_height;
+            let row_pos = egui::pos2(ui.min_rect().left(), y);
+            let row_rect =
+                egui::Rect::from_min_size(row_pos, egui::vec2(ui.min_rect().width(), row_height));
+
             // Only the rows the viewport asked for, so the cost of a search is
             // the size of the pane and never the size of the scrollback.
             for (index, found) in search.matches.iter().enumerate() {
-                if found.line != first + offset {
+                if found.line != line_idx {
                     continue;
                 }
-                let y = top + offset as f32 * row_height;
                 let rect = egui::Rect::from_min_size(
                     egui::pos2(ui.min_rect().left() + found.column as f32 * cell.x, y),
                     egui::vec2(found.columns as f32 * cell.x, row_height),
@@ -678,19 +723,25 @@ pub(crate) fn terminal_rows(
                     },
                 );
             }
-            if line.is_empty() {
+
+            if let Some(galleys) = cached_galleys_storage {
+                if let Some(Some(galley)) = galleys.get(offset) {
+                    ui.painter()
+                        .galley(row_pos, Arc::clone(galley), search.palette.terminal_fg);
+                }
+                ui.add_space(row_height);
+            } else if line.is_empty() {
                 // A blank line still owns its row, or every line below it
                 // would be drawn one row too high.
                 ui.add_space(row_height);
             } else {
                 ui.add(egui::Label::new(line.clone()).wrap_mode(egui::TextWrapMode::Extend));
+            }
+
+            if !line.is_empty() {
                 // Only the rows on screen are read for paths and links, so the
                 // cost is the pane rather than the scrollback.
-                let row = egui::Rect::from_min_size(
-                    egui::pos2(ui.min_rect().left(), top + offset as f32 * row_height),
-                    egui::vec2(ui.min_rect().width(), row_height),
-                );
-                if let Some(kind) = terminal_row_links(ui, &line.text, row, cell, links) {
+                if let Some(kind) = terminal_row_links(ui, &line.text, row_rect, cell, links) {
                     under_pointer = Some(kind);
                 }
             }
@@ -711,6 +762,132 @@ pub(crate) struct TerminalRowsResult {
     pub(crate) caret: Option<egui::Rect>,
 }
 
+/// Deterministic dirty-checking key for a rendered terminal pane.
+/// Any change in geometry, scroll range, focus state, output content,
+/// cursor position, theme, or active search marks the pane dirty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TerminalPaneKey {
+    /// Identifies the session.
+    pub(crate) session_id: Uuid,
+    /// Integer-rounded viewport dimensions (width, height) to eliminate sub-pixel float jitter.
+    pub(crate) rect_size: (u32, u32),
+    /// Range of visible rows (start, end) served by `ScrollArea::show_rows`.
+    pub(crate) visible_rows: (usize, usize),
+    /// Monotonically increasing counter bumped only when tmux outputs new content.
+    pub(crate) output_generation: u64,
+    /// Caret coordinates within the terminal grid.
+    pub(crate) cursor: Option<TerminalCursor>,
+    /// Active theme (Dark/Light).
+    pub(crate) theme: AppTheme,
+    /// Current search query string (if search is open).
+    pub(crate) search_query: Option<String>,
+    /// Currently focused search match index (if search is open).
+    pub(crate) search_current: Option<usize>,
+}
+
+/// Cached rendered representation of one terminal pane.
+pub(crate) struct CachedTerminalPane {
+    /// The key against which this cached rendering was generated.
+    pub(crate) key: TerminalPaneKey,
+    /// Shaped galleys for the visible rows. `None` represents an empty row (blank line).
+    pub(crate) galleys: Vec<Option<Arc<egui::Galley>>>,
+    /// Precomputed caret bounding rectangle in screen coordinates (if cursor is visible).
+    pub(crate) caret: Option<egui::Rect>,
+}
+
+/// Retained galley & dirty-checked rendering cache for terminal panes.
+/// Eliminates per-frame LayoutJob cloning and egui::Label allocations on unchanged frames.
+#[derive(Default)]
+pub(crate) struct TerminalPaneRenderCache {
+    /// Memoized pane layouts keyed by session ID.
+    entries: HashMap<Uuid, CachedTerminalPane>,
+    /// Per-session count of builds (cache misses).
+    session_builds: HashMap<Uuid, usize>,
+    /// Total number of cache misses (galley shape builds).
+    builds: usize,
+    /// Total number of cache hits (reused galleys).
+    hits: usize,
+}
+
+impl TerminalPaneRenderCache {
+    /// Query the cache. If `key` matches the existing entry for `session_id`,
+    /// returns the cached galleys and caret without invoking `render_fn`.
+    /// On a miss or dirty key, invokes `render_fn`, stores the result, and increments `builds`.
+    pub(crate) fn get_or_render(
+        &mut self,
+        session_id: Uuid,
+        key: &TerminalPaneKey,
+        render_fn: impl FnOnce() -> (Vec<Option<Arc<egui::Galley>>>, Option<egui::Rect>),
+    ) -> (&[Option<Arc<egui::Galley>>], Option<egui::Rect>) {
+        let is_hit = self
+            .entries
+            .get(&session_id)
+            .is_some_and(|entry| entry.key == *key);
+        if is_hit {
+            self.hits += 1;
+        } else {
+            let (galleys, caret) = render_fn();
+            self.entries.insert(
+                session_id,
+                CachedTerminalPane {
+                    key: key.clone(),
+                    galleys,
+                    caret,
+                },
+            );
+            self.builds += 1;
+            *self.session_builds.entry(session_id).or_default() += 1;
+        }
+        let entry = self.entries.get(&session_id).expect("entry must exist");
+        (&entry.galleys, entry.caret)
+    }
+
+    /// Number of full rebuilds (cache misses).
+    #[cfg(test)]
+    pub(crate) fn builds(&self) -> usize {
+        self.builds
+    }
+
+    /// Number of rebuilds for a specific session.
+    #[cfg(test)]
+    pub(crate) fn session_builds(&self, session_id: Uuid) -> usize {
+        self.session_builds.get(&session_id).copied().unwrap_or(0)
+    }
+
+    /// Number of cache hits.
+    #[cfg(test)]
+    pub(crate) fn hits(&self) -> usize {
+        self.hits
+    }
+
+    /// Evict a specific session (e.g. when closed or deleted).
+    pub(crate) fn remove(&mut self, session_id: &Uuid) -> Option<CachedTerminalPane> {
+        self.session_builds.remove(session_id);
+        self.entries.remove(session_id)
+    }
+
+    /// Clear all cached entries (e.g. on theme or font change).
+    pub(crate) fn clear(&mut self) {
+        self.entries.clear();
+        self.session_builds.clear();
+    }
+
+    /// Retain only active sessions to prevent unbounded memory growth.
+    pub(crate) fn retain(&mut self, mut f: impl FnMut(&Uuid, &mut CachedTerminalPane) -> bool) {
+        self.entries.retain(|id, pane| f(id, pane));
+        self.session_builds
+            .retain(|id, _| self.entries.contains_key(id));
+    }
+}
+
+/// Context passed into `terminal_rows` containing identity, dirty generation, and cache reference.
+pub(crate) struct TerminalPaneContext<'a> {
+    pub(crate) session_id: Uuid,
+    pub(crate) output_generation: u64,
+    pub(crate) theme: AppTheme,
+    pub(crate) cache: &'a mut TerminalPaneRenderCache,
+}
+
 /// What the pane needs to know about a search in progress. Borrowed rather than
 /// owned, and empty when no search is open, so a pane with no search costs
 /// nothing to draw.
@@ -719,6 +896,7 @@ pub(crate) struct TerminalSearchOverlay<'a> {
     pub(crate) current: Option<usize>,
     pub(crate) scroll_to: Option<usize>,
     pub(crate) palette: &'a Palette,
+    pub(crate) query: Option<&'a str>,
 }
 
 /// A row of the pane's grid, numbered as a row of the capture instead.
