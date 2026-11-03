@@ -63389,6 +63389,7 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
     let root = temporary_directory("repaint-idle-test");
     let mut app = test_app(root.join("store.json"));
     app.page = Page::Sessions;
+    app.hooks_started = true;
     app.hooks_enabled = false;
     app.handoff_archive_sweep_started = true;
     app.ports_scanned_at = Some(Instant::now());
@@ -63400,6 +63401,8 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
     let run_frame = |app: &mut OperonApp| {
+        app.ports_scanned_at = Some(Instant::now());
+        app.last_session_refresh = Instant::now();
         let mut frame = eframe::Frame::_new_kittest();
         ctx.run(
             egui::RawInput {
