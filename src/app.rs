@@ -105,6 +105,26 @@ pub(crate) enum BackgroundKey {
     HandoffArchiveSweep,
 }
 
+impl BackgroundKey {
+    pub(crate) fn session_id(&self) -> Option<Uuid> {
+        match self {
+            BackgroundKey::SessionStart(id)
+            | BackgroundKey::EmptySessionStart(id)
+            | BackgroundKey::SessionStop(id)
+            | BackgroundKey::SessionOutput(id)
+            | BackgroundKey::TerminalInput(id)
+            | BackgroundKey::TerminalResize(id)
+            | BackgroundKey::TerminalClose(id)
+            | BackgroundKey::NativeSessionResolution(id)
+            | BackgroundKey::CheckpointCapture(id, _)
+            | BackgroundKey::Checkpoints(id)
+            | BackgroundKey::CheckpointRestore(id)
+            | BackgroundKey::CheckpointDiff(id) => Some(*id),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum BackgroundResult {
     HooksApplied {
@@ -456,6 +476,12 @@ pub(crate) struct OperonApp {
     pub(crate) terminal_input_queue: HashMap<Uuid, VecDeque<TerminalInput>>,
     pub(crate) terminal_resize_requested: HashMap<Uuid, (u16, u16)>,
     pub(crate) terminal_resize_applied: HashMap<Uuid, (u16, u16)>,
+    pub(crate) terminal_fallback_layouts: HashMap<Uuid, Vec<LayoutJob>>,
+    pub(crate) terminal_pane_render_cache: TerminalPaneRenderCache,
+    pub(crate) terminal_output_generations: HashMap<Uuid, u64>,
+    pub(crate) workspace_divider_drag: bool,
+    pub(crate) last_terminal_resize_flushed: HashMap<Uuid, Instant>,
+    pub(crate) visible_sessions: Arc<std::sync::RwLock<HashSet<Uuid>>>,
     pub(crate) depends_on_input: Option<Uuid>,
     pub(crate) window_maximized: bool,
     pub(crate) last_session_refresh: Instant,
@@ -674,6 +700,8 @@ pub(crate) struct OperonApp {
     pub(crate) unresolved_paths: Vec<String>,
     /// Which session the current resolved_paths cache belongs to.
     pub(crate) resolved_paths_session: Option<Uuid>,
+    /// Path resolution cache partitioned per session.
+    pub(crate) terminal_path_caches: HashMap<Uuid, HashMap<String, Option<PathBuf>>>,
     /// The line an editor document should be scrolled to when it next draws.
     /// Spent by the frame that uses it, so scrolling by hand afterwards stands.
     pub(crate) editor_jump_line: Option<usize>,
@@ -988,6 +1016,12 @@ impl OperonApp {
             terminal_input_queue: HashMap::new(),
             terminal_resize_requested: HashMap::new(),
             terminal_resize_applied: HashMap::new(),
+            terminal_fallback_layouts: HashMap::new(),
+            terminal_pane_render_cache: TerminalPaneRenderCache::default(),
+            terminal_output_generations: HashMap::new(),
+            workspace_divider_drag: false,
+            last_terminal_resize_flushed: HashMap::new(),
+            visible_sessions: Arc::new(std::sync::RwLock::new(HashSet::new())),
             depends_on_input: None,
             window_maximized: false,
             last_session_refresh: Instant::now(),
@@ -1075,6 +1109,7 @@ impl OperonApp {
             touched_files_cache: None,
             unresolved_paths: Vec::new(),
             resolved_paths_session: None,
+            terminal_path_caches: HashMap::new(),
             editor_jump_line: None,
             terminal_path_menu: None,
             session_prompt_turns: HashMap::new(),
@@ -1320,10 +1355,12 @@ impl OperonApp {
             // every open terminal keeps the colours of the theme it was
             // captured under.
             self.terminal_layouts.clear();
+            self.terminal_pane_render_cache.clear();
         }
         if self.applied_terminal_font != Some(self.store.terminal_font) {
             configure_macos_fonts(ctx, self.store.terminal_font);
             self.applied_terminal_font = Some(self.store.terminal_font);
+            self.terminal_pane_render_cache.clear();
         }
     }
 
@@ -1399,17 +1436,26 @@ impl OperonApp {
         key: BackgroundKey,
         job: impl FnOnce() -> BackgroundResult + Send + 'static,
     ) {
+        let target_session = key.session_id();
         if !self.background_tasks.insert(key) {
             return;
         }
         let sender = self.background_sender.clone();
         let repaint = self.repaint.clone();
+        let visible_sessions = self.visible_sessions.clone();
         thread::spawn(move || {
             let _ = sender.send(job());
-            // The result is only read by a frame, and the next scheduled one
-            // can be 100ms away — two of those per keystroke (change 154).
-            if let Some(repaint) = repaint {
-                repaint.request_repaint();
+            let should_repaint = match target_session {
+                Some(session_id) => visible_sessions
+                    .read()
+                    .map(|set| set.contains(&session_id))
+                    .unwrap_or(true),
+                None => true,
+            };
+            if should_repaint {
+                if let Some(repaint) = repaint {
+                    repaint.request_repaint();
+                }
             }
         });
     }
@@ -1948,7 +1994,9 @@ impl OperonApp {
                     match result {
                         Ok(()) => {
                             self.terminal_resize_applied.insert(session_id, size);
-                            self.request_session_output(session_id);
+                            if !self.is_layout_dragging() {
+                                self.request_session_output(session_id);
+                            }
                         }
                         Err(error) => {
                             if self.terminal_resize_requested.get(&session_id) == Some(&size) {
@@ -2004,7 +2052,9 @@ impl OperonApp {
                             }
                         }
                     }
-                    self.flush_terminal_resize(session_id);
+                    if !self.is_layout_dragging() {
+                        self.flush_terminal_resize(session_id);
+                    }
                 }
                 BackgroundResult::TerminalClosed { session_id, result } => {
                     self.background_tasks
@@ -4195,6 +4245,16 @@ impl OperonApp {
             self.resolved_paths_session = None;
             self.terminal_path_menu = None;
         }
+        self.terminal_path_caches
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.terminal_fallback_layouts
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.terminal_pane_render_cache
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.terminal_output_generations
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.last_terminal_resize_flushed
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
         self.pending_project_removal = None;
         self.notice = Some(tr("プロジェクトの記録を削除しました。ファイルは残っています。").into());
     }
@@ -6372,6 +6432,11 @@ impl OperonApp {
         }
         self.session_output.remove(&session_id);
         self.terminal_layouts.remove(&session_id);
+        self.terminal_fallback_layouts.remove(&session_id);
+        self.terminal_path_caches.remove(&session_id);
+        self.terminal_pane_render_cache.remove(&session_id);
+        self.terminal_output_generations.remove(&session_id);
+        self.last_terminal_resize_flushed.remove(&session_id);
         self.terminal_cursors.remove(&session_id);
         self.terminal_preedits.remove(&session_id);
         self.session_prompt_turns.remove(&session_id);
@@ -6561,7 +6626,25 @@ impl OperonApp {
             self.terminal_focus_request = None;
         }
         if self.selected_session != session_id {
-            self.resolved_paths.clear();
+            if let Some(prev_session) = self.selected_session {
+                if !self.resolved_paths.is_empty() {
+                    self.terminal_path_caches
+                        .insert(prev_session, std::mem::take(&mut self.resolved_paths));
+                }
+            } else {
+                self.resolved_paths.clear();
+            }
+
+            if let Some(new_session) = session_id {
+                if let Some(cached) = self.terminal_path_caches.get(&new_session) {
+                    self.resolved_paths = cached.clone();
+                } else {
+                    self.resolved_paths = HashMap::new();
+                }
+            } else {
+                self.resolved_paths = HashMap::new();
+            }
+
             self.resolved_paths_generation += 1;
             self.unresolved_paths.clear();
             self.resolved_paths_session = session_id;
@@ -6731,13 +6814,23 @@ impl OperonApp {
             return;
         }
         let palette = self.store.theme.palette();
-        self.terminal_layouts
-            .insert(session_id, terminal_line_layouts(&output, palette));
+        let layouts = terminal_line_layouts(&output, palette);
+        self.terminal_fallback_layouts
+            .insert(session_id, layouts.clone());
+        self.terminal_layouts.insert(session_id, layouts);
         self.session_output.insert(session_id, output);
+        let gen = self
+            .terminal_output_generations
+            .entry(session_id)
+            .or_insert(0);
+        *gen = gen.saturating_add(1);
         // The buffer moved, so where the query occurs moved with it. Here
         // rather than per frame: this walks every line, and the lines only
         // change when tmux has said something new.
         self.refresh_terminal_search(session_id);
+        if let Some(cache) = self.terminal_path_caches.get_mut(&session_id) {
+            cache.retain(|_, resolved| resolved.is_some());
+        }
         if self.resolved_paths_session == Some(session_id) {
             self.resolved_paths.retain(|_, resolved| resolved.is_some());
             self.resolved_paths_generation += 1;
@@ -6827,6 +6920,22 @@ impl OperonApp {
         });
     }
 
+    pub(crate) fn is_layout_dragging(&self) -> bool {
+        self.workspace_divider_drag || self.workspace_drag.is_some()
+    }
+
+    pub(crate) fn finish_layout_drag(&mut self) {
+        for session_id in self.terminals_on_screen() {
+            if let Some(&requested) = self.terminal_resize_requested.get(&session_id) {
+                if self.terminal_resize_applied.get(&session_id) != Some(&requested) {
+                    self.flush_terminal_resize(session_id);
+                } else {
+                    self.request_session_output(session_id);
+                }
+            }
+        }
+    }
+
     pub(crate) fn request_terminal_resize(&mut self, session_id: Uuid, size: (u16, u16)) {
         if self.terminal_resize_requested.get(&session_id) == Some(&size)
             && self.terminal_resize_applied.get(&session_id) == Some(&size)
@@ -6834,6 +6943,15 @@ impl OperonApp {
             return;
         }
         self.terminal_resize_requested.insert(session_id, size);
+        if self.is_layout_dragging() {
+            let last_flush = self.last_terminal_resize_flushed.get(&session_id).copied();
+            let now = Instant::now();
+            if let Some(last) = last_flush {
+                if now.duration_since(last) < Duration::from_millis(150) {
+                    return;
+                }
+            }
+        }
         self.flush_terminal_resize(session_id);
     }
 
@@ -6859,6 +6977,8 @@ impl OperonApp {
         else {
             return;
         };
+        self.last_terminal_resize_flushed
+            .insert(session_id, Instant::now());
         self.spawn_background(BackgroundKey::TerminalResize(session_id), move || {
             BackgroundResult::TerminalResized {
                 session_id,
@@ -6896,6 +7016,9 @@ impl eframe::App for OperonApp {
         if self.repaint.is_none() {
             self.repaint = Some(ctx.clone());
         }
+        if let Ok(mut visible) = self.visible_sessions.write() {
+            *visible = self.terminals_on_screen().into_iter().collect();
+        }
         self.apply_appearance(ctx);
         let palette = self.store.theme.palette();
         self.ensure_hooks_started(ctx);
@@ -6922,11 +7045,7 @@ impl eframe::App for OperonApp {
             self.request_session_poll();
             self.last_session_refresh = Instant::now();
         }
-        ctx.request_repaint_after(if self.background_tasks.is_empty() {
-            Duration::from_secs(2)
-        } else {
-            Duration::from_millis(100)
-        });
+        ctx.request_repaint_after(Duration::from_secs(2));
         // A toast leaves on time even when nothing else would wake the frame.
         if let Some(remaining) = self.expire_brief_notice(Instant::now()) {
             ctx.request_repaint_after(remaining);
@@ -9111,7 +9230,17 @@ impl OperonApp {
         if self.resolved_paths_session.is_some()
             && self.resolved_paths_session != self.selected_session
         {
-            self.resolved_paths.clear();
+            if let Some(prev) = self.resolved_paths_session {
+                if !self.resolved_paths.is_empty() {
+                    self.terminal_path_caches
+                        .insert(prev, std::mem::take(&mut self.resolved_paths));
+                }
+            }
+            if let Some(current) = self.selected_session {
+                if let Some(cached) = self.terminal_path_caches.get(&current) {
+                    self.resolved_paths = cached.clone();
+                }
+            }
             self.resolved_paths_generation += 1;
         }
         self.resolved_paths_session = self.selected_session;
@@ -9134,7 +9263,13 @@ impl OperonApp {
             // Nothing to resolve against. Recording the miss stops the pane
             // asking about the same names on every frame.
             for candidate in candidates {
-                self.resolved_paths.insert(candidate, None);
+                self.resolved_paths.insert(candidate.clone(), None);
+                if let Some(session_id) = self.selected_session {
+                    self.terminal_path_caches
+                        .entry(session_id)
+                        .or_default()
+                        .insert(candidate, None);
+                }
                 self.resolved_paths_generation += 1;
             }
             return;
@@ -9142,7 +9277,14 @@ impl OperonApp {
         for candidate in candidates {
             let resolved =
                 resolve_terminal_session_path(worktree_path.as_deref(), &project_path, &candidate);
-            self.resolved_paths.insert(candidate, resolved);
+            self.resolved_paths
+                .insert(candidate.clone(), resolved.clone());
+            if let Some(session_id) = self.selected_session {
+                self.terminal_path_caches
+                    .entry(session_id)
+                    .or_default()
+                    .insert(candidate, resolved);
+            }
             self.resolved_paths_generation += 1;
         }
     }
@@ -9217,7 +9359,17 @@ impl OperonApp {
         if self.resolved_paths_session.is_some()
             && self.resolved_paths_session != self.selected_session
         {
-            self.resolved_paths.clear();
+            if let Some(prev) = self.resolved_paths_session {
+                if !self.resolved_paths.is_empty() {
+                    self.terminal_path_caches
+                        .insert(prev, std::mem::take(&mut self.resolved_paths));
+                }
+            }
+            if let Some(current) = self.selected_session {
+                if let Some(cached) = self.terminal_path_caches.get(&current) {
+                    self.resolved_paths = cached.clone();
+                }
+            }
             self.resolved_paths_generation += 1;
         }
         self.resolved_paths_session = self.selected_session;
@@ -9231,6 +9383,12 @@ impl OperonApp {
                         resolve_terminal_session_path(worktree.as_deref(), &project.path, path);
                     if fresh.is_some() {
                         self.resolved_paths.insert(path.to_owned(), fresh.clone());
+                        if let Some(session_id) = self.selected_session {
+                            self.terminal_path_caches
+                                .entry(session_id)
+                                .or_default()
+                                .insert(path.to_owned(), fresh.clone());
+                        }
                         self.resolved_paths_generation += 1;
                         fresh
                     } else {
@@ -9242,6 +9400,12 @@ impl OperonApp {
                 let fresh = resolve_terminal_session_path(worktree.as_deref(), &project.path, path);
                 if fresh.is_some() {
                     self.resolved_paths.insert(path.to_owned(), fresh.clone());
+                    if let Some(session_id) = self.selected_session {
+                        self.terminal_path_caches
+                            .entry(session_id)
+                            .or_default()
+                            .insert(path.to_owned(), fresh.clone());
+                    }
                     self.resolved_paths_generation += 1;
                 }
                 fresh

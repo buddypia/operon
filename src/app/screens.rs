@@ -5914,7 +5914,7 @@ impl OperonApp {
     /// One terminal with its header. `split` when it is one of several
     /// (change 226): it then carries a grip and ✕, the focused one is framed,
     /// and only the focused one types, polls for its echo, and resolves paths.
-    fn ui_terminal_pane(&mut self, ui: &mut egui::Ui, session: &Session, split: bool) {
+    pub(crate) fn ui_terminal_pane(&mut self, ui: &mut egui::Ui, session: &Session, split: bool) {
         let palette = self.store.theme.palette();
         let session_id = session.id;
         let focused = if self.workspace_initialized {
@@ -6221,29 +6221,84 @@ impl OperonApp {
                         ui.available_height().max(if split { 0.0 } else { 320.0 });
                     ui.set_min_width(terminal_w);
                     let cell = terminal_cell_size(ui);
-                    // The path cache is the focused terminal's: two terminals
-                    // taking turns at it would empty it every frame.
-                    if focused {
-                        if self.resolved_paths_session.is_some()
-                            && self.resolved_paths_session != Some(session_id)
-                        {
-                            self.resolved_paths.clear();
-                            self.resolved_paths_generation += 1;
-                            self.unresolved_paths.clear();
+                    // With per-session path cache partitioning, switching focus
+                    // preserves previously resolved paths in terminal_path_caches.
+                    if focused && self.resolved_paths_session != Some(session_id) {
+                        if let Some(prev) = self.resolved_paths_session {
+                            if !self.resolved_paths.is_empty() {
+                                self.terminal_path_caches
+                                    .insert(prev, std::mem::take(&mut self.resolved_paths));
+                            }
+                        }
+                        if let Some(cached) = self.terminal_path_caches.get(&session_id) {
+                            self.resolved_paths = cached.clone();
+                        } else {
+                            self.resolved_paths = HashMap::new();
                         }
                         self.resolved_paths_session = Some(session_id);
+                        self.resolved_paths_generation += 1;
                     }
-                    let no_paths = HashMap::new();
                     if self.selected_session.is_none() {
                         self.selected_session = Some(session_id);
                     }
                     // Read before the frame: the caret the rows draw is a row of
                     // the buffer, so the rows themselves have to know it.
                     let cursor = self.terminal_cursors.get(&session_id).copied();
+
+                    let has_layouts = self.terminal_layouts.contains_key(&session_id);
+                    let has_fallback = self.terminal_fallback_layouts.contains_key(&session_id);
+                    let has_raw = self.session_output.contains_key(&session_id);
+                    if !has_layouts && !has_fallback && !has_raw {
+                        self.request_session_output(session_id);
+                    }
+
+                    let fallback_holder = if self.terminal_layouts.contains_key(&session_id)
+                        || self.terminal_fallback_layouts.contains_key(&session_id)
+                    {
+                        None
+                    } else {
+                        self.session_output
+                            .get(&session_id)
+                            .map(|raw| terminal_line_layouts(raw, palette))
+                    };
+                    let lines = if let Some(lines) = self.terminal_layouts.get(&session_id) {
+                        Some(lines.as_slice())
+                    } else if let Some(fallback) = self.terminal_fallback_layouts.get(&session_id) {
+                        Some(fallback.as_slice())
+                    } else {
+                        fallback_holder.as_deref()
+                    };
+
+                    let generation = self
+                        .terminal_output_generations
+                        .get(&session_id)
+                        .copied()
+                        .unwrap_or(0);
+                    let search_overlay = terminal_search_overlay_from(
+                        self.terminal_search.get(&session_id),
+                        palette,
+                    );
+                    let no_paths = HashMap::new();
+                    let resolved_paths_ref: &HashMap<String, Option<PathBuf>> = if focused {
+                        &self.resolved_paths
+                    } else if let Some(cache) = self.terminal_path_caches.get(&session_id) {
+                        cache
+                    } else {
+                        &no_paths
+                    };
+                    let theme = self.store.theme;
+                    let cache = &mut self.terminal_pane_render_cache;
+
                     let (terminal_rect, (hovered_target, unresolved, caret)) = {
-                        let lines = self.terminal_layouts.get(&session_id);
-                        let border = if split && focused {
-                            egui::Stroke::new(2.0, palette.accent)
+                        let border = if split {
+                            egui::Stroke::new(
+                                2.0,
+                                if focused {
+                                    palette.accent
+                                } else {
+                                    palette.terminal_border
+                                },
+                            )
                         } else {
                             egui::Stroke::new(1.0, palette.terminal_border)
                         };
@@ -6260,22 +6315,25 @@ impl OperonApp {
                                 match lines {
                                     Some(lines) => {
                                         let mut unresolved = Vec::new();
+                                        let context = TerminalPaneContext {
+                                            session_id,
+                                            output_generation: generation,
+                                            theme,
+                                            cache,
+                                        };
                                         let hovered = terminal_rows(
                                             ui,
                                             lines,
                                             viewport,
                                             cell.y,
-                                            self.terminal_search_overlay(session_id, palette),
+                                            search_overlay,
                                             &mut TerminalLinkOverlay {
-                                                resolved: if focused {
-                                                    &self.resolved_paths
-                                                } else {
-                                                    &no_paths
-                                                },
+                                                resolved: resolved_paths_ref,
                                                 unresolved: &mut unresolved,
                                                 palette,
                                             },
                                             cursor,
+                                            Some(context),
                                         );
                                         (hovered.hovered, unresolved, hovered.caret)
                                     }
@@ -6705,11 +6763,14 @@ impl OperonApp {
                 self.save_active_document();
             }
         }
+        self.terminal_pane_render_cache
+            .retain(|id, _| self.store.sessions.iter().any(|s| s.id == *id));
         let layout = self.workspace.rects(center);
         if layout.panes.is_empty() {
             body.heading(tr("セッションを選択"));
             body.label(tr("一覧からセッションを選んでください。"));
         }
+        let mut any_divider_dragged = false;
         for rule in &layout.rules {
             let response = ui
                 .interact(
@@ -6726,6 +6787,7 @@ impl OperonApp {
                 });
             }
             if response.dragged() {
+                any_divider_dragged = true;
                 if let Some(pos) = response.interact_pointer_pos() {
                     let share = if rule.side_by_side {
                         (pos.x - rule.span.left()) / (rule.span.width() - DOCK_GAP)
@@ -6752,6 +6814,11 @@ impl OperonApp {
                     response.hovered() || response.dragged(),
                 );
             }
+        }
+        let drag_ended = self.workspace_divider_drag && !any_divider_dragged;
+        self.workspace_divider_drag = any_divider_dragged;
+        if drag_ended {
+            self.finish_layout_drag();
         }
         for (group, rect) in &layout.panes {
             let mut pane = ui.new_child(
@@ -6962,6 +7029,7 @@ impl OperonApp {
             });
             if cancel {
                 self.workspace_drag = None;
+                self.finish_layout_drag();
             } else {
                 let landing = pos.and_then(|p| {
                     layout
@@ -7001,6 +7069,7 @@ impl OperonApp {
                 }
                 if released {
                     self.workspace_drag = None;
+                    self.finish_layout_drag();
                 }
             }
         }
@@ -8421,26 +8490,38 @@ impl OperonApp {
         };
         search.scroll_to = Some(search.matches[search.current].line);
     }
+}
 
+pub(crate) fn terminal_search_overlay_from<'a>(
+    search: Option<&'a TerminalSearch>,
+    palette: &'a Palette,
+) -> TerminalSearchOverlay<'a> {
+    match search {
+        Some(search) if search.open && !search.matches.is_empty() => TerminalSearchOverlay {
+            matches: &search.matches,
+            current: Some(search.current),
+            scroll_to: search.scroll_to,
+            palette,
+            query: Some(&search.query),
+        },
+        _ => TerminalSearchOverlay {
+            matches: &[],
+            current: None,
+            scroll_to: None,
+            palette,
+            query: None,
+        },
+    }
+}
+
+impl OperonApp {
+    #[allow(dead_code)]
     pub(crate) fn terminal_search_overlay<'a>(
         &'a self,
         session_id: Uuid,
         palette: &'a Palette,
     ) -> TerminalSearchOverlay<'a> {
-        match self.terminal_search.get(&session_id) {
-            Some(search) if search.open && !search.matches.is_empty() => TerminalSearchOverlay {
-                matches: &search.matches,
-                current: Some(search.current),
-                scroll_to: search.scroll_to,
-                palette,
-            },
-            _ => TerminalSearchOverlay {
-                matches: &[],
-                current: None,
-                scroll_to: None,
-                palette,
-            },
-        }
+        terminal_search_overlay_from(self.terminal_search.get(&session_id), palette)
     }
 
     /// The bar: one row, under the pane, the way a browser does it.
