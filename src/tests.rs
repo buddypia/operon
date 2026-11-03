@@ -16922,6 +16922,12 @@ pub(crate) fn the_gitignore_exemption_covers_runtime_state_and_nothing_tracked()
             .any(|entry| gitignore_entry_covers(entry, ".claude/state/")),
         ".claude/state/ が免除されていません — 051 の plan.md はこれを正しく名指ししています"
     );
+    assert!(
+        omitted
+            .iter()
+            .any(|entry| gitignore_entry_covers(entry, ".claude/teamwork/")),
+        ".claude/teamwork/ が免除されていません — teamwork 実行時の一時成果物が main を汚します"
+    );
 
     // What it must never reach, derived rather than listed. A hand-kept roster of
     // example paths is the shape this change set out to delete: it would have to
@@ -63383,6 +63389,7 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
     let root = temporary_directory("repaint-idle-test");
     let mut app = test_app(root.join("store.json"));
     app.page = Page::Sessions;
+    app.hooks_started = true;
     app.hooks_enabled = false;
     app.handoff_archive_sweep_started = true;
     app.ports_scanned_at = Some(Instant::now());
@@ -63394,6 +63401,8 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
     let run_frame = |app: &mut OperonApp| {
+        app.ports_scanned_at = Some(Instant::now());
+        app.last_session_refresh = Instant::now();
         let mut frame = eframe::Frame::_new_kittest();
         ctx.run(
             egui::RawInput {
@@ -63416,11 +63425,1172 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
     let delay = full_output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
     assert!(
         delay >= Duration::from_secs(1),
-        "Idle frame with in-flight background task must schedule repaint >= 1s, not 100ms: {:?}",
-        delay
+        "Idle frame with in-flight background task must schedule repaint >= 1s, not 100ms: {delay:?}"
     );
 
     app.background_tasks.clear();
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_rapid_20_cycle_focus_toggle_zero_misses() {
+    let root = temporary_directory("adv-rapid-focus");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-rapid-focus".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        app.set_session_output(id, format!("output content for {name}\n"), None);
+        id
+    };
+
+    let sa = make_session(&mut app, "pane-A");
+    let sb = make_session(&mut app, "pane-B");
+
+    let ga = app.workspace.open(WorkspaceTab::Session(sa));
+    app.workspace.open(WorkspaceTab::Session(sb));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sb),
+        ga,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    // Frame 0: Initial render with Session A focused
+    app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+    frame(&mut app);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    let initial_hits = app.terminal_pane_render_cache.hits();
+
+    // Rapid focus toggling across 20 frames (10 full cycles: A -> B -> A -> B ...)
+    for cycle in 0..10 {
+        app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+        frame(&mut app);
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sa),
+            1,
+            "Cycle {cycle} (to B): Pane A must NOT rebuild"
+        );
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sb),
+            1,
+            "Cycle {cycle} (to B): Pane B must NOT rebuild"
+        );
+
+        app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+        frame(&mut app);
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sa),
+            1,
+            "Cycle {cycle} (to A): Pane A must NOT rebuild"
+        );
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sb),
+            1,
+            "Cycle {cycle} (to A): Pane B must NOT rebuild"
+        );
+    }
+
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    assert_eq!(app.terminal_pane_render_cache.hits(), initial_hits + 40);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_varying_content_and_cursor_positions_focus_invariance() {
+    let root = temporary_directory("adv-varying-content-cursor");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-varying-content".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        id
+    };
+
+    let sa = make_session(&mut app, "pane-A-ansi");
+    let sb = make_session(&mut app, "pane-B-paths");
+
+    let ansi_lines: Vec<String> = (0..25)
+        .map(|i| {
+            format!(
+                "\x1b[32m[PASS]\x1b[0m test_case_{i}: \x1b[1mexecution succeeded\x1b[0m in 0.{i}s"
+            )
+        })
+        .collect();
+    app.set_session_output(
+        sa,
+        ansi_lines.join("\n"),
+        Some(TerminalCursor {
+            x: 15,
+            y: 3,
+            pane_rows: 24,
+        }),
+    );
+
+    let path_lines: Vec<String> = (0..30)
+        .map(|i| format!("at src/app/screens.rs:{}:12 in module_{i}", 6000 + i * 10))
+        .collect();
+    app.set_session_output(
+        sb,
+        path_lines.join("\n"),
+        Some(TerminalCursor {
+            x: 4,
+            y: 18,
+            pane_rows: 24,
+        }),
+    );
+
+    let ga = app.workspace.open(WorkspaceTab::Session(sa));
+    app.workspace.open(WorkspaceTab::Session(sb));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sb),
+        ga,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+    frame(&mut app);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    for _ in 0..5 {
+        app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+        frame(&mut app);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+        app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+        frame(&mut app);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    }
+
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_multi_split_configurations_focus_invariance() {
+    let root = temporary_directory("adv-multi-split");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-multi-split".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        app.set_session_output(
+            id,
+            format!("output for pane {name}\nsecond row of text\n"),
+            None,
+        );
+        id
+    };
+
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    let sa = make_session(&mut app, "pane-top-A");
+    let sb = make_session(&mut app, "pane-bottom-B");
+
+    let ga = app.workspace.open(WorkspaceTab::Session(sa));
+    app.workspace.open(WorkspaceTab::Session(sb));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sb),
+        ga,
+        PaneDrop::Bottom,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0)),
+    ));
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+    frame(&mut app);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    for _ in 0..5 {
+        app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+        frame(&mut app);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+        app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+        frame(&mut app);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    }
+
+    let sc = make_session(&mut app, "pane-bottom-right-C");
+    app.workspace.open(WorkspaceTab::Session(sc));
+
+    let group_b = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(sb)))
+        .map(|g| g.id)
+        .expect("sb group must exist");
+
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sc),
+        group_b,
+        PaneDrop::Bottom,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0)),
+    ));
+    assert_eq!(app.workspace.visible().len(), 3);
+
+    frame(&mut app);
+    let builds_a = app.terminal_pane_render_cache.session_builds(sa);
+    let builds_b = app.terminal_pane_render_cache.session_builds(sb);
+    let builds_c = app.terminal_pane_render_cache.session_builds(sc);
+
+    let sequence = [sa, sb, sc, sa, sc, sb, sa, sb, sc];
+    for target in sequence {
+        app.activate_workspace_tab(&WorkspaceTab::Session(target));
+        frame(&mut app);
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sa),
+            builds_a,
+            "Focus switch must not rebuild Pane A"
+        );
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sb),
+            builds_b,
+            "Focus switch must not rebuild Pane B"
+        );
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(sc),
+            builds_c,
+            "Focus switch must not rebuild Pane C"
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_secondary_factors_during_focus_toggle() {
+    let root = temporary_directory("adv-secondary-factors");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-secondary".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        app.set_session_output(
+            id,
+            format!("output content for {name}\nwith src/app.rs:10 path\n"),
+            None,
+        );
+        id
+    };
+
+    let sa = make_session(&mut app, "pane-A");
+    let sb = make_session(&mut app, "pane-B");
+
+    let ga = app.workspace.open(WorkspaceTab::Session(sa));
+    app.workspace.open(WorkspaceTab::Session(sb));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sb),
+        ga,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let ctx = egui::Context::default();
+    let frame_with_pointer = |app: &mut OperonApp, pointer_pos: Option<egui::Pos2>| {
+        let events = match pointer_pos {
+            Some(pos) => vec![egui::Event::PointerMoved(pos)],
+            None => Vec::new(),
+        };
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+    frame_with_pointer(&mut app, None);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    frame_with_pointer(&mut app, Some(egui::pos2(200.0, 300.0)));
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+    frame_with_pointer(&mut app, Some(egui::pos2(1000.0, 300.0)));
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sa),
+        1,
+        "Hover and focus change must not invalidate Pane A cache"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sb),
+        1,
+        "Hover and focus change must not invalidate Pane B cache"
+    );
+
+    frame_with_pointer(&mut app, Some(egui::pos2(200.0, 350.0)));
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+    frame_with_pointer(&mut app, Some(egui::pos2(800.0, 400.0)));
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+    app.set_session_output(sa, "Updated Pane A output content\n".into(), None);
+    frame_with_pointer(&mut app, None);
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sa),
+        2,
+        "Pane A with fresh output must rebuild galleys"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sb),
+        1,
+        "Pane B with unchanged output must retain cached galleys"
+    );
+
+    for _ in 0..3 {
+        app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+        frame_with_pointer(&mut app, None);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 2);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+
+        app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+        frame_with_pointer(&mut app, None);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 2);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    }
+
+    app.store.theme = AppTheme::Light;
+    frame_with_pointer(&mut app, None);
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sa),
+        3,
+        "Theme switch must invalidate Pane A cache for new palette"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sb),
+        2,
+        "Theme switch must invalidate Pane B cache for new palette"
+    );
+
+    for _ in 0..3 {
+        app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+        frame_with_pointer(&mut app, None);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 3);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 2);
+
+        app.activate_workspace_tab(&WorkspaceTab::Session(sa));
+        frame_with_pointer(&mut app, None);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 3);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 2);
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
+    let root = temporary_directory("bg-wake-55-variants");
+    let mut app = test_app(root.join("store.json"));
+
+    let context = egui::Context::default();
+    let (woke, wakes) = std::sync::mpsc::channel();
+    context.set_request_repaint_callback(move |_| {
+        let _ = woke.send(());
+    });
+    app.repaint = Some(context.clone());
+
+    let session_id = Uuid::new_v4();
+    let project_id = Uuid::new_v4();
+    let action_id = Uuid::new_v4();
+    let doc_id = DocumentId {
+        project: project_id,
+        root: PathBuf::from("/test/root"),
+        path: PathBuf::from("test/path.rs"),
+    };
+
+    let session_variants = vec![
+        BackgroundKey::SessionStart(session_id),
+        BackgroundKey::EmptySessionStart(session_id),
+        BackgroundKey::SessionStop(session_id),
+        BackgroundKey::SessionOutput(session_id),
+        BackgroundKey::TerminalInput(session_id),
+        BackgroundKey::TerminalResize(session_id),
+        BackgroundKey::TerminalClose(session_id),
+        BackgroundKey::NativeSessionResolution(session_id),
+        BackgroundKey::CheckpointCapture(session_id, 1),
+        BackgroundKey::Checkpoints(session_id),
+        BackgroundKey::CheckpointRestore(session_id),
+        BackgroundKey::CheckpointDiff(session_id),
+    ];
+
+    let non_session_variants = vec![
+        BackgroundKey::WorkspaceScan,
+        BackgroundKey::GitChanges(project_id),
+        BackgroundKey::GitDiff(project_id, None),
+        BackgroundKey::GitHistory(project_id),
+        BackgroundKey::Worktrees(project_id),
+        BackgroundKey::PullRequests(project_id),
+        BackgroundKey::Files(project_id),
+        BackgroundKey::WorktreeFiles(PathBuf::from("/test/wt")),
+        BackgroundKey::FileOpen(doc_id.clone()),
+        BackgroundKey::FileSave(doc_id.clone()),
+        BackgroundKey::FileWatch(doc_id.clone()),
+        BackgroundKey::Skills(project_id),
+        BackgroundKey::Rules(project_id),
+        BackgroundKey::SessionPoll,
+        BackgroundKey::FullHistoryImport(action_id),
+        BackgroundKey::WorktreeMutation(project_id),
+        BackgroundKey::LandWorktree(project_id),
+        BackgroundKey::CreatePullRequest(project_id),
+        BackgroundKey::FetchIssues(project_id),
+        BackgroundKey::GitMutation(project_id),
+        BackgroundKey::CommitMessage(project_id),
+        BackgroundKey::AiDiffReview(project_id),
+        BackgroundKey::Upstream(project_id),
+        BackgroundKey::PortScan,
+        BackgroundKey::ToolStatus,
+        BackgroundKey::RecoveryScan,
+        BackgroundKey::RecoveryAdopt("adopt_session".into()),
+        BackgroundKey::CliSessions(project_id),
+        BackgroundKey::TranscriptSearch,
+        BackgroundKey::SystemAction(action_id),
+        BackgroundKey::Notification(action_id),
+        BackgroundKey::HookApply,
+        BackgroundKey::RunScriptRead,
+        BackgroundKey::PromptTemplatesRead,
+        BackgroundKey::KnowledgeRun,
+        BackgroundKey::KnowledgeLoad(project_id),
+        BackgroundKey::KnowledgeEdit(project_id),
+        BackgroundKey::KnowledgeMap(project_id),
+        BackgroundKey::KnowledgeSearch,
+        BackgroundKey::KnowledgeSessionSearch,
+        BackgroundKey::ModelDownload,
+        BackgroundKey::ModelReadiness,
+        BackgroundKey::HandoffArchiveSweep,
+    ];
+
+    assert_eq!(
+        session_variants.len(),
+        12,
+        "Must test exactly 12 session variants"
+    );
+    assert_eq!(
+        non_session_variants.len(),
+        43,
+        "Must test exactly 43 non-session variants"
+    );
+    assert_eq!(
+        session_variants.len() + non_session_variants.len(),
+        55,
+        "Total variants must be 55"
+    );
+
+    for key in &session_variants {
+        assert_eq!(
+            key.session_id(),
+            Some(session_id),
+            "Key {key:?} must map to Some(session_id)"
+        );
+    }
+    for key in &non_session_variants {
+        assert_eq!(key.session_id(), None, "Key {key:?} must map to None");
+    }
+
+    if let Ok(mut visible) = app.visible_sessions.write() {
+        visible.clear();
+    }
+    for (i, key) in session_variants.iter().enumerate() {
+        app.background_tasks.clear();
+        while app.background_receiver.try_recv().is_ok() {}
+        while wakes.try_recv().is_ok() {}
+
+        let k = key.clone();
+        app.spawn_background(k, || BackgroundResult::ListeningPorts(Vec::new()));
+
+        let wake_received = wakes.recv_timeout(Duration::from_millis(60));
+        assert!(
+            wake_received.is_err(),
+            "Session task #{i} ({key:?}) when off-screen MUST NOT wake frame, but received: {wake_received:?}"
+        );
+    }
+
+    if let Ok(mut visible) = app.visible_sessions.write() {
+        visible.clear();
+        visible.insert(session_id);
+    }
+    for (i, key) in session_variants.iter().enumerate() {
+        app.background_tasks.clear();
+        while app.background_receiver.try_recv().is_ok() {}
+        while wakes.try_recv().is_ok() {}
+        let _ = context.run(egui::RawInput::default(), |_| {});
+
+        let k = key.clone();
+        app.spawn_background(k, || BackgroundResult::ListeningPorts(Vec::new()));
+
+        let wake_received = wakes.recv_timeout(Duration::from_millis(500));
+        assert!(
+            wake_received.is_ok(),
+            "Session task #{i} ({key:?}) when visible MUST wake frame immediately"
+        );
+    }
+
+    if let Ok(mut visible) = app.visible_sessions.write() {
+        visible.clear();
+    }
+    for (i, key) in non_session_variants.iter().enumerate() {
+        app.background_tasks.clear();
+        while app.background_receiver.try_recv().is_ok() {}
+        while wakes.try_recv().is_ok() {}
+        let _ = context.run(egui::RawInput::default(), |_| {});
+
+        let k = key.clone();
+        app.spawn_background(k, || BackgroundResult::ListeningPorts(Vec::new()));
+
+        let wake_received = wakes.recv_timeout(Duration::from_millis(500));
+        assert!(
+            wake_received.is_ok(),
+            "Non-session task #{i} ({key:?}) MUST wake frame even when visible_sessions is empty"
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_rapid_tab_cycling_zero_leak_zero_redundant_builds() {
+    let root = temporary_directory("adv-tab-cycle");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-cycle-project".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        app.set_session_output(
+            id,
+            format!("output content for {name}\nsecond line\n"),
+            None,
+        );
+        id
+    };
+
+    let s0 = make_session(&mut app, "tab-0");
+    let s1 = make_session(&mut app, "tab-1");
+    let s2 = make_session(&mut app, "tab-2");
+    let s3 = make_session(&mut app, "tab-3");
+    let s4 = make_session(&mut app, "tab-4");
+    let sessions = [s0, s1, s2, s3, s4];
+
+    app.workspace.open(WorkspaceTab::Session(s0));
+    for &s in &sessions[1..] {
+        app.workspace.open(WorkspaceTab::Session(s));
+    }
+
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(s0));
+    frame(&mut app);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(s0), 1);
+
+    for &s in &sessions[1..] {
+        app.activate_workspace_tab(&WorkspaceTab::Session(s));
+        frame(&mut app);
+        assert_eq!(app.terminal_pane_render_cache.session_builds(s), 1);
+    }
+    assert_eq!(app.terminal_pane_render_cache.builds(), 5);
+
+    let sequence = [
+        0, 1, 2, 3, 4, 3, 2, 1, 0, 4, 2, 0, 3, 1, 4, 1, 3, 0, 2, 4, 0, 2, 4, 1, 3, 2, 0, 4, 3, 1,
+        0, 3, 2, 4, 1, 4, 0, 2, 1, 3, 1, 0, 4, 2, 3, 0, 1, 3, 4, 2, 2, 4, 1, 0, 3, 3, 1, 4, 0, 2,
+        4, 3, 2, 1, 0, 0, 1, 2, 3, 4, 4, 2, 0, 1, 3, 3, 0, 2, 4, 1, 1, 4, 2, 0, 3, 2, 1, 0, 4, 3,
+        0, 4, 3, 2, 1, 2, 0, 3, 1, 4,
+    ];
+
+    let hits_before = app.terminal_pane_render_cache.hits();
+    for &idx in &sequence {
+        app.activate_workspace_tab(&WorkspaceTab::Session(sessions[idx]));
+        frame(&mut app);
+    }
+
+    assert_eq!(
+        app.terminal_pane_render_cache.builds(),
+        5,
+        "Rapid tab switching must never rebuild galleys for previously cached tabs"
+    );
+    for &s in &sessions {
+        assert_eq!(
+            app.terminal_pane_render_cache.session_builds(s),
+            1,
+            "Each session must have exactly 1 lifetime build"
+        );
+    }
+
+    assert_eq!(
+        app.terminal_pane_render_cache.hits(),
+        hits_before + sequence.len(),
+        "Every single tab switch must produce a cache hit"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_deeply_nested_asymmetric_split_isolation() {
+    let root = temporary_directory("adv-nested-split");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-nested-project".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        app.set_session_output(id, format!("output content for {name}\n"), None);
+        id
+    };
+
+    let sa = make_session(&mut app, "pane-A");
+    let sb = make_session(&mut app, "pane-B");
+    let sc = make_session(&mut app, "pane-C");
+    let sd = make_session(&mut app, "pane-D");
+
+    let ga = app.workspace.open(WorkspaceTab::Session(sa));
+    app.workspace.open(WorkspaceTab::Session(sb));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sb),
+        ga,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let ga_id = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(sa)))
+        .unwrap()
+        .id;
+    app.workspace.open(WorkspaceTab::Session(sc));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sc),
+        ga_id,
+        PaneDrop::Bottom,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let gb_id = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(sb)))
+        .unwrap()
+        .id;
+    app.workspace.open(WorkspaceTab::Session(sd));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sd),
+        gb_id,
+        PaneDrop::Bottom,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let ctx = egui::Context::default();
+    let run_frame = |app: &mut OperonApp, size: egui::Vec2| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    run_frame(&mut app, egui::vec2(1600.0, 820.0));
+    assert_eq!(app.terminal_pane_render_cache.builds(), 4);
+
+    let hits_before = app.terminal_pane_render_cache.hits();
+    run_frame(&mut app, egui::vec2(1600.0, 820.0));
+    assert_eq!(app.terminal_pane_render_cache.builds(), 4);
+    assert_eq!(app.terminal_pane_render_cache.hits(), hits_before + 4);
+
+    app.set_session_output(sd, "mutated line in pane D\n".into(), None);
+    run_frame(&mut app, egui::vec2(1600.0, 820.0));
+
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sd), 2);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sc), 1);
+    assert_eq!(app.terminal_pane_render_cache.builds(), 5);
+
+    run_frame(&mut app, egui::vec2(1200.0, 700.0));
+    assert_eq!(app.terminal_pane_render_cache.builds(), 9);
+
+    let hits_resized = app.terminal_pane_render_cache.hits();
+    run_frame(&mut app, egui::vec2(1200.0, 700.0));
+    assert_eq!(app.terminal_pane_render_cache.builds(), 9);
+    assert_eq!(app.terminal_pane_render_cache.hits(), hits_resized + 4);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_concurrent_sibling_mutation_during_tab_switch() {
+    let root = temporary_directory("adv-concurrent-mut");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.workspace_initialized = true;
+    app.show_session_inspector = false;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "test-concurrent-project".into(),
+        added_at: now(),
+    });
+
+    let make_session = |app: &mut OperonApp, name: &str| {
+        let id = Uuid::new_v4();
+        let session = Session {
+            id,
+            project_id,
+            name: name.into(),
+            goal: String::new(),
+            agent: "claude".into(),
+            tmux_name: managed_tmux_name(id),
+            created_at: now(),
+            launched_at: Some(now()),
+            status: SessionStatus::Active,
+            worktree_path: Some(root.clone()),
+            branch: None,
+            agent_command: "claude".into(),
+            native_session_id: None,
+            native_session_path: None,
+            origin: None,
+            depends_on: Vec::new(),
+        };
+        app.store.sessions.push(session);
+        app.set_session_output(id, format!("output content for {name}\n"), None);
+        id
+    };
+
+    let sa = make_session(&mut app, "pane-left-A");
+    let sb = make_session(&mut app, "pane-right-B");
+    let sc = make_session(&mut app, "pane-right-C");
+
+    let ga = app.workspace.open(WorkspaceTab::Session(sa));
+    app.workspace.open(WorkspaceTab::Session(sb));
+    app.workspace.open(WorkspaceTab::Session(sc));
+
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sb),
+        ga,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+    let gb_id = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(sb)))
+        .unwrap()
+        .id;
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sc),
+        gb_id,
+        PaneDrop::Center,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 820.0)),
+    ));
+
+    let ctx = egui::Context::default();
+    let frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        );
+    };
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+    frame(&mut app);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sc), 0);
+
+    app.set_session_output(sa, "left pane A new line!\n".into(), None);
+    app.activate_workspace_tab(&WorkspaceTab::Session(sc));
+    frame(&mut app);
+
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sa),
+        2,
+        "Mutated left pane must rebuild"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sc),
+        1,
+        "Newly activated tab C must build once"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(sb),
+        1,
+        "Deactivated tab B must NOT rebuild"
+    );
+
+    app.set_session_output(sb, "hidden background output in B\n".into(), None);
+    frame(&mut app);
+
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 1);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 2);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sc), 1);
+
+    app.activate_workspace_tab(&WorkspaceTab::Session(sb));
+    frame(&mut app);
+
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sb), 2);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(sa), 2);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn adversarial_cache_invalidation_matrix() {
+    let root = temporary_directory("adv-inval-matrix");
+    let mut app = test_app(root.join("store.json"));
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let session_id = session.id;
+    app.store.sessions.push(session.clone());
+    app.select_session(session_id);
+    app.set_session_output(
+        session_id,
+        "matrix test line 1\nmatrix test line 2\n".into(),
+        None,
+    );
+
+    let ctx = egui::Context::default();
+    let frame_with_size = |app: &mut OperonApp, size: egui::Vec2| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let s = app.store.sessions[0].clone();
+                    app.ui_terminal_pane(ui, &s, false);
+                });
+            },
+        );
+    };
+
+    frame_with_size(&mut app, egui::vec2(1600.0, 820.0));
+    assert_eq!(app.terminal_pane_render_cache.builds(), 1);
+
+    frame_with_size(&mut app, egui::vec2(1600.2, 820.4));
+    assert_eq!(
+        app.terminal_pane_render_cache.builds(),
+        1,
+        "Sub-pixel float noise must not trigger rebuild"
+    );
+
+    frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
+    assert_eq!(
+        app.terminal_pane_render_cache.builds(),
+        2,
+        "Integer rect dimension change must rebuild"
+    );
+
+    app.set_session_output(session_id, "matrix test updated line\n".into(), None);
+    frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
+    assert_eq!(
+        app.terminal_pane_render_cache.builds(),
+        3,
+        "New output generation must rebuild"
+    );
+
+    app.store.theme = if app.store.theme == AppTheme::Dark {
+        AppTheme::Light
+    } else {
+        AppTheme::Dark
+    };
+    app.apply_appearance(&ctx);
+    frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
+    assert_eq!(
+        app.terminal_pane_render_cache.builds(),
+        4,
+        "Theme change must invalidate cache and rebuild"
+    );
+
+    app.store.terminal_font = TerminalFont::SarasaMonoK;
+    app.apply_appearance(&ctx);
+    frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
+    assert_eq!(
+        app.terminal_pane_render_cache.builds(),
+        5,
+        "Terminal font change must invalidate cache and rebuild"
+    );
+
+    app.store.sessions[0].status = SessionStatus::Exited;
+    app.remove_session_record(session_id);
+    assert_eq!(app.terminal_pane_render_cache.session_builds(session_id), 0);
+    assert!(
+        app.terminal_pane_render_cache.remove(&session_id).is_none(),
+        "Deleted session must have no residual cache entry"
+    );
+
     fs::remove_dir_all(&root).ok();
 }
 
