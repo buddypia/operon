@@ -1,0 +1,41 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# What is missing (backlog 20261104-8bzmycdr, recorded by change 242):
+# 1. docs/sdlc/verification-methods.yaml lists formal-proof (`cargo kani
+#    --harness`) and no surface may require it, because nobody had measured
+#    whether Kani builds this crate: native llama-cpp-sys-2 (CMake) and eframe.
+# 2. Done when one measured CI run of `cargo kani` on one `#[kani::proof]`
+#    harness is recorded, and the method table requires formal-proof on the
+#    surfaces it can serve — or the measurement says it cannot, and the table
+#    says why.
+# 3. Kani is not a crate dependency: `cargo install kani-verifier` on the CI
+#    runner only. The probe runs on this branch only.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Probe first: the kani-probe workflow with one harness, run on this branch; read its timings. The route's documents follow from what it measures."
+
+contract:
+  probe-measured: "machine pending the kani-probe run on this branch: install, setup, build, verify times and verdict"
+  three-gates: "machine pending gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine passed no: src/tests.rs, Cargo.toml lints, CI and documents only"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
