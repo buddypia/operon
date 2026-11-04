@@ -1,0 +1,9 @@
+# The evidence for change 243. Shape: docs/sdlc/templates/verification.yaml.
+# Refactor route: no spec, so no Rn. The digest is the whole branch against
+# main; the plan commit before it touched only this directory.
+digest: "24821db086f1524c"
+
+obligations:
+  - I1 formal-model :: cargo test --locked model_check_store_survives_every_interruption_of_a_write
+  - I2 empirical-test :: cargo test --locked every_model_test_goes_through_exhaustive_check
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/243-store-has-no-model-of-interrupted-writes/mutations.py

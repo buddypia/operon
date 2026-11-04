@@ -66330,6 +66330,533 @@ pub(crate) fn model_check_safe_agent_command_admits_no_shell_metacharacter() {
     );
 }
 
+// ── The store under interruption (change 243) ────────────────────────────────
+
+/// One step of `write_file_atomically_with_sync`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum StoreWriteStep {
+    CreateTemporary,
+    WriteContents,
+    SyncFile,
+    Rename,
+    SyncDirectory,
+}
+
+/// The five steps in the order the body of `write_file_atomically_with_sync`
+/// performs them. The model takes its order from here, so moving a step in
+/// `src/store.rs` moves it in the model, and the walk judges the code as
+/// written rather than a copy of it.
+fn store_write_steps_in_source_order() -> Vec<StoreWriteStep> {
+    let source = include_str!("store.rs");
+    let start = source
+        .find("pub(crate) fn write_file_atomically_with_sync(")
+        .expect("write_file_atomically_with_sync が src/store.rs にありません");
+    let body = &source[start..];
+    let body = &body[..body[1..]
+        .find("\npub(crate) fn ")
+        .map_or(body.len(), |end| end + 1)];
+    let mut found = [
+        ("create_new(true)", StoreWriteStep::CreateTemporary),
+        ("file.write_all(contents)", StoreWriteStep::WriteContents),
+        ("sync_file(&file)", StoreWriteStep::SyncFile),
+        ("fs::rename(&temporary, path)", StoreWriteStep::Rename),
+        ("sync_directory(&directory)", StoreWriteStep::SyncDirectory),
+    ]
+    .map(|(marker, step)| {
+        let at = body
+            .find(marker)
+            .unwrap_or_else(|| panic!("{marker} が write_file_atomically_with_sync にありません"));
+        (at, step)
+    });
+    found.sort_by_key(|(at, _)| *at);
+    found.into_iter().map(|(_, step)| step).collect()
+}
+
+/// What a file holds. `generation` counts the saves that produced it and is
+/// carried in the bytes as that many pending cancellations, so reading it back
+/// goes through the real parser.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum StoreBytes {
+    Empty,
+    Whole { schema: u32, generation: u8 },
+    Torn { schema: u32, generation: u8 },
+}
+
+impl StoreBytes {
+    fn encoded(self) -> Vec<u8> {
+        let (schema, generation) = match self {
+            Self::Empty => return Vec::new(),
+            Self::Whole { schema, generation } | Self::Torn { schema, generation } => {
+                (schema, generation)
+            }
+        };
+        let pending: Vec<Uuid> = (0..u128::from(generation)).map(Uuid::from_u128).collect();
+        // Schema 1 is the store before a version was written into it.
+        let value = if schema == 1 {
+            serde_json::json!({ "projects": [], "sessions": [], "pending_cancellations": pending })
+        } else {
+            serde_json::json!({
+                "schema_version": schema,
+                "projects": [],
+                "sessions": [],
+                "pending_cancellations": pending,
+            })
+        };
+        // A `Value` of strings, numbers and arrays always encodes.
+        let whole = serde_json::to_vec_pretty(&value).expect("serde_json::Value encodes");
+        match self {
+            Self::Torn { .. } => whole[..whole.len() / 2].to_vec(),
+            _ => whole,
+        }
+    }
+
+    fn torn(self) -> Self {
+        match self {
+            Self::Whole { schema, generation } => Self::Torn { schema, generation },
+            other => other,
+        }
+    }
+
+    fn newer_than_this_build(self) -> bool {
+        matches!(self, Self::Whole { schema, .. } if schema > STORE_SCHEMA_VERSION)
+    }
+}
+
+/// One file: what a reader sees now, and what a crash keeps for certain.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct StoreInode {
+    visible: StoreBytes,
+    durable: StoreBytes,
+}
+
+/// The directory's two names, by inode.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+struct StoreDirectory {
+    current: Option<usize>,
+    temporary: Option<usize>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum StorePhase {
+    /// Before the first launch: what the Mac already holds is not chosen yet.
+    Unchosen,
+    /// Starting: import a legacy snapshot if there is no current index, then load.
+    Down,
+    /// Running, holding this generation in memory.
+    Up { generation: u8 },
+    /// Writing `writes` to the current index, `step` steps done.
+    Saving {
+        generation: u8,
+        writes: StoreBytes,
+        step: usize,
+        importing: bool,
+    },
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct StoreModel {
+    phase: StorePhase,
+    inodes: Vec<StoreInode>,
+    visible: StoreDirectory,
+    durable: StoreDirectory,
+    /// The legacy snapshot. `import_legacy_store_if_needed` only reads it.
+    legacy: Option<StoreBytes>,
+    /// An unreadable index `load_store_safely` moved aside.
+    preserved: Option<StoreBytes>,
+    /// An index written by a newer build. It has to stay on disk byte for byte.
+    newer: Option<StoreBytes>,
+    /// The newest generation a save reported durable, or that was on disk
+    /// before Operon started. A load that returns less has lost it.
+    durable_generation: Option<u8>,
+    saves: u8,
+    lost: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum CrashNames {
+    Visible,
+    Durable,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum CrashContents {
+    Visible,
+    Durable,
+    Torn,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum StoreEvent {
+    Start {
+        legacy: bool,
+        schema: u32,
+    },
+    Load,
+    Save,
+    NextStep,
+    DirectorySyncFails,
+    Crash {
+        names: CrashNames,
+        contents: CrashContents,
+    },
+}
+
+const STORE_MODEL_SAVES: u8 = 2;
+
+/// What the real start-up code does with each file the model can produce,
+/// asked once per file on a scratch directory before the walk: the walk needs
+/// the answers thousands of times, and the code is deterministic in its bytes.
+struct StoreOracle {
+    /// `load_store_safely`: the generation it loaded (`None` for the empty
+    /// store it falls back to), and whether the original bytes are still on
+    /// disk afterwards, in place or moved aside.
+    load: HashMap<StoreBytes, (Option<u8>, bool)>,
+    /// `import_legacy_store_if_needed`: what it writes as the current index.
+    import: HashMap<StoreBytes, StoreBytes>,
+}
+
+fn store_model_files() -> Vec<StoreBytes> {
+    let mut files = vec![StoreBytes::Empty];
+    for schema in 1..=STORE_SCHEMA_VERSION + 1 {
+        for generation in 0..=STORE_MODEL_SAVES {
+            files.extend([
+                StoreBytes::Whole { schema, generation },
+                StoreBytes::Torn { schema, generation },
+            ]);
+        }
+    }
+    files
+}
+
+fn store_oracle() -> StoreOracle {
+    let mut oracle = StoreOracle {
+        load: HashMap::new(),
+        import: HashMap::new(),
+    };
+    for file in store_model_files() {
+        let original = file.encoded();
+        let root = temporary_directory("store-model");
+        let current = root.join("store-v2.json");
+        fs::write(&current, &original).unwrap();
+        let loaded = load_store_safely(&current);
+        let generation = loaded
+            .notice
+            .is_none()
+            .then(|| loaded.store.pending_cancellations.len() as u8);
+        let kept = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(|entry| fs::read(entry.ok()?.path()).ok())
+            .any(|bytes| bytes == original);
+        oracle.load.insert(file, (generation, kept));
+
+        let legacy = root.join("legacy").join("store.json");
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, &original).unwrap();
+        let fresh = root.join("fresh").join("store-v2.json");
+        let mut written = None;
+        let _ = import_legacy_store_if_needed_with_writer(&fresh, &legacy, |path, bytes| {
+            if path == fresh {
+                written = Some(bytes.to_vec());
+            }
+            Ok(WriteOutcome::Durable)
+        });
+        assert_eq!(
+            fs::read(&legacy).unwrap(),
+            original,
+            "取り込みが旧形式のスナップショット {file:?} を書き換えました"
+        );
+        if let Some(bytes) = written {
+            // The import writes either the legacy bytes as they are or a
+            // fresh store of its own; the model names the second by what it
+            // parses to, and an unparseable one as torn.
+            let name = if bytes == original {
+                file
+            } else {
+                parse_store_contents(&bytes)
+                    .map(|store| StoreBytes::Whole {
+                        schema: store.schema_version,
+                        generation: store.pending_cancellations.len() as u8,
+                    })
+                    .unwrap_or(StoreBytes::Torn {
+                        schema: STORE_SCHEMA_VERSION,
+                        generation: 0,
+                    })
+            };
+            oracle.import.insert(file, name);
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+    oracle
+}
+
+fn store_load_lost(durable: Option<u8>, loaded: Option<u8>, what: &str) -> Option<String> {
+    match durable {
+        Some(saved) if loaded.is_none_or(|loaded| loaded < saved) => Some(format!(
+            "保存済みの世代 {saved} が失われ、再起動後に {what} を読みました"
+        )),
+        _ => None,
+    }
+}
+
+fn store_model_step(
+    steps: &[StoreWriteStep],
+    oracle: &StoreOracle,
+    state: &StoreModel,
+    event: &StoreEvent,
+) -> Option<StoreModel> {
+    let mut next = state.clone();
+    match (*event, state.phase) {
+        (StoreEvent::Start { legacy, schema }, StorePhase::Unchosen) => {
+            let bytes = StoreBytes::Whole {
+                schema,
+                generation: 0,
+            };
+            if legacy {
+                next.legacy = Some(bytes);
+            } else {
+                next.inodes.push(StoreInode {
+                    visible: bytes,
+                    durable: bytes,
+                });
+                next.visible.current = Some(0);
+                next.durable.current = Some(0);
+            }
+            next.newer = bytes.newer_than_this_build().then_some(bytes);
+            next.durable_generation = next.newer.is_none().then_some(0);
+            next.phase = StorePhase::Down;
+        }
+        (StoreEvent::Load, StorePhase::Down) => match (state.visible.current, state.legacy) {
+            (None, Some(legacy)) => {
+                // Nothing written as the current index: Operon starts empty
+                // beside a snapshot it never read.
+                let Some(&writes) = oracle.import.get(&legacy) else {
+                    next.phase = StorePhase::Up { generation: 0 };
+                    next.lost = store_load_lost(
+                        state.durable_generation,
+                        None,
+                        "取り込まれなかった空の記録",
+                    );
+                    return Some(next);
+                };
+                let generation = match writes {
+                    StoreBytes::Whole { generation, .. } => generation,
+                    _ => 0,
+                };
+                next.phase = StorePhase::Saving {
+                    generation,
+                    writes,
+                    step: 0,
+                    importing: true,
+                };
+            }
+            (None, None) => {
+                next.phase = StorePhase::Up { generation: 0 };
+                next.lost = store_load_lost(state.durable_generation, None, "空の記録");
+            }
+            (Some(inode), _) => {
+                let bytes = state.inodes[inode].visible;
+                let (generation, kept) = oracle.load[&bytes];
+                next.phase = StorePhase::Up {
+                    generation: generation.unwrap_or(0),
+                };
+                if generation.is_none() {
+                    // Moved aside (or gone), and Operon starts on an empty store.
+                    next.visible.current = None;
+                    next.durable.current = None;
+                    if kept {
+                        next.preserved = Some(bytes);
+                    }
+                }
+                next.lost =
+                    store_load_lost(state.durable_generation, generation, &format!("{bytes:?}"));
+            }
+        },
+        (StoreEvent::Save, StorePhase::Up { generation }) if state.saves < STORE_MODEL_SAVES => {
+            next.saves += 1;
+            next.phase = StorePhase::Saving {
+                generation: generation + 1,
+                writes: StoreBytes::Whole {
+                    schema: STORE_SCHEMA_VERSION,
+                    generation: generation + 1,
+                },
+                step: 0,
+                importing: false,
+            };
+        }
+        (
+            StoreEvent::NextStep,
+            StorePhase::Saving {
+                generation,
+                writes,
+                step,
+                importing,
+            },
+        ) => {
+            let temporary = state.visible.temporary;
+            match steps[step] {
+                StoreWriteStep::CreateTemporary => {
+                    next.inodes.push(StoreInode {
+                        visible: StoreBytes::Empty,
+                        durable: StoreBytes::Empty,
+                    });
+                    next.visible.temporary = Some(next.inodes.len() - 1);
+                }
+                // A step that needs the temporary file before it exists has no
+                // meaning; the real code would fail with an I/O error, and the
+                // save would not happen.
+                StoreWriteStep::WriteContents => next.inodes[temporary?].visible = writes,
+                StoreWriteStep::SyncFile => {
+                    let inode = temporary?;
+                    next.inodes[inode].durable = next.inodes[inode].visible;
+                }
+                StoreWriteStep::Rename => {
+                    next.visible.current = Some(temporary?);
+                    next.visible.temporary = None;
+                }
+                StoreWriteStep::SyncDirectory => next.durable = next.visible,
+            }
+            next.phase = if step + 1 == steps.len() {
+                if !importing {
+                    next.durable_generation = Some(generation);
+                }
+                StorePhase::Up { generation }
+            } else {
+                StorePhase::Saving {
+                    generation,
+                    writes,
+                    step: step + 1,
+                    importing,
+                }
+            };
+        }
+        // `CommittedButNotSynced`: the directory sync failed. The app keeps
+        // running and retries, and nothing new is promised durable.
+        (
+            StoreEvent::DirectorySyncFails,
+            StorePhase::Saving {
+                generation, step, ..
+            },
+        ) if steps[step] == StoreWriteStep::SyncDirectory => {
+            next.phase = StorePhase::Up { generation };
+        }
+        (
+            StoreEvent::Crash { names, contents },
+            StorePhase::Up { .. } | StorePhase::Saving { .. },
+        ) => {
+            let directory = match names {
+                CrashNames::Visible => state.visible,
+                CrashNames::Durable => state.durable,
+            };
+            let survived = |inode: StoreInode| match contents {
+                CrashContents::Visible => inode.visible,
+                CrashContents::Durable => inode.durable,
+                CrashContents::Torn if inode.visible != inode.durable => inode.visible.torn(),
+                CrashContents::Torn => inode.visible,
+            };
+            // Keep only the file the current name still reaches: a leftover
+            // temporary file is never read back, and dropping it keeps the
+            // state space finite across crashes.
+            next.inodes = directory
+                .current
+                .map(|inode| {
+                    let bytes = survived(state.inodes[inode]);
+                    StoreInode {
+                        visible: bytes,
+                        durable: bytes,
+                    }
+                })
+                .into_iter()
+                .collect();
+            next.visible = StoreDirectory {
+                current: directory.current.map(|_| 0),
+                temporary: None,
+            };
+            next.durable = next.visible;
+            next.phase = StorePhase::Down;
+        }
+        _ => return None,
+    }
+    Some(next)
+}
+
+#[test]
+/// Change 243: the first formal model of the store. Every schema a Mac can
+/// hold — versionless 1 through one newer than this build — as the current
+/// index or as a legacy snapshot to import; then up to two saves, a crash
+/// allowed between any two steps of `write_file_atomically_with_sync` (in the
+/// order read out of `src/store.rs`), each crash keeping either view of the
+/// directory's names and, for the file, its visible, durable, or torn bytes;
+/// and a directory sync that fails. Every reachable state, not a sample.
+///
+/// The property, stated apart from the code: after any crash the index Operon
+/// loads holds at least the newest generation a save reported durable, and an
+/// index from a newer build stays on disk byte for byte.
+pub(crate) fn model_check_store_survives_every_interruption_of_a_write() {
+    let steps = store_write_steps_in_source_order();
+    let oracle = store_oracle();
+    let mut events = vec![
+        StoreEvent::Load,
+        StoreEvent::Save,
+        StoreEvent::NextStep,
+        StoreEvent::DirectorySyncFails,
+    ];
+    for schema in 1..=STORE_SCHEMA_VERSION + 1 {
+        for legacy in [false, true] {
+            events.push(StoreEvent::Start { legacy, schema });
+        }
+    }
+    for names in [CrashNames::Visible, CrashNames::Durable] {
+        for contents in [
+            CrashContents::Visible,
+            CrashContents::Durable,
+            CrashContents::Torn,
+        ] {
+            events.push(StoreEvent::Crash { names, contents });
+        }
+    }
+    let initial = StoreModel {
+        phase: StorePhase::Unchosen,
+        inodes: Vec::new(),
+        visible: StoreDirectory::default(),
+        durable: StoreDirectory::default(),
+        legacy: None,
+        preserved: None,
+        newer: None,
+        durable_generation: None,
+        saves: 0,
+        lost: None,
+    };
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| store_model_step(&steps, &oracle, state, event),
+        |state| {
+            if let Some(lost) = &state.lost {
+                return Err(lost.clone());
+            }
+            let current = state
+                .visible
+                .current
+                .map(|inode| state.inodes[inode].visible);
+            match state.newer {
+                Some(newer) if ![state.legacy, state.preserved, current].contains(&Some(newer)) => {
+                    Err(format!("新しいビルドの記録 {newer:?} が残っていません"))
+                }
+                _ => Ok(()),
+            }
+        },
+        500_000,
+    );
+    // Every save reaches every step: 2 starting places x schemas, and five
+    // steps per save. Fewer states than that means a step never ran.
+    let floor = 2 * (STORE_SCHEMA_VERSION as usize + 1) * 5;
+    assert!(
+        coverage.states > floor,
+        "到達した状態が {} しかありません（下限 {floor}）— 書き込みの手順が進んでいません",
+        coverage.states
+    );
+}
+
 #[test]
 /// Change 242, requirement 5. `formal-model` is formal only because every
 /// `model_check_*` test enumerates through `exhaustive_check`. A `model_` test that
