@@ -65819,7 +65819,7 @@ fn ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_
     for (rel, expected_jobs) in [
         (
             ".github/workflows/ci.yml",
-            &["checks", "test", "package"][..],
+            &["checks", "test", "verify", "package"][..],
         ),
         (".github/workflows/harness.yml", &["evals"][..]),
     ] {
@@ -65865,13 +65865,19 @@ fn ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_
             let reset_pos = segment
                 .find("bash scripts/seed-target.sh --reset-only .")
                 .unwrap_or_else(|| panic!("{rel} の rust-cache ステップ後に seed-target.sh --reset-only . がありません"));
-            let build_pos = ["cargo ", "scripts/package-macos.sh", "scripts/run-evals.sh"]
-                .iter()
-                .filter_map(|needle| segment.find(needle))
-                .min()
-                .unwrap_or_else(|| {
-                    panic!("{rel} の rust-cache ステップ後にビルドまたは実行コマンドがありません")
-                });
+            let build_pos = [
+                "cargo ",
+                "scripts/package-macos.sh",
+                "scripts/run-evals.sh",
+                // Change 242: builds and runs each obligation's `cargo test`.
+                "scripts/run-obligations.sh",
+            ]
+            .iter()
+            .filter_map(|needle| segment.find(needle))
+            .min()
+            .unwrap_or_else(|| {
+                panic!("{rel} の rust-cache ステップ後にビルドまたは実行コマンドがありません")
+            });
             assert!(
                 key_pos < reset_pos && reset_pos < build_pos,
                 "{rel} では rust-cache の key 設定 → seed-target.sh --reset-only . → ビルド実行の順序である必要があります"
