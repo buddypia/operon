@@ -14,11 +14,13 @@
 # verification.yaml; the sweep went to 24 of 24 caught.
 # Round 2, both approve-with-nits. Round 3: the commit gate refused the
 # short `evals/007` link in empirical-verifier.md; with the full path both
-# re-confirmed approve-with-nits at the digest below.
+# re-confirmed approve-with-nits. Round 4: CI failed one existing guard that
+# lists the cached CI jobs (it did not know verify); 665888d added it, and both
+# re-confirmed approve-with-nits on the whole branch against main, below.
 
-digest: "87cadbe11e2d657d"
+digest: "f73987f59d1531c8"
 
-rounds: 3
+rounds: 4
 
 carried:
   - rust-reviewer/1 · verification_check accepts a bare R or I id with no digits; [RFI][0-9]* matches zero digits

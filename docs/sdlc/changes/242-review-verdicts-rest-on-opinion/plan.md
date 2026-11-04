@@ -87,3 +87,8 @@
   red. `every_high_surface_names_the_methods_it_requires` now asserts it.
 - **Measured.** The sweep takes 179–185 s locally; every obligation of this
   change, run by `scripts/run-obligations.sh`, 182 s.
+- **CI found a guard the local run did not.** The first push's `verify` job
+  re-ran all 17 obligations green (521 s), but the suite failed in
+  `ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_cmake`,
+  which lists the cached CI jobs by name. 665888d adds `verify` and accepts
+  `scripts/run-obligations.sh` as its build step.

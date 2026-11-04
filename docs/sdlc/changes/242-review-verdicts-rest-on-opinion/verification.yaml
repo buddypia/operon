@@ -1,7 +1,8 @@
 # The evidence for change 242, in the shape it introduces. main's gate judges
 # this change by verdicts (review.yaml) because main has no method table yet;
 # CI's verify job runs every line below on the branch head all the same.
-digest: "87cadbe11e2d657d"
+# The digest is the whole branch against main, which the landing merge records.
+digest: "f73987f59d1531c8"
 
 obligations:
   - R1 empirical-test :: cargo test --locked review_gate_requires_a_verification_record_once_the_method_table_exists
