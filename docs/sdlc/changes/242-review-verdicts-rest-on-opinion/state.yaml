@@ -18,11 +18,11 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Finish plan.md steps 8-10: verification.yaml, review.yaml by the two reviewers, push, CI verify green, merge."
+resume: "The person approves the notation-only edit of plan.md (digest 8ba7c53d6844b3c4) and spec.md (1d0232142b1fccd7); log both in approvals.log, set status done, merge --no-ff."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh (83e33d1, 665888d, 2a6efc0 committed through it)"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine passed no: only src/tests.rs, scripts, CI and documents change"
-  verify-job: "machine pending the CI verify job is green on the branch head"
+  verify-job: "machine passed CI run 41788189296 on 2a6efc0: verify (17 obligations), test suite, checks all success"
   guards-verified-by-mutation: "human pending each new guard watched failing"
