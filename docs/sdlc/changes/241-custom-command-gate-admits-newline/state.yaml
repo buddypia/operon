@@ -1,0 +1,46 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. is_safe_agent_command("a\nb") and ("\na") return true. The gate's
+#    character test uses is_ascii_whitespace, which admits \n, \r and form
+#    feed besides space and tab. build_agent_launch_command returns the
+#    custom command and respawn_tmux_pane hands it to tmux as one shell
+#    string, so `claude<newline>other-command` runs other-command, past a gate
+#    whose notice says shell operators are refused. The command is also
+#    remembered in recent-agent-settings.json, so it runs again on relaunch.
+#    Found by the first formal model in change 242 (backlog 20261104-fc3mmtvh).
+# 2. Cause: whitespace in a shell is not one class. Space and tab separate
+#    words; a newline ends a command, like `;`.
+# 3. Kept as it is: space and tab inside a command; leading and trailing
+#    whitespace is still trimmed before the test, so a pasted command with a
+#    trailing newline keeps working.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. The retry path is gated too (empirical-verifier F1). Lesson 107. Lands after CI; the app is repackaged after landing."
+
+contract:
+  three-gates: "machine passed gate-commit.sh admitted 5a11e32 (fmt, clippy, record tests)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0; diagnose and warn rows predate this change"
+  failing-test-first: "machine passed both new tests failed on the unedited gate: a newline inside admitted, model counterexample of 2 steps"
+  release-binary: "machine passed src/agents.rs and src/tmux.rs change; packaged and swapped from main after landing (ship skill)"
+  guards-verified-by-mutation: "human passed mutations.py 6 of 6 caught; the four line-break mutations by the model alone"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

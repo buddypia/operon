@@ -5649,6 +5649,56 @@ pub(crate) fn allows_custom_agent_flags_but_rejects_shell_operators() {
     assert!(!is_safe_agent_command("my-agent $(whoami)"));
 }
 #[test]
+/// Change 241. A build before the fix saved a custom command with a line break
+/// in it, and a retry read it back from the store straight into tmux. A stored
+/// agent launch passes the same gate a typed one does; a run script carries a
+/// person's own shell on purpose and keeps it.
+pub(crate) fn a_stored_agent_command_with_a_line_break_is_refused_at_retry() {
+    let project = Path::new("/tmp/operon-241");
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Failed);
+    for agent in AGENTS {
+        session.agent = (*agent).into();
+        session.agent_command = format!("{agent}\nid");
+        assert!(
+            stored_launch_command(&session, project).is_err(),
+            "{agent}: 保存済みの {:?} が再起動で tmux に渡ります",
+            session.agent_command
+        );
+        session.agent_command = format!("{agent} --model fast");
+        assert_eq!(
+            stored_launch_command(&session, project).as_deref(),
+            Ok(format!("{agent} --model fast").as_str())
+        );
+    }
+    session.agent = RUN_SCRIPT_AGENT.into();
+    session.agent_command = "npm run build && npm run dev".into();
+    assert_eq!(
+        stored_launch_command(&session, project).as_deref(),
+        Ok("npm run build && npm run dev")
+    );
+}
+#[test]
+/// Change 241. A newline ends a shell command the way `;` does, and the custom
+/// command reaches tmux as one shell string, so `claude\nother` would run
+/// `other`. Only space and tab separate words; the rest of ASCII whitespace is
+/// refused, while a trailing newline from a paste is still trimmed away.
+pub(crate) fn custom_command_with_a_line_break_inside_is_refused() {
+    for command in [
+        "claude\nrm -rf ~",
+        "claude\r\nid",
+        "claude\rid",
+        "claude\u{0c}id",
+        "\nclaude\nid",
+    ] {
+        assert!(
+            !is_safe_agent_command(command),
+            "{command:?} は改行で 2 つ目のコマンドを実行できるのに通りました"
+        );
+    }
+    assert!(is_safe_agent_command("claude\t--model fast"));
+    assert!(is_safe_agent_command("claude --model fast\n"));
+}
+#[test]
 pub(crate) fn validates_cli_session_ids_before_resuming() {
     assert!(is_safe_cli_session_id(
         "12345678-abcd-0123-abcd-1234567890ab"
@@ -66234,6 +66284,48 @@ pub(crate) fn model_check_safe_agent_option_admits_no_shell_metacharacter() {
     assert_eq!(
         coverage.states,
         1 + 33 + 33 * 33 + 33 * 33 * 33,
+        "長さ 3 までの文字列を全部回っていません"
+    );
+}
+
+#[test]
+/// Change 241: the 242 model with the command arm restored. Every string of up
+/// to three characters over the shell's meaningful characters, every ASCII
+/// whitespace character, word characters the gate allows, and non-ASCII — all
+/// of them, not a sample. The property is stated apart from the
+/// implementation: nothing the custom-command gate accepts carries a character
+/// that makes a shell do more than run one command with arguments, once the
+/// launch has trimmed it. Space and tab are the only separators that only
+/// separate words.
+pub(crate) fn model_check_safe_agent_command_admits_no_shell_metacharacter() {
+    const SHELL_MEANING: &[char] = &[
+        ';', '|', '&', '$', '`', '<', '>', '(', ')', '\'', '"', '\\', '*', '?', '[', ']', '{', '}',
+        '!', '#', '~', '%', '\n', '\r', '\u{0b}', '\u{0c}',
+    ];
+    let mut alphabet: Vec<char> = SHELL_MEANING.to_vec();
+    alphabet.extend([
+        'a', 'Z', '0', '-', '.', '/', '=', ' ', '\t', 'é', '\u{3000}',
+    ]);
+    let size = alphabet.len();
+    let coverage = exhaustive_check(
+        String::new(),
+        &alphabet,
+        |state: &String, character: &char| {
+            (state.chars().count() < 3).then(|| format!("{state}{character}"))
+        },
+        // What runs is the trimmed command (`build_agent_launch_command`), so a
+        // line break the trim removes reaches no shell.
+        |candidate: &String| match candidate.trim().chars().find(|c| SHELL_MEANING.contains(c)) {
+            Some(c) if is_safe_agent_command(candidate) => Err(format!(
+                "is_safe_agent_command が {c:?} を含む {candidate:?} を通しました"
+            )),
+            _ => Ok(()),
+        },
+        200_000,
+    );
+    assert_eq!(
+        coverage.states,
+        1 + size + size * size + size * size * size,
         "長さ 3 までの文字列を全部回っていません"
     );
 }

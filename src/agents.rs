@@ -909,13 +909,20 @@ pub(crate) fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// The custom command reaches tmux as one shell string, so every character it
+/// admits must mean nothing to a shell but a word. Space and tab only separate
+/// words; a newline or carriage return ends a command the way `;` does, which
+/// is why the rest of ASCII whitespace is refused (change 241). Leading and
+/// trailing whitespace is trimmed first, so a pasted line still passes.
 pub(crate) fn is_safe_agent_command(command: &str) -> bool {
     let command = command.trim();
     !command.is_empty()
         && command.chars().all(|character| {
             character.is_ascii_alphanumeric()
-                || character.is_ascii_whitespace()
-                || matches!(character, '-' | '_' | '.' | '/' | '=' | ':' | '@' | '+')
+                || matches!(
+                    character,
+                    ' ' | '\t' | '-' | '_' | '.' | '/' | '=' | ':' | '@' | '+'
+                )
         })
 }
 

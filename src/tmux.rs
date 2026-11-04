@@ -254,17 +254,7 @@ pub(crate) fn launch_stored_session(
         )
         .map_err(|error| error.to_string())?;
     } else {
-        let command = if session.agent_command.is_empty() {
-            &session.agent
-        } else {
-            &session.agent_command
-        };
-        let command = resolved_native_resume_command(
-            command,
-            session.native_session_id.as_deref(),
-            session.native_session_path.as_deref(),
-            project_path,
-        )?;
+        let command = stored_launch_command(session, project_path)?;
         let executable = command.split_whitespace().next().unwrap_or_default();
         if !tool_available(executable) {
             return Err(tf!(
@@ -287,6 +277,29 @@ pub(crate) fn launch_stored_session(
         }
     }
     Ok(git_branch(&worktree_path).ok())
+}
+
+/// The shell command a stored session starts or retries with. An agent launch
+/// read back from the store goes through the same gate as one typed today: a
+/// build before change 241 let a line break into a custom command and saved
+/// it, and this string reaches tmux as one shell line. Run scripts and plain
+/// terminals carry a person's own shell on purpose and are not agent launches.
+pub(crate) fn stored_launch_command(session: &Session, project_path: &Path) -> UiResult<String> {
+    let command = if session.agent_command.is_empty() {
+        &session.agent
+    } else {
+        &session.agent_command
+    };
+    let command = resolved_native_resume_command(
+        command,
+        session.native_session_id.as_deref(),
+        session.native_session_path.as_deref(),
+        project_path,
+    )?;
+    if AGENTS.contains(&session.agent.as_str()) && !is_safe_agent_command(&command) {
+        return Err(tr("カスタムコマンドに指定できるのは実行ファイルと通常のフラグだけです。シェル演算子は使えません。").into());
+    }
+    Ok(command)
 }
 
 /// The `-e KEY=VALUE` arguments a managed session is created with, or nothing
