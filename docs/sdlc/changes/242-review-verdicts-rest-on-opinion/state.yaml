@@ -22,7 +22,7 @@ resume: "The person approves the notation-only edit of plan.md (digest 8ba7c53d6
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh (83e33d1, 665888d, 2a6efc0 committed through it)"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh (exit 0 on 010e512, 2026-11-04)"
   release-binary: "machine passed no: only src/tests.rs, scripts, CI and documents change"
   verify-job: "machine passed CI run 41788189296 on 2a6efc0: verify (17 obligations), test suite, checks all success"
   guards-verified-by-mutation: "human pending each new guard watched failing"
