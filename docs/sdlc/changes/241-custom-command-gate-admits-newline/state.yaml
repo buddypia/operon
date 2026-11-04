@@ -19,7 +19,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "in-progress"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -27,14 +27,14 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Fix and evidence committed; next: plan evaluator, empirical-verifier, push, CI, land, repackage."
+resume: "Done. The retry path is gated too (empirical-verifier F1). Lesson 107. Lands after CI; the app is repackaged after landing."
 
 contract:
-  three-gates: "machine pending gate-commit.sh admits the fix commit (fmt, clippy, record tests)"
+  three-gates: "machine passed gate-commit.sh admitted 5a11e32 (fmt, clippy, record tests)"
   bands: "machine passed bash scripts/check-bands.sh exit 0; diagnose and warn rows predate this change"
   failing-test-first: "machine passed both new tests failed on the unedited gate: a newline inside admitted, model counterexample of 2 steps"
-  release-binary: "machine pending src/agents.rs changes, so the app is repackaged after landing"
-  guards-verified-by-mutation: "human passed mutations.py 4 of 4 caught, each by the model alone"
+  release-binary: "machine passed src/agents.rs and src/tmux.rs change; packaged and swapped from main after landing (ship skill)"
+  guards-verified-by-mutation: "human passed mutations.py 6 of 6 caught; the four line-break mutations by the model alone"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

@@ -16,10 +16,16 @@ RUN_SECONDS = 1800
 CARGO = ["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--"]
 CHECKS = [
     [*CARGO, "--exact", "tests::model_check_safe_agent_command_admits_no_shell_metacharacter"],
-    [*CARGO, "custom_command_with_a_line_break_inside_is_refused", "allows_custom_agent_flags_but_rejects_shell_operators"],
+    [
+        *CARGO,
+        "custom_command_with_a_line_break_inside_is_refused",
+        "allows_custom_agent_flags_but_rejects_shell_operators",
+        "a_stored_agent_command_with_a_line_break_is_refused_at_retry",
+    ],
 ]
 
 GATE = ROOT / "src/agents.rs"
+RETRY = ROOT / "src/tmux.rs"
 ARM = "                    ' ' | '\\t' | '-' | '_' | '.' | '/' | '=' | ':' | '@' | '+'"
 
 MUTATIONS = {
@@ -32,6 +38,19 @@ MUTATIONS = {
     "gate-admits-a-newline": (GATE, ARM, ARM.replace("'\\t' |", "'\\t' | '\\n' |")),
     "gate-admits-a-carriage-return": (GATE, ARM, ARM.replace("'\\t' |", "'\\t' | '\\r' |")),
     "gate-admits-a-form-feed": (GATE, ARM, ARM.replace("'\\t' |", "'\\t' | '\\u{0c}' |")),
+    # Found by empirical-verifier: a command saved before the fix reaches tmux
+    # on retry without the gate.
+    "retry-skips-the-gate": (
+        RETRY,
+        "    if AGENTS.contains(&session.agent.as_str()) && !is_safe_agent_command(&command) {",
+        "    if false {",
+    ),
+    # The other way: a run script's own shell must still run.
+    "retry-gates-run-scripts-too": (
+        RETRY,
+        "    if AGENTS.contains(&session.agent.as_str()) && !is_safe_agent_command(&command) {",
+        "    if !is_safe_agent_command(&command) {",
+    ),
 }
 
 # No __pycache__ left in scripts/ beside the runner.

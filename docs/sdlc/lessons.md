@@ -1528,3 +1528,19 @@ shell string — two steps, `['\n', 'a']`.
 `review_gate_judges_history_before_the_method_table_by_verdicts`, and
 `verifier_agents_return_evidence_not_verdicts`, each watched failing in
 `docs/sdlc/changes/242-review-verdicts-rest-on-opinion/mutations.py`.
+
+## 107 — A gate checked where a value is typed, not where it is read back
+
+`is_safe_agent_command` used `is_ascii_whitespace`, so a newline inside a custom
+command passed a gate whose notice says shell operators are refused, and the
+command reaches tmux as one shell line (change 241). Fixing the gate was not
+enough: the command was also saved in the session store, and a retry read it
+back into tmux with no gate at all, so a command saved by an older build would
+still have run as two commands. **The rule:** whitespace in a shell is not one
+class — only space and tab only separate words — and a value a gate admits on
+input is gated again wherever it is read back from disk on its way to a shell.
+
+**Guard.** `model_check_safe_agent_command_admits_no_shell_metacharacter`,
+`custom_command_with_a_line_break_inside_is_refused`, and
+`a_stored_agent_command_with_a_line_break_is_refused_at_retry`, each watched
+failing in `docs/sdlc/changes/241-custom-command-gate-admits-newline/mutations.py`.

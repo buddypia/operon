@@ -5649,6 +5649,35 @@ pub(crate) fn allows_custom_agent_flags_but_rejects_shell_operators() {
     assert!(!is_safe_agent_command("my-agent $(whoami)"));
 }
 #[test]
+/// Change 241. A build before the fix saved a custom command with a line break
+/// in it, and a retry read it back from the store straight into tmux. A stored
+/// agent launch passes the same gate a typed one does; a run script carries a
+/// person's own shell on purpose and keeps it.
+pub(crate) fn a_stored_agent_command_with_a_line_break_is_refused_at_retry() {
+    let project = Path::new("/tmp/operon-241");
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Failed);
+    for agent in AGENTS {
+        session.agent = (*agent).into();
+        session.agent_command = format!("{agent}\nid");
+        assert!(
+            stored_launch_command(&session, project).is_err(),
+            "{agent}: 保存済みの {:?} が再起動で tmux に渡ります",
+            session.agent_command
+        );
+        session.agent_command = format!("{agent} --model fast");
+        assert_eq!(
+            stored_launch_command(&session, project).as_deref(),
+            Ok(format!("{agent} --model fast").as_str())
+        );
+    }
+    session.agent = RUN_SCRIPT_AGENT.into();
+    session.agent_command = "npm run build && npm run dev".into();
+    assert_eq!(
+        stored_launch_command(&session, project).as_deref(),
+        Ok("npm run build && npm run dev")
+    );
+}
+#[test]
 /// Change 241. A newline ends a shell command the way `;` does, and the custom
 /// command reaches tmux as one shell string, so `claude\nother` would run
 /// `other`. Only space and tab separate words; the rest of ASCII whitespace is

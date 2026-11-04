@@ -1,11 +1,12 @@
 # The evidence for change 241. Shape: docs/sdlc/templates/verification.yaml.
 # Bugfix route: no spec, so no Rn; the claims are the regression, the model,
 # the existing command tests staying green, and the sweep.
-digest: "f19319275b0a66a9"
+digest: "4efa91eb9cd2de3b"
 
 obligations:
   - I1 empirical-test :: cargo test --locked custom_command_with_a_line_break_inside_is_refused
   - I2 formal-model :: cargo test --locked model_check_safe_agent_command_admits_no_shell_metacharacter
   - I3 empirical-test :: cargo test --locked allows_custom_agent_flags_but_rejects_shell_operators
   - I4 empirical-test :: cargo test --locked pre_approving_a_shell_tool_asks_and_pre_approving_a_reader_does_not
+  - F1 empirical-test :: cargo test --locked a_stored_agent_command_with_a_line_break_is_refused_at_retry
   - I5 empirical-mutation :: python3 docs/sdlc/changes/241-custom-command-gate-admits-newline/mutations.py

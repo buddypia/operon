@@ -39,3 +39,16 @@ Admit `' '` and `'\t'` only. Nothing else in the predicate changes.
 |---|---|---|
 | A remembered command holding a tab or other whitespace now refused | a launch refused that used to run | tab stays admitted; only line breaks and form feed are dropped, which never separated words for the person who typed them |
 | The model's alphabet misses a separator | a line-ending character still admitted | the alphabet holds `\n`, `\r`, form feed, vertical tab, tab and a non-ASCII space |
+
+## Departures from the plan
+
+- **The retry path is gated too** (empirical-verifier, F1). A session's
+  `agent_command` is read back from the store and handed to tmux by
+  `launch_stored_session` with no gate, so a command saved by a build before
+  this fix would still run as two shell lines on retry. The command
+  construction moved into `stored_launch_command` in `src/tmux.rs`, which
+  refuses an agent launch (`AGENTS`) that fails `is_safe_agent_command`, with
+  the notice the launch screen already shows. Run scripts and plain terminals
+  carry a person's own shell and are not gated.
+  `a_stored_agent_command_with_a_line_break_is_refused_at_retry` pins both
+  sides; two mutations watch it.
