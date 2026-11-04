@@ -1,0 +1,7 @@
+# The evidence for change 244. Shape: docs/sdlc/templates/verification.yaml.
+# The probe commit: the harness is invisible to every build but cargo kani.
+digest: "519546b8bf735b58"
+
+obligations:
+  - I1 empirical-test :: cargo test --locked model_check_safe_agent_command_admits_no_shell_metacharacter
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/244-formal-proof-cannot-be-required/mutations.py

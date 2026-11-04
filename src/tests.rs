@@ -66857,6 +66857,24 @@ pub(crate) fn model_check_store_survives_every_interruption_of_a_write() {
     );
 }
 
+/// Change 244: the probe harness for Kani. Every string of up to four bytes
+/// that is UTF-8, as a symbolic value rather than an enumeration: whatever the
+/// custom-command gate admits holds no line break or `;` once the launch has
+/// trimmed it. The same property as
+/// `model_check_safe_agent_command_admits_no_shell_metacharacter`, proved by a
+/// different checker over the compiled code.
+#[cfg(kani)]
+#[kani::proof]
+#[kani::unwind(6)]
+fn proof_safe_agent_command_admits_no_line_break() {
+    let bytes: [u8; 4] = kani::any();
+    if let Ok(command) = std::str::from_utf8(&bytes) {
+        if is_safe_agent_command(command) {
+            assert!(!command.trim().contains(['\n', '\r', ';']));
+        }
+    }
+}
+
 #[test]
 /// Change 242, requirement 5. `formal-model` is formal only because every
 /// `model_check_*` test enumerates through `exhaustive_check`. A `model_` test that

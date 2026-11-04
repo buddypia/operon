@@ -1,0 +1,45 @@
+name: Kani probe
+
+# Change 244: does Kani, a bounded model checker for Rust, build this crate and
+# verify one harness, and how long does it take on the runner every other job
+# uses? A measurement, not a gate: it runs on the probing branch only, and the
+# change records its timings before deciding whether formal-proof can be
+# required anywhere (backlog 20261104-8bzmycdr).
+
+on:
+  push:
+    branches: ['feature/244-formal-proof-cannot-be-required']
+
+env:
+  CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: ON
+
+jobs:
+  kani:
+    name: kani probe
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+      - name: Install kani-verifier
+        run: |
+          start=$SECONDS
+          cargo install --locked kani-verifier
+          echo "install_seconds=$((SECONDS - start))" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Kani setup
+        run: |
+          start=$SECONDS
+          cargo kani setup
+          echo "setup_seconds=$((SECONDS - start))" | tee -a "$GITHUB_STEP_SUMMARY"
+          cargo kani --version | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Verify one harness
+        run: |
+          start=$SECONDS
+          set +e
+          cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break 2>&1 | tee kani.log
+          status=${PIPESTATUS[0]}
+          echo "verify_seconds=$((SECONDS - start)) exit=$status" | tee -a "$GITHUB_STEP_SUMMARY"
+          tail -n 40 kani.log >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
