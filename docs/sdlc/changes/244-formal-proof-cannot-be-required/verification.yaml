@@ -3,7 +3,7 @@
 # change cannot record it as a formal-proof obligation, because main's method
 # table — the one that judges this commit — still has the old prefix.
 # The digest is the whole branch against main, which the landing merge judges.
-digest: "bf33386c5dd40d1b"
+digest: "04765ebbf4b31ff7"
 
 obligations:
   - R1 empirical-test :: cargo test --locked a_launch_gate_change_must_name_a_proof_harness_that_exists

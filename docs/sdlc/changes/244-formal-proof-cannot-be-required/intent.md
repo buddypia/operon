@@ -1,6 +1,6 @@
 # Intent: a proof can be asked for nowhere, because nobody measured whether one runs
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-04
 
 ## Problem
