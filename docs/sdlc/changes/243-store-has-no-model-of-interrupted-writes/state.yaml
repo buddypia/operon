@@ -14,8 +14,8 @@
 
 state:
   route: "refactor"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 2"
   questions: "0 7"
   autonomy: "full"
@@ -23,13 +23,13 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Plan committed; next: the model test in src/tests.rs."
+resume: "Done. The store model exists and passes on main; it covers the store file, not the cancellation sidecar written beside it (backlog)."
 
 contract:
   three-gates: "machine pending gate-commit.sh admits the commit"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine passed no: only src/tests.rs and documents change"
-  guards-verified-by-mutation: "human pending mutations.py"
+  guards-verified-by-mutation: "human passed mutations.py 7 of 7 caught, each by the model"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

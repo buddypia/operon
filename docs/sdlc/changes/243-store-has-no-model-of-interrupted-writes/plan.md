@@ -51,3 +51,16 @@ The invariant, stated apart from the code:
 | The model passes because it cannot reach the bad state | a mutation in step 2 survives | the sweep; a lower bound on states visited |
 | The step order is read from the wrong function | a reordering in `src/store.rs` does not move the model | the marker search is bounded to the function's body; the reorder mutations |
 | The state space explodes | the walk hits its ceiling and refuses | `exhaustive_check` refuses past `max_states`; the bound is two saves |
+
+## Departures from the plan
+
+- **The start-up readings are the real code, not a description of it.** A
+  first draft wrote what `load_store_safely` and the legacy import do by hand,
+  so the two mutations aimed at them (delete an unreadable index; import
+  nothing) could not have turned the model red. `store_oracle` now runs both
+  functions on a scratch directory for every file the model can produce, once,
+  before the walk, and the walk reads their answers. It also asserts the
+  legacy snapshot is byte for byte the same after each import.
+- **Two mutations added**: the import writes nothing as the current index, and
+  the fallback for an unreadable legacy snapshot overwrites it. The sweep is 7
+  of 7.
