@@ -263,6 +263,19 @@ verification_check() {
 該当するテストが 0 件でも cargo test は成功するので、これは証拠になりません。"
           continue
         fi ;;
+      # A harness name that matches nothing is the same false evidence: Kani
+      # with no harness to check reports no failure.
+      "cargo kani "*)
+        # The attribute must sit in the attribute block right above the
+        # function, not merely somewhere before it.
+        if [ "$(printf '%s\n' "$tests_text" | LC_ALL=C awk -v name="$rest" '
+          /^[[:space:]]*#\[/ || /^[[:space:]]*\/\/\// { if ($0 ~ /#\[kani::proof\]/) proof = 1; next }
+          { if ($0 ~ ("^[[:space:]]*(pub\\(crate\\) )?fn " name "\\(") && proof) found = 1; proof = 0 }
+          END { print found + 0 }')" != 1 ]; then
+          note "❌ BLOCK — ${change_name} · ${id} の「${cmd}」に当たる #[kani::proof] が src/tests.rs にありません
+該当する証明がなければ Kani は何も検証せずに終わるので、これは証拠になりません。"
+          continue
+        fi ;;
     esac
     present="$present$method "
     case "$kind" in

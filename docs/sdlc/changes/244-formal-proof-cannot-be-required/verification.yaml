@@ -1,7 +1,12 @@
 # The evidence for change 244. Shape: docs/sdlc/templates/verification.yaml.
-# The probe commit: the harness is invisible to every build but cargo kani.
-digest: "519546b8bf735b58"
+# The proof itself is measured by the kani-probe run recorded in plan.md: this
+# change cannot record it as a formal-proof obligation, because main's method
+# table — the one that judges this commit — still has the old prefix.
+digest: "bdac435561ca950a"
 
 obligations:
   - I1 empirical-test :: cargo test --locked model_check_safe_agent_command_admits_no_shell_metacharacter
-  - I2 empirical-mutation :: python3 docs/sdlc/changes/244-formal-proof-cannot-be-required/mutations.py
+  - I2 empirical-test :: cargo test --locked a_launch_gate_change_must_name_a_proof_harness_that_exists
+  - I3 empirical-test :: cargo test --locked the_verify_job_installs_kani_before_it_runs_a_recorded_proof
+  - I4 empirical-test :: cargo test --locked the_review_gate_has_no_bypass
+  - I5 empirical-mutation :: python3 docs/sdlc/changes/244-formal-proof-cannot-be-required/mutations.py

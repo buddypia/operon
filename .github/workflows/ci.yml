@@ -130,6 +130,17 @@ jobs:
           key: ${{ env.ImageOS }}-${{ env.ImageVersion }}-no-openssl
       - name: Reset restored native CMake caches
         run: bash scripts/seed-target.sh --reset-only .
+      # Change 244. Kani only when an obligation of this branch asks for a
+      # proof: the install and setup take under a minute, the proof about
+      # seven, and a branch that records none pays for neither.
+      - name: Install Kani when a proof is recorded
+        run: |
+          base=$(git merge-base origin/main HEAD)
+          records=$(git diff --name-only "$base" HEAD -- 'docs/sdlc/changes/*/verification.yaml')
+          if [ -n "$records" ] && grep -l ' formal-proof :: ' $records >/dev/null 2>&1; then
+            cargo install --locked kani-verifier --version 0.68.0
+            cargo kani setup
+          fi
       - name: Re-run every recorded obligation
         run: bash scripts/run-obligations.sh origin/main
 

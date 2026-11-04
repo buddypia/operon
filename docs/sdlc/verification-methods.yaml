@@ -46,9 +46,12 @@ methods:
   # embedding-model tests) and goes through exhaustive_check in
   # src/tests.rs, which `every_model_test_goes_through_exhaustive_check` holds.
   formal-model: "formal cargo test --locked model_check_"
-  # Not required by any surface until a measured probe shows Kani builds this
-  # crate (native llama-cpp-sys-2, eframe). Backlog 20261104-8bzmycdr.
-  formal-proof: "formal cargo kani --harness "
+  # Measured by change 244 on macos-latest (CI run 41802936778): Kani 0.68.0
+  # builds this crate, llama-cpp-sys-2 and eframe included, and proves one
+  # harness in 419 s — about 325 s compiling, 94 s proving. The harnesses are
+  # `#[cfg(kani)] #[kani::proof]` functions in src/tests.rs, which is why the
+  # command carries `--tests`; the gate refuses a name no harness has.
+  formal-proof: "formal cargo kani --tests --harness "
 
 surfaces:
   # Every schema version x every interruption point is a finite model; data
@@ -61,6 +64,9 @@ surfaces:
   # Also pulled in by an added Command::new, .spawn(, .output( or unsafe in any
   # file, as the reviewer was before.
   subprocess: "empirical-mutation"
+  # The launch gates in src/agents.rs. A change there re-proves them; the
+  # harness it names already exists unless the change adds a gate.
+  launch-gate: "formal-proof"
 
 routes:
   feature: "empirical-test,empirical-mutation"

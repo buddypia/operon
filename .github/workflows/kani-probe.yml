@@ -43,3 +43,25 @@ jobs:
           echo "verify_seconds=$((SECONDS - start)) exit=$status" | tee -a "$GITHUB_STEP_SUMMARY"
           tail -n 40 kani.log >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
+      # The harness has to be able to fail: put the newline back into the gate
+      # (the defect change 241 fixed) and require Kani to report it.
+      - name: Watch the harness fail on the defect it guards
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src/agents.rs")
+          s = p.read_text()
+          arm = "' ' | '\\t' | '-'"
+          assert arm in s, "the gate's whitespace arm moved"
+          p.write_text(s.replace(arm, "' ' | '\\t' | '\\n' | '-'", 1))
+          PY
+          git diff --stat
+          set +e
+          cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break > mutant.log 2>&1
+          status=$?
+          grep -E "VERIFICATION:|Failed Checks|failed\)" mutant.log | tee -a "$GITHUB_STEP_SUMMARY"
+          git checkout -- src/agents.rs
+          if [ "$status" -eq 0 ]; then
+            echo "the harness passed on the defect: it proves nothing" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

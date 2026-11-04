@@ -66933,13 +66933,13 @@ fn verification_fixture(label: &str, table_in_base: bool) -> (PathBuf, PathBuf) 
     .unwrap();
     fs::write(
         fixture.join("docs/sdlc/risk.yaml"),
-        "surfaces:\n  text: \"low full no src/i18n.rs\"\n  store: \"high paused no src/store.rs\"\n",
+        "surfaces:\n  text: \"low full no src/i18n.rs\"\n  store: \"high paused no src/store.rs\"\n  launch-gate: \"medium supervised no src/agents.rs\"\n",
     )
     .unwrap();
     fs::write(fixture.join(".claude/agents/rust-reviewer.md"), "# rust\n").unwrap();
     fs::write(
         fixture.join("src/tests.rs"),
-        "fn some_test() {}\nfn model_check_counter() {}\n",
+        "fn some_test() {}\nfn model_check_counter() {}\n#[cfg(kani)]\n#[kani::proof]\nfn proof_counter() {}\nfn proof_without_attribute() {}\n",
     )
     .unwrap();
     fs::write(
@@ -66947,7 +66947,7 @@ fn verification_fixture(label: &str, table_in_base: bool) -> (PathBuf, PathBuf) 
         "state:\n  route: \"bugfix\"\n  status: \"reviewing\"\n",
     )
     .unwrap();
-    let table = "methods:\n  empirical-test: \"empirical cargo test --locked \"\n  empirical-mutation: \"empirical python3 docs/sdlc/changes/\"\n  empirical-measure: \"empirical bash scripts/measure-\"\n  formal-model: \"formal cargo test --locked model_check_\"\nsurfaces:\n  store: \"formal-model\"\nroutes:\n  bugfix: \"empirical-test\"\n  docs: \"-\"\n";
+    let table = "methods:\n  empirical-test: \"empirical cargo test --locked \"\n  empirical-mutation: \"empirical python3 docs/sdlc/changes/\"\n  empirical-measure: \"empirical bash scripts/measure-\"\n  formal-model: \"formal cargo test --locked model_check_\"\n  formal-proof: \"formal cargo kani --tests --harness \"\nsurfaces:\n  store: \"formal-model\"\n  launch-gate: \"formal-proof\"\nroutes:\n  bugfix: \"empirical-test\"\n  docs: \"-\"\n";
     if table_in_base {
         fs::write(fixture.join("docs/sdlc/verification-methods.yaml"), table).unwrap();
     }
@@ -67121,6 +67121,99 @@ pub(crate) fn an_obligation_command_outside_its_method_prefix_is_refused() {
     assert!(
         code == 1 && output.contains("verification-methods.yaml にありません"),
         "{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 244. The `verify` job is what runs a recorded proof, so it has to
+/// have Kani before it runs the obligations — the version change 244 measured,
+/// installed only when a record of the branch asks for `formal-proof`, which
+/// keeps the seven minutes off every branch that records none.
+pub(crate) fn the_verify_job_installs_kani_before_it_runs_a_recorded_proof() {
+    let workflow = include_str!("../.github/workflows/ci.yml");
+    let verify = &workflow[workflow
+        .find("\n  verify:\n")
+        .expect("ci.yml に verify ジョブがありません")..];
+    let verify = &verify[..verify[1..]
+        .find("\n  package:")
+        .map_or(verify.len(), |end| end + 1)];
+    let install = verify
+        .find("cargo install --locked kani-verifier --version 0.68.0")
+        .expect("verify ジョブが計測した版の Kani を入れていません");
+    let condition = verify
+        .find("' formal-proof :: '")
+        .expect("Kani の導入が formal-proof の記録に結び付いていません");
+    let run = verify
+        .find("bash scripts/run-obligations.sh")
+        .expect("verify ジョブが記録を実行していません");
+    assert!(
+        condition < install && install < run,
+        "Kani を入れる前に記録を実行しているか、条件なしに入れています"
+    );
+    let table = include_str!("../docs/sdlc/verification-methods.yaml");
+    assert!(
+        table.contains("formal-proof: \"formal cargo kani --tests --harness \""),
+        "verification-methods.yaml の formal-proof の形が、CI が入れる Kani の使い方と違います"
+    );
+    // The surface that asks for the proof is the file the gates live in.
+    assert!(
+        table.contains("\n  launch-gate: \"formal-proof\"\n"),
+        "起動ゲートの surface が formal-proof を求めていません"
+    );
+    let risk = include_str!("../docs/sdlc/risk.yaml");
+    let row = risk
+        .lines()
+        .find(|line| line.trim_start().starts_with("launch-gate:"))
+        .expect("risk.yaml に launch-gate がありません");
+    assert!(
+        row.contains("src/agents.rs")
+            && include_str!("agents.rs").contains("pub(crate) fn is_safe_agent_command("),
+        "launch-gate が起動ゲートの定義されたファイルを指していません: {row}"
+    );
+}
+
+#[test]
+/// Change 244. A change to the launch gates re-proves them: touching
+/// `src/agents.rs` asks for a `formal-proof` obligation, and the one recorded
+/// must name a `#[kani::proof]` harness that exists — Kani given a name that
+/// matches nothing verifies nothing and reports no failure, the same false
+/// evidence as a test filter that matches no test.
+pub(crate) fn a_launch_gate_change_must_name_a_proof_harness_that_exists() {
+    let (fixture, change) = verification_fixture("verify-proof", true);
+    fs::write(fixture.join("src/agents.rs"), "// changed\n").unwrap();
+    let digest = probed_digest(&fixture, &change);
+    let record = |line: &str| {
+        format!("digest: \"{digest}\"\nobligations:\n  - I1 empirical-test :: cargo test --locked some_test\n{line}")
+    };
+    let (code, output) = gate_with(&fixture, &change, "verification.yaml", &record(""));
+    assert!(
+        code == 1 && output.contains("launch-gate には formal-proof の検証が必要です"),
+        "起動ゲートの変更に証明が求められていません:\n{output}"
+    );
+    for harness in ["proof_missing", "proof_without_attribute", "proof_count"] {
+        let (code, output) = gate_with(
+            &fixture,
+            &change,
+            "verification.yaml",
+            &record(&format!(
+                "  - I2 formal-proof :: cargo kani --tests --harness {harness}\n"
+            )),
+        );
+        assert!(
+            code == 1 && output.contains("#[kani::proof] が src/tests.rs にありません"),
+            "存在しない証明 {harness} が証拠として通りました:\n{output}"
+        );
+    }
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &record("  - I2 formal-proof :: cargo kani --tests --harness proof_counter\n"),
+    );
+    assert!(
+        code == 0 && output.contains("形式的 1"),
+        "実在する証明で着地できません:\n{output}"
     );
     fs::remove_dir_all(fixture).unwrap();
 }
