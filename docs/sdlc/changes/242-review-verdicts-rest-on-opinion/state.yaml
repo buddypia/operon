@@ -9,8 +9,8 @@
 
 state:
   route: "security"
-  stage: "build"
-  status: "in-progress"
+  stage: "deploy"
+  status: "done"
   attempts: "0 2"
   questions: "1 7"
   autonomy: "paused"
@@ -25,4 +25,4 @@ contract:
   bands: "machine passed bash scripts/check-bands.sh (exit 0 on 010e512, 2026-11-04)"
   release-binary: "machine passed no: only src/tests.rs, scripts, CI and documents change"
   verify-job: "machine passed CI run 41788189296 on 2a6efc0: verify (17 obligations), test suite, checks all success"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py: 24 of 24 caught; F1, F3, F4 watched failing before their fixes"
