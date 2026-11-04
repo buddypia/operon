@@ -1,9 +1,8 @@
 # Plan: a change lands on evidence the machine re-runs, not on a reviewer's opinion
 
 - **Spec**: `./spec.md`
-- **Approved**: pending — gate configuration loses a check (the verdict
-  requirement), which `.claude/skills/sdlc/references/approval.md` gives to a person
-- **Status**: draft
+- **Approved**: 2026-11-04 by the person (「進めて」)
+- **Status**: in progress
 
 ## Files that change
 
@@ -11,7 +10,7 @@
 |---|---|
 | `docs/sdlc/verification-methods.yaml` | new: methods, prefixes, surface and route requirements |
 | `docs/sdlc/templates/verification.yaml` | new: the record's shape |
-| `scripts/lib/verification.sh` | new: parse and validate a record (shared by gate and runner) |
+| scripts/lib/verification.sh | new: parse and validate a record (shared by gate and runner) |
 | `scripts/check-review.sh` | the evidence rule, switched on by the table in the first parent; verdict rule kept for history |
 | `scripts/run-obligations.sh` | new: CI runner |
 | `.github/workflows/ci.yml` | `verify` job |
@@ -26,7 +25,7 @@
 
 1. Method table and record template. The suite still passes: nothing reads them yet.
 2. `exhaustive_check` and its two tests, with the failing test first.
-3. `scripts/lib/verification.sh` and the record tests (requirements 2, 3, 4, 7),
+3. scripts/lib/verification.sh and the record tests (requirements 2, 3, 4, 7),
    failing first.
 4. `scripts/check-review.sh` switch, plus the tests for requirements 1 and 8
    in temporary repositories. Watch the verdict rule still pass this branch.
@@ -64,4 +63,27 @@
 
 ## Departures from the plan
 
-None yet.
+- **No scripts/lib/verification.sh.** The commit is judged by `main`'s
+  committed `check-review.sh`, possibly run from a temporary file; a library it
+  sourced from the tree would be the judged branch's own, which is the
+  substitution the trampoline exists to prevent. The parser lives in
+  `check-review.sh`, and CI reaches it through `--obligations`, so there is
+  still one parser.
+- **`model_check_` instead of `model_`.** The suite already has
+  `model_is_ready_only_when_size_and_mtime_match_the_verified_sidecar` and
+  `model_download_command_is_fixed_and_resumable` — tests of the embedding
+  model, not formal models — and the guard went red on them.
+- **The first model found a defect, kept out of this change.** Over
+  `is_safe_agent_command` the model failed in two steps, `['\n', 'a']`: the
+  gate counts a newline as whitespace and the command reaches tmux as one shell
+  string. It is a bugfix on the `subprocess` surface, so it is its own change
+  (backlog); this change's model covers `is_safe_agent_option`, which holds.
+- **One freshness comparison.** `the_review_gate_has_no_bypass` pins the digest
+  comparison to one line; it moved into `digest_is_stale`, which both rules call.
+  The same guard now pins the evidence rule's two passes and CI's listing exit
+  to the line that proves the judgement ran.
+- **A guard the sweep asked for.** The first sweep caught 17 of 18: weakening
+  the real table so `store` no longer asks for a formal method turned nothing
+  red. `every_high_surface_names_the_methods_it_requires` now asserts it.
+- **Measured.** The sweep takes 179–185 s locally; every obligation of this
+  change, run by `scripts/run-obligations.sh`, 182 s.

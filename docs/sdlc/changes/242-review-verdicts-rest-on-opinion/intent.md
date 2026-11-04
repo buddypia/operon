@@ -1,6 +1,6 @@
 # Intent: a review verdict is an opinion anyone can type, not evidence anyone can re-run
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-04
 
 The person's request, verbatim: 「적대적 리뷰 대신에 1. 경험적 검증 (Empirical

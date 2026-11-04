@@ -173,7 +173,12 @@ script, a subagent, a hook, and the always-on file last, paid for by a cut — a
   needs a paper trail; `root-cause` before a bug is fixed; `ship` when a build is
   released. `harness_agents_md_says_when_to_read_every_skill` refuses a skill
   with no such line.
-- `.claude/agents/` — a scoped reviewer with its own context, kept only where a
+- `.claude/agents/` — since change 242, two verifiers that try to falsify a
+  change and return evidence, never a verdict: `empirical-verifier` writes the
+  failing reproduction and reads the mutation sweep, `formal-verifier` writes
+  `model_check_*` tests that walk every state of a bounded model through
+  `exhaustive_check`. Before that, and still defined for the history judged by
+  it, a scoped reviewer with its own context, kept only where a
   measured fold into a skill scored worse (change 224's `eval.md` is the
   method). `subprocess-safety-reviewer` covers the surface where a mistake is
   unrecoverable rather than merely wrong; `rust-reviewer` covers the craft axes
@@ -224,10 +229,23 @@ to improve the steering against the suite without fitting it to the suite.
 
 ## Stage 5 — Deploy
 
-`REVIEW.md` is the review policy: which passes run, what counts as Important
-versus a Nit, what is excluded, and which reviewers each change needs. It is
-what `/code-review` and `.github/workflows/claude-review.yml` both read, so a
-policy change lands in one place.
+`REVIEW.md` is the review policy. Since change 242 a change lands on
+**evidence a machine re-runs**, not on a reviewer's verdict: empirical evidence
+(a test that fails without the change, a mutation sweep, a measurement) and
+formal evidence (an exhaustive check of a bounded model, or a proof). The
+change records one obligation per claim in `verification.yaml`;
+`docs/sdlc/verification-methods.yaml` says which methods exist, the only
+command each may run, and which methods a route and a high surface require.
+`scripts/check-review.sh` binds the record to the diff and checks it covers
+every requirement and every required method, and the CI `verify` job runs every
+obligation again through `scripts/run-obligations.sh` on the branch head, so a
+recorded claim that does not hold cannot merge. A finding is a failing test or
+nothing: there are no verdicts, rounds, or carried findings under this rule.
+`/code-review` and `.github/workflows/claude-review.yml` read the same file, so
+a policy change lands in one place.
+
+What follows is how the gate is wired. Before change 242 it asked for verdicts,
+and a commit whose first parent has no method table is still judged that way.
 
 The agent that wrote a change does not approve it, and since change 035 merging
 does not wait for a reader either: `scripts/check-review.sh` runs from git's own
@@ -296,7 +314,8 @@ Built:
 | work-type routes | `docs/sdlc/routes.yaml` — kind → stages → ceiling, without a sub-skill graph, model routing, or evidence caches |
 | the attempt ceiling | the ceiling plus `docs/sdlc/templates/handoff.md`, because a table an agent prints to itself is prose |
 | root-cause discipline before a fix | `.claude/skills/root-cause/SKILL.md` — the Iron Law and the phase order; no technique catalog |
-| a Rust craft reviewer | `.claude/agents/rust-reviewer.md` — immediate-mode per-frame work, ownership, and panic sites |
+| a Rust craft reviewer | `.claude/agents/rust-reviewer.md` — immediate-mode per-frame work, ownership, and panic sites; judges history before change 242 |
+| evidence instead of verdicts | `docs/sdlc/verification-methods.yaml`, `scripts/run-obligations.sh`, the CI `verify` job, and `exhaustive_check` in `src/tests.rs` (change 242) |
 | a stop gate on completion claims | `.claude/hooks/gate-stop.sh`, against each change's `state.yaml` contract |
 | path-scoped rules | `.claude/rules/` with `paths:` frontmatter, plus a guard that no rule may omit `paths:` |
 

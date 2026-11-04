@@ -1,0 +1,27 @@
+# The evidence for one change. Copy into a change directory. Change 242.
+#
+# Parsed by `verification_check` in scripts/check-review.sh, by line shape, for
+# the gate and for CI (scripts/run-obligations.sh, through `--obligations`), which runs
+# every obligation again on the branch head. What is recorded here is not
+# believed; it is re-run.
+#
+# Prose goes in `#` comments only.
+#
+#   digest: "<16 hex>"   the diff this evidence is about; read it off
+#                        `bash scripts/check-review.sh --index`
+#   obligations:         one `  - ID METHOD :: COMMAND` line per claim
+#
+#   ID       Rn  requirement n of spec.md — every numbered requirement needs one
+#            Fn  a finding that was reproduced: the test that failed at the
+#                change's head before the fix and passes after it
+#            In  any other invariant the change claims
+#   METHOD   a name under `methods:` in docs/sdlc/verification-methods.yaml
+#   COMMAND  must start with that method's prefix; no ; | & $ ` < > ( ) \ or quotes
+#
+# There is no field for a finding nobody reproduced, and no verdict. A worry
+# that cannot be turned into a failing test is not evidence of anything.
+digest: "0000000000000000"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked the_test_that_fails_without_requirement_one
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/NNN-slug/mutations.py

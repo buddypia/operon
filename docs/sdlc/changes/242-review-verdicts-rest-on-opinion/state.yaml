@@ -4,13 +4,13 @@
 # (2026-11-04): verdicts are replaced by evidence obligations rather than kept
 # beside them; formal verification starts as exhaustive finite-state model
 # checking in the suite, and a bounded model checker for Rust is a measured
-# follow-up. The plan removes a check from gate configuration, so it waits for
-# a person (approval.md).
+# follow-up. The plan removes a check from gate configuration; the person
+# approved it on 2026-11-04 (approvals.log).
 
 state:
   route: "security"
-  stage: "plan"
-  status: "awaiting-user"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 2"
   questions: "1 7"
   autonomy: "paused"
@@ -18,7 +18,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Get the person's approval of plan.md, log it in approvals.log, then build in the order plan.md gives."
+resume: "Finish plan.md steps 8-10: verification.yaml, review.yaml by the two reviewers, push, CI verify green, merge."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"

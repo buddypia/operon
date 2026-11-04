@@ -1,7 +1,7 @@
 # Spec: a change lands on evidence the machine re-runs, not on a reviewer's opinion
 
 - **Intent**: `./intent.md`
-- **Status**: draft
+- **Status**: approved
 
 ## Requirements
 
@@ -95,7 +95,7 @@ the CI job, in Japanese like the gate's other refusals:
   the paper-trail rules are shared and unchanged.
 - **`scripts/run-obligations.sh`** (new) — the CI runner. It reads the records,
   validates them with the same rules (sourcing one shared function file,
-  `scripts/lib/verification.sh`, so that the gate and the runner cannot
+  scripts/lib/verification.sh, so that the gate and the runner cannot
   disagree), and runs each obligation. Ceilings: 900 s per obligation and
   3600 s per job; output is capped at 64 KiB per obligation in the log.
 - **`.github/workflows/ci.yml`** — a `verify` job, macOS, same toolchain and

@@ -1,0 +1,23 @@
+# The evidence for change 242, in the shape it introduces. main's gate judges
+# this change by verdicts (review.yaml) because main has no method table yet;
+# CI's verify job runs every line below on the branch head all the same.
+digest: "87cadbe11e2d657d"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked review_gate_requires_a_verification_record_once_the_method_table_exists
+  - R2 empirical-test :: cargo test --locked an_obligation_command_outside_its_method_prefix_is_refused
+  - R3 empirical-test :: cargo test --locked every_spec_requirement_has_an_obligation
+  - R4 empirical-test :: cargo test --locked every_high_surface_names_the_methods_it_requires
+  - R5 empirical-test :: cargo test --locked every_model_test_goes_through_exhaustive_check
+  - R6 empirical-test :: cargo test --locked ci_re_runs_every_obligation_the_branch_records
+  - R7 empirical-test :: cargo test --locked verification_record_has_no_field_for_an_unreproduced_finding
+  - R8 empirical-test :: cargo test --locked review_gate_judges_history_before_the_method_table_by_verdicts
+  - R9 empirical-test :: cargo test --locked verifier_agents_return_evidence_not_verdicts
+  - I1 empirical-test :: cargo test --locked exhaustive_check_reports_the_shortest_counterexample
+  - I2 formal-model :: cargo test --locked model_check_safe_agent_option_admits_no_shell_metacharacter
+  - F1 empirical-test :: cargo test --locked a_record_satisfies_the_method_an_added_child_requires
+  - F2 empirical-test :: cargo test --locked the_model_check_count_excludes_its_own_search
+  - F3 empirical-test :: cargo test --locked an_unknown_route_does_not_land_on_no_evidence
+  - F4 empirical-test :: cargo test --locked the_evidence_rule_cannot_be_switched_off
+  - F5 empirical-test :: cargo test --locked a_new_gate_exit_is_pinned_to_its_block
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/242-review-verdicts-rest-on-opinion/mutations.py

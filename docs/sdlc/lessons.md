@@ -1497,3 +1497,34 @@ before building.
 **Guard.** `ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_cmake`
 (watched failing before the fix and across all nine mutants in
 `docs/sdlc/changes/238-cached-cmake-breaks-ci-after-runner-update/mutations.py`).
+
+## 106 — An opinion bound to a digest is still an opinion
+
+From change 035 to change 241 a change landed on reviewer verdicts written into
+`review.yaml` at the diff's digest. The gate could tell that a verdict existed
+and was fresh, never that it was true — its own text said it could not tell a
+reviewer that ran from a line that was typed — and the verdicts did not
+converge: 92 of 167 reviewed changes took two or more rounds, one took 20, and
+517 findings were carried without being fixed or refuted. The round ceiling and
+the rule against taking a nit were patches over a record that could not be
+re-checked. **The rule:** a change lands on evidence a machine re-runs —
+empirical (a test, a mutation sweep, a measurement) or formal (an exhaustive
+walk of a bounded model through `exhaustive_check`) — recorded per claim in
+`verification.yaml`, bound to the diff by `scripts/check-review.sh` and run
+again by the CI `verify` job. A finding is a failing test or nothing.
+
+The first model written under the rule found a defect the reviewers had not:
+`is_safe_agent_command` accepts a newline, and the command reaches tmux as one
+shell string — two steps, `['\n', 'a']`.
+
+**Guard.** `review_gate_requires_a_verification_record_once_the_method_table_exists`,
+`an_obligation_command_outside_its_method_prefix_is_refused`,
+`every_spec_requirement_has_an_obligation`,
+`every_high_surface_names_the_methods_it_requires`,
+`exhaustive_check_reports_the_shortest_counterexample`,
+`every_model_test_goes_through_exhaustive_check`,
+`ci_re_runs_every_obligation_the_branch_records`,
+`verification_record_has_no_field_for_an_unreproduced_finding`,
+`review_gate_judges_history_before_the_method_table_by_verdicts`, and
+`verifier_agents_return_evidence_not_verdicts`, each watched failing in
+`docs/sdlc/changes/242-review-verdicts-rest-on-opinion/mutations.py`.
