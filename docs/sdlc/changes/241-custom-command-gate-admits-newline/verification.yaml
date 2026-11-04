@@ -1,7 +1,8 @@
 # The evidence for change 241. Shape: docs/sdlc/templates/verification.yaml.
 # Bugfix route: no spec, so no Rn; the claims are the regression, the model,
-# the existing command tests staying green, and the sweep.
-digest: "4efa91eb9cd2de3b"
+# the existing command tests staying green, and the sweep. The digest is the
+# whole branch against main, which the landing merge judges.
+digest: "6f15e4ad9e30ec77"
 
 obligations:
   - I1 empirical-test :: cargo test --locked custom_command_with_a_line_break_inside_is_refused
