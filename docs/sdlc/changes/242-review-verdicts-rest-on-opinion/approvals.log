@@ -2,3 +2,6 @@
 2026-11-04T09:00:00Z person spec spec.md 66d3ed167eab1358 approve user 2026-11-04: 「進めて」 — the same answer
 2026-11-04T09:00:00Z person plan plan.md c54a71c888f829c0 approve user 2026-11-04: 「進めて」 — the plan as committed in 914c484, approval line filled
 2026-11-04T09:00:00Z person gate-configuration plan.md c54a71c888f829c0 approve user 2026-11-04: 「進めて」 — the relaxation was described to the person as removing the reviewer-verdict requirement in favour of re-run evidence
+2026-11-04T13:00:00Z person spec spec.md 1d0232142b1fccd7 approve user 2026-11-04: 「承認、マージして」 — the notation-only edit (backticks removed from the dropped path scripts/lib/verification.sh), described to the person as unchanged in content
+2026-11-04T13:00:00Z person plan plan.md 8ba7c53d6844b3c4 approve user 2026-11-04: 「承認、マージして」 — the same notation-only edit
+2026-11-04T13:00:00Z person gate-configuration plan.md 8ba7c53d6844b3c4 approve user 2026-11-04: 「承認、マージして」 — the same answer, for the paused surface

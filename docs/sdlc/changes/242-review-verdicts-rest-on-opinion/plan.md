@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-04 by the person (「進めて」)
-- **Status**: in progress
+- **Status**: done
 
 ## Files that change
 

@@ -18,7 +18,7 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "The person approves the notation-only edit of plan.md (digest 8ba7c53d6844b3c4) and spec.md (1d0232142b1fccd7); log both in approvals.log, set status done, merge --no-ff."
+resume: "Done. What outlived it: the newline hole in is_safe_agent_command (backlog P1), the Kani probe, the first store model, and retiring the verdict reviewers; the next change is the first judged by evidence."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh (83e33d1, 665888d, 2a6efc0 committed through it)"
