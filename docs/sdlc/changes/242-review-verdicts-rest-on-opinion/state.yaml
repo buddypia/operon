@@ -1,0 +1,28 @@
+# Shape: docs/sdlc/templates/state.yaml.
+#
+# Defaults adopted because the person did not answer within ten minutes
+# (2026-11-04): verdicts are replaced by evidence obligations rather than kept
+# beside them; formal verification starts as exhaustive finite-state model
+# checking in the suite, and a bounded model checker for Rust is a measured
+# follow-up. The plan removes a check from gate configuration, so it waits for
+# a person (approval.md).
+
+state:
+  route: "security"
+  stage: "plan"
+  status: "awaiting-user"
+  attempts: "0 2"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Get the person's approval of plan.md, log it in approvals.log, then build in the order plan.md gives."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine passed no: only src/tests.rs, scripts, CI and documents change"
+  verify-job: "machine pending the CI verify job is green on the branch head"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
