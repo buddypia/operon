@@ -42,6 +42,11 @@ debug = 1
 [profile.test]
 debug = 1
 
+# `cfg(kani)` is set only by `cargo kani`, for the proof harnesses in
+# src/tests.rs (change 244); without this rustc warns that it is unknown.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
 [dev-dependencies]
 ab_glyph = "0.2"
 # Tests only, and deliberately not a dependency: src/tmux/hooks.rs edits

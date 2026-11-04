@@ -66,6 +66,11 @@ surfaces:
   # Children that outlive their parent, and launch paths that reach a shell.
   subprocess: "medium supervised no src/exec.rs,src/agents.rs,src/tmux.rs,src/git.rs"
 
+  # The gates every launch command passes before it reaches a shell, which a
+  # bounded model checker can prove over every input rather than sample
+  # (change 244). Also in `subprocess`; the higher tier of the two applies.
+  launch-gate: "medium supervised no src/agents.rs"
+
   # Formats Operon does not own, read out of another product's store. The failure
   # is a restore that looks complete and is not — lesson 007.
   foreign-store: "medium supervised no src/history.rs,src/transcript.rs,src/cli.rs"

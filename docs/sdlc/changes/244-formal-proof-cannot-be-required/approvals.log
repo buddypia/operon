@@ -1,0 +1,9 @@
+2026-11-04T09:15:37Z auto plan plan.md 6f8eaf907eb38e02 approve evaluator subagent: the probe and its departure meet backlog 8bzmycdr (a measured run recorded, formal-proof required on the one surface it serves); the built diff matches the plan's table
+2026-11-04T09:32:09Z auto spec spec.md bd3b6c791a3c6aa7 approve evaluator subagent: each requirement names a test or mutation that exists, the spec answers the intent's outcome, and the policy rows hold
+2026-11-04T09:40:12Z auto plan plan.md 0c8548dd6719577d approve evaluator subagent, re-asked: the removed workflow named as prose instead of a path; nothing else changed above the departures
+2026-11-04T09:40:12Z auto gate-configuration plan.md 0c8548dd6719577d approve evaluator subagent, re-asked: the same tightening at the new digest
+2026-11-04T09:47:42Z person intent intent.md 9a8aac32369b2564 approve user 2026-11-04: 「244 を承認、マージして」 — answering the request to approve change 244 (formal proof required for the launch gates, measured at about 7 minutes of CI)
+2026-11-04T09:47:42Z person spec spec.md bd3b6c791a3c6aa7 approve user 2026-11-04: 「244 を承認、マージして」 — the same approval
+2026-11-04T09:47:42Z person plan plan.md 0c8548dd6719577d approve user 2026-11-04: 「244 を承認、マージして」 — the same approval
+2026-11-04T09:47:42Z person gate-configuration plan.md 0c8548dd6719577d approve user 2026-11-04: 「244 を承認、マージして」 — launch-gate surface, harness-name check, Kani in the verify job, as described to the person
+2026-11-04T09:47:42Z person dependencies plan.md 0c8548dd6719577d approve user 2026-11-04: 「244 を承認、マージして」 — Cargo.toml declares cfg(kani) only; no crate added
