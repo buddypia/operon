@@ -1,0 +1,28 @@
+# Shape: docs/sdlc/templates/state.yaml.
+#
+# Defaults adopted because the person did not answer within ten minutes
+# (2026-11-04): verdicts are replaced by evidence obligations rather than kept
+# beside them; formal verification starts as exhaustive finite-state model
+# checking in the suite, and a bounded model checker for Rust is a measured
+# follow-up. The plan removes a check from gate configuration; the person
+# approved it on 2026-11-04 (approvals.log).
+
+state:
+  route: "security"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 2"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. What outlived it: the newline hole in is_safe_agent_command (backlog P1), the Kani probe, the first store model, and retiring the verdict reviewers; the next change is the first judged by evidence."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh (83e33d1, 665888d, 2a6efc0 committed through it)"
+  bands: "machine passed bash scripts/check-bands.sh (exit 0 on 010e512, 2026-11-04)"
+  release-binary: "machine passed no: only src/tests.rs, scripts, CI and documents change"
+  verify-job: "machine passed CI run 41788189296 on 2a6efc0: verify (17 obligations), test suite, checks all success"
+  guards-verified-by-mutation: "human passed mutations.py: 24 of 24 caught; F1, F3, F4 watched failing before their fixes"

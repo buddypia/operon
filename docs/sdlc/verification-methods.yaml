@@ -1,0 +1,72 @@
+# What counts as evidence that a change does what it claims. Change 242.
+#
+# Before this file a change landed on reviewer verdicts: an agent's opinion,
+# written into review.yaml at the diff's digest. The gate could say a verdict
+# existed and was fresh, never that it was true, and opinions did not converge —
+# 92 of 167 reviewed changes needed two or more rounds, one needed 20, and 517
+# findings were parked unconfirmed. Evidence is the other thing: a command that
+# anyone, and CI in particular, can run again on the same tree.
+#
+# Two kinds:
+#   empirical  the claim is tested against what the code actually does — a test,
+#              a mutation sweep showing the guard goes red when the rule is
+#              removed, a measurement, a reproduction.
+#   formal     the claim is checked against every case, not a sample — an
+#              exhaustive walk of a finite model's reachable states, or a
+#              machine-checked proof.
+#
+# THIS FILE IS THE SWITCH. scripts/check-review.sh judges a commit by
+# verification.yaml when this file is in the commit's first parent, and by the
+# old verdicts otherwise, so history keeps the rule it was made under. It is a
+# file main's judge before change 242 does not read, which is why adding it
+# widens nothing (lesson 039).
+#
+# Read by `verification_check` in scripts/check-review.sh, the only parser; the
+# CI runner reaches it through `check-review.sh --obligations`, so the gate and
+# CI cannot disagree about what a record means. Flat and
+# positional, like routes.yaml: the parser is sed, not a YAML library.
+#
+#   methods:   <method>: "<kind> <command prefix>"
+#              The ONLY command an obligation of that method may run. A record
+#              whose command does not start with its method's prefix, or holds a
+#              shell metacharacter, is refused: CI executes these, and a record
+#              that could say `true` would be a verdict again.
+#   surfaces:  <surface>: "<method>,<method>"   from docs/sdlc/risk.yaml
+#   routes:    <route>: "<method>,<method>"     from docs/sdlc/routes.yaml, or "-"
+#
+# `every_high_surface_names_the_methods_it_requires` in src/tests.rs fails when
+# a high surface in risk.yaml has no row here, or a row names a method that is
+# not listed.
+
+methods:
+  empirical-test: "empirical cargo test --locked "
+  empirical-mutation: "empirical python3 docs/sdlc/changes/"
+  empirical-measure: "empirical bash scripts/measure-"
+  # A model test is named model_check_* (model_ alone is taken by the
+  # embedding-model tests) and goes through exhaustive_check in
+  # src/tests.rs, which `every_model_test_goes_through_exhaustive_check` holds.
+  formal-model: "formal cargo test --locked model_check_"
+  # Not required by any surface until a measured probe shows Kani builds this
+  # crate (native llama-cpp-sys-2, eframe). Backlog 20261104-8bzmycdr.
+  formal-proof: "formal cargo kani --harness "
+
+surfaces:
+  # Every schema version x every interruption point is a finite model; data
+  # loss there is unrecoverable, so a sample is not enough.
+  store: "formal-model,empirical-mutation"
+  unsafe-and-path: "empirical-mutation"
+  bundle-swap: "empirical-mutation"
+  gate-configuration: "empirical-mutation"
+  dependencies: "empirical-test"
+  # Also pulled in by an added Command::new, .spawn(, .output( or unsafe in any
+  # file, as the reviewer was before.
+  subprocess: "empirical-mutation"
+
+routes:
+  feature: "empirical-test,empirical-mutation"
+  modify: "empirical-test,empirical-mutation"
+  bugfix: "empirical-test,empirical-mutation"
+  refactor: "empirical-test,empirical-mutation"
+  security: "empirical-test,empirical-mutation"
+  docs: "-"
+  trivial: "-"

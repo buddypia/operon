@@ -104,6 +104,7 @@ mode=byhand
 base=HEAD
 commit=""
 target=""
+obligations_dir=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --all) show_all=1 ;;
@@ -113,6 +114,8 @@ while [ "$#" -gt 0 ]; do
     # would describe half of what lands.
     --against) shift; base="${1:-}" ;;
     --commit) shift; commit="${1:-}"; mode=commit ;;
+    # CI's entry, change 242: see verification_check.
+    --obligations) shift; obligations_dir="${1:-}" ;;
     "") ;;
     *) target="${1%/}" ;;
   esac
@@ -160,6 +163,179 @@ lands() {
 }
 # `  key: "value"`, with trailing blanks or a comment tolerated after the quote.
 field() { printf '%s\n' "$1" | sed -n "s/^  $2: \"\([^\"]*\)\" *\(#.*\)\{0,1\}$/\1/p" | head -1; }
+# One top-level block of a flat table: `methods:` up to the next top-level key.
+section() { printf '%s\n' "$1" | sed -n "/^$2:/,/^[a-z]/p"; }
+
+problems=()
+note() { problems+=("$1"); }
+
+# --- evidence, not verdicts (change 242) -------------------------------------
+#
+# A verdict was an opinion bound to a digest: the gate could say it existed and
+# was fresh, never that it was true. An obligation is a command, and
+# scripts/run-obligations.sh runs every one again in CI on the branch head, so
+# what is recorded here is re-run rather than believed. This function judges a
+# record's shape and coverage; it is the only parser of verification.yaml, and
+# CI reaches it through `--obligations` so the two cannot disagree.
+#
+#   $1 record text   $2 docs/sdlc/verification-methods.yaml text
+#   $3 spec.md text  $4 change name   $5 required pairs, `who:method` each
+#
+# Leaves its findings with `note`, and the validated obligations in
+# `$obligations_ok` as `id<US>method<US>kind<US>command` lines.
+#
+# What a command may be. CI executes it, so a record that could say `true` —
+# or `cargo test --locked --config build.rustc-wrapper=…` — would be a verdict
+# again, or worse. So: the method's literal prefix, then ONE plain name with no
+# leading dash, no slash, nothing a shell would read. A mutation sweep may only
+# be the change's own `mutations.py`. A test filter must name a test that
+# exists, because `cargo test` with a filter that matches nothing passes.
+verification_check() {
+  local record=$1 methods_text=$2 spec_text=$3 change_name=$4 required_pairs=$5
+  local methods_block items item head cmd id method row kind prefix rest seen_ids="" present=" "
+  local tests_text pair who want n numbers
+  obligations_ok=""
+  verified_empirical=0
+  verified_formal=0
+  methods_block=$(section "$methods_text" methods)
+  items=$(printf '%s\n' "$record" | sed -n '/^obligations:/,/^[a-z]/p' | sed -n 's/^  - //p')
+  if [ -z "$items" ]; then
+    note "❌ BLOCK — ${change_name} · 検証記録に obligations の行がありません
+変更の主張ごとに「  - ID 方法 :: コマンド」を 1 行ずつ書いてください（docs/sdlc/templates/verification.yaml）。"
+    return
+  fi
+  tests_text=$(landing src/tests.rs)
+  while IFS= read -r item; do
+    [ -n "$item" ] || continue
+    head=${item%% :: *}
+    cmd=${item#* :: }
+    set -f
+    set -- $head
+    set +f
+    if [ "$head" = "$item" ] || [ "$#" -ne 2 ]; then
+      note "❌ BLOCK — ${change_name} · 検証行が「ID 方法 :: コマンド」の形ではありません
+読めた行: ${item}"
+      continue
+    fi
+    id=$1
+    method=$2
+    case "$id" in
+      [RFI][0-9]*) case "${id#?}" in *[!0-9]*) id="" ;; esac ;;
+      *) id="" ;;
+    esac
+    if [ -z "$id" ]; then
+      note "❌ BLOCK — ${change_name} · 検証行の ID「$1」は R（要件）・F（再現した指摘）・I（その他の不変条件）に番号を付けたものではありません"
+      continue
+    fi
+    case " $seen_ids " in
+      *" $id "*)
+        note "❌ BLOCK — ${change_name} · 検証行の ID ${id} が 2 回あります"
+        continue ;;
+    esac
+    seen_ids="$seen_ids $id"
+    row=$(field "$methods_block" "$method")
+    if [ -z "$row" ]; then
+      note "❌ BLOCK — ${change_name} · ${id} の方法 ${method} は docs/sdlc/verification-methods.yaml にありません"
+      continue
+    fi
+    kind=${row%% *}
+    prefix=${row#* }
+    rest=""
+    case "$cmd" in
+      "$prefix"*) rest=${cmd#"$prefix"} ;;
+    esac
+    if [ "$method" = empirical-mutation ]; then
+      [ "$cmd" = "python3 docs/sdlc/changes/${change_name}/mutations.py" ] || rest=""
+      lands "docs/sdlc/changes/${change_name}/mutations.py" || rest=""
+    elif ! printf '%s' "$rest" | LC_ALL=C grep -E '^[A-Za-z0-9_][A-Za-z0-9_.-]*$' >/dev/null; then
+      rest=""
+    fi
+    case "$rest" in *..*) rest="" ;; esac
+    if [ -z "$rest" ]; then
+      note "❌ BLOCK — ${change_name} · ${id} のコマンドは ${method} で許されていません
+許されるのは「${prefix}」に名前を 1 つ続けた形だけです（変異検査はこの変更の mutations.py だけ）。読めた値: ${cmd}"
+      continue
+    fi
+    case "$prefix" in
+      "cargo test --locked "*)
+        if ! printf '%s\n' "$tests_text" | LC_ALL=C grep -E "fn [a-z0-9_]*${cmd#cargo test --locked }[a-z0-9_]*\(" >/dev/null; then
+          note "❌ BLOCK — ${change_name} · ${id} の「${cmd}」に当たるテストが src/tests.rs にありません
+該当するテストが 0 件でも cargo test は成功するので、これは証拠になりません。"
+          continue
+        fi ;;
+    esac
+    present="$present$method "
+    case "$kind" in
+      formal) verified_formal=$((verified_formal + 1)) ;;
+      *) verified_empirical=$((verified_empirical + 1)) ;;
+    esac
+    obligations_ok="${obligations_ok}${id}"$'\037'"${method}"$'\037'"${kind}"$'\037'"${cmd}"$'\n'
+  done <<<"$items"
+
+  numbers=$(printf '%s\n' "$spec_text" | awk '/^## Requirements/{f=1;next} /^## /{f=0} f&&/^[0-9]+\./{sub(/\..*/,""); print}')
+  for n in $numbers; do
+    case " $seen_ids " in
+      *" R$n "*) ;;
+      *) note "❌ BLOCK — ${change_name} · 要件 ${n} を検証する行がありません
+spec.md の要件 ${n} に、R${n} の行を verification.yaml に足してください。" ;;
+    esac
+  done
+
+  for pair in $required_pairs; do
+    who=${pair%%:*}
+    want=${pair#*:}
+    case "$present" in
+      *" $want "*) ;;
+      *) note "❌ BLOCK — ${change_name} · ${who} には ${want} の検証が必要です
+docs/sdlc/verification-methods.yaml がそう定めています。" ;;
+    esac
+  done
+}
+
+# `who:method` for every method the route and the touched surfaces ask for.
+# `$1` route, `$2` methods table text, `$3` surface names, `$4` 1 when the diff
+# adds a child or `unsafe` anywhere.
+required_methods() {
+  local route=$1 methods_text=$2 surface_names=$3 spawns=$4 out="" row m s
+  row=$(field "$(section "$methods_text" routes)" "$route")
+  [ "$row" = "-" ] && row=""
+  for m in $(printf '%s' "$row" | tr ',' ' '); do out="$out route:$m"; done
+  for s in $surface_names; do
+    row=$(field "$(section "$methods_text" surfaces)" "$s")
+    for m in $(printf '%s' "$row" | tr ',' ' '); do out="$out $s:$m"; done
+  done
+  if [ "$spawns" -eq 1 ]; then
+    row=$(field "$(section "$methods_text" surfaces)" subprocess)
+    # No colon in the name: `verification_check` splits on the first one.
+    for m in $(printf '%s' "$row" | tr ',' ' '); do out="$out 子プロセスやunsafeを足すdiff:$m"; done
+  fi
+  printf '%s\n' "$out"
+}
+
+# CI's entry. `--obligations <change-dir>` judges the record as it is in the
+# working tree and prints one validated obligation per line,
+# `id<TAB>method<TAB>command`; scripts/run-obligations.sh runs exactly those.
+# The digest is not checked here — on CI the tree is the branch head and the
+# diff against it is empty; the commit gate already bound the record to its
+# diff. The surfaces are not either, for the same reason; the route's methods
+# and the spec's requirements are.
+if [ -n "$obligations_dir" ]; then
+  dir=${obligations_dir%/}
+  [ -f "$dir/verification.yaml" ] || { echo "no verification.yaml in $dir" >&2; exit 2; }
+  mode=byhand
+  ob_change=$(basename "$dir")
+  ob_route=$(field "$(cat "$dir/state.yaml" 2>/dev/null)" route)
+  ob_methods=$(cat docs/sdlc/verification-methods.yaml 2>/dev/null)
+  [ -n "$ob_methods" ] || { echo "docs/sdlc/verification-methods.yaml is missing" >&2; exit 2; }
+  verification_check "$(cat "$dir/verification.yaml")" "$ob_methods" "$(cat "$dir/spec.md" 2>/dev/null)" \
+    "$ob_change" "$(required_methods "$ob_route" "$ob_methods" "" 0)"
+  if [ "${#problems[@]}" -gt 0 ]; then
+    printf '%s\n\n' "${problems[@]}" >&2
+    exit 1
+  fi
+  printf '%s' "$obligations_ok" | tr '\037' '\t' | awk -F'\t' 'NF { print $1 "\t" $2 "\t" $4 }'
+  exit 0
+fi
 
 # --- the digest: which diff is this ------------------------------------------
 #
@@ -303,6 +479,17 @@ if [ "$digest" = "$empty_digest" ] && [ "$legacy_digest" != "$empty_digest" ]; t
   exit 2
 fi
 changed=$(run_diff --name-only)
+
+# Whether `$recorded_digest` is about some other diff. One comparison decides
+# freshness for both rules — verdicts and evidence — and it accepts the two
+# digests and nothing else; a second comparison would be a third digest.
+digest_is_stale() {
+  if [ -n "${recorded_digest+set}" ] \
+    && [ "$recorded_digest" != "$digest" ] && [ "$recorded_digest" != "$legacy_digest" ]; then
+    return 0
+  fi
+  return 1
+}
 
 # --- which surfaces the diff is on -------------------------------------------
 #
@@ -578,6 +765,76 @@ ${review} が変わる（または消える）のに、この commit にはコ�
   exit 0
 fi
 
+# --- the switch: evidence once the method table exists (change 242) ----------
+#
+# Read from the first parent, never from what lands: a commit is the one place
+# that can edit its own judge, so the commit that adds the table is still judged
+# by verdicts, and a commit cannot switch the evidence rule off by deleting the
+# table — its parent still has it. History made before the table keeps the rule
+# it was made under, which is what a re-judge past the reflog needs.
+methods_before=$(landed_before docs/sdlc/verification-methods.yaml)
+if printf '%s\n' "$methods_before" | grep '^methods:' >/dev/null; then
+  verification="$target/verification.yaml"
+  # Both sides, the stricter wins: a table that drops a requirement in this very
+  # diff is still judged by the requirement it dropped.
+  methods_now=$(landing docs/sdlc/verification-methods.yaml)
+  methods_union=$(printf '%s\n%s\n' "$methods_before" "$methods_now")
+  surface_names=$(printf '%s\n' "$surfaces" | awk 'NF { print $1 }' | sort -u | tr '\n' ' ')
+  required_pairs=$(
+    {
+      required_methods "$route" "$methods_before" "$surface_names" "$spawns_or_unsafe"
+      required_methods "$route" "$methods_now" "$surface_names" "$spawns_or_unsafe"
+    } | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' '
+  )
+  # The rule cannot be switched off: the parent has the table, so what lands
+  # must too, or the next commit would be judged by verdicts again.
+  if ! printf '%s\n' "$methods_now" | grep '^methods:' >/dev/null; then
+    echo "❌ BLOCK — ${change} · docs/sdlc/verification-methods.yaml を消すか、methods: を外しています
+親の commit は検証の方式で判定されています。表が無くなると次の commit から判定の方式に戻るので、この commit は通しません。"
+    exit 1
+  fi
+  # A route the table does not know asks for nothing, which would land a
+  # mistyped route on no evidence. The verdict rule refused it too.
+  if [ -z "$(field "$(section "$methods_union" routes)" "$route")" ]; then
+    echo "❌ BLOCK — ${change} · route \`${route}\` が docs/sdlc/verification-methods.yaml の routes: にありません
+どの検証が要るかが決まらないので、この変更は判定できません。"
+    exit 1
+  fi
+  spec_text=$(landing "$target/spec.md")
+  has_requirements=$(printf '%s\n' "$spec_text" | awk '/^## Requirements/{f=1;next} /^## /{f=0} f&&/^[0-9]+\./{n++} END{print n+0}')
+  if [ -z "$required_pairs" ] && [ "$has_requirements" -eq 0 ] && ! lands "$verification"; then
+    evidence_line="検証 0 件 · diff ${digest}"
+    evidence_note="route ${route} は決定的な検査のみを要求します"
+  else
+    if [ "$mode" = index ] && [ -f "$verification" ] && ! git diff --no-ext-diff --no-textconv --quiet -- "$verification" 2>/dev/null; then
+      note "❌ BLOCK — ${change} · verification.yaml が stage されていません
+検証記録は、それが検証するコードと同じ commit に載せてください: git add ${verification}"
+    elif ! lands "$verification"; then
+      note "❌ BLOCK — ${change} · 検証記録がありません
+${verification} に、変更の主張ごとに検証（経験的・形式的）を 1 行ずつ書いてください。
+形は docs/sdlc/templates/verification.yaml、diff は ${digest} です。"
+    else
+      record=$(landing "$verification")
+      recorded_digest=$(printf '%s\n' "$record" | sed -n 's/^digest: "\([^"]*\)" *\(#.*\)\{0,1\}$/\1/p' | head -1)
+      if digest_is_stale; then
+        note "❌ BLOCK — ${change} · 検証記録が古い diff のものです
+記録は diff ${recorded_digest:-（記録なし）} のもの、現在の diff は ${digest}。
+コードが変わったので、検証を走らせ直してから digest を書き換えてください。"
+      fi
+      verification_check "$record" "$methods_union" "$spec_text" "$change" "$required_pairs"
+    fi
+    if [ "${#problems[@]}" -gt 0 ]; then
+      if [ "$show_all" -eq 1 ]; then printf '%s\n\n' "${problems[@]}"; else printf '%s\n' "${problems[0]}"; fi
+      exit 1
+    fi
+    evidence_line="検証 $((verified_empirical + verified_formal)) 件（経験的 ${verified_empirical} · 形式的 ${verified_formal}）· diff ${digest}"
+    evidence_note="CI が全件を branch の先頭で実行し直します（scripts/run-obligations.sh）"
+  fi
+  printf '✅ SHIP  —  %s\n' "$change"
+  printf '%s\n\n%s\n' "$evidence_line" "$evidence_note"
+  exit 0
+fi
+
 # --- which reviewers this diff needs -----------------------------------------
 #
 # The route says the floor; the surfaces widen it. A route may ask for more than
@@ -753,8 +1010,7 @@ nit は blocking しませんが、Important は直してから commit してく
   # A record that is required, or one that is being written in this commit,
   # has to be about this diff. A record nobody asked for and nobody touched —
   # a docs commit on a change reviewed earlier — is left alone and not shown.
-  if { [ -n "$required" ] || [ "$review_landing_changed" -eq 1 ]; } \
-    && [ "$recorded_digest" != "$digest" ] && [ "$recorded_digest" != "$legacy_digest" ]; then
+  if { [ -n "$required" ] || [ "$review_landing_changed" -eq 1 ]; } && digest_is_stale; then
     note "❌ BLOCK — ${change} · 判定が古い diff のものです
 判定は diff ${recorded_digest:-（記録なし）} のもの、現在の diff は ${digest}。
 古い承認は無い承認より悪いので、再レビューしてから commit してください。

@@ -1,17 +1,118 @@
 # Review policy
 
-The passes every change to Operon is reviewed against, whether the reviewer is
-`/code-review`, `.github/workflows/claude-review.yml`, or a person. Stage 5 of the
-pipeline in `docs/sdlc/README.md`.
+How every change to Operon is reviewed, whether the reviewer is a verifier in
+`.claude/agents/`, `.github/workflows/claude-review.yml`, or a person. Stage 5 of
+the pipeline in `docs/sdlc/README.md`.
 
-One rule stands above the passes: **the agent that wrote a change does not
-approve it.** A review by the session that produced the diff is a second opinion
-from the same opinion.
+## A change lands on evidence, not on an opinion (change 242)
 
-The second rule makes the first one hold: **a verdict is about a diff, and merging
-waits on the verdict, not on a reader.** Before change 035 this document ended at
-a person finding the time, and 24 changes sat at `reviewing` with nothing saying
-so.
+Until change 242 a change landed on reviewer verdicts: an agent's approve, or
+approve with nits, written into `review.yaml` at the diff's digest. The gate
+could establish that a verdict existed and was fresh, never that it was true,
+and the opinions did not converge. Of 167 reviewed changes, 92 needed two or
+more rounds, one needed 20, and 517 findings were parked unconfirmed. A second
+opinion produces new opinions; a failing test ends when it goes green.
+
+So review is now **verification**, in two kinds, and both are commands a machine
+re-runs:
+
+- **Empirical** — the claim is tested against what the code does. A test that
+  fails without the change (`empirical-test`), the change's mutation sweep
+  showing every guard goes red when its rule is removed (`empirical-mutation`),
+  a measurement (`empirical-measure`).
+- **Formal** — the claim is checked against every case within a stated bound,
+  not a sample. A `model_check_*` test that walks every reachable state of a finite
+  model through `exhaustive_check` in `src/tests.rs` (`formal-model`), or a
+  machine-checked proof harness (`formal-proof`, not yet required anywhere; it
+  waits on a measured probe of whether Kani builds this crate).
+
+`docs/sdlc/verification-methods.yaml` is the closed list of methods, the only
+command prefix each may run, and which methods each route and each high surface
+of `docs/sdlc/risk.yaml` requires. A change records its evidence in
+`verification.yaml` beside its `state.yaml` — shape in
+`docs/sdlc/templates/verification.yaml` — one obligation per claim: `Rn` for
+requirement *n* of the spec (every requirement needs one), `Fn` for a finding
+that was reproduced, `In` for any other invariant.
+
+Three things hold the evidence to account, and none of them is a reader:
+
+1. **`scripts/check-review.sh`** binds the record to the diff (the digest is the
+   same one verdicts used), refuses a command outside its method's prefix or
+   holding anything a shell would read, refuses a test filter that names no test
+   — `cargo test` with a filter matching nothing passes — and refuses a record
+   that leaves a requirement or a required method uncovered.
+2. **The CI `verify` job** runs `scripts/run-obligations.sh`, which executes
+   every obligation of every change the branch touches, bounded, on the branch
+   head. An obligation that fails, times out, or ran no test is a red workflow.
+3. **`.claude/hooks/gate-merge.sh`** does not merge a branch whose CI is not
+   green. A recorded obligation that does not hold therefore cannot land.
+
+The old rule — **the agent that wrote a change does not approve it** — is kept
+in a stronger form: nobody approves it. The verifiers try to break it, the
+machine re-runs what they and the author recorded, and the record says what was
+run, not who was satisfied.
+
+## A finding is a reproduction or nothing
+
+A verifier's finding counts only as **a test that fails at the change's head**,
+run and observed failing for the reason stated. The author fixes the defect and
+records the test as an `Fn` obligation, so the reproduction stays in the suite
+as a regression test and CI keeps re-running it.
+
+A worry that nobody could turn into a failing test is not recorded. The record
+has no field for it — no verdict, no unconfirmed finding, no line for a person
+— because an unreproduced finding was what filled 517 carried lines without
+fixing or refuting any. If a verifier believes something is wrong and cannot
+reproduce it, it says what it tried in one line to the author; that is a lead,
+not a finding, and it does not block, linger, or reach a person.
+
+This removes the loop the verdict rules below were written to contain. There
+is no Important or Nit, because a reproduced finding is always fixed and an
+unreproduced one is never recorded; no round ceiling, because new evidence is
+not a new round of opinion; and no carried findings.
+
+## The verifiers
+
+- `empirical-verifier` (`.claude/agents/empirical-verifier.md`) re-runs the
+  record, attacks the inputs the change will meet — empty, absent, interrupted,
+  denied, too large, non-UTF-8, concurrent — and reads the mutation sweep for a
+  claim no mutation asks about (`evals/007-mutate-the-claim-not-the-counter.md`).
+- `formal-verifier` (`.claude/agents/formal-verifier.md`) states the change's
+  invariant apart from its implementation, bounds the state that decides it, and
+  checks every case with `exhaustive_check`, returning coverage or the shortest
+  counterexample.
+
+Both run in an isolated worktree and return patches. A verifier writes no
+verdict and nothing a gate reads; what it returns becomes evidence only when the
+author records it and CI re-runs it.
+
+What the verifiers attack is the checklist under **The passes** below:
+correctness, durability and subprocess safety, Rust craft — per-frame work in
+the draw path is a measurement to write, not a judgement to make — policy
+conformance, and harness consistency.
+
+## Which rule judges a commit
+
+`scripts/check-review.sh` judges a commit by evidence when
+`docs/sdlc/verification-methods.yaml` is in the commit's **first parent**, and
+by the verdict rules below otherwise. The parent, not the commit: the commit
+that adds the table is still judged by verdicts (change 242 itself was, by
+`main`'s gate), and no commit can switch evidence off by deleting the table.
+History made before the table keeps the rule it was made under, which is what
+a re-judge past the reflog needs.
+
+# The verdict rule, for history before change 242
+
+Everything from here is the rule a commit made before the method table was
+judged by, kept because such a commit can still be re-judged, and because
+`rust-reviewer` and `subprocess-safety-reviewer` remain defined until it is
+retired. The **passes** are still current: they are what the verifiers attack.
+
+The verdict rule had one rule above the passes: **the agent that wrote a change
+does not approve it.** And a second that made the first hold: **a verdict is
+about a diff, and merging waits on the verdict, not on a reader.** Before change
+035 this document ended at a person finding the time, and 24 changes sat at
+`reviewing` with nothing saying so.
 
 Report findings with a `file:line` anchor and a failure scenario stated as
 inputs or state → wrong outcome. A finding with no scenario is a preference.

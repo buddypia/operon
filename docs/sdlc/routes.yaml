@@ -22,7 +22,10 @@
 #             stops and writes handoff.md from docs/sdlc/templates/handoff.md
 #   gate      the check that closes the route
 #   requires  a document that must be satisfied on top of the gate, or `-`
-#   review    which reviewers must return a verdict on the diff before it merges:
+#   review    (history before change 242, whose method table now decides what
+#             evidence a route needs: docs/sdlc/verification-methods.yaml.
+#             Kept as five values because main's judge reads exactly five.)
+#             which reviewers must return a verdict on the diff before it merges:
 #             full  = both definitions in .claude/agents/
 #             craft = rust-reviewer
 #             none  = the deterministic checks alone

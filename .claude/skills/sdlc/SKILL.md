@@ -179,8 +179,20 @@ verification loop, `.claude/hooks/gate-commit.sh` at the commit boundary,
 `.claude/hooks/gate-stop.sh` will refuse a finish while a `machine` item in the
 contract is still `pending`, so settle them or mark them `waived` with a reason.
 
-**Review has a ceiling too, and it is the one that gets spent without being
-noticed.** `approve-with-nits` means approve. Taking a nit moves the digest,
+**Review is verification (change 242).** Write `verification.yaml` from
+`docs/sdlc/templates/verification.yaml`: one obligation per spec requirement
+(`Rn`), each a command of a method in `docs/sdlc/verification-methods.yaml`,
+plus every method the route and the touched high surfaces require. Ask
+`empirical-verifier` and, when a surface asks for `formal-model` or the change
+claims something always holds, `formal-verifier` — both with worktree
+isolation — to try to break it. A failing test they return is a defect: fix it
+and record the test as `Fn`. Anything they could not reproduce is not recorded.
+`bash scripts/check-review.sh --index` checks the record; the CI `verify` job
+runs it. What follows is the verdict rule, which still judges a commit whose
+first parent has no method table.
+
+**Under the verdict rule, review has a ceiling too, and it is the one that gets
+spent without being noticed.** `approve-with-nits` means approve. Taking a nit moves the digest,
 which voids the approvals the nit arrived with, so a taken nit costs a whole
 review round and the round produces another nit — change 060 spent nineteen
 rounds there. Carry open nits in `review.yaml`'s `carried:` block and land;
@@ -217,7 +229,8 @@ without recording one is indistinguishable from finishing.
 - **Watch each new guard fail** before trusting it. Delete or invert what it
   guards and confirm it goes red. A guard nobody has seen fail is a guess about
   what it guards.
-- **Copy the sweep from `docs/sdlc/templates/mutations.py`** and fill in its four
+- **Copy the sweep from `docs/sdlc/templates/mutations.py`** — and record it as
+  the `empirical-mutation` obligation, so CI runs it again — and fill in its four
   blocks; it calls `scripts/mutation_sweep.py`, which keeps the rules earlier
   sweeps learned by getting them wrong — assert the target is there before
   replacing it, write the mutated file rather than `copy2` it, bound every run,

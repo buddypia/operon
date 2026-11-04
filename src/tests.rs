@@ -27318,17 +27318,28 @@ pub(crate) fn the_review_gate_has_no_bypass() {
         .filter(|(position, line)| {
             let no_target = line.trim() == "[ -z \"$target\" ] && exit 0";
             let paper_trail = line.trim() == "exit 0" && *position == paper_trail_only + 1;
+            // Change 242: the evidence rule's pass and CI's listing. Each is the
+            // one top-level `exit 0` of its block, that block's last statement,
+            // and the block is opened by exactly the line that decides it — so
+            // an exit added anywhere in either block is a second exit and fails.
+            let evidence = line.trim() == "exit 0"
+                && [
+                    "if printf '%s\\n' \"$methods_before\" | grep '^methods:' >/dev/null; then",
+                    "if [ -n \"$obligations_dir\" ]; then",
+                ]
+                .iter()
+                .any(|opener| closes_its_block(&code, *position, opener));
             let merge_commit = line.trim() == "exit 0"
                 && code
                     .get(position.saturating_sub(1))
                     .map(|prev| prev.contains("git rev-parse --verify --quiet \"${commit}^2\""))
                     .unwrap_or(false);
-            !no_target && !paper_trail && !merge_commit
+            !no_target && !paper_trail && !merge_commit && !evidence
         })
         .map(|(_, line)| *line)
         .collect();
     assert!(
-        (successes.len() == 2 || successes.len() == 3) && unknown.is_empty(),
+        (2..=5).contains(&successes.len()) && unknown.is_empty(),
         "check-review.sh の成功終了が「変更ディレクトリなし」と「paper trail のみ」\
          以外にあります ({} 件) — 判定を通らずに合格できる経路です:\n{}",
         successes.len(),
@@ -65808,7 +65819,7 @@ fn ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_
     for (rel, expected_jobs) in [
         (
             ".github/workflows/ci.yml",
-            &["checks", "test", "package"][..],
+            &["checks", "test", "verify", "package"][..],
         ),
         (".github/workflows/harness.yml", &["evals"][..]),
     ] {
@@ -65854,13 +65865,19 @@ fn ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_
             let reset_pos = segment
                 .find("bash scripts/seed-target.sh --reset-only .")
                 .unwrap_or_else(|| panic!("{rel} の rust-cache ステップ後に seed-target.sh --reset-only . がありません"));
-            let build_pos = ["cargo ", "scripts/package-macos.sh", "scripts/run-evals.sh"]
-                .iter()
-                .filter_map(|needle| segment.find(needle))
-                .min()
-                .unwrap_or_else(|| {
-                    panic!("{rel} の rust-cache ステップ後にビルドまたは実行コマンドがありません")
-                });
+            let build_pos = [
+                "cargo ",
+                "scripts/package-macos.sh",
+                "scripts/run-evals.sh",
+                // Change 242: builds and runs each obligation's `cargo test`.
+                "scripts/run-obligations.sh",
+            ]
+            .iter()
+            .filter_map(|needle| segment.find(needle))
+            .min()
+            .unwrap_or_else(|| {
+                panic!("{rel} の rust-cache ステップ後にビルドまたは実行コマンドがありません")
+            });
             assert!(
                 key_pos < reset_pos && reset_pos < build_pos,
                 "{rel} では rust-cache の key 設定 → seed-target.sh --reset-only . → ビルド実行の順序である必要があります"
@@ -66032,4 +66049,943 @@ fn ci_caches_native_builds_per_runner_image_without_openssl_and_resets_restored_
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+// ── change 242: evidence instead of verdicts ────────────────────────────────
+
+/// The size of what a model check covered, so a test can assert that the walk
+/// reached every state it claims to have reached rather than trusting it.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ModelCoverage {
+    pub(crate) states: usize,
+    pub(crate) transitions: usize,
+}
+
+/// Explicit-state model checking: the formal half of change 242.
+///
+/// A test samples; this enumerates. Starting from `initial`, every event is
+/// applied to every reachable state, breadth first, until no new state appears,
+/// and `invariant` is asserted in each one. `step` returns `None` where an event
+/// does not apply, which is also how a model states its bound. Breadth first is
+/// what makes the counterexample the shortest one: the first state found in
+/// violation is found at the smallest depth, and the event trace back to
+/// `initial` is printed with it.
+///
+/// It refuses rather than passes past `max_states`: a model that did not
+/// finish proved nothing about the states it did not reach, and a check that
+/// quietly stopped would be a sample labelled as a proof.
+///
+/// `every_model_test_goes_through_exhaustive_check` holds every `model_check_*` test
+/// to this function, which is what lets `docs/sdlc/verification-methods.yaml`
+/// call the `formal-model` method formal.
+pub(crate) fn exhaustive_check<S, E>(
+    initial: S,
+    events: &[E],
+    step: impl Fn(&S, &E) -> Option<S>,
+    invariant: impl Fn(&S) -> std::result::Result<(), String>,
+    max_states: usize,
+) -> ModelCoverage
+where
+    S: Clone + Eq + std::hash::Hash + std::fmt::Debug,
+    E: Clone + std::fmt::Debug,
+{
+    use std::collections::{HashMap, VecDeque};
+    // Each state's parent and the event that reached it, for the trace.
+    let mut parent: HashMap<S, Option<(S, E)>> = HashMap::new();
+    let mut frontier = VecDeque::new();
+    let mut transitions = 0usize;
+    parent.insert(initial.clone(), None);
+    frontier.push_back(initial);
+    while let Some(state) = frontier.pop_front() {
+        if let Err(why) = invariant(&state) {
+            let mut trace = Vec::new();
+            let mut cursor = state.clone();
+            while let Some(Some((previous, event))) = parent.get(&cursor).cloned() {
+                trace.push(event);
+                cursor = previous;
+            }
+            trace.reverse();
+            panic!(
+                "不変条件が破れました: {why}\n最短の手順 ({} 手): {trace:?}\n状態: {state:?}",
+                trace.len()
+            );
+        }
+        for event in events {
+            let Some(next) = step(&state, event) else {
+                continue;
+            };
+            transitions += 1;
+            if parent.contains_key(&next) {
+                continue;
+            }
+            assert!(
+                parent.len() < max_states,
+                "状態数が上限 {max_states} に達しました。探索が終わっていないので、何も証明していません"
+            );
+            parent.insert(next.clone(), Some((state.clone(), event.clone())));
+            frontier.push_back(next);
+        }
+    }
+    ModelCoverage {
+        states: parent.len(),
+        transitions,
+    }
+}
+
+fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| {
+            payload
+                .downcast_ref::<&str>()
+                .map(|text| (*text).to_owned())
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+/// Change 242, requirement 5. The checker itself, on a model small enough to
+/// know by hand: a counter from 0 to 10 moved by +1 and +3. Every one of the
+/// eleven values is reachable, so a passing walk must report eleven; 7 is
+/// reachable at the earliest in three moves, so a violation at 7 must report a
+/// three-move trace and not a longer one; and a model with no bound must be
+/// refused at the ceiling, not passed.
+pub(crate) fn exhaustive_check_reports_the_shortest_counterexample() {
+    let step = |state: &u8, add: &u8| (state + add <= 10).then_some(state + add);
+    let coverage = exhaustive_check(0u8, &[1u8, 3], step, |_| Ok(()), 100);
+    assert_eq!(
+        coverage.states, 11,
+        "到達できる 11 状態を全部回っていません"
+    );
+
+    let violation = std::panic::catch_unwind(|| {
+        exhaustive_check(
+            0u8,
+            &[1u8, 3],
+            step,
+            |state| {
+                if *state == 7 {
+                    Err("7 に到達".to_owned())
+                } else {
+                    Ok(())
+                }
+            },
+            100,
+        )
+    })
+    .map(|_| String::new())
+    .unwrap_or_else(panic_message);
+    assert!(
+        violation.contains("7 に到達") && violation.contains("(3 手)"),
+        "最短の反例 (3 手) が報告されていません:\n{violation}"
+    );
+
+    let unbounded = std::panic::catch_unwind(|| {
+        exhaustive_check(
+            0u64,
+            &[1u64],
+            |state, add| Some(state + add),
+            |_| Ok(()),
+            50,
+        )
+    })
+    .map(|_| String::new())
+    .unwrap_or_else(panic_message);
+    assert!(
+        unbounded.contains("上限 50"),
+        "終わらない探索が上限で止まらず、合格扱いになっています:\n{unbounded}"
+    );
+}
+
+#[test]
+/// The first formal model (change 242). Every string of up to three characters
+/// over an alphabet holding every character a shell gives meaning to, plus
+/// representatives of what the gate allows, plus non-ASCII and a non-ASCII
+/// space — 33^3 + 33^2 + 33 + 1 strings, every one of them, not a sample. The
+/// property is stated apart from the implementation: nothing the launch-option
+/// gate accepts carries a character a shell would act on.
+///
+/// The same model over `is_safe_agent_command` fails on its first run, with the
+/// two-step counterexample `['\n', 'a']`: that gate counts a newline as
+/// whitespace, and the command reaches tmux as one shell string. It is a
+/// bugfix of its own (backlog), so it is not in this model until it is fixed.
+pub(crate) fn model_check_safe_agent_option_admits_no_shell_metacharacter() {
+    const SHELL_MEANING: &[char] = &[
+        ';', '|', '&', '$', '`', '<', '>', '(', ')', '\'', '"', '\\', '*', '?', '[', ']', '{', '}',
+        '!', '#', '~', '\n', '%',
+    ];
+    let mut alphabet: Vec<char> = SHELL_MEANING.to_vec();
+    alphabet.extend(['a', 'Z', '0', '-', '.', '/', '=', ' ', 'é', '\u{3000}']);
+    let coverage = exhaustive_check(
+        String::new(),
+        &alphabet,
+        |state: &String, character: &char| {
+            (state.chars().count() < 3).then(|| format!("{state}{character}"))
+        },
+        |candidate: &String| match candidate.chars().find(|c| SHELL_MEANING.contains(c)) {
+            Some(c) if is_safe_agent_option(candidate) => Err(format!(
+                "is_safe_agent_option が {c:?} を含む {candidate:?} を通しました"
+            )),
+            _ => Ok(()),
+        },
+        100_000,
+    );
+    assert_eq!(
+        coverage.states,
+        1 + 33 + 33 * 33 + 33 * 33 * 33,
+        "長さ 3 までの文字列を全部回っていません"
+    );
+}
+
+#[test]
+/// Change 242, requirement 5. `formal-model` is formal only because every
+/// `model_check_*` test enumerates through `exhaustive_check`. A `model_` test that
+/// sampled a few cases would be a sample wearing the method's name, and the
+/// record would call it a proof. The guard also asks that one exists, so it
+/// cannot pass by having nothing to read.
+pub(crate) fn every_model_test_goes_through_exhaustive_check() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let suite = fs::read_to_string(root.join("src/tests.rs")).unwrap();
+    let (models, offenders) = model_check_offenders(&suite);
+    assert!(models > 0, "model_check_ テストが 1 つもありません");
+    assert!(
+        offenders.is_empty(),
+        "exhaustive_check を通らない model_check_ テストがあります — 形式的検証を名乗れません: {offenders:?}"
+    );
+}
+
+/// A scratch repository the review gate can judge, carrying its own tables so
+/// the guards below test the gate's rules rather than this month's numbers.
+/// `table_in_base` puts `docs/sdlc/verification-methods.yaml` in the seed
+/// commit — the first parent the gate reads its switch from.
+fn verification_fixture(label: &str, table_in_base: bool) -> (PathBuf, PathBuf) {
+    let fixture = temporary_directory(label);
+    let change = fixture.join("docs/sdlc/changes/001-a-change");
+    for directory in [
+        &change,
+        &fixture.join(".claude/agents"),
+        &fixture.join("src"),
+        &fixture.join("scripts"),
+    ] {
+        fs::create_dir_all(directory).unwrap();
+    }
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for script in ["check-review.sh", "run-bounded.sh", "run-obligations.sh"] {
+        fs::copy(
+            root.join("scripts").join(script),
+            fixture.join("scripts").join(script),
+        )
+        .unwrap();
+    }
+    fs::write(fixture.join("scripts/measure-holds.sh"), "exit 0\n").unwrap();
+    fs::write(
+        fixture.join("scripts/measure-breaks.sh"),
+        "echo broke\nexit 1\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("docs/sdlc/routes.yaml"),
+        "routes:\n  bugfix: \"build,test 3 gate.sh - craft\"\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("docs/sdlc/review-rounds.yaml"),
+        "rounds:\n  bugfix: \"2\"\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.join("docs/sdlc/risk.yaml"),
+        "surfaces:\n  text: \"low full no src/i18n.rs\"\n  store: \"high paused no src/store.rs\"\n",
+    )
+    .unwrap();
+    fs::write(fixture.join(".claude/agents/rust-reviewer.md"), "# rust\n").unwrap();
+    fs::write(
+        fixture.join("src/tests.rs"),
+        "fn some_test() {}\nfn model_check_counter() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        change.join("state.yaml"),
+        "state:\n  route: \"bugfix\"\n  status: \"reviewing\"\n",
+    )
+    .unwrap();
+    let table = "methods:\n  empirical-test: \"empirical cargo test --locked \"\n  empirical-mutation: \"empirical python3 docs/sdlc/changes/\"\n  empirical-measure: \"empirical bash scripts/measure-\"\n  formal-model: \"formal cargo test --locked model_check_\"\nsurfaces:\n  store: \"formal-model\"\nroutes:\n  bugfix: \"empirical-test\"\n  docs: \"-\"\n";
+    if table_in_base {
+        fs::write(fixture.join("docs/sdlc/verification-methods.yaml"), table).unwrap();
+    }
+    run_fixture_git(&fixture, &["init", "-q", "--initial-branch=main"]);
+    run_fixture_git(&fixture, &["add", "-A"]);
+    run_fixture_git(
+        &fixture,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "seed",
+        ],
+    );
+    if !table_in_base {
+        // In the diff being judged, not in its parent: still the old rule.
+        fs::write(fixture.join("docs/sdlc/verification-methods.yaml"), table).unwrap();
+    }
+    fs::write(fixture.join("src/i18n.rs"), "// changed\n").unwrap();
+    run_fixture_git(&fixture, &["add", "-A"]);
+    (fixture, change)
+}
+
+fn run_fixture_git(fixture: &Path, arguments: &[&str]) {
+    assert!(
+        git_command(fixture)
+            .args(arguments)
+            .status()
+            .unwrap()
+            .success(),
+        "git {arguments:?} がフィクスチャで失敗しました"
+    );
+}
+
+/// Runs a script of the fixture with the repository pointers this session may
+/// export removed, so it reads the fixture and not the real repository.
+fn fixture_script(fixture: &Path, script: &str, arguments: &[&str]) -> (i32, String) {
+    let mut command = Command::new("bash");
+    for pointer in INHERITED_REPOSITORY_POINTERS {
+        command.env_remove(pointer);
+    }
+    let output = command
+        .arg(fixture.join("scripts").join(script))
+        .args(arguments)
+        .current_dir(fixture)
+        .output()
+        .unwrap();
+    (
+        output.status.code().unwrap_or(-1),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    )
+}
+
+/// Writes and stages a file of the fixture's change, then asks the gate.
+fn gate_with(fixture: &Path, change: &Path, file: &str, text: &str) -> (i32, String) {
+    fs::write(change.join(file), text).unwrap();
+    run_fixture_git(fixture, &["add", "-A"]);
+    fixture_script(fixture, "check-review.sh", &["--index", "--all"])
+}
+
+/// The digest the gate reports for the staged diff, read off its own refusal
+/// rather than computed here — a guard that checks the gate against a value it
+/// typed itself is this suite's oldest mistake.
+fn probed_digest(fixture: &Path, change: &Path) -> String {
+    let (_, probe) = gate_with(
+        fixture,
+        change,
+        "verification.yaml",
+        "digest: \"0000000000000000\"\nobligations:\n  - I1 empirical-test :: cargo test --locked some_test\n",
+    );
+    let digest = probe
+        .split("現在の diff は ")
+        .nth(1)
+        .and_then(|rest| rest.split('。').next())
+        .unwrap_or_else(|| panic!("ゲートが現在の digest を報告しませんでした:\n{probe}"))
+        .trim()
+        .to_owned();
+    assert_eq!(digest.len(), 16, "digest の形が変わっています: {digest}");
+    digest
+}
+
+#[test]
+/// Change 242, requirement 1. Once the method table is in the first parent, a
+/// reviewer's approval is no longer what lands a change: with only a verdict
+/// the commit is refused for having no evidence, and with a covering record of
+/// evidence it ships — the verdict playing no part either way.
+pub(crate) fn review_gate_requires_a_verification_record_once_the_method_table_exists() {
+    let (fixture, change) = verification_fixture("verify-required", true);
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "review.yaml",
+        "digest: \"0000000000000000\"\nverdicts:\n  rust-reviewer: \"approve 0 0\"\n",
+    );
+    assert_eq!(code, 1, "判定だけで着地しました:\n{output}");
+    assert!(
+        output.contains("検証記録がありません"),
+        "拒否の理由が違います:\n{output}"
+    );
+
+    let digest = probed_digest(&fixture, &change);
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - I1 empirical-test :: cargo test --locked some_test\n"),
+    );
+    assert_eq!(code, 0, "検証を満たした記録で着地できません:\n{output}");
+    assert!(
+        output.contains("検証 1 件（経験的 1 · 形式的 0）"),
+        "通過の表示に検証の件数がありません:\n{output}"
+    );
+    assert!(
+        !output.contains("Important"),
+        "意見の判定の語彙が残っています:\n{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, requirement 2. CI runs what a record says, so the record may
+/// only say a method's literal prefix and one plain name. Each of these would
+/// be a verdict again — `true` — or arbitrary execution in CI — a cargo flag
+/// that names a wrapper, a separator — or evidence of nothing: a test filter
+/// that matches no test, which `cargo test` reports as success.
+pub(crate) fn an_obligation_command_outside_its_method_prefix_is_refused() {
+    let (fixture, change) = verification_fixture("verify-prefix", true);
+    let digest = probed_digest(&fixture, &change);
+    for (command, why) in [
+        ("true", "許されていません"),
+        (
+            "cargo test --locked --config=build.rustc-wrapper=x",
+            "許されていません",
+        ),
+        ("cargo test --locked some_test;true", "許されていません"),
+        ("cargo test --locked ../some_test", "許されていません"),
+        (
+            "cargo test --locked no_such_test",
+            "テストが src/tests.rs にありません",
+        ),
+        (
+            "python3 docs/sdlc/changes/002-other/mutations.py",
+            "許されていません",
+        ),
+    ] {
+        let (code, output) = gate_with(
+            &fixture,
+            &change,
+            "verification.yaml",
+            &format!("digest: \"{digest}\"\nobligations:\n  - I1 empirical-test :: {command}\n"),
+        );
+        assert!(
+            code == 1 && output.contains(why),
+            "「{command}」が拒否されませんでした（{why}）:\n{output}"
+        );
+    }
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - I1 no-such-method :: cargo test --locked some_test\n"),
+    );
+    assert!(
+        code == 1 && output.contains("verification-methods.yaml にありません"),
+        "{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, requirements 3 and 4. Every numbered requirement of the spec
+/// needs an obligation of its own number, and a surface the diff touches asks
+/// for the method the table names for it — the kind of evidence, not a person.
+pub(crate) fn every_spec_requirement_has_an_obligation() {
+    let (fixture, change) = verification_fixture("verify-coverage", true);
+    fs::write(
+        change.join("spec.md"),
+        "# Spec\n\n## Requirements\n\n1. one\n2. two\n\n## Behaviour\n",
+    )
+    .unwrap();
+    let digest = probed_digest(&fixture, &change);
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - R1 empirical-test :: cargo test --locked some_test\n"),
+    );
+    assert!(
+        code == 1 && output.contains("要件 2 を検証する行がありません"),
+        "{output}"
+    );
+
+    fs::write(fixture.join("src/store.rs"), "// changed\n").unwrap();
+    let digest = probed_digest(&fixture, &change);
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - R1 empirical-test :: cargo test --locked some_test\n  - R2 empirical-test :: cargo test --locked some_test\n"),
+    );
+    assert!(
+        code == 1 && output.contains("store には formal-model の検証が必要です"),
+        "store に形式的検証が求められていません:\n{output}"
+    );
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - R1 empirical-test :: cargo test --locked some_test\n  - R2 formal-model :: cargo test --locked model_check_counter\n"),
+    );
+    assert_eq!(
+        code, 0,
+        "要件と surface を満たした記録が通りません:\n{output}"
+    );
+    assert!(output.contains("形式的 1"), "{output}");
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, requirement 8. A commit whose first parent has no method table
+/// is judged by the verdicts it was made under — including the commit that
+/// adds the table, which is how this change itself is judged by `main`'s gate.
+pub(crate) fn review_gate_judges_history_before_the_method_table_by_verdicts() {
+    let (fixture, change) = verification_fixture("verify-history", false);
+    let (_, probe) = gate_with(
+        &fixture,
+        &change,
+        "review.yaml",
+        "digest: \"0000000000000000\"\nverdicts:\n  rust-reviewer: \"approve 0 0\"\n",
+    );
+    let digest = probe
+        .split("現在の diff は ")
+        .nth(1)
+        .and_then(|rest| rest.split('。').next())
+        .unwrap_or_else(|| panic!("旧方式の判定として読まれていません:\n{probe}"))
+        .trim()
+        .to_owned();
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "review.yaml",
+        &format!("digest: \"{digest}\"\nverdicts:\n  rust-reviewer: \"approve 0 0\"\n"),
+    );
+    assert_eq!(
+        code, 0,
+        "表のない親の上の commit が判定で着地できません:\n{output}"
+    );
+    assert!(
+        output.contains("passes"),
+        "旧方式の表示ではありません:\n{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, requirement 6. The record is run, not read. The runner executes
+/// exactly what the gate validated, reports a failing obligation by its id and
+/// exits non-zero, and CI calls it on every branch with the history it needs to
+/// find the branch's change directories.
+pub(crate) fn ci_re_runs_every_obligation_the_branch_records() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let ci = fs::read_to_string(root.join(".github/workflows/ci.yml")).unwrap();
+    assert!(
+        ci.contains("run: bash scripts/run-obligations.sh origin/main")
+            && ci.contains("fetch-depth: 0"),
+        "CI が検証記録を実行し直していません"
+    );
+
+    let (fixture, change) = verification_fixture("verify-runner", true);
+    // A route that asks for no method, so the record can hold only the
+    // fixture's measurements and the runner runs nothing that needs cargo.
+    fs::write(change.join("state.yaml"), "state:\n  route: \"docs\"\n").unwrap();
+    fs::write(
+        change.join("verification.yaml"),
+        "digest: \"0000000000000000\"\nobligations:\n  - I1 empirical-measure :: bash scripts/measure-holds.sh\n",
+    )
+    .unwrap();
+    let (code, output) = fixture_script(
+        &fixture,
+        "run-obligations.sh",
+        &["--dir", "docs/sdlc/changes/001-a-change"],
+    );
+    assert!(
+        code == 0 && output.contains("✓ I1"),
+        "成立する検証が成立と報告されません:\n{output}"
+    );
+
+    fs::write(
+        change.join("verification.yaml"),
+        "digest: \"0000000000000000\"\nobligations:\n  - I1 empirical-measure :: bash scripts/measure-holds.sh\n  - I2 empirical-measure :: bash scripts/measure-breaks.sh\n",
+    )
+    .unwrap();
+    let (code, output) = fixture_script(
+        &fixture,
+        "run-obligations.sh",
+        &["--dir", "docs/sdlc/changes/001-a-change"],
+    );
+    assert!(
+        code == 1 && output.contains("❌ I2") && output.contains("broke"),
+        "不成立の検証が CI を赤にしません:\n{output}"
+    );
+
+    fs::write(
+        change.join("verification.yaml"),
+        "digest: \"0000000000000000\"\nobligations:\n  - I1 empirical-measure :: true\n",
+    )
+    .unwrap();
+    let (code, output) = fixture_script(
+        &fixture,
+        "run-obligations.sh",
+        &["--dir", "docs/sdlc/changes/001-a-change"],
+    );
+    assert!(
+        code == 1 && !output.contains("✓"),
+        "検証されていないコマンドが実行されました:\n{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, requirement 4. Every high surface asks for a kind of evidence,
+/// every method a row names exists, and every route has a row — a surface or a
+/// route the table does not know would land on nothing at all.
+pub(crate) fn every_high_surface_names_the_methods_it_requires() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let table = fs::read_to_string(root.join("docs/sdlc/verification-methods.yaml")).unwrap();
+    let block = |name: &str| -> Vec<(String, String)> {
+        let mut inside = false;
+        let mut rows = Vec::new();
+        for line in table.lines() {
+            if !line.starts_with(' ') && !line.starts_with('#') && !line.is_empty() {
+                inside = line == format!("{name}:");
+                continue;
+            }
+            if let Some((key, value)) = inside.then(|| line.trim().split_once(": \"")).flatten() {
+                rows.push((key.to_owned(), value.trim_end_matches('"').to_owned()));
+            }
+        }
+        rows
+    };
+    let methods: Vec<String> = block("methods").into_iter().map(|(name, _)| name).collect();
+    assert!(
+        methods.iter().any(|m| m.starts_with("formal-")),
+        "形式的な方法がありません"
+    );
+    let surfaces = block("surfaces");
+    let routes = block("routes");
+    for (who, row) in surfaces.iter().chain(routes.iter()) {
+        for method in row.split(',').filter(|m| *m != "-") {
+            assert!(
+                methods.iter().any(|m| m == method),
+                "{who} が存在しない方法 {method} を求めています"
+            );
+        }
+    }
+    // The store holds work nobody else has a copy of, and a lost write there is
+    // unrecoverable: a sample of interruption points is not enough, so it asks
+    // for a method whose kind is formal. Read the kind from the table rather
+    // than naming the method here.
+    let formal: Vec<String> = block("methods")
+        .into_iter()
+        .filter(|(_, row)| row.starts_with("formal "))
+        .map(|(name, _)| name)
+        .collect();
+    let store = surfaces
+        .iter()
+        .find(|(name, _)| name == "store")
+        .map(|(_, row)| row.clone())
+        .unwrap_or_default();
+    assert!(
+        store
+            .split(',')
+            .any(|method| formal.iter().any(|f| f == method)),
+        "store に形式的検証が求められていません: {store}"
+    );
+    let risk = fs::read_to_string(root.join("docs/sdlc/risk.yaml")).unwrap();
+    for line in risk.lines().filter(|line| line.contains(": \"high ")) {
+        let surface = line.trim().split(':').next().unwrap_or_default();
+        assert!(
+            surfaces.iter().any(|(name, _)| name == surface),
+            "high の surface {surface} に求める検証がありません"
+        );
+    }
+    let route_table = fs::read_to_string(root.join("docs/sdlc/routes.yaml")).unwrap();
+    for line in route_table
+        .lines()
+        .filter(|line| line.starts_with("  ") && line.contains(": \""))
+    {
+        let route = line.trim().split(':').next().unwrap_or_default();
+        assert!(
+            routes.iter().any(|(name, _)| name == route),
+            "route {route} に検証の行がありません"
+        );
+    }
+}
+
+#[test]
+/// Change 242, requirement 7. A worry nobody reproduced has nowhere to go: the
+/// record has no verdict, no unconfirmed finding, and no line for a person to
+/// read about one, and the review policy says a finding is a failing test.
+pub(crate) fn verification_record_has_no_field_for_an_unreproduced_finding() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let template = fs::read_to_string(root.join("docs/sdlc/templates/verification.yaml")).unwrap();
+    for field in ["verdicts:", "carried:", "person:", "rounds:"] {
+        assert!(
+            !template.lines().any(|line| line.starts_with(field)),
+            "検証記録の雛形に {field} があります — 再現されていない意見の置き場になります"
+        );
+    }
+    let policy = fs::read_to_string(root.join("REVIEW.md")).unwrap();
+    assert!(
+        policy.contains("A finding is a reproduction or nothing"),
+        "REVIEW.md が「指摘は再現か、何でもない」を述べていません"
+    );
+}
+
+#[test]
+/// Change 242, requirement 9. The verifiers try to falsify and hand back
+/// evidence; neither is told to return an approval, and both work in an
+/// isolated worktree because what they return is code.
+pub(crate) fn verifier_agents_return_evidence_not_verdicts() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for (agent, evidence) in [
+        ("empirical-verifier", "fails at the change's head"),
+        ("formal-verifier", "exhaustive_check"),
+    ] {
+        let text = fs::read_to_string(root.join(format!(".claude/agents/{agent}.md")))
+            .unwrap_or_else(|_| panic!(".claude/agents/{agent}.md がありません"));
+        assert!(
+            text.contains(evidence),
+            "{agent} が証拠（{evidence}）を返すと書かれていません"
+        );
+        assert!(
+            text.contains("worktree"),
+            "{agent} が隔離された worktree で動くと書かれていません"
+        );
+        assert!(
+            !text.contains("**approve**") && !text.contains("do not approve"),
+            "{agent} が承認・不承認を返すよう書かれています"
+        );
+    }
+}
+
+#[test]
+/// Change 242, finding F1 (rust-reviewer). A diff that adds a child or
+/// `unsafe` asks for the subprocess surface's method, and a record carrying it
+/// must pass. The requirement used to be keyed `Command::new/unsafe:<method>`,
+/// which the first-colon split read as `Command` wanting `:new/unsafe:<method>`
+/// — a method no record can hold, so every such change was blocked.
+pub(crate) fn a_record_satisfies_the_method_an_added_child_requires() {
+    let (fixture, change) = verification_fixture("verify-spawn", true);
+    let table = fs::read_to_string(fixture.join("docs/sdlc/verification-methods.yaml")).unwrap();
+    fs::write(
+        fixture.join("docs/sdlc/verification-methods.yaml"),
+        table.replace(
+            "surfaces:\n",
+            "surfaces:\n  subprocess: \"empirical-measure\"\n",
+        ),
+    )
+    .unwrap();
+    run_fixture_git(&fixture, &["add", "-A"]);
+    run_fixture_git(
+        &fixture,
+        &[
+            "-c",
+            "user.name=Operon test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "table",
+        ],
+    );
+    fs::write(
+        fixture.join("src/i18n.rs"),
+        "// changed\nfn f() { Command::new(\"x\"); }\n",
+    )
+    .unwrap();
+    let digest = probed_digest(&fixture, &change);
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - I1 empirical-test :: cargo test --locked some_test\n"),
+    );
+    assert!(
+        code == 1
+            && output.contains("empirical-measure の検証が必要です")
+            && !output.contains(":new"),
+        "子プロセスを足す diff に求める検証が、読める形で拒否されていません:\n{output}"
+    );
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        &format!("digest: \"{digest}\"\nobligations:\n  - I1 empirical-test :: cargo test --locked some_test\n  - I2 empirical-measure :: bash scripts/measure-holds.sh\n"),
+    );
+    assert_eq!(
+        code, 0,
+        "求められた検証を満たした記録が通りません:\n{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, finding F3 (rust-reviewer). The verdict rule refused a route
+/// the table did not have; the evidence rule must too, or a mistyped route
+/// with no spec and no high surface lands with no evidence at all.
+pub(crate) fn an_unknown_route_does_not_land_on_no_evidence() {
+    let (fixture, change) = verification_fixture("verify-route", true);
+    fs::write(change.join("state.yaml"), "state:\n  route: \"zzz\"\n").unwrap();
+    run_fixture_git(&fixture, &["add", "-A"]);
+    let (code, output) = fixture_script(&fixture, "check-review.sh", &["--index", "--all"]);
+    assert!(
+        code != 0 && output.contains("zzz"),
+        "表にない route が検証 0 件で着地しました:\n{output}"
+    );
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+#[test]
+/// Change 242, finding F4 (subprocess-safety-reviewer). The evidence rule must
+/// not be switchable off. Once the table is in the first parent, a commit that
+/// removes it — after which the next commit would fall back to verdicts — is
+/// refused; and the table and the runner are gate configuration, so editing
+/// them asks for the evidence that surface requires.
+pub(crate) fn the_evidence_rule_cannot_be_switched_off() {
+    let (fixture, change) = verification_fixture("verify-ratchet", true);
+    run_fixture_git(
+        &fixture,
+        &["rm", "-q", "docs/sdlc/verification-methods.yaml"],
+    );
+    // Refused before the record is read, so its digest does not matter.
+    let (code, output) = gate_with(
+        &fixture,
+        &change,
+        "verification.yaml",
+        "digest: \"0000000000000000\"\nobligations:\n  - I1 empirical-test :: cargo test --locked some_test\n",
+    );
+    assert!(
+        code == 1 && output.contains("verification-methods.yaml を消すか"),
+        "検証の表を消す commit が通りました。次の commit から判定の方式に戻ります:\n{output}"
+    );
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let risk = fs::read_to_string(root.join("docs/sdlc/risk.yaml")).unwrap();
+    let gate = risk
+        .lines()
+        .find(|line| line.trim_start().starts_with("gate-configuration:"))
+        .unwrap_or_default();
+    for path in [
+        "docs/sdlc/verification-methods.yaml",
+        "scripts/run-obligations.sh",
+    ] {
+        assert!(
+            gate.split(&[',', ' ', '"'][..]).any(|p| p == path),
+            "{path} が gate-configuration の surface にありません"
+        );
+    }
+    fs::remove_dir_all(fixture).unwrap();
+}
+
+/// The `model_check_*` tests a suite defines, and those that do not call
+/// `exhaustive_check` outside a comment. Read at line starts, so the text of a
+/// guard that searches for the prefix is not itself counted as a model.
+fn model_check_offenders(suite: &str) -> (usize, Vec<String>) {
+    let mut models = 0;
+    let mut offenders = Vec::new();
+    let lines: Vec<&str> = suite.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        let Some(rest) = line.strip_prefix("pub(crate) fn model_check_") else {
+            continue;
+        };
+        let name = format!("model_check_{}", rest.split('(').next().unwrap_or_default());
+        models += 1;
+        let calls = lines[index + 1..]
+            .iter()
+            .take_while(|body| **body != "}")
+            .any(|body| {
+                let code = body.split("//").next().unwrap_or_default();
+                code.contains("exhaustive_check(")
+            });
+        if !calls {
+            offenders.push(name);
+        }
+    }
+    (models, offenders)
+}
+
+/// Whether the `exit 0` at `position` is the single top-level exit of the
+/// block `opener` starts, and its last statement: the nearest unindented `if`
+/// above it is `opener`, the next code line is the block's `fi`, and no other
+/// line of the block is a bare `exit 0` at the block's own indentation.
+fn closes_its_block(code: &[&str], position: usize, opener: &str) -> bool {
+    let Some(start) = code[..position]
+        .iter()
+        .rposition(|line| line.starts_with("if "))
+    else {
+        return false;
+    };
+    code[start] == opener
+        && code[position] == "  exit 0"
+        && code.get(position + 1) == Some(&"fi")
+        && code[start + 1..position]
+            .iter()
+            .all(|line| *line != "  exit 0" && *line != "fi")
+}
+
+#[test]
+/// Change 242, finding F5 (subprocess-safety-reviewer). An exit pinned only by
+/// the text of the line before it lets a bypass that echoes the same text
+/// through. Pinned to its block, a second exit in the block is refused.
+pub(crate) fn a_new_gate_exit_is_pinned_to_its_block() {
+    let opener = "if [ -n \"$obligations_dir\" ]; then";
+    let honest = [
+        opener,
+        "  printf '%s' \"$obligations_ok\"",
+        "  exit 0",
+        "fi",
+    ];
+    assert!(closes_its_block(&honest, 2, opener));
+    let bypass = [
+        opener,
+        "  printf '%s' \"$obligations_ok\"",
+        "  exit 0",
+        "  echo x",
+        "  exit 0",
+        "fi",
+    ];
+    assert!(
+        !closes_its_block(&bypass, 4, opener),
+        "同じ block の 2 つ目の exit 0 を通しました"
+    );
+    assert!(
+        !closes_its_block(&bypass, 2, opener),
+        "block の途中の exit 0 を通しました"
+    );
+    let elsewhere = [
+        "if [ -z \"$changed\" ]; then",
+        "  printf '%s' \"$obligations_ok\"",
+        "  exit 0",
+        "fi",
+    ];
+    assert!(
+        !closes_its_block(&elsewhere, 2, opener),
+        "別の block の exit 0 を通しました"
+    );
+}
+
+#[test]
+/// Change 242, finding F2 (rust-reviewer). The model guard used to find the
+/// prefix inside its own string literal and the call inside its own body, so
+/// with every model deleted, or with a model that named the checker only in a
+/// comment, it stayed green.
+pub(crate) fn the_model_check_count_excludes_its_own_search() {
+    let guard_only = "fn guard() {\n    suite.match_indices(\"pub(crate) fn model_check_\");\n    // exhaustive_check(\n}\n";
+    assert_eq!(
+        model_check_offenders(guard_only).0,
+        0,
+        "ガード自身を model として数えています"
+    );
+    let commented =
+        "pub(crate) fn model_check_x() {\n    // exhaustive_check(\n    assert!(true);\n}\n";
+    assert_eq!(
+        model_check_offenders(commented).1,
+        vec!["model_check_x".to_owned()],
+        "コメントの中の exhaustive_check( を呼び出しと数えています"
+    );
 }

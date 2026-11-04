@@ -100,9 +100,14 @@ the earlier sections stay as they were.
 
 ## 4. Review, land, package
 
-- **Review**: the route's `review` column in `docs/sdlc/routes.yaml` names the
-  reviewers in `.claude/agents/`; `REVIEW.md` is the policy and
-  `scripts/check-review.sh` the gate.
+- **Verify**: since change 242 a change lands on evidence. Write
+  `verification.yaml` (requirements → commands of the methods
+  `docs/sdlc/verification-methods.yaml` allows and requires), have
+  `empirical-verifier` and `formal-verifier` try to falsify it, fix what they
+  reproduce, and record their failing tests as `Fn`. `REVIEW.md` is the policy,
+  `scripts/check-review.sh` the gate, and the CI `verify` job re-runs every
+  obligation. A branch whose first parent predates the method table is still
+  judged by the route's `review` column and the reviewers it names.
 - **Close** per `.claude/skills/sdlc/SKILL.md` §10 before committing the branch:
   set `status: done` and settle contract verdicts in `state.yaml` (and add a
   lesson with its guard when the mistake could recur) — `.claude/hooks/gate-merge.sh`

@@ -1,0 +1,49 @@
+# Review of change 242. Shape: docs/sdlc/templates/review.yaml.
+#
+# The last change judged by verdicts: main's gate has no method table yet, so
+# it asks rust-reviewer and subprocess-safety-reviewer for this one. The same
+# change's evidence is in verification.yaml and CI's verify job runs it.
+#
+# Round 1, both do-not-approve, five Important between them: a required-method
+# token with a colon that no record could satisfy (rust/F1), a model guard that
+# counted its own string literal (rust/F2), an unknown route landing on zero
+# evidence (rust/F3), the method table and runner outside gate-configuration so
+# the evidence rule could be switched off in two commits (subprocess/F4), and
+# new success exits pinned by text a bypass could copy (subprocess/F5). Each was
+# reproduced as a failing test first, fixed, and recorded as F1-F5 in
+# verification.yaml; the sweep went to 24 of 24 caught.
+# Round 2, both approve-with-nits. Round 3: the commit gate refused the
+# short `evals/007` link in empirical-verifier.md; with the full path both
+# re-confirmed approve-with-nits. Round 4: CI failed one existing guard that
+# lists the cached CI jobs (it did not know verify); 665888d added it, and both
+# re-confirmed approve-with-nits on the whole branch against main, below.
+
+digest: "f73987f59d1531c8"
+
+rounds: 4
+
+carried:
+  - rust-reviewer/1 · verification_check accepts a bare R or I id with no digits; [RFI][0-9]* matches zero digits
+    person: "検証記録の番号を「R」だけで書いても受け付けてしまいます。記録の読みやすさだけの問題で、対応は不要です。"
+  - rust-reviewer/2 · exhaustive_check asserts the invariant at pop, so a shallow violation still in the frontier can be reported as hitting the state ceiling instead of as a counterexample
+    person: "形式的な検査で、状態数の上限と違反が同時に起きると、違反ではなく上限として報告されます。どちらでも失敗として止まるので、対応は不要です。"
+  - rust-reviewer/3 · model_check_offenders misses a model_check_ fn without pub(crate), or one whose exhaustive_check( is inside a block comment or a string
+    person: "書き方を工夫すれば、網羅検査を通らないテストを形式的検証と名乗らせることができます。普通に書けば起きず、今は対応不要です。"
+  - rust-reviewer/4 · verification_fixture callers remove the scratch repository only on the success path; a failed assertion leaks it
+    person: "テストが失敗したとき、一時フォルダが消えずに残ります。テストの後片付けの問題で、対応は不要です。"
+  - rust-reviewer/5 · panic_message returns an empty string for a payload that is neither String nor &str, hiding the real failure
+    person: "まれな形の失敗では、テストの失敗理由が空欄で表示されます。失敗自体は検出されるので、対応は不要です。"
+  - subprocess-safety-reviewer/1 · a mutations.py or test that exits 0 is vacuous evidence; on gate-configuration the author writes both the guard and its only check
+    person: "常に成功する検証を書けば、形だけの証拠で通せてしまいます。仕組み上の限界として残しており、今は対応不要です。"
+  - subprocess-safety-reviewer/2 · run-obligations.sh writes all child output to a file and trims afterwards; a looping child can fill the runner disk within 900 s
+    person: "CI で暴走したテストが出力を出し続けると、CI のディスクを使い切る可能性があります。15 分で止まるので、対応は不要です。"
+  - subprocess-safety-reviewer/3 · for dir in $dirs runs with globbing on; a change directory name with * expands to others (still validated)
+    person: "変更フォルダの名前に「*」を含めると、CI が別のフォルダも検証します。そういう名前は作られないので、対応は不要です。"
+  - subprocess-safety-reviewer/4 · a method only in the landed table is accepted through methods_union; now covered by the gate-configuration evidence requirement
+    person: "検証の方法表に新しい方法を足した変更は、足した方法をその場で使えます。表の変更自体に検証が必要になったので、対応は不要です。"
+  - subprocess-safety-reviewer/5 · CI skips a change directory with no verification.yaml and exits 0; state that this is deliberate
+    person: "検証記録の無い古い変更は、CI で何も実行されません。手元のコミット時の検査が記録を求めるので、対応は不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 5"
+  subprocess-safety-reviewer: "approve-with-nits 0 5"

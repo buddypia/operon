@@ -15,6 +15,10 @@ name: CI
 # and the hook checks are `bash -n`. What went: a job running the ignored tests
 # with `continue-on-error` and `|| true`, which could not fail and had no agent
 # CLI to pass with; AGENTS.md says when to run those, locally.
+#
+# Change 242 added a fourth, `verify`, which re-runs the evidence a change
+# recorded. A branch push now starts three here (`package` is main-only) and
+# two in harness.yml: five, which is the account's ceiling and not past it.
 
 on:
   push:
@@ -100,6 +104,34 @@ jobs:
         run: bash scripts/seed-target.sh --reset-only .
       - name: Full locked test suite
         run: cargo test --locked
+
+  # Change 242. A change lands on evidence, and this is where the evidence is
+  # run rather than believed: every obligation in the verification.yaml of
+  # every change this branch touches, on the branch head. The commit gate binds
+  # the record to its diff; this job is what makes a recorded command that does
+  # not hold a red workflow, and .claude/hooks/gate-merge.sh does not merge one.
+  verify:
+    name: verification obligations
+    runs-on: macos-latest
+    env:
+      RUSTFLAGS: -D warnings
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The merge base with main decides which change directories the
+          # branch touches.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ env.ImageOS }}-${{ env.ImageVersion }}-no-openssl
+      - name: Reset restored native CMake caches
+        run: bash scripts/seed-target.sh --reset-only .
+      - name: Re-run every recorded obligation
+        run: bash scripts/run-obligations.sh origin/main
 
   package:
     name: macos app bundle packaging
