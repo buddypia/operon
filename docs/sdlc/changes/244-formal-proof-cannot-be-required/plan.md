@@ -43,3 +43,28 @@
 | The probe takes a sixth macOS job while a landing runs five | another branch's CI queues | runs on this branch only, and is removed |
 | Kani's toolchain differs from 1.88 and the crate does not compile under it | the build step fails | that is outcome three, recorded with its error |
 | The `cfg(kani)` declaration hides a misspelt cfg | a typo in another cfg is not warned about | `check-cfg` names exactly `cfg(kani)`; every other cfg is still checked |
+
+## Departures from the plan
+
+- **Measured: outcome one.** CI run 41802936778 on `ff32070`, `macos-latest`:
+  `kani-verifier` 0.68.0, install 29 s (a prebuilt binary), `cargo kani setup`
+  11 s, `cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break`
+  419 s — about 325 s compiling the crate, llama-cpp-sys-2 and eframe included,
+  and 94 s proving: 686 checks, 0 failed, `VERIFICATION:- SUCCESSFUL`. That
+  fits the 900 s each obligation is given in the `verify` job.
+- **So formal-proof becomes requirable, where it serves.** Kani proves
+  properties of pure functions over symbolic input; in this crate those are
+  the launch gates in `src/agents.rs`. Written before the edit:
+
+  | File | Change |
+  |---|---|
+  | `docs/sdlc/risk.yaml` | a surface `launch-gate`, `medium supervised no src/agents.rs` |
+  | `docs/sdlc/verification-methods.yaml` | `launch-gate: "formal-proof"`; the `formal-proof` prefix becomes `cargo kani --tests --harness ` (the harnesses sit in the test module); the comment states the measurement |
+  | `scripts/check-review.sh` | a `formal-proof` obligation must name a `#[kani::proof]` function that exists in `src/tests.rs`, as a `cargo test` one must name a test |
+  | `.github/workflows/ci.yml` | the `verify` job installs Kani 0.68.0 when an obligation of the branch names `formal-proof`, and only then |
+  | `.github/workflows/kani-probe.yml` | also watches the harness fail with the newline put back into the gate; removed before landing |
+
+  All of it adds a requirement; none removes or narrows one, so the
+  evaluator decides it (`approval.md`, gate configuration, tightening). A
+  change to `src/agents.rs` from here on records the existing harness as its
+  `formal-proof` obligation, which costs its CI run about seven minutes.
