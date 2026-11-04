@@ -6,7 +6,7 @@
 
 ## Order of work
 
-1. **Probe.** `.github/workflows/kani-probe.yml`, on this branch only: install
+1. **Probe.** the probe workflow (kani-probe.yml, removed before landing), on this branch only: install
    `kani-verifier`, `cargo kani setup`, then
    `cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break`,
    each step timed into the job summary. The harness sits in `src/tests.rs`
@@ -30,7 +30,7 @@
 
 | File | Change |
 |---|---|
-| `.github/workflows/kani-probe.yml` | added for the probe, removed before landing |
+| the probe workflow (kani-probe.yml, removed before landing) | added for the probe, removed before landing |
 | `src/tests.rs` | the `#[cfg(kani)]` harness |
 | `Cargo.toml` | `[lints.rust] unexpected_cfgs` declares `cfg(kani)` |
 | `docs/sdlc/verification-methods.yaml` | the measured verdict on `formal-proof` |
@@ -62,9 +62,18 @@
   | `docs/sdlc/verification-methods.yaml` | `launch-gate: "formal-proof"`; the `formal-proof` prefix becomes `cargo kani --tests --harness ` (the harnesses sit in the test module); the comment states the measurement |
   | `scripts/check-review.sh` | a `formal-proof` obligation must name a `#[kani::proof]` function that exists in `src/tests.rs`, as a `cargo test` one must name a test |
   | `.github/workflows/ci.yml` | the `verify` job installs Kani 0.68.0 when an obligation of the branch names `formal-proof`, and only then |
-  | `.github/workflows/kani-probe.yml` | also watches the harness fail with the newline put back into the gate; removed before landing |
+  | the probe workflow (kani-probe.yml, removed before landing) | also watches the harness fail with the newline put back into the gate; removed before landing |
 
   All of it adds a requirement; none removes or narrows one, so the
   evaluator decides it (`approval.md`, gate configuration, tightening). A
   change to `src/agents.rs` from here on records the existing harness as its
   `formal-proof` obligation, which costs its CI run about seven minutes.
+- **The harness fails on the defect it guards.** CI run 41806210171 on
+  `348940a`: with `'\n'` put back into the gate's whitespace arm, Kani reports
+  `VERIFICATION:- FAILED` on `assertion failed: !command.trim().contains(['\n',
+  '\r', ';'])`; unmutated, the same run proved it again in 380 s. The probe
+  workflow is removed in the commit after it.
+- **This change records no formal-proof obligation of its own**: the method
+  table that judges its commits is main's, whose prefix is still the old one.
+  The two probe runs above are its proof evidence; the first change to
+  `src/agents.rs` after it lands records the harness under the new prefix.

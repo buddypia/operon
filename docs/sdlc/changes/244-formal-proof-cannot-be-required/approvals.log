@@ -1,2 +1,5 @@
 2026-11-04T09:15:37Z auto plan plan.md 6f8eaf907eb38e02 approve evaluator subagent: the probe and its departure meet backlog 8bzmycdr (a measured run recorded, formal-proof required on the one surface it serves); the built diff matches the plan's table
 2026-11-04T09:15:37Z auto gate-configuration plan.md 6f8eaf907eb38e02 approve evaluator subagent: every edit adds a requirement — a launch-gate surface, a refusal of a proof name with no harness, Kani installed only when a proof is recorded; the formal-proof prefix gains --tests while no surface required it, so nothing is narrowed
+2026-11-04T09:32:09Z auto spec spec.md bd3b6c791a3c6aa7 approve evaluator subagent: each requirement names a test or mutation that exists, the spec answers the intent's outcome, and the policy rows hold
+2026-11-04T09:40:12Z auto plan plan.md 0c8548dd6719577d approve evaluator subagent, re-asked: the removed workflow named as prose instead of a path; nothing else changed above the departures
+2026-11-04T09:40:12Z auto gate-configuration plan.md 0c8548dd6719577d approve evaluator subagent, re-asked: the same tightening at the new digest

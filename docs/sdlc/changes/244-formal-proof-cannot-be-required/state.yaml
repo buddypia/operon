@@ -14,21 +14,21 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "awaiting-user"
   attempts: "0 3"
-  questions: "0 7"
+  questions: "1 7"
   autonomy: "supervised"
   risk: "high"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 
-resume: "Probe first: the kani-probe workflow with one harness, run on this branch; read its timings. The route's documents follow from what it measures."
+resume: "Built, CI green, probe removed. Waiting for a person to approve the intent, the spec at bd3b6c791a3c6aa7, and the plan at 0c8548dd6719577d for gate-configuration and dependencies (approvals.log); asked 2026-11-04, no answer. Then: approve line, status done, land."
 
 contract:
-  probe-measured: "machine pending the kani-probe run on this branch: install, setup, build, verify times and verdict"
-  three-gates: "machine pending gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  probe-measured: "machine passed runs 41802936778 and 41806210171: install 29 s, setup 11 s, build and proof 419 s, 686 checks 0 failed; FAILED with the newline put back"
+  three-gates: "machine passed gate-commit.sh admitted 348940a; CI run 41806210192 green"
+  bands: "machine passed bash scripts/check-bands.sh exit 0"
   release-binary: "machine passed no: src/tests.rs, Cargo.toml lints, CI and documents only"
 
 sets:
