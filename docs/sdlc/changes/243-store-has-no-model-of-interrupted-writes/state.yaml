@@ -26,8 +26,8 @@ state:
 resume: "Done. The store model exists and passes on main; it covers the store file, not the cancellation sidecar written beside it (backlog)."
 
 contract:
-  three-gates: "machine pending gate-commit.sh admits the commit"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed gate-commit.sh admitted 1862c46 (fmt, clippy, record tests); CI run 41798763881 green"
+  bands: "machine passed bash scripts/check-bands.sh exit 0"
   release-binary: "machine passed no: only src/tests.rs and documents change"
   guards-verified-by-mutation: "human passed mutations.py 7 of 7 caught, each by the model"
 
