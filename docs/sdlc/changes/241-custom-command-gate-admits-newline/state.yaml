@@ -18,7 +18,7 @@
 
 state:
   route: "bugfix"
-  stage: "build"
+  stage: "test"
   status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
@@ -27,14 +27,14 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Plan committed; next: failing tests, then the fix in src/agents.rs."
+resume: "Fix and evidence committed; next: plan evaluator, empirical-verifier, push, CI, land, repackage."
 
 contract:
-  three-gates: "machine pending"
-  bands: "machine pending"
-  failing-test-first: "machine pending"
-  release-binary: "machine pending"
-  guards-verified-by-mutation: "human pending"
+  three-gates: "machine pending gate-commit.sh admits the fix commit (fmt, clippy, record tests)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0; diagnose and warn rows predate this change"
+  failing-test-first: "machine passed both new tests failed on the unedited gate: a newline inside admitted, model counterexample of 2 steps"
+  release-binary: "machine pending src/agents.rs changes, so the app is repackaged after landing"
+  guards-verified-by-mutation: "human passed mutations.py 4 of 4 caught, each by the model alone"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
