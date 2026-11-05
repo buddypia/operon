@@ -1,0 +1,12 @@
+digest: "51c605867356994e"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_column_project_is_a_heading_not_a_card
+  - R2 empirical-test :: cargo test --locked session_column_project_heading_keeps_its_operations
+  - R3 empirical-test :: cargo test --locked session_column_project_is_a_heading_not_a_card
+  - R4 empirical-test :: cargo test --locked session_crumb_names_project_then_title
+  - I2 empirical-test :: cargo test --locked terminal_pane_draws_the_crumb_once
+  - R5 empirical-test :: cargo test --locked session_column_project_heading_keeps_its_operations
+  - F1 empirical-test :: cargo test --locked session_column_project_is_a_heading_not_a_card
+  - F2 empirical-mutation :: python3 docs/sdlc/changes/245-project-hero-in-two-places/mutations.py
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/245-project-hero-in-two-places/mutations.py
