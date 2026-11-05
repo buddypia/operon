@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-05
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -49,4 +49,9 @@
 
 ## Departures from the plan
 
-Filled in during implementation.
+- Verification (empirical-verifier): the selected heading at `text_strong`
+  broke requirement 3 in that group, and the guards read roles from anywhere
+  in the column. Spec requirement 1 now keeps the selected heading in
+  `text_muted` (strong only), the guards read the name, title, and crumb
+  labels themselves, and the sweep gained the three role mutants. Recorded
+  as F1 and F2 in `verification.yaml`; sweep is 8 of 8 caught.

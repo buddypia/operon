@@ -7,9 +7,11 @@
 
 1. In `ui_workspace_projects`, a project is drawn as a group heading, not a
    card: no `card_frame` fill for the group, the name at 12.5 in
-   `text_muted` (strong only when it is the selected project, in
-   `text_strong`), and a `hairline` under the heading row. Pinned by
-   `session_column_project_is_a_heading_not_a_card`.
+   `text_muted` (strong only when it is the selected project, still in
+   `text_muted` so requirement 3 holds in that group too), and a
+   `hairline` under the heading row. Pinned by
+   `session_column_project_is_a_heading_not_a_card`, which reads the roles
+   on the name label itself, not anywhere in the column.
 2. The heading keeps every operation it has today: fold/unfold, drag to
    reorder (the name stays the grip), click to select the workspace project,
    the status count chips, and the small `+` that starts a session. Pinned by

@@ -45,5 +45,5 @@ Terminal pane:
 - No projects: 「プロジェクトがありません」 (unchanged).
 - Long project name: truncates in the heading; hover shows name, path,
   「ドラッグで並べ替え」 (unchanged).
-- Selected project: heading name in `text_strong`; no fill anywhere.
+- Selected project: heading name strong, still in `text_muted`; no fill anywhere.
 - Split terminal: same crumb above each pane header.

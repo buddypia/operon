@@ -1,7 +1,7 @@
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -9,13 +9,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "テストを先に書き左列と現在地を実装する"
+resume: "左列は見出しになり、主役はプロジェクト画面だけになった"
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes - touches src/app/screens.rs so ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed yes - touches src/app/screens.rs so ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human passed mutation sweep 8 of 8 caught"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

@@ -1,0 +1,15 @@
+# The review record for one change. Copy into a change directory.
+#
+# `scripts/check-review.sh` is the only parser, and until this template existed
+# the shape lived nowhere else — which is how `rounds:` and `carried:
+  - rust-reviewer/1 · 狭い分割ペインで現在地の行が折り返すことがある
+    person: "画面を細かく分割したときだけ、上部の1行が2行になることがあります。使うのに困ったら教えてください。対応は要りません。"
+  - rust-reviewer/2 · 現在地を1回だけ描くことをテストが直接は確かめていない
+    person: "今の使い方で困ることはありません。対応は要りません。"
+  - rust-reviewer/3 · 操作のテストが文字列の有無で確かめている
+    person: "今の使い方で困ることはありません。対応は要りません。"
+  - rust-reviewer/4 · 見出しの文字の作り方が2か所に分かれている
+    person: "見た目には出ません。対応は要りません。"
+
+verdicts:
+  rust-reviewer: "approve 0 0"
