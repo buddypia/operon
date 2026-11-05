@@ -5809,18 +5809,22 @@ impl OperonApp {
                                     // gates in `src/agents.rs`, which this
                                     // change does not touch (change 246).
                                     let label = agent_short_label(&candidate.agent);
+                                    // The chip's size, as `agent_chip` takes
+                                    // it: a parameter, not a `.size(…)` of
+                                    // its own, so it stays the helper's call.
+                                    let chip_size = 10.5;
                                     match agent_icon_texture(ui.ctx(), &candidate.agent) {
                                         Some(texture) => {
                                             ui.add(egui::Image::new((
                                                 texture.id(),
-                                                egui::vec2(14.5, 14.5),
+                                                egui::vec2(chip_size + 4.0, chip_size + 4.0),
                                             )))
                                             .on_hover_text(label);
                                         }
                                         None => {
                                             ui.label(
                                                 RichText::new(label)
-                                                    .size(10.5)
+                                                    .size(chip_size)
                                                     .color(second_ink),
                                             )
                                             .on_hover_text(label);
