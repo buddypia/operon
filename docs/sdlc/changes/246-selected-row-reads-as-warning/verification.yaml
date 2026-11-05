@@ -1,5 +1,5 @@
 # The evidence for change 246. Shape: docs/sdlc/templates/verification.yaml.
-digest: "69b6203e0548828d"
+digest: "2f1aa1418ba6f892"
 
 obligations:
   - R1 empirical-test :: cargo test --locked selected_row_takes_the_selection_colour
