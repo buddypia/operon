@@ -569,8 +569,11 @@ impl OperonApp {
             waiting.sort_by_key(|session| std::cmp::Reverse(session.created_at));
             // Owned only for the five drawn: a row takes `&mut self`.
             let waiting: Vec<Session> = waiting.into_iter().take(5).cloned().collect();
+            // A neutral card, not the selection surface: this banner is a
+            // warning, and wearing the selection colour would say the wrong
+            // thing twice (change 246).
             card_frame(palette)
-                .fill(palette.row_selected)
+                .fill(palette.card)
                 .stroke(egui::Stroke::new(1.0, palette.warning))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
@@ -5193,6 +5196,16 @@ impl OperonApp {
                                             egui::Sense::hover(),
                                         );
                                         ui.painter().circle_filled(dot.center(), 4.0, ink);
+                                        // Ringed on the selected row, for the
+                                        // same reason as the session column's
+                                        // dot (change 246).
+                                        if selected {
+                                            ui.painter().circle_stroke(
+                                                dot.center(),
+                                                4.0,
+                                                egui::Stroke::new(1.0, palette.selected_ink()),
+                                            );
+                                        }
                                         let title_width = (ui.available_width() - 56.0).max(40.0);
                                         ui.allocate_ui_with_layout(
                                             egui::vec2(title_width, 20.0),
@@ -5203,7 +5216,11 @@ impl OperonApp {
                                                         RichText::new(&title)
                                                             .strong()
                                                             .size(13.5)
-                                                            .color(palette.text_strong),
+                                                            .color(if selected {
+                                                                palette.selected_ink()
+                                                            } else {
+                                                                palette.text_strong
+                                                            }),
                                                     )
                                                     .truncate(),
                                                 );
@@ -5212,16 +5229,24 @@ impl OperonApp {
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                ui.label(RichText::new(wait).size(11.5).color(ink));
+                                                ui.label(RichText::new(wait).size(11.5).color(
+                                                    if selected {
+                                                        palette.selected_ink()
+                                                    } else {
+                                                        ink
+                                                    },
+                                                ));
                                             },
                                         );
                                     });
                                     ui.add(
-                                        egui::Label::new(
-                                            RichText::new(meta)
-                                                .size(12.0)
-                                                .color(palette.text_muted),
-                                        )
+                                        egui::Label::new(RichText::new(meta).size(12.0).color(
+                                            if selected {
+                                                palette.selected_secondary_ink()
+                                            } else {
+                                                palette.text_muted
+                                            },
+                                        ))
                                         .truncate(),
                                     );
                                     if let Some(line) = line {
@@ -5229,7 +5254,11 @@ impl OperonApp {
                                             line.to_owned(),
                                             egui::TextFormat {
                                                 font_id: egui::FontId::proportional(12.0),
-                                                color: palette.text,
+                                                color: if selected {
+                                                    palette.selected_secondary_ink()
+                                                } else {
+                                                    palette.text
+                                                },
                                                 ..Default::default()
                                             },
                                         );
@@ -5599,7 +5628,11 @@ impl OperonApp {
                                             egui::Button::new(
                                                 RichText::new(ICON_MORE)
                                                     .size(14.0)
-                                                    .color(palette.text_muted),
+                                                    .color(if is_selected {
+                                                        palette.selected_secondary_ink()
+                                                    } else {
+                                                        palette.text_muted
+                                                    }),
                                             )
                                             .frame(false)
                                             .min_size(egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL)),
@@ -5655,7 +5688,12 @@ impl OperonApp {
                                 ui.spacing_mut().item_spacing.x = SPACE_XS + 2.0;
                                 // The status as a dot in its own colour. The
                                 // word is on the line below; the dot is what a
-                                // glance down the column reads.
+                                // glance down the column reads. On the selected
+                                // row the dot is ringed in the selected ink:
+                                // a tone's fill alone can measure under the
+                                // non-text ratio against the selection colour,
+                                // and the ring is what keeps the mark findable
+                                // (change 246).
                                 let (dot, _) = ui.allocate_exact_size(
                                     egui::vec2(8.0, 8.0),
                                     egui::Sense::hover(),
@@ -5665,6 +5703,13 @@ impl OperonApp {
                                     4.0,
                                     palette.status(status.tone),
                                 );
+                                if is_selected {
+                                    ui.painter().circle_stroke(
+                                        dot.center(),
+                                        4.0,
+                                        egui::Stroke::new(1.0, palette.selected_ink()),
+                                    );
+                                }
                                 if renaming {
                                     let editor = ui.add(
                                         egui::TextEdit::singleline(&mut self.rename_input)
@@ -5698,9 +5743,15 @@ impl OperonApp {
                                                 // than by weight: the row a
                                                 // person has not read yet is the
                                                 // one written in the strongest
-                                                // ink the theme has.
+                                                // ink the theme has. On the
+                                                // selected row the two arms
+                                                // are the selected inks, which
+                                                // are these same values taken
+                                                // by their selected names.
                                                 .color(if is_unread {
                                                     palette.text_strong
+                                                } else if is_selected {
+                                                    palette.selected_secondary_ink()
                                                 } else {
                                                     palette.text
                                                 }),
@@ -5735,22 +5786,69 @@ impl OperonApp {
                                     },
                                 );
                             });
+                            // On the selected row the whole second line
+                            // takes the selected secondary ink: the muted,
+                            // tone, and branch inks measure under AA against
+                            // the selection colour, and the state is still
+                            // carried by the word and the ringed dot above
+                            // (change 246).
+                            let second_ink = if is_selected {
+                                palette.selected_secondary_ink()
+                            } else {
+                                palette.text_muted
+                            };
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = SPACE_XS;
                                 ui.add_space(14.0);
-                                agent_chip(ui, &candidate.agent, 10.5, palette);
+                                if is_selected {
+                                    // `agent_chip` with the row's ink for its
+                                    // fallback word, spelled out here: the
+                                    // helper's vendor ink measures under AA
+                                    // on the selection colour, and the
+                                    // helper itself lives behind the launch
+                                    // gates in `src/agents.rs`, which this
+                                    // change does not touch (change 246).
+                                    let label = agent_short_label(&candidate.agent);
+                                    // The chip's size, as `agent_chip` takes
+                                    // it: a parameter, not a `.size(…)` of
+                                    // its own, so it stays the helper's call.
+                                    let chip_size = 10.5;
+                                    match agent_icon_texture(ui.ctx(), &candidate.agent) {
+                                        Some(texture) => {
+                                            ui.add(egui::Image::new((
+                                                texture.id(),
+                                                egui::vec2(chip_size + 4.0, chip_size + 4.0),
+                                            )))
+                                            .on_hover_text(label);
+                                        }
+                                        None => {
+                                            ui.label(
+                                                RichText::new(label)
+                                                    .size(chip_size)
+                                                    .color(second_ink),
+                                            )
+                                            .on_hover_text(label);
+                                        }
+                                    }
+                                } else {
+                                    agent_chip(ui, &candidate.agent, 10.5, palette);
+                                }
                                 ui.label(
                                     RichText::new(agent_short_label(&candidate.agent))
                                         .size(11.5)
-                                        .color(palette.text_muted),
+                                        .color(second_ink),
                                 );
-                                ui.label(RichText::new("·").size(11.5).color(palette.text_faint));
+                                ui.label(RichText::new("·").size(11.5).color(second_ink));
                                 // Four words for fourteen states: which one it
                                 // is, is the hover's to say.
                                 ui.label(
                                     RichText::new(&status.label)
                                         .size(11.5)
-                                        .color(palette.status(status.tone)),
+                                        .color(if is_selected {
+                                            second_ink
+                                        } else {
+                                            palette.status(status.tone)
+                                        }),
                                 )
                                 .on_hover_text(&status.hint);
                                 // The branch only when the session runs in a
@@ -5771,7 +5869,11 @@ impl OperonApp {
                                         egui::Label::new(
                                             RichText::new(format!("{ICON_BRANCH} {location}"))
                                                 .size(11.5)
-                                                .color(palette.branch),
+                                                .color(if is_selected {
+                                                    second_ink
+                                                } else {
+                                                    palette.branch
+                                                }),
                                         )
                                         .truncate(),
                                     );

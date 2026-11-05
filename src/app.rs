@@ -5709,12 +5709,21 @@ impl OperonApp {
         if self.pending_session_close != Some(session_id) {
             return;
         }
+        // Inside the selected row this sentence sits on the selection
+        // colour, where the soft brand ink measures under AA in every theme;
+        // it takes the selected secondary ink there (change 246).
+        let palette = self.store.theme.palette();
+        let ink = if self.selected_session == Some(session_id) {
+            palette.selected_secondary_ink()
+        } else {
+            palette.accent_soft
+        };
         ui.label(
             RichText::new(tr(
                 "実行中のセッションを削除しますか？ 停止後に一覧から取り除きます。",
             ))
             .small()
-            .color(self.store.theme.palette().accent_soft),
+            .color(ink),
         );
         ui.horizontal(|ui| {
             if secondary_button(ui, tr("キャンセル")).clicked() {

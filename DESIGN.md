@@ -26,7 +26,7 @@ colors:
   dark-raised: "#191919"
   dark-card: "#1E1E1E"
   dark-inset: "#0A0A0A"
-  dark-row-selected: "#36271D"
+  dark-row-selected: "#005C80"
   dark-scrim: "#000000DC"
   dark-on-scrim: "#FFBE5A"
   dark-control: "#3C3C3C"
@@ -90,7 +90,7 @@ colors:
   light-raised: "#FFFFFF"
   light-card: "#EFECE6"
   light-inset: "#FFFFFF"
-  light-row-selected: "#FBE6D2"
+  light-row-selected: "#B4D6FA"
   light-scrim: "#000000C8"
   light-on-scrim: "#FFCD82"
   light-control: "#E6E2DB"
@@ -154,7 +154,7 @@ colors:
   contrast-raised: "#1C1D21"
   contrast-card: "#222328"
   contrast-inset: "#040507"
-  contrast-row-selected: "#4A3423"
+  contrast-row-selected: "#0A6E96"
   contrast-scrim: "#000000EB"
   contrast-on-scrim: "#FFD08A"
   contrast-control: "#33363D"
@@ -427,10 +427,15 @@ be a status hue that no longer meant one thing.
 
 ### Contrast
 
-Every ink is checked against every surface it can land on — including the warm
-tint of a selected session row, which is where the status chips and vendor
-chips are read — at the WCAG 2.1 AA ratio for the size it is drawn at: 4.5:1
-for text, 3:1 for `text-faint` and for the outlines that mark hover and press.
+Every ink is checked against every surface it can land on — including the
+selection colour of a selected session row — at the WCAG 2.1 AA ratio for the
+size it is drawn at: 4.5:1 for text, 3:1 for `text-faint` and for the outlines
+that mark hover and press. A selected row is the one surface the muted and
+status inks do not land on as text: its words take `text-strong` and `text`
+(the two selected inks), its status tone survives only in a dot ringed by the
+stronger of them, and the test checks exactly those inks against that surface
+rather than claiming the whole table against a surface half of it never
+touches.
 The check runs as a test, across all three themes, over roughly five hundred
 pairs. A colour that fails it is not a taste disagreement; it is a build
 failure.
@@ -635,10 +640,18 @@ Above that sit exactly three louder states, each used once per screen:
 - **The filled accent button.** The one action that starts work — launch a
   session, add the first project. There is never a second one on a page: two
   filled buttons is two things claiming to be the answer.
-- **The tinted selection.** `row-selected` behind `accent-text`, for the current
-  page in the toolbar, the chosen agent, and the selected session row. A
-  selected sidebar row adds a 2px accent bar on its left edge, because hover and
-  selection are both tints and one of them has to be more than a tint.
+- **The selection.** `row-selected` — which carries the `selection` value in
+  every theme, so a selected row and selected text are one language — behind
+  the two selected inks (`text-strong` for the row's own words, `text` for
+  its second line), for the current page in the toolbar and the selected
+  session row. (The chosen agent wears its own vendor wash, not this
+  surface.) It used to be a warm tint behind
+  `accent-text`; the tint sat in the same warm family as the waiting,
+  vendor, and recovered colours, so "selected" could not be told from
+  "needs you" at a glance, and the brand ink measured 3.36:1 against the
+  surface that replaced it. A selected sidebar row adds a 2px accent bar on
+  its left edge, because hover and selection are both fills and one of them
+  has to be more than a fill.
 - **The accent rule under a tab.** In-page tab bars mark the current tab with a
   2px rule along the bottom of the word, landing on the hairline under the row.
   A filled chip there would be a third selection language and would read as a

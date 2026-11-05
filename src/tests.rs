@@ -7356,13 +7356,16 @@ pub(crate) fn every_theme_stays_readable() {
         let palette = theme.palette();
         // Text sits on the panel, on a card, and on the white of a text
         // edit, so each ink is checked against all three.
+        // `row-selected` is not in this list any more (change 246): the
+        // muted and tone inks no longer land on it as text, so claiming
+        // them against it would claim what is not drawn. What is drawn
+        // there is checked on its own below.
         let surfaces = [
             ("panel", palette.panel),
             ("raised", palette.raised),
             ("card", palette.card),
             ("inset", palette.inset),
             ("window", palette.window),
-            ("row-selected", palette.row_selected),
         ];
         let inks = [
             ("text_strong", palette.text_strong, 4.5),
@@ -7393,6 +7396,25 @@ pub(crate) fn every_theme_stays_readable() {
                 );
             }
         }
+        // What a selected row actually draws (change 246): its words in the
+        // two selected inks, and the focus outline in `border_strong`. The
+        // status tone survives there only as a dot ringed in the selected
+        // ink, which is why the ring's ink is the one held to the text ratio.
+        for (ink_name, ink) in [
+            ("selected_ink", palette.selected_ink()),
+            ("selected_secondary_ink", palette.selected_secondary_ink()),
+        ] {
+            require(
+                contrast_ratio(ink, palette.row_selected),
+                4.5,
+                format!("{name}: {ink_name} on row-selected"),
+            );
+        }
+        require(
+            contrast_ratio(palette.border_strong, palette.row_selected),
+            3.0,
+            format!("{name}: border_strong on row-selected"),
+        );
         // Uncoloured terminal output is the single largest block of text
         // in the app, and it answers to its own ink rather than to ANSI 7.
         require(
@@ -7502,7 +7524,9 @@ pub(crate) fn every_theme_stays_readable() {
         // 3:1 non-text rule — and only the ones that carry a state do.
         // `border` is what marks a hovered control, `border_strong` a
         // pressed one and a focused row; both are checked on every surface
-        // because a hovered card and a focused row sit on all of them.
+        // in the list above because a hovered card and a focused row sit on
+        // all of them. The selected surface is not in that list: its focus
+        // outline is checked against it on its own, above.
         // `border_subtle` is a separator and is exempt.
         for (line_name, line) in [
             ("border", palette.border),
@@ -7553,6 +7577,73 @@ pub(crate) fn every_theme_stays_readable() {
         "unreadable pairs:\n{}",
         failures.join("\n")
     );
+}
+
+/// A selected row and selected text are one language (change 246): the
+/// warm tint a selected row used to wear sat in the same family as the
+/// waiting, vendor, and recovered colours, so the eye could not separate
+/// "selected" from "needs you". Each palette is a constant table, so the
+/// two roles repeat the literal; this is what keeps them from drifting.
+#[test]
+pub(crate) fn selected_row_takes_the_selection_colour() {
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        assert_eq!(
+            palette.row_selected,
+            palette.selection,
+            "{}: a selected row must wear the selection colour",
+            theme.label(),
+        );
+    }
+}
+
+/// The inks a selected row is drawn in stay readable on the selection
+/// colour in every theme (change 246). This is the guard that keeps a call
+/// site from going back to a muted ink there: `text_muted` measures 2.80:1
+/// against the dark selection colour, and the brand ink 3.36:1.
+#[test]
+pub(crate) fn selected_row_inks_stay_readable() {
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        for (name, ink) in [
+            ("selected_ink", palette.selected_ink()),
+            ("selected_secondary_ink", palette.selected_secondary_ink()),
+        ] {
+            let ratio = contrast_ratio(ink, palette.row_selected);
+            assert!(
+                ratio >= 4.5,
+                "{}: {name} on row-selected measures {ratio:.2}:1, needs 4.5:1",
+                theme.label(),
+            );
+        }
+    }
+}
+
+/// Only a selection wears the selection colour (change 246). The role used
+/// to be borrowed — a hover on the knowledge map, the home page's attention
+/// banner — and a borrowed selection colour says "selected" where nothing
+/// is. The counts are the guard for a borrower spelled as a field access,
+/// which is how every call site here spells it: the two selections (the
+/// session row and the pinned waiting row) and the toolbar page. (A third,
+/// the selected project card, stopped wearing a fill at all when the
+/// project became a heading in change 245.) A borrower reached any other
+/// way is review's to catch.
+#[test]
+pub(crate) fn only_selections_wear_the_selection_colour() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (file, expected) in [
+        ("src/app/screens.rs", 2),
+        ("src/ui/widgets.rs", 1),
+        ("src/app/knowledge.rs", 0),
+    ] {
+        let text =
+            fs::read_to_string(root.join(file)).unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert_eq!(
+            text.matches(".row_selected").count(),
+            expected,
+            "{file}: row_selected is for selections only",
+        );
+    }
 }
 
 /// Keyboard focus on a custom-drawn row is a stroke or nothing: the helper

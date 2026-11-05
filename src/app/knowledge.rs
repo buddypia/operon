@@ -1721,6 +1721,9 @@ fn map_points_bounds(points: &[[f32; 2]]) -> ([f32; 2], [f32; 2]) {
 }
 
 /// One clickable row of the map's panel, tinted while the pointer is on it.
+/// The tint is the neutral card surface, not the selection colour: a hover
+/// is not a selection, and the two stopped sharing a surface when the
+/// selected row took the selection colour (change 246).
 fn map_panel_row(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -1731,7 +1734,7 @@ fn map_panel_row(
         egui::Sense::click(),
     );
     if response.hovered() {
-        ui.painter().rect_filled(rect, 4.0, palette.row_selected);
+        ui.painter().rect_filled(rect, 4.0, palette.card);
     }
     let mut row = ui.new_child(
         egui::UiBuilder::new()
