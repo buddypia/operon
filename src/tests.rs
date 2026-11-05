@@ -54081,6 +54081,20 @@ pub(crate) fn a_column_title_double_click_renames_its_session() {
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| app.ui_terminal_workspace(ui));
     };
+    // One pass with the pointer resting on the row first: its hover
+    // layout is drawn from that pass, as it is before a person's press.
+    let _ = context.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            time: Some(9.95),
+            events: vec![egui::Event::PointerMoved(at)],
+            ..Default::default()
+        },
+        &mut draw,
+    );
     // Move, press, release, press, release — one pass each, 50ms apart.
     for (step, pressed) in [None, Some(true), Some(false), Some(true), Some(false)]
         .into_iter()

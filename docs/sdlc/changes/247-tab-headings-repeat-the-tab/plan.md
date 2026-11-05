@@ -45,4 +45,13 @@
 
 ## Departures from the plan
 
-Filled in during implementation.
+- The first CI run failed two tests. `every_message_row_is_one_the_code_shows`
+  named the cause: the removed PR heading was the only draw of the
+  `プルリクエスト` message id, so its EN/KO rows were orphaned; the rows are
+  removed with the heading (spec's Documentation row corrected to match).
+  `a_column_title_double_click_renames_its_session` lost its click when the
+  demoted list title moved the first row up: the press landed in the same
+  pass as the pointer's arrival, before the row's hover layout was drawn.
+  That test's scene now rests the pointer on the row for one pass first —
+  the arrangement `column_hovered` already used — and the guarded
+  behaviour (double-click renames) is asserted unchanged.

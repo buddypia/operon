@@ -3,3 +3,4 @@
 2026-11-05T10:42:20Z auto spec spec.md e5eaae8f58356f67 approve evaluator round 2
 2026-11-05T10:42:20Z auto plan plan.md 5181d13df5def307 approve evaluator findings fixed proof now names five tests
 2026-11-05T10:42:20Z auto screen screen.md 16a770973cb35466 approve evaluator round 2 layout matches spec with real Git view labels
+2026-11-05T12:06:36Z auto spec spec.md 703afae325f03917 approve evaluator round 3 orphaned pull-request rows removed with the heading

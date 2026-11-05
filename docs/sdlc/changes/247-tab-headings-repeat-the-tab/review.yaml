@@ -5,9 +5,9 @@
 # path in mutations.py) sat outside the judged diff and was fixed in
 # that record file, so the two remaining nits are carried below.
 
-digest: "be3132974fc58888"
+digest: "a39b59ef064cbb87"
 
-rounds: 2
+rounds: 3
 
 carried:
   - rust-reviewer/1 · agent_settings_sections_use_section_headings asserts .size(15.0) and palette.text_strong but never .strong(): removing .strong() from the スキル/ルールと指示 labels stays green while the sections render regular weight, contrary to spec requirement 4.
@@ -16,4 +16,4 @@ carried:
     person: "セッション一覧の題が明るい色で表示されても、自動チェックでは見つけられない弱さが残っています。見た目が気になったら伝えてください。あなたが何かする必要はありません。"
 
 verdicts:
-  rust-reviewer: "approve-with-nits 0 2"
+  rust-reviewer: "approve 0 0"
