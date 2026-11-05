@@ -82,3 +82,16 @@
   counts, and the rows under it keep 245's inks on the panel, the switches
   added for the blue card came back out, and the borrow guard's count for
   `src/app/screens.rs` went from three selections to two.
+
+- The first CI run failed only the recorded formal-proof obligation, and
+  the cause was not this change: the verify job runs with
+  `RUSTFLAGS=-D warnings`, under which `cargo kani` cannot compile this
+  crate at all — 71 f32-fallback and some ninety unused-variable warnings
+  across pre-existing code (long-standing `Stroke::new(1.0, …)` call sites,
+  test fixtures) become 162 errors. Without the flag the same harness
+  verifies locally (`VERIFICATION:- SUCCESSFUL`). The obligation existed
+  only because the vendor-chip fix touched `src/agents.rs`, the launch-gate
+  surface, so the fix moved: `src/agents.rs` is untouched again, and the
+  selected row spells the chip out with `agent_icon_texture` where it
+  stands. Making Kani compile under `-D warnings` is a change of its own
+  and is left for one.

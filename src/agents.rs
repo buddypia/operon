@@ -883,30 +883,6 @@ pub(crate) fn agent_icon_slot(ui: &mut egui::Ui, agent: Option<&str>, size: f32)
 /// and falls back to its label rather than showing nothing. `size` is the text
 /// size; the mark is drawn slightly larger so both read at the same height.
 pub(crate) fn agent_chip(ui: &mut egui::Ui, agent: &str, size: f32, palette: &Palette) {
-    agent_chip_in(ui, agent, size, palette, None);
-}
-
-/// The same chip on a selected row, where the fallback word — the one ink
-/// this helper chooses — takes the row's own ink instead of the vendor's:
-/// every vendor ink measures under AA against the selection colour
-/// (change 246). The mark itself is a texture and keeps its colours.
-pub(crate) fn agent_chip_with_ink(
-    ui: &mut egui::Ui,
-    agent: &str,
-    size: f32,
-    palette: &Palette,
-    ink: Color32,
-) {
-    agent_chip_in(ui, agent, size, palette, Some(ink));
-}
-
-fn agent_chip_in(
-    ui: &mut egui::Ui,
-    agent: &str,
-    size: f32,
-    palette: &Palette,
-    fallback_ink: Option<Color32>,
-) {
     let label = agent_short_label(agent);
     let response = match agent_icon_texture(ui.ctx(), agent) {
         Some(texture) => ui.add(egui::Image::new((
@@ -916,7 +892,7 @@ fn agent_chip_in(
         None => ui.label(
             RichText::new(label)
                 .size(size)
-                .color(fallback_ink.unwrap_or_else(|| palette.agent_accent(agent))),
+                .color(palette.agent_accent(agent)),
         ),
     };
     response.on_hover_text(label);

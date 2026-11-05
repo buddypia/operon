@@ -5788,13 +5788,31 @@ impl OperonApp {
                                 ui.spacing_mut().item_spacing.x = SPACE_XS;
                                 ui.add_space(14.0);
                                 if is_selected {
-                                    agent_chip_with_ink(
-                                        ui,
-                                        &candidate.agent,
-                                        10.5,
-                                        palette,
-                                        second_ink,
-                                    );
+                                    // `agent_chip` with the row's ink for its
+                                    // fallback word, spelled out here: the
+                                    // helper's vendor ink measures under AA
+                                    // on the selection colour, and the
+                                    // helper itself lives behind the launch
+                                    // gates in `src/agents.rs`, which this
+                                    // change does not touch (change 246).
+                                    let label = agent_short_label(&candidate.agent);
+                                    match agent_icon_texture(ui.ctx(), &candidate.agent) {
+                                        Some(texture) => {
+                                            ui.add(egui::Image::new((
+                                                texture.id(),
+                                                egui::vec2(14.5, 14.5),
+                                            )))
+                                            .on_hover_text(label);
+                                        }
+                                        None => {
+                                            ui.label(
+                                                RichText::new(label)
+                                                    .size(10.5)
+                                                    .color(second_ink),
+                                            )
+                                            .on_hover_text(label);
+                                        }
+                                    }
                                 } else {
                                     agent_chip(ui, &candidate.agent, 10.5, palette);
                                 }
