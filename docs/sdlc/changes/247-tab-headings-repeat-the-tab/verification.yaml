@@ -1,0 +1,10 @@
+digest: "8924f293dc5bcaf7"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked tab_content_no_longer_repeats_its_tab_as_a_heading
+  - R2 empirical-test :: cargo test --locked tab_content_no_longer_repeats_its_tab_as_a_heading
+  - R3 empirical-test :: cargo test --locked session_list_title_is_a_panel_label_not_a_heading
+  - R4 empirical-test :: cargo test --locked agent_settings_sections_use_section_headings
+  - R5 empirical-test :: cargo test --locked settings_sidebar_label_is_a_panel_label
+  - R6 empirical-test :: cargo test --locked tab_headings_keep_their_controls
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/247-tab-headings-repeat-the-tab/mutations.py
