@@ -2878,8 +2878,9 @@ impl OperonApp {
 
     pub(crate) fn ui_git(&mut self, ui: &mut egui::Ui, project: &Project) {
         let palette = self.store.theme.palette();
+        // No heading: the 変更 tab already says this is the project's
+        // changes (change 247). The row is the view switch and refresh.
         ui.horizontal(|ui| {
-            ui.heading("Git");
             for view in GitView::all() {
                 if ui
                     .selectable_label(self.git_view == view, view.label())
@@ -3145,7 +3146,6 @@ impl OperonApp {
         let palette = self.store.theme.palette();
         let mutation_running = self.worktree_mutation_running(project.id);
         ui.horizontal(|ui| {
-            ui.heading("worktree");
             if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_worktrees(project);
             }
@@ -3301,7 +3301,6 @@ impl OperonApp {
     pub(crate) fn ui_pull_requests(&mut self, ui: &mut egui::Ui, project: &Project) {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
-            ui.heading(tr("プルリクエスト"));
             ui.label(RichText::new(tr("認証済み GitHub CLI 経由")).small().weak());
             if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_pull_requests(project);
@@ -4167,7 +4166,12 @@ impl OperonApp {
     pub(crate) fn ui_skills(&mut self, ui: &mut egui::Ui, project: &Project) {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
-            ui.heading(tr("スキル"));
+            ui.label(
+                RichText::new(tr("スキル"))
+                    .size(15.0)
+                    .strong()
+                    .color(palette.text_strong),
+            );
             if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_skills(project);
             }
@@ -4207,7 +4211,12 @@ impl OperonApp {
     pub(crate) fn ui_rules(&mut self, ui: &mut egui::Ui, project: &Project) {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
-            ui.heading(tr("ルールと指示"));
+            ui.label(
+                RichText::new(tr("ルールと指示"))
+                    .size(15.0)
+                    .strong()
+                    .color(palette.text_strong),
+            );
             if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_rules(project);
             }
@@ -4246,7 +4255,6 @@ impl OperonApp {
     fn ui_sessions(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         ui.horizontal(|ui| {
-            ui.heading(tr("セッション"));
             if icon_button(ui, palette, ICON_REFRESH, tr("更新")).clicked() {
                 self.request_session_poll();
             }
@@ -4583,9 +4591,8 @@ impl OperonApp {
                 ui.set_width(200.0);
                 ui.label(
                     RichText::new(tr("設定"))
-                        .size(20.0)
-                        .strong()
-                        .color(palette.text_strong),
+                        .size(12.5)
+                        .color(palette.text_muted),
                 );
                 ui.add_space(SPACE_SM);
                 for section in SettingsSection::all() {
@@ -5299,7 +5306,13 @@ impl OperonApp {
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
         let group_counts = self.status_group_counts();
-        ui.heading(tr("プロジェクト別セッション"));
+        // A panel label, not a page heading (change 247): this list is
+        // also the docked session panel, where this is its only name.
+        ui.label(
+            RichText::new(tr("プロジェクト別セッション"))
+                .size(12.5)
+                .color(palette.text_muted),
+        );
         // The four things a person can do about a session, as four independent
         // toggles on one row, behind a 「すべて」 that says no filter is on and
         // clears one that is. The icon each group used to carry is the status
