@@ -62,4 +62,16 @@
 
 ## Departures from the plan
 
-None yet.
+- A third test, `only_selections_wear_the_selection_colour`, was added
+  during implementation so requirement 4 is a guard the mutation sweep can
+  break, not only a grep a person runs once. It counts `palette.row_selected`
+  at the call sites that may wear it (three selections in
+  `src/app/screens.rs`, the toolbar page in `src/ui/widgets.rs`, none in
+  `src/app/knowledge.rs`). The plan had named only the two palette tests.
+- Review and the empirical verifier each found inks still landing on the
+  selection colour that the first pass missed, and all were fixed rather
+  than carried: the vendor chip's fallback word (`agent_chip_with_ink` in
+  `src/agents.rs`), the session rows nested inside a selected project card
+  and that card's empty line, and the removal confirmation inside the
+  selected row (`src/app.rs`). The titles that already held the selected
+  values now take them through the accessors where they are selected.

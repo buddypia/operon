@@ -57,7 +57,10 @@ pub(crate) struct Palette {
     pub(crate) card: Color32,
     /// Text edits and other sunken fields.
     pub(crate) inset: Color32,
-    /// The row a person has selected in the session list.
+    /// The surface a person has selected — a session row, the chosen toolbar
+    /// page. It carries the `selection` value in every theme (change 246), so
+    /// a selected row and selected text are one language; the literal repeats
+    /// because a palette is a constant table, and a test holds the two equal.
     pub(crate) row_selected: Color32,
     /// Veil drawn over the whole window while a folder is dragged onto it.
     pub(crate) scrim: Color32,
@@ -169,7 +172,7 @@ pub(crate) const DARK_PALETTE: Palette = Palette {
     raised: Color32::from_rgb(25, 25, 25),
     card: Color32::from_rgb(30, 30, 30),
     inset: Color32::from_rgb(10, 10, 10),
-    row_selected: Color32::from_rgb(54, 39, 29),
+    row_selected: Color32::from_rgb(0, 92, 128),
     scrim: Color32::from_black_alpha(220),
     on_scrim: Color32::from_rgb(255, 190, 90),
 
@@ -249,7 +252,7 @@ pub(crate) const LIGHT_PALETTE: Palette = Palette {
     raised: Color32::from_rgb(255, 255, 255),
     card: Color32::from_rgb(239, 236, 230),
     inset: Color32::from_rgb(255, 255, 255),
-    row_selected: Color32::from_rgb(251, 230, 210),
+    row_selected: Color32::from_rgb(180, 214, 250),
     scrim: Color32::from_black_alpha(200),
     on_scrim: Color32::from_rgb(255, 205, 130),
 
@@ -329,7 +332,7 @@ pub(crate) const HIGH_CONTRAST_PALETTE: Palette = Palette {
     raised: Color32::from_rgb(28, 29, 33),
     card: Color32::from_rgb(34, 35, 40),
     inset: Color32::from_rgb(4, 5, 7),
-    row_selected: Color32::from_rgb(74, 52, 35),
+    row_selected: Color32::from_rgb(10, 110, 150),
     scrim: Color32::from_black_alpha(235),
     on_scrim: Color32::from_rgb(255, 208, 138),
 
@@ -593,6 +596,21 @@ impl Palette {
             "gemini" => self.agent_antigravity,
             _ => self.agent_unknown,
         }
+    }
+
+    /// The ink of the words that carry a selected row: its title, the chosen
+    /// toolbar page. A selected row wears the selection colour (change 246),
+    /// on which the muted inks measure under AA, so a call site takes its
+    /// inks from here rather than reaching for the muted end of the table.
+    pub(crate) fn selected_ink(&self) -> Color32 {
+        self.text_strong
+    }
+
+    /// The ink of the second line of a selected row — its vendor, status,
+    /// branch, and time. Ordinary text rather than the strongest, so the
+    /// title keeps its step above the line under it.
+    pub(crate) fn selected_secondary_ink(&self) -> Color32 {
+        self.text
     }
 
     /// The colour a status is drawn in, resolved from the role the status

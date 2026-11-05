@@ -421,9 +421,10 @@ pub(crate) fn launch_progress_footer(
 }
 
 /// One tab of the toolbar's segmented navigation. The chosen one is marked by
-/// the accent-tinted row surface and the accent ink, which is the same pairing
-/// a selected session row uses — egui's own selection blue belongs to selected
-/// *text*, and a page is not text.
+/// the selection colour and the selected ink, which is the same pairing a
+/// selected session row uses: a selected row and selected text are one
+/// language (change 246), and the words on that surface take the ink that
+/// stays readable there rather than the brand ink.
 pub(crate) fn nav_tab(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -432,7 +433,7 @@ pub(crate) fn nav_tab(
     selected: bool,
 ) -> egui::Response {
     let ink = if selected {
-        palette.accent_text
+        palette.selected_ink()
     } else {
         palette.text_muted
     };

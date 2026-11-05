@@ -1,0 +1,10 @@
+# The evidence for change 246. Shape: docs/sdlc/templates/verification.yaml.
+digest: "f6787ea0283290ee"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked selected_row_takes_the_selection_colour
+  - R2 empirical-test :: cargo test --locked selected_row_inks_stay_readable
+  - R3 empirical-test :: cargo test --locked every_theme_stays_readable
+  - R4 empirical-mutation :: python3 docs/sdlc/changes/246-selected-row-reads-as-warning/mutations.py
+  - I1 empirical-test :: cargo test --locked only_selections_wear_the_selection_colour
+  - I2 formal-proof :: cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break

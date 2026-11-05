@@ -1,7 +1,7 @@
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -9,13 +9,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Add selected_row_takes_the_selection_colour alone and watch it fail, then follow plan.md steps 2-8"
+resume: "Review round 2 is with the rust-reviewer; on approve, commit, push, watch CI, merge on main, then package"
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh (warnings recorded, no action tier)"
   release-binary: "machine pending yes — touches src/theme.rs, src/app/screens.rs, src/ui/widgets.rs and src/app/knowledge.rs, so it ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed selected_secondary_ink pointed at text_muted turned selected_row_inks_stay_readable red at 2.80:1, then restored"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
