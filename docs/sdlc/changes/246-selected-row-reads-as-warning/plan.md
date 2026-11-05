@@ -75,3 +75,10 @@
   and that card's empty line, and the removal confirmation inside the
   selected row (`src/app.rs`). The titles that already held the selected
   values now take them through the accessors where they are selected.
+- Change 245 landed while this change was in review and turned the project
+  card into a heading with no fill, so the selected-project-card site this
+  plan and the screen describe no longer exists. Merging it in removed
+  that site rather than adapting to it: the project name, its status
+  counts, and the rows under it keep 245's inks on the panel, the switches
+  added for the blue card came back out, and the borrow guard's count for
+  `src/app/screens.rs` went from three selections to two.

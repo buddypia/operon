@@ -6027,6 +6027,13 @@ impl OperonApp {
                 .map(|turn| turn.prompt.as_str()),
         );
         let activity = self.session_activity_for(session_id);
+        // The place, once, small: the header below names the session, so the
+        // project is said here and nowhere else in the pane.
+        ui.label(
+            RichText::new(session_crumb(&project_name, &title))
+                .size(11.5)
+                .color(palette.text_muted),
+        );
         // The pane's own header, on one line: what you are looking at on the
         // left, what you can do to it pinned to the right. The actions never
         // move as the status changes, because a control that walks along the
@@ -6256,14 +6263,8 @@ impl OperonApp {
                             heading.on_hover_text(goal);
                         }
                         status_chip(ui, &status, 12.5, palette);
-                        meta_separator(ui, palette);
-                        ui.label(
-                            RichText::new(&project_name)
-                                .size(12.0)
-                                .color(palette.text_muted),
-                        );
                         if let Some(branch) = &session.branch {
-                            ui.label(RichText::new("/").size(12.0).color(palette.text_faint));
+                            meta_separator(ui, palette);
                             ui.label(
                                 RichText::new(format!("{ICON_BRANCH} {branch}"))
                                     .size(12.0)
@@ -7160,7 +7161,11 @@ impl OperonApp {
         // One start per project, on its own header: the toolbar holds the
         // column-wide one (change 237).
         ui.horizontal(|ui| {
-            ui.heading(tr("プロジェクト"));
+            ui.label(
+                RichText::new(tr("プロジェクト"))
+                    .size(12.5)
+                    .color(palette.text_muted),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(tr("履歴")).clicked() {
                     self.session_library_open = !self.session_library_open;
@@ -7233,12 +7238,10 @@ impl OperonApp {
                 for project in projects {
                     let folded = self.session_arrangement.folded.contains(&project.id);
                     let selected = self.selected_project == Some(project.id);
-                    let card = card_frame(palette)
-                        .fill(if selected {
-                            palette.row_selected
-                        } else {
-                            palette.card
-                        })
+                    // A heading, not a card (change 245): the project groups
+                    // its sessions here, and is a destination only on the
+                    // Projects page, so no fill makes it look like one.
+                    let card = egui::Frame::new()
                         .inner_margin(egui::Margin::same(SPACE_SM as i8))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
@@ -7291,11 +7294,7 @@ impl OperonApp {
                                                         ))
                                                         .size(12.5)
                                                         .strong()
-                                                        .color(if selected {
-                                                            palette.selected_ink()
-                                                        } else {
-                                                            palette.status(group.tone())
-                                                        }),
+                                                        .color(palette.status(group.tone())),
                                                     )
                                                     .selectable(false)
                                                     .sense(egui::Sense::click()),
@@ -7316,25 +7315,18 @@ impl OperonApp {
                                         ui.with_layout(
                                             egui::Layout::left_to_right(egui::Align::Center),
                                             |ui| {
-                                                ui.label(RichText::new(ICON_PROJECT).color(
-                                                    if selected {
-                                                        palette.selected_ink()
-                                                    } else {
-                                                        palette.accent_text
-                                                    },
-                                                ));
                                                 let response = ui
                                                     .add(
-                                                        egui::Label::new(
+                                                        egui::Label::new(if selected {
                                                             RichText::new(&project.name)
-                                                                .size(15.0)
+                                                                .size(12.5)
                                                                 .strong()
-                                                                .color(if selected {
-                                                                    palette.selected_ink()
-                                                                } else {
-                                                                    palette.text_strong
-                                                                }),
-                                                        )
+                                                                .color(palette.text_muted)
+                                                        } else {
+                                                            RichText::new(&project.name)
+                                                                .size(12.5)
+                                                                .color(palette.text_muted)
+                                                        })
                                                         .truncate()
                                                         .selectable(false)
                                                         .sense(egui::Sense::click_and_drag()),
@@ -7361,6 +7353,7 @@ impl OperonApp {
                                     },
                                 );
                             });
+                            hairline(ui, palette);
                             if folded {
                                 return;
                             }
@@ -7391,27 +7384,16 @@ impl OperonApp {
                                     .show(ui, |ui| {
                                         ui.set_min_width(ui.available_width());
                                         ui.horizontal(|ui| {
-                                            // Inside a selected project card
-                                            // these rows sit on the selection
-                                            // colour themselves, so their
-                                            // glyph and words take the
-                                            // selected inks there (change 246).
-                                            ui.label(RichText::new(kind.icon()).color(
-                                                if selected {
-                                                    palette.selected_ink()
-                                                } else {
-                                                    palette.status(kind.tone())
-                                                },
-                                            ));
+                                            ui.label(
+                                                RichText::new(kind.icon())
+                                                    .color(palette.status(kind.tone())),
+                                            );
                                             ui.add(
                                                 egui::Label::new(
-                                                    RichText::new(&title).size(12.5).color(
-                                                        if selected {
-                                                            palette.selected_secondary_ink()
-                                                        } else {
-                                                            palette.text
-                                                        },
-                                                    ),
+                                                    RichText::new(&title)
+                                                        .size(12.5)
+                                                        .strong()
+                                                        .color(palette.text),
                                                 )
                                                 .truncate()
                                                 .selectable(false),
@@ -7447,11 +7429,7 @@ impl OperonApp {
                                 ui.label(
                                     RichText::new(tr("起動中のセッションはありません"))
                                         .small()
-                                        .color(if selected {
-                                            palette.selected_secondary_ink()
-                                        } else {
-                                            palette.text_faint
-                                        }),
+                                        .weak(),
                                 );
                             }
                         });
@@ -8201,6 +8179,11 @@ impl OperonApp {
 /// Whether modifiers include Command (⌘) to trigger opening a terminal target externally.
 pub(crate) fn is_terminal_cmd_modifier(modifiers: &egui::Modifiers) -> bool {
     modifiers.command || modifiers.mac_cmd
+}
+
+/// The pane's place, small: the project it belongs to, then the session.
+pub(crate) fn session_crumb(project_name: &str, title: &str) -> String {
+    format!("{project_name} / {title}")
 }
 
 /// Whether modifiers include Command (⌘) or Option (⌥) to trigger opening a terminal target.

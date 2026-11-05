@@ -7623,14 +7623,16 @@ pub(crate) fn selected_row_inks_stay_readable() {
 /// to be borrowed — a hover on the knowledge map, the home page's attention
 /// banner — and a borrowed selection colour says "selected" where nothing
 /// is. The counts are the guard for a borrower spelled as a field access,
-/// which is how every call site here spells it: the three selections (the
-/// session row, the pinned waiting row, the project card) and the toolbar
-/// page. A borrower reached any other way is review's to catch.
+/// which is how every call site here spells it: the two selections (the
+/// session row and the pinned waiting row) and the toolbar page. (A third,
+/// the selected project card, stopped wearing a fill at all when the
+/// project became a heading in change 245.) A borrower reached any other
+/// way is review's to catch.
 #[test]
 pub(crate) fn only_selections_wear_the_selection_colour() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (file, expected) in [
-        ("src/app/screens.rs", 3),
+        ("src/app/screens.rs", 2),
         ("src/ui/widgets.rs", 1),
         ("src/app/knowledge.rs", 0),
     ] {
@@ -67806,5 +67808,110 @@ pub(crate) fn the_model_check_count_excludes_its_own_search() {
         model_check_offenders(commented).1,
         vec!["model_check_x".to_owned()],
         "コメントの中の exhaustive_check( を呼び出しと数えています"
+    );
+}
+
+#[test]
+pub(crate) fn session_crumb_names_project_then_title() {
+    assert_eq!(
+        crate::app::screens::session_crumb("operon", "レビュー対応"),
+        "operon / レビュー対応"
+    );
+}
+
+#[test]
+pub(crate) fn session_column_project_is_a_heading_not_a_card() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let column = screens
+        .split_once("fn ui_workspace_projects")
+        .map(|(_, after)| after)
+        .and_then(|after| after.split_once("pub(crate) fn toggle_project_fold"))
+        .map(|(inside, _)| inside)
+        .expect("セッション列が見つかりません");
+    assert!(
+        !column.contains("card_frame(palette)"),
+        "左列のプロジェクトがまだカードで描かれています"
+    );
+    assert!(
+        column.contains("hairline(ui, palette)"),
+        "見出しの下に線がありません"
+    );
+    assert!(
+        !column.contains("ICON_PROJECT"),
+        "見出しにプロジェクトのアイコンが残っています"
+    );
+    let name_at = column
+        .find("RichText::new(&project.name)")
+        .expect("プロジェクト名が描かれていません");
+    let name_block = &column[name_at..column.len().min(name_at + 700)];
+    assert!(
+        name_block.contains(".size(12.5)") && name_block.contains("palette.text_muted"),
+        "プロジェクト名が小さな薄い見出しになっていません"
+    );
+    assert!(
+        !name_block.contains(".size(15.0)") && !name_block.contains("palette.text_strong"),
+        "プロジェクト名がまだ主役の強さです"
+    );
+    let title_at = column
+        .find("RichText::new(&title)")
+        .expect("セッション名が描かれていません");
+    let title_block = &column[title_at..column.len().min(title_at + 400)];
+    assert!(
+        title_block.contains(".strong()") && title_block.contains("palette.text"),
+        "セッション名が主役の強さになっていません"
+    );
+}
+
+#[test]
+pub(crate) fn session_column_project_heading_keeps_its_operations() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let column = screens
+        .split_once("fn ui_workspace_projects")
+        .map(|(_, after)| after)
+        .and_then(|after| after.split_once("pub(crate) fn toggle_project_fold"))
+        .map(|(inside, _)| inside)
+        .expect("セッション列が見つかりません");
+    for needle in [
+        "toggle_project_fold",
+        "open_project_session_setup(project.id)",
+        "workspace_project_drag = Some(project.id)",
+        "targets.push(project.id,",
+        "select_workspace_project(project.id)",
+    ] {
+        assert!(
+            column.contains(needle),
+            "見出しの操作が消えています: {needle}"
+        );
+    }
+}
+
+#[test]
+pub(crate) fn terminal_pane_draws_the_crumb_once() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let pane = screens
+        .split_once("pub(crate) fn ui_terminal_pane")
+        .map(|(_, after)| after)
+        .and_then(|after| after.split_once("fn workspace_tab_title"))
+        .map(|(inside, _)| inside)
+        .expect("ターミナルのペインが見つかりません");
+    assert!(
+        pane.contains("session_crumb(&project_name, &title)"),
+        "ペインの上に現在地が描かれていません"
+    );
+    let crumb_at = pane
+        .find("session_crumb(&project_name, &title)")
+        .expect("現在地が描かれていません");
+    let crumb_block = &pane[crumb_at..pane.len().min(crumb_at + 300)];
+    assert!(
+        crumb_block.contains(".size(11.5)") && crumb_block.contains("palette.text_muted"),
+        "現在地が小さな薄い文字になっていません"
+    );
+    assert!(
+        !crumb_block.contains("palette.text_strong"),
+        "現在地が主役の強さになっています"
+    );
+    assert!(
+        !pane.contains("RichText::new(&project_name)\n                                .size(12.0)"),
+        "ヘッダーにプロジェクト名が重ねて残っています"
     );
 }
