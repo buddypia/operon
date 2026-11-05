@@ -1,7 +1,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -9,10 +9,10 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Review round 2 is with the rust-reviewer; on approve, commit, push, watch CI, merge on main, then package"
+resume: "Landed as the selection colour with its two selected inks. The 2px accent bar DESIGN.md prescribes for a selected sidebar row is still unimplemented and is the natural follow-up; making cargo kani compile under RUSTFLAGS=-D warnings is a change of its own, left behind in plan.md departures."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh (SHIP at f7d6d9c04e72a732)"
   bands: "machine passed bash scripts/check-bands.sh (warnings recorded, no action tier)"
   release-binary: "machine pending yes — touches src/theme.rs, src/app/screens.rs, src/ui/widgets.rs and src/app/knowledge.rs, so it ends with bash scripts/package-macos.sh"
   guards-verified-by-mutation: "human passed selected_secondary_ink pointed at text_muted turned selected_row_inks_stay_readable red at 2.80:1, then restored"

@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: recorded in `approvals.log` when the evaluator's verdict lands
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
