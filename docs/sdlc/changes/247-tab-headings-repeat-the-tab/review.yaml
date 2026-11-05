@@ -1,0 +1,19 @@
+# Change 247 review. The empirical verifier tried to falsify every
+# requirement and reproduced nothing (five named tests plus the painted
+# dock/settings/changes tests). The rust reviewer approved with three
+# nits and no Important finding; the third nit (a hard-coded worktree
+# path in mutations.py) sat outside the judged diff and was fixed in
+# that record file, so the two remaining nits are carried below.
+
+digest: "42d8ed15cb9a846a"
+
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · agent_settings_sections_use_section_headings asserts .size(15.0) and palette.text_strong but never .strong(): removing .strong() from the スキル/ルールと指示 labels stays green while the sections render regular weight, contrary to spec requirement 4.
+    person: "スキルとルールと指示の見出しが細い字で表示されても、自動チェックでは見つけられない弱さが残っています。見た目が気になったら伝えてください。あなたが何かする必要はありません。"
+  - rust-reviewer/2 · session_list_title_is_a_panel_label_not_a_heading checks .size(12.5) and palette.text_muted section-wide: changing only the title's colour to text_strong stays green while プロジェクト別セッション is no longer muted, contrary to spec requirement 3.
+    person: "セッション一覧の題が明るい色で表示されても、自動チェックでは見つけられない弱さが残っています。見た目が気になったら伝えてください。あなたが何かする必要はありません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"

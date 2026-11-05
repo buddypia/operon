@@ -67719,3 +67719,150 @@ pub(crate) fn the_model_check_count_excludes_its_own_search() {
         "コメントの中の exhaustive_check( を呼び出しと数えています"
     );
 }
+
+/// One function of `src/app/screens.rs`, cut out by its neighbours so a
+/// guard reads the row it names and not the whole file.
+#[cfg(test)]
+fn screens_section<'a>(screens: &'a str, start: &str, end: &str) -> &'a str {
+    screens
+        .split_once(start)
+        .map(|(_, after)| after)
+        .and_then(|after| after.split_once(end))
+        .map(|(inside, _)| inside)
+        .expect("対象の関数が見つかりません")
+}
+
+#[test]
+pub(crate) fn tab_content_no_longer_repeats_its_tab_as_a_heading() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    for (start, end, name) in [
+        (
+            "pub(crate) fn ui_git",
+            "pub(crate) fn ui_git_diff_view",
+            "変更タブ",
+        ),
+        (
+            "pub(crate) fn ui_worktrees",
+            "pub(crate) fn ui_pull_requests",
+            "worktreeタブ",
+        ),
+        (
+            "pub(crate) fn ui_pull_requests",
+            "pub(crate) fn ui_files",
+            "PRタブ",
+        ),
+        ("fn ui_sessions", "fn ui_session_grid", "セッションページ"),
+    ] {
+        let section = screens_section(&screens, start, end);
+        assert!(
+            !section.contains("ui.heading("),
+            "{name} の中身がタブ名を大きな見出しで繰り返しています"
+        );
+    }
+}
+
+#[test]
+pub(crate) fn session_list_title_is_a_panel_label_not_a_heading() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let section = screens_section(
+        &screens,
+        "pub(crate) fn ui_terminal_session_tabs",
+        "pub(crate) fn ui_terminal_panel",
+    );
+    assert!(
+        !section.contains("ui.heading(tr(\"プロジェクト別セッション\"))"),
+        "セッション一覧の題がまだ大きな見出しです"
+    );
+    assert!(
+        section.contains("RichText::new(tr(\"プロジェクト別セッション\"))")
+            && section.contains(".size(12.5)")
+            && section.contains("palette.text_muted"),
+        "セッション一覧の題が小さな薄いラベルになっていません"
+    );
+}
+
+#[test]
+pub(crate) fn agent_settings_sections_use_section_headings() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    for (start, end, name) in [
+        (
+            "pub(crate) fn ui_skills",
+            "pub(crate) fn ui_rules",
+            "スキル",
+        ),
+        ("pub(crate) fn ui_rules", "fn ui_sessions", "ルールと指示"),
+    ] {
+        let section = screens_section(&screens, start, end);
+        assert!(
+            !section.contains("ui.heading("),
+            "{name} がまだページ見出しの大きさです"
+        );
+        assert!(
+            section.contains(".size(15.0)") && section.contains("palette.text_strong"),
+            "{name} が区切りの見出し（15px）になっていません"
+        );
+    }
+}
+
+#[test]
+pub(crate) fn settings_sidebar_label_is_a_panel_label() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    let section = screens_section(
+        &screens,
+        "pub(crate) fn ui_settings",
+        "fn ui_settings_appearance",
+    );
+    assert!(
+        !section.contains(".size(20.0)"),
+        "設定のサイドバーのラベルがまだページ見出しの大きさです"
+    );
+    assert!(
+        section.contains(".size(12.5)") && section.contains("palette.text_muted"),
+        "設定のサイドバーのラベルが小さな薄いラベルになっていません"
+    );
+}
+
+#[test]
+pub(crate) fn tab_headings_keep_their_controls() {
+    let screens = fs::read_to_string("src/app/screens.rs").unwrap();
+    for (start, end, needles) in [
+        (
+            "pub(crate) fn ui_git",
+            "pub(crate) fn ui_git_diff_view",
+            vec!["GitView::all", "ICON_REFRESH"],
+        ),
+        (
+            "pub(crate) fn ui_worktrees",
+            "pub(crate) fn ui_pull_requests",
+            vec!["ICON_REFRESH"],
+        ),
+        (
+            "pub(crate) fn ui_pull_requests",
+            "pub(crate) fn ui_files",
+            vec!["認証済み GitHub CLI 経由", "ICON_REFRESH"],
+        ),
+        (
+            "fn ui_sessions",
+            "fn ui_session_grid",
+            vec!["SessionView::List", "セッションを検索", "ICON_REFRESH"],
+        ),
+        (
+            "pub(crate) fn ui_skills",
+            "pub(crate) fn ui_rules",
+            vec!["ICON_REFRESH"],
+        ),
+        (
+            "pub(crate) fn ui_rules",
+            "fn ui_sessions",
+            vec!["ICON_REFRESH"],
+        ),
+    ] {
+        let section = screens_section(&screens, start, end);
+        for needle in needles {
+            assert!(
+                section.contains(needle),
+                "見出しを消した行の操作が消えています: {needle}"
+            );
+        }
+    }
+}
