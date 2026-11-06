@@ -1,6 +1,6 @@
 # Intent: identical session tabs hide which session needs attention
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-07
 
 ## Problem
