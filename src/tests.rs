@@ -54002,11 +54002,12 @@ pub(crate) fn a_session_rows_menus_offer_stop_and_remove() {
         let context = egui::Context::default();
         let painted = column_painted(&mut app, &context);
         let (title, _) = painted.in_column("first").unwrap();
-        // The row's second line — its agent's name — is not a control.
+        // The separator on the second line is not a control; the vendor
+        // mark replaced the name this hit target used to use.
         let padding = painted
             .texts
             .iter()
-            .filter(|(text, rect, _)| text == "Claude" && rect.min.y > title.max.y)
+            .filter(|(text, rect, _)| text == "·" && rect.min.y > title.max.y)
             .map(|(_, rect, _)| *rect)
             .min_by(|a, b| a.min.y.total_cmp(&b.min.y))
             .expect("first の 2 行目がありません");
@@ -57869,7 +57870,7 @@ pub(crate) fn test_change_181_session_row_drag_reorders_within_its_project() {
     let title = column_181_at(&texts, "二番目");
     let line = texts
         .iter()
-        .filter(|(text, pos)| text == "Codex" && pos.y > title.y)
+        .filter(|(text, pos)| text == "·" && pos.y > title.y)
         .map(|(_, pos)| *pos)
         .min_by(|a, b| a.y.total_cmp(&b.y))
         .expect("二番目 の二行目");
@@ -58147,7 +58148,7 @@ pub(crate) fn test_change_181_hovers_say_rows_and_projects_can_be_dragged() {
     let title = column_181_at(&texts, "二番目");
     let line = texts
         .iter()
-        .filter(|(text, pos)| text == "Codex" && pos.y > title.y)
+        .filter(|(text, pos)| text == "·" && pos.y > title.y)
         .map(|(_, pos)| *pos)
         .min_by(|a, b| a.y.total_cmp(&b.y))
         .expect("二番目 の二行目");
