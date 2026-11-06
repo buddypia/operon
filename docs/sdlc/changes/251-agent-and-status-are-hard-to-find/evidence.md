@@ -32,3 +32,7 @@ Run 42263483921 passed fmt/clippy/bands and found three stale UI hit targets: `a
 The band check reports existing warnings for steering_bytes and approval_escapes, and a pre-existing largest_module_lines diagnostic: app.rs was 9,529 lines on main and is 9,573 here (+44 lines of filter state and predicates). It was already above the 9,400 diagnostic boundary; this change introduces no new concern requiring a module split.
 
 All nine targeted tests passed after updating those hit targets, and make q.fast passed again. The final head must still pass CI before merging; waiving a duplicated state-file result does not waive this gate.
+
+## Integration with main
+
+Run 42264546940 passed all CI jobs at d1a6913 (1,168 tests passed; 0 failed; 6 ignored). Main then advanced to 812d585 with change 250. The merge retains both added test groups, and 12 combined sidebar/menu/drag/tab/status-badge tests plus make q.fast pass. The native fixture was captured again after integration; sidebar.png now includes the new icon-only status tabs and the disposable fixture exits successfully after capture. The integrated head receives its own CI run before landing.

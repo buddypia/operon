@@ -1,0 +1,16 @@
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+resume: "Land only after CI passes, then package from main and obtain permission before restarting the running app."
+contract:
+  three-gates: "machine passed CARGO_INCREMENTAL=0 make q.fast and all named tests; full-suite CI remains a prerequisite for main merge"
+  bands: "machine passed bash scripts/check-bands.sh; existing src/app.rs size diagnosis recorded in plan.md"
+  release-binary: "machine passed yes - release source changed; package from main after landing"
+  guards-verified-by-mutation: "machine passed isolated empirical verifier ran all six obligations and caught all six mutations in 186s"
