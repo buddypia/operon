@@ -11,7 +11,6 @@
 | src/app.rs | Memory-only agent and waiting filters and common predicate/reset methods. |
 | src/app/screens.rs | Sidebar controls and matching rows; share filters with history and grid; remove repeated agent words. |
 | src/ui/widgets.rs | Accessible vendor image toggle with existing control/focus helpers if needed. |
-| DESIGN.md | Document the shared sidebar filter control in the existing Controls table. |
 | src/i18n_tables.rs | All language rows for new labels. |
 | src/tests.rs | Behavioral combination and real pointer/render tests. |
 
@@ -38,4 +37,4 @@
 
 ## Departures from the plan
 
-Filters scroll with projects so the controls remain reachable when the sidebar shares a short edge with an inspector. An independent verifier proposed a long legacy-agent label attack; it reproduced a hidden title, so the fallback label now truncates at 72px and keeps its full name on hover. The original test build exhausted disk space; only this session's generated incremental cache, failed object files, and CMake intermediate build trees were removed, retaining native libraries. Subsequent checks use CARGO_INCREMENTAL=0.
+Filters scroll with projects so the controls remain reachable when the sidebar shares a short edge with an inspector. An independent verifier proposed a long legacy-agent label attack; it reproduced a hidden title, so the fallback label now truncates at 72px and keeps its full name on hover. The original test build exhausted disk space; only this session's generated incremental cache, failed object files, and CMake intermediate build trees were removed, retaining native libraries. Subsequent checks use CARGO_INCREMENTAL=0. The new shared filter button is also documented in the existing DESIGN.md Controls table.
