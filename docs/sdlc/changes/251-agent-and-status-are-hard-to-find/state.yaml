@@ -1,14 +1,14 @@
 state:
   route: "modify"
   stage: "design"
-  status: "planning"
+  status: "ready"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
-resume: "Review the requested left-sidebar filter design before implementation."
+  readiness: "go"
+  screen: "approved"
+resume: "Implement the independently reviewed sidebar design and run the named guards."
 contract:
   three-gates: "machine pending make q.fast and named sidebar/filter tests"
   full-ci: "machine pending CI on branch head"
