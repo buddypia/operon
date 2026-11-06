@@ -999,6 +999,22 @@ impl SessionStatusKind {
         }
     }
 
+    pub(crate) fn status_mark(self) -> StatusMark {
+        match self {
+            SessionStatusKind::Stopping | SessionStatusKind::Stopped => StatusMark::Stop,
+            SessionStatusKind::Starting => StatusMark::Power,
+            SessionStatusKind::Working | SessionStatusKind::Running => StatusMark::Progress,
+            SessionStatusKind::Waiting | SessionStatusKind::Blocked => StatusMark::Attention,
+            SessionStatusKind::Idle => StatusMark::Pause,
+            SessionStatusKind::Ready => StatusMark::Play,
+            SessionStatusKind::Queued => StatusMark::Hourglass,
+            SessionStatusKind::Done => StatusMark::Check,
+            SessionStatusKind::Failed => StatusMark::Cross,
+            SessionStatusKind::Lost => StatusMark::Minus,
+            SessionStatusKind::Checking => StatusMark::Question,
+        }
+    }
+
     /// The word a person reads for this state: its group's, a message id.
     /// Fourteen states used to have fourteen English tokens beside four
     /// Japanese chip words, so one session had two names depending on where it
@@ -1056,6 +1072,29 @@ impl SessionStatusKind {
             | SessionStatusKind::Lost => SessionStatusGroup::Finished,
         }
     }
+}
+
+/// A passive status indicator with a full-height hover target. Wording is
+/// accessible without making it a permanent label beside the tab title.
+pub(crate) fn session_status_icon(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    kind: SessionStatusKind,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(STATUS_ICON_SIZE, CONTROL_HEIGHT_SMALL),
+        egui::Sense::hover(),
+    );
+    if ui.is_rect_visible(rect) {
+        kind.status_mark().paint(
+            ui.painter(),
+            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(STATUS_ICON_SIZE)),
+            palette.status(kind.tone()),
+        );
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, tr(kind.label())));
+    response
 }
 
 /// The four answers to "what can I do with this session right now", which is
