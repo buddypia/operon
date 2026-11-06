@@ -5353,7 +5353,7 @@ impl OperonApp {
             ui.spacing_mut().item_spacing.x = 2.0;
             if ui
                 .selectable_label(
-                    !self.waiting_filter && !self.status_filter.iter().any(|selected| *selected),
+                    !self.status_filter.iter().any(|selected| *selected),
                     RichText::new(tf!("すべて {count}", count = sessions.len()))
                         .size(11.5)
                         .color(palette.text),
@@ -5389,7 +5389,6 @@ impl OperonApp {
         // The queue is drawn first unless the chips leave 要対応 out, and a
         // session drawn there is not drawn again in its project.
         let pinning = !self.status_filter.iter().any(|selected| *selected)
-            || self.waiting_filter
             || self.status_filter[SessionStatusGroup::NeedsYou.index()];
         // A move inside the column ends as a dock move does: Escape, or a
         // release the window never saw because focus left mid-drag.
@@ -7220,72 +7219,117 @@ impl OperonApp {
         }
     }
 
+    /// The sidebar's filters (change 252): the four status groups as counted
+    /// tiles, two per row where two fit, then the CLI marks in one segment,
+    /// and — only while something is filtered — how many sessions show and
+    /// the one action that clears both dimensions.
     fn ui_sidebar_session_filters(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
-        ui.label(
-            RichText::new(tr("CLI"))
-                .size(11.5)
-                .color(palette.text_muted),
-        );
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(SPACE_XS, SPACE_XS);
-            let filtering = self.agent_filter.iter().any(|selected| *selected);
-            if session_filter_button(ui, palette, tr("すべて"), !filtering, None).clicked() {
-                self.clear_agent_filter();
-            }
-            for agent in ["codex", "claude", "gemini"] {
-                let index = session_agent_filter_index(agent);
-                if session_filter_button(
-                    ui,
-                    palette,
-                    agent_choice_copy(agent).0,
-                    self.agent_filter[index],
-                    Some(agent),
-                )
-                .clicked()
-                {
-                    self.toggle_agent_filter(index);
-                }
-            }
-            if session_filter_button(ui, palette, tr("その他"), self.agent_filter[3], None)
-                .clicked()
-            {
-                self.toggle_agent_filter(3);
-            }
-        });
-        ui.label(
-            RichText::new(tr("ステータス"))
-                .size(11.5)
-                .color(palette.text_muted),
-        );
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(SPACE_XS, SPACE_XS);
-            let filtering =
-                self.waiting_filter || self.status_filter.iter().any(|selected| *selected);
-            if session_filter_button(ui, palette, tr("すべて"), !filtering, None).clicked() {
-                self.clear_status_filter();
-            }
-            if session_filter_button(ui, palette, tr("承認・回答待ち"), self.waiting_filter, None)
-                .clicked()
-            {
-                self.toggle_waiting_filter();
-            }
-            for group in SessionStatusGroup::GROUPS {
-                if session_filter_button(
-                    ui,
-                    palette,
-                    tr(group.message_id()),
-                    self.status_filter[group.index()],
-                    None,
-                )
-                .on_hover_text(tr(group.hint_id()))
-                .clicked()
-                {
-                    self.toggle_status_filter(group);
-                }
+        let counts = self.status_group_counts_for_chosen_agents();
+        let gap = SPACE_XS;
+        let columns = if ui.available_width() >= 2.0 * STATUS_TILE_MIN_W + gap {
+            2
+        } else {
+            1
+        };
+        let width = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
+        let mut toggled = None;
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+            for row in SessionStatusGroup::GROUPS.chunks(columns) {
+                ui.horizontal(|ui| {
+                    for &group in row {
+                        let tile = status_filter_tile(
+                            ui,
+                            palette,
+                            group,
+                            counts[group.index()],
+                            self.status_filter[group.index()],
+                            width,
+                        )
+                        .on_hover_ui(|ui| {
+                            ui.label(tr(group.hint_id()));
+                            // The waiting choice change 252 folded into
+                            // 要対応 keeps its number here.
+                            if group == SessionStatusGroup::NeedsYou {
+                                ui.label(tf!(
+                                    "承認・回答待ち {count} 件",
+                                    count = self.waiting_session_count()
+                                ));
+                            }
+                        });
+                        if tile.clicked() {
+                            toggled = Some(group);
+                        }
+                    }
+                });
             }
         });
+        if let Some(group) = toggled {
+            self.toggle_status_filter(group);
+        }
+        let filtering = self.has_session_filters();
+        let mut summarised = false;
+        ui.horizontal(|ui| {
+            self.ui_sidebar_agent_segment(ui, palette);
+            if filtering && ui.available_width() >= STATUS_TILE_MIN_W {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.ui_sidebar_filter_summary(ui, palette);
+                });
+                summarised = true;
+            }
+        });
+        if filtering && !summarised {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.ui_sidebar_filter_summary(ui, palette);
+                });
+            });
+        }
         hairline(ui, palette);
+    }
+
+    /// Codex, Claude Code, Antigravity and every other CLI, as marks in one
+    /// hairline segment; the marks not chosen fade while any is.
+    fn ui_sidebar_agent_segment(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        let narrowed = self.agent_filter.iter().any(|selected| *selected);
+        let mut toggled = None;
+        egui::Frame::NONE
+            .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+            .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
+            .inner_margin(egui::Margin::same(2))
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
+                for agent in ["codex", "claude", "gemini", "other"] {
+                    let index = session_agent_filter_index(agent);
+                    let (label, mark) = if index == 3 {
+                        (tr("その他"), None)
+                    } else {
+                        (agent_choice_copy(agent).0, Some(agent))
+                    };
+                    let selected = self.agent_filter[index];
+                    if agent_filter_toggle(ui, palette, label, mark, ICON_MORE, selected, narrowed)
+                        .clicked()
+                    {
+                        toggled = Some(index);
+                    }
+                }
+            });
+        if let Some(index) = toggled {
+            self.toggle_agent_filter(index);
+        }
+    }
+
+    /// Right to left: 「クリア」, then how many sessions the column shows.
+    fn ui_sidebar_filter_summary(&mut self, ui: &mut egui::Ui, palette: &Palette) {
+        if quiet_button(ui, palette, tr("クリア")).clicked() {
+            self.clear_session_filters();
+        }
+        ui.label(
+            RichText::new(tf!("{count} 件", count = self.matching_session_count()))
+                .size(12.0)
+                .color(palette.text_muted),
+        );
     }
 
     fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {

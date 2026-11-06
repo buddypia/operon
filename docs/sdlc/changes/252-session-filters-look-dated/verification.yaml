@@ -1,0 +1,11 @@
+# Change 252: compact, counted sidebar filters. Every obligation is re-run in CI.
+digest: "d8fc86e906105784"
+obligations:
+  - R1 empirical-test :: cargo test --locked sidebar_252_status_tiles_count_and_toggle
+  - R2 empirical-test :: cargo test --locked sidebar_252_counts_follow_cli_and_clear_only_while_filtering
+  - R3 empirical-test :: cargo test --locked sidebar_252_needs_you_covers_waiting
+  - R4 empirical-test :: cargo test --locked sidebar_252_tiles_fit_narrow_column
+  - R5 empirical-test :: cargo test --locked sidebar_252_counts_follow_cli_and_clear_only_while_filtering
+  - I1 empirical-test :: cargo test --locked sidebar_251_
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/252-session-filters-look-dated/mutations.py
+  - F1 empirical-test :: cargo test --locked only_selections_wear_the_selection_colour

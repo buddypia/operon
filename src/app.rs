@@ -420,7 +420,6 @@ pub(crate) struct OperonApp {
     /// open the app on a list with sessions missing and no memory of why.
     pub(crate) status_filter: [bool; 4],
     pub(crate) agent_filter: [bool; 4],
-    pub(crate) waiting_filter: bool,
     pub(crate) git_selected_file: Option<String>,
     pub(crate) selected_file: Option<PathBuf>,
     pub(crate) project_path_input: String,
@@ -979,7 +978,6 @@ impl OperonApp {
             pending_history_open: None,
             status_filter: [false; 4],
             agent_filter: [false; 4],
-            waiting_filter: false,
             git_selected_file: None,
             selected_file: None,
             project_path_input: String::new(),
@@ -5810,8 +5808,19 @@ impl OperonApp {
     /// How many sessions are in each group right now, indexed by
     /// `SessionStatusGroup::index`. One pass, no allocation.
     pub(crate) fn status_group_counts(&self) -> [usize; 4] {
+        self.status_group_counts_where(|_| true)
+    }
+
+    /// The sidebar's tile counts: what each group would show if it were chosen
+    /// alone with the current CLI choice, so a number never promises rows the
+    /// column will not draw.
+    pub(crate) fn status_group_counts_for_chosen_agents(&self) -> [usize; 4] {
+        self.status_group_counts_where(|session| self.session_matches_agent_filter(session))
+    }
+
+    fn status_group_counts_where(&self, keep: impl Fn(&Session) -> bool) -> [usize; 4] {
         let mut counts = [0usize; 4];
-        for session in &self.store.sessions {
+        for session in self.store.sessions.iter().filter(|session| keep(session)) {
             let group = self.session_status_kind_for(session).group();
             counts[group.index()] += 1;
             // The unread overlay, kept in step with `attention_count`: a
@@ -5927,18 +5936,16 @@ impl OperonApp {
     /// selected everything passes, which is the list as it was before there
     /// was a filter at all.
     pub(crate) fn session_matches_status_filter(&self, session: &Session) -> bool {
-        if !self.status_filter.iter().any(|selected| *selected) && !self.waiting_filter {
+        if !self.status_filter.iter().any(|selected| *selected) {
             return true;
         }
         // Once per session, not once per selected chip: for a queued session,
         // deciding the kind walks its dependencies against every other
         // session, and this runs for every row on every frame.
         let kind = self.session_status_kind_for(session);
-        (self.waiting_filter && kind == SessionStatusKind::Waiting)
-            || SessionStatusGroup::GROUPS.iter().any(|group| {
-                self.status_filter[group.index()]
-                    && self.kind_in_status_group(kind, session, *group)
-            })
+        SessionStatusGroup::GROUPS.iter().any(|group| {
+            self.status_filter[group.index()] && self.kind_in_status_group(kind, session, *group)
+        })
     }
 
     pub(crate) fn session_matches_filters(&self, session: &Session) -> bool {
@@ -5951,9 +5958,31 @@ impl OperonApp {
     }
 
     pub(crate) fn has_session_filters(&self) -> bool {
-        self.waiting_filter
-            || self.status_filter.iter().any(|selected| *selected)
+        self.status_filter.iter().any(|selected| *selected)
             || self.agent_filter.iter().any(|selected| *selected)
+    }
+
+    /// How many sessions the column shows while a filter is on.
+    pub(crate) fn matching_session_count(&self) -> usize {
+        self.store
+            .sessions
+            .iter()
+            .filter(|session| self.session_matches_filters(session))
+            .count()
+    }
+
+    /// How many of 要対応's sessions, under the current CLI choice, are
+    /// waiting on a permission or an answer: the choice change 252 folded in.
+    /// Asked only while the pointer is on the tile.
+    pub(crate) fn waiting_session_count(&self) -> usize {
+        self.store
+            .sessions
+            .iter()
+            .filter(|session| {
+                self.session_matches_agent_filter(session)
+                    && self.session_status_kind_for(session) == SessionStatusKind::Waiting
+            })
+            .count()
     }
 
     pub(crate) fn toggle_agent_filter(&mut self, index: usize) {
@@ -5965,11 +5994,6 @@ impl OperonApp {
 
     pub(crate) fn clear_agent_filter(&mut self) {
         self.agent_filter = [false; 4];
-        self.forget_pending_session_close();
-    }
-
-    pub(crate) fn toggle_waiting_filter(&mut self) {
-        self.waiting_filter = !self.waiting_filter;
         self.forget_pending_session_close();
     }
 
@@ -5986,7 +6010,6 @@ impl OperonApp {
     }
 
     pub(crate) fn clear_status_filter(&mut self) {
-        self.waiting_filter = false;
         self.status_filter = [false; 4];
         self.forget_pending_session_close();
     }

@@ -347,26 +347,156 @@ pub(crate) fn session_agent_filter_index(agent: &str) -> usize {
     }
 }
 
-/// A filter's selected state remains visible; native button semantics also
-/// give the icon-only vendor choices keyboard activation and readable names.
-pub(crate) fn session_filter_button(
+/// One status group as a sidebar filter tile (change 252): the group's mark in
+/// its status colour, its word, and how many sessions choosing it would show.
+///
+/// A hairline at rest and a fill under the pointer, like every other control;
+/// chosen, it takes a wash of its own status colour, so the tile and the rows
+/// it leaves share a colour. A zero count draws faint but stays clickable — it
+/// is still a true answer to "what would this show".
+pub(crate) fn status_filter_tile(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    group: SessionStatusGroup,
+    count: usize,
+    selected: bool,
+    width: f32,
+) -> egui::Response {
+    let label = tr(group.message_id());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, CONTROL_HEIGHT), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let tone = palette.status(group.tone());
+        let quiet = count == 0 && !selected;
+        let fill = if selected {
+            tone.gamma_multiply(0.14)
+        } else if response.hovered() {
+            palette.control_hovered
+        } else {
+            Color32::TRANSPARENT
+        };
+        let edge = if selected {
+            tone.gamma_multiply(0.6)
+        } else {
+            palette.border_subtle
+        };
+        let painter = ui.painter();
+        painter.rect(
+            rect,
+            egui::CornerRadius::same(RADIUS_CONTROL),
+            fill,
+            egui::Stroke::new(1.0, edge),
+            egui::StrokeKind::Inside,
+        );
+        // The glyph the sidebar's rows and project counts already use for the
+        // group, so a tile and the rows it leaves carry the same mark.
+        let mark = painter.text(
+            egui::pos2(rect.left() + SPACE_SM, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            group.icon(),
+            egui::FontId::proportional(13.5),
+            if quiet { palette.text_faint } else { tone },
+        );
+        let count_ink = if selected { tone } else { palette.text_faint };
+        let count = painter.layout_no_wrap(
+            count.to_string(),
+            egui::FontId::proportional(12.0),
+            count_ink,
+        );
+        let count_at = egui::pos2(
+            rect.right() - SPACE_SM - count.size().x,
+            rect.center().y - count.size().y / 2.0,
+        );
+        let ink = if selected {
+            palette.text_strong
+        } else if quiet {
+            palette.text_faint
+        } else {
+            palette.text
+        };
+        let word_left = mark.right() + SPACE_XS;
+        let mut job = egui::text::LayoutJob::simple_singleline(
+            label.to_owned(),
+            egui::FontId::proportional(12.5),
+            ink,
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(
+            (count_at.x - SPACE_XS - word_left).max(0.0),
+        );
+        let word = ui.fonts(|fonts| fonts.layout_job(job));
+        painter.galley(
+            egui::pos2(word_left, rect.center().y - word.size().y / 2.0),
+            word,
+            ink,
+        );
+        painter.galley(count_at, count, count_ink);
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+    });
+    paint_button_focus(ui, &response, palette);
+    response
+}
+
+/// One CLI choice in the sidebar's CLI segment (change 252): the official mark
+/// alone, or `glyph` for the slot that has none, with `label` on hover and as
+/// its accessible name. `faded` is set while some other CLI is chosen, so what
+/// the column is narrowed to reads from the marks that keep their colour.
+pub(crate) fn agent_filter_toggle(
     ui: &mut egui::Ui,
     palette: &Palette,
     label: &str,
-    selected: bool,
     agent: Option<&str>,
+    glyph: &str,
+    selected: bool,
+    faded: bool,
 ) -> egui::Response {
-    let button = match agent.and_then(|agent| agent_icon_texture(ui.ctx(), agent)) {
-        Some(texture) => {
-            egui::Button::image(egui::Image::new((texture.id(), egui::vec2(18.0, 18.0))))
-        }
-        None => egui::Button::new(RichText::new(label).size(11.5)),
-    };
-    let response = ui.add(
-        button
-            .selected(selected)
-            .min_size(egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT)),
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT_SMALL),
+        egui::Sense::click(),
     );
+    if ui.is_rect_visible(rect) {
+        let corner = egui::CornerRadius::same(RADIUS_CONTROL);
+        if selected {
+            ui.painter().rect(
+                rect,
+                corner,
+                palette.control_active,
+                egui::Stroke::new(1.0, palette.border),
+                egui::StrokeKind::Inside,
+            );
+        } else if response.hovered() {
+            ui.painter()
+                .rect_filled(rect, corner, palette.control_hovered);
+        }
+        let mut mark = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        if faded && !selected && !response.hovered() {
+            mark.multiply_opacity(0.4);
+        }
+        match agent.and_then(|agent| agent_icon_texture(ui.ctx(), agent)) {
+            Some(texture) => egui::Image::new((texture.id(), egui::Vec2::splat(AGENT_FILTER_MARK)))
+                .paint_at(
+                    &mark,
+                    egui::Rect::from_center_size(
+                        rect.center(),
+                        egui::Vec2::splat(AGENT_FILTER_MARK),
+                    ),
+                ),
+            None => {
+                mark.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    glyph,
+                    egui::FontId::proportional(14.0),
+                    if selected {
+                        palette.text_strong
+                    } else {
+                        palette.text_muted
+                    },
+                );
+            }
+        }
+    }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
     });
