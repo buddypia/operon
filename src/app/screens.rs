@@ -6968,30 +6968,23 @@ impl OperonApp {
                                 .inner_margin(egui::Margin::symmetric(8, 4))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        // Keep the state visible before even a truncated title.
+                                        // State wording belongs in the hover, not the tab.
                                         if let WorkspaceTab::Session(id) = tab {
                                             if let Some(session) =
                                                 self.store.sessions.iter().find(|s| s.id == *id)
                                             {
                                                 let kind = self.session_status_kind_for(session);
-                                                ui.label(
-                                                    RichText::new(kind.icon())
-                                                        .color(palette.status(kind.tone())),
-                                                )
-                                                .on_hover_ui(|ui| {
-                                                    let view = session_status_view(
-                                                        &self.store.sessions,
-                                                        session,
-                                                        self.cancellation_pending(*id),
-                                                        self.session_activity_for(*id),
-                                                    );
-                                                    ui.label(&view.label);
-                                                    ui.label(&view.hint);
-                                                });
-                                                ui.label(
-                                                    RichText::new(tr(kind.label()))
-                                                        .size(12.5)
-                                                        .color(palette.status(kind.tone())),
+                                                session_status_icon(ui, palette, kind).on_hover_ui(
+                                                    |ui| {
+                                                        let view = session_status_view(
+                                                            &self.store.sessions,
+                                                            session,
+                                                            self.cancellation_pending(*id),
+                                                            self.session_activity_for(*id),
+                                                        );
+                                                        ui.label(&view.label);
+                                                        ui.label(&view.hint);
+                                                    },
                                                 );
                                             }
                                         }

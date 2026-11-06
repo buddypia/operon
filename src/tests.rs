@@ -65925,13 +65925,35 @@ fn session_arrangement_without_folded_projects_still_loads() {
     fs::remove_dir_all(root).unwrap();
 }
 
+fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Option<egui::Rect> {
+    output.shapes.iter().find_map(|shape| match &shape.shape {
+        egui::Shape::Circle(circle)
+            if (circle.radius - 8.0).abs() < 0.01
+                && circle.center.x >= column_right(output)
+                && circle.center.x < title.left()
+                // The title is centred inside its existing 160px label cell.
+                && title.left() - circle.center.x < 160.0
+                && (circle.center.y - title.center().y).abs() < CONTROL_HEIGHT / 2.0 =>
+        {
+            Some(egui::Rect::from_center_size(
+                circle.center,
+                egui::Vec2::splat(STATUS_ICON_SIZE),
+            ))
+        }
+        _ => None,
+    })
+}
+
 #[test]
 fn workspace_session_tab_shows_its_status_glyph() {
     let root = temporary_directory("workspace-tab-glyph");
     let (mut app, _populated, _empty, first, _second) = status_column_fixture(&root);
     app.select_session(first);
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let tab = |output: &egui::FullOutput, title: &str| {
@@ -65941,19 +65963,11 @@ fn workspace_session_tab_shows_its_status_glyph() {
             .min_by(|a, b| a.top().total_cmp(&b.top()))
             .expect("central tab title")
     };
-    let glyph_before = |output: &egui::FullOutput, title: &str, glyph: &str| {
-        let title = tab(output, title);
-        drawn_text_rects(output, |text| text == glyph)
-            .into_iter()
-            .find(|rect| {
-                rect.right() <= title.left() + 1.0
-                    && rect.left() >= column_right(output)
-                    && title.left() - rect.right() < 160.0
-                    && (rect.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
-            })
-    };
-    assert!(glyph_before(&output, "second", ICON_ATTENTION).is_some());
-    let busy = glyph_before(&output, "first", ICON_STATUS_RUNNING).expect("busy glyph");
+    let attention = session_tab_status_circle(&output, tab(&output, "second"))
+        .expect("inactive tab attention badge");
+    let busy =
+        session_tab_status_circle(&output, tab(&output, "first")).expect("busy status badge");
+    assert!(attention.left() > busy.right());
     workspace_pointer_frame(
         &mut app,
         &ctx,
@@ -65965,6 +65979,39 @@ fn workspace_session_tab_shows_its_status_glyph() {
             && drawn_text_rect(&hovered, |text| text == "ターミナル稼働中").is_some(),
         "hovering the glyph names the state and what it means"
     );
+    app.session_activity.insert(
+        first,
+        ActivityTracker {
+            settled: Some(AgentActivity::Idle),
+            candidate: None,
+        },
+    );
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let changed = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(drawn_text_rect(&changed, |text| text == tr("指示待ち")).is_some());
+    assert!(drawn_text_rect(&changed, |text| text == tr("次の依頼を待っています")).is_some());
+    assert!(drawn_text_rect(&changed, |text| text == tr("ターミナル稼働中")).is_none());
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(attention.center())],
+    );
+    // egui permits one tooltip per layer and releases the previous anchor
+    // using the prior pass, so allow that handoff before inspecting the next.
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let inactive = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(drawn_text_rect(&inactive, |text| text
+        == tr("ターミナルを開いて回答してください"))
+    .is_some());
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(egui::pos2(700.0, 500.0))],
+    );
+    let away = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(drawn_text_rect(&away, |text| text
+        == tr("ターミナルを開いて回答してください"))
+    .is_none());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -68102,30 +68149,27 @@ pub(crate) fn session_tabs_show_live_state_before_title() {
     let (mut app, _, _, first, _) = status_column_fixture(&root);
     app.select_session(first);
     let ctx = egui::Context::default();
-    for (status, activity, word, icon) in [
+    for (status, activity, expected_kind) in [
         (
             SessionStatus::Active,
             Some(AgentActivity::Idle),
-            "指示待ち",
-            ICON_STATUS_IDLE,
+            SessionStatusKind::Idle,
         ),
         (
             SessionStatus::Active,
             Some(AgentActivity::Working),
-            "実行中",
-            ICON_STATUS_RUNNING,
+            SessionStatusKind::Working,
         ),
         (
             SessionStatus::Active,
             Some(AgentActivity::AwaitingInput),
-            "要対応",
-            ICON_ATTENTION,
+            SessionStatusKind::Waiting,
         ),
-        (SessionStatus::Exited, None, "終了", ICON_STATUS_DONE),
-        (SessionStatus::Failed, None, "終了", ICON_STATUS_FAILED),
-        (SessionStatus::Cancelled, None, "終了", ICON_STOP),
-        (SessionStatus::Lost, None, "終了", ICON_STATUS_LOST),
-        (SessionStatus::Unknown, None, "実行中", ICON_STATUS_UNKNOWN),
+        (SessionStatus::Exited, None, SessionStatusKind::Done),
+        (SessionStatus::Failed, None, SessionStatusKind::Failed),
+        (SessionStatus::Cancelled, None, SessionStatusKind::Stopped),
+        (SessionStatus::Lost, None, SessionStatusKind::Lost),
+        (SessionStatus::Unknown, None, SessionStatusKind::Checking),
     ] {
         app.store
             .sessions
@@ -68147,23 +68191,52 @@ pub(crate) fn session_tabs_show_live_state_before_title() {
             .filter(|r| r.left() >= column_right(&output))
             .min_by(|a, b| a.top().total_cmp(&b.top()))
             .expect("tab title");
-        let state = drawn_text_rects(&output, |text| text == tr(word))
-            .into_iter()
-            .find(|r| {
-                r.left() >= column_right(&output)
-                    && r.right() <= title.left()
-                    && title.left() - r.right() < 160.0
-                    && (r.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
+        let badge = session_tab_status_circle(&output, title).expect("live state badge");
+        let actual: Vec<_> = output
+            .shapes
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s.shape,
+                    egui::Shape::Circle(_) | egui::Shape::LineSegment { .. } | egui::Shape::Rect(_)
+                ) && badge
+                    .expand(0.01)
+                    .contains_rect(s.shape.visual_bounding_rect())
             })
-            .unwrap_or_else(|| panic!("session must show {word} before its title"));
-        assert!(
-            drawn_text_rects(&output, |text| text == icon)
+            .map(|s| s.shape.clone())
+            .collect();
+        let expected_ctx = egui::Context::default();
+        let expected = expected_ctx.run(egui::RawInput::default(), |ctx| {
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Middle,
+                egui::Id::new("expected-status"),
+            ));
+            expected_kind.status_mark().paint(
+                &painter,
+                badge,
+                app.store.theme.palette().status(expected_kind.tone()),
+            );
+        });
+        assert_eq!(
+            actual,
+            expected
+                .shapes
                 .into_iter()
-                .any(|r| r.left() >= column_right(&output)
-                    && r.right() <= state.left()
-                    && state.left() - r.right() < 20.0
-                    && (r.center().y - state.center().y).abs() < CONTROL_HEIGHT / 2.0),
-            "state icon must precede its word"
+                .map(|s| s.shape)
+                .collect::<Vec<_>>(),
+            "workspace must paint the current {expected_kind:?} mark and tone"
+        );
+        let word = expected_kind.label();
+        assert!(
+            !drawn_text_rects(&output, |text| text == tr(word))
+                .into_iter()
+                .any(|r| {
+                    r.left() >= column_right(&output)
+                        && r.right() <= title.left()
+                        && title.left() - r.right() < 160.0
+                        && (r.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
+                }),
+            "session tab must not permanently show {word} before its title"
         );
     }
     fs::remove_dir_all(root).unwrap();
@@ -68359,4 +68432,73 @@ fn topbar_wordmark_is_neutral_beside_the_primary_action() {
         "primary action must retain its orange fill"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_tab_status_badges_are_distinct_vectors() {
+    let cases = [
+        (SessionStatusKind::Stopping, StatusMark::Stop),
+        (SessionStatusKind::Starting, StatusMark::Power),
+        (SessionStatusKind::Working, StatusMark::Progress),
+        (SessionStatusKind::Waiting, StatusMark::Attention),
+        (SessionStatusKind::Idle, StatusMark::Pause),
+        (SessionStatusKind::Running, StatusMark::Progress),
+        (SessionStatusKind::Blocked, StatusMark::Attention),
+        (SessionStatusKind::Ready, StatusMark::Play),
+        (SessionStatusKind::Queued, StatusMark::Hourglass),
+        (SessionStatusKind::Done, StatusMark::Check),
+        (SessionStatusKind::Failed, StatusMark::Cross),
+        (SessionStatusKind::Stopped, StatusMark::Stop),
+        (SessionStatusKind::Lost, StatusMark::Minus),
+        (SessionStatusKind::Checking, StatusMark::Question),
+    ];
+    assert_eq!(cases.len(), SessionStatusKind::ALL.len());
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        for scale in [1.0, 2.0] {
+            let mut monochrome = Vec::new();
+            for (kind, expected) in cases {
+                assert_eq!(kind.status_mark(), expected, "{kind:?}");
+                let ctx = egui::Context::default();
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(20.0, 20.0),
+                    egui::Vec2::splat(STATUS_ICON_SIZE * scale),
+                );
+                let output = ctx.run(egui::RawInput::default(), |ctx| {
+                    let painter = ctx.layer_painter(egui::LayerId::new(
+                        egui::Order::Middle,
+                        egui::Id::new("status-test"),
+                    ));
+                    kind.status_mark().paint(&painter, rect, palette.text);
+                });
+                let shapes: Vec<_> = output.shapes.into_iter().map(|s| s.shape).collect();
+                assert!(shapes.len() >= 2, "enclosure and inner mark: {kind:?}");
+                assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Circle(c)
+                    if c.center == rect.center() && (c.radius - 8.0 * scale).abs() < 0.01
+                    && c.stroke.color == palette.text && (c.stroke.width - 1.5 * scale).abs() < 0.01)), "common enclosure: {kind:?}");
+                for shape in &shapes {
+                    assert!(
+                        !matches!(shape, egui::Shape::Text(_)),
+                        "native vector, not a font glyph"
+                    );
+                    assert!(
+                        rect.expand(0.01)
+                            .contains_rect(shape.visual_bounding_rect()),
+                        "bounded mark: {kind:?}"
+                    );
+                }
+                monochrome.push((expected, shapes));
+            }
+            for (index, (mark, shapes)) in monochrome.iter().enumerate() {
+                for (other, other_shapes) in &monochrome[..index] {
+                    if mark != other {
+                        assert_ne!(
+                            shapes, other_shapes,
+                            "different states must differ without colour"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

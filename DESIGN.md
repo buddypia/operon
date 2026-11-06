@@ -510,7 +510,7 @@ to tell two sessions apart — becomes the least readable thing on the card.
 
 ## Iconography
 
-One family does the icons too: **Phosphor Icons**, regular weight, bundled as a
+The action icon family is **Phosphor Icons**, regular weight, bundled as a
 font and named through the `ICON_*` constants in `src/glyphs.rs`. Drawing code
 never writes a glyph — it names an action, the same way it names a colour role
 rather than a hex value.
@@ -532,6 +532,14 @@ enclosure is what keeps a chip from reading as a button in the same row, and
 the difference inside it is what a person who cannot use the colour still has.
 Colour carries the meaning first (see *Status is a meaning, not a colour*), but
 it may not carry it alone.
+
+Session tabs use the generated `StatusMark` vector family in `src/glyphs.rs`:
+18px circular enclosures with 1.5px strokes and distinct progress, pause,
+exclamation, power, play, hourglass, check, cross, stop, minus and question
+centres. Geometry stays sharp across display scales and all three themes;
+`Palette::status` supplies the ink. These passive indicators show no permanent
+state word. Hover displays the current localized state name and explanation.
+Existing status chips keep their shared Phosphor glyphs and text.
 
 Size is part of whether a mark exists. Phosphor's `dot` is three pixels of ink
 at the 12px a chip is drawn at, which is a smudge, not a state — a glyph that

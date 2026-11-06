@@ -1,6 +1,6 @@
 # Plan: compact session status badges
 
-- **Status**: approved
+- **Status**: done
 
 ## Steps
 
@@ -19,4 +19,12 @@ The R1–R3 tests in spec.md inspect real egui shapes and tooltips. Workspace po
 
 ## Departures from the plan
 
-None.
+The first geometry guard assumed a badge within 35px of the painted title. Observed egui output placed the second badge at x=533 and its short title at x=610.4 because the existing title is centred in a 160px cell. Corrected the guard to the existing cell width without changing product layout. The changed no-permanent-word guard was observed failing before implementation, then passing.
+
+Inspected the generated geometry in a monochrome sheet at native 18px and 3x size. All eleven central marks and their common enclosure are readable. Actual workspace primitives and hover behavior are covered by the named tests; no running user application was terminated.
+
+Band investigation: `largest_module_lines` is 9529 in src/app.rs on both main and this branch. This change does not touch that module. Existing steering/escape warnings are recorded; no new band policy is introduced.
+
+Tooltip-test investigation: pinned egui 0.31.1 permits only one tooltip per layer based on the previous pass and defaults to showing only when the pointer is still. The test now disables only that timing behavior and allows a handoff frame; production hover timing is unchanged. R1, R2, R3 and workspace pointer tests passed with CARGO_INCREMENTAL=0. A disk-full compilation was avoided with this build setting, then the user explicitly authorized removal of this worktree's generated incremental cache.
+
+Independent empirical verification: empirical_verify_status applied the branch snapshot in an isolated scratch worktree and ran all six recorded obligations with CARGO_INCREMENTAL=0. Exit0 in186s: all five test obligations passed and all six deliberate mutations were caught. The wrapper retained the success result, not individual panic text; no claim is made about unavailable detailed logs. No production code changes were requested by verification.

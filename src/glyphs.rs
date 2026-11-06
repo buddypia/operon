@@ -202,3 +202,112 @@ pub(crate) const AGENT_ICON_ANTIGRAVITY: &[u8] =
 /// three vendor marks already ship at. The plate is dropped rather than kept so
 /// the mark carries no tile of its own onto the light theme.
 pub(crate) const BRAND_MARK: &[u8] = include_bytes!("../assets/operon-mark-128.png");
+
+/// Generated vector vocabulary for compact session status badges. All marks
+/// share an enclosure, so they read as status indicators rather than actions.
+/// The 18-point grid uses geometry instead of a font or scaled raster asset.
+pub(crate) const STATUS_ICON_SIZE: f32 = 18.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StatusMark {
+    Progress,
+    Pause,
+    Attention,
+    Power,
+    Play,
+    Hourglass,
+    Check,
+    Cross,
+    Stop,
+    Minus,
+    Question,
+}
+
+impl StatusMark {
+    pub(crate) fn paint(self, painter: &egui::Painter, rect: egui::Rect, ink: Color32) {
+        let center = rect.center();
+        let scale = rect.width().min(rect.height()) / STATUS_ICON_SIZE;
+        let stroke = egui::Stroke::new(1.5 * scale, ink);
+        let point = |[x, y]: [f32; 2]| center + egui::vec2(x, y) * scale;
+        let line = |a, b| {
+            painter.line_segment([point(a), point(b)], stroke);
+        };
+        let path = |points: &[[f32; 2]]| {
+            for edge in points.windows(2) {
+                line(edge[0], edge[1]);
+            }
+        };
+        painter.circle_stroke(center, 8.0 * scale, stroke);
+        match self {
+            Self::Progress => {
+                path(&[
+                    [-3.8, -0.8],
+                    [-2.7, -3.0],
+                    [0.0, -4.0],
+                    [2.8, -3.0],
+                    [3.8, -0.8],
+                ]);
+                path(&[[1.6, -1.7], [3.8, -0.8], [4.4, -3.0]]);
+                path(&[[3.8, 0.8], [2.7, 3.0], [0.0, 4.0], [-2.8, 3.0], [-3.8, 0.8]]);
+                path(&[[-1.6, 1.7], [-3.8, 0.8], [-4.4, 3.0]]);
+            }
+            Self::Pause => {
+                line([-2.0, -3.5], [-2.0, 3.5]);
+                line([2.0, -3.5], [2.0, 3.5]);
+            }
+            Self::Attention => {
+                line([0.0, -4.0], [0.0, 0.5]);
+                painter.circle_filled(point([0.0, 3.3]), 0.9 * scale, ink);
+            }
+            Self::Power => {
+                path(&[
+                    [-3.0, -2.0],
+                    [-3.8, 0.0],
+                    [-2.8, 2.8],
+                    [0.0, 3.8],
+                    [2.8, 2.8],
+                    [3.8, 0.0],
+                    [3.0, -2.0],
+                ]);
+                line([0.0, -4.2], [0.0, 0.0]);
+            }
+            Self::Play => path(&[[-2.3, -3.8], [3.5, 0.0], [-2.3, 3.8], [-2.3, -3.8]]),
+            Self::Hourglass => path(&[
+                [-3.0, -3.5],
+                [3.0, -3.5],
+                [2.5, -2.0],
+                [-2.5, 2.0],
+                [-3.0, 3.5],
+                [3.0, 3.5],
+                [2.5, 2.0],
+                [-2.5, -2.0],
+                [-3.0, -3.5],
+            ]),
+            Self::Check => path(&[[-3.8, -0.2], [-1.0, 2.8], [4.0, -3.0]]),
+            Self::Cross => {
+                line([-3.0, -3.0], [3.0, 3.0]);
+                line([3.0, -3.0], [-3.0, 3.0]);
+            }
+            Self::Stop => {
+                painter.rect_filled(
+                    egui::Rect::from_center_size(center, egui::vec2(6.0, 6.0) * scale),
+                    0.8,
+                    ink,
+                );
+            }
+            Self::Minus => line([-3.5, 0.0], [3.5, 0.0]),
+            Self::Question => {
+                path(&[
+                    [-2.6, -2.8],
+                    [-1.5, -4.0],
+                    [1.5, -4.0],
+                    [2.6, -2.8],
+                    [2.6, -1.3],
+                    [0.0, 0.3],
+                    [0.0, 1.0],
+                ]);
+                painter.circle_filled(point([0.0, 3.5]), 0.9 * scale, ink);
+            }
+        }
+    }
+}
