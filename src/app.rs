@@ -419,6 +419,8 @@ pub(crate) struct OperonApp {
     /// Deliberately not in the store: a filter that survived a restart would
     /// open the app on a list with sessions missing and no memory of why.
     pub(crate) status_filter: [bool; 4],
+    pub(crate) agent_filter: [bool; 4],
+    pub(crate) waiting_filter: bool,
     pub(crate) git_selected_file: Option<String>,
     pub(crate) selected_file: Option<PathBuf>,
     pub(crate) project_path_input: String,
@@ -976,6 +978,8 @@ impl OperonApp {
             session_library_open: false,
             pending_history_open: None,
             status_filter: [false; 4],
+            agent_filter: [false; 4],
+            waiting_filter: false,
             git_selected_file: None,
             selected_file: None,
             project_path_input: String::new(),
@@ -5923,16 +5927,55 @@ impl OperonApp {
     /// selected everything passes, which is the list as it was before there
     /// was a filter at all.
     pub(crate) fn session_matches_status_filter(&self, session: &Session) -> bool {
-        if !self.status_filter.iter().any(|selected| *selected) {
+        if !self.status_filter.iter().any(|selected| *selected) && !self.waiting_filter {
             return true;
         }
         // Once per session, not once per selected chip: for a queued session,
         // deciding the kind walks its dependencies against every other
         // session, and this runs for every row on every frame.
         let kind = self.session_status_kind_for(session);
-        SessionStatusGroup::GROUPS.iter().any(|group| {
-            self.status_filter[group.index()] && self.kind_in_status_group(kind, session, *group)
-        })
+        (self.waiting_filter && kind == SessionStatusKind::Waiting)
+            || SessionStatusGroup::GROUPS.iter().any(|group| {
+                self.status_filter[group.index()]
+                    && self.kind_in_status_group(kind, session, *group)
+            })
+    }
+
+    pub(crate) fn session_matches_filters(&self, session: &Session) -> bool {
+        self.session_matches_agent_filter(session) && self.session_matches_status_filter(session)
+    }
+
+    pub(crate) fn session_matches_agent_filter(&self, session: &Session) -> bool {
+        !self.agent_filter.iter().any(|selected| *selected)
+            || self.agent_filter[session_agent_filter_index(&session.agent)]
+    }
+
+    pub(crate) fn has_session_filters(&self) -> bool {
+        self.waiting_filter
+            || self.status_filter.iter().any(|selected| *selected)
+            || self.agent_filter.iter().any(|selected| *selected)
+    }
+
+    pub(crate) fn toggle_agent_filter(&mut self, index: usize) {
+        if let Some(selected) = self.agent_filter.get_mut(index) {
+            *selected = !*selected;
+            self.forget_pending_session_close();
+        }
+    }
+
+    pub(crate) fn clear_agent_filter(&mut self) {
+        self.agent_filter = [false; 4];
+        self.forget_pending_session_close();
+    }
+
+    pub(crate) fn toggle_waiting_filter(&mut self) {
+        self.waiting_filter = !self.waiting_filter;
+        self.forget_pending_session_close();
+    }
+
+    pub(crate) fn clear_session_filters(&mut self) {
+        self.clear_agent_filter();
+        self.clear_status_filter();
     }
 
     /// Turn one chip on or off.
@@ -5943,6 +5986,7 @@ impl OperonApp {
     }
 
     pub(crate) fn clear_status_filter(&mut self) {
+        self.waiting_filter = false;
         self.status_filter = [false; 4];
         self.forget_pending_session_close();
     }
@@ -5961,7 +6005,7 @@ impl OperonApp {
         self.session_view = SessionView::List;
         self.search.clear();
         self.pending_history_open = None;
-        self.status_filter = [false; 4];
+        self.clear_session_filters();
         self.status_filter[group.index()] = true;
         self.forget_pending_session_close();
     }

@@ -4388,10 +4388,18 @@ impl OperonApp {
             ui.label(RichText::new(tr("プロジェクトはまだありません。")).weak());
             return;
         }
+        if self.has_session_filters()
+            && !sessions
+                .iter()
+                .any(|session| self.session_matches_filters(session))
+        {
+            ui.label(RichText::new(tr("一致するセッションはありません。")).weak());
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
             for project in projects {
                 let mut project_sessions = sessions
                     .iter()
+                    .filter(|session| self.session_matches_filters(session))
                     .filter(|session| {
                         session.project_id == project.id
                             && (needle.is_empty()
@@ -4401,6 +4409,9 @@ impl OperonApp {
                     })
                     .cloned()
                     .collect::<Vec<_>>();
+                if self.has_session_filters() && project_sessions.is_empty() {
+                    continue;
+                }
                 project_sessions.sort_by_key(|session| session.created_at);
                 egui::Frame::group(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -5118,7 +5129,11 @@ impl OperonApp {
         let count = self
             .attention_order
             .iter()
-            .filter(|id| sessions.iter().any(|session| session.id == **id))
+            .filter(|id| {
+                sessions
+                    .iter()
+                    .any(|session| session.id == **id && self.session_matches_filters(session))
+            })
             .count();
         if count == 0 {
             return 0;
@@ -5142,8 +5157,9 @@ impl OperonApp {
                 // it to iterate would allocate every frame.
                 for index in 0..self.attention_order.len() {
                     let session_id = self.attention_order[index];
-                    let Some(session) = sessions.iter().find(|session| session.id == session_id)
-                    else {
+                    let Some(session) = sessions.iter().find(|session| {
+                        session.id == session_id && self.session_matches_filters(session)
+                    }) else {
                         continue;
                     };
                     let title = session_list_title(
@@ -5162,7 +5178,7 @@ impl OperonApp {
                         .unwrap_or_default();
                     let meta = match session.branch.as_deref() {
                         Some(branch) => format!("{project} · {ICON_BRANCH} {branch}"),
-                        None => format!("{project} · {}", agent_short_label(&session.agent)),
+                        None => format!("{ICON_PROJECT} {project}"),
                     };
                     let wait = self
                         .attention_wait(session_id, now)
@@ -5206,6 +5222,7 @@ impl OperonApp {
                                                 egui::Stroke::new(1.0, palette.selected_ink()),
                                             );
                                         }
+                                        agent_chip(ui, &session.agent, 12.0, palette);
                                         let title_width = (ui.available_width() - 56.0).max(40.0);
                                         ui.allocate_ui_with_layout(
                                             egui::vec2(title_width, 20.0),
@@ -5294,6 +5311,7 @@ impl OperonApp {
             .store
             .sessions
             .iter()
+            .filter(|session| self.session_matches_agent_filter(session))
             .filter(|session| {
                 needle.is_empty()
                     || format!("{} {} {}", session.name, session.goal, session.agent)
@@ -5305,7 +5323,14 @@ impl OperonApp {
         // One pass over the sessions for all four numbers. `status_view` would
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
-        let group_counts = self.status_group_counts();
+        let mut group_counts = [0usize; 4];
+        for session in &sessions {
+            let kind = self.session_status_kind_for(session);
+            for group in SessionStatusGroup::GROUPS {
+                group_counts[group.index()] +=
+                    usize::from(self.kind_in_status_group(kind, session, group));
+            }
+        }
         // A panel label, not a page heading (change 247): this list is
         // also the docked session panel, where this is its only name.
         ui.label(
@@ -5323,12 +5348,12 @@ impl OperonApp {
         // The count that used to sit beside the title as `⚠ n` is the 要対応
         // chip now: two counts of "needs me" side by side, defined differently,
         // is worse than one.
-        let filtering = self.status_filter.iter().any(|selected| *selected);
+        let filtering = self.has_session_filters();
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             if ui
                 .selectable_label(
-                    !filtering,
+                    !self.waiting_filter && !self.status_filter.iter().any(|selected| *selected),
                     RichText::new(tf!("すべて {count}", count = sessions.len()))
                         .size(11.5)
                         .color(palette.text),
@@ -5363,7 +5388,9 @@ impl OperonApp {
         let mut shown = 0usize;
         // The queue is drawn first unless the chips leave 要対応 out, and a
         // session drawn there is not drawn again in its project.
-        let pinning = !filtering || self.status_filter[SessionStatusGroup::NeedsYou.index()];
+        let pinning = !self.status_filter.iter().any(|selected| *selected)
+            || self.waiting_filter
+            || self.status_filter[SessionStatusGroup::NeedsYou.index()];
         // A move inside the column ends as a dock move does: Escape, or a
         // release the window never saw because focus left mid-drag.
         if self.column_drag.is_some() {
@@ -5417,7 +5444,7 @@ impl OperonApp {
                 let mut project_sessions = sessions
                     .iter()
                     .filter(|session| session.project_id == project.id)
-                    .filter(|session| self.session_matches_status_filter(session))
+                    .filter(|session| self.session_matches_filters(session))
                     .filter(|session| {
                         let pinned = pinning && self.attention_since.contains_key(&session.id);
                         pinned_here += usize::from(pinned);
@@ -5833,11 +5860,6 @@ impl OperonApp {
                                 } else {
                                     agent_chip(ui, &candidate.agent, 10.5, palette);
                                 }
-                                ui.label(
-                                    RichText::new(agent_short_label(&candidate.agent))
-                                        .size(11.5)
-                                        .color(second_ink),
-                                );
                                 ui.label(RichText::new("·").size(11.5).color(second_ink));
                                 // Four words for fourteen states: which one it
                                 // is, is the hover's to say.
@@ -5979,7 +6001,7 @@ impl OperonApp {
             }
             if !needle.is_empty() && sessions.is_empty() {
                 ui.label(RichText::new(tr("検索条件に一致するセッションはありません。")).weak());
-            } else if sessions.is_empty() {
+            } else if self.store.sessions.is_empty() {
                 // A person with no sessions is not being filtered, so this
                 // wins over anything the filter would have said.
                 ui.label(RichText::new(tr("セッションはまだありません。プロジェクトから起動してください。")).weak());
@@ -5993,11 +6015,11 @@ impl OperonApp {
                             .color(palette.text_muted),
                     );
                     if ui.button(tr("フィルタを解除")).clicked() {
-                        self.clear_status_filter();
+                        self.clear_session_filters();
                     }
                 } else {
                     ui.label(
-                        RichText::new(tf!("{p0} 件を非表示中", p0 = sessions.len().saturating_sub(shown)))
+                        RichText::new(tf!("{p0} 件を非表示中", p0 = self.store.sessions.len().saturating_sub(shown)))
                             .size(11.5)
                             .color(palette.text_faint),
                     );
@@ -7205,6 +7227,74 @@ impl OperonApp {
         }
     }
 
+    fn ui_sidebar_session_filters(&mut self, ui: &mut egui::Ui) {
+        let palette = self.store.theme.palette();
+        ui.label(
+            RichText::new(tr("CLI"))
+                .size(11.5)
+                .color(palette.text_muted),
+        );
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(SPACE_XS, SPACE_XS);
+            let filtering = self.agent_filter.iter().any(|selected| *selected);
+            if session_filter_button(ui, palette, tr("すべて"), !filtering, None).clicked() {
+                self.clear_agent_filter();
+            }
+            for agent in ["codex", "claude", "gemini"] {
+                let index = session_agent_filter_index(agent);
+                if session_filter_button(
+                    ui,
+                    palette,
+                    agent_choice_copy(agent).0,
+                    self.agent_filter[index],
+                    Some(agent),
+                )
+                .clicked()
+                {
+                    self.toggle_agent_filter(index);
+                }
+            }
+            if session_filter_button(ui, palette, tr("その他"), self.agent_filter[3], None)
+                .clicked()
+            {
+                self.toggle_agent_filter(3);
+            }
+        });
+        ui.label(
+            RichText::new(tr("ステータス"))
+                .size(11.5)
+                .color(palette.text_muted),
+        );
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(SPACE_XS, SPACE_XS);
+            let filtering =
+                self.waiting_filter || self.status_filter.iter().any(|selected| *selected);
+            if session_filter_button(ui, palette, tr("すべて"), !filtering, None).clicked() {
+                self.clear_status_filter();
+            }
+            if session_filter_button(ui, palette, tr("承認・回答待ち"), self.waiting_filter, None)
+                .clicked()
+            {
+                self.toggle_waiting_filter();
+            }
+            for group in SessionStatusGroup::GROUPS {
+                if session_filter_button(
+                    ui,
+                    palette,
+                    tr(group.message_id()),
+                    self.status_filter[group.index()],
+                    None,
+                )
+                .on_hover_text(tr(group.hint_id()))
+                .clicked()
+                {
+                    self.toggle_status_filter(group);
+                }
+            }
+        });
+        hairline(ui, palette);
+    }
+
     fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         // One start per project, on its own header: the toolbar holds the
@@ -7233,29 +7323,6 @@ impl OperonApp {
         let pointer = ui.input(|i| i.pointer.latest_pos());
         let mut projects = self.store.projects.clone();
         sort_column_projects(&mut projects, &self.session_arrangement);
-        // Every session someone may act on, once per frame: what needs the
-        // person first, then what is moving, then what is free, each in the
-        // column's own order. Finished sessions stay in 履歴 unless unread.
-        let mut ordered = self.store.sessions.iter().collect::<Vec<_>>();
-        sort_column_sessions(&mut ordered, &self.session_arrangement);
-        let mut live = ordered
-            .into_iter()
-            .filter_map(|session| {
-                let kind = self.session_status_kind_for(session);
-                let group = if self.is_session_unread(session.id) {
-                    SessionStatusGroup::NeedsYou
-                } else {
-                    kind.group()
-                };
-                (group != SessionStatusGroup::Finished).then_some((
-                    session.project_id,
-                    group,
-                    kind,
-                    session.id,
-                ))
-            })
-            .collect::<Vec<_>>();
-        live.sort_by_key(|(_, group, _, _)| group.index());
         let mut open = None;
         let mut fold = None;
         if projects.is_empty() {
@@ -7264,6 +7331,35 @@ impl OperonApp {
         egui::ScrollArea::vertical()
             .id_salt("workspace-project-scroll")
             .show(ui, |ui| {
+                self.ui_sidebar_session_filters(ui);
+                let filtering = self.has_session_filters();
+                // Every session someone may act on, once per frame: what needs the
+                // person first, then what is moving, then what is free, each in the
+                // column's own order. Finished sessions stay in 履歴 unless unread.
+                let mut ordered = self.store.sessions.iter().collect::<Vec<_>>();
+                sort_column_sessions(&mut ordered, &self.session_arrangement);
+                let mut live = ordered
+                    .into_iter()
+                    .filter(|session| self.session_matches_filters(session))
+                    .filter_map(|session| {
+                        let kind = self.session_status_kind_for(session);
+                        let group = if self.is_session_unread(session.id) {
+                            SessionStatusGroup::NeedsYou
+                        } else {
+                            kind.group()
+                        };
+                        (filtering || group != SessionStatusGroup::Finished).then_some((
+                            session.project_id,
+                            group,
+                            kind,
+                            session.id,
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                live.sort_by_key(|(_, group, _, _)| group.index());
+                if filtering && live.is_empty() && !projects.is_empty() {
+                    ui.label(RichText::new(tr("一致するセッションはありません。")).weak());
+                }
                 let view = ui.clip_rect();
                 if let Some(pos) =
                     pointer.filter(|pos| drag.is_some() && view.x_range().contains(pos.x))
@@ -7285,6 +7381,9 @@ impl OperonApp {
                 }
                 let mut targets = ColumnTargets::default();
                 for project in projects {
+                    if filtering && !live.iter().any(|(owner, ..)| *owner == project.id) {
+                        continue;
+                    }
                     let folded = self.session_arrangement.folded.contains(&project.id);
                     let selected = self.selected_project == Some(project.id);
                     // A heading, not a card (change 245): the project groups
@@ -7437,6 +7536,30 @@ impl OperonApp {
                                                 RichText::new(kind.icon())
                                                     .color(palette.status(kind.tone())),
                                             );
+                                            if agent_icon_asset(&session.agent).is_some() {
+                                                agent_chip(ui, &session.agent, 12.0, palette);
+                                            } else {
+                                                // Legacy commands can be arbitrarily long;
+                                                // keep space for the session's title.
+                                                let width = ui.available_width().min(72.0);
+                                                ui.allocate_ui_with_layout(
+                                                    egui::vec2(width, 18.0),
+                                                    egui::Layout::left_to_right(
+                                                        egui::Align::Center,
+                                                    ),
+                                                    |ui| {
+                                                        let label =
+                                                            agent_short_label(&session.agent);
+                                                        ui.add(
+                                                            egui::Label::new(
+                                                                RichText::new(label).size(11.5),
+                                                            )
+                                                            .truncate(),
+                                                        )
+                                                        .on_hover_text(label);
+                                                    },
+                                                );
+                                            }
                                             ui.add(
                                                 egui::Label::new(
                                                     RichText::new(&title)

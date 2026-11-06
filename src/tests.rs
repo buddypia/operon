@@ -68360,3 +68360,370 @@ fn topbar_wordmark_is_neutral_beside_the_primary_action() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn sidebar_251_filters_drive_real_rows() {
+    let root = temporary_directory("sidebar-251-controls");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.hook_status
+        .insert(first, sidebar_251_hook(AgentActivity::AwaitingInput));
+    let mut finished = app.store.sessions[0].clone();
+    finished.id = Uuid::new_v4();
+    finished.name = "finished-third".into();
+    finished.status = SessionStatus::Exited;
+    app.store.sessions.push(finished);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let rows = |out: &egui::FullOutput, text: &str| {
+        drawn_text_rects(out, |label| label == text)
+            .iter()
+            .any(|r| r.left() < right)
+    };
+    assert!(rows(&out, "CLI"), "sidebar CLI choices absent");
+    assert!(rows(&out, "承認・回答待ち"), "waiting filter absent");
+    assert!(rows(&out, "first") && rows(&out, "second"));
+    assert!(!rows(&out, "finished-third"));
+    let active = app.workspace.active().cloned();
+    let selected = app.selected_session;
+    let target = |out: &egui::FullOutput, label: &str| {
+        drawn_text_rects(out, |text| text == label)
+            .into_iter()
+            .find(|r| r.left() < right)
+            .unwrap()
+            .center()
+    };
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "承認・回答待ち"));
+    assert!(app.waiting_filter);
+    assert!(rows(&out, "first"));
+    assert!(!rows(&out, "second") && !rows(&out, "finished-third"));
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "終了"));
+    assert!(
+        rows(&out, "first") && rows(&out, "finished-third"),
+        "status choices form a union"
+    );
+    assert!(!rows(&out, "second"));
+    // Clear only the status dimension using its own All control (second row).
+    let all = drawn_text_rects(&out, |text| text == "すべて")
+        .into_iter()
+        .filter(|r| r.left() < right)
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    let out = sidebar_251_click(&mut app, &ctx, all.center());
+    assert!(!app.has_session_filters());
+    assert!(rows(&out, "first") && rows(&out, "second"));
+    assert!(!rows(&out, "finished-third"));
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "その他"));
+    assert!(rows(&out, "一致するセッションはありません。"));
+    assert!(!rows(&out, "first") && !rows(&out, "second"));
+    assert_eq!(app.workspace.active().cloned(), active);
+    assert_eq!(app.selected_session, selected);
+    app.clear_session_filters();
+    // History's priority queue obeys the same combined predicate.
+    app.agent_filter[0] = true;
+    app.track_attention(Instant::now());
+    let texts = session_tabs_texts(&mut app);
+    assert!(!texts.iter().any(|text| text == "first" || text == "second"));
+    assert!(texts
+        .iter()
+        .any(|text| text == "選んだ状態のセッションはありません"));
+    fs::remove_dir_all(root).ok();
+}
+
+fn sidebar_251_hook(activity: AgentActivity) -> HookStatus {
+    HookStatus {
+        activity,
+        boundary: false,
+        tool: None,
+        last_message: None,
+        started_at: Instant::now(),
+        received_at: Instant::now(),
+        completed_transcript: None,
+    }
+}
+
+#[test]
+fn sidebar_251_filter_combinations() {
+    let root = temporary_directory("sidebar-251-combinations");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.hook_status
+        .insert(first, sidebar_251_hook(AgentActivity::AwaitingInput));
+    let waiting = app.store.sessions[0].clone();
+    assert_eq!(
+        app.session_status_kind_for(&waiting),
+        SessionStatusKind::Waiting
+    );
+    // Every combination of the two independent dimensions, plus the narrow
+    // waiting choice. Unknown and terminal IDs belong to the Other choice.
+    for agent_bits in 0..16 {
+        app.agent_filter = std::array::from_fn(|i| agent_bits & (1 << i) != 0);
+        for status_bits in 0..16 {
+            app.status_filter = std::array::from_fn(|i| status_bits & (1 << i) != 0);
+            for only_waiting in [false, true] {
+                app.waiting_filter = only_waiting;
+                for (agent, slot) in [
+                    ("codex", 0),
+                    ("claude", 1),
+                    ("gemini", 2),
+                    ("terminal", 3),
+                    ("custom", 3),
+                    ("legacy-command", 3),
+                ] {
+                    for ended in [false, true] {
+                        let mut session = waiting.clone();
+                        session.agent = agent.into();
+                        if ended {
+                            session.status = SessionStatus::Exited;
+                        }
+                        let group_slot = if ended { 3 } else { 0 };
+                        let agent_match = agent_bits == 0 || agent_bits & (1 << slot) != 0;
+                        let status_match = (status_bits == 0 && !only_waiting)
+                            || (only_waiting && !ended)
+                            || status_bits & (1 << group_slot) != 0;
+                        assert_eq!(app.session_matches_filters(&session), agent_match && status_match,
+                            "agents={agent_bits} statuses={status_bits} waiting={only_waiting} agent={agent} ended={ended}");
+                    }
+                }
+            }
+        }
+    }
+    app.pending_session_close = Some(first);
+    app.toggle_agent_filter(0);
+    assert_eq!(app.pending_session_close, None);
+    app.pending_session_close = Some(first);
+    app.toggle_waiting_filter();
+    assert_eq!(app.pending_session_close, None);
+    app.show_status_group(SessionStatusGroup::Busy);
+    assert!(!app.waiting_filter);
+    assert_eq!(app.agent_filter, [false; 4]);
+    assert_eq!(app.status_filter, [false, true, false, false]);
+    app.clear_session_filters();
+    assert!(!app.has_session_filters());
+    // A stale waiting hook must not keep promising a permission prompt.
+    app.waiting_filter = true;
+    app.hook_status.get_mut(&first).unwrap().received_at =
+        Instant::now() - Duration::from_secs(24 * 3600);
+    assert!(!app.session_matches_filters(&waiting));
+    fs::remove_dir_all(root).ok();
+}
+
+fn sidebar_251_mesh_rects(output: &egui::FullOutput, texture: egui::TextureId) -> Vec<egui::Rect> {
+    fn visit(shape: &egui::epaint::Shape, texture: egui::TextureId, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::epaint::Shape::Mesh(mesh) if mesh.texture_id == texture => {
+                out.push(mesh.calc_bounds())
+            }
+            egui::epaint::Shape::Rect(rect) if rect.fill_texture_id() == texture => {
+                out.push(rect.rect)
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().for_each(|shape| visit(shape, texture, out))
+            }
+            _ => {}
+        }
+    }
+    let mut rects = Vec::new();
+    for clipped in &output.shapes {
+        visit(&clipped.shape, texture, &mut rects);
+    }
+    rects
+}
+
+fn sidebar_251_click(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    point: egui::Pos2,
+) -> egui::FullOutput {
+    workspace_pointer_frame(app, ctx, vec![egui::Event::PointerMoved(point)]);
+    workspace_pointer_frame(app, ctx, vec![column_181_button(point, true)]);
+    workspace_pointer_frame(app, ctx, vec![column_181_button(point, false)]);
+    workspace_pointer_frame(app, ctx, Vec::new())
+}
+
+#[test]
+fn sidebar_251_marks_and_accessible_filters() {
+    let root = temporary_directory("sidebar-251-marks");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.store.sessions[0].agent = "gemini".into();
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let icon = agent_icon_texture(&ctx, "gemini").unwrap().id();
+    let marks = sidebar_251_mesh_rects(&output, icon)
+        .into_iter()
+        .filter(|r| r.right() < right)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        marks.len(),
+        2,
+        "filter choice and session row each show the official Antigravity mark"
+    );
+    assert!(!text_positions(&output)
+        .iter()
+        .any(|(text, pos)| text == "Antigravity" && pos.x < right));
+    let filter_mark = marks
+        .iter()
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap();
+    let output = sidebar_251_click(&mut app, &ctx, filter_mark.center());
+    assert_eq!(
+        app.agent_filter,
+        [false, false, true, false],
+        "official mark is an actual filter button"
+    );
+    assert!(!drawn_text_rects(&output, |text| text == "second")
+        .iter()
+        .any(|r| r.left() < right));
+    let selected_before = app.selected_session;
+    let active_before = app.workspace.active().cloned();
+    // A click emits the widget's accessible name, including icon-only controls.
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![column_181_button(filter_mark.center(), true)],
+    );
+    let event_output = workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![column_181_button(filter_mark.center(), false)],
+    );
+    assert!(
+        event_output
+            .platform_output
+            .events
+            .iter()
+            .any(|event| { format!("{event:?}").contains("Antigravity") }),
+        "icon-only filter must expose its name in widget info"
+    );
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert_eq!(app.selected_session, selected_before);
+    assert_eq!(app.workspace.active().cloned(), active_before);
+    for label in ["CLI", "ステータス", "承認・回答待ち", "その他"] {
+        for rect in drawn_text_rects(&output, |text| text == label) {
+            assert!(
+                rect.right() < right,
+                "{label} must fit sidebar: {rect:?} right={right}"
+            );
+        }
+    }
+    fs::remove_dir_all(root).ok();
+}
+
+// Independent verifier attack, reproduced failing before bounding the fallback.
+#[test]
+fn sidebar_251_unknown_cli_does_not_push_title_outside_column() {
+    let root = temporary_directory("sidebar-251-unknown-width");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.store.sessions[0].agent = "older-cli-command-with-a-very-long-name-".repeat(12);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    app.agent_filter[3] = true;
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let title = drawn_text_rects(&output, |s| s == "first")
+        .into_iter()
+        .find(|rect| rect.left() < right)
+        .expect("a legacy CLI fallback must leave its session title readable in the sidebar");
+    assert!(
+        title.right() <= right,
+        "session title escaped sidebar: {title:?} / {right}"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_251_short_stacked_column_can_scroll_to_project_rows() {
+    let root = temporary_directory("sidebar-251-short-column");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.show_session_inspector = true;
+    app.dock
+        .move_panel(DockPanel::View(InspectorTab::Files), DockEdge::Left);
+    app.dock.splits[DockEdge::Left.index()] = 0.0;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    let draw = |app: &mut OperonApp, events| {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 540.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            },
+        )
+    };
+    draw(&mut app, Vec::new());
+    let out = draw(&mut app, Vec::new());
+    let right = project_column_right(&app);
+    let visible_title = |out: &egui::FullOutput| {
+        out.shapes.iter().any(|clipped| match &clipped.shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == "first" => {
+                let rect = text.galley.rect.translate(text.pos.to_vec2());
+                rect.left() < right && clipped.clip_rect.contains(rect.center())
+            }
+            _ => false,
+        })
+    };
+    assert!(
+        !visible_title(&out),
+        "fixture must start with the session below the filters"
+    );
+    let point = egui::pos2(60.0, SIDEBAR_SECTION_MIN_H - 16.0);
+    draw(&mut app, vec![egui::Event::PointerMoved(point)]);
+    draw(
+        &mut app,
+        vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -500.0),
+            modifiers: egui::Modifiers::default(),
+        }],
+    );
+    let mut visible = false;
+    for _ in 0..8 {
+        visible |= visible_title(&draw(&mut app, Vec::new()));
+    }
+    assert!(
+        visible,
+        "a 120px stacked sidebar must scroll past its filters to live sessions"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_251_terminal_and_custom_fallbacks_remain_named() {
+    let root = temporary_directory("sidebar-251-other-fallback");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.store.sessions[0].agent = "terminal".into();
+    app.store.sessions[1].agent = "custom".into();
+    app.select_session(first);
+    app.show_session_inspector = false;
+    app.agent_filter[3] = true;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    for expected in ["ターミナル", "カスタム CLI", "first", "second"] {
+        assert!(
+            drawn_text_rects(&out, |s| s == expected)
+                .iter()
+                .any(|r| r.left() < right),
+            "other CLI fallback lost {expected}"
+        );
+    }
+    fs::remove_dir_all(root).ok();
+}
