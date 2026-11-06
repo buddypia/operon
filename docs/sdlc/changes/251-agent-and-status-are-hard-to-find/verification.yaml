@@ -1,0 +1,10 @@
+digest: "2eb34c74bd45db81"
+obligations:
+  - R1 empirical-test :: cargo test --locked sidebar_251_filters_drive_real_rows
+  - R2 empirical-test :: cargo test --locked sidebar_251_filter_combinations
+  - R3 empirical-test :: cargo test --locked sidebar_251_marks_and_accessible_filters
+  - F1 empirical-test :: cargo test --locked sidebar_251_unknown_cli_does_not_push_title_outside_column
+  - F2 empirical-test :: cargo test --locked a_session_rows_menus_offer_stop_and_remove
+  - F3 empirical-test :: cargo test --locked test_change_181_hovers_say_rows_and_projects_can_be_dragged
+  - F4 empirical-test :: cargo test --locked test_change_181_session_row_drag_reorders_within_its_project
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/251-agent-and-status-are-hard-to-find/mutations.py

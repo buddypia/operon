@@ -337,6 +337,43 @@ pub(crate) fn primary_button(
     response
 }
 
+/// Transient CLI filter slots: known vendors first, all other commands last.
+pub(crate) fn session_agent_filter_index(agent: &str) -> usize {
+    match agent {
+        "codex" => 0,
+        "claude" => 1,
+        "gemini" => 2,
+        _ => 3,
+    }
+}
+
+/// A filter's selected state remains visible; native button semantics also
+/// give the icon-only vendor choices keyboard activation and readable names.
+pub(crate) fn session_filter_button(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    label: &str,
+    selected: bool,
+    agent: Option<&str>,
+) -> egui::Response {
+    let button = match agent.and_then(|agent| agent_icon_texture(ui.ctx(), agent)) {
+        Some(texture) => {
+            egui::Button::image(egui::Image::new((texture.id(), egui::vec2(18.0, 18.0))))
+        }
+        None => egui::Button::new(RichText::new(label).size(11.5)),
+    };
+    let response = ui.add(
+        button
+            .selected(selected)
+            .min_size(egui::vec2(CONTROL_HEIGHT, CONTROL_HEIGHT)),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+    });
+    paint_button_focus(ui, &response, palette);
+    response.on_hover_text(label)
+}
+
 /// Everything that is not the primary action: a hairline at rest, a fill under
 /// the pointer. This is the app's ordinary button and it is what `ui.button`
 /// already draws, wrapped only to hold the shared height.

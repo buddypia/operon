@@ -683,6 +683,7 @@ control as `secondary_button`; everything else goes through its helper:
 |---|---|
 | the one action that starts work | `primary_button` |
 | any ordinary action, a toggle, Cancel / Delete in a prompt | `secondary_button` |
+| sidebar CLI and status filters, with a persistent selected state and readable icon names | `session_filter_button` (28px) |
 | the quiet action beside a heading | `quiet_button` |
 | an icon in a toolbar | `icon_button` (28px) |
 | an icon in a list row, a find bar, or a menu row | `small_icon_button` (24px) |
