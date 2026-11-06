@@ -1,0 +1,44 @@
+# Plan: readable state at the beginning of session tabs
+
+- **Spec**: `./spec.md`
+- **Approved**: 2026-11-07
+- **Status**: done
+
+## Files that change
+
+| File | Change |
+|---|---|
+| src/glyphs.rs | Recognizable idle and running marks. |
+| src/app/screens.rs | Visible translated state before the tab title. |
+| src/tests.rs | Icon mapping and rendered geometry/state transition guards. |
+| DESIGN.md | Describe pause and circular arrows. |
+
+## Order of work
+
+1. Add guards, observe failures against current implementation.
+2. Update two glyph constants and tab state text with existing egui APIs.
+3. Run named tests and existing workspace pointer guards, mutation sweep and make q.fast.
+4. Record obligations; independent empirical verifier re-runs them in a separate worktree.
+5. Commit, push, wait for CI, merge from main, clean branch/worktree, package installed build.
+
+## Risks
+
+| Risk | How it shows up | What catches it |
+|---|---|---|
+| State text is truncated or on another line | Same-name tabs remain ambiguous | Rendered geometry guard. |
+| A cached status stops updating | Busy appears idle | Transition guard in the same app/context. |
+| Global marks affect rows | Rows show different shapes | Shared constants and bundled-font test. |
+
+## Proof of completion
+
+R1–R3 named tests pass; mutation sweep catches every removal; make q.fast and CI pass. Installed build matches main. Verify native rendering when installation can safely proceed.
+
+## Departures from the plan
+
+The test guards were authored just before the plan commit; production implementation remained untouched until after the plan was committed.
+
+The first geometry guard incorrectly assumed short titles were left aligned. Drawn text showed the state at x303 and the short title at x432, centered within its existing 160px slot. The guard now allows that slot while still requiring icon, state and title in left-to-right order on the same tab row.
+
+Band diagnosis: `largest_module_lines` is 9529 in unchanged `src/app.rs`, also 9529 on the original main; this change adds four lines to `src/app/screens.rs` (8894 to 8898). The existing 9400 diagnose threshold was already exceeded. `steering_bytes` and `approval_escapes` are warn-level observations; no gate or threshold was changed.
+
+Verification: independent empirical verifier re-ran all six obligations successfully in 428 seconds, including five caught mutations with the source restored. Author make q.fast, workspace pointer test, icon-font test and five session-tab tests passed. CI run 42247518608 passed on implementation commit 723fe47. No tests were removed (1161 to 1163) and ignore count stayed at 8. Source changes were committed before independent verification so the verifier could check the exact commit in its isolated tree; this closing record follows it before landing.

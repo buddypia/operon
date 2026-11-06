@@ -68075,3 +68075,96 @@ pub(crate) fn tab_headings_keep_their_controls() {
         }
     }
 }
+
+#[test]
+pub(crate) fn session_tab_state_icons_are_recognizable() {
+    assert_eq!(ICON_STATUS_IDLE, egui_phosphor::regular::PAUSE_CIRCLE);
+    assert_eq!(
+        ICON_STATUS_RUNNING,
+        egui_phosphor::regular::ARROWS_CLOCKWISE
+    );
+    assert_eq!(
+        SessionStatusKind::Done.icon(),
+        egui_phosphor::regular::CHECK_CIRCLE
+    );
+    for kind in [
+        SessionStatusKind::Failed,
+        SessionStatusKind::Stopped,
+        SessionStatusKind::Lost,
+    ] {
+        assert_ne!(kind.icon(), SessionStatusKind::Done.icon());
+    }
+}
+
+#[test]
+pub(crate) fn session_tabs_show_live_state_before_title() {
+    let root = temporary_directory("tab-state-before-title");
+    let (mut app, _, _, first, _) = status_column_fixture(&root);
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    for (status, activity, word, icon) in [
+        (
+            SessionStatus::Active,
+            Some(AgentActivity::Idle),
+            "指示待ち",
+            ICON_STATUS_IDLE,
+        ),
+        (
+            SessionStatus::Active,
+            Some(AgentActivity::Working),
+            "実行中",
+            ICON_STATUS_RUNNING,
+        ),
+        (
+            SessionStatus::Active,
+            Some(AgentActivity::AwaitingInput),
+            "要対応",
+            ICON_ATTENTION,
+        ),
+        (SessionStatus::Exited, None, "終了", ICON_STATUS_DONE),
+        (SessionStatus::Failed, None, "終了", ICON_STATUS_FAILED),
+        (SessionStatus::Cancelled, None, "終了", ICON_STOP),
+        (SessionStatus::Lost, None, "終了", ICON_STATUS_LOST),
+        (SessionStatus::Unknown, None, "実行中", ICON_STATUS_UNKNOWN),
+    ] {
+        app.store
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == first)
+            .unwrap()
+            .status = status;
+        app.session_activity.insert(
+            first,
+            ActivityTracker {
+                settled: activity,
+                candidate: None,
+            },
+        );
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let title = drawn_text_rects(&output, |text| text == "first")
+            .into_iter()
+            .filter(|r| r.left() >= column_right(&output))
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .expect("tab title");
+        let state = drawn_text_rects(&output, |text| text == tr(word))
+            .into_iter()
+            .find(|r| {
+                r.left() >= column_right(&output)
+                    && r.right() <= title.left()
+                    && title.left() - r.right() < 160.0
+                    && (r.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
+            })
+            .unwrap_or_else(|| panic!("session must show {word} before its title"));
+        assert!(
+            drawn_text_rects(&output, |text| text == icon)
+                .into_iter()
+                .any(|r| r.left() >= column_right(&output)
+                    && r.right() <= state.left()
+                    && state.left() - r.right() < 20.0
+                    && (r.center().y - state.center().y).abs() < CONTROL_HEIGHT / 2.0),
+            "state icon must precede its word"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
