@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-07
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -38,3 +38,7 @@ R1–R3 named tests pass; mutation sweep catches every removal; make q.fast and 
 The test guards were authored just before the plan commit; production implementation remained untouched until after the plan was committed.
 
 The first geometry guard incorrectly assumed short titles were left aligned. Drawn text showed the state at x303 and the short title at x432, centered within its existing 160px slot. The guard now allows that slot while still requiring icon, state and title in left-to-right order on the same tab row.
+
+Band diagnosis: `largest_module_lines` is 9529 in unchanged `src/app.rs`, also 9529 on the original main; this change adds four lines to `src/app/screens.rs` (8894 to 8898). The existing 9400 diagnose threshold was already exceeded. `steering_bytes` and `approval_escapes` are warn-level observations; no gate or threshold was changed.
+
+Verification: independent empirical verifier re-ran all six obligations successfully in 428 seconds, including five caught mutations with the source restored. Author make q.fast, workspace pointer test, icon-font test and five session-tab tests passed. CI run 42247518608 passed on implementation commit 723fe47. No tests were removed (1161 to 1163) and ignore count stayed at 8. Source changes were committed before independent verification so the verifier could check the exact commit in its isolated tree; this closing record follows it before landing.

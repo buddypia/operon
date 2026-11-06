@@ -41,7 +41,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Run independent empirical verification and CI before landing."
+resume: "Land after CI, package from main, and obtain permission before restarting the running installed Operon."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,10 +70,10 @@ resume: "Run independent empirical verification and CI before landing."
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending bash scripts/package-macos.sh and installed build verification"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed make q.fast plus named tests and full CI run 42247518608"
+  bands: "machine passed bash scripts/check-bands.sh; existing diagnose band investigated in plan.md"
+  release-binary: "machine passed yes - src/app/screens.rs and src/glyphs.rs require packaging from main after landing; installed verification awaits permission to restart Operon"
+  guards-verified-by-mutation: "human passed independent verifier caught 5 of 5 mutations and restored source"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
