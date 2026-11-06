@@ -107,6 +107,12 @@ pub(crate) const SIDEBAR_MIN_W: f32 = 180.0;
 pub(crate) const SIDEBAR_MAX_W: f32 = 480.0;
 /// Default width for workspace sidebars.
 pub(crate) const SIDEBAR_DEFAULT_W: f32 = 268.0;
+/// Least width of one sidebar status filter tile: mark, the longest group
+/// word and a two-digit count. Two fit side by side in the default column and
+/// not in the narrowest, where the tiles stack (change 252).
+pub(crate) const STATUS_TILE_MIN_W: f32 = 104.0;
+/// Edge of an official CLI mark in the sidebar's CLI filter.
+pub(crate) const AGENT_FILTER_MARK: f32 = 16.0;
 /// Share of the session column the session list takes when the side panel is
 /// stacked under it; the panel gets the rest.
 pub(crate) const SIDEBAR_SPLIT_DEFAULT: f32 = 0.4;

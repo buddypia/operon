@@ -68525,21 +68525,17 @@ fn sidebar_251_filters_drive_real_rows() {
             .iter()
             .any(|r| r.left() < right)
     };
-    assert!(rows(&out, "CLI"), "sidebar CLI choices absent");
-    assert!(rows(&out, "承認・回答待ち"), "waiting filter absent");
+    // Change 252: the waiting choice folded into 要対応, and each dimension's
+    // own 「すべて」 gave way to one 「クリア」 shown only while filtering.
+    assert!(rows(&out, "要対応"), "status tiles absent");
     assert!(rows(&out, "first") && rows(&out, "second"));
     assert!(!rows(&out, "finished-third"));
     let active = app.workspace.active().cloned();
     let selected = app.selected_session;
-    let target = |out: &egui::FullOutput, label: &str| {
-        drawn_text_rects(out, |text| text == label)
-            .into_iter()
-            .find(|r| r.left() < right)
-            .unwrap()
-            .center()
-    };
-    let out = sidebar_251_click(&mut app, &ctx, target(&out, "承認・回答待ち"));
-    assert!(app.waiting_filter);
+    let target =
+        |out: &egui::FullOutput, label: &str| sidebar_252_top(out, right, label).unwrap().center();
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "要対応"));
+    assert_eq!(app.status_filter, [true, false, false, false]);
     assert!(rows(&out, "first"));
     assert!(!rows(&out, "second") && !rows(&out, "finished-third"));
     let out = sidebar_251_click(&mut app, &ctx, target(&out, "終了"));
@@ -68548,17 +68544,11 @@ fn sidebar_251_filters_drive_real_rows() {
         "status choices form a union"
     );
     assert!(!rows(&out, "second"));
-    // Clear only the status dimension using its own All control (second row).
-    let all = drawn_text_rects(&out, |text| text == "すべて")
-        .into_iter()
-        .filter(|r| r.left() < right)
-        .max_by(|a, b| a.top().total_cmp(&b.top()))
-        .unwrap();
-    let out = sidebar_251_click(&mut app, &ctx, all.center());
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "クリア"));
     assert!(!app.has_session_filters());
     assert!(rows(&out, "first") && rows(&out, "second"));
     assert!(!rows(&out, "finished-third"));
-    let out = sidebar_251_click(&mut app, &ctx, target(&out, "その他"));
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, ICON_MORE));
     assert!(rows(&out, "一致するセッションはありません。"));
     assert!(!rows(&out, "first") && !rows(&out, "second"));
     assert_eq!(app.workspace.active().cloned(), active);
@@ -68598,36 +68588,35 @@ fn sidebar_251_filter_combinations() {
         app.session_status_kind_for(&waiting),
         SessionStatusKind::Waiting
     );
-    // Every combination of the two independent dimensions, plus the narrow
-    // waiting choice. Unknown and terminal IDs belong to the Other choice.
+    // Every combination of the two independent dimensions. Change 252 folded
+    // the narrow waiting choice into 要対応. Unknown and terminal IDs belong
+    // to the Other choice.
     for agent_bits in 0..16 {
         app.agent_filter = std::array::from_fn(|i| agent_bits & (1 << i) != 0);
         for status_bits in 0..16 {
             app.status_filter = std::array::from_fn(|i| status_bits & (1 << i) != 0);
-            for only_waiting in [false, true] {
-                app.waiting_filter = only_waiting;
-                for (agent, slot) in [
-                    ("codex", 0),
-                    ("claude", 1),
-                    ("gemini", 2),
-                    ("terminal", 3),
-                    ("custom", 3),
-                    ("legacy-command", 3),
-                ] {
-                    for ended in [false, true] {
-                        let mut session = waiting.clone();
-                        session.agent = agent.into();
-                        if ended {
-                            session.status = SessionStatus::Exited;
-                        }
-                        let group_slot = if ended { 3 } else { 0 };
-                        let agent_match = agent_bits == 0 || agent_bits & (1 << slot) != 0;
-                        let status_match = (status_bits == 0 && !only_waiting)
-                            || (only_waiting && !ended)
-                            || status_bits & (1 << group_slot) != 0;
-                        assert_eq!(app.session_matches_filters(&session), agent_match && status_match,
-                            "agents={agent_bits} statuses={status_bits} waiting={only_waiting} agent={agent} ended={ended}");
+            for (agent, slot) in [
+                ("codex", 0),
+                ("claude", 1),
+                ("gemini", 2),
+                ("terminal", 3),
+                ("custom", 3),
+                ("legacy-command", 3),
+            ] {
+                for ended in [false, true] {
+                    let mut session = waiting.clone();
+                    session.agent = agent.into();
+                    if ended {
+                        session.status = SessionStatus::Exited;
                     }
+                    let group_slot = if ended { 3 } else { 0 };
+                    let agent_match = agent_bits == 0 || agent_bits & (1 << slot) != 0;
+                    let status_match = status_bits == 0 || status_bits & (1 << group_slot) != 0;
+                    assert_eq!(
+                        app.session_matches_filters(&session),
+                        agent_match && status_match,
+                        "agents={agent_bits} statuses={status_bits} agent={agent} ended={ended}"
+                    );
                 }
             }
         }
@@ -68636,16 +68625,15 @@ fn sidebar_251_filter_combinations() {
     app.toggle_agent_filter(0);
     assert_eq!(app.pending_session_close, None);
     app.pending_session_close = Some(first);
-    app.toggle_waiting_filter();
+    app.toggle_status_filter(SessionStatusGroup::NeedsYou);
     assert_eq!(app.pending_session_close, None);
     app.show_status_group(SessionStatusGroup::Busy);
-    assert!(!app.waiting_filter);
     assert_eq!(app.agent_filter, [false; 4]);
     assert_eq!(app.status_filter, [false, true, false, false]);
     app.clear_session_filters();
     assert!(!app.has_session_filters());
     // A stale waiting hook must not keep promising a permission prompt.
-    app.waiting_filter = true;
+    app.status_filter[SessionStatusGroup::NeedsYou.index()] = true;
     app.hook_status.get_mut(&first).unwrap().received_at =
         Instant::now() - Duration::from_secs(24 * 3600);
     assert!(!app.session_matches_filters(&waiting));
@@ -68746,7 +68734,7 @@ fn sidebar_251_marks_and_accessible_filters() {
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert_eq!(app.selected_session, selected_before);
     assert_eq!(app.workspace.active().cloned(), active_before);
-    for label in ["CLI", "ステータス", "承認・回答待ち", "その他"] {
+    for label in ["要対応", "実行中", "指示待ち", "終了"] {
         for rect in drawn_text_rects(&output, |text| text == label) {
             assert!(
                 rect.right() < right,
@@ -68866,6 +68854,247 @@ fn sidebar_251_terminal_and_custom_fallbacks_remain_named() {
                 .iter()
                 .any(|r| r.left() < right),
             "other CLI fallback lost {expected}"
+        );
+    }
+    fs::remove_dir_all(root).ok();
+}
+
+/// Change 252 fixture: `first` waits on a permission, `second` is untouched,
+/// and a third session has ended.
+fn sidebar_252_fixture(name: &str) -> (PathBuf, OperonApp, Uuid) {
+    let root = temporary_directory(name);
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.show_session_inspector = false;
+    app.hook_status
+        .insert(first, sidebar_251_hook(AgentActivity::AwaitingInput));
+    let mut finished = app.store.sessions[0].clone();
+    finished.id = Uuid::new_v4();
+    finished.name = "finished-third".into();
+    finished.status = SessionStatus::Exited;
+    app.store.sessions.push(finished);
+    (root, app, first)
+}
+
+/// The topmost drawing of `label` inside the left column: the filters sit
+/// above every row that could repeat a group's word.
+fn sidebar_252_top(output: &egui::FullOutput, right: f32, label: &str) -> Option<egui::Rect> {
+    drawn_text_rects(output, |text| text == label)
+        .into_iter()
+        .filter(|rect| rect.left() < right)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+}
+
+fn sidebar_252_tiles(output: &egui::FullOutput, right: f32) -> Vec<egui::Rect> {
+    SessionStatusGroup::GROUPS
+        .iter()
+        .map(|group| {
+            sidebar_252_top(output, right, tr(group.message_id()))
+                .unwrap_or_else(|| panic!("{group:?} tile absent from the sidebar"))
+        })
+        .collect()
+}
+
+fn sidebar_252_in_column(output: &egui::FullOutput, right: f32, label: &str) -> bool {
+    drawn_text_rects(output, |text| text == label)
+        .iter()
+        .any(|rect| rect.left() < right)
+}
+
+#[test]
+fn sidebar_252_status_tiles_count_and_toggle() {
+    let (root, mut app, _) = sidebar_252_fixture("sidebar-252-tiles");
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    for gone in ["CLI", "ステータス", "すべて", "承認・回答待ち"] {
+        assert!(
+            !sidebar_252_in_column(&out, right, gone),
+            "{gone} must not be drawn in the sidebar filters"
+        );
+    }
+    let tiles = sidebar_252_tiles(&out, right);
+    assert!(
+        (tiles[0].center().y - tiles[1].center().y).abs() < 1.0
+            && (tiles[2].center().y - tiles[3].center().y).abs() < 1.0
+            && tiles[2].top() > tiles[0].bottom()
+            && tiles[1].left() > tiles[0].right(),
+        "four tiles, two per row, at the default width: {tiles:?}"
+    );
+    let mut expected = [0usize; 4];
+    for session in &app.store.sessions {
+        expected[app.session_status_kind_for(session).group().index()] += 1;
+    }
+    assert_eq!(expected[SessionStatusGroup::NeedsYou.index()], 1);
+    assert_eq!(expected[SessionStatusGroup::Finished.index()], 1);
+    for (slot, tile) in tiles.iter().enumerate() {
+        let end = if slot % 2 == 0 {
+            tiles[slot + 1].left()
+        } else {
+            right
+        };
+        let count = expected[slot].to_string();
+        assert!(
+            drawn_text_rects(&out, |text| text == count)
+                .iter()
+                .any(|r| {
+                    (r.center().y - tile.center().y).abs() < 1.0
+                        && r.left() > tile.right()
+                        && r.right() < end
+                }),
+            "tile {slot} must show its count {count}"
+        );
+    }
+    let out = sidebar_251_click(&mut app, &ctx, tiles[0].center());
+    assert_eq!(app.status_filter, [true, false, false, false]);
+    assert!(sidebar_252_in_column(&out, right, "first"));
+    assert!(!sidebar_252_in_column(&out, right, "second"));
+    let tiles = sidebar_252_tiles(&out, right);
+    let out = sidebar_251_click(&mut app, &ctx, tiles[3].center());
+    assert!(
+        sidebar_252_in_column(&out, right, "first")
+            && sidebar_252_in_column(&out, right, "finished-third"),
+        "status tiles form a union"
+    );
+    let tiles = sidebar_252_tiles(&out, right);
+    sidebar_251_click(&mut app, &ctx, tiles[0].center());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert_eq!(app.status_filter, [false, false, false, true]);
+    assert!(!sidebar_252_in_column(&out, right, "first"));
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_252_counts_follow_cli_and_clear_only_while_filtering() {
+    let (root, mut app, first) = sidebar_252_fixture("sidebar-252-clear");
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    assert!(!sidebar_252_in_column(&out, right, "クリア"));
+    assert!(!drawn_text_rects(&out, |text| text.ends_with(" 件"))
+        .iter()
+        .any(|r| r.left() < right));
+    // Every fixture session runs Claude Code, so choosing Codex leaves none:
+    // each tile says 0 and the column says how many rows it shows.
+    app.agent_filter[session_agent_filter_index("codex")] = true;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let tiles = sidebar_252_tiles(&out, right);
+    for (slot, tile) in tiles.iter().enumerate() {
+        let end = if slot % 2 == 0 {
+            tiles[slot + 1].left()
+        } else {
+            right
+        };
+        assert!(
+            drawn_text_rects(&out, |text| text == "0").iter().any(|r| {
+                (r.center().y - tile.center().y).abs() < 1.0
+                    && r.left() > tile.right()
+                    && r.right() < end
+            }),
+            "tile {slot} must count only the chosen CLI"
+        );
+    }
+    assert!(sidebar_252_in_column(&out, right, "0 件"));
+    let clear = sidebar_252_top(&out, right, "クリア").expect("クリア while filtering");
+    let selected = app.selected_session;
+    let active = app.workspace.active().cloned();
+    app.pending_session_close = Some(first);
+    let out = sidebar_251_click(&mut app, &ctx, clear.center());
+    assert!(!app.has_session_filters(), "クリア clears both dimensions");
+    assert_eq!(app.pending_session_close, None);
+    assert_eq!(app.selected_session, selected);
+    assert_eq!(app.workspace.active().cloned(), active);
+    assert!(!sidebar_252_in_column(&out, right, "クリア"));
+    assert!(sidebar_252_in_column(&out, right, "first"));
+    // A tile is a filter change too.
+    app.pending_session_close = Some(first);
+    let tiles = sidebar_252_tiles(&out, right);
+    let out = sidebar_251_click(&mut app, &ctx, tiles[1].center());
+    assert_eq!(app.pending_session_close, None);
+    assert!(sidebar_252_in_column(&out, right, "クリア"));
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_252_needs_you_covers_waiting() {
+    let (root, mut app, first) = sidebar_252_fixture("sidebar-252-waiting");
+    let waiting = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == first)
+        .cloned()
+        .expect("fixture session");
+    assert_eq!(
+        app.session_status_kind_for(&waiting),
+        SessionStatusKind::Waiting
+    );
+    app.status_filter[SessionStatusGroup::NeedsYou.index()] = true;
+    assert!(app.session_matches_filters(&waiting));
+    app.clear_session_filters();
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let tile = sidebar_252_tiles(&out, right)[0];
+    let mut named = false;
+    for _ in 0..4 {
+        let out = workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(tile.center())],
+        );
+        named |= !drawn_text_rects(&out, |text| text.contains("承認・回答待ち 1 件")).is_empty();
+    }
+    assert!(named, "要対応's hover names how many sessions are waiting");
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_252_tiles_fit_narrow_column() {
+    let (root, mut app, _) = sidebar_252_fixture("sidebar-252-narrow");
+    app.dock.sizes[DockEdge::Left.index()] = SIDEBAR_MIN_W;
+    app.agent_filter[session_agent_filter_index("claude")] = true;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let area = app.dock_area.expect("a drawn workspace");
+    assert!(
+        right - area.left() <= SIDEBAR_MIN_W + 1.0,
+        "fixture must draw the narrowest column"
+    );
+    let tiles = sidebar_252_tiles(&out, right);
+    for pair in tiles.windows(2) {
+        assert!(
+            pair[1].top() > pair[0].bottom() && (pair[1].left() - pair[0].left()).abs() < 1.0,
+            "tiles stack one per row at the narrowest column: {tiles:?}"
+        );
+    }
+    let mut controls = tiles.clone();
+    controls.extend(sidebar_252_top(&out, right, "クリア"));
+    controls.extend(
+        drawn_text_rects(&out, |text| text.ends_with(" 件"))
+            .into_iter()
+            .filter(|r| r.left() < right),
+    );
+    for agent in ["codex", "claude", "gemini"] {
+        let texture = agent_icon_texture(&ctx, agent).expect("bundled mark").id();
+        controls.extend(
+            sidebar_251_mesh_rects(&out, texture)
+                .into_iter()
+                .filter(|r| r.left() < right),
+        );
+    }
+    assert!(controls.len() >= 4 + 2 + 3);
+    for rect in controls {
+        assert!(
+            rect.right() <= right,
+            "filter control escapes the column: {rect:?} / {right}"
         );
     }
     fs::remove_dir_all(root).ok();
