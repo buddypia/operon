@@ -523,9 +523,9 @@ baseline. A row of them read as a row of accidents. Phosphor's codepoints sit
 in the private use area, so no text face can answer for them, and every mark in
 the app is one weight and one grid.
 
-Actions are bare pictograms; statuses are not. Every status mark is a circle,
-and what sits inside it says which state: a closed ring is idle, a ring with a
-gap is running, and a check, a cross, or a dash inside one is how the run ended
+Actions are bare pictograms; statuses use a circular enclosure. A pause inside
+a circle is idle, circular arrows show running, and a check, a cross, or a
+dash inside a circle is how the run ended
 — the dash for the run that ended with nobody watching, which is neither of the
 other two and must not borrow either one's mark. The
 enclosure is what keeps a chip from reading as a button in the same row, and

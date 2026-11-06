@@ -36,3 +36,5 @@ R1–R3 named tests pass; mutation sweep catches every removal; make q.fast and 
 ## Departures from the plan
 
 The test guards were authored just before the plan commit; production implementation remained untouched until after the plan was committed.
+
+The first geometry guard incorrectly assumed short titles were left aligned. Drawn text showed the state at x303 and the short title at x432, centered within its existing 160px slot. The guard now allows that slot while still requiring icon, state and title in left-to-right order on the same tab row.
