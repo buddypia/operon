@@ -6968,8 +6968,7 @@ impl OperonApp {
                                 .inner_margin(egui::Margin::symmetric(8, 4))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        // A session's state in one glyph
-                                        // (change 237); the words on hover.
+                                        // Keep the state visible before even a truncated title.
                                         if let WorkspaceTab::Session(id) = tab {
                                             if let Some(session) =
                                                 self.store.sessions.iter().find(|s| s.id == *id)
@@ -6989,6 +6988,11 @@ impl OperonApp {
                                                     ui.label(&view.label);
                                                     ui.label(&view.hint);
                                                 });
+                                                ui.label(
+                                                    RichText::new(tr(kind.label()))
+                                                        .size(12.5)
+                                                        .color(palette.status(kind.tone())),
+                                                );
                                             }
                                         }
                                         let mut label = ui.add_sized(

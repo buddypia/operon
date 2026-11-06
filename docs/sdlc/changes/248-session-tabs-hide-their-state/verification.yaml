@@ -1,0 +1,9 @@
+digest: "c6570e829525f563"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_tab_state_icons_are_recognizable
+  - R2 empirical-test :: cargo test --locked session_tabs_show_live_state_before_title
+  - R3 empirical-test :: cargo test --locked workspace_session_tab_shows_its_status_glyph
+  - I1 empirical-test :: cargo test --locked workspace_pointer_
+  - I2 empirical-test :: cargo test --locked every_icon_resolves_from_the_bundled_icon_font
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/248-session-tabs-hide-their-state/mutations.py

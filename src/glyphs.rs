@@ -74,15 +74,15 @@ pub(crate) const ICON_ATTENTION: &str = icons::WARNING;
 pub(crate) const ICON_PENDING: &str = icons::HOURGLASS_MEDIUM;
 
 /// The marks a status chip leads with. A status is not an action, so none of
-/// these is a bare pictogram: every one of them is a circle, and what is inside
-/// it says which state. That keeps a chip from reading as a button in the same
-/// row, and it survives being the wrong colour for a person who cannot use the
+/// these is a bare action: a circle or circular arrows give the mark its
+/// status enclosure, with pause, check, cross or minus distinguishing states.
+/// That keeps a chip from reading as a button in the same row, and it survives being the wrong colour for a person who cannot use the
 /// colour to tell running from idle.
 ///
 /// Phosphor's own `dot` is not one of these: its ink is three pixels across at
 /// the size a chip is drawn, which is a smudge rather than a state.
-pub(crate) const ICON_STATUS_RUNNING: &str = icons::CIRCLE_NOTCH;
-pub(crate) const ICON_STATUS_IDLE: &str = icons::CIRCLE;
+pub(crate) const ICON_STATUS_RUNNING: &str = icons::ARROWS_CLOCKWISE;
+pub(crate) const ICON_STATUS_IDLE: &str = icons::PAUSE_CIRCLE;
 pub(crate) const ICON_STATUS_STARTING: &str = icons::POWER;
 pub(crate) const ICON_STATUS_QUEUED: &str = icons::PLAY_CIRCLE;
 pub(crate) const ICON_STATUS_DONE: &str = icons::CHECK_CIRCLE;
