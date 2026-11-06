@@ -13,7 +13,7 @@
 
 Small inner marks can blur: use an 18px circle with 1.5px strokes and inspect at native size and enlarged. Avoid changing state classification or replacing shared status chips. Pointer hover must cover the full badge cell and retain the current label/hint. No per-frame parsing or I/O.
 
-## Proof
+## Proof of completion
 
 The R1–R3 tests in spec.md inspect real egui shapes and tooltips. Workspace pointer tests retain tab interactions. The mutation sweep falsifies each requested behavior and must catch every mutation. Full suite runs in CI.
 
