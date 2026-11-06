@@ -20,7 +20,7 @@ Empty workspaces and missing sessions show no fabricated badge. Unknown state ha
 
 ## Design
 
-Placement: EXTEND. `src/app/screens.rs::ui_workspace` currently draws a state glyph and permanent `kind.label()` before each session title (change 248). Replace those with `session_status_icon` from `src/ui/widgets.rs`. Define the generated vector vocabulary and painter in `src/glyphs.rs`, which already owns the icon vocabulary; do not rasterize an 18px icon or depend on a font fallback. Reuse `SessionStatusKind` and `Palette::status` rather than classify twice. Other status chips retain their text and existing glyphs.
+Placement: EXTEND. `ui_tab_workspace` in `src/app/screens.rs` currently draws a state glyph and permanent `kind.label()` before each session title (change 248). Replace those with `session_status_icon` from `src/ui/widgets.rs`. Define the generated vector vocabulary and painter in `src/glyphs.rs`, which already owns the icon vocabulary; do not rasterize an 18px icon or depend on a font fallback. Reuse `SessionStatusKind` and `Palette::status` rather than classify twice. Other status chips retain their text and existing glyphs.
 
 The badge occupies 18 logical pixels in a `CONTROL_HEIGHT_SMALL` hover target. Its common enclosure and interior are painted with the current palette's status tone. The helper adds accessible localized state text to widget metadata without putting it in the visible tab. No new module or asset decoder.
 
@@ -34,7 +34,7 @@ The badge occupies 18 logical pixels in a `CONTROL_HEIGHT_SMALL` hover target. I
 | Durability | No | No persistence, cancellation behavior, migration or byte limit changes. |
 | Subprocess safety | No | No process lifecycle or external commands in product. |
 | Documentation — CONTRIBUTING.md | Yes | Internal DESIGN.md icon guidance updated; no public command or capability changes. |
-| Local-first — CONTRIBUTUTING.md | Yes | Pure local drawing, no dependencies, network or unsafe. |
+| Local-first — CONTRIBUTING.md | Yes | Pure local drawing, no dependencies, network or unsafe. |
 | Budgets | No | Fixed-size vector geometry from current in-memory kind. |
 
 ## Flagged concerns

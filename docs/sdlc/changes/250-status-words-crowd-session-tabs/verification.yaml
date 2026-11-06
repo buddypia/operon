@@ -7,3 +7,4 @@ obligations:
   - I1 empirical-test :: cargo test --locked workspace_pointer_
   - I2 empirical-test :: cargo test --locked session_tab_state_icons_are_recognizable
   - I3 empirical-mutation :: python3 docs/sdlc/changes/250-status-words-crowd-session-tabs/mutations.py
+  - I4 empirical-test :: cargo test --locked harness_documents_only_name_paths_that_exist
