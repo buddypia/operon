@@ -1,0 +1,17 @@
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "3 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+resume: "Write the failing sidebar_252_ tests, then the code in plan order."
+contract:
+  three-gates: "machine pending make q.fast and the named sidebar_251_ and sidebar_252_ tests"
+  full-ci: "machine pending scripts/ci-verified.sh passes on the final head before merge"
+  guards-verified-by-mutation: "machine pending mutations.py catches every mutation"
+  release-binary: "machine pending yes - src/ changes; package from main after landing"
+  installed-app: "human pending the installed app shows the new filters"
