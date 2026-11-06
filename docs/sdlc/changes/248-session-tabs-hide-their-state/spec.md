@@ -1,7 +1,7 @@
 # Spec: readable state at the beginning of session tabs
 
 - **Intent**: `./intent.md`
-- **Status**: approved
+- **Status**: draft
 
 ## Requirements
 

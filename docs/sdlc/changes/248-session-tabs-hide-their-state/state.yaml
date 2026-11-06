@@ -41,7 +41,7 @@
 state:
   route: "modify"
   stage: "build"
-  status: "in-progress"
+  status: "awaiting-user"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Observe failing guards, implement tab state cues, and verify."
+resume: "Await the person approval requested for the tab specification while checking the baseline tests."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
