@@ -1,14 +1,14 @@
 state:
   route: "modify"
   stage: "design"
-  status: "ready"
+  status: "awaiting-user"
   attempts: "0 3"
-  questions: "0 7"
+  questions: "1 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
   screen: "approved"
-resume: "Evaluate the neutral dark palette specification and plan before editing source."
+resume: "Await the person approval of spec.md; neutral chrome preview is .tmp/neutral-chrome/preview.png. No source changes made."
 contract:
   three-gates: "machine pending make q.fast and named palette tests"
   bands: "machine pending bash scripts/check-bands.sh"

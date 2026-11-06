@@ -10,7 +10,7 @@
 3. Run named palette/readability/ANSI/documentation tests, q.fast, bands and mutation sweep; independent empirical verifier attacks evidence.
 4. Record evidence, commit and push, wait for CI, merge from main, clean up branch/worktree, package and install per ship.
 
-## Proof and risks
+## Proof of completion
 
 Existing contrast tests protect readability across themes. Semantic-preservation test compares untouched dark role values and other palettes against main's baseline. Mutation restores orange/blue chrome and requires neutral test failure. Render actual egui controls using current palette and inspect their output. No runtime work added. Main may move concurrently; refresh and recheck landing diff if needed.
 
