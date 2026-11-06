@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-07
-- **Status**: in progress
+- **Status**: done
 
 ## Files that change
 
@@ -38,4 +38,4 @@ Named tests pass; `make q.fast` clean; mutation sweep catches every mutation; CI
 
 ## Departures from the plan
 
-None yet.
+The first render drew each tile's mark as the circled vector status mark that workspace tabs use, while the sidebar's own rows and project counts use the group glyphs; the tiles now paint `SessionStatusGroup::icon()` so a tile and the rows it leaves carry the same mark, and no `status_mark()` was added to the group. 「クリア」 is the quiet link alone, without the close mark: the quiet button takes one string, and joining a glyph to the word would have needed a new message id for a decoration. The native check used a throwaway software rasteriser over egui's own tessellation instead of a framebuffer capture.
