@@ -1,14 +1,14 @@
 state:
   route: "modify"
-  stage: "design"
-  status: "awaiting-user"
+  stage: "build"
+  status: "ready"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
   screen: "approved"
-resume: "Await the person approval of spec.md; neutral chrome preview is .tmp/neutral-chrome/preview.png. No source changes made."
+resume: "Implement the approved grey chrome with orange accents, then run the named verification and ship."
 contract:
   three-gates: "machine pending make q.fast and named palette tests"
   bands: "machine pending bash scripts/check-bands.sh"

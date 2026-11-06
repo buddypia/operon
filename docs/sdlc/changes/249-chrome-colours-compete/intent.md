@@ -8,4 +8,8 @@ The user sees orange primary actions beside blue selections in the dark session 
 
 ## Desired outcome
 
-A quiet black and grey application frame, with clear selection and primary action hierarchy. Semantic status, diff and terminal colours keep their meanings.
+A quiet black and grey application frame, with orange reserved for primary actions and fine selection indicators. Semantic status, diff and terminal colours keep their meanings.
+
+## Clarification
+
+The user supplied VS Code screenshots and asked 「強調イメージをオレンジ色にしようか」. The proposed grey base, orange primary action and thin orange selected-tab underline was approved with 「進めて」 on 2026-11-07.

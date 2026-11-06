@@ -14,5 +14,5 @@ After:
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-Black/grey surfaces; selected tabs and rows #383838 with light text; primary action #D0D0D0 with dark text; app label light grey. Focus uses a light outline. Terminal and semantic status retain colours.
+Black/grey surfaces; selected tabs and rows #383838 with light text; primary action #FF9438 with dark text; app label light grey. Selected navigation tabs have a 2px orange bottom rule. Focus uses a light outline. Terminal and semantic status retain colours.
 Empty: current empty text on dark panel. Loading: current indicator/status. Error/interrupted: existing warning/error colour. Long names: current truncation. No geometry or content changes.
