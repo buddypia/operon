@@ -683,7 +683,8 @@ control as `secondary_button`; everything else goes through its helper:
 |---|---|
 | the one action that starts work | `primary_button` |
 | any ordinary action, a toggle, Cancel / Delete in a prompt | `secondary_button` |
-| sidebar CLI and status filters, with a persistent selected state and readable icon names | `session_filter_button` (28px) |
+| a sidebar status filter: the group's mark, word and count, washed in its status colour when chosen | `status_filter_tile` (28px) |
+| a sidebar CLI filter: an official mark in a hairline segment, named on hover and to assistive technology | `agent_filter_toggle` (24px) |
 | the quiet action beside a heading | `quiet_button` |
 | an icon in a toolbar | `icon_button` (28px) |
 | an icon in a list row, a find bar, or a menu row | `small_icon_button` (24px) |

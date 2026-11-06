@@ -1,0 +1,17 @@
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "2 3"
+  questions: "3 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+resume: "Land only after ci-verified.sh passes on the final head, then package and install from main."
+contract:
+  three-gates: "machine passed make q.fast; ten sidebar_25 tests and 195 related tests pass"
+  full-ci: "machine waived head-specific; scripts/ci-verified.sh must pass on the final head before merge"
+  guards-verified-by-mutation: "machine passed 7 of 7 mutations caught by mutations.py"
+  release-binary: "machine passed yes - src/ changes; package from main after landing"
+  installed-app: "human pending the installed app shows the new filters after packaging"
