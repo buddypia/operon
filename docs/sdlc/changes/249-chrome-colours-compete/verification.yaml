@@ -1,0 +1,13 @@
+digest: "ec0154cd2346f589"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked dark_chrome_uses_neutral_roles
+  - R2 empirical-test :: cargo test --locked neutral_chrome_preserves_semantic_colours
+  - R3 empirical-test :: cargo test --locked design_md_documents_exactly_what_the_app_paints
+  - R4 empirical-test :: cargo test --locked selected_navigation_uses_a_fine_accent_rule
+  - I1 empirical-test :: cargo test --locked active_workspace_tab_has_an_orange_rule
+  - I2 empirical-test :: cargo test --locked topbar_wordmark_is_neutral_beside_the_primary_action
+  - I3 empirical-test :: cargo test --locked every_theme_stays_readable
+  - I4 empirical-test :: cargo test --locked ansi_numbers_map_to_the_colours_they_name
+  - I5 empirical-test :: cargo test --locked focus_ring_on_a_button_is_the_strong_outline_at_control_radius
+  - I6 empirical-mutation :: python3 docs/sdlc/changes/249-chrome-colours-compete/mutations.py

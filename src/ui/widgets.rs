@@ -420,11 +420,8 @@ pub(crate) fn launch_progress_footer(
     (status, action)
 }
 
-/// One tab of the toolbar's segmented navigation. The chosen one is marked by
-/// the selection colour and the selected ink, which is the same pairing a
-/// selected session row uses: a selected row and selected text are one
-/// language (change 246), and the words on that surface take the ink that
-/// stays readable there rather than the brand ink.
+/// Toolbar and workspace navigation share a neutral selected fill and a fine
+/// accent rule. The strong focus ring remains the last mark painted.
 pub(crate) fn nav_tab(
     ui: &mut egui::Ui,
     palette: &Palette,
@@ -449,6 +446,16 @@ pub(crate) fn nav_tab(
         button = button.fill(palette.row_selected);
     }
     let response = ui.add(button);
+    if selected {
+        let rect = response.rect;
+        ui.painter().line_segment(
+            [
+                egui::pos2(rect.left(), rect.bottom() - 1.0),
+                egui::pos2(rect.right(), rect.bottom() - 1.0),
+            ],
+            egui::Stroke::new(2.0, palette.accent),
+        );
+    }
     paint_button_focus(ui, &response, palette);
     response
 }
@@ -457,7 +464,7 @@ pub(crate) fn nav_tab(
 /// edge that lands on the hairline under the row.
 ///
 /// A filled chip would be a third kind of selected-thing in an app that already
-/// has two — the toolbar's tinted nav and a selected list row — and a filled
+/// has two — the toolbar's selected nav and a selected list row — and a filled
 /// chip beside a hairline button reads as a button that is stuck down. A rule
 /// under a word is the mark every tool of this kind uses, and it is the only
 /// one that says "this is where you are" rather than "this is pressed".

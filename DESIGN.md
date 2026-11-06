@@ -26,22 +26,22 @@ colors:
   dark-raised: "#191919"
   dark-card: "#1E1E1E"
   dark-inset: "#0A0A0A"
-  dark-row-selected: "#005C80"
+  dark-row-selected: "#383838"
   dark-scrim: "#000000DC"
   dark-on-scrim: "#FFBE5A"
   dark-control: "#3C3C3C"
   dark-control-hovered: "#464646"
   dark-control-active: "#373737"
-  dark-selection: "#005C80"
-  dark-selection-border: "#C0DEFF"
+  dark-selection: "#383838"
+  dark-selection-border: "#DCDCDC"
   dark-border-subtle: "#3C3C3C"
   dark-border: "#767676"
   dark-border-strong: "#FFFFFF"
-  dark-text-strong: "#F2F4F7"
-  dark-text: "#C9CDD3"
-  dark-text-muted: "#9AA0A8"
-  dark-text-faint: "#9399A2"
-  dark-branch: "#96BEFF"
+  dark-text-strong: "#F2F2F2"
+  dark-text: "#CDCDCD"
+  dark-text-muted: "#A0A0A0"
+  dark-text-faint: "#999999"
+  dark-branch: "#C8C8C8"
   dark-link: "#5AAAFF"
   dark-code-bg: "#404040"
   dark-accent: "#FF9438"
@@ -315,14 +315,14 @@ person picks one in Settings and it is stored locally.
 
 ## Colors
 
-The palette is a near-monochrome ramp with a single warm accent, plus a fixed
+The default dark chrome uses a black and grey ramp with a single warm accent, plus a fixed
 set of status hues that never do any other job.
 
 - **Primary (#FF9438) — Signal Orange.** The brand mark, the one button that
-  starts work, and nothing else. It is the only warm colour on a cool screen,
-  which is what makes a single orange button findable without a label.
+  starts work, and fine selected-tab rules. Selected backgrounds and ordinary
+  metadata remain grey, so small orange marks carry the action hierarchy.
 - **Secondary (#78AFFF) — Console Blue.** Information that is on its way
-  somewhere: a session starting, a branch name, a link. Blue is what the eye
+  somewhere: a session starting or a link. Dark branch metadata uses neutral ink. Blue is what the eye
   skips when it is hunting for trouble, which is exactly right for it.
 - **Tertiary (#37D2A1) — Session Green.** Something is running and healthy. The
   most common non-neutral colour on screen, so it is the least saturated of the
@@ -652,10 +652,12 @@ Above that sit exactly three louder states, each used once per screen:
   surface that replaced it. A selected sidebar row adds a 2px accent bar on
   its left edge, because hover and selection are both fills and one of them
   has to be more than a fill.
-- **The accent rule under a tab.** In-page tab bars mark the current tab with a
-  2px rule along the bottom of the word, landing on the hairline under the row.
-  A filled chip there would be a third selection language and would read as a
-  button that is stuck down.
+- **The accent rule under a tab.** Toolbar navigation, workspace tabs and
+  in-page tab bars mark the current tab with a
+  2px rule along the bottom. Navigation and workspace rules sit inside their
+  control bounds; in-page rules land on the hairline under the row.
+  Toolbar selection keeps its neutral fill; its orange rule distinguishes it
+  from hover. In-page tabs remain frameless.
 
 Everything else — icon buttons in a toolbar, the actions on a list row, the
 "other options" beside a heading — is frameless until hovered.
