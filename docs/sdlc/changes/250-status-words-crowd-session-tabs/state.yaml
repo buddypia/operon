@@ -1,0 +1,16 @@
+state:
+  route: "modify"
+  stage: "design"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+resume: "Evaluate the requested icon-only tabs, then implement and verify their live hover explanations."
+contract:
+  three-gates: "machine pending make q.fast, named tests, and CI before landing"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes - package from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/250-status-words-crowd-session-tabs/mutations.py"
