@@ -68168,3 +68168,195 @@ pub(crate) fn session_tabs_show_live_state_before_title() {
     }
     fs::remove_dir_all(root).unwrap();
 }
+
+/// Change 249: chrome is neutral; only the action accent carries orange.
+#[test]
+fn dark_chrome_uses_neutral_roles() {
+    let p = AppTheme::Dark.palette();
+    for (name, color) in p.tokens() {
+        if matches!(
+            name.as_str(),
+            "window"
+                | "panel"
+                | "raised"
+                | "card"
+                | "inset"
+                | "row-selected"
+                | "control"
+                | "control-hovered"
+                | "control-active"
+                | "selection"
+                | "selection-border"
+                | "border-subtle"
+                | "border"
+                | "border-strong"
+                | "text-strong"
+                | "text"
+                | "text-muted"
+                | "text-faint"
+                | "branch"
+                | "code-bg"
+        ) {
+            assert_eq!(color.r(), color.g(), "{name} must be neutral");
+            assert_eq!(color.g(), color.b(), "{name} must be neutral");
+        }
+    }
+    assert!(
+        p.accent.r() > p.accent.g() && p.accent.g() > p.accent.b(),
+        "primary action accent must remain orange"
+    );
+    assert!(
+        contrast_ratio(p.row_selected, p.panel) >= 1.4,
+        "selected rows must remain distinguishable from their panel"
+    );
+    assert!(contrast_ratio(p.on_accent, p.accent) >= 4.5);
+}
+
+#[test]
+fn neutral_chrome_preserves_semantic_colours() {
+    let p = AppTheme::Dark.palette();
+    for (actual, rgb) in [
+        (p.info, [120, 175, 255]),
+        (p.success, [55, 210, 161]),
+        (p.calm, [126, 196, 176]),
+        (p.warning, [246, 187, 55]),
+        (p.danger, [238, 102, 102]),
+        (p.link, [90, 170, 255]),
+        (p.diff_added, [90, 215, 155]),
+        (p.diff_removed, [255, 138, 133]),
+        (p.agent_codex, [48, 184, 167]),
+        (p.agent_claude, [222, 119, 72]),
+        (p.agent_antigravity, [105, 150, 244]),
+        (p.terminal_bg, [10, 12, 16]),
+        (p.terminal_fg, [206, 212, 222]),
+    ] {
+        assert_eq!(actual, egui::Color32::from_rgb(rgb[0], rgb[1], rgb[2]));
+    }
+}
+
+/// Inspect real egui paint primitives, including selected and idle controls.
+#[test]
+fn selected_navigation_uses_a_fine_accent_rule() {
+    for theme in AppTheme::all() {
+        let p = theme.palette();
+        for selected in [false, true] {
+            let ctx = egui::Context::default();
+            ctx.set_visuals(p.visuals());
+            let mut tab_rect = egui::Rect::NOTHING;
+            let mut shapes = Vec::new();
+            for _ in 0..2 {
+                shapes = ctx
+                    .run(egui::RawInput::default(), |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            tab_rect = nav_tab(ui, p, "", "セッション", selected).rect;
+                        });
+                    })
+                    .shapes;
+            }
+            let rules: Vec<_> = shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, stroke } if stroke.color == p.accent => {
+                        Some((points, stroke))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                rules.len(),
+                usize::from(selected),
+                "{} selected={selected}",
+                theme.label()
+            );
+            if selected {
+                let (points, stroke) = rules[0];
+                assert_eq!(stroke.width, 2.0);
+                assert_eq!(points[0].y, points[1].y);
+                assert!(points[0].y >= tab_rect.bottom() - 2.0);
+                assert!(points.iter().all(|point| tab_rect.contains(*point)));
+                assert!(shapes.iter().any(|s| matches!(&s.shape,
+                    egui::Shape::Rect(r) if r.fill == p.row_selected && r.rect == tab_rect)));
+            }
+        }
+    }
+}
+
+#[test]
+fn active_workspace_tab_has_an_orange_rule() {
+    let root = temporary_directory("workspace-tab-accent");
+    let (mut app, _, _, first, second) = status_column_fixture(&root);
+    let ctx = egui::Context::default();
+    for active in [first, second] {
+        app.select_session(active);
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let title = drawn_text_rects(&output, |t| {
+            t == if active == first { "first" } else { "second" }
+        })
+        .into_iter()
+        .filter(|r| r.left() >= column_right(&output))
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("active workspace tab");
+        let p = app.store.theme.palette();
+        let rules: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == p.accent
+                        && stroke.width == 2.0
+                        && points[0].x <= title.left()
+                        && points[1].x >= title.right()
+                        && points[0].y >= title.bottom()
+                        && points[0].y < title.bottom() + 16.0 =>
+                {
+                    Some(points)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rules.len(),
+            1,
+            "active tab must have one fine orange bottom rule"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn topbar_wordmark_is_neutral_beside_the_primary_action() {
+    let root = temporary_directory("neutral-wordmark");
+    let (mut app, _, _, _, _) = status_column_fixture(&root);
+    let ctx = egui::Context::default();
+    ctx.set_visuals(app.store.theme.visuals());
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = ctx
+            .run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| app.ui_topbar(ctx),
+            )
+            .shapes;
+    }
+    let p = app.store.theme.palette();
+    let wordmark = shapes.iter().find_map(|s| match &s.shape {
+        egui::Shape::Text(t) if t.galley.text() == "Operon" => {
+            t.galley.job.sections.first().map(|s| s.format.color)
+        }
+        _ => None,
+    });
+    assert_eq!(wordmark, Some(p.text_strong));
+    assert!(
+        shapes.iter().any(|s| matches!(&s.shape,
+        egui::Shape::Rect(r) if r.fill == p.accent)),
+        "primary action must retain its orange fill"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

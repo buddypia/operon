@@ -82,7 +82,7 @@ impl OperonApp {
                     let wordmark = RichText::new("Operon")
                         .size(14.0)
                         .strong()
-                        .color(palette.accent_text);
+                        .color(palette.text_strong);
                     // Mark and word are one control, so there is one hover
                     // target and one click target rather than two widgets that
                     // happen to sit together. A build whose bundled mark will
@@ -6963,7 +6963,7 @@ impl OperonApp {
                         for (index, tab) in tabs.tabs.iter().enumerate() {
                             let (title, hover, dirty) = self.workspace_tab_title(tab);
                             let active = tabs.active == index;
-                            egui::Frame::new()
+                            let tab_frame = egui::Frame::new()
                                 .fill(if active { palette.raised } else { palette.card })
                                 .inner_margin(egui::Margin::symmetric(8, 4))
                                 .show(ui, |ui| {
@@ -7053,6 +7053,16 @@ impl OperonApp {
                                         }
                                     });
                                 });
+                            if active {
+                                let rect = tab_frame.response.rect;
+                                ui.painter().line_segment(
+                                    [
+                                        egui::pos2(rect.left(), rect.bottom() - 1.0),
+                                        egui::pos2(rect.right(), rect.bottom() - 1.0),
+                                    ],
+                                    egui::Stroke::new(2.0, palette.accent),
+                                );
+                            }
                         }
                     });
                 });
