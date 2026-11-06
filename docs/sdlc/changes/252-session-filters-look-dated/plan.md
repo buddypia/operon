@@ -39,3 +39,5 @@ Named tests pass; `make q.fast` clean; mutation sweep catches every mutation; CI
 ## Departures from the plan
 
 The first render drew each tile's mark as the circled vector status mark that workspace tabs use, while the sidebar's own rows and project counts use the group glyphs; the tiles now paint `SessionStatusGroup::icon()` so a tile and the rows it leaves carry the same mark, and no `status_mark()` was added to the group. 「クリア」 is the quiet link alone, without the close mark: the quiet button takes one string, and joining a glyph to the word would have needed a new message id for a decoration. The native check used a throwaway software rasteriser over egui's own tessellation instead of a framebuffer capture.
+
+The spec named `row_selected` for a chosen CLI mark; CI showed that role is reserved for real selections (`only_selections_wear_the_selection_colour`), so a chosen mark wears `control_active` with the `border` hairline instead.

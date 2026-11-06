@@ -461,7 +461,7 @@ pub(crate) fn agent_filter_toggle(
             ui.painter().rect(
                 rect,
                 corner,
-                palette.row_selected,
+                palette.control_active,
                 egui::Stroke::new(1.0, palette.border),
                 egui::StrokeKind::Inside,
             );
