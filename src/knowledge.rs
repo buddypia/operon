@@ -123,6 +123,9 @@ pub(crate) struct KnowledgeEntry {
     pub(crate) reference_count: u32,
     pub(crate) recurrences: u32,
     pub(crate) pinned: bool,
+    /// The conversation it came from confirmed it: a test or command output
+    /// showed it, or the person said so (change 256).
+    pub(crate) verified: bool,
     pub(crate) sources: Vec<KnowledgeSource>,
 }
 
@@ -147,6 +150,15 @@ pub(crate) fn freshness(last_used: u64, reference_count: u32, recurrences: u32, 
     let uses = f64::from(reference_count) + f64::from(recurrences);
     let tau = KNOWLEDGE_TAU_DAYS * (1.0 + (1.0 + uses).ln());
     (-days / tau).exp()
+}
+
+/// What a person and an agent read for an entry's `verified` (change 256).
+pub(crate) fn verified_label(verified: bool) -> &'static str {
+    if verified {
+        tr("検証済み")
+    } else {
+        tr("未確認")
+    }
 }
 
 pub(crate) fn provider_key(provider: CliProvider) -> &'static str {
@@ -220,6 +232,7 @@ CREATE TABLE IF NOT EXISTS entries (
     reference_count INTEGER NOT NULL DEFAULT 0,
     recurrences INTEGER NOT NULL DEFAULT 0,
     pinned INTEGER NOT NULL DEFAULT 0,
+    verified INTEGER NOT NULL DEFAULT 0,
     vector BLOB NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sources (
@@ -278,6 +291,32 @@ pub(crate) fn may_add_entries(pinned: usize) -> bool {
     pinned < KNOWLEDGE_MAX_ENTRIES
 }
 
+fn entries_have_verified(connection: &rusqlite::Connection) -> rusqlite::Result<bool> {
+    connection
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('entries') WHERE name = 'verified'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|count| count > 0)
+}
+
+/// Add `entries.verified` to a database made before change 256. Additive, like
+/// the `layout` table of change 171: a 157 build names its columns in every
+/// `SELECT` and `INSERT`, so it ignores this one and its inserts take the
+/// default — the schema version is not raised. The GUI's run and an agent's
+/// `knowledge search` may both find the column missing on one old file; the
+/// `ALTER` that loses fails, and the column being there afterwards is success.
+pub(crate) fn add_verified_column(connection: &rusqlite::Connection) -> Result<()> {
+    match connection
+        .execute_batch("ALTER TABLE entries ADD COLUMN verified INTEGER NOT NULL DEFAULT 0")
+    {
+        Ok(()) => Ok(()),
+        Err(_) if entries_have_verified(connection).unwrap_or(false) => Ok(()),
+        Err(error) => Err(sql_error(error)),
+    }
+}
+
 pub(crate) struct KnowledgeDatabase {
     connection: rusqlite::Connection,
 }
@@ -311,6 +350,9 @@ impl KnowledgeDatabase {
         connection
             .execute_batch(KNOWLEDGE_SCHEMA)
             .map_err(sql_error)?;
+        if !entries_have_verified(&connection).map_err(sql_error)? {
+            add_verified_column(&connection)?;
+        }
         let database = Self { connection };
         match database.meta("schema_version")? {
             None => database.set_meta("schema_version", &KNOWLEDGE_SCHEMA_VERSION.to_string())?,
@@ -434,7 +476,7 @@ impl KnowledgeDatabase {
             .connection
             .prepare(
                 "SELECT id, kind, title, body, created_at, reinforced_at, referenced_at,
-                        reference_count, recurrences, pinned
+                        reference_count, recurrences, pinned, verified
                  FROM entries ORDER BY id",
             )
             .map_err(sql_error)?;
@@ -451,6 +493,7 @@ impl KnowledgeDatabase {
                     row.get::<_, i64>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, i64>(9)?,
+                    row.get::<_, i64>(10)?,
                 ))
             })
             .map_err(sql_error)?
@@ -471,6 +514,7 @@ impl KnowledgeDatabase {
                     references,
                     recurrences,
                     pinned,
+                    verified,
                 )| {
                     KnowledgeEntry {
                         id,
@@ -483,6 +527,7 @@ impl KnowledgeDatabase {
                         reference_count: references.max(0) as u32,
                         recurrences: recurrences.max(0) as u32,
                         pinned: pinned != 0,
+                        verified: verified != 0,
                         sources: sources.remove(&id).unwrap_or_default(),
                     }
                 },
@@ -745,8 +790,10 @@ impl KnowledgeDatabase {
             Some((id, similarity)) if similarity >= KNOWLEDGE_DEDUPE_COSINE => {
                 self.connection
                     .execute(
-                        "UPDATE entries SET recurrences = recurrences + 1, reinforced_at = ?2 WHERE id = ?1",
-                        params![id, now as i64],
+                        "UPDATE entries SET recurrences = recurrences + 1, reinforced_at = ?2,
+                                            verified = MAX(verified, ?3)
+                         WHERE id = ?1",
+                        params![id, now as i64, entry.verified],
                     )
                     .map_err(sql_error)?;
                 self.insert_source(id, source, now)?;
@@ -757,13 +804,14 @@ impl KnowledgeDatabase {
                 self.connection
                     .execute(
                         "INSERT INTO entries (kind, title, body, created_at, reinforced_at, referenced_at,
-                                              reference_count, recurrences, pinned, vector)
-                         VALUES (?1, ?2, ?3, ?4, ?4, ?4, 0, 0, 0, ?5)",
+                                              reference_count, recurrences, pinned, verified, vector)
+                         VALUES (?1, ?2, ?3, ?4, ?4, ?4, 0, 0, 0, ?5, ?6)",
                         params![
                             entry.kind.key(),
                             entry.title,
                             entry.body,
                             now as i64,
+                            entry.verified,
                             vector_to_blob(&entry.vector)
                         ],
                     )
@@ -896,6 +944,7 @@ pub(crate) struct NewEntry {
     pub(crate) kind: KnowledgeKind,
     pub(crate) title: String,
     pub(crate) body: String,
+    pub(crate) verified: bool,
     pub(crate) vector: Vec<f32>,
 }
 
@@ -1127,7 +1176,12 @@ anything that only mattered at that moment.\n\n\
 Answer with only a JSON array, no prose and no code fence, of 0 to 5 objects:\n\
 {\"kind\": \"decision\" | \"cause\" | \"procedure\" | \"pitfall\" | \"fact\", \
 \"title\": \"at most 40 characters\", \"body\": \"at most 400 characters, understandable on its own\", \
-\"candidate\": <the candidate's number>}\n\
+\"verified\": true | false, \"candidate\": <the candidate's number>}\n\
+Set verified to true only when the conversation itself shows the knowledge was checked: a test \
+or a command ran and its output confirmed it, or the person confirmed it. Set it to false for a \
+hypothesis, a plan, or a claim nobody checked. A later conversation relies on a verified entry \
+without checking it again and checks an unverified one first, so when verified is true, say in \
+the body how it was confirmed.\n\
 Write title and body in the language the conversation uses. Never copy secrets, tokens, \
 passwords, or personal data. Answer [] when nothing is worth keeping.\n",
     );
@@ -1158,6 +1212,7 @@ pub(crate) struct JudgedEntry {
     pub(crate) kind: KnowledgeKind,
     pub(crate) title: String,
     pub(crate) body: String,
+    pub(crate) verified: bool,
     /// Index into the candidates the prompt listed.
     pub(crate) candidate: usize,
 }
@@ -1185,6 +1240,10 @@ pub(crate) fn parse_judge_answer(answer: &str, offered: usize) -> Option<Vec<Jud
                         kind,
                         title: title.chars().take(KNOWLEDGE_TITLE_MAX_CHARS).collect(),
                         body: body.chars().take(KNOWLEDGE_BODY_MAX_CHARS).collect(),
+                        verified: item
+                            .get("verified")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false),
                         candidate: number - 1,
                     },
                 )
@@ -1716,6 +1775,7 @@ fn process_conversation(
                     kind: entry.kind,
                     title: entry.title.clone(),
                     body: entry.body.clone(),
+                    verified: entry.verified,
                     vector,
                 },
                 &NewSource {
@@ -2220,6 +2280,7 @@ pub(crate) fn knowledge_cli(
                     "kind": hit.entry.kind.key(),
                     "title": hit.entry.title,
                     "body": hit.entry.body,
+                    "verified": hit.entry.verified,
                     "similarity": (hit.similarity * 1000.0).round() / 1000.0,
                     "sources": hit.entry.sources.iter().map(|source| serde_json::json!({
                         "cli": source.provider.agent(),
@@ -2237,7 +2298,11 @@ pub(crate) fn knowledge_cli(
             .map(|hit| {
                 format!(
                     "[{}] {} ({:.0}%)\n{}\n",
-                    hit.entry.kind.label(),
+                    tf!(
+                        "{kind}・{status}",
+                        kind = hit.entry.kind.label(),
+                        status = verified_label(hit.entry.verified)
+                    ),
                     hit.entry.title,
                     hit.similarity * 100.0,
                     hit.entry.body

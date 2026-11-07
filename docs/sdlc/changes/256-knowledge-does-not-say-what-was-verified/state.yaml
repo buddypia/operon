@@ -1,0 +1,19 @@
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Landed; the installed app is packaged once after the article's later steps land, and rust-reviewer's four carried nits await a follow-up."
+
+contract:
+  three-gates: "machine passed make q.fast: fmt and clippy clean; gate-commit runs them again at the commit"
+  bands: "machine passed bash scripts/check-bands.sh: three breaches, all present on main before this change"
+  release-binary: "machine waived src/knowledge.rs and src/app/knowledge.rs changed, so the app is stale; packaged once with bash scripts/package-macos.sh after the later article steps land, rather than quitting Operon three times"
+  verified-tests: "machine passed cargo test --locked knowledge_256_: 8 passed, each watched failing first"
+  guards-verified-by-mutation: "human passed mutations.py: 13 of 13 caught, sources restored"

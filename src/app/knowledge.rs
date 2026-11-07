@@ -1313,6 +1313,7 @@ impl OperonApp {
                         .strong()
                         .color(palette.accent_text),
                 );
+                verified_mark(ui, palette, entry.verified);
                 ui.label(RichText::new(&entry.title).color(palette.text_strong));
             });
             ui.horizontal(|ui| {
@@ -1628,6 +1629,7 @@ fn knowledge_row(
             .strong()
             .color(palette.accent_text),
     );
+    verified_mark(ui, palette, entry.verified);
     let right_width = 260.0;
     let title_width = (ui.available_width() - right_width).max(80.0);
     ui.add_sized(
@@ -1658,6 +1660,20 @@ fn knowledge_row(
                 .color(palette.text_faint),
         );
     }
+}
+
+/// 検証済み or 未確認 beside the kind (change 256). Unconfirmed is the quieter
+/// ink: it is what every entry kept before the flag existed says.
+fn verified_mark(ui: &mut egui::Ui, palette: &Palette, verified: bool) {
+    ui.label(
+        RichText::new(verified_label(verified))
+            .size(12.0)
+            .color(if verified {
+                palette.text_muted
+            } else {
+                palette.text_faint
+            }),
+    );
 }
 
 /// Ten cells: filled share is the freshness; under 0.3 — about to fade — the
