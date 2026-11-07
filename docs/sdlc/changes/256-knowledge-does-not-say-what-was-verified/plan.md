@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-07
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -49,4 +49,9 @@ The tree compiles after every step.
 
 ## Departures from the plan
 
-None yet.
+- The change was staged while the mutation sweep had one mutant applied, so the
+  index briefly held the judge prompt without its purpose sentence. Found by
+  comparing the index with the restored tree after the sweep; the file was
+  staged again, the tests re-run, and the reviewer re-read the corrected diff.
+  Nothing was committed from the mutant.
+- Packaging is deferred to one run after the article's later steps land.

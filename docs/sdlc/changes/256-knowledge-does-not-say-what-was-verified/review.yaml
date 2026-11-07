@@ -1,0 +1,25 @@
+# Review record for change 256-knowledge-does-not-say-what-was-verified.
+#
+# rust-reviewer read the staged diff (src/knowledge.rs, src/app/knowledge.rs,
+# src/i18n_tables.rs, src/tests.rs) from the index: no per-frame work in
+# verified_mark, no new panic site, no format!-built SQL, INSERT/UPDATE params
+# in order, the ALTER race guard only swallows an error when the column is there
+# afterwards, and every statement a 157-era build runs names its columns. It was
+# asked again after a sweep mutant was found staged in the prompt and confirmed
+# the corrected diff unchanged otherwise.
+
+digest: "bd22b790cb8eccfc"
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · open_existing is the read path for knowledge search; on the first open of an old file after upgrade it now needs the write lock for the ALTER, so a GUI write transaction longer than 2s or a read-only file makes that one search fail with "database is locked", where before WAL readers did not block. Once per file; the next open succeeds.
+    person: "アップデート直後の最初の 1 回だけ、Operon がナレッジを更新している最中にエージェントがナレッジ検索をすると「読み書きできませんでした」で失敗することがあります。もう一度検索すれば成功します。あなたが何かする必要はありません。"
+  - rust-reviewer/2 · the migration runs before the newer-schema refusal in open; a file from a newer Operon lacking the column would be altered before being refused. Unlikely; moving it after the version check costs nothing.
+    person: "より新しい Operon で作られたナレッジを古い Operon で開いた場合の順序に小さな改善の余地があります。実際に起きる見込みはほぼなく、あなたが何かする必要はありません。"
+  - rust-reviewer/3 · a failed migration reports the generic "cannot read or write the database" message with no sign it was the verified column upgrade; .context(...) would help a bug report.
+    person: "列の追加に失敗した場合のエラー文が一般的な文言のままで、原因が分かりにくいです。普段の利用には影響せず、あなたが何かする必要はありません。"
+  - rust-reviewer/4 · "verified": "true" as a string or 1 parses as false, the safe direction; a test or log line would show whether the judge model drifts.
+    person: "判定 AI が形式を崩して答えた場合、そのナレッジは安全側の「未確認」として残ります。あなたが何かする必要はありません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"

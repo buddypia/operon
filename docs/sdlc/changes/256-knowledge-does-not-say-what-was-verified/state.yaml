@@ -1,7 +1,7 @@
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -9,11 +9,11 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the eight failing knowledge_256_ tests, then implement the plan in order."
+resume: "Landed; the installed app is packaged once after the article's later steps land, and rust-reviewer's four carried nits await a follow-up."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending touches src/knowledge.rs and src/app/knowledge.rs, so it ends with bash scripts/package-macos.sh"
-  verified-tests: "machine pending cargo test --locked knowledge_256_"
-  guards-verified-by-mutation: "human pending python3 docs/sdlc/changes/256-knowledge-does-not-say-what-was-verified/mutations.py"
+  three-gates: "machine passed make q.fast: fmt and clippy clean; gate-commit runs them again at the commit"
+  bands: "machine passed bash scripts/check-bands.sh: three breaches, all present on main before this change"
+  release-binary: "machine waived src/knowledge.rs and src/app/knowledge.rs changed, so the app is stale; packaged once with bash scripts/package-macos.sh after the later article steps land, rather than quitting Operon three times"
+  verified-tests: "machine passed cargo test --locked knowledge_256_: 8 passed, each watched failing first"
+  guards-verified-by-mutation: "human passed mutations.py: 13 of 13 caught, sources restored"
