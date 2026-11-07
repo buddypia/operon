@@ -12,6 +12,6 @@ While switching between several terminals, the selected sidebar row is almost in
 
 The person monitoring sessions in the existing Sessions workspace, especially with several sessions in the same project.
 
-## Success
+## Desired outcome
 
 Selection is visible in the sidebar and tabs, names take less space, and a persistent right-edge plus creates a plain terminal in the active project and working directory.
