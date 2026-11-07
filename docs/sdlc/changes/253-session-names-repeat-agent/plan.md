@@ -5,8 +5,8 @@
 
 ## Files that change
 
-- src/app.rs: numbered launch defaults, shared workspace title projection, editor location flag and displayed rename seed.
-- src/app/screens.rs: shared titles; inline editor, double click and context menu in sidebar and tabs.
+- src/app.rs: numbered launch defaults, startup rewrite through existing persist/rollback, editor location flag and displayed rename seed.
+- src/app/screens.rs: inline editor, double click and context menu in sidebar and tabs.
 - src/i18n_tables.rs: numbered-name translation in every language.
 - src/tests.rs: numbered names, legacy titles, real pointer rename/save/cancel and persistence checks.
 

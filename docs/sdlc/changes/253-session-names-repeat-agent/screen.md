@@ -7,7 +7,7 @@ Existing workspace, 268px sidebar and 1280px window; no layout rearrangement.
 Before:
     design-lookbook                    [Ⅱ design-lookbook · Antigr… ×]
       Ⅱ [agent mark] design-lookbook · Antigravity
-After:
+After (saved names, including existing automatic names):
     design-lookbook                    [Ⅱ セッション1 ×] [Ⅱ セッション2 ×]
       Ⅱ [agent mark] セッション1
       Ⅱ [agent mark] セッション2
