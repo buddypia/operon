@@ -2353,7 +2353,7 @@ pub(crate) fn knowledge_cli(
     let Some((subcommand, rest)) = arguments.split_first() else {
         return fail(64, knowledge_usage());
     };
-    if subcommand != "search" {
+    if subcommand != KNOWLEDGE_SEARCH_SUBCOMMAND {
         return fail(64, knowledge_usage());
     }
     let Some(search) = parse_search_arguments(rest) else {
@@ -2449,6 +2449,157 @@ pub(crate) fn knowledge_cli(
     }
 }
 
+// ---------------------------------------------------------------------------
+// `Operon knowledge brief`: what the SessionStart hook hands an agent (change 258).
+
+/// The few lines an agent starts a session with: what the knowledge is for,
+/// how to search it, and the titles worth knowing now — never a body, which
+/// search returns on demand. `None` when there is nothing to tell, or when even
+/// the header would not fit `KNOWLEDGE_BRIEF_MAX_CHARS`.
+pub(crate) fn knowledge_brief(
+    entries: &[KnowledgeEntry],
+    executable: &Path,
+    now: u64,
+) -> Option<String> {
+    if entries.is_empty() {
+        return None;
+    }
+    let command = format!(
+        "{} {KNOWLEDGE_CLI_SUBCOMMAND} {KNOWLEDGE_SEARCH_SUBCOMMAND} \"<what you need>\" --json",
+        shell_quote(&executable.display().to_string())
+    );
+    let mut brief = format!(
+        "This project keeps {count} knowledge entries distilled from earlier agent conversations in it, \
+         so that an agent does not re-derive what an earlier session already found.\n\
+         Search it before investigating a cause, choosing an approach, or answering how this project works:\n\
+         {command}\n\
+         {verified} entries were confirmed by a test, command output, or the person; \
+         check {unverified} ones before relying on them.\n\
+         Entries worth knowing now:\n",
+        count = entries.len(),
+        verified = verified_label(true),
+        unverified = verified_label(false),
+    );
+    let mut length = brief.chars().count();
+    if length > KNOWLEDGE_BRIEF_MAX_CHARS {
+        return None;
+    }
+    let mut ranked: Vec<(&KnowledgeEntry, f64)> = entries
+        .iter()
+        .map(|entry| (entry, entry.freshness(now)))
+        .collect();
+    ranked.sort_by(|(a, a_fresh), (b, b_fresh)| {
+        b.pinned
+            .cmp(&a.pinned)
+            .then(b.verified.cmp(&a.verified))
+            .then(b_fresh.total_cmp(a_fresh))
+    });
+    for (entry, _) in ranked.into_iter().take(KNOWLEDGE_BRIEF_ENTRIES) {
+        let line = format!(
+            "- [{}] {}\n",
+            tf!(
+                "{kind}・{status}",
+                kind = entry.kind.label(),
+                status = verified_label(entry.verified)
+            ),
+            // One line per entry, whatever the judge wrote into a title.
+            entry.title.split_whitespace().collect::<Vec<_>>().join(" ")
+        );
+        let line_length = line.chars().count();
+        if length + line_length > KNOWLEDGE_BRIEF_MAX_CHARS {
+            break;
+        }
+        length += line_length;
+        brief.push_str(&line);
+    }
+    Some(brief)
+}
+
+/// The brief for the project `directory` is in, as the SessionStart hook's JSON
+/// answer, or nothing at all. The project is found by path alone — no `git`
+/// call, so nothing here can hold a session start — and the store is opened
+/// only if it exists; nothing is written and no reference is counted.
+pub(crate) fn knowledge_brief_cli(
+    directory: &Path,
+    projects: &[Project],
+    root: &Path,
+    executable: &Path,
+) -> CliOutcome {
+    let brief = project_containing(directory, projects)
+        .and_then(|project| {
+            KnowledgeDatabase::open_existing(&knowledge_database_path(root, project.id))
+                .ok()
+                .flatten()
+        })
+        .filter(|database| database.enabled().unwrap_or(false))
+        .and_then(|database| database.entries().ok())
+        .and_then(|entries| knowledge_brief(&entries, executable, now()));
+    let stdout = brief.map_or_else(String::new, |brief| {
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": brief,
+                }
+            })
+        )
+    });
+    CliOutcome {
+        code: 0,
+        stdout,
+        stderr: String::new(),
+    }
+}
+
+/// The registered project whose folder holds `directory`, by path alone.
+fn project_containing<'a>(directory: &Path, projects: &'a [Project]) -> Option<&'a Project> {
+    let canonical = |path: &Path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let roots: Vec<PathBuf> = projects
+        .iter()
+        .map(|project| canonical(&project.path))
+        .collect();
+    let directory = canonical(directory);
+    directory.ancestors().find_map(|ancestor| {
+        roots
+            .iter()
+            .position(|root| root == ancestor)
+            .map(|index| &projects[index])
+    })
+}
+
+/// `work`'s answer, or `None` when it has not answered within `seconds`. The
+/// thread is left behind on a timeout: the caller is a command about to exit.
+pub(crate) fn bounded<T: Send + 'static>(
+    seconds: u64,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+    receiver.recv_timeout(Duration::from_secs(seconds)).ok()
+}
+
+fn run_brief_cli() -> i32 {
+    let outcome = bounded(KNOWLEDGE_BRIEF_SECONDS, || {
+        let directory = std::env::current_dir().ok()?;
+        let executable = std::env::current_exe().ok()?;
+        let projects = load_store(&app_data_file()).ok()?.projects;
+        Some(knowledge_brief_cli(
+            &directory,
+            &projects,
+            &knowledge_root(),
+            &executable,
+        ))
+    })
+    .flatten();
+    if let Some(outcome) = outcome {
+        print!("{}", outcome.stdout);
+    }
+    0
+}
+
 fn not_enabled_message(project: &Project) -> String {
     tf!(
         "{name} ではナレッジの収集が有効になっていません。Operon のプロジェクト › ナレッジ で有効にしてください。",
@@ -2460,6 +2611,11 @@ fn not_enabled_message(project: &Project) -> String {
 /// `KNOWLEDGE_CLI_SUBCOMMAND`. Opens no window and takes no instance lock; it
 /// reads the store read-only and writes only reference counts.
 pub(crate) fn run_cli(arguments: &[String]) -> i32 {
+    // Before anything that looks up the model: the brief runs at every
+    // session start and needs none.
+    if arguments.first().map(String::as_str) == Some(KNOWLEDGE_BRIEF_SUBCOMMAND) {
+        return run_brief_cli();
+    }
     if let [subcommand, fixture] = arguments {
         if subcommand != KNOWLEDGE_EMBED_GOLDEN_SUBCOMMAND {
             return run_search_cli(arguments);

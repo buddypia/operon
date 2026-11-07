@@ -320,6 +320,9 @@ Settings.
   is shown the nearest existing notes and the note is rewritten in place with
   what is true now, keeping its references and earlier sources. Pinned notes
   are never rewritten.
+- When a Claude Code or Codex session starts in a project with knowledge on,
+  that CLI is given the titles of up to 10 notes (pinned, verified, and
+  recently used first) and the command to search them, never their bodies.
 - Search by meaning in the ナレッジ tab, in local history search (whole
   conversations of opted-in projects), and from agents:
   `/Applications/Operon.app/Contents/MacOS/Operon knowledge search "query" --json`

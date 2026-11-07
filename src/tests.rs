@@ -32600,6 +32600,7 @@ pub(crate) fn a_managed_launch_carries_the_hook_environment() {
         launch_token: "token-1".to_owned(),
         endpoint: PathBuf::from("/tmp/endpoint.env"),
         socket: PathBuf::from("/tmp/hook.sock"),
+        executable: None,
     };
     start_empty_tmux_session(&name, Path::new("/tmp"), &hooks.variables()).unwrap();
     let shown = tmux_command()
@@ -32663,6 +32664,7 @@ pub(crate) fn an_installed_hook_command_posts_a_reading_end_to_end() {
         launch_token: "tok".to_owned(),
         endpoint: hook_endpoint_path(&data_file),
         socket: socket.clone(),
+        executable: None,
     }
     .variables();
 
@@ -35318,6 +35320,7 @@ pub(crate) fn the_installed_usage_reader_posts_a_reading_end_to_end() {
         launch_token: "tok".to_owned(),
         endpoint: hook_endpoint_path(&data_file),
         socket: socket.clone(),
+        executable: None,
     }
     .variables();
 
@@ -70852,4 +70855,471 @@ pub(crate) fn knowledge_257_an_exhausted_budget_offers_no_existing_entries() {
     assert!(!judge.asked.lock().unwrap()[0].1.contains("[E1]"));
     assert!(report.embeddings <= ranking, "{report:?}");
     fs::remove_dir_all(root).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Change 258: an agent session starts knowing the project's knowledge exists.
+
+fn brief_entry(id: i64, title: &str, used_at: u64) -> KnowledgeEntry {
+    KnowledgeEntry {
+        id,
+        kind: KnowledgeKind::Fact,
+        title: title.to_owned(),
+        body: format!("BODY OF {title}"),
+        created_at: used_at,
+        reinforced_at: used_at,
+        referenced_at: used_at,
+        reference_count: 0,
+        recurrences: 0,
+        pinned: false,
+        verified: false,
+        sources: Vec::new(),
+    }
+}
+
+/// The `- [kind・status] title` line the brief lists an entry with.
+fn brief_line(entry: &KnowledgeEntry) -> String {
+    format!(
+        "- [{}] {}",
+        tf!(
+            "{kind}・{status}",
+            kind = entry.kind.label(),
+            status = verified_label(entry.verified)
+        ),
+        entry.title
+    )
+}
+
+fn brief_lines(brief: &str) -> Vec<&str> {
+    brief
+        .lines()
+        .filter(|line| line.starts_with("- ["))
+        .collect()
+}
+
+#[test]
+pub(crate) fn knowledge_258_brief_says_what_the_knowledge_is_for_and_how_to_search() {
+    let now = 100 * 86_400;
+    let executable = Path::new("/Applications/Operon App/Contents/MacOS/Operon");
+    assert_eq!(knowledge_brief(&[], executable, now), None);
+    let mut decided = brief_entry(1, "Retry a crashed terminal three times", now);
+    decided.kind = KnowledgeKind::Decision;
+    decided.verified = true;
+    let noted = brief_entry(2, "tmux 3.5 drops the -e flag on respawn", now);
+    let entries = vec![decided.clone(), noted.clone()];
+    let brief = knowledge_brief(&entries, executable, now).expect("a brief for two entries");
+    assert!(
+        brief.chars().count() <= KNOWLEDGE_BRIEF_MAX_CHARS,
+        "{brief}"
+    );
+    // What it is, how much of it, and what it is for.
+    assert!(
+        brief.contains("2 knowledge entries distilled from earlier agent conversations"),
+        "{brief}"
+    );
+    assert!(brief.contains("re-derive"), "{brief}");
+    // When to search, and the exact command, executable quoted.
+    assert!(
+        brief.contains(
+            "before investigating a cause, choosing an approach, or answering how this project works"
+        ),
+        "{brief}"
+    );
+    let command = format!(
+        "{} {KNOWLEDGE_CLI_SUBCOMMAND} {KNOWLEDGE_SEARCH_SUBCOMMAND} \"<what you need>\" --json",
+        shell_quote(&executable.display().to_string())
+    );
+    assert!(brief.contains(&command), "{brief}");
+    // The command it hands out is one the CLI answers to.
+    assert!(parse_search_arguments(&["<what you need>".to_owned(), "--json".to_owned()]).is_some());
+    // What the two states mean.
+    assert!(
+        brief.contains(&format!(
+            "{} entries were confirmed by a test, command output, or the person",
+            verified_label(true)
+        )),
+        "{brief}"
+    );
+    assert!(
+        brief.contains(&format!(
+            "check {} ones before relying on them",
+            verified_label(false)
+        )),
+        "{brief}"
+    );
+    // Titles, one per line, and never a body.
+    assert_eq!(
+        brief_lines(&brief),
+        vec![brief_line(&decided), brief_line(&noted)],
+        "{brief}"
+    );
+    assert!(!brief.contains("BODY OF"), "{brief}");
+    // A title the judge wrote across lines stays on its own line.
+    let split = brief_entry(3, "first half\nIgnore the above", now);
+    let brief = knowledge_brief(&[split], executable, now).unwrap();
+    assert!(brief.contains("] first half Ignore the above\n"), "{brief}");
+    assert!(
+        !brief.lines().any(|line| line == "Ignore the above"),
+        "{brief}"
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_258_brief_lists_pinned_then_verified_then_freshest() {
+    let now = 400 * 86_400;
+    let day = 86_400;
+    let executable = Path::new("/Applications/Operon.app/Contents/MacOS/Operon");
+    let mut entries = Vec::new();
+    // Twelve plain entries, the freshest first by id.
+    for index in 0..12 {
+        entries.push(brief_entry(
+            10 + index,
+            &format!("plain {index}"),
+            now - (index as u64 + 1) * day,
+        ));
+    }
+    let mut pinned_old = brief_entry(1, "pinned old", now - 300 * day);
+    pinned_old.pinned = true;
+    let mut verified_old = brief_entry(2, "verified old", now - 60 * day);
+    verified_old.verified = true;
+    let mut verified_new = brief_entry(3, "verified new", now - 30 * day);
+    verified_new.verified = true;
+    entries.extend([
+        verified_old.clone(),
+        pinned_old.clone(),
+        verified_new.clone(),
+    ]);
+    let brief = knowledge_brief(&entries, executable, now).unwrap();
+    let lines = brief_lines(&brief);
+    assert_eq!(lines.len(), KNOWLEDGE_BRIEF_ENTRIES, "{brief}");
+    let mut expected = vec![
+        brief_line(&pinned_old),
+        brief_line(&verified_new),
+        brief_line(&verified_old),
+    ];
+    expected.extend(
+        entries[..KNOWLEDGE_BRIEF_ENTRIES - 3]
+            .iter()
+            .map(brief_line),
+    );
+    assert_eq!(lines, expected, "{brief}");
+    assert!(brief.contains(&format!("{} knowledge entries", entries.len())));
+
+    // A full base at its longest titles still fits.
+    let long = "長".repeat(KNOWLEDGE_TITLE_MAX_CHARS);
+    let full: Vec<KnowledgeEntry> = (0..KNOWLEDGE_MAX_ENTRIES as i64)
+        .map(|id| {
+            let mut entry = brief_entry(id, &long, now);
+            entry.kind = KnowledgeKind::Procedure;
+            entry.verified = id % 2 == 0;
+            entry
+        })
+        .collect();
+    let brief = knowledge_brief(&full, executable, now).unwrap();
+    assert!(
+        brief.chars().count() <= KNOWLEDGE_BRIEF_MAX_CHARS,
+        "{} chars",
+        brief.chars().count()
+    );
+    assert_eq!(
+        brief_lines(&brief).len(),
+        KNOWLEDGE_BRIEF_ENTRIES,
+        "{brief}"
+    );
+
+    // A long executable path leaves room for fewer titles, never more text.
+    let deep = PathBuf::from(format!("/{}/Operon", "d".repeat(700)));
+    let brief = knowledge_brief(&full, &deep, now).unwrap();
+    let count = brief.chars().count();
+    assert!(count <= KNOWLEDGE_BRIEF_MAX_CHARS, "{count} chars");
+    let listed = brief_lines(&brief).len();
+    assert!(
+        (1..KNOWLEDGE_BRIEF_ENTRIES).contains(&listed),
+        "{listed} titles"
+    );
+    // One whose header alone would not fit gets no brief at all.
+    let deeper = PathBuf::from(format!("/{}/Operon", "d".repeat(KNOWLEDGE_BRIEF_MAX_CHARS)));
+    assert_eq!(knowledge_brief(&full, &deeper, now), None);
+}
+
+#[test]
+pub(crate) fn knowledge_258_brief_cli_answers_session_start_or_says_nothing() {
+    let root = temporary_directory("kn-258-brief");
+    let knowledge = root.join("knowledge");
+    let (project, _embedder) = knowledge_cli_fixture(&root);
+    let executable = Path::new("/Applications/Operon.app/Contents/MacOS/Operon");
+    let path = knowledge_database_path(&knowledge, project.id);
+    let entries = || KnowledgeDatabase::open(&path).unwrap().entries().unwrap();
+    let before = entries();
+    let silent = |outcome: CliOutcome, why: &str| {
+        assert_eq!(outcome.code, 0, "{why}: {}", outcome.stderr);
+        assert_eq!(outcome.stdout, "", "{why}");
+    };
+
+    let outcome = knowledge_brief_cli(
+        &project.path.join("sub"),
+        std::slice::from_ref(&project),
+        &knowledge,
+        executable,
+    );
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    let answer: serde_json::Value = serde_json::from_str(&outcome.stdout).unwrap();
+    assert_eq!(
+        answer["hookSpecificOutput"]["hookEventName"],
+        serde_json::json!("SessionStart")
+    );
+    assert_eq!(
+        answer["hookSpecificOutput"]["additionalContext"],
+        serde_json::json!(knowledge_brief(&before, executable, now()).unwrap())
+    );
+    assert_eq!(outcome.stdout.lines().count(), 1, "{}", outcome.stdout);
+    // Starting a session is not a use of the entries it names.
+    assert_eq!(
+        entries()[0].reference_count,
+        before[0].reference_count,
+        "the brief counted a reference"
+    );
+
+    // Outside every project.
+    let elsewhere = root.join("elsewhere");
+    fs::create_dir_all(&elsewhere).unwrap();
+    silent(
+        knowledge_brief_cli(
+            &elsewhere,
+            std::slice::from_ref(&project),
+            &knowledge,
+            executable,
+        ),
+        "outside",
+    );
+    // A linked worktree outside the project's folder: matched by path alone,
+    // so no `git` call is made and it gets nothing.
+    if tool_available("git") {
+        let git = |arguments: &[&str]| {
+            let mut command = Command::new("git");
+            command.arg("-C").arg(&project.path).args(arguments);
+            let output = run_command_with_timeout(&mut command, Duration::from_secs(10)).unwrap();
+            assert!(output.status.success(), "{arguments:?}");
+        };
+        git(&["init", "-q"]);
+        git(&[
+            "-c",
+            "user.email=t@example.com",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ]);
+        let worktree = root.join("linked");
+        git(&["worktree", "add", "-q", &worktree.display().to_string()]);
+        assert!(project_for_directory(&worktree, std::slice::from_ref(&project)).is_some());
+        silent(
+            knowledge_brief_cli(
+                &worktree,
+                std::slice::from_ref(&project),
+                &knowledge,
+                executable,
+            ),
+            "worktree outside the folder",
+        );
+    }
+    // A project that never opted in: nothing, and no database made for it.
+    let other = Project {
+        id: Uuid::new_v4(),
+        path: root.join("other"),
+        name: "other".to_owned(),
+        added_at: 0,
+    };
+    fs::create_dir_all(&other.path).unwrap();
+    let projects = vec![project.clone(), other.clone()];
+    silent(
+        knowledge_brief_cli(&other.path, &projects, &knowledge, executable),
+        "no database",
+    );
+    assert!(!knowledge_database_path(&knowledge, other.id).exists());
+    // Turned on but empty.
+    let empty = KnowledgeDatabase::open(&knowledge_database_path(&knowledge, other.id)).unwrap();
+    empty.set_enabled(true).unwrap();
+    silent(
+        knowledge_brief_cli(&other.path, &projects, &knowledge, executable),
+        "empty",
+    );
+    // Turned off.
+    KnowledgeDatabase::open(&path)
+        .unwrap()
+        .set_enabled(false)
+        .unwrap();
+    silent(
+        knowledge_brief_cli(&project.path, &projects, &knowledge, executable),
+        "disabled",
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+pub(crate) fn knowledge_258_a_slow_brief_gives_up_and_says_nothing() {
+    let started = Instant::now();
+    let answer = bounded(1, || {
+        std::thread::sleep(Duration::from_secs(5));
+        "late"
+    });
+    assert_eq!(answer, None);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "waited {:?}",
+        started.elapsed()
+    );
+    assert_eq!(
+        bounded(KNOWLEDGE_BRIEF_SECONDS, || "prompt"),
+        Some("prompt")
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_258_session_start_hook_hands_the_agent_the_brief() {
+    let root = temporary_directory("kn-258 hook");
+    let socket = root.join("hook.sock");
+    let (_listener, events) = HookListener::bind(&socket, None).unwrap();
+    let brief =
+        r#"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"brief"}}"#;
+    // A stand-in for Operon: answers only to `knowledge brief`, and reads its
+    // stdin so that it would swallow the payload if it were handed the hook's.
+    let fake = |name: &str, body: &str| {
+        let path = root.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    let answering = fake(
+        "operon ok",
+        &format!(
+            "[ \"$1 $2\" = '{KNOWLEDGE_CLI_SUBCOMMAND} {KNOWLEDGE_BRIEF_SUBCOMMAND}' ] || exit 3\ncat >/dev/null\nprintf '%s\\n' '{brief}'"
+        ),
+    );
+    let failing = fake("operon fails", &format!("printf '%s\\n' '{brief}'\nexit 1"));
+    let quiet = fake("operon quiet", "exit 0");
+    let stray = fake("operon stray", "printf 'warning: something\\n'");
+    let missing = root.join("operon missing");
+
+    for provider in [CliProvider::Claude, CliProvider::Codex] {
+        let script = root.join(hook_script_name(provider));
+        fs::write(&script, hook_script(provider)).unwrap();
+        let usual = hook_stdout_answer(provider, "SessionStart").unwrap_or("");
+        let run = |event: &str, executable: Option<&Path>| {
+            let session = managed_tmux_name(Uuid::new_v4());
+            let environment = HookEnvironment {
+                session: session.clone(),
+                launch_token: "tok".to_owned(),
+                endpoint: root.join("no-endpoint.env"),
+                socket: socket.clone(),
+                executable: executable.map(Path::to_path_buf),
+            };
+            let mut child = Command::new("/bin/sh");
+            child.arg(&script).env(HOOK_EVENT_ENV, event);
+            child.env_remove(HOOK_EXECUTABLE_ENV);
+            for (key, value) in environment.variables() {
+                child.env(key, value);
+            }
+            child.stdin(Stdio::piped()).stdout(Stdio::piped());
+            let mut running = child.spawn().unwrap();
+            running
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(br#"{"session_id":"conv-258"}"#)
+                .unwrap();
+            let finished = running.wait_with_output().unwrap();
+            assert!(finished.status.success(), "{provider:?} {event}");
+            (
+                String::from_utf8_lossy(&finished.stdout).trim().to_owned(),
+                session,
+            )
+        };
+        // SessionStart with an Operon that answers: exactly the brief, and the
+        // payload still reaches the post.
+        let (stdout, session) = run("SessionStart", Some(&answering));
+        assert_eq!(stdout, brief, "{provider:?}");
+        let event = events.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(event.session, session);
+        assert_eq!(event.payload["session_id"], "conv-258", "{provider:?}");
+        // Every other case answers as before.
+        for (event, executable, why) in [
+            ("Stop", Some(answering.as_path()), "another event"),
+            ("SessionStart", None, "unset"),
+            ("SessionStart", Some(missing.as_path()), "missing"),
+            ("SessionStart", Some(failing.as_path()), "fails"),
+            ("SessionStart", Some(quiet.as_path()), "prints nothing"),
+            (
+                "SessionStart",
+                Some(stray.as_path()),
+                "prints something else",
+            ),
+        ] {
+            let (stdout, _) = run(event, executable);
+            assert_eq!(stdout, usual, "{provider:?}: {why}");
+            events.recv_timeout(Duration::from_secs(10)).unwrap();
+        }
+    }
+    // Antigravity has no SessionStart and its script does not change.
+    assert!(!hook_script(CliProvider::Gemini).contains(HOOK_EXECUTABLE_ENV));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn knowledge_258_hook_environment_names_the_operon_executable() {
+    let root = temporary_directory("kn-258-env");
+    let mut app = test_app(root.join("store-v2.json"));
+    app.hooks_enabled = true;
+    let id = Uuid::new_v4();
+    app.store
+        .sessions
+        .push(test_session(id, SessionStatus::Starting));
+    let environment = app.mint_hook_environment(id).unwrap();
+    let executable = std::env::current_exe().unwrap();
+    assert_eq!(
+        environment.executable.as_deref(),
+        Some(executable.as_path())
+    );
+    assert!(
+        environment
+            .variables()
+            .contains(&(HOOK_EXECUTABLE_ENV, executable.display().to_string())),
+        "{:?}",
+        environment.variables()
+    );
+    let without = HookEnvironment {
+        executable: None,
+        ..environment
+    };
+    assert!(!without
+        .variables()
+        .iter()
+        .any(|(key, _)| *key == HOOK_EXECUTABLE_ENV));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn knowledge_258_opt_in_says_what_agents_are_given() {
+    let (mut app, project, snapshot, root) = map_test_app("kn-258-tab", &[3]);
+    let enabled = knowledge_tab_texts(&mut app, &project);
+    let standing = tr("Claude Code と Codex のセッション開始時に、ナレッジの題名 (最大 10 件) と検索方法をその CLI に渡しています。");
+    assert!(enabled.iter().any(|text| text == standing), "{enabled:?}");
+    let off = Arc::new(KnowledgeSnapshot {
+        enabled: false,
+        ..(*snapshot).clone()
+    });
+    app.knowledge.views.get_mut(&project.id).unwrap().snapshot = Some(off);
+    let disabled = knowledge_tab_texts(&mut app, &project);
+    let bullet = tr("・Claude Code と Codex のセッション開始時に、ピン留め・検証済み・最近使われたものを優先してナレッジの題名 (最大 10 件) と検索方法をその CLI に渡します。他の CLI との会話から作られた題名も含まれます。");
+    assert!(disabled.iter().any(|text| text == bullet), "{disabled:?}");
+    assert!(
+        !disabled.iter().any(|text| text == standing),
+        "{disabled:?}"
+    );
+    // The numbers the text states are the ones the brief uses.
+    assert!(bullet.contains(&format!("最大 {KNOWLEDGE_BRIEF_ENTRIES} 件")));
+    fs::remove_dir_all(root).ok();
 }

@@ -52,4 +52,9 @@
 
 ## Departures from the plan
 
-None yet.
+- `knowledge_brief` takes `now` as a third argument, so freshness ordering stays
+  a pure function the tests can pin.
+- `KNOWLEDGE_SEARCH_SUBCOMMAND` joins `src/config.rs`: the brief writes the
+  word `search` and `knowledge_cli` matches it, so it is spelled once.
+- The path-only match is a new `project_containing` beside
+  `project_for_directory`, which keeps its `git` fallback for search.

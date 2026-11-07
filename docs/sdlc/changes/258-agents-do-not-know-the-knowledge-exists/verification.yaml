@@ -1,0 +1,17 @@
+# Change 258: an agent session starts knowing the project's knowledge exists.
+# Each Rn is the spec requirement of that number; I1 is the mutation sweep,
+# I2 and I3 the hook and knowledge tests that predate this change, I4 the
+# 3-second bound behind R3.
+digest: "8326e911a59bda3e"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked knowledge_258_brief_says_what_the_knowledge_is_for_and_how_to_search
+  - R2 empirical-test :: cargo test --locked knowledge_258_brief_lists_pinned_then_verified_then_freshest
+  - R3 empirical-test :: cargo test --locked knowledge_258_brief_cli_answers_session_start_or_says_nothing
+  - I4 empirical-test :: cargo test --locked knowledge_258_a_slow_brief_gives_up_and_says_nothing
+  - R4 empirical-test :: cargo test --locked knowledge_258_session_start_hook_hands_the_agent_the_brief
+  - R5 empirical-test :: cargo test --locked knowledge_258_hook_environment_names_the_operon_executable
+  - R6 empirical-test :: cargo test --locked knowledge_258_opt_in_says_what_agents_are_given
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/258-agents-do-not-know-the-knowledge-exists/mutations.py
+  - I2 empirical-test :: cargo test --locked hook
+  - I3 empirical-test :: cargo test --locked knowledge_
