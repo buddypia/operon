@@ -880,6 +880,7 @@ impl OperonApp {
                     tr("・意味の判定は、この Mac 上の EmbeddingGemma 2 で行います。"),
                     tr("・残す候補だけを、利用可能な CLI (Claude Code・Codex・Antigravity) で要約します (1日 30 回まで)。"),
                     tr("・ナレッジはこの Mac の Operon データフォルダに保存し、リポジトリには書きません。"),
+                    tr("・Claude Code と Codex のセッション開始時に、ピン留め・検証済み・最近使われたものを優先してナレッジの題名 (最大 10 件) と検索方法をその CLI に渡します。他の CLI との会話から作られた題名も含まれます。"),
                 ] {
                     ui.label(RichText::new(line).color(palette.text_muted));
                 }
@@ -982,6 +983,12 @@ impl OperonApp {
                 self.start_model_download();
             }
         });
+        // A project turned on before change 258 never saw the opt-in bullet.
+        ui.label(
+            RichText::new(tr("Claude Code と Codex のセッション開始時に、ナレッジの題名 (最大 10 件) と検索方法をその CLI に渡しています。"))
+                .size(12.5)
+                .color(palette.text_muted),
+        );
         if snapshot.failed > 0 {
             ui.horizontal(|ui| {
                 ui.label(

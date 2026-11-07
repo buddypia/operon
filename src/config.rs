@@ -299,6 +299,9 @@ pub(crate) const HOOK_SOCKET_ENV: &str = "OPERON_HOOK_SOCKET";
 /// Antigravity passes no event name on stdin, so its managed command sets one
 /// in the script's environment instead.
 pub(crate) const HOOK_EVENT_ENV: &str = "OPERON_HOOK_EVENT";
+/// The Operon executable a managed session was launched by, so the
+/// SessionStart hook can ask it for the project's knowledge brief (change 258).
+pub(crate) const HOOK_EXECUTABLE_ENV: &str = "OPERON_EXECUTABLE";
 /// The name of Operon's bundle inside Antigravity's hooks file, beside any
 /// other tool's bundle.
 pub(crate) const HOOK_ANTIGRAVITY_BUNDLE: &str = "operon-status";
@@ -537,6 +540,18 @@ pub(crate) const EMBEDDING_DOWNLOAD_SECONDS: u64 = 1_800;
 pub(crate) const KNOWLEDGE_CLI_SUBCOMMAND: &str = "knowledge";
 /// `Operon knowledge embed-golden <fixture>`, the fidelity check's entry point.
 pub(crate) const KNOWLEDGE_EMBED_GOLDEN_SUBCOMMAND: &str = "embed-golden";
+/// `Operon knowledge search "…"`: the word the brief tells agents to type and
+/// the word the CLI answers to.
+pub(crate) const KNOWLEDGE_SEARCH_SUBCOMMAND: &str = "search";
+/// `Operon knowledge brief`, which the SessionStart hook runs (change 258).
+pub(crate) const KNOWLEDGE_BRIEF_SUBCOMMAND: &str = "brief";
+/// Titles a brief lists at most: pinned, then verified, then freshest.
+pub(crate) const KNOWLEDGE_BRIEF_ENTRIES: usize = 10;
+/// Under Codex's ~2,500-token hook-context cap even at one token per Japanese
+/// character, and under Claude Code's 10,000 characters (their docs, 2026-11-08).
+pub(crate) const KNOWLEDGE_BRIEF_MAX_CHARS: usize = 1_500;
+/// How long the brief may hold a session start before it gives up silently.
+pub(crate) const KNOWLEDGE_BRIEF_SECONDS: u64 = 3;
 /// The shipped runtime's vectors stay this close to the reference ones
 /// (spec Req 15); the Metal batch measured 0.9999.
 pub(crate) const EMBEDDING_FIDELITY_MIN_COSINE: f32 = 0.995;

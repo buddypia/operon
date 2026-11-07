@@ -3657,6 +3657,9 @@ impl OperonApp {
             launch_token,
             endpoint: hook_endpoint_path(&self.data_file),
             socket: hook_socket_path(&self.data_file),
+            // Launch time, not the draw path: the SessionStart hook asks this
+            // executable for the project's knowledge brief (change 258).
+            executable: std::env::current_exe().ok(),
         })
     }
 

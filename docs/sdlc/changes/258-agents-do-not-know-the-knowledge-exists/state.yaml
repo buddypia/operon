@@ -1,0 +1,19 @@
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Landed with the article's last step; package the app once from main with the ship skill. Five carried review items await a follow-up."
+
+contract:
+  three-gates: "machine passed make q.fast: fmt and clippy clean; gate-commit runs them again at the commit"
+  bands: "machine passed bash scripts/check-bands.sh: only breaches present on main before this change (largest_module_lines grew by this change's three lines in src/app.rs)"
+  release-binary: "machine waived src/knowledge.rs, src/tmux/hooks.rs, src/app.rs changed, so the app is stale; packaged once with bash scripts/package-macos.sh after this, the article's last step, lands"
+  brief-tests: "machine passed cargo test --locked knowledge_258_: 7 passed, each watched failing first; a real run in an opted-in project answered in 0.07 s with a 922-character brief"
+  guards-verified-by-mutation: "human passed mutations.py: 26 of 26 caught, sources restored"

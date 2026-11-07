@@ -1,0 +1,30 @@
+# Review record for change 258-agents-do-not-know-the-knowledge-exists.
+#
+# rust-reviewer and subprocess-safety-reviewer read the staged diff from the
+# index while the mutation sweep ran. No per-frame work (current_exe runs at
+# launch; the new tab line is a tr lookup), no new panic site, no new Command
+# from Rust, the brief only reads the store through open_existing and counts no
+# reference. The script expands $OPERON_EXECUTABLE only inside double quotes,
+# gives the brief /dev/null as stdin, and every failure falls back to the old
+# answer and exit 0. Both raised that a title spanning lines would become
+# lines of its own, and rust-reviewer that project paths were canonicalised at
+# every ancestor; both were fixed in this round, with a test and a mutation.
+
+digest: "2ed7bb36767d13ab"
+rounds: 1
+
+carried:
+  - rust-reviewer/3 · Claude's {} answer now waits for the brief, up to 3 s plus process start, before it is printed; Claude's own hook timeout is 60 s, so the answer still arrives.
+    person: "Claude Code のセッション開始が、ナレッジの準備のために最大 3 秒ほど遅れることがあります。あなたが何かする必要はありません。"
+  - rust-reviewer/4 · the brief is English but carries the kind and 検証済み/未確認 labels through tr, as the search output does, so the agent sees labels in the app's language.
+    person: "CLI に渡す説明文は英語ですが、種類と「検証済み・未確認」の表記は Operon の表示言語のままです。CLI はそのまま読めるので、あなたが何かする必要はありません。"
+  - subprocess-safety-reviewer/1 · the script bounds the brief only once Operon's main is running; an exec that stalls before that (a quarantine check on a freshly replaced bundle, a hung volume) waits until the CLI's own 60 s hook timeout.
+    person: "Operon を入れ替えた直後などにまれに、セッション開始の待ちが長くなることがあります。その場合も CLI の上限 60 秒で打ち切られ、セッションは通常どおり始まります。"
+  - subprocess-safety-reviewer/3 · SessionStart fires on resume, clear, and compact too, so the brief is re-read each time; this is the intent (a compacted session loses it otherwise).
+    person: "会話の再開・クリア・圧縮のたびにも、ナレッジの題名を渡し直します。圧縮で消えないようにするためで、あなたが何かする必要はありません。"
+  - subprocess-safety-reviewer/4 · OPERON_EXECUTABLE stays in the pane's environment, and a pane that outlives an Operon move keeps the old path, so its brief and search command fail harmlessly until the pane is restarted.
+    person: "Operon の場所を移すと、移す前に開いたターミナルではナレッジの案内が出なくなります。ターミナルを開き直せば戻ります。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
+  subprocess-safety-reviewer: "approve-with-nits 0 4"

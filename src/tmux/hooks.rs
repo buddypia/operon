@@ -43,6 +43,9 @@ pub(crate) struct HookEnvironment {
     pub(crate) launch_token: String,
     pub(crate) endpoint: PathBuf,
     pub(crate) socket: PathBuf,
+    /// The Operon that launched the session, which the SessionStart hook asks
+    /// for the project's knowledge brief (change 258).
+    pub(crate) executable: Option<PathBuf>,
 }
 
 impl HookEnvironment {
@@ -51,12 +54,16 @@ impl HookEnvironment {
     /// been read, and the endpoint file is what lets it keep working after
     /// Operon restarts under a new socket.
     pub(crate) fn variables(&self) -> Vec<(&'static str, String)> {
-        vec![
+        let mut variables = vec![
             (HOOK_SESSION_ENV, self.session.clone()),
             (HOOK_LAUNCH_ENV, self.launch_token.clone()),
             (HOOK_ENDPOINT_ENV, self.endpoint.display().to_string()),
             (HOOK_SOCKET_ENV, self.socket.display().to_string()),
-        ]
+        ];
+        if let Some(executable) = &self.executable {
+            variables.push((HOOK_EXECUTABLE_ENV, executable.display().to_string()));
+        }
+        variables
     }
 }
 
@@ -186,10 +193,28 @@ pub(crate) fn hook_script(provider: CliProvider) -> String {
             hook_stdout_answer(provider, "PreToolUse").unwrap_or("{}"),
             hook_stdout_answer(provider, "other").unwrap_or("{}"),
         ),
-        _ => match hook_stdout_answer(provider, "") {
-            Some(answer) => format!("printf '%s\\n' '{answer}'\n"),
-            None => String::new(),
-        },
+        // Claude Code and Codex take SessionStart context on stdout (change
+        // 258): Operon's knowledge brief, asked of the Operon that launched the
+        // pane with stdin from /dev/null so the payload is still there to read,
+        // and printed only when it is the JSON the CLI expects. Anything else —
+        // no executable, a failure, silence, stray text — answers as before.
+        _ => {
+            let usual = match hook_stdout_answer(provider, "") {
+                Some(answer) => format!("printf '%s\\n' '{answer}'"),
+                None => ":".to_owned(),
+            };
+            format!(
+                r#"brief=''
+if [ "${HOOK_EVENT_ENV}" = SessionStart ] && [ -n "${HOOK_EXECUTABLE_ENV}" ] && [ -x "${HOOK_EXECUTABLE_ENV}" ]; then
+  brief=$("${HOOK_EXECUTABLE_ENV}" {KNOWLEDGE_CLI_SUBCOMMAND} {KNOWLEDGE_BRIEF_SUBCOMMAND} </dev/null 2>/dev/null) || brief=''
+fi
+case "$brief" in
+  '{{"hookSpecificOutput":'*) printf '%s\n' "$brief" ;;
+  *) {usual} ;;
+esac
+"#
+            )
+        }
     };
     // Antigravity fires hooks with nothing on stdin; the others always send a
     // payload, and an empty one from them means the CLI is not talking to us.

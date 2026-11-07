@@ -1,0 +1,4 @@
+2026-11-07T16:28:27Z auto intent intent.md fd880d83d77df405 approve restates the person's quoted request as step 3; titles only for opted-in projects, no protection removed
+2026-11-07T16:28:27Z auto spec spec.md d00ea6db8d7f935e approve after one revision: brief bounded to 3 seconds with no git call, 1,500-character cap, output guard, standing line for already-enabled projects
+2026-11-07T16:28:27Z auto screen screen.md ed171a6eeaa53d3b approve bullet and enabled-tab line match Req 6 word for word inside existing styles
+2026-11-07T16:28:27Z auto plan plan.md 28352f2e25aeb4b2 approve follows the revised spec with seven tests and risk rows for the slow brief and stray output, no paused surface
