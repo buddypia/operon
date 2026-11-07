@@ -54392,6 +54392,7 @@ fn golden_entry(
         kind,
         title: title.to_owned(),
         body: body.to_owned(),
+        verified: false,
         vector: embedder
             .embed(&[document_input(Some(title), body)])
             .unwrap()
@@ -54957,6 +54958,7 @@ pub(crate) fn judge_answer_parses_or_yields_nothing() {
             kind: KnowledgeKind::Decision,
             title: "t".to_owned(),
             body: "b".to_owned(),
+            verified: false,
             candidate: 1,
         }])
     );
@@ -56464,6 +56466,7 @@ fn insert_map_entry(database: &KnowledgeDatabase, title: &str, vector: Vec<f32>,
         kind: KnowledgeKind::Fact,
         title: title.to_owned(),
         body: title.to_owned(),
+        verified: false,
         vector,
     };
     match database
@@ -56645,6 +56648,7 @@ fn map_test_entry(id: i64, title: &str, uses: u32) -> KnowledgeEntry {
         reference_count: uses,
         recurrences: 0,
         pinned: false,
+        verified: false,
         sources: Vec::new(),
     }
 }
@@ -70058,5 +70062,350 @@ pub(crate) fn session_254_selected_tab_rule_is_visible() {
         }
     }
     assert_eq!(rules, 1);
+    fs::remove_dir_all(root).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Change 256: a knowledge entry says whether its conversation confirmed it.
+
+fn judged_answer_verified(entries: &[(&str, (&str, &str), usize, Option<bool>)]) -> JudgeOutcome {
+    JudgeOutcome::Answer(
+        serde_json::Value::Array(
+            entries
+                .iter()
+                .map(|(kind, (title, body), candidate, verified)| {
+                    let mut item = serde_json::json!({"kind": kind, "title": title, "body": body, "candidate": candidate});
+                    if let Some(verified) = verified {
+                        item["verified"] = serde_json::Value::Bool(*verified);
+                    }
+                    item
+                })
+                .collect(),
+        )
+        .to_string(),
+    )
+}
+
+#[test]
+pub(crate) fn knowledge_256_judge_prompt_asks_whether_it_was_verified() {
+    let prompt = judge_prompt(&[]);
+    assert!(prompt.contains("\"verified\": true | false"), "{prompt}");
+    assert!(
+        prompt.contains("a test or a command ran and its output confirmed it"),
+        "what counts as evidence: {prompt}"
+    );
+    assert!(prompt.contains("the person confirmed it"), "{prompt}");
+    assert!(
+        prompt.contains("a hypothesis, a plan, or a claim nobody checked"),
+        "what does not count: {prompt}"
+    );
+    assert!(
+        prompt.contains("relies on a verified entry without checking it again"),
+        "what the flag is for: {prompt}"
+    );
+    assert!(
+        prompt.contains("say in the body how it was confirmed"),
+        "{prompt}"
+    );
+    // Still inside its ceiling with every candidate at its limit.
+    let huge = "y".repeat(50_000);
+    let candidates: Vec<Candidate> = (0..KNOWLEDGE_CANDIDATES_PER_CONVERSATION)
+        .map(|index| Candidate {
+            exchange: Exchange {
+                index,
+                person: huge.clone(),
+                agent: huge.clone(),
+            },
+            text: String::new(),
+            vector: Vec::new(),
+            score: 0.0,
+        })
+        .collect();
+    let full = judge_prompt(&candidates);
+    assert!(
+        full.len() <= KNOWLEDGE_JUDGE_PROMPT_MAX_BYTES,
+        "{}",
+        full.len()
+    );
+    assert!(full.contains("\"verified\": true | false"));
+}
+
+#[test]
+pub(crate) fn knowledge_256_judge_answer_carries_verified() {
+    let answer = r#"[
+        {"kind":"cause","title":"a","body":"b","candidate":1,"verified":true},
+        {"kind":"cause","title":"c","body":"d","candidate":1,"verified":false},
+        {"kind":"cause","title":"e","body":"f","candidate":1},
+        {"kind":"cause","title":"g","body":"h","candidate":1,"verified":"yes"}
+    ]"#;
+    let parsed = parse_judge_answer(answer, 1).unwrap();
+    assert_eq!(parsed.len(), 4, "the old shape still parses whole");
+    assert_eq!(
+        parsed
+            .iter()
+            .map(|entry| entry.verified)
+            .collect::<Vec<_>>(),
+        vec![true, false, false, false]
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_256_verified_is_stored_and_never_downgraded() {
+    let root = temporary_directory("kn-256-store");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let source = test_source(&embedder, HELD_OUT_KEEP[0]);
+    let guess = golden_entry(&embedder, ENTRY_RESTORE, KnowledgeKind::Cause);
+    let proved = NewEntry {
+        verified: true,
+        ..guess.clone()
+    };
+    let verified_of = |database: &KnowledgeDatabase| {
+        database
+            .entries()
+            .unwrap()
+            .into_iter()
+            .map(|entry| (entry.title, entry.verified))
+            .collect::<Vec<_>>()
+    };
+    assert!(matches!(
+        database
+            .add_or_reinforce(&guess, &source, 10, true)
+            .unwrap(),
+        AddOutcome::Added(_)
+    ));
+    assert_eq!(
+        verified_of(&database),
+        vec![(ENTRY_RESTORE.0.to_owned(), false)]
+    );
+    assert!(matches!(
+        database
+            .add_or_reinforce(&proved, &source, 20, true)
+            .unwrap(),
+        AddOutcome::Reinforced(_)
+    ));
+    assert_eq!(
+        verified_of(&database),
+        vec![(ENTRY_RESTORE.0.to_owned(), true)],
+        "a later conversation confirmed it"
+    );
+    database
+        .add_or_reinforce(&guess, &source, 30, true)
+        .unwrap();
+    assert_eq!(
+        verified_of(&database),
+        vec![(ENTRY_RESTORE.0.to_owned(), true)],
+        "an unconfirmed repeat does not take it back"
+    );
+    let release = NewEntry {
+        verified: true,
+        ..golden_entry(&embedder, ENTRY_RELEASE, KnowledgeKind::Procedure)
+    };
+    assert!(matches!(
+        database
+            .add_or_reinforce(&release, &source, 40, true)
+            .unwrap(),
+        AddOutcome::Added(_)
+    ));
+    assert!(verified_of(&database).contains(&(ENTRY_RELEASE.0.to_owned(), true)));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_256_an_older_database_gains_verified_without_a_new_version() {
+    let root = temporary_directory("kn-256-old");
+    let path = knowledge_database_path(&root, Uuid::new_v4());
+    fs::create_dir_all(&root).unwrap();
+    {
+        // The entries table as change 157 wrote it, holding one row.
+        let old = rusqlite::Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO meta VALUES ('schema_version', '1');
+             CREATE TABLE entries (
+                 id INTEGER PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL,
+                 body TEXT NOT NULL, created_at INTEGER NOT NULL,
+                 reinforced_at INTEGER NOT NULL, referenced_at INTEGER NOT NULL,
+                 reference_count INTEGER NOT NULL DEFAULT 0,
+                 recurrences INTEGER NOT NULL DEFAULT 0,
+                 pinned INTEGER NOT NULL DEFAULT 0, vector BLOB NOT NULL);
+             INSERT INTO entries (kind, title, body, created_at, reinforced_at, referenced_at, vector)
+                 VALUES ('fact', 'old', 'kept before 256', 1, 1, 1, x'00');",
+        )
+        .unwrap();
+    }
+    for _ in 0..2 {
+        let database = KnowledgeDatabase::open(&path).unwrap();
+        let entries = database.entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "old");
+        assert!(!entries[0].verified, "kept before the flag existed");
+        assert_eq!(
+            database.meta("schema_version").unwrap().as_deref(),
+            Some("1"),
+            "an older Operon must still open it"
+        );
+    }
+    let database = KnowledgeDatabase::open(&path).unwrap();
+    let columns: Vec<String> = database
+        .connection_for_tests()
+        .prepare("SELECT name FROM pragma_table_info('entries')")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(columns.iter().any(|name| name == "verified"), "{columns:?}");
+    // What an older build writes: only the columns it knows.
+    database
+        .connection_for_tests()
+        .execute(
+            "INSERT INTO entries (kind, title, body, created_at, reinforced_at, referenced_at,
+                                  reference_count, recurrences, pinned, vector)
+             VALUES ('fact', 'from 157', 'b', 2, 2, 2, 0, 0, 0, x'00')",
+            [],
+        )
+        .unwrap();
+    assert_eq!(database.entries().unwrap().len(), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_256_adding_verified_twice_still_opens() {
+    let root = temporary_directory("kn-256-race");
+    let (database, _) = enabled_knowledge_database(&root);
+    // The loser of two opens racing on an old file: the column is already there.
+    add_verified_column(database.connection_for_tests()).unwrap();
+    add_verified_column(database.connection_for_tests()).unwrap();
+    // Any other failure still reaches the caller.
+    let empty = rusqlite::Connection::open_in_memory().unwrap();
+    assert!(add_verified_column(&empty).is_err());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_256_a_run_stores_what_the_judge_said_was_verified() {
+    let root = temporary_directory("kn-256-run");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[0]]);
+    let embedder = KnowledgeTestEmbedder::new();
+    let judge = RecordingJudge::answering(vec![judged_answer_verified(&[
+        ("cause", ENTRY_RESTORE, 1, Some(true)),
+        ("procedure", ENTRY_RELEASE, 1, Some(false)),
+    ])]);
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let report = run_project(
+        &mut database,
+        &[claude_session(&transcript, "s")],
+        &embedder,
+        &judge,
+        now(),
+        knowledge_test_limits(),
+        &|_, _| {},
+    )
+    .unwrap();
+    assert_eq!(report.added, 2, "{report:?}");
+    let mut stored = database
+        .entries()
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.title, entry.verified))
+        .collect::<Vec<_>>();
+    stored.sort();
+    let mut expected = vec![
+        (ENTRY_RESTORE.0.to_owned(), true),
+        (ENTRY_RELEASE.0.to_owned(), false),
+    ];
+    expected.sort();
+    assert_eq!(stored, expected);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_256_search_says_which_entries_were_verified() {
+    let root = temporary_directory("kn-256-cli");
+    let (project, embedder) = knowledge_cli_fixture(&root);
+    let search = |json: bool| {
+        let mut arguments = vec![
+            "search".to_owned(),
+            "how many times do we retry a crashed terminal?".to_owned(),
+        ];
+        if json {
+            arguments.push("--json".to_owned());
+        }
+        let outcome = knowledge_cli(
+            &arguments,
+            &project.path,
+            std::slice::from_ref(&project),
+            &root.join("knowledge"),
+            Some(&embedder),
+            now(),
+        );
+        assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+        outcome.stdout
+    };
+    let bracket = |status: &str| {
+        format!(
+            "[{}]",
+            tf!(
+                "{kind}・{status}",
+                kind = KnowledgeKind::Decision.label(),
+                status = status
+            )
+        )
+    };
+    let text = search(false);
+    assert!(text.contains(&bracket(tr("未確認"))), "{text}");
+    let rows: serde_json::Value = serde_json::from_str(&search(true)).unwrap();
+    assert_eq!(rows[0]["verified"], serde_json::Value::Bool(false));
+    // A later conversation confirms it.
+    let database = KnowledgeDatabase::open(&knowledge_database_path(
+        &root.join("knowledge"),
+        project.id,
+    ))
+    .unwrap();
+    database
+        .add_or_reinforce(
+            &NewEntry {
+                verified: true,
+                ..golden_entry(&embedder, ENTRY_RETRY, KnowledgeKind::Decision)
+            },
+            &test_source(&embedder, HELD_OUT_KEEP[0]),
+            now(),
+            true,
+        )
+        .unwrap();
+    let text = search(false);
+    assert!(text.contains(&bracket(tr("検証済み"))), "{text}");
+    let rows: serde_json::Value = serde_json::from_str(&search(true)).unwrap();
+    assert_eq!(rows[0]["verified"], serde_json::Value::Bool(true));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_256_the_tab_says_which_entries_were_verified() {
+    let (mut app, project, snapshot, root) = map_test_app("kn-256-tab", &[3]);
+    let mut entries = snapshot.entries.clone();
+    entries[0].verified = true;
+    let marked = Arc::new(KnowledgeSnapshot {
+        entries,
+        ..(*snapshot).clone()
+    });
+    let view = app.knowledge.views.get_mut(&project.id).unwrap();
+    view.snapshot = Some(marked.clone());
+    view.map_for = Some(marked.clone());
+    let count = |texts: &[String], word: &str| texts.iter().filter(|text| *text == word).count();
+    app.knowledge.layout_mode = KnowledgeLayoutMode::List;
+    let rows = knowledge_tab_texts(&mut app, &project);
+    assert_eq!(count(&rows, tr("検証済み")), 1, "{rows:?}");
+    assert_eq!(count(&rows, tr("未確認")), 2, "{rows:?}");
+    // The open entry's heading beside the map says it too.
+    app.knowledge.layout_mode = KnowledgeLayoutMode::Map;
+    app.knowledge.open_entry = Some((project.id, marked.entries[0].id));
+    let heading = knowledge_tab_texts(&mut app, &project);
+    assert!(
+        heading.iter().any(|text| text == tr("検証済み")),
+        "{heading:?}"
+    );
     fs::remove_dir_all(root).unwrap();
 }

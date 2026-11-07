@@ -1,0 +1,4 @@
+2026-11-07T14:54:50Z auto intent intent.md ec63de6d23ab173c approve restates the person's quoted request as step 1 of the article with checkable outcomes
+2026-11-07T14:54:50Z auto spec spec.md 89675e335dffd8c1 approve after two revisions: concurrent-open ALTER race handled with its own test, policy rows hold, acceptance counts match
+2026-11-07T14:54:50Z auto screen screen.md 9e839e5714363759 approve wording and state inside existing palette roles at the two kind-label sites, no new control, icon, role, or layout
+2026-11-07T14:54:50Z auto plan plan.md 90efd3ba6eddfce9 approve covers every requirement tests-first, risk table includes the ALTER race, touches no paused surface

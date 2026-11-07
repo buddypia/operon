@@ -1,6 +1,6 @@
 # The evidence for change 255. Format: docs/sdlc/templates/verification.yaml.
 # I1 is R1's frame wake, split out because an ID may appear once.
-digest: "09dd252476a61e40"
+digest: "5e41839e7d10d9da"
 
 obligations:
   - R1 empirical-test :: cargo test --locked session_255_terminal_resize_waits_until_the_size_settles

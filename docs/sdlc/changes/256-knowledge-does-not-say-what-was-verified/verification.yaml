@@ -1,0 +1,16 @@
+# Change 256: a knowledge entry says whether its conversation confirmed it.
+# Each Rn is the spec requirement of that number; I1 is Req 4's concurrent-open
+# race, I2 the mutation sweep, I3 the knowledge tests that predate this change.
+digest: "bd22b790cb8eccfc"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked knowledge_256_judge_prompt_asks_whether_it_was_verified
+  - R2 empirical-test :: cargo test --locked knowledge_256_judge_answer_carries_verified
+  - R3 empirical-test :: cargo test --locked knowledge_256_verified_is_stored_and_never_downgraded
+  - R4 empirical-test :: cargo test --locked knowledge_256_an_older_database_gains_verified_without_a_new_version
+  - R5 empirical-test :: cargo test --locked knowledge_256_a_run_stores_what_the_judge_said_was_verified
+  - R6 empirical-test :: cargo test --locked knowledge_256_search_says_which_entries_were_verified
+  - R7 empirical-test :: cargo test --locked knowledge_256_the_tab_says_which_entries_were_verified
+  - I1 empirical-test :: cargo test --locked knowledge_256_adding_verified_twice_still_opens
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/256-knowledge-does-not-say-what-was-verified/mutations.py
+  - I3 empirical-test :: cargo test --locked knowledge_

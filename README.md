@@ -312,6 +312,10 @@ Settings.
 - Notes that recur are reinforced rather than duplicated. Notes nobody reads
   fade with a 30-day freshness clock and are removed; referenced or pinned
   notes stay.
+- Each note says whether its conversation confirmed it — 検証済み when a test,
+  a command's output, or the person did, 未確認 otherwise — and says how. A
+  later conversation that confirms an unconfirmed note promotes it; a confirmed
+  note never goes back. Search shows the same, and `--json` carries `verified`.
 - Search by meaning in the ナレッジ tab, in local history search (whole
   conversations of opted-in projects), and from agents:
   `/Applications/Operon.app/Contents/MacOS/Operon knowledge search "query" --json`
