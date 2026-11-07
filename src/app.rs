@@ -463,6 +463,7 @@ pub(crate) struct OperonApp {
     pub(crate) renaming_session: Option<Uuid>,
     pub(crate) rename_input: String,
     pub(crate) rename_needs_focus: bool,
+    pub(crate) rename_in_workspace_tab: bool,
     pub(crate) remove_after_close: HashSet<Uuid>,
     pub(crate) selected_session: Option<Uuid>,
     pub(crate) session_output: HashMap<Uuid, String>,
@@ -825,6 +826,7 @@ impl OperonApp {
                 None => migration_notice,
             });
         }
+        app.number_legacy_session_names();
         app
     }
 
@@ -1007,6 +1009,7 @@ impl OperonApp {
             renaming_session: None,
             rename_input: String::new(),
             rename_needs_focus: false,
+            rename_in_workspace_tab: false,
             remove_after_close: HashSet::new(),
             selected_session: None,
             session_output: HashMap::new(),
@@ -4339,19 +4342,7 @@ impl OperonApp {
         let goal = goal_with_native_tracking_token(&self.selected_agent, user_goal.clone(), id);
         let tmux_name = managed_tmux_name(id);
         let raw_name = if self.session_name_input.trim().is_empty() {
-            // A request written in Japanese has no spaces to cut on, so the
-            // title comes from its opening line rather than its first words.
-            conversation_topic_name(
-                nonempty_transcript_text(&user_goal).as_deref(),
-                None,
-                || {
-                    format!(
-                        "{} · {}",
-                        workspace_display_name(&worktree_path),
-                        agent_choice_copy(&self.selected_agent).0
-                    )
-                },
-            )
+            self.next_session_name(project.id)
         } else {
             self.session_name_input.trim().to_owned()
         };
@@ -4474,7 +4465,7 @@ impl OperonApp {
         self.store.sessions.push(Session {
             id,
             project_id: project.id,
-            name: plain_terminal_name(&worktree_path),
+            name: self.next_session_name(project.id),
             goal: tr("AI を起動しない素のターミナルです。").into(),
             agent: "terminal".into(),
             tmux_name: tmux_name.clone(),
@@ -6074,11 +6065,70 @@ impl OperonApp {
         view
     }
 
+    /// Allocate within a project, respecting numbers saved in every UI language.
+    pub(crate) fn unused_session_name(&self, project: Uuid, mut number: usize) -> String {
+        while self.store.sessions.iter().any(|session| {
+            session.project_id == project && session_name_number(&session.name) == Some(number)
+        }) {
+            number += 1;
+        }
+        tf!("セッション{p0}", p0 = number)
+    }
+
+    pub(crate) fn next_session_name(&self, project: Uuid) -> String {
+        let count = self
+            .store
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == project)
+            .count();
+        self.unused_session_name(project, count + 1)
+    }
+
+    /// Rewrite only the old automatic launch fallback; no store shape changes.
+    /// Persist owns committed-but-not-synced retries; reject only an uncommitted write.
+    pub(crate) fn number_legacy_session_names(&mut self) {
+        let mut legacy = self
+            .store
+            .sessions
+            .iter()
+            .enumerate()
+            .filter_map(|(index, session)| {
+                let (workspace, label) = session.name.rsplit_once(" · ")?;
+                let provider = cli_provider_for_agent(&session.agent)?;
+                let path = session.worktree_path.as_deref().or_else(|| {
+                    self.store
+                        .projects
+                        .iter()
+                        .find(|p| p.id == session.project_id)
+                        .map(|p| p.path.as_path())
+                })?;
+                (session.goal.trim().is_empty()
+                    && provider_from_label(label) == Some(provider)
+                    && workspace == workspace_display_name(path))
+                .then_some((session.created_at, session.id, index))
+            })
+            .collect::<Vec<_>>();
+        if legacy.is_empty() {
+            return;
+        }
+        legacy.sort_unstable();
+        let previous_store = self.store.clone();
+        for (_, _, index) in legacy {
+            let project = self.store.sessions[index].project_id;
+            self.store.sessions[index].name = self.unused_session_name(project, 1);
+        }
+        if !self.persist() {
+            self.store = previous_store;
+        }
+    }
+
     pub(crate) fn begin_session_rename(&mut self, session: &Session) {
         self.renaming_session = Some(session.id);
         // Seed the editor with what the list shows, not the raw stored name:
         // a legacy record still carries the old internal wording.
         self.rename_input = session_title(session);
+        self.rename_in_workspace_tab = false;
         self.rename_needs_focus = true;
     }
 
@@ -9593,4 +9643,17 @@ pub(crate) fn attention_wait_label(waited: Duration) -> String {
     } else {
         tf!("{p0}時間", p0 = minutes / 60)
     }
+}
+
+/// Recognise previously saved numbered names even after changing UI language.
+pub(crate) fn session_name_number(name: &str) -> Option<usize> {
+    const TEMPLATE: &str = "セッション{p0}";
+    Language::all().into_iter().find_map(|language| {
+        let template = crate::i18n_tables::translation_for(language, TEMPLATE).unwrap_or(TEMPLATE);
+        let (prefix, suffix) = template.split_once("{p0}")?;
+        name.strip_prefix(prefix)?
+            .strip_suffix(suffix)?
+            .parse()
+            .ok()
+    })
 }

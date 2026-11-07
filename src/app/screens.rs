@@ -7009,6 +7009,15 @@ impl OperonApp {
                                                 );
                                             }
                                         }
+                                        let editing = matches!(tab, WorkspaceTab::Session(id)
+                                            if self.renaming_session == Some(*id) && self.rename_in_workspace_tab);
+                                        if editing {
+                                            match workspace_session_name_editor(ui, &mut self.rename_input, &mut self.rename_needs_focus, 160.0) {
+                                                Some(true) => self.commit_session_rename(),
+                                                Some(false) => self.cancel_session_rename(),
+                                                None => {}
+                                            }
+                                        } else {
                                         let mut label = ui.add_sized(
                                             egui::vec2(160.0, CONTROL_HEIGHT_SMALL),
                                             egui::Label::new(
@@ -7026,6 +7035,21 @@ impl OperonApp {
                                         // does not say.
                                         if let Some(hover) = hover {
                                             label = label.on_hover_text(hover);
+                                        }
+                                        if let WorkspaceTab::Session(id) = tab {
+                                            let mut rename = label.double_clicked();
+                                            label.context_menu(|ui| {
+                                                if quiet_button(ui, palette, tr("名前を変更")).clicked() {
+                                                    rename = true;
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                            if rename {
+                                                if let Some(session) = self.store.sessions.iter().find(|s|s.id==*id).cloned() {
+                                                    self.begin_session_rename(&session);
+                                                    self.rename_in_workspace_tab = true;
+                                                }
+                                            }
                                         }
                                         if label.clicked() {
                                             chosen = Some(tab.clone());
@@ -7048,6 +7072,7 @@ impl OperonApp {
                                                     self.activate_workspace_tab(&moved);
                                                 }
                                             }
+                                        }
                                         }
                                         if dirty {
                                             ui.label(
@@ -7558,6 +7583,7 @@ impl OperonApp {
                                         .and_then(|turns| turns.first())
                                         .map(|turn| turn.prompt.as_str()),
                                 );
+                                let mut rename_finished = None;
                                 let row = egui::Frame::new()
                                     .fill(if self.selected_session == Some(id) {
                                         palette.raised
@@ -7597,16 +7623,27 @@ impl OperonApp {
                                                     },
                                                 );
                                             }
-                                            ui.add(
-                                                egui::Label::new(
-                                                    RichText::new(&title)
-                                                        .size(12.5)
-                                                        .strong()
-                                                        .color(palette.text),
-                                                )
-                                                .truncate()
-                                                .selectable(false),
-                                            );
+                                            if self.renaming_session == Some(id)
+                                                && !self.rename_in_workspace_tab
+                                            {
+                                                rename_finished = workspace_session_name_editor(
+                                                    ui,
+                                                    &mut self.rename_input,
+                                                    &mut self.rename_needs_focus,
+                                                    ui.available_width(),
+                                                );
+                                            } else {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(&title)
+                                                            .size(12.5)
+                                                            .strong()
+                                                            .color(palette.text),
+                                                    )
+                                                    .truncate()
+                                                    .selectable(false),
+                                                );
+                                            }
                                         });
                                     })
                                     .response;
@@ -7614,7 +7651,13 @@ impl OperonApp {
                                     .interact(
                                         row.rect,
                                         egui::Id::new(("workspace-project-session", id)),
-                                        egui::Sense::click(),
+                                        if self.renaming_session == Some(id)
+                                            && !self.rename_in_workspace_tab
+                                        {
+                                            egui::Sense::hover()
+                                        } else {
+                                            egui::Sense::click()
+                                        },
                                     )
                                     .on_hover_ui(|ui| {
                                         let view = session_status_view(
@@ -7630,7 +7673,22 @@ impl OperonApp {
                                 if row.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
-                                if row.clicked() {
+                                let mut rename = row.double_clicked();
+                                row.context_menu(|ui| {
+                                    if quiet_button(ui, palette, tr("名前を変更")).clicked() {
+                                        rename = true;
+                                        ui.close_menu();
+                                    }
+                                });
+                                let rename_candidate = rename.then(|| session.clone());
+                                match rename_finished {
+                                    Some(true) => self.commit_session_rename(),
+                                    Some(false) => self.cancel_session_rename(),
+                                    None => {}
+                                }
+                                if let Some(session) = rename_candidate {
+                                    self.begin_session_rename(&session);
+                                } else if row.clicked() {
                                     open = Some(id);
                                 }
                             }
@@ -9065,4 +9123,29 @@ fn flags_match_ignoring_order(a: &[String], b: &[String]) -> bool {
                 a.iter().filter(|item| *item == flag).count()
                     == b.iter().filter(|item| *item == flag).count()
             }))
+}
+
+/// The same editor at either name; return the save/cancel decision so a caller
+/// can finish borrowing row metadata before changing the store.
+fn workspace_session_name_editor(
+    ui: &mut egui::Ui,
+    input: &mut String,
+    needs_focus: &mut bool,
+    width: f32,
+) -> Option<bool> {
+    let editor = ui.add_sized(
+        egui::vec2(width, CONTROL_HEIGHT_SMALL),
+        egui::TextEdit::singleline(input).hint_text(tr("セッション名")),
+    );
+    if *needs_focus {
+        editor.request_focus();
+        *needs_focus = false;
+        None
+    } else if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        Some(false)
+    } else if editor.lost_focus() {
+        Some(true)
+    } else {
+        None
+    }
 }

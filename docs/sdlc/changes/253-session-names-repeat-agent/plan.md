@@ -1,7 +1,7 @@
 # Plan: Short session names and direct rename
 
 - **Spec**: `./spec.md`
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -30,4 +30,6 @@ Named tests and mutations pass; q.fast passes; independent verifier reruns evide
 
 ## Departures from the plan
 
-None.
+The person clarified that existing automatic names must be saved as numbers, rather than projected only in the workspace; startup now rewrites recognized fallback names through the existing atomic persistence operation. A shared editor returns save/cancel so the sidebar can retain borrowed session metadata without a new per-frame clone. Plain terminal launches also receive numbered defaults.
+
+The existing module-size band already exceeded its 9,400-line diagnostic threshold: main has 9,596 lines in src/app.rs and this change adds about 63. The increase is the bounded naming/migration helpers and editor-location field; no disk or process work enters drawing. No unrelated module split is included.

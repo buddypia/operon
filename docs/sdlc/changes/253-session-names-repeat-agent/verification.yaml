@@ -1,0 +1,8 @@
+digest: "3d8f7bc0117ba40e"
+obligations:
+  - R1 empirical-test :: cargo test --locked session_253_numbered_defaults
+  - R2 empirical-test :: cargo test --locked session_253_compact_titles
+  - R3 empirical-test :: cargo test --locked session_253_rename_from_sidebar_and_tab
+  - I1 empirical-test :: cargo test --locked renaming_a_session_is_durable
+  - I2 empirical-test :: cargo test --locked every_translation_
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/253-session-names-repeat-agent/mutations.py
