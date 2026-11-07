@@ -7624,7 +7624,8 @@ pub(crate) fn selected_row_inks_stay_readable() {
 /// banner — and a borrowed selection colour says "selected" where nothing
 /// is. The counts are the guard for a borrower spelled as a field access,
 /// which is how every call site here spells it: the two selections (the
-/// session row and the pinned waiting row) and the toolbar page. (A third,
+/// session row and the pinned waiting row), the workspace's selected sidebar
+/// row and active tab, and the toolbar page. (Another,
 /// the selected project card, stopped wearing a fill at all when the
 /// project became a heading in change 245.) A borrower reached any other
 /// way is review's to catch.
@@ -7632,7 +7633,7 @@ pub(crate) fn selected_row_inks_stay_readable() {
 pub(crate) fn only_selections_wear_the_selection_colour() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (file, expected) in [
-        ("src/app/screens.rs", 2),
+        ("src/app/screens.rs", 4),
         ("src/ui/widgets.rs", 1),
         ("src/app/knowledge.rs", 0),
     ] {
@@ -65927,22 +65928,26 @@ fn session_arrangement_without_folded_projects_still_loads() {
 }
 
 fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Option<egui::Rect> {
-    output.shapes.iter().find_map(|shape| match &shape.shape {
-        egui::Shape::Circle(circle)
-            if (circle.radius - 8.0).abs() < 0.01
+    output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Circle(circle)
+                if (circle.radius - 8.0).abs() < 0.01
                 && circle.center.x >= column_right(output)
                 && circle.center.x < title.left()
-                // The title is centred inside its existing 160px label cell.
+                // Use the nearest mark: compact tabs may place both within this range.
                 && title.left() - circle.center.x < 160.0
                 && (circle.center.y - title.center().y).abs() < CONTROL_HEIGHT / 2.0 =>
-        {
-            Some(egui::Rect::from_center_size(
-                circle.center,
-                egui::Vec2::splat(STATUS_ICON_SIZE),
-            ))
-        }
-        _ => None,
-    })
+            {
+                Some(egui::Rect::from_center_size(
+                    circle.center,
+                    egui::Vec2::splat(STATUS_ICON_SIZE),
+                ))
+            }
+            _ => None,
+        })
+        .max_by(|a, b| a.center().x.total_cmp(&b.center().x))
 }
 
 #[test]
@@ -67917,7 +67922,10 @@ pub(crate) fn session_column_project_is_a_heading_not_a_card() {
     let title_at = column
         .find("RichText::new(&title)")
         .expect("セッション名が描かれていません");
-    let title_block = &column[title_at..column.len().min(title_at + 400)];
+    let title_block = column[title_at..]
+        .split_once(".truncate()")
+        .map(|(title, _)| title)
+        .expect("session title label ends with truncation");
     assert!(
         title_block.contains(".strong()") && title_block.contains("palette.text"),
         "セッション名が主役の強さになっていません"
