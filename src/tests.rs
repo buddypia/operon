@@ -69683,6 +69683,16 @@ pub(crate) fn session_254_terminal_context() {
             .contains(&BackgroundKey::EmptySessionStart(created.id)),
         "terminal launch finished or reported its failure"
     );
+    if !tmux_available {
+        // Another pane's queued read can finish after this launch has failed.
+        app.background_sender
+            .send(BackgroundResult::SessionOutput {
+                session_id: second,
+                result: Err("injected concurrent output read failure".into()),
+            })
+            .unwrap();
+        app.process_background_results();
+    }
     if tmux_available {
         let state = tmux_state(&created.tmux_name);
         let cwd = run_command_with_timeout(
@@ -69716,7 +69726,17 @@ pub(crate) fn session_254_terminal_context() {
                 .status,
             SessionStatus::Failed
         );
-        assert!(app.notice.as_deref().unwrap_or_default().contains("tmux"));
+        let progress = app
+            .launch_progress
+            .as_ref()
+            .filter(|progress| progress.session_id == created.id)
+            .expect("this terminal retains its launch diagnostic");
+        assert!(!progress.dismissed, "launch failure is shown to the person");
+        assert!(progress
+            .failure
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tmux"));
     }
     // Context must be verified even on CI machines without tmux.
     assert_eq!(created.project_id, app.store.projects[0].id);

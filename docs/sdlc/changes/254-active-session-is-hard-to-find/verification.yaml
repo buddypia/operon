@@ -1,4 +1,4 @@
-digest: "1b7fa9d1a3680ad3"
+digest: "2286e78e81f5cbfe"
 obligations:
   - R1 empirical-test :: cargo test --locked session_254_selection_follows_navigation
   - R2 empirical-test :: cargo test --locked session_254_compact_tabs
@@ -12,3 +12,4 @@ obligations:
   - F5 empirical-test :: cargo test --locked session_column_project_is_a_heading_not_a_card
   - F6 empirical-test :: cargo test --locked workspace_session_tab_shows_its_status_glyph
   - F7 empirical-test :: cargo test --locked session_254_terminal_context
+  - F8 empirical-test :: cargo test --locked session_254_terminal_context

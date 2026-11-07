@@ -44,3 +44,5 @@ Independent verification found a missing horizontal-position assertion and a ver
 The first full CI run exposed three existing source/layout test assumptions and missing lesson admission markers. Corrected these retained guards, recorded F3-F6, ran all10 affected checks, and incremented the closing-gate attempt count to1/3.
 
 The first CI verification job exposed an early return in the context test when tmux was missing. Split mandatory context assertions from the optional live-process probe, caught the mutation without tmux, and recorded F7 and lesson109.
+
+A later full-suite run exposed an incidental shared-notice assertion in the missing-tmux branch. Reproduced the overwrite through the real background-result handler, retained that interleaving, asserted the matching launch diagnostic, stress-tested20 no-tmux runs, and caught the context mutation at the actual path assertion. Closing attempts are2/3.

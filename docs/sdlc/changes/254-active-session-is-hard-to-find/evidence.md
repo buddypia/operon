@@ -39,3 +39,9 @@ The first run's verification job also reproduced F7: the worktree-context mutati
 F7 correction proof: bounded runner compiled the unmutated guard and ran it with a restricted child PATH without tmux (green), then changed the pane context to project root and ran the same restricted test. The worktree assertion failed, so the previously CI-surviving mutation is caught1/1 without tmux. Source was restored by mutation_sweep. Live tmux remains additionally exercised on this Mac.
 
 Final F7-restored source: all10 affected tests pass in10.28s; fresh make q.fast passes (clippy4.27s). Lesson109 records the dependency-independent context guard.
+
+Final-head CI reproduced F8:1181 passed,1failed,6ignored; the no-tmux context guard asserted the global notice still contained tmux. Deterministic reproduction queued a SessionOutput error for another pane after the launch failure: shared notice became the output-read error while launch_progress.failure retained the tmux diagnosis. This was watched failing with exit101 under the restricted child PATH. The guard now checks the matching session's retained, undismissed launch diagnostic; the concurrent output-read event remains in the test. Production behavior is unchanged.
+
+F8-stable missing-tool guard passed20/20 child processes with no tmux and an explicitly queued unrelated output failure (four concurrent children,2.48s total). The earlier F7 targeted run had stopped at the incidental shared-notice assertion; it was replaced as worktree proof by a new green-baseline/reversion run after F8: the mutated test fails at the actual path comparison (project root versus worktree, line69743),1/1 caught, source restored.
+
+Final F8-restored check: all10 affected tests pass in11.71s; make q.fast passes (clippy4.69s). No product source changes followed the inspected clipping correction.
