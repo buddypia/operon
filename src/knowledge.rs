@@ -422,7 +422,6 @@ impl KnowledgeDatabase {
         Ok(self.meta("model")?.as_deref() == Some(EMBEDDING_MODEL_ID))
     }
 
-    #[cfg(test)]
     pub(crate) fn entry_count(&self) -> Result<usize> {
         self.count("SELECT COUNT(*) FROM entries")
     }
@@ -823,6 +822,78 @@ impl KnowledgeDatabase {
         Ok(AddOutcome::Added(entry_id))
     }
 
+    /// The unpinned entries nearest the query vectors, best first.
+    pub(crate) fn related_entries(&self, queries: &[Vec<f32>]) -> Result<Vec<KnownEntry>> {
+        if queries.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut scored = self
+            .vectors("SELECT id, vector FROM entries WHERE pinned = 0")?
+            .into_iter()
+            .map(|(id, vector)| {
+                let best = queries
+                    .iter()
+                    .map(|query| cosine(query, &vector))
+                    .fold(f32::MIN, f32::max);
+                (id, best)
+            })
+            .filter(|(_, similarity)| *similarity >= KNOWLEDGE_SEARCH_MIN_COSINE)
+            .collect::<Vec<_>>();
+        scored.sort_by(|left, right| right.1.total_cmp(&left.1));
+        scored.truncate(KNOWLEDGE_JUDGE_KNOWN_ENTRIES);
+        scored
+            .into_iter()
+            .map(|(id, _)| {
+                self.connection
+                    .query_row(
+                        "SELECT title, body FROM entries WHERE id = ?1",
+                        params![id],
+                        |row| {
+                            Ok(KnownEntry {
+                                id,
+                                title: row.get(0)?,
+                                body: row.get(1)?,
+                            })
+                        },
+                    )
+                    .map_err(sql_error)
+            })
+            .collect()
+    }
+
+    /// Put a new item's content in place of an existing entry; `false` when
+    /// the entry is pinned or gone.
+    pub(crate) fn replace_entry(
+        &self,
+        id: i64,
+        entry: &NewEntry,
+        source: &NewSource,
+        now: u64,
+    ) -> Result<bool> {
+        let changed = self
+            .connection
+            .execute(
+                "UPDATE entries SET kind = ?2, title = ?3, body = ?4, verified = ?5, vector = ?6,
+                                    recurrences = recurrences + 1, reinforced_at = ?7
+                 WHERE id = ?1 AND pinned = 0",
+                params![
+                    id,
+                    entry.kind.key(),
+                    entry.title,
+                    entry.body,
+                    entry.verified,
+                    vector_to_blob(&entry.vector),
+                    now as i64
+                ],
+            )
+            .map_err(sql_error)?;
+        if changed == 0 {
+            return Ok(false);
+        }
+        self.insert_source(id, source, now)?;
+        Ok(true)
+    }
+
     fn insert_source(&self, entry: i64, source: &NewSource, now: u64) -> Result<()> {
         self.connection
             .execute(
@@ -962,6 +1033,8 @@ pub(crate) struct NewSource {
 pub(crate) enum AddOutcome {
     Added(i64),
     Reinforced(i64),
+    /// An existing entry now says what this item says (change 257).
+    Replaced(i64),
     /// Pinned entries fill the base; nothing new is added.
     Refused,
 }
@@ -1166,7 +1239,16 @@ pub(crate) fn rankable(exchange: &Exchange) -> bool {
 // ---------------------------------------------------------------------------
 // The second step: the conversation's own CLI judges.
 
-pub(crate) fn judge_prompt(candidates: &[Candidate]) -> String {
+/// An existing entry offered to the judge, which may say a new item replaces
+/// it (change 257).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KnownEntry {
+    pub(crate) id: i64,
+    pub(crate) title: String,
+    pub(crate) body: String,
+}
+
+pub(crate) fn judge_prompt(candidates: &[Candidate], known: &[KnownEntry]) -> String {
     let mut prompt = String::from(
         "You are curating a project knowledge base from one coding-agent conversation. \
 Below are numbered candidate exchanges from it. Keep only knowledge a later conversation in \
@@ -1185,6 +1267,18 @@ the body how it was confirmed.\n\
 Write title and body in the language the conversation uses. Never copy secrets, tokens, \
 passwords, or personal data. Answer [] when nothing is worth keeping.\n",
     );
+    if !known.is_empty() {
+        prompt.push_str(
+            "\nBelow are existing entries of this knowledge base, numbered E1, E2, and so on. When \
+the conversation shows that one of them is wrong or out of date, add \"replaces\": <its E number, \
+as an integer> to the item that says what is true now; that item then takes the entry's place. \
+Leave replaces out when an item only repeats or adds to an entry.\n\nExisting entries:\n",
+        );
+        for (number, entry) in (1..).zip(known.iter().take(KNOWLEDGE_JUDGE_KNOWN_ENTRIES)) {
+            prompt.push_str(&format!("[E{number}] {}\n{}\n", entry.title, entry.body));
+        }
+        prompt.push_str("\nCandidate exchanges:\n");
+    }
     for (number, candidate) in (1..).zip(candidates) {
         let person: String = candidate
             .exchange
@@ -1215,12 +1309,19 @@ pub(crate) struct JudgedEntry {
     pub(crate) verified: bool,
     /// Index into the candidates the prompt listed.
     pub(crate) candidate: usize,
+    /// Index into the existing entries the prompt listed, when this item
+    /// replaces one of them.
+    pub(crate) replaces: Option<usize>,
 }
 
 /// The judge's answer, or `None` when it is not the array the prompt asked
 /// for. Items naming an unknown kind or a candidate that was not offered are
 /// dropped; titles and bodies past their limits are cut.
-pub(crate) fn parse_judge_answer(answer: &str, offered: usize) -> Option<Vec<JudgedEntry>> {
+pub(crate) fn parse_judge_answer(
+    answer: &str,
+    offered: usize,
+    known: usize,
+) -> Option<Vec<JudgedEntry>> {
     let start = answer.find('[')?;
     let end = answer.rfind(']')?;
     if end < start {
@@ -1245,6 +1346,12 @@ pub(crate) fn parse_judge_answer(answer: &str, offered: usize) -> Option<Vec<Jud
                             .and_then(serde_json::Value::as_bool)
                             .unwrap_or(false),
                         candidate: number - 1,
+                        replaces: item
+                            .get("replaces")
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|number| usize::try_from(number).ok())
+                            .filter(|number| (1..=known).contains(number))
+                            .map(|number| number - 1),
                     },
                 )
             })
@@ -1400,6 +1507,7 @@ pub(crate) struct RunReport {
     pub(crate) processed: usize,
     pub(crate) added: usize,
     pub(crate) reinforced: usize,
+    pub(crate) replaced: usize,
     pub(crate) removed: usize,
     pub(crate) judge_calls: usize,
     /// The CLI that could not judge; the run stopped judging there.
@@ -1723,7 +1831,19 @@ fn process_conversation(
         report.capped = true;
         return Ok(Processed::Skipped);
     }
-    let prompt = judge_prompt(&candidates);
+    // Existing entries near what the conversation talks about, so the judge can
+    // say one is now wrong (change 257). Spent through the run's budget, never
+    // past it; with nothing to offer, nothing extra is embedded.
+    let known = if database.entry_count()? > 0 && budget.spend(candidates.len()) {
+        let queries = candidates
+            .iter()
+            .map(|candidate| query_input(&candidate.text))
+            .collect::<Vec<_>>();
+        database.related_entries(&embedder.embed(&queries)?)?
+    } else {
+        Vec::new()
+    };
+    let prompt = judge_prompt(&candidates, &known);
     let answer = match judge.judge(session.provider, &prompt) {
         JudgeOutcome::Pause(_) => {
             report.paused.get_or_insert(session.provider);
@@ -1741,7 +1861,7 @@ fn process_conversation(
     };
     database.record_judge_call(utc_day(now))?;
     report.judge_calls += 1;
-    let Some(judged) = parse_judge_answer(&answer, candidates.len()) else {
+    let Some(judged) = parse_judge_answer(&answer, candidates.len(), known.len()) else {
         row.attempts += 1;
         row.paused_at = None;
         row.processed_at = now;
@@ -1768,30 +1888,41 @@ fn process_conversation(
     let entry_vectors = embedder.embed(&entry_inputs)?;
     let may_insert = may_add_entries(database.pinned_count()?);
     let stored = database.write_if_enabled(|database| {
+        let mut replaced = Vec::new();
         for (entry, vector) in judged.iter().zip(entry_vectors) {
             let candidate = &candidates[entry.candidate];
-            let outcome = database.add_or_reinforce(
-                &NewEntry {
-                    kind: entry.kind,
-                    title: entry.title.clone(),
-                    body: entry.body.clone(),
-                    verified: entry.verified,
-                    vector,
-                },
-                &NewSource {
-                    provider: session.provider,
-                    session_id: session.id.clone(),
-                    transcript_path: transcript.clone(),
-                    exchange_index: candidate.exchange.index,
-                    text: candidate.text.clone(),
-                    vector: candidate.vector.clone(),
-                },
-                now,
-                may_insert,
-            )?;
+            let new_entry = NewEntry {
+                kind: entry.kind,
+                title: entry.title.clone(),
+                body: entry.body.clone(),
+                verified: entry.verified,
+                vector,
+            };
+            let source = NewSource {
+                provider: session.provider,
+                session_id: session.id.clone(),
+                transcript_path: transcript.clone(),
+                exchange_index: candidate.exchange.index,
+                text: candidate.text.clone(),
+                vector: candidate.vector.clone(),
+            };
+            // Each offered entry is replaced at most once per answer; a pinned
+            // or vanished one, or a second claim on it, is stored as usual.
+            let target = entry
+                .replaces
+                .filter(|index| !replaced.contains(index))
+                .and_then(|index| known.get(index).map(|known| (index, known.id)));
+            let outcome = match target {
+                Some((index, id)) if database.replace_entry(id, &new_entry, &source, now)? => {
+                    replaced.push(index);
+                    AddOutcome::Replaced(id)
+                }
+                _ => database.add_or_reinforce(&new_entry, &source, now, may_insert)?,
+            };
             match outcome {
                 AddOutcome::Added(_) => report.added += 1,
                 AddOutcome::Reinforced(_) => report.reinforced += 1,
+                AddOutcome::Replaced(_) => report.replaced += 1,
                 AddOutcome::Refused => report.full_of_pinned = true,
             }
         }

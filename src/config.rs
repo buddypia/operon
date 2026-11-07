@@ -578,6 +578,9 @@ pub(crate) const KNOWLEDGE_JUDGE_SECONDS: u64 = 120;
 pub(crate) const KNOWLEDGE_JUDGE_PERSON_CHARS: usize = 800;
 pub(crate) const KNOWLEDGE_JUDGE_AGENT_CHARS: usize = 1_600;
 pub(crate) const KNOWLEDGE_JUDGE_MAX_ENTRIES: usize = 5;
+/// Existing entries offered to the judge for replacement (change 257): each is
+/// at most a 40-character title and a 400-character body.
+pub(crate) const KNOWLEDGE_JUDGE_KNOWN_ENTRIES: usize = 5;
 pub(crate) const KNOWLEDGE_TITLE_MAX_CHARS: usize = 40;
 pub(crate) const KNOWLEDGE_BODY_MAX_CHARS: usize = 400;
 /// Three unparseable answers mark a conversation `failed`; it is tried again
