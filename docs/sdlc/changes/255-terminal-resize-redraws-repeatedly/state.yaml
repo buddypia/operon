@@ -1,0 +1,24 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify. Risk: low (risk.yaml `drawing`: src/app.rs, src/ui), full
+# autonomy; the change paints, so screen.md is agreed first.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the four session_255_ tests, watch them fail, then implement per plan.md."
+
+contract:
+  three-gates: "machine pending make q.fast and the session_255_ tests"
+  readiness: "machine passed bash scripts/check-readiness.sh docs/sdlc/changes/255-terminal-resize-redraws-repeatedly"
+  release-binary: "machine pending required - production src changes; package from main after landing"
+  guards-verified-by-mutation: "machine pending mutations.py catches every claimed guard"
