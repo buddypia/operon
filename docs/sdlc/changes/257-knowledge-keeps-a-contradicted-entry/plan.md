@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-08
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -47,4 +47,6 @@ The tree compiles after every step.
 
 ## Departures from the plan
 
-None yet.
+- `KnowledgeDatabase::entry_count` lost its `#[cfg(test)]`: the run asks it
+  whether the base has anything to offer before embedding queries.
+- Packaging is deferred to one run after the article's last step lands.

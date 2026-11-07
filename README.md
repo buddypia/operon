@@ -316,6 +316,10 @@ Settings.
   a command's output, or the person did, 未確認 otherwise — and says how. A
   later conversation that confirms an unconfirmed note promotes it; a confirmed
   note never goes back. Search shows the same, and `--json` carries `verified`.
+- When a conversation shows a note is wrong or out of date, the summarising CLI
+  is shown the nearest existing notes and the note is rewritten in place with
+  what is true now, keeping its references and earlier sources. Pinned notes
+  are never rewritten.
 - Search by meaning in the ナレッジ tab, in local history search (whole
   conversations of opted-in projects), and from agents:
   `/Applications/Operon.app/Contents/MacOS/Operon knowledge search "query" --json`

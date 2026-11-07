@@ -54921,7 +54921,7 @@ pub(crate) fn judge_prompt_stays_under_its_ceiling() {
             score: 0.0,
         })
         .collect();
-    let prompt = judge_prompt(&candidates);
+    let prompt = judge_prompt(&candidates, &[]);
     assert!(
         prompt.len() <= KNOWLEDGE_JUDGE_PROMPT_MAX_BYTES,
         "{}",
@@ -54958,23 +54958,24 @@ pub(crate) fn judge_answer_parses_or_yields_nothing() {
     let fenced =
         "```json\n[{\"kind\":\"decision\",\"title\":\"t\",\"body\":\"b\",\"candidate\":2}]\n```";
     assert_eq!(
-        parse_judge_answer(fenced, 3),
+        parse_judge_answer(fenced, 3, 0),
         Some(vec![JudgedEntry {
             kind: KnowledgeKind::Decision,
             title: "t".to_owned(),
             body: "b".to_owned(),
             verified: false,
             candidate: 1,
+            replaces: None,
         }])
     );
-    assert_eq!(parse_judge_answer("[]", 3), Some(Vec::new()));
-    assert_eq!(parse_judge_answer("I could not decide.", 3), None);
-    assert_eq!(parse_judge_answer("[not json]", 3), None);
+    assert_eq!(parse_judge_answer("[]", 3, 0), Some(Vec::new()));
+    assert_eq!(parse_judge_answer("I could not decide.", 3, 0), None);
+    assert_eq!(parse_judge_answer("[not json]", 3, 0), None);
     let mixed = r#"[{"kind":"opinion","title":"t","body":"b","candidate":1},
         {"kind":"fact","title":"t","body":"b","candidate":9},
         {"kind":"fact","title":"","body":"b","candidate":1},
         {"kind":"fact","title":"ok","body":"b","candidate":1}]"#;
-    let parsed = parse_judge_answer(mixed, 3).unwrap();
+    let parsed = parse_judge_answer(mixed, 3, 0).unwrap();
     assert_eq!(
         parsed.len(),
         1,
@@ -54987,7 +54988,7 @@ pub(crate) fn judge_answer_parses_or_yields_nothing() {
             .collect(),
     )
     .to_string();
-    let parsed = parse_judge_answer(&many, 1).unwrap();
+    let parsed = parse_judge_answer(&many, 1, 0).unwrap();
     assert_eq!(parsed.len(), KNOWLEDGE_JUDGE_MAX_ENTRIES);
     assert_eq!(parsed[0].title.chars().count(), KNOWLEDGE_TITLE_MAX_CHARS);
     assert_eq!(parsed[0].body.chars().count(), KNOWLEDGE_BODY_MAX_CHARS);
@@ -69848,7 +69849,7 @@ fn judged_answer_verified(entries: &[(&str, (&str, &str), usize, Option<bool>)])
 
 #[test]
 pub(crate) fn knowledge_256_judge_prompt_asks_whether_it_was_verified() {
-    let prompt = judge_prompt(&[]);
+    let prompt = judge_prompt(&[], &[]);
     assert!(prompt.contains("\"verified\": true | false"), "{prompt}");
     assert!(
         prompt.contains("a test or a command ran and its output confirmed it"),
@@ -69881,7 +69882,7 @@ pub(crate) fn knowledge_256_judge_prompt_asks_whether_it_was_verified() {
             score: 0.0,
         })
         .collect();
-    let full = judge_prompt(&candidates);
+    let full = judge_prompt(&candidates, &[]);
     assert!(
         full.len() <= KNOWLEDGE_JUDGE_PROMPT_MAX_BYTES,
         "{}",
@@ -69898,7 +69899,7 @@ pub(crate) fn knowledge_256_judge_answer_carries_verified() {
         {"kind":"cause","title":"e","body":"f","candidate":1},
         {"kind":"cause","title":"g","body":"h","candidate":1,"verified":"yes"}
     ]"#;
-    let parsed = parse_judge_answer(answer, 1).unwrap();
+    let parsed = parse_judge_answer(answer, 1, 0).unwrap();
     assert_eq!(parsed.len(), 4, "the old shape still parses whole");
     assert_eq!(
         parsed
@@ -70167,5 +70168,448 @@ pub(crate) fn knowledge_256_the_tab_says_which_entries_were_verified() {
         heading.iter().any(|text| text == tr("検証済み")),
         "{heading:?}"
     );
+    fs::remove_dir_all(root).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Change 257: a conversation that proves an entry wrong replaces it.
+
+/// Delegates to `KnowledgeTestEmbedder` and keeps every text it was asked for.
+struct TextRecordingEmbedder {
+    inner: KnowledgeTestEmbedder,
+    texts: std::sync::Mutex<Vec<String>>,
+}
+
+impl TextRecordingEmbedder {
+    fn new() -> Self {
+        Self {
+            inner: KnowledgeTestEmbedder::new(),
+            texts: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    fn queries(&self) -> usize {
+        let prefix = query_input("");
+        self.texts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|text| text.starts_with(&prefix))
+            .count()
+    }
+}
+
+impl Embedder for TextRecordingEmbedder {
+    fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.texts.lock().unwrap().extend(texts.iter().cloned());
+        self.inner.embed(texts)
+    }
+}
+
+/// An entry written straight into the table, so near-identical vectors are
+/// not merged by `add_or_reinforce`.
+fn insert_entry_row(
+    database: &KnowledgeDatabase,
+    (title, body): (&str, &str),
+    vector: &[f32],
+    pinned: bool,
+) -> i64 {
+    let connection = database.connection_for_tests();
+    connection
+        .execute(
+            "INSERT INTO entries (kind, title, body, created_at, reinforced_at, referenced_at,
+                                  reference_count, recurrences, pinned, vector)
+             VALUES ('decision', ?1, ?2, ?5, ?5, ?5, 0, 0, ?3, ?4)",
+            // Stamped now: a run prunes entries nobody used for weeks.
+            rusqlite::params![title, body, pinned, vector_to_blob(vector), now() as i64],
+        )
+        .unwrap();
+    connection.last_insert_rowid()
+}
+
+/// `query` turned away from itself by `t` towards an unrelated direction.
+fn blended(query: &[f32], away: &[f32], t: f32) -> Vec<f32> {
+    normalised(
+        &query
+            .iter()
+            .zip(away)
+            .map(|(q, a)| q * (1.0 - t) + a * t)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn known_entry(id: i64, (title, body): (&str, &str)) -> KnownEntry {
+    KnownEntry {
+        id,
+        title: title.to_owned(),
+        body: body.to_owned(),
+    }
+}
+
+#[test]
+pub(crate) fn knowledge_257_judge_prompt_offers_existing_entries_to_replace() {
+    let candidates = vec![Candidate {
+        exchange: Exchange {
+            index: 0,
+            person: "上限は？".to_owned(),
+            agent: "5回に変えました。".to_owned(),
+        },
+        text: String::new(),
+        vector: Vec::new(),
+        score: 0.0,
+    }];
+    let prompt = judge_prompt(&candidates, &[known_entry(7, ENTRY_RETRY)]);
+    for phrase in [
+        "\"replaces\"",
+        "wrong or out of date",
+        "takes the entry's place",
+        "Leave replaces out when an item only repeats or adds to an entry",
+    ] {
+        assert!(prompt.contains(phrase), "{phrase}: {prompt}");
+    }
+    let listed = format!("[E1] {}\n{}\n", ENTRY_RETRY.0, ENTRY_RETRY.1);
+    let at = prompt.find(&listed).expect(&prompt);
+    assert!(
+        at < prompt.find("\n[1]\n").unwrap(),
+        "existing entries come before the candidates"
+    );
+    let bare = judge_prompt(&candidates, &[]);
+    assert!(!bare.contains("replaces"), "{bare}");
+    assert!(!bare.contains("[E1]"), "{bare}");
+    // The most known entries, each at its limits, and every candidate at its
+    // limit still fit.
+    let title = "長".repeat(KNOWLEDGE_TITLE_MAX_CHARS);
+    let body = "長".repeat(KNOWLEDGE_BODY_MAX_CHARS);
+    let known: Vec<KnownEntry> = (0..KNOWLEDGE_JUDGE_KNOWN_ENTRIES as i64)
+        .map(|id| known_entry(id, (&title, &body)))
+        .collect();
+    let huge = "y".repeat(50_000);
+    let full_candidates: Vec<Candidate> = (0..KNOWLEDGE_CANDIDATES_PER_CONVERSATION)
+        .map(|index| Candidate {
+            exchange: Exchange {
+                index,
+                person: huge.clone(),
+                agent: huge.clone(),
+            },
+            text: String::new(),
+            vector: Vec::new(),
+            score: 0.0,
+        })
+        .collect();
+    let full = judge_prompt(&full_candidates, &known);
+    assert!(
+        full.len() <= KNOWLEDGE_JUDGE_PROMPT_MAX_BYTES,
+        "{}",
+        full.len()
+    );
+    assert!(full.contains(&format!("[E{}]", KNOWLEDGE_JUDGE_KNOWN_ENTRIES)));
+    assert!(full.contains(&format!("[{}]", KNOWLEDGE_CANDIDATES_PER_CONVERSATION)));
+}
+
+#[test]
+pub(crate) fn knowledge_257_judge_answer_carries_replaces() {
+    let answer = r#"[
+        {"kind":"fact","title":"a","body":"b","candidate":1,"replaces":1},
+        {"kind":"fact","title":"a","body":"b","candidate":1,"replaces":2},
+        {"kind":"fact","title":"a","body":"b","candidate":1,"replaces":3},
+        {"kind":"fact","title":"a","body":"b","candidate":1,"replaces":0},
+        {"kind":"fact","title":"a","body":"b","candidate":1,"replaces":"1"},
+        {"kind":"fact","title":"a","body":"b","candidate":1}
+    ]"#;
+    let parsed = parse_judge_answer(answer, 1, 2).unwrap();
+    assert_eq!(parsed.len(), KNOWLEDGE_JUDGE_MAX_ENTRIES);
+    assert_eq!(
+        parsed
+            .iter()
+            .map(|entry| entry.replaces)
+            .collect::<Vec<_>>(),
+        vec![Some(0), Some(1), None, None, None]
+    );
+    let last = r#"[{"kind":"fact","title":"a","body":"b","candidate":1}]"#;
+    assert_eq!(parse_judge_answer(last, 1, 2).unwrap()[0].replaces, None);
+    let none_known = r#"[{"kind":"fact","title":"a","body":"b","candidate":1,"replaces":1}]"#;
+    assert_eq!(
+        parse_judge_answer(none_known, 1, 0).unwrap()[0].replaces,
+        None
+    );
+}
+
+#[test]
+pub(crate) fn knowledge_257_related_entries_are_near_unpinned_and_bounded() {
+    let root = temporary_directory("kn-257-related");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let query = embedder
+        .embed(&[query_input("retry limit")])
+        .unwrap()
+        .pop()
+        .unwrap();
+    let away = embedder
+        .embed(&[query_input("unrelated")])
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert!(database
+        .related_entries(std::slice::from_ref(&query))
+        .unwrap()
+        .is_empty());
+    let pinned = insert_entry_row(&database, ("pinned", "p"), &query, true);
+    let far = insert_entry_row(&database, ("far", "f"), &away, false);
+    let near: Vec<i64> = (0..7)
+        .map(|step| {
+            let title = format!("near {step}");
+            insert_entry_row(
+                &database,
+                (&title, "n"),
+                &blended(&query, &away, step as f32 * 0.04),
+                false,
+            )
+        })
+        .collect();
+    let related = database
+        .related_entries(std::slice::from_ref(&query))
+        .unwrap();
+    assert_eq!(related.len(), KNOWLEDGE_JUDGE_KNOWN_ENTRIES);
+    assert_eq!(
+        related.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+        near[..KNOWLEDGE_JUDGE_KNOWN_ENTRIES].to_vec(),
+        "best first"
+    );
+    assert!(related
+        .iter()
+        .all(|entry| entry.id != pinned && entry.id != far));
+    assert_eq!(related[0].title, "near 0");
+    assert_eq!(related[0].body, "n");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_257_replacing_an_entry_keeps_its_history_and_spares_pinned() {
+    let root = temporary_directory("kn-257-replace");
+    let embedder = KnowledgeTestEmbedder::new();
+    let (database, _) = enabled_knowledge_database(&root);
+    let old = NewEntry {
+        verified: true,
+        ..golden_entry(&embedder, ENTRY_RETRY, KnowledgeKind::Decision)
+    };
+    let AddOutcome::Added(id) = database
+        .add_or_reinforce(&old, &test_source(&embedder, HELD_OUT_KEEP[0]), 10, true)
+        .unwrap()
+    else {
+        panic!("not added");
+    };
+    database.record_references(&[id, id], 20).unwrap();
+    let new = NewEntry {
+        kind: KnowledgeKind::Fact,
+        title: "tmux の再起動は5回まで".to_owned(),
+        body: "上限を5回に上げた。".to_owned(),
+        verified: false,
+        vector: embedder
+            .embed(&[document_input(
+                Some("tmux の再起動は5回まで"),
+                "上限を5回に上げた。",
+            )])
+            .unwrap()
+            .pop()
+            .unwrap(),
+    };
+    let source = test_source(&embedder, HELD_OUT_KEEP[1]);
+    assert!(database.replace_entry(id, &new, &source, 30).unwrap());
+    let entries = database.entries().unwrap();
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert_eq!(entry.id, id);
+    assert_eq!(
+        (entry.kind, entry.title.as_str(), entry.body.as_str()),
+        (KnowledgeKind::Fact, new.title.as_str(), new.body.as_str())
+    );
+    assert!(
+        !entry.verified,
+        "the old confirmation was about the old content"
+    );
+    assert_eq!(entry.created_at, 10);
+    assert_eq!(entry.reference_count, 2);
+    assert_eq!(entry.recurrences, 1);
+    assert_eq!(entry.reinforced_at, 30);
+    assert_eq!(
+        entry.sources.len(),
+        2,
+        "the old source stays under the entry"
+    );
+    assert_eq!(
+        database.entry_vectors().unwrap(),
+        vec![(id, new.vector.clone())]
+    );
+    // Pinned: never rewritten.
+    database.set_pinned(id, true).unwrap();
+    let other = NewEntry {
+        title: "書き換え".to_owned(),
+        ..new.clone()
+    };
+    assert!(!database.replace_entry(id, &other, &source, 40).unwrap());
+    let kept = database.entries().unwrap().pop().unwrap();
+    assert_eq!(kept.title, new.title);
+    assert_eq!(kept.sources.len(), 2);
+    // Gone: nothing written.
+    assert!(!database
+        .replace_entry(id + 100, &other, &source, 40)
+        .unwrap());
+    assert_eq!(database.entries().unwrap().pop().unwrap().sources.len(), 2);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_257_a_run_replaces_what_the_judge_says_is_out_of_date() {
+    let root = temporary_directory("kn-257-run");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[1]]);
+    let session = claude_session(&transcript, "s");
+    let run =
+        |database: &mut KnowledgeDatabase, embedder: &dyn Embedder, judge: &RecordingJudge| {
+            run_project(
+                database,
+                std::slice::from_ref(&session),
+                embedder,
+                judge,
+                now(),
+                knowledge_test_limits(),
+                &|_, _| {},
+            )
+            .unwrap()
+        };
+    // An empty base offers nothing and embeds no query.
+    {
+        let embedder = TextRecordingEmbedder::new();
+        let judge = RecordingJudge::answering(vec![]);
+        let (mut database, _) = enabled_knowledge_database(&root.join("empty"));
+        run(&mut database, &embedder, &judge);
+        assert_eq!(judge.calls(), 1);
+        assert_eq!(embedder.queries(), 0);
+        assert!(!judge.asked.lock().unwrap()[0].1.contains("[E1]"));
+    }
+    let embedder = TextRecordingEmbedder::new();
+    let (mut database, _) = enabled_knowledge_database(&root);
+    let query = embedder
+        .embed(&[query_input(HELD_OUT_KEEP[1])])
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stale = insert_entry_row(&database, ENTRY_RETRY, &query, false);
+    let untouched = insert_entry_row(
+        &database,
+        ENTRY_RELEASE,
+        &embedder
+            .embed(&[query_input("unrelated")])
+            .unwrap()
+            .pop()
+            .unwrap(),
+        false,
+    );
+    embedder.texts.lock().unwrap().clear();
+    let current = (
+        "判定のタイムアウトは180秒",
+        "120秒では長いプロンプトで足りず、180秒に延ばした。",
+    );
+    let second = (
+        "判定の再試行は1回",
+        "タイムアウトした判定は次の更新で1回だけ再試行する。",
+    );
+    let judge = RecordingJudge::answering(vec![JudgeOutcome::Answer(
+        serde_json::json!([
+            {"kind": "decision", "title": current.0, "body": current.1, "candidate": 1, "replaces": 1},
+            {"kind": "decision", "title": second.0, "body": second.1, "candidate": 1, "replaces": 1},
+        ])
+        .to_string(),
+    )]);
+    let report = run(&mut database, &embedder, &judge);
+    assert_eq!(embedder.queries(), 1, "one query per candidate");
+    let asked = judge.asked.lock().unwrap()[0].1.clone();
+    assert!(
+        asked.contains(&format!("[E1] {}", ENTRY_RETRY.0)),
+        "{asked}"
+    );
+    assert!(
+        !asked.contains(ENTRY_RELEASE.0),
+        "only related entries are offered"
+    );
+    assert_eq!(report.replaced, 1, "{report:?}");
+    let entries = database.entries().unwrap();
+    assert_eq!(
+        entries.len(),
+        3,
+        "replaced in place; the second item stands on its own"
+    );
+    let by_id = |id: i64| entries.iter().find(|entry| entry.id == id).unwrap();
+    assert_eq!(
+        (by_id(stale).title.as_str(), by_id(stale).body.as_str()),
+        current
+    );
+    assert_eq!(by_id(untouched).title, ENTRY_RELEASE.0);
+    assert!(entries.iter().any(|entry| entry.title == second.0));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn knowledge_257_an_exhausted_budget_offers_no_existing_entries() {
+    let root = temporary_directory("kn-257-budget");
+    let transcript = root.join("s.jsonl");
+    write_claude_transcript(&transcript, &[HELD_OUT_KEEP[1]]);
+    let session = claude_session(&transcript, "s");
+    let setup = |label: &str, embedder: &TextRecordingEmbedder| {
+        let (database, _) = enabled_knowledge_database(&root.join(label));
+        let query = embedder
+            .embed(&[query_input(HELD_OUT_KEEP[1])])
+            .unwrap()
+            .pop()
+            .unwrap();
+        insert_entry_row(&database, ENTRY_RETRY, &query, false);
+        embedder.texts.lock().unwrap().clear();
+        database
+    };
+    let run = |database: &mut KnowledgeDatabase,
+               embedder: &dyn Embedder,
+               judge: &RecordingJudge,
+               limits: RunLimits| {
+        run_project(
+            database,
+            std::slice::from_ref(&session),
+            embedder,
+            judge,
+            now(),
+            limits,
+            &|_, _| {},
+        )
+        .unwrap()
+    };
+    // Measure what ranking spends before the queries.
+    let measuring = TextRecordingEmbedder::new();
+    let mut database = setup("measure", &measuring);
+    let judge = RecordingJudge::answering(vec![]);
+    run(&mut database, &measuring, &judge, knowledge_test_limits());
+    let prefix = query_input("");
+    let ranking = measuring
+        .texts
+        .lock()
+        .unwrap()
+        .iter()
+        .position(|text| text.starts_with(&prefix))
+        .expect("a query was embedded with budget to spare");
+    // The same run with only that much: no query, nothing offered, still judged.
+    let embedder = TextRecordingEmbedder::new();
+    let mut database = setup("short", &embedder);
+    let judge = RecordingJudge::answering(vec![]);
+    let report = run(
+        &mut database,
+        &embedder,
+        &judge,
+        RunLimits {
+            embeddings: ranking,
+            ..knowledge_test_limits()
+        },
+    );
+    assert_eq!(judge.calls(), 1, "{report:?}");
+    assert_eq!(embedder.queries(), 0);
+    assert!(!judge.asked.lock().unwrap()[0].1.contains("[E1]"));
+    assert!(report.embeddings <= ranking, "{report:?}");
     fs::remove_dir_all(root).unwrap();
 }

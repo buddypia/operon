@@ -1,0 +1,25 @@
+# Review record for change 257-knowledge-keeps-a-contradicted-entry.
+#
+# rust-reviewer read the staged diff (src/config.rs, src/knowledge.rs,
+# src/tests.rs) from the index while the mutation sweep ran: the replaces index
+# maps through known.get and stays bounded by the parser; a replaced entry keeps
+# its id and is re-laid out through its vector fingerprint; related_entries is
+# one vector scan plus at most five reads on the background run; every write is
+# inside write_if_enabled; both new statements are literal SQL with params!; no
+# new panic site.
+
+digest: "dae120bf37a883af"
+rounds: 1
+
+carried:
+  - rust-reviewer/1 · process_conversation spends candidates.len() embeddings and embeds the queries before judge.judge; when the judge itself pauses mid-call those embeddings are discarded and repeated next run. Bounded by the judge call cap.
+    person: "要約する CLI が途中で止まった会話では、近いナレッジを探す計算が次回にもう一度行われます。更新が少し遅くなるだけで、あなたが何かする必要はありません。"
+  - rust-reviewer/2 · report.replaced, like added and reinforced already, is counted inside the write_if_enabled closure and stays incremented if the commit then fails.
+    person: "保存に失敗した更新でも、内部の件数だけは数えられてしまうことがあります。画面には出ない数で、あなたが何かする必要はありません。"
+  - rust-reviewer/3 · existing entry text goes into the judge prompt verbatim; a body containing "[E1]" or a replaces instruction could confuse the judge. The text came from an earlier judge answer, is capped at 400 characters, and is local.
+    person: "まれに要約する CLI が既存ナレッジの文面に惑わされ、関係の薄いナレッジを書き換える可能性があります。変えてほしくないナレッジはピン留めすれば守られます。"
+  - rust-reviewer/4 · .take(KNOWLEDGE_JUDGE_KNOWN_ENTRIES) in the prompt loop duplicates the truncation in related_entries; if it were ever the only guard, the parser would accept a number the prompt did not list.
+    person: "上限の確認が二か所にあり、片方だけが変わると食い違う余地があります。今は一致しており、あなたが何かする必要はありません。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 4"
