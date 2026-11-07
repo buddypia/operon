@@ -6904,6 +6904,21 @@ impl OperonApp {
             .retain(|id, _| self.store.sessions.iter().any(|s| s.id == *id));
         let layout = self.workspace.rects(center);
         if layout.panes.is_empty() {
+            body.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_enabled_ui(self.workspace_project.is_some(), |ui| {
+                    let add = icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"));
+                    add.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::WidgetType::Button,
+                            ui.is_enabled(),
+                            tr("空のターミナルを開く"),
+                        )
+                    });
+                    if add.clicked() {
+                        self.launch_workspace_terminal(None);
+                    }
+                });
+            });
             body.heading(tr("セッションを選択"));
             body.label(tr("一覧からセッションを選んでください。"));
         }
@@ -6976,135 +6991,160 @@ impl OperonApp {
             };
             let mut chosen = None;
             let mut close = None;
-            egui::ScrollArea::horizontal()
-                .id_salt(("workspace-tabs", group))
-                .auto_shrink([false, true])
-                .show(&mut pane, |ui| {
-                    ui.horizontal(|ui| {
-                        for (index, tab) in tabs.tabs.iter().enumerate() {
-                            let (title, hover, dirty) = self.workspace_tab_title(tab);
-                            let active = tabs.active == index;
-                            let tab_frame = egui::Frame::new()
-                                .fill(if active { palette.raised } else { palette.card })
-                                .inner_margin(egui::Margin::symmetric(8, 4))
-                                .show(ui, |ui| {
-                                    ui.horizontal(|ui| {
-                                        // State wording belongs in the hover, not the tab.
-                                        if let WorkspaceTab::Session(id) = tab {
-                                            if let Some(session) =
-                                                self.store.sessions.iter().find(|s| s.id == *id)
-                                            {
-                                                let kind = self.session_status_kind_for(session);
-                                                session_status_icon(ui, palette, kind).on_hover_ui(
-                                                    |ui| {
-                                                        let view = session_status_view(
-                                                            &self.store.sessions,
-                                                            session,
-                                                            self.cancellation_pending(*id),
-                                                            self.session_activity_for(*id),
+            pane.horizontal(|ui| {
+                // Keep the action outside the scrolling and clipped tab region.
+                let width = (ui.available_width() - CONTROL_HEIGHT - SPACE_SM).max(0.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, CONTROL_HEIGHT_SMALL + SPACE_SM),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        ui.set_max_width(width);
+                        // Horizontal overflow stops before the plus; the row keeps its natural height.
+                        let tab_clip = ui.clip_rect().with_min_x(ui.max_rect().left()).with_max_x(ui.max_rect().right());
+                        ui.shrink_clip_rect(tab_clip);
+                        egui::ScrollArea::horizontal()
+                        .id_salt(("workspace-tabs", group))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for (index, tab) in tabs.tabs.iter().enumerate() {
+                                    let (title, hover, dirty) = self.workspace_tab_title(tab);
+                                    let active = tabs.active == index;
+                                    let tab_frame = egui::Frame::new()
+                                        .fill(if active { palette.row_selected } else { palette.card })
+                                        .inner_margin(egui::Margin::symmetric(8, 4))
+                                        .show(ui, |ui| {
+                                            ui.horizontal(|ui| {
+                                                // State wording belongs in the hover, not the tab.
+                                                if let WorkspaceTab::Session(id) = tab {
+                                                    if let Some(session) =
+                                                        self.store.sessions.iter().find(|s| s.id == *id)
+                                                    {
+                                                        let kind = self.session_status_kind_for(session);
+                                                        session_status_icon(ui, palette, kind).on_hover_ui(
+                                                            |ui| {
+                                                                let view = session_status_view(
+                                                                    &self.store.sessions,
+                                                                    session,
+                                                                    self.cancellation_pending(*id),
+                                                                    self.session_activity_for(*id),
+                                                                );
+                                                                ui.label(&view.label);
+                                                                ui.label(&view.hint);
+                                                            },
                                                         );
-                                                        ui.label(&view.label);
-                                                        ui.label(&view.hint);
-                                                    },
-                                                );
-                                            }
-                                        }
-                                        let editing = matches!(tab, WorkspaceTab::Session(id)
-                                            if self.renaming_session == Some(*id) && self.rename_in_workspace_tab);
-                                        if editing {
-                                            match workspace_session_name_editor(ui, &mut self.rename_input, &mut self.rename_needs_focus, 160.0) {
-                                                Some(true) => self.commit_session_rename(),
-                                                Some(false) => self.cancel_session_rename(),
-                                                None => {}
-                                            }
-                                        } else {
-                                        let mut label = ui.add_sized(
-                                            egui::vec2(160.0, CONTROL_HEIGHT_SMALL),
-                                            egui::Label::new(
-                                                RichText::new(&title).size(12.5).color(if active {
-                                                    palette.text_strong
+                                                    }
+                                                }
+                                                let editing = matches!(tab, WorkspaceTab::Session(id)
+                                                    if self.renaming_session == Some(*id) && self.rename_in_workspace_tab);
+                                                if editing {
+                                                    match workspace_session_name_editor(ui, &mut self.rename_input, &mut self.rename_needs_focus, 160.0) {
+                                                        Some(true) => self.commit_session_rename(),
+                                                        Some(false) => self.cancel_session_rename(),
+                                                        None => {}
+                                                    }
                                                 } else {
-                                                    palette.text
-                                                }),
-                                            )
-                                            .truncate()
-                                            .sense(egui::Sense::click_and_drag()),
-                                        );
-                                        // A truncated label already shows its
-                                        // full text on hover; add only what it
-                                        // does not say.
-                                        if let Some(hover) = hover {
-                                            label = label.on_hover_text(hover);
-                                        }
-                                        if let WorkspaceTab::Session(id) = tab {
-                                            let mut rename = label.double_clicked();
-                                            label.context_menu(|ui| {
-                                                if quiet_button(ui, palette, tr("名前を変更")).clicked() {
-                                                    rename = true;
-                                                    ui.close_menu();
+                                                let title_width = ui.fonts(|fonts| fonts.layout_no_wrap(
+                                                    title.clone(), egui::FontId::proportional(12.0), palette.text,
+                                                ).size().x).clamp(40.0, 132.0);
+                                                let mut label = ui.add_sized(
+                                                    egui::vec2(title_width, CONTROL_HEIGHT_SMALL),
+                                                    egui::Label::new(
+                                                        RichText::new(&title).size(12.0).color(if active {
+                                                            palette.text_strong
+                                                        } else {
+                                                            palette.text
+                                                        }),
+                                                    )
+                                                    .truncate()
+                                                    .halign(egui::Align::Min)
+                                                    .sense(egui::Sense::click_and_drag()),
+                                                );
+                                                // A truncated label already shows its
+                                                // full text on hover; add only what it
+                                                // does not say.
+                                                if let Some(hover) = hover {
+                                                    label = label.on_hover_text(hover);
+                                                }
+                                                if let WorkspaceTab::Session(id) = tab {
+                                                    let mut rename = label.double_clicked();
+                                                    label.context_menu(|ui| {
+                                                        if quiet_button(ui, palette, tr("名前を変更")).clicked() {
+                                                            rename = true;
+                                                            ui.close_menu();
+                                                        }
+                                                    });
+                                                    if rename {
+                                                        if let Some(session) = self.store.sessions.iter().find(|s|s.id==*id).cloned() {
+                                                            self.begin_session_rename(&session);
+                                                            self.rename_in_workspace_tab = true;
+                                                        }
+                                                    }
+                                                }
+                                                if label.clicked() {
+                                                    chosen = Some(tab.clone());
+                                                }
+                                                if label.drag_started() {
+                                                    self.workspace_drag = Some(tab.clone());
+                                                }
+                                                if self.workspace_drag.is_some()
+                                                    && ui.input(|i| {
+                                                        i.pointer
+                                                            .hover_pos()
+                                                            .is_some_and(|pos| label.rect.contains(pos))
+                                                            && i.pointer.primary_released()
+                                                            && !i.key_pressed(egui::Key::Escape)
+                                                    })
+                                                {
+                                                    if let Some(moved) = self.workspace_drag.take() {
+                                                        if self.workspace.insert_tab(&moved, *group, index)
+                                                        {
+                                                            self.activate_workspace_tab(&moved);
+                                                        }
+                                                    }
+                                                }
+                                                }
+                                                if dirty {
+                                                    ui.label(
+                                                        RichText::new(ICON_UNSAVED)
+                                                            .color(palette.accent_text),
+                                                    );
+                                                }
+                                                if small_icon_button(
+                                                    ui,
+                                                    palette,
+                                                    ICON_CLOSE,
+                                                    tr("タブを閉じる"),
+                                                )
+                                                .clicked()
+                                                {
+                                                    close = Some(tab.clone());
                                                 }
                                             });
-                                            if rename {
-                                                if let Some(session) = self.store.sessions.iter().find(|s|s.id==*id).cloned() {
-                                                    self.begin_session_rename(&session);
-                                                    self.rename_in_workspace_tab = true;
-                                                }
-                                            }
-                                        }
-                                        if label.clicked() {
-                                            chosen = Some(tab.clone());
-                                        }
-                                        if label.drag_started() {
-                                            self.workspace_drag = Some(tab.clone());
-                                        }
-                                        if self.workspace_drag.is_some()
-                                            && ui.input(|i| {
-                                                i.pointer
-                                                    .hover_pos()
-                                                    .is_some_and(|pos| label.rect.contains(pos))
-                                                    && i.pointer.primary_released()
-                                                    && !i.key_pressed(egui::Key::Escape)
-                                            })
-                                        {
-                                            if let Some(moved) = self.workspace_drag.take() {
-                                                if self.workspace.insert_tab(&moved, *group, index)
-                                                {
-                                                    self.activate_workspace_tab(&moved);
-                                                }
-                                            }
-                                        }
-                                        }
-                                        if dirty {
-                                            ui.label(
-                                                RichText::new(ICON_UNSAVED)
-                                                    .color(palette.accent_text),
-                                            );
-                                        }
-                                        if small_icon_button(
-                                            ui,
-                                            palette,
-                                            ICON_CLOSE,
-                                            tr("タブを閉じる"),
-                                        )
-                                        .clicked()
-                                        {
-                                            close = Some(tab.clone());
-                                        }
-                                    });
-                                });
-                            if active {
-                                let rect = tab_frame.response.rect;
-                                ui.painter().line_segment(
-                                    [
-                                        egui::pos2(rect.left(), rect.bottom() - 1.0),
-                                        egui::pos2(rect.right(), rect.bottom() - 1.0),
-                                    ],
-                                    egui::Stroke::new(2.0, palette.accent),
-                                );
-                            }
-                        }
-                    });
+                                        });
+                                    if active {
+                                        let rect = tab_frame.response.rect;
+                                        ui.painter().line_segment(
+                                            [
+                                                egui::pos2(rect.left(), rect.bottom() - 1.0),
+                                                egui::pos2(rect.right(), rect.bottom() - 1.0),
+                                            ],
+                                            egui::Stroke::new(2.0, palette.accent),
+                                        );
+                                    }
+                                }
+                            });
+                        });
                 });
+                let add = ui.scope(|ui| {
+                    ui.spacing_mut().button_padding.x = 0.0;
+                    icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"))
+                }).inner;
+                add.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("空のターミナルを開く")));
+                if add.clicked() {
+                    self.launch_workspace_terminal(Some(*group));
+                }
+            });
             if let Some(tab) = chosen {
                 self.workspace.select(*group, &tab);
                 self.activate_workspace_tab(&tab);
@@ -7586,7 +7626,7 @@ impl OperonApp {
                                 let mut rename_finished = None;
                                 let row = egui::Frame::new()
                                     .fill(if self.selected_session == Some(id) {
-                                        palette.raised
+                                        palette.row_selected
                                     } else {
                                         Color32::TRANSPARENT
                                     })
@@ -7638,7 +7678,14 @@ impl OperonApp {
                                                         RichText::new(&title)
                                                             .size(12.5)
                                                             .strong()
-                                                            .color(palette.text),
+                                                            .color(
+                                                                if self.selected_session == Some(id)
+                                                                {
+                                                                    palette.text_strong
+                                                                } else {
+                                                                    palette.text
+                                                                },
+                                                            ),
                                                     )
                                                     .truncate()
                                                     .selectable(false),
@@ -7647,6 +7694,16 @@ impl OperonApp {
                                         });
                                     })
                                     .response;
+                                if self.selected_session == Some(id) {
+                                    let x = row.rect.left() + 1.0;
+                                    ui.painter().line_segment(
+                                        [
+                                            egui::pos2(x, row.rect.top() + 2.0),
+                                            egui::pos2(x, row.rect.bottom() - 2.0),
+                                        ],
+                                        egui::Stroke::new(2.0, palette.accent),
+                                    );
+                                }
                                 let row = ui
                                     .interact(
                                         row.rect,

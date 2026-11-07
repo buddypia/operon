@@ -1,0 +1,15 @@
+digest: "bf66d0a8100a276c"
+obligations:
+  - R1 empirical-test :: cargo test --locked session_254_selection_follows_navigation
+  - R2 empirical-test :: cargo test --locked session_254_compact_tabs
+  - R3 empirical-test :: cargo test --locked session_254_terminal_
+  - I1 empirical-test :: cargo test --locked session_254_empty_workspace
+  - I2 empirical-test :: cargo test --locked session_253_
+  - F1 empirical-mutation :: python3 docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py
+  - F2 empirical-test :: cargo test --locked session_254_selected_tab_rule_is_visible
+  - F3 empirical-test :: cargo test --locked every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran
+  - F4 empirical-test :: cargo test --locked only_selections_wear_the_selection_colour
+  - F5 empirical-test :: cargo test --locked session_column_project_is_a_heading_not_a_card
+  - F6 empirical-test :: cargo test --locked workspace_session_tab_shows_its_status_glyph
+  - F7 empirical-test :: cargo test --locked session_254_terminal_context
+  - F8 empirical-test :: cargo test --locked session_254_terminal_context
