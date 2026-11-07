@@ -69398,3 +69398,332 @@ pub(crate) fn session_253_compact_titles() {
     assert!(include_str!("app.rs").contains("app.number_legacy_session_names();"));
     fs::remove_dir_all(root).unwrap();
 }
+
+// Change 254: selection is navigation state, independent of the agent's status.
+#[test]
+pub(crate) fn session_254_selection_follows_navigation() {
+    for theme in AppTheme::all() {
+        let root = temporary_directory("session-254-selection");
+        let (mut app, _, _, first, second) = status_column_fixture(&root);
+        app.store.theme = theme;
+        app.select_session(first);
+        let ctx = egui::Context::default();
+        app.apply_appearance(&ctx);
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        for (id, name, in_tab) in [(second, "second", true), (first, "first", false)] {
+            // Separate navigation clicks from the intentional double-click rename gesture.
+            for _ in 0..24 {
+                workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            }
+            let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            let right = project_column_right(&app);
+            let title = drawn_text_rects(&out, |s| s == name)
+                .into_iter()
+                .filter(|r| (r.left() > right) == in_tab)
+                .min_by(|a, b| a.top().total_cmp(&b.top()))
+                .unwrap();
+            let out =
+                session_253_pointer(&mut app, &ctx, title.center(), egui::PointerButton::Primary);
+            assert_eq!(
+                app.selected_session,
+                Some(id),
+                "{} {name} in_tab={in_tab} at {title:?}",
+                theme.label()
+            );
+            let sidebar = drawn_text_rects(&out, |s| s == name)
+                .into_iter()
+                .find(|r| r.left() < right)
+                .unwrap();
+            let palette = theme.palette();
+            assert!(
+                out.shapes
+                    .iter()
+                    .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                if r.fill == palette.row_selected && r.rect.contains_rect(sidebar))),
+                "selected row needs neutral selection fill"
+            );
+            let bars: Vec<_> = out
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if stroke.color == palette.accent
+                            && stroke.width == 2.0
+                            && points[0].x == points[1].x
+                            && points[0].x < right =>
+                    {
+                        Some(points)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                bars.len(),
+                1,
+                "only selected sidebar row has an accent rule"
+            );
+            assert!(bars[0][0].y <= sidebar.center().y && bars[0][1].y >= sidebar.center().y);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+pub(crate) fn session_254_compact_tabs() {
+    let root = temporary_directory("session-254-tabs");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let texts: Vec<_> = out
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Text(t)
+                if ["first", "second"].contains(&t.galley.text()) && t.pos.x > right =>
+            {
+                Some(t)
+            }
+            _ => None,
+        })
+        .take(2)
+        .collect();
+    assert_eq!(texts.len(), 2);
+    for text in &texts {
+        assert!(
+            text.galley
+                .job
+                .sections
+                .iter()
+                .all(|s| s.format.font_id.size == 12.0),
+            "tab titles use caption size"
+        );
+    }
+    assert!(
+        texts[1].pos.x - texts[0].pos.x < 150.0,
+        "short names must not reserve large empty labels"
+    );
+    assert!(
+        texts[0].pos.x - right < 65.0,
+        "title is left aligned beside status icon"
+    );
+    let selected = texts[0].visual_bounding_rect();
+    assert!(
+        out.shapes
+            .iter()
+            .any(|s| matches!(&s.shape, egui::Shape::Rect(r)
+        if r.fill == app.store.theme.palette().row_selected && r.rect.contains_rect(selected))),
+        "active tab uses selection fill"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+fn session_254_add_rect(app: &OperonApp, out: &egui::FullOutput) -> egui::Rect {
+    drawn_text_rects(out, |s| s == ICON_ADD)
+        .into_iter()
+        .filter(|r| r.left() > project_column_right(app))
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("persistent plus in tab strip")
+}
+
+#[test]
+pub(crate) fn session_254_terminal_action() {
+    let root = temporary_directory("session-254-add");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.select_session(first);
+    app.show_session_inspector = false;
+    for i in 0..18 {
+        let mut s = app.store.sessions[0].clone();
+        s.id = Uuid::new_v4();
+        s.name = format!("long-session-name-{i}");
+        app.store.sessions.push(s);
+    }
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let area = app.dock.rects(app.dock_area.unwrap(), None).center;
+    assert!(add.right() <= area.right() && add.left() > area.right() - CONTROL_HEIGHT - SPACE_SM);
+    for shape in &out.shapes {
+        if matches!(&shape.shape, egui::Shape::Text(t) if t.pos.x > project_column_right(&app) && t.pos.y < add.bottom() && t.galley.text() != ICON_ADD)
+        {
+            assert!(
+                shape.clip_rect.right() <= add.left(),
+                "scrolling tabs must clip before the fixed plus"
+            );
+        }
+    }
+    let mut named = false;
+    for _ in 0..4 {
+        let hover = workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(add.center())],
+        );
+        named |= !drawn_text_rects(&hover, |s| s == "空のターミナルを開く").is_empty();
+    }
+    assert!(named, "plus explains that it starts a plain terminal");
+    let count = app.store.sessions.len();
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert_eq!(app.store.sessions.len(), count);
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_254_terminal_context() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("session-254-context");
+    let project_path = root.join("project");
+    fs::create_dir_all(&project_path).unwrap();
+    run_fixture_git(&project_path, &["init", "-q"]);
+    run_fixture_git(
+        &project_path,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        ],
+    );
+    let worktree = root.join("worktree");
+    run_fixture_git(
+        &project_path,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "feature/terminal",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let (mut app, first, second) = app_with_two_sessions(&project_path);
+    app.tools.tmux = true;
+    app.store.sessions[0].worktree_path = Some(worktree.clone());
+    app.select_session(first);
+    app.select_session(second);
+    app.show_session_inspector = false;
+    let group = app.workspace.groups[0].id;
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(first),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
+    app.workspace.select(group, &WorkspaceTab::Session(second));
+    app.activate_workspace_tab(&WorkspaceTab::Session(second));
+    // A launch form left on a different project must never redirect the plus.
+    app.session_path_project = Some(Uuid::new_v4());
+    app.session_path_input = root.join("unrelated").display().to_string();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = drawn_text_rects(&out, |s| s == ICON_ADD)
+        .into_iter()
+        .filter(|r| r.left() > project_column_right(&app))
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("right pane plus");
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    let created = app.store.sessions.last().unwrap().clone();
+    assert_ne!(created.id, second);
+    assert_ne!(created.id, first);
+    for _ in 0..200 {
+        app.process_background_results();
+        if !app
+            .background_tasks
+            .contains(&BackgroundKey::EmptySessionStart(created.id))
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let state = tmux_state(&created.tmux_name);
+    let cwd = run_command_with_timeout(
+        tmux_command().args([
+            "display-message",
+            "-p",
+            "-t",
+            &created.tmux_name,
+            "#{pane_current_path}",
+        ]),
+        Duration::from_secs(2),
+    )
+    .unwrap();
+    kill_tmux_session(&created.tmux_name);
+    assert_eq!(
+        state,
+        TmuxState::Alive,
+        "plus really launches a plain terminal"
+    );
+    assert_eq!(created.project_id, app.store.projects[0].id);
+    assert_eq!(
+        created.worktree_path,
+        Some(worktree.canonicalize().unwrap())
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&cwd.stdout).trim(),
+        worktree.canonicalize().unwrap().to_str().unwrap()
+    );
+    assert_eq!(created.origin, Some(SessionOrigin::PlainTerminal));
+    assert_eq!(app.selected_session, Some(created.id));
+    assert!(!app.launch_sheet_open);
+    assert_eq!(
+        app.session_path_input,
+        root.join("unrelated").display().to_string(),
+        "quick launch preserves the form draft"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_254_empty_workspace() {
+    let root = temporary_directory("session-254-empty");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert!(app.store.sessions.is_empty());
+    assert!(app.notice.is_none(), "no-project action is disabled");
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "空のプロジェクト".into(),
+        path: root.clone(),
+        added_at: now(),
+    };
+    app.store.projects.push(project.clone());
+    app.select_workspace_project(project.id);
+    app.tools.tmux = false;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert!(app.store.sessions.is_empty());
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    fs::remove_dir_all(root).unwrap();
+}

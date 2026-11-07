@@ -1,14 +1,14 @@
 state:
   route: "modify"
-  stage: "design"
-  status: "ready"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
   screen: "approved"
-resume: "Evaluate the requested existing-screen refinements, then implement and verify."
+resume: "Run the regression tests and independent verification before landing."
 contract:
   three-gates: "machine pending make q.fast and cargo test --locked session_254_"
   guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py"

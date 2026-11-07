@@ -4439,6 +4439,56 @@ impl OperonApp {
             self.notice = Some(tr("先にプロジェクトを選んでください。").into());
             return;
         };
+        let input = self.session_path_input.clone();
+        self.launch_empty_session_at(project, self.session_path_project, &input);
+    }
+
+    /// The plus belongs to its pane, not a possibly stale launch-sheet draft.
+    pub(crate) fn launch_workspace_terminal(&mut self, group: Option<Uuid>) {
+        let tab = group
+            .and_then(|id| self.workspace.groups.iter().find(|g| g.id == id))
+            .and_then(|g| g.tabs.get(g.active))
+            .or_else(|| self.workspace.active())
+            .cloned();
+        let project_id = tab
+            .as_ref()
+            .and_then(|tab| self.workspace_tab_project(tab))
+            .or(self.workspace_project)
+            .or(self.selected_project);
+        let Some(project) = self
+            .store
+            .projects
+            .iter()
+            .find(|p| Some(p.id) == project_id)
+            .cloned()
+        else {
+            self.notice = Some(tr("先にプロジェクトを選んでください。").into());
+            return;
+        };
+        let path = match &tab {
+            Some(WorkspaceTab::Session(id)) => self
+                .store
+                .sessions
+                .iter()
+                .find(|s| s.id == *id)
+                .and_then(|s| s.worktree_path.as_ref())
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        if let Some(group) = group {
+            self.workspace.focused = Some(group);
+        }
+        let project_id = project.id;
+        self.launch_empty_session_at(project, Some(project_id), &path);
+    }
+
+    fn launch_empty_session_at(
+        &mut self,
+        project: Project,
+        path_project: Option<Uuid>,
+        path_input: &str,
+    ) {
         if self.worktree_mutation_running(project.id) {
             self.notice = Some(tr("worktree 操作の完了を待ってください。").into());
             return;
@@ -4450,8 +4500,8 @@ impl OperonApp {
         let worktree_path = match resolve_selected_session_path(
             project.id,
             &project.path,
-            self.session_path_project,
-            &self.session_path_input,
+            path_project,
+            path_input,
         ) {
             Ok(path) => path,
             Err(error) => {

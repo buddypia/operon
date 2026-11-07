@@ -37,4 +37,4 @@
 
 ## Departures from the plan
 
-None.
+Regression tests were drafted while the artifact evaluator was working, before the plan commit; production implementation still followed the independent evaluation, readiness Go and plan commit. See evidence.md. The existing plain-terminal creation body was factored into launch_empty_session_at so the plus can pass explicit context without overwriting a saved launch-sheet draft.

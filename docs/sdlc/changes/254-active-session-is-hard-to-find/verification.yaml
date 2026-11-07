@@ -1,0 +1,8 @@
+digest: "1b0debfd117444a4"
+obligations:
+  - R1 empirical-test :: cargo test --locked session_254_selection_follows_navigation
+  - R2 empirical-test :: cargo test --locked session_254_compact_tabs
+  - R3 empirical-test :: cargo test --locked session_254_terminal_
+  - I1 empirical-test :: cargo test --locked session_254_empty_workspace
+  - I2 empirical-test :: cargo test --locked session_253_
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py
