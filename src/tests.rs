@@ -69099,3 +69099,302 @@ fn sidebar_252_tiles_fit_narrow_column() {
     }
     fs::remove_dir_all(root).ok();
 }
+
+// Change 253: the visible names, rather than a separate settings screen, own renaming.
+fn session_253_pointer(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    at: egui::Pos2,
+    button: egui::PointerButton,
+) -> egui::FullOutput {
+    workspace_pointer_frame(app, ctx, vec![egui::Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        workspace_pointer_frame(
+            app,
+            ctx,
+            vec![egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            }],
+        );
+    }
+    workspace_pointer_frame(app, ctx, Vec::new())
+}
+
+#[test]
+pub(crate) fn session_253_rename_from_sidebar_and_tab() {
+    for in_tab in [false, true] {
+        for menu in [false, true] {
+            let root = temporary_directory("session-253-rename");
+            let (mut app, first, _) = app_with_two_sessions(&root);
+            app.select_session(first);
+            app.show_session_inspector = false;
+            let ctx = egui::Context::default();
+            workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            let right = project_column_right(&app);
+            let at = drawn_text_rects(&out, |text| text == "first")
+                .into_iter()
+                .filter(|r| (r.left() > right) == in_tab)
+                .min_by(|a, b| a.top().total_cmp(&b.top()))
+                .unwrap()
+                .center();
+            if menu {
+                let out = session_253_pointer(&mut app, &ctx, at, egui::PointerButton::Secondary);
+                let action = drawn_text_rect(&out, |text| text == "名前を変更")
+                    .expect("right-click must offer 名前を変更");
+                session_253_pointer(
+                    &mut app,
+                    &ctx,
+                    action.center(),
+                    egui::PointerButton::Primary,
+                );
+            } else {
+                for _ in 0..2 {
+                    session_253_pointer(&mut app, &ctx, at, egui::PointerButton::Primary);
+                }
+            }
+            assert_eq!(
+                app.renaming_session,
+                Some(first),
+                "in_tab={in_tab}, menu={menu}"
+            );
+            workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            app.rename_input = "調査と修正".into();
+            workspace_pointer_frame(
+                &mut app,
+                &ctx,
+                vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                }],
+            );
+            assert_eq!(app.renaming_session, None);
+            assert_eq!(
+                load_store(&app.data_file)
+                    .unwrap()
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == first)
+                    .unwrap()
+                    .name,
+                "調査と修正"
+            );
+            let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            let rects = drawn_text_rects(&out, |text| text == "調査と修正");
+            assert!(rects.iter().any(|r| r.left() < right));
+            assert!(rects.iter().any(|r| r.left() > right));
+            let session = app
+                .store
+                .sessions
+                .iter()
+                .find(|s| s.id == first)
+                .unwrap()
+                .clone();
+            app.begin_session_rename(&session);
+            app.rename_in_workspace_tab = in_tab;
+            workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            app.rename_input = "取り消す名前".into();
+            workspace_pointer_frame(
+                &mut app,
+                &ctx,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                }],
+            );
+            assert_eq!(app.renaming_session, None);
+            assert_eq!(
+                app.store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == first)
+                    .unwrap()
+                    .name,
+                "調査と修正"
+            );
+            app.begin_session_rename(&session);
+            app.rename_in_workspace_tab = in_tab;
+            workspace_pointer_frame(
+                &mut app,
+                &ctx,
+                vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::default(),
+                }],
+            );
+            app.rename_input = "クリックで保存".into();
+            // Blur by clicking a different control; typing is retained.
+            session_253_pointer(
+                &mut app,
+                &ctx,
+                egui::pos2(2.0, 800.0),
+                egui::PointerButton::Primary,
+            );
+            assert_eq!(app.renaming_session, None);
+            assert_eq!(
+                app.store
+                    .sessions
+                    .iter()
+                    .find(|s| s.id == first)
+                    .unwrap()
+                    .name,
+                "クリックで保存"
+            );
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
+pub(crate) fn session_253_numbered_defaults() {
+    let root = temporary_directory("session-253-numbers");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    let project = app.store.sessions[0].project_id;
+    assert_eq!(app.next_session_name(Uuid::new_v4()), "セッション1");
+    assert_eq!(app.next_session_name(project), "セッション3");
+    app.store.sessions[0].name = "Session 3".into();
+    assert_eq!(app.next_session_name(project), "セッション4");
+    app.store.sessions[1].name = "세션 4".into();
+    assert_eq!(app.next_session_name(project), "セッション5");
+    assert_eq!(session_name_number("セッション10"), Some(10));
+    assert_eq!(session_name_number("Session notes"), None);
+    app.begin_session_rename(
+        &app.store
+            .sessions
+            .iter()
+            .find(|s| s.id == first)
+            .unwrap()
+            .clone(),
+    );
+    assert_eq!(app.rename_input, "Session 3");
+    fs::remove_dir_all(root).unwrap();
+    let (mut app, project, root) = launch_screen_fixture("verifier-253-queued");
+    let mut parent = test_session(Uuid::new_v4(), SessionStatus::Active);
+    parent.project_id = project.id;
+    let parent_id = parent.id;
+    app.store.sessions.push(parent);
+    app.selected_agent = "gemini".into();
+    app.goal_input = "調査を始めて".into();
+    app.depends_on_input = Some(parent_id);
+    app.launch_session();
+    assert_eq!(app.store.sessions.len(), 2, "{:?}", app.notice);
+    assert_eq!(app.store.sessions[1].status, SessionStatus::Queued);
+    assert_eq!(app.store.sessions[1].name, "セッション2");
+    app.session_name_input = "自分で付けた名前".into();
+    app.goal_input = "別の依頼".into();
+    app.depends_on_input = Some(parent_id);
+    app.launch_session();
+    assert_eq!(app.store.sessions[2].name, "自分で付けた名前");
+    assert_eq!(
+        load_store(&app.data_file).unwrap().sessions[1].name,
+        "セッション2"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_253_compact_titles() {
+    let root = temporary_directory("session-253-legacy");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    for (i, session) in app.store.sessions.iter_mut().enumerate() {
+        session.created_at = i as u64;
+        session.agent = "gemini".into();
+        session.name = format!("{} · Antigravity", workspace_display_name(&root));
+    }
+    let old = app.store.sessions[0].name.clone();
+    let mut custom = app.store.sessions[0].clone();
+    custom.id = Uuid::new_v4();
+    custom.name = "Antigravity の調査".into();
+    app.store.sessions.push(custom.clone());
+    let mut requested = custom.clone();
+    requested.id = Uuid::new_v4();
+    requested.name = old.clone();
+    requested.goal = "作業の依頼".into();
+    app.store.sessions.push(requested.clone());
+    app.store.sessions.swap(0, 1);
+    app.number_legacy_session_names();
+    let saved = load_store(&app.data_file).unwrap();
+    assert_eq!(
+        saved.sessions.iter().find(|s| s.id == first).unwrap().name,
+        "セッション1"
+    );
+    assert_eq!(
+        saved.sessions.iter().find(|s| s.id == second).unwrap().name,
+        "セッション2"
+    );
+    assert_eq!(
+        saved
+            .sessions
+            .iter()
+            .find(|s| s.id == custom.id)
+            .unwrap()
+            .name,
+        custom.name
+    );
+    assert_eq!(
+        saved
+            .sessions
+            .iter()
+            .find(|s| s.id == requested.id)
+            .unwrap()
+            .name,
+        old
+    );
+    let bytes = fs::read(&app.data_file).unwrap();
+    app.number_legacy_session_names();
+    assert_eq!(
+        fs::read(&app.data_file).unwrap(),
+        bytes,
+        "startup must be idempotent"
+    );
+    let ctx = egui::Context::default();
+    app.select_session(first);
+    app.show_session_inspector = false;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let names = drawn_text_rects(&out, |s| s == "セッション1");
+    assert!(names.iter().any(|r| r.left() < right));
+    assert!(names.iter().any(|r| r.left() > right));
+    // An uncommitted write cannot change the in-memory names.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == first)
+        .unwrap()
+        .name = old.clone();
+    app.data_file = root.clone(); // A directory cannot be replaced by a store file.
+    app.number_legacy_session_names();
+    assert_eq!(
+        app.store
+            .sessions
+            .iter()
+            .find(|s| s.id == first)
+            .unwrap()
+            .name,
+        old
+    );
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap()
+        .contains("保存できませんでした"));
+    assert_eq!(fs::read(root.join("store-v2.json")).unwrap(), bytes);
+    // The existing persistence outcome owns committed-but-not-synced retries.
+    assert!(app.apply_persist_result(Ok(WriteOutcome::CommittedButNotSynced("injected".into()))));
+    assert!(app.store_retry_pending);
+    assert!(include_str!("app.rs").contains("app.number_legacy_session_names();"));
+    fs::remove_dir_all(root).unwrap();
+}

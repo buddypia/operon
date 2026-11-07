@@ -1,0 +1,16 @@
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+resume: "Land after CI passes on the final head, package from main, then install with permission to restart the running app."
+contract:
+  three-gates: "machine passed make q.fast and all session_253_, rename, translation, sidebar and tab-state checks"
+  guards-verified-by-mutation: "machine passed independent 8 of 8 mutations; final Escape and real-launch guard each watched failing and restored"
+  release-binary: "machine passed yes - production source changed; package from main after CI and landing"
+  installed-app: "human pending install and restart require permission to quit the running app"
