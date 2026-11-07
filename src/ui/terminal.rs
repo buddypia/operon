@@ -662,39 +662,31 @@ pub(crate) fn terminal_rows(
             None
         };
 
-        let (cached_galleys_storage, cached_caret) = match context {
-            Some(ctx) => {
-                let key = TerminalPaneKey {
-                    session_id: ctx.session_id,
-                    rect_size: (viewport.x.round() as u32, viewport.y.round() as u32),
-                    visible_rows: (rows.start, rows.end),
-                    output_generation: ctx.output_generation,
-                    cursor,
-                    theme: ctx.theme,
-                    search_query: search.query.map(|q| q.to_string()),
-                    search_current: search.current,
-                };
-                let ctx_fonts = ui.ctx().clone();
-                let (galleys, caret_res) = ctx.cache.get_or_render(ctx.session_id, &key, || {
-                    let galleys: Vec<Option<Arc<egui::Galley>>> = rows
-                        .clone()
-                        .map(|idx| {
-                            let line = &lines[idx];
-                            if line.is_empty() {
-                                None
-                            } else {
-                                Some(ctx_fonts.fonts(|fonts| fonts.layout_job(line.clone())))
-                            }
-                        })
-                        .collect();
-                    (galleys, computed_caret)
-                });
-                (Some(galleys), caret_res)
-            }
-            None => (None, computed_caret),
-        };
+        let cached_galleys_storage = context.map(|ctx| {
+            let key = TerminalPaneKey {
+                session_id: ctx.session_id,
+                visible_rows: (rows.start, rows.end),
+                output_generation: ctx.output_generation,
+                theme: ctx.theme,
+            };
+            let ctx_fonts = ui.ctx().clone();
+            ctx.cache.get_or_render(ctx.session_id, &key, || {
+                rows.clone()
+                    .map(|idx| {
+                        let line = &lines[idx];
+                        if line.is_empty() {
+                            None
+                        } else {
+                            Some(ctx_fonts.fonts(|fonts| fonts.layout_job(line.clone())))
+                        }
+                    })
+                    .collect()
+            })
+        });
 
-        caret = cached_caret;
+        // Placed for this frame's pane, never cached: the pane moves and
+        // resizes without its rows changing.
+        caret = computed_caret;
 
         for (offset, line) in lines[rows.clone()].iter().enumerate() {
             let line_idx = first + offset;
@@ -762,27 +754,20 @@ pub(crate) struct TerminalRowsResult {
     pub(crate) caret: Option<egui::Rect>,
 }
 
-/// Deterministic dirty-checking key for a rendered terminal pane.
-/// Any change in geometry, scroll range, focus state, output content,
-/// cursor position, theme, or active search marks the pane dirty.
+/// Dirty-checking key for a pane's laid-out rows: exactly the inputs of a
+/// row's galley. The pane's size is not one — rows are laid out unwrapped —
+/// nor are the caret and search highlights, which are painted every frame, so
+/// a window resize with unchanged output reuses every row (change 255).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TerminalPaneKey {
     /// Identifies the session.
     pub(crate) session_id: Uuid,
-    /// Integer-rounded viewport dimensions (width, height) to eliminate sub-pixel float jitter.
-    pub(crate) rect_size: (u32, u32),
     /// Range of visible rows (start, end) served by `ScrollArea::show_rows`.
     pub(crate) visible_rows: (usize, usize),
     /// Monotonically increasing counter bumped only when tmux outputs new content.
     pub(crate) output_generation: u64,
-    /// Caret coordinates within the terminal grid.
-    pub(crate) cursor: Option<TerminalCursor>,
     /// Active theme (Dark/Light).
     pub(crate) theme: AppTheme,
-    /// Current search query string (if search is open).
-    pub(crate) search_query: Option<String>,
-    /// Currently focused search match index (if search is open).
-    pub(crate) search_current: Option<usize>,
 }
 
 /// Cached rendered representation of one terminal pane.
@@ -791,8 +776,6 @@ pub(crate) struct CachedTerminalPane {
     pub(crate) key: TerminalPaneKey,
     /// Shaped galleys for the visible rows. `None` represents an empty row (blank line).
     pub(crate) galleys: Vec<Option<Arc<egui::Galley>>>,
-    /// Precomputed caret bounding rectangle in screen coordinates (if cursor is visible).
-    pub(crate) caret: Option<egui::Rect>,
 }
 
 /// Retained galley & dirty-checked rendering cache for terminal panes.
@@ -811,14 +794,14 @@ pub(crate) struct TerminalPaneRenderCache {
 
 impl TerminalPaneRenderCache {
     /// Query the cache. If `key` matches the existing entry for `session_id`,
-    /// returns the cached galleys and caret without invoking `render_fn`.
+    /// returns the cached galleys without invoking `render_fn`.
     /// On a miss or dirty key, invokes `render_fn`, stores the result, and increments `builds`.
     pub(crate) fn get_or_render(
         &mut self,
         session_id: Uuid,
         key: &TerminalPaneKey,
-        render_fn: impl FnOnce() -> (Vec<Option<Arc<egui::Galley>>>, Option<egui::Rect>),
-    ) -> (&[Option<Arc<egui::Galley>>], Option<egui::Rect>) {
+        render_fn: impl FnOnce() -> Vec<Option<Arc<egui::Galley>>>,
+    ) -> &[Option<Arc<egui::Galley>>] {
         let is_hit = self
             .entries
             .get(&session_id)
@@ -826,20 +809,19 @@ impl TerminalPaneRenderCache {
         if is_hit {
             self.hits += 1;
         } else {
-            let (galleys, caret) = render_fn();
+            let galleys = render_fn();
             self.entries.insert(
                 session_id,
                 CachedTerminalPane {
                     key: key.clone(),
                     galleys,
-                    caret,
                 },
             );
             self.builds += 1;
             *self.session_builds.entry(session_id).or_default() += 1;
         }
         let entry = self.entries.get(&session_id).expect("entry must exist");
-        (&entry.galleys, entry.caret)
+        &entry.galleys
     }
 
     /// Number of full rebuilds (cache misses).
@@ -896,7 +878,6 @@ pub(crate) struct TerminalSearchOverlay<'a> {
     pub(crate) current: Option<usize>,
     pub(crate) scroll_to: Option<usize>,
     pub(crate) palette: &'a Palette,
-    pub(crate) query: Option<&'a str>,
 }
 
 /// A row of the pane's grid, numbered as a row of the capture instead.
