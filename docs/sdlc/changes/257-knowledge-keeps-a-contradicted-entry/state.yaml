@@ -1,0 +1,19 @@
+state:
+  route: "modify"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Write the six failing knowledge_257_ tests, then implement the plan in order."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending touches src/knowledge.rs and src/config.rs, so it ends with bash scripts/package-macos.sh"
+  replace-tests: "machine pending cargo test --locked knowledge_257_"
+  guards-verified-by-mutation: "human pending python3 docs/sdlc/changes/257-knowledge-keeps-a-contradicted-entry/mutations.py"
