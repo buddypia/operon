@@ -1,13 +1,13 @@
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "design"
+  status: "ready"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 resume: "Evaluate the requested existing-screen refinements, then implement and verify."
 contract:
   three-gates: "machine pending make q.fast and cargo test --locked session_254_"

@@ -1,6 +1,6 @@
 # Intent: Find the current session and create a terminal quickly
 
-- **Status**: draft
+- **Status**: approved
 
 ## Problem
 
