@@ -1,0 +1,19 @@
+state:
+  route: "modify"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Merge main after change 257 lands, then write the seven failing knowledge_258_ tests."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending touches src/knowledge.rs, src/tmux/hooks.rs, src/app.rs: ends with bash scripts/package-macos.sh and the ship skill's install"
+  brief-tests: "machine pending cargo test --locked knowledge_258_"
+  guards-verified-by-mutation: "human pending python3 docs/sdlc/changes/258-agents-do-not-know-the-knowledge-exists/mutations.py"
