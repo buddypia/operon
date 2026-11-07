@@ -6999,7 +6999,9 @@ impl OperonApp {
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         ui.set_max_width(width);
-                        ui.shrink_clip_rect(ui.max_rect());
+                        // Horizontal overflow stops before the plus; the row keeps its natural height.
+                        let tab_clip = ui.clip_rect().with_min_x(ui.max_rect().left()).with_max_x(ui.max_rect().right());
+                        ui.shrink_clip_rect(tab_clip);
                         egui::ScrollArea::horizontal()
                         .id_salt(("workspace-tabs", group))
                         .auto_shrink([false, true])

@@ -15,7 +15,7 @@ Show the current session in the sidebar and tab strip, reduce tab width/text, an
 - D1: Three requested changes mapped to R1-R3 tests; no new screen or navigation.
 - D2: Trace session, document, empty and absent context through the shared launch path; preserve focused pane for insertion.
 - D3: Empty workspace, absent project, stale sheet path, missing tmux, overflowing names/tabs and split pane covered.
-- D4: Five new behavioral tests observed red before implementation then green; independent mutations and CI remain the closing evidence.
+- D4: Four initial requirement tests observed red before implementation, then green; the empty-state extension and independently reproduced clipping regression bring the final set to six. Independent mutations and CI are the closing evidence.
 - D5: No command strings or trust boundaries added; existing path resolution and background allowed-path validation retained.
 - D6: N/A, no personal data/telemetry/logging surface changes.
 - D7: N/A, manifests and dependencies unchanged.
@@ -32,6 +32,8 @@ Necessary: screenshot/request show selection too subtle and a missing direct act
 
 ## Gate
 
-New tests: 5 passed, 0 failed. Fresh fmt/clippy, existing navigation/rename/type-scale checks, independent obligations/mutations, rendered images and CI are recorded in evidence.md once complete.
+New tests: 6 passed, 0 failed. Fresh fmt/clippy and the named existing navigation/rename/type-scale checks passed. Final screenshots inspected in normal/narrow/split/light fixtures; no new drawing IO or commands. Two independently reproduced findings were fixed: left-edge guard lacked x placement, and the tab underline was clipped. Commands, timings and mutation evidence are in evidence.md.
 
-Review remains in progress until those checks finish.
+The remaining deployment steps are CI on the final branch head, landing, packaging from main, and permission to quit the installed app before replacement.
+
+UNRESOLVED DECISIONS: permission to quit the running application for installation.

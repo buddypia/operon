@@ -1544,3 +1544,9 @@ input is gated again wherever it is read back from disk on its way to a shell.
 `custom_command_with_a_line_break_inside_is_refused`, and
 `a_stored_agent_command_with_a_line_break_is_refused_at_retry`, each watched
 failing in `docs/sdlc/changes/241-custom-command-gate-admits-newline/mutations.py`.
+
+## 108 — A selection rule can be in the column and still be on the wrong edge
+
+The first change-254 selection guard counted one orange vertical rule in the sidebar and checked its vertical span. A mutation moving the rule from the selected row's left edge to its right edge survived: both edges were still inside the column. A placement claim needs the target row's bounds as its reference, not only the larger containing column.
+
+**Guard.** `session_254_selection_follows_navigation` anchors the rule to the selected fill's left edge in every theme after pointer navigation. The `sidebar-rule-disappears` mutation in `docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py` moves it to the opposite edge and must fail. `session_254_selected_tab_rule_is_visible` also checks the underline against its actual clip rect: an existing shape below a clip is invisible even when its position looks correct in the shape list.

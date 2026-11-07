@@ -1,8 +1,9 @@
-digest: "1b0debfd117444a4"
+digest: "88e3f9840d98cf60"
 obligations:
   - R1 empirical-test :: cargo test --locked session_254_selection_follows_navigation
   - R2 empirical-test :: cargo test --locked session_254_compact_tabs
   - R3 empirical-test :: cargo test --locked session_254_terminal_
   - I1 empirical-test :: cargo test --locked session_254_empty_workspace
   - I2 empirical-test :: cargo test --locked session_253_
-  - I3 empirical-mutation :: python3 docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py
+  - F1 empirical-mutation :: python3 docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py
+  - F2 empirical-test :: cargo test --locked session_254_selected_tab_rule_is_visible

@@ -13,6 +13,7 @@ MUTATIONS = {
     "selected-tab-disappears": (SCREENS, "if active { palette.row_selected }", "if active { palette.raised }"),
     "tab-text-too-large": (SCREENS, "RichText::new(&title).size(12.0)", "RichText::new(&title).size(15.0)"),
     "short-tab-wastes-width": (SCREENS, ".clamp(40.0, 132.0)", ".clamp(160.0, 160.0)"),
+    "selected-tab-rule-is-clipped": (SCREENS, "ui.shrink_clip_rect(tab_clip);", "let _ = tab_clip; ui.shrink_clip_rect(ui.max_rect());"),
     "plus-does-nothing": (SCREENS, "self.launch_workspace_terminal(Some(*group));", "let _ = group;"),
     "plus-promises-wrong-action": (SCREENS, 'tr("空のターミナルを開く")', 'tr("名前を変更")'),
     "plus-ignores-pane-worktree": (APP, "self.launch_empty_session_at(project, Some(project_id), &path);", "let _ = path; self.launch_empty_session_at(project, Some(project_id), \"\");"),

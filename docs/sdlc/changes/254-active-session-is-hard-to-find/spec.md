@@ -6,7 +6,7 @@
 ## Requirements
 
 1. The selected sidebar session has the documented neutral selection fill and a 2px orange left rule, following selection when either sidebar or workspace tabs are clicked. Test: `session_254_selection_follows_navigation`.
-2. Workspace tab titles use 12px regular text, left alignment, and a content-sized width capped at 132px; the selected tab has neutral selection fill plus its existing orange bottom rule. Long names truncate and rename/close/drag remain available. Test: `session_254_compact_tabs`.
+2. Workspace tab titles use 12px regular text, left alignment, and a content-sized width capped at 132px; the selected tab has neutral selection fill plus its existing orange bottom rule. Long names truncate and rename/close/drag remain available. Tests: `session_254_compact_tabs`, `session_254_selected_tab_rule_is_visible`.
 3. Every pane's tab strip reserves a fixed right-edge plus outside horizontal scrolling. Clicking it immediately starts a plain terminal in that pane's active session project and worktree, using the existing bounded background launch. Stale launch-form values cannot redirect it. Missing tmux and invalid paths use existing Japanese notices without creating a session. Tests: `session_254_terminal_action`, `session_254_terminal_context`.
 
 ## Behaviour

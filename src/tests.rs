@@ -69463,6 +69463,23 @@ pub(crate) fn session_254_selection_follows_navigation() {
                 "only selected sidebar row has an accent rule"
             );
             assert!(bars[0][0].y <= sidebar.center().y && bars[0][1].y >= sidebar.center().y);
+            let selected_row = out
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Rect(r)
+                        if r.fill == palette.row_selected && r.rect.contains_rect(sidebar) =>
+                    {
+                        Some(r.rect)
+                    }
+                    _ => None,
+                })
+                .expect("selected sidebar row fill");
+            assert_eq!(
+                bars[0][0].x,
+                selected_row.left() + 1.0,
+                "selection rule must mark the selected row's left edge"
+            );
         }
         fs::remove_dir_all(root).unwrap();
     }
@@ -69725,5 +69742,36 @@ pub(crate) fn session_254_empty_workspace() {
         .as_deref()
         .unwrap_or_default()
         .contains("tmux が必要"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_254_selected_tab_rule_is_visible() {
+    let root = temporary_directory("session-254-visible-tab-rule");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = project_column_right(&app);
+    let mut rules = 0;
+    for shape in &out.shapes {
+        if let egui::Shape::LineSegment { points, stroke } = &shape.shape {
+            if stroke.color == app.store.theme.palette().accent
+                && points[0].y == points[1].y
+                && points[0].x > right
+            {
+                rules += 1;
+                assert!(
+                    points.iter().all(|point| shape.clip_rect.contains(*point)),
+                    "selected tab rule is clipped: points={points:?}, clip={:?}",
+                    shape.clip_rect
+                );
+            }
+        }
+    }
+    assert_eq!(rules, 1);
     fs::remove_dir_all(root).unwrap();
 }

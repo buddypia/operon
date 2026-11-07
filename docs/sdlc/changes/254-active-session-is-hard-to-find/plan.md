@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-07
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -38,3 +38,5 @@
 ## Departures from the plan
 
 Regression tests were drafted while the artifact evaluator was working, before the plan commit; production implementation still followed the independent evaluation, readiness Go and plan commit. See evidence.md. The existing plain-terminal creation body was factored into launch_empty_session_at so the plus can pass explicit context without overwriting a saved launch-sheet draft.
+
+Independent verification found a missing horizontal-position assertion and a vertical clip hiding the tab underline. Anchored the sidebar guard to its own row, added an actual shape-versus-clip regression, and retained the tab row's natural vertical clip while still clipping horizontally before the plus. Lesson 108 covers the guard gap.
