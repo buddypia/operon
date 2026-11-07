@@ -2,7 +2,7 @@
 # Each Rn is the spec requirement of that number; I1 is the mutation sweep,
 # I2 and I3 the hook and knowledge tests that predate this change, I4 the
 # 3-second bound behind R3.
-digest: "8326e911a59bda3e"
+digest: "6161e398dd75b0d4"
 
 obligations:
   - R1 empirical-test :: cargo test --locked knowledge_258_brief_says_what_the_knowledge_is_for_and_how_to_search

@@ -71096,8 +71096,8 @@ pub(crate) fn knowledge_258_brief_cli_answers_session_start_or_says_nothing() {
     // so no `git` call is made and it gets nothing.
     if tool_available("git") {
         let git = |arguments: &[&str]| {
-            let mut command = Command::new("git");
-            command.arg("-C").arg(&project.path).args(arguments);
+            let mut command = git_command(&project.path);
+            command.args(arguments);
             let output = run_command_with_timeout(&mut command, Duration::from_secs(10)).unwrap();
             assert!(output.status.success(), "{arguments:?}");
         };
