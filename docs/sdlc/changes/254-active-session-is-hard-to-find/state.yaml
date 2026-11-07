@@ -8,7 +8,7 @@ state:
   risk: "low"
   readiness: "go"
   screen: "approved"
-resume: "Land after corrected-head CI, package from main, and install when permission to quit the running app is available."
+resume: "Land after final CI, package from main, and install when permission to quit the running app is available."
 contract:
   three-gates: "machine passed fresh make q.fast and all six session_254_ plus named existing UI checks"
   guards-verified-by-mutation: "machine passed independent original seven catches plus repaired left-edge and new clipping mutations; all nine caught"

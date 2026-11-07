@@ -1550,3 +1550,9 @@ failing in `docs/sdlc/changes/241-custom-command-gate-admits-newline/mutations.p
 The first change-254 selection guard counted one orange vertical rule in the sidebar and checked its vertical span. A mutation moving the rule from the selected row's left edge to its right edge survived: both edges were still inside the column. **The rule:** a placement claim needs the target row's bounds as its reference, not only the larger containing column.
 
 **Guard.** `session_254_selection_follows_navigation` anchors the rule to the selected fill's left edge in every theme after pointer navigation. The `sidebar-rule-disappears` mutation in `docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py` moves it to the opposite edge and was watched failing after the assertion was strengthened. `session_254_selected_tab_rule_is_visible` also checks the underline against its actual clip rect: an existing shape below a clip is invisible even when its position looks correct in the shape list. Its clipping mutation was also watched failing.
+
+## 109 — A context guard skipped itself when its live dependency was absent
+
+The change254 context test returned immediately without tmux. Its worktree mutation was caught locally, but survived on CI because no context assertion ran there. **The rule:** check derived and persisted context independently of optional live-process probes; only the process probe depends on its tool.
+
+**Guard.** `session_254_terminal_context` checks project, worktree and selected session with or without tmux, and additionally checks a real process when available. The project-root mutation was watched failing under a child PATH without tmux after a green baseline; `docs/sdlc/changes/254-active-session-is-hard-to-find/mutations.py` re-runs it in CI.

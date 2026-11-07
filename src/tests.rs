@@ -69608,9 +69608,7 @@ pub(crate) fn session_254_terminal_action() {
 
 #[test]
 pub(crate) fn session_254_terminal_context() {
-    if !tool_available("tmux") {
-        return;
-    }
+    let tmux_available = tool_available("tmux");
     let root = temporary_directory("session-254-context");
     let project_path = root.join("project");
     fs::create_dir_all(&project_path).unwrap();
@@ -69680,32 +69678,51 @@ pub(crate) fn session_254_terminal_context() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let state = tmux_state(&created.tmux_name);
-    let cwd = run_command_with_timeout(
-        tmux_command().args([
-            "display-message",
-            "-p",
-            "-t",
-            &created.tmux_name,
-            "#{pane_current_path}",
-        ]),
-        Duration::from_secs(2),
-    )
-    .unwrap();
-    kill_tmux_session(&created.tmux_name);
-    assert_eq!(
-        state,
-        TmuxState::Alive,
-        "plus really launches a plain terminal"
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::EmptySessionStart(created.id)),
+        "terminal launch finished or reported its failure"
     );
+    if tmux_available {
+        let state = tmux_state(&created.tmux_name);
+        let cwd = run_command_with_timeout(
+            tmux_command().args([
+                "display-message",
+                "-p",
+                "-t",
+                &created.tmux_name,
+                "#{pane_current_path}",
+            ]),
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        kill_tmux_session(&created.tmux_name);
+        assert_eq!(
+            state,
+            TmuxState::Alive,
+            "plus really launches a plain terminal"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&cwd.stdout).trim(),
+            worktree.canonicalize().unwrap().to_str().unwrap()
+        );
+    } else {
+        assert_eq!(
+            app.store
+                .sessions
+                .iter()
+                .find(|s| s.id == created.id)
+                .unwrap()
+                .status,
+            SessionStatus::Failed
+        );
+        assert!(app.notice.as_deref().unwrap_or_default().contains("tmux"));
+    }
+    // Context must be verified even on CI machines without tmux.
     assert_eq!(created.project_id, app.store.projects[0].id);
     assert_eq!(
         created.worktree_path,
         Some(worktree.canonicalize().unwrap())
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&cwd.stdout).trim(),
-        worktree.canonicalize().unwrap().to_str().unwrap()
     );
     assert_eq!(created.origin, Some(SessionOrigin::PlainTerminal));
     assert_eq!(app.selected_session, Some(created.id));
