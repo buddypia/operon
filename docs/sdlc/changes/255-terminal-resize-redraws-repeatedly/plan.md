@@ -50,3 +50,9 @@
   therefore 5, not 4.
 - **`TerminalSearchOverlay::query` removed.** Its only reader was the dropped
   `search_query` key field; leaving it is a dead-code error under clippy.
+- **Two existing tests rewritten.** CI's full suite failed
+  `adversarial_cache_invalidation_matrix` and
+  `adversarial_deeply_nested_asymmetric_split_isolation`: both asserted that a
+  pane size change rebuilds its rows, the behaviour R5 reverses. Their resize
+  steps now assert reuse; every other step (output, theme, font, deletion) is
+  unchanged. The plan named only the `terminal_pane_render_cache` tests.

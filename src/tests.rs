@@ -64774,12 +64774,14 @@ fn adversarial_deeply_nested_asymmetric_split_isolation() {
     assert_eq!(app.terminal_pane_render_cache.session_builds(sc), 1);
     assert_eq!(app.terminal_pane_render_cache.builds(), 5);
 
+    // A window resize with unchanged output keeps every pane's rows
+    // (change 255).
     run_frame(&mut app, egui::vec2(1200.0, 700.0));
-    assert_eq!(app.terminal_pane_render_cache.builds(), 9);
+    assert_eq!(app.terminal_pane_render_cache.builds(), 5);
 
     let hits_resized = app.terminal_pane_render_cache.hits();
     run_frame(&mut app, egui::vec2(1200.0, 700.0));
-    assert_eq!(app.terminal_pane_render_cache.builds(), 9);
+    assert_eq!(app.terminal_pane_render_cache.builds(), 5);
     assert_eq!(app.terminal_pane_render_cache.hits(), hits_resized + 4);
 
     fs::remove_dir_all(&root).ok();
@@ -64955,15 +64957,15 @@ fn adversarial_cache_invalidation_matrix() {
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        2,
-        "Integer rect dimension change must rebuild"
+        1,
+        "a pane size change with unchanged output reuses its rows (change 255)"
     );
 
     app.set_session_output(session_id, "matrix test updated line\n".into(), None);
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        3,
+        2,
         "New output generation must rebuild"
     );
 
@@ -64976,7 +64978,7 @@ fn adversarial_cache_invalidation_matrix() {
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        4,
+        3,
         "Theme change must invalidate cache and rebuild"
     );
 
@@ -64985,7 +64987,7 @@ fn adversarial_cache_invalidation_matrix() {
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        5,
+        4,
         "Terminal font change must invalidate cache and rebuild"
     );
 
