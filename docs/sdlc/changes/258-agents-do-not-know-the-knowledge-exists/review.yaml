@@ -10,7 +10,7 @@
 # lines of its own, and rust-reviewer that project paths were canonicalised at
 # every ancestor; both were fixed in this round, with a test and a mutation.
 
-digest: "6161e398dd75b0d4"
+digest: "2ed7bb36767d13ab"
 rounds: 1
 
 carried:
