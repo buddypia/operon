@@ -46,3 +46,5 @@ The first full CI run exposed three existing source/layout test assumptions and 
 The first CI verification job exposed an early return in the context test when tmux was missing. Split mandatory context assertions from the optional live-process probe, caught the mutation without tmux, and recorded F7 and lesson109.
 
 A later full-suite run exposed an incidental shared-notice assertion in the missing-tmux branch. Reproduced the overwrite through the real background-result handler, retained that interleaving, asserted the matching launch diagnostic, stress-tested20 no-tmux runs, and caught the context mutation at the actual path assertion. Closing attempts are2/3.
+
+Before landing, bind the verification record to the full origin/main-to-branch diff, not only the most recent code commit. The merge hook caught that scope mismatch; main was restored with git merge --abort and only the change record was corrected.

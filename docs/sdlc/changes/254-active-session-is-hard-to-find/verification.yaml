@@ -1,4 +1,4 @@
-digest: "2286e78e81f5cbfe"
+digest: "bf66d0a8100a276c"
 obligations:
   - R1 empirical-test :: cargo test --locked session_254_selection_follows_navigation
   - R2 empirical-test :: cargo test --locked session_254_compact_tabs
