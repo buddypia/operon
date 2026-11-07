@@ -6491,10 +6491,15 @@ impl OperonApp {
                         search.scroll_to = None;
                     }
                     self.ui_terminal_search(ui, palette, session_id);
-                    self.request_terminal_resize(
+                    // A size still settling is sent from a later frame; wake
+                    // for it, or a window left still would keep the old grid
+                    // until something else repaints.
+                    if let Some(wait) = self.request_terminal_resize(
                         session_id,
                         terminal_grid_size(terminal_rect.size(), cell),
-                    );
+                    ) {
+                        ui.ctx().request_repaint_after(wait);
+                    }
                     if focused {
                         self.unresolved_paths.extend(unresolved);
                     }
@@ -8916,14 +8921,12 @@ pub(crate) fn terminal_search_overlay_from<'a>(
             current: Some(search.current),
             scroll_to: search.scroll_to,
             palette,
-            query: Some(&search.query),
         },
         _ => TerminalSearchOverlay {
             matches: &[],
             current: None,
             scroll_to: None,
             palette,
-            query: None,
         },
     }
 }

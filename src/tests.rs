@@ -28664,7 +28664,6 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 current: None,
                 scroll_to: Some(25),
                 palette: &palette,
-                query: None,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
@@ -28696,7 +28695,6 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 current: None,
                 scroll_to: Some(10),
                 palette: &palette,
-                query: None,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
@@ -28774,7 +28772,6 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
                     current: None,
                     scroll_to: Some(scroll_to),
                     palette: &palette,
-                    query: None,
                 };
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
@@ -28858,7 +28855,6 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
                     // vertical one.
                     scroll_to: Some(18),
                     palette: &palette,
-                    query: None,
                 };
                 let caret = terminal_rows(
                     ui,
@@ -28921,7 +28917,6 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
                 current: None,
                 scroll_to: Some(55),
                 palette: &palette,
-                query: None,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
@@ -63439,6 +63434,249 @@ fn terminal_resize_debounces_during_divider_drag() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// A sized session whose grid moved: what change 255 starts every resize test from.
+fn session_255_sized_app(name: &str) -> (std::path::PathBuf, OperonApp, Uuid) {
+    let root = temporary_directory(name);
+    let mut app = test_app(root.join("store.json"));
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let session_id = session.id;
+    app.store.sessions.push(session);
+    app.terminal_resize_requested.insert(session_id, (80, 24));
+    app.terminal_resize_applied.insert(session_id, (80, 24));
+    (root, app, session_id)
+}
+
+/// Pretend the requested size last changed `age` ago.
+fn session_255_age_change(app: &mut OperonApp, session_id: Uuid, age: Duration) {
+    let then = Instant::now()
+        .checked_sub(age)
+        .expect("the test clock is far past the settle time");
+    app.terminal_resize_changed_at.insert(session_id, then);
+}
+
+#[test]
+fn session_255_terminal_resize_waits_until_the_size_settles() {
+    let (root, mut app, session_id) = session_255_sized_app("resize-settle");
+    let resize = BackgroundKey::TerminalResize(session_id);
+
+    // A window drag: each frame measures a new grid. None of them is sent.
+    let wait = app
+        .request_terminal_resize(session_id, (90, 24))
+        .expect("an unsettled size reports when it will be due");
+    assert!(wait > Duration::ZERO && wait <= TERMINAL_RESIZE_SETTLE);
+    assert!(
+        !app.background_tasks.contains(&resize),
+        "a size that is still changing must not reach tmux"
+    );
+
+    // Most of the settle time passes, then the grid moves again: the wait
+    // starts over rather than sending the size the drag is passing through.
+    session_255_age_change(
+        &mut app,
+        session_id,
+        TERMINAL_RESIZE_SETTLE - Duration::from_millis(10),
+    );
+    let wait = app
+        .request_terminal_resize(session_id, (100, 24))
+        .expect("a newer size restarts the wait");
+    assert!(
+        wait > TERMINAL_RESIZE_SETTLE / 2,
+        "the wait restarted: {wait:?}"
+    );
+    assert!(!app.background_tasks.contains(&resize));
+
+    // The grid holds still for the settle time: the final size is sent, once.
+    session_255_age_change(&mut app, session_id, TERMINAL_RESIZE_SETTLE);
+    assert_eq!(app.request_terminal_resize(session_id, (100, 24)), None);
+    assert!(app.background_tasks.contains(&resize));
+    assert_eq!(
+        app.terminal_resize_requested.get(&session_id),
+        Some(&(100, 24))
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn session_255_a_settling_size_wakes_the_frame() {
+    let (root, mut app, session_id) = session_255_sized_app("resize-wake");
+    app.select_session(session_id);
+    app.set_session_output(session_id, "line\n".into(), None);
+    // The pane will measure a grid other than the applied (80, 24) — a resize
+    // that has just happened. Nothing else in the pane asks for a frame.
+    let ctx = egui::Context::default();
+    let mut frame = || {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 820.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let session = app.store.sessions[0].clone();
+                    app.ui_terminal_pane(ui, &session, false);
+                });
+            },
+        )
+    };
+    // egui asks for an immediate frame while a fresh context settles its
+    // layout; the frame after that shows only what the pane asked for.
+    frame();
+    let output = frame();
+    assert_ne!(
+        app.terminal_resize_requested.get(&session_id),
+        Some(&(80, 24)),
+        "the pane measured a new grid"
+    );
+    let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    assert!(
+        delay <= TERMINAL_RESIZE_SETTLE,
+        "a size left settling must wake the frame when it is due, not on the next idle repaint: {delay:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn session_255_first_terminal_resize_is_sent_at_once() {
+    let root = temporary_directory("resize-first");
+    let mut app = test_app(root.join("store.json"));
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let session_id = session.id;
+    app.store.sessions.push(session);
+
+    assert_eq!(app.request_terminal_resize(session_id, (120, 40)), None);
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::TerminalResize(session_id)),
+        "a pane that has never been sized must not wait to be"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn session_255_resize_completion_does_not_send_an_unsettled_size() {
+    let (root, mut app, session_id) = session_255_sized_app("resize-completion");
+    let resize = BackgroundKey::TerminalResize(session_id);
+
+    // (90, 24) settled and is on its way to tmux.
+    app.terminal_resize_requested.insert(session_id, (90, 24));
+    app.background_tasks.insert(resize.clone());
+    // The drag moves on while it is in flight.
+    app.request_terminal_resize(session_id, (100, 24));
+
+    app.background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id,
+            size: (90, 24),
+            result: Ok(()),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    assert_eq!(
+        app.terminal_resize_applied.get(&session_id),
+        Some(&(90, 24))
+    );
+    assert!(
+        !app.background_tasks.contains(&resize),
+        "finishing one resize must not send a size that is still changing"
+    );
+
+    session_255_age_change(&mut app, session_id, TERMINAL_RESIZE_SETTLE);
+    assert_eq!(app.flush_terminal_resize(session_id), None);
+    assert!(app.background_tasks.contains(&resize));
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let mut output = String::new();
+    for index in 0..5 {
+        output.push_str(&format!("row {index}\n"));
+    }
+    let lines = terminal_line_layouts(&output, &palette);
+    let cursor = TerminalCursor {
+        x: 2,
+        y: 4,
+        pane_rows: 5,
+    };
+    let session_id = Uuid::new_v4();
+    let mut cache = TerminalPaneRenderCache::default();
+    let mut carets = Vec::new();
+    // The second frame is the same output in a pane pushed right and made
+    // narrower, as a window resize or a sidebar does to it.
+    for side in [None, Some(200.0)] {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                if let Some(width) = side {
+                    egui::SidePanel::left("session-255-side")
+                        .exact_width(width)
+                        .resizable(false)
+                        .show(ctx, |_| {});
+                }
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let cell = terminal_cell_size(ui);
+                    let viewport = egui::vec2(ui.available_width(), cell.y * 20.0);
+                    let search = TerminalSearchOverlay {
+                        matches: &[],
+                        current: None,
+                        scroll_to: None,
+                        palette: &palette,
+                    };
+                    let mut links = TerminalLinkOverlay {
+                        resolved: &HashMap::new(),
+                        unresolved: &mut Vec::new(),
+                        palette: &palette,
+                    };
+                    carets.push(
+                        terminal_rows(
+                            ui,
+                            &lines,
+                            viewport,
+                            cell.y,
+                            search,
+                            &mut links,
+                            Some(cursor),
+                            Some(TerminalPaneContext {
+                                session_id,
+                                output_generation: 1,
+                                theme: AppTheme::Dark,
+                                cache: &mut cache,
+                            }),
+                        )
+                        .caret,
+                    );
+                });
+            },
+        );
+    }
+    assert_eq!(
+        cache.builds(),
+        1,
+        "a pane that only changed size must reuse the rows it laid out"
+    );
+    let before = carets[0].expect("caret drawn in the first frame");
+    let after = carets[1].expect("caret drawn in the moved pane");
+    assert!(
+        after.min.x - before.min.x > 150.0,
+        "the caret must follow the pane, not the cached frame: {before:?} → {after:?}"
+    );
+}
+
 #[test]
 fn background_task_completion_only_wakes_visible_sessions() {
     let root = temporary_directory("bg-wake-scoping");
@@ -64541,12 +64779,14 @@ fn adversarial_deeply_nested_asymmetric_split_isolation() {
     assert_eq!(app.terminal_pane_render_cache.session_builds(sc), 1);
     assert_eq!(app.terminal_pane_render_cache.builds(), 5);
 
+    // A window resize with unchanged output keeps every pane's rows
+    // (change 255).
     run_frame(&mut app, egui::vec2(1200.0, 700.0));
-    assert_eq!(app.terminal_pane_render_cache.builds(), 9);
+    assert_eq!(app.terminal_pane_render_cache.builds(), 5);
 
     let hits_resized = app.terminal_pane_render_cache.hits();
     run_frame(&mut app, egui::vec2(1200.0, 700.0));
-    assert_eq!(app.terminal_pane_render_cache.builds(), 9);
+    assert_eq!(app.terminal_pane_render_cache.builds(), 5);
     assert_eq!(app.terminal_pane_render_cache.hits(), hits_resized + 4);
 
     fs::remove_dir_all(&root).ok();
@@ -64722,15 +64962,15 @@ fn adversarial_cache_invalidation_matrix() {
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        2,
-        "Integer rect dimension change must rebuild"
+        1,
+        "a pane size change with unchanged output reuses its rows (change 255)"
     );
 
     app.set_session_output(session_id, "matrix test updated line\n".into(), None);
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        3,
+        2,
         "New output generation must rebuild"
     );
 
@@ -64743,7 +64983,7 @@ fn adversarial_cache_invalidation_matrix() {
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        4,
+        3,
         "Theme change must invalidate cache and rebuild"
     );
 
@@ -64752,7 +64992,7 @@ fn adversarial_cache_invalidation_matrix() {
     frame_with_size(&mut app, egui::vec2(1400.0, 700.0));
     assert_eq!(
         app.terminal_pane_render_cache.builds(),
-        5,
+        4,
         "Terminal font change must invalidate cache and rebuild"
     );
 

@@ -482,7 +482,7 @@ pub(crate) struct OperonApp {
     pub(crate) terminal_pane_render_cache: TerminalPaneRenderCache,
     pub(crate) terminal_output_generations: HashMap<Uuid, u64>,
     pub(crate) workspace_divider_drag: bool,
-    pub(crate) last_terminal_resize_flushed: HashMap<Uuid, Instant>,
+    pub(crate) terminal_resize_changed_at: HashMap<Uuid, Instant>,
     pub(crate) visible_sessions: Arc<std::sync::RwLock<HashSet<Uuid>>>,
     pub(crate) depends_on_input: Option<Uuid>,
     pub(crate) window_maximized: bool,
@@ -1025,7 +1025,7 @@ impl OperonApp {
             terminal_pane_render_cache: TerminalPaneRenderCache::default(),
             terminal_output_generations: HashMap::new(),
             workspace_divider_drag: false,
-            last_terminal_resize_flushed: HashMap::new(),
+            terminal_resize_changed_at: HashMap::new(),
             visible_sessions: Arc::new(std::sync::RwLock::new(HashSet::new())),
             depends_on_input: None,
             window_maximized: false,
@@ -4258,7 +4258,7 @@ impl OperonApp {
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
         self.terminal_output_generations
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
-        self.last_terminal_resize_flushed
+        self.terminal_resize_changed_at
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
         self.pending_project_removal = None;
         self.notice = Some(tr("プロジェクトの記録を削除しました。ファイルは残っています。").into());
@@ -6612,7 +6612,7 @@ impl OperonApp {
         self.terminal_path_caches.remove(&session_id);
         self.terminal_pane_render_cache.remove(&session_id);
         self.terminal_output_generations.remove(&session_id);
-        self.last_terminal_resize_flushed.remove(&session_id);
+        self.terminal_resize_changed_at.remove(&session_id);
         self.terminal_cursors.remove(&session_id);
         self.terminal_preedits.remove(&session_id);
         self.session_prompt_turns.remove(&session_id);
@@ -7104,6 +7104,8 @@ impl OperonApp {
         for session_id in self.terminals_on_screen() {
             if let Some(&requested) = self.terminal_resize_requested.get(&session_id) {
                 if self.terminal_resize_applied.get(&session_id) != Some(&requested) {
+                    // Letting go of the divider is the size settling.
+                    self.terminal_resize_changed_at.remove(&session_id);
                     self.flush_terminal_resize(session_id);
                 } else {
                     self.request_session_output(session_id);
@@ -7112,49 +7114,56 @@ impl OperonApp {
         }
     }
 
-    pub(crate) fn request_terminal_resize(&mut self, session_id: Uuid, size: (u16, u16)) {
-        if self.terminal_resize_requested.get(&session_id) == Some(&size)
-            && self.terminal_resize_applied.get(&session_id) == Some(&size)
-        {
-            return;
+    /// Ask for a pane's grid to become `size`. A pane that has been sized
+    /// before is told only once its grid has held still for
+    /// `TERMINAL_RESIZE_SETTLE`: every size tmux hears makes the agent redraw
+    /// its whole screen, and one window drag passes through dozens. Returns how
+    /// long until a waiting size is due, so the frame can wake for it.
+    pub(crate) fn request_terminal_resize(
+        &mut self,
+        session_id: Uuid,
+        size: (u16, u16),
+    ) -> Option<Duration> {
+        if self.terminal_resize_requested.get(&session_id) != Some(&size) {
+            self.terminal_resize_requested.insert(session_id, size);
+            self.terminal_resize_changed_at
+                .insert(session_id, Instant::now());
         }
-        self.terminal_resize_requested.insert(session_id, size);
-        if self.is_layout_dragging() {
-            let last_flush = self.last_terminal_resize_flushed.get(&session_id).copied();
-            let now = Instant::now();
-            if let Some(last) = last_flush {
-                if now.duration_since(last) < Duration::from_millis(150) {
-                    return;
-                }
-            }
-        }
-        self.flush_terminal_resize(session_id);
+        self.flush_terminal_resize(session_id)
     }
 
-    pub(crate) fn flush_terminal_resize(&mut self, session_id: Uuid) {
+    /// Send the requested size when it is settled and nothing is in flight.
+    /// `Some(wait)` when the size is still settling; `None` when it was sent,
+    /// is already applied, or has to wait for the resize in flight, whose
+    /// completion calls this again.
+    pub(crate) fn flush_terminal_resize(&mut self, session_id: Uuid) -> Option<Duration> {
         if self
             .background_tasks
             .contains(&BackgroundKey::TerminalResize(session_id))
         {
-            return;
+            return None;
         }
-        let Some(size) = self.terminal_resize_requested.get(&session_id).copied() else {
-            return;
-        };
-        if self.terminal_resize_applied.get(&session_id) == Some(&size) {
-            return;
+        let size = self.terminal_resize_requested.get(&session_id).copied()?;
+        let applied = self.terminal_resize_applied.get(&session_id).copied();
+        if applied == Some(size) {
+            return None;
         }
-        let Some(tmux_name) = self
+        // A pane never sized is told at once: until then the agent draws for
+        // whatever grid tmux started it with.
+        if applied.is_some() {
+            if let Some(changed) = self.terminal_resize_changed_at.get(&session_id) {
+                let held = changed.elapsed();
+                if held < TERMINAL_RESIZE_SETTLE {
+                    return Some(TERMINAL_RESIZE_SETTLE - held);
+                }
+            }
+        }
+        let tmux_name = self
             .store
             .sessions
             .iter()
             .find(|session| session.id == session_id && session.status == SessionStatus::Active)
-            .map(|session| session.tmux_name.clone())
-        else {
-            return;
-        };
-        self.last_terminal_resize_flushed
-            .insert(session_id, Instant::now());
+            .map(|session| session.tmux_name.clone())?;
         self.spawn_background(BackgroundKey::TerminalResize(session_id), move || {
             BackgroundResult::TerminalResized {
                 session_id,
@@ -7162,6 +7171,7 @@ impl OperonApp {
                 result: tmux_resize(&tmux_name, size).map_err(|error| error.to_string()),
             }
         });
+        None
     }
 }
 
