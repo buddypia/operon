@@ -1,0 +1,3 @@
+2026-11-07T15:43:39Z auto intent intent.md a1ea695233269ca7 approve restates the person's quoted request as step 2 of the article with no new direction and no extra judge call
+2026-11-07T15:43:39Z auto spec spec.md a2d3e60668f7e48d approve after one revision: query embeddings spent through Budget::spend with its own test, each offered entry replaced at most once per answer
+2026-11-07T15:43:39Z auto plan plan.md 399505e4e02156fc approve follows the revised spec's six tests and order, risk rows cover budget and double replacement, no paused surface
