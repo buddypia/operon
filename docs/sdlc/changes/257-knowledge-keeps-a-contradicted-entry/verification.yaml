@@ -1,0 +1,15 @@
+# Change 257: a conversation that proves an entry wrong replaces it.
+# Each Rn is the spec requirement of that number; I1 is the mutation sweep,
+# I2 the knowledge and judge tests that predate this change.
+digest: "dae120bf37a883af"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked knowledge_257_judge_prompt_offers_existing_entries_to_replace
+  - R2 empirical-test :: cargo test --locked knowledge_257_judge_answer_carries_replaces
+  - R3 empirical-test :: cargo test --locked knowledge_257_related_entries_are_near_unpinned_and_bounded
+  - R4 empirical-test :: cargo test --locked knowledge_257_replacing_an_entry_keeps_its_history_and_spares_pinned
+  - R5 empirical-test :: cargo test --locked knowledge_257_a_run_replaces_what_the_judge_says_is_out_of_date
+  - R6 empirical-test :: cargo test --locked knowledge_257_an_exhausted_budget_offers_no_existing_entries
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/257-knowledge-keeps-a-contradicted-entry/mutations.py
+  - I2 empirical-test :: cargo test --locked knowledge_
+  - I3 empirical-test :: cargo test --locked judge_
