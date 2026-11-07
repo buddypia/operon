@@ -43,4 +43,10 @@
 
 ## Departures from the plan
 
-None yet.
+- **A fifth test, `session_255_a_settling_size_wakes_the_frame`.** The mutation
+  sweep showed the pane's `request_repaint_after(wait)` was guarded by nothing:
+  R1 checks that the wait is returned, not that the frame asks to wake. The test
+  draws the pane twice and reads egui's repaint delay. The proof line's count is
+  therefore 5, not 4.
+- **`TerminalSearchOverlay::query` removed.** Its only reader was the dropped
+  `search_query` key field; leaving it is a dead-code error under clippy.

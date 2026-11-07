@@ -203,6 +203,13 @@ pub(crate) const TERMINAL_SCROLLBACK_LINES: usize = 5_000;
 /// (change 154). Only while typing: an idle pane is not captured any faster.
 pub(crate) const TERMINAL_ECHO_POLL: std::time::Duration = std::time::Duration::from_millis(33);
 pub(crate) const TERMINAL_ECHO_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+/// How long a terminal pane's grid must hold still before tmux is told the new
+/// size. Every size tmux is told makes the agent CLI in it redraw its whole
+/// screen, and a window drag or a maximize animation passes through dozens of
+/// sizes on the way to the one it ends at (change 255). A pane that has never
+/// been sized is told at once.
+pub(crate) const TERMINAL_RESIZE_SETTLE: std::time::Duration =
+    std::time::Duration::from_millis(150);
 /// Claude Code's local store, and the two directories inside it Operon reads.
 ///
 /// Spelled once for the reason `MANAGED_TMUX_PREFIX` is: five call sites built a

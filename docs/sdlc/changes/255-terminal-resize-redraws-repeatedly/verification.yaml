@@ -1,0 +1,13 @@
+# The evidence for change 255. Format: docs/sdlc/templates/verification.yaml.
+# I1 is R1's frame wake, split out because an ID may appear once.
+digest: "c112d0713781ba67"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_255_terminal_resize_waits_until_the_size_settles
+  - R2 empirical-test :: cargo test --locked session_255_first_terminal_resize_is_sent_at_once
+  - R3 empirical-test :: cargo test --locked session_255_resize_completion_does_not_send_an_unsettled_size
+  - R4 empirical-test :: cargo test --locked terminal_resize_debounces_during_divider_drag
+  - R5 empirical-test :: cargo test --locked session_255_pane_size_change_reuses_rows_and_moves_the_caret
+  - I1 empirical-test :: cargo test --locked session_255_a_settling_size_wakes_the_frame
+  - I2 empirical-test :: cargo test --locked terminal_pane_render_cache
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/255-terminal-resize-redraws-repeatedly/mutations.py
