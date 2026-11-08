@@ -8,7 +8,7 @@
 
 state:
   route: "modify"
-  stage: "build"
+  stage: "test"
   status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
@@ -17,13 +17,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Records approved; change the tests first and watch R1 and R3 fail, then widgets, tables, documents."
+resume: "Built; R1 and R3 watched failing then passing, 10 of 10 mutations caught. Next: empirical verifier, close, push, CI, land, package."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed make q.fast and the seven named tests in verification.yaml"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine pending yes: touches src/ui/widgets.rs and src/i18n_tables.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "machine pending each new guard watched failing"
+  guards-verified-by-mutation: "machine passed 10 of 10 mutations caught by docs/sdlc/changes/259-idle-and-needs-you-read-alike/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

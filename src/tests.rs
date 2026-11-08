@@ -32959,7 +32959,7 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
     assert_eq!(
         SessionStatusKind::Idle.group(),
         SessionStatusGroup::Free,
-        "an idle agent is the one thing 指示待ち is for"
+        "an idle agent is the one thing 手すき is for"
     );
     assert_eq!(
         SessionStatusKind::Waiting.group(),
@@ -47034,7 +47034,7 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         false,
         Some(AgentActivity::Idle),
     );
-    assert_eq!(view.label, tr("指示待ち"));
+    assert_eq!(view.label, tr("手すき"));
     let mut ids: Vec<&str> = SessionStatusGroup::GROUPS
         .iter()
         .map(|group| group.message_id())
@@ -60510,15 +60510,57 @@ pub(crate) fn the_git_sub_tabs_are_translated_message_ids() {
     }
 }
 
-/// Change 221: the idle status group is worded 「指示待ち」 so it does not share
-/// the word 「待機中」 with queued sessions waiting behind a prerequisite.
+/// Change 259: the idle status group is worded 「手すき」, and both of its hover
+/// explanations say the turn is over, so 要対応 is the only status that reads
+/// as waiting on the person. It still does not share 「待機中」 with queued
+/// sessions waiting behind a prerequisite (change 221).
 #[test]
-pub(crate) fn the_idle_group_word_is_not_the_queued_session_word() {
-    assert_eq!(SessionStatusGroup::Free.message_id(), "指示待ち");
-    assert_ne!(SessionStatusGroup::Free.message_id(), "待機中");
-    assert_eq!(SessionStatusKind::Idle.label(), "指示待ち");
-    assert_eq!(translation_for(Language::En, "指示待ち"), Some("Idle"));
-    assert_eq!(translation_for(Language::Ko, "指示待ち"), Some("지시 대기"));
+pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
+    assert_eq!(SessionStatusGroup::Free.message_id(), "手すき");
+    assert_eq!(SessionStatusKind::Idle.label(), "手すき");
+    assert_eq!(translation_for(Language::En, "手すき"), Some("Idle"));
+    assert_eq!(translation_for(Language::Ko, "手すき"), Some("유휴"));
+    assert_eq!(
+        SessionStatusGroup::Free.hint_id(),
+        "ターンを終えて手が空いているセッション"
+    );
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let view = session_status_view(
+        std::slice::from_ref(&session),
+        &session,
+        false,
+        Some(AgentActivity::Idle),
+    );
+    assert_eq!(view.hint, tr("ターンを終えて手が空いています"));
+    for group in SessionStatusGroup::GROUPS {
+        let word = group.message_id();
+        assert!(
+            !word.contains('待'),
+            "{group:?} 「{word}」 reads as waiting"
+        );
+        let ko = translation_for(Language::Ko, word).unwrap_or_default();
+        assert!(!ko.contains("대기"), "{group:?} 「{ko}」 reads as waiting");
+    }
+    for id in [
+        SessionStatusGroup::Free.hint_id(),
+        "ターンを終えて手が空いています",
+    ] {
+        assert!(!id.contains('待'), "idle hint 「{id}」 reads as waiting");
+        let en = translation_for(Language::En, id).unwrap_or_default();
+        assert!(
+            !en.is_empty() && !en.to_lowercase().contains("wait"),
+            "idle hint {en:?} reads as waiting"
+        );
+        let ko = translation_for(Language::Ko, id).unwrap_or_default();
+        assert!(
+            !ko.is_empty() && !ko.contains("대기") && !ko.contains("기다"),
+            "idle hint 「{ko}」 reads as waiting"
+        );
+    }
+    assert!(
+        translation_for(Language::En, "指示待ち").is_none(),
+        "the old idle group row must be gone"
+    );
     assert!(
         translation_for(Language::En, "待機中").is_none(),
         "the bare group row for 待機中 must be gone while queued-session sentences remain"
@@ -60578,48 +60620,50 @@ pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Change 221: the documents that name the idle filter use 「指示待ち」 / 「지시 대기」,
-/// while the sentences about queued sessions in the manual keep 「待機中」 / 「대기 중」.
+/// Changes 221 and 259: the documents that name the idle filter use 「手すき」 /
+/// 「유휴」 and describe it as a finished turn, nowhere the old 「指示待ち」 /
+/// 「지시 대기」, while the sentences about queued sessions in the manual keep
+/// 「待機中」 / 「대기 중」.
 #[test]
 pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
     let readme = fs::read_to_string("README.md").unwrap();
     assert!(
-        readme.contains("header — **要対応**, **実行中**, **指示待ち**, **終了** —"),
-        "README.md must name the idle filter 指示待ち"
+        readme.contains("header — **要対応**, **実行中**, **手すき**, **終了** —"),
+        "README.md must name the idle filter 手すき"
     );
 
     let readme_ja = fs::read_to_string("README.ja.md").unwrap();
     assert!(
-        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・指示待ち・終了で一覧"),
-        "README.ja.md hero caption must name 指示待ち"
+        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・手すき・終了で一覧"),
+        "README.ja.md hero caption must name 手すき"
     );
     assert!(
-        readme_ja.contains("**要対応**・**実行中**・**指示待ち**・**終了** の 4 つのトグル"),
-        "README.ja.md filter toggles must name 指示待ち"
+        readme_ja.contains("**要対応**・**実行中**・**手すき**・**終了** の 4 つのトグル"),
+        "README.ja.md filter toggles must name 手すき"
     );
 
     let readme_ko = fs::read_to_string("README.ko.md").unwrap();
     assert!(
-        readme_ko.contains("모든 프로젝트의 세션을 대응 필요·실행 중·지시 대기·종료로 한눈에"),
-        "README.ko.md hero caption must name 지시 대기"
+        readme_ko.contains("모든 프로젝트의 세션을 대응 필요·실행 중·유휴·종료로 한눈에"),
+        "README.ko.md hero caption must name 유휴"
     );
     assert!(
-        readme_ko.contains("**대응 필요**·**실행 중**·**지시 대기**·**종료** 네 개의 토글"),
-        "README.ko.md filter toggles must name 지시 대기"
+        readme_ko.contains("**대응 필요**·**실행 중**·**유휴**·**종료** 네 개의 토글"),
+        "README.ko.md filter toggles must name 유휴"
     );
 
     let manual_ja = fs::read_to_string("docs/MANUAL.ja.md").unwrap();
     assert!(
-        manual_ja.contains("| **指示待ち** | 起動していて、次の依頼を待っている |"),
-        "docs/MANUAL.ja.md state table must name 指示待ち"
+        manual_ja.contains("| **手すき** | ターンを終えて手が空いている。次の依頼を出すかは自由 |"),
+        "docs/MANUAL.ja.md state table must name 手すき as a finished turn"
     );
     assert!(
-        manual_ja.contains("**要対応**・**実行中**・**指示待ち**・**終了** の 4 つのトグル"),
-        "docs/MANUAL.ja.md filter toggles must name 指示待ち"
+        manual_ja.contains("**要対応**・**実行中**・**手すき**・**終了** の 4 つのトグル"),
+        "docs/MANUAL.ja.md filter toggles must name 手すき"
     );
     assert!(
-        manual_ja.contains("**状態が「実行中」のまま変わらない／「指示待ち」のまま**"),
-        "docs/MANUAL.ja.md troubleshooting must name 指示待ち"
+        manual_ja.contains("**状態が「実行中」のまま変わらない／「手すき」のまま**"),
+        "docs/MANUAL.ja.md troubleshooting must name 手すき"
     );
     assert!(
         manual_ja.contains("待機中のセッションには **今すぐ開始** が出て"),
@@ -60628,16 +60672,16 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
 
     let manual_ko = fs::read_to_string("docs/MANUAL.ko.md").unwrap();
     assert!(
-        manual_ko.contains("| **지시 대기** | 실행 중이며 다음 요청을 기다리는 상태 |"),
-        "docs/MANUAL.ko.md state table must name 지시 대기"
+        manual_ko.contains("| **유휴** | 턴을 마치고 손이 비어 있는 상태. 다음 요청은 자유 |"),
+        "docs/MANUAL.ko.md state table must name 유휴 as a finished turn"
     );
     assert!(
-        manual_ko.contains("**대응 필요**, **실행 중**, **지시 대기**, **종료** 네 개의 토글 칩"),
-        "docs/MANUAL.ko.md filter toggles must name 지시 대기"
+        manual_ko.contains("**대응 필요**, **실행 중**, **유휴**, **종료** 네 개의 토글 칩"),
+        "docs/MANUAL.ko.md filter toggles must name 유휴"
     );
     assert!(
-        manual_ko.contains("**상태가 \"실행 중\"에서 바뀌지 않거나 \"지시 대기\"로 남음**"),
-        "docs/MANUAL.ko.md troubleshooting must name 지시 대기"
+        manual_ko.contains("**상태가 \"실행 중\"에서 바뀌지 않거나 \"유휴\"로 남음**"),
+        "docs/MANUAL.ko.md troubleshooting must name 유휴"
     );
     assert!(
         manual_ko.contains(
@@ -60645,6 +60689,20 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         ),
         "docs/MANUAL.ko.md queued-session sentence must keep 대기 중인 세션"
     );
+    for (path, text) in [
+        ("README.md", &readme),
+        ("README.ja.md", &readme_ja),
+        ("README.ko.md", &readme_ko),
+        ("docs/MANUAL.ja.md", &manual_ja),
+        ("docs/MANUAL.ko.md", &manual_ko),
+    ] {
+        for old in ["指示待ち", "지시 대기"] {
+            assert!(
+                !text.contains(old),
+                "{path} still names the idle filter {old}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -66242,8 +66300,10 @@ fn workspace_session_tab_shows_its_status_glyph() {
     );
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let changed = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    assert!(drawn_text_rect(&changed, |text| text == tr("指示待ち")).is_some());
-    assert!(drawn_text_rect(&changed, |text| text == tr("次の依頼を待っています")).is_some());
+    assert!(drawn_text_rect(&changed, |text| text == tr("手すき")).is_some());
+    assert!(drawn_text_rect(&changed, |text| text
+        == tr("ターンを終えて手が空いています"))
+    .is_some());
     assert!(drawn_text_rect(&changed, |text| text == tr("ターミナル稼働中")).is_none());
     workspace_pointer_frame(
         &mut app,
@@ -68990,7 +69050,7 @@ fn sidebar_251_marks_and_accessible_filters() {
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert_eq!(app.selected_session, selected_before);
     assert_eq!(app.workspace.active().cloned(), active_before);
-    for label in ["要対応", "実行中", "指示待ち", "終了"] {
+    for label in ["要対応", "実行中", "手すき", "終了"] {
         for rect in drawn_text_rects(&output, |text| text == label) {
             assert!(
                 rect.right() < right,
