@@ -49,3 +49,9 @@ pins it. Four mutations were added for these cases, and the sweep catches 14 of 
 
 Bands: `largest_module_lines` is at 9722 in `src/app.rs`, the same on
 `origin/main`. This change does not touch that file.
+
+The first landing attempt was refused. The second commit's verification digest
+had been read from the index against that commit's parent, so it covered only
+that commit's delta. The landing gate reads the whole branch against main. The
+record now carries the digest from `bash scripts/check-review.sh --against
+origin/main`, and the code is unchanged.
