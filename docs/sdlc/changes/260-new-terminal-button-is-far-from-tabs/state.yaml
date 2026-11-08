@@ -2,16 +2,16 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Have spec.md, screen.md and plan.md evaluated, run the readiness gate, and commit plan.md before editing src/."
+resume: "Write the two session_260_ tests, watch them fail, then change the two layout lines in ui_tab_workspace."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"

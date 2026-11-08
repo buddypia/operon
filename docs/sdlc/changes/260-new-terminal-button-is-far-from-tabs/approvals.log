@@ -1,0 +1,4 @@
+2026-11-08T16:42:38Z auto intent intent.md 152ac21bfad8cdaa approve Independent artifact evaluator: restates the quoted request; overflow behaviour inherited from change 254.
+2026-11-08T16:42:38Z auto spec spec.md f80e9ea3cc13bfb4 approve Independent artifact evaluator checked auto_shrink and allocate claims against egui 0.31.1; its requirement-1 item-spacing wording applied.
+2026-11-08T16:42:38Z auto screen screen.md 54580439efd58cc0 approve Independent artifact evaluator: the person's request names this placement; empty-workspace follow-on is low risk.
+2026-11-08T16:42:38Z auto plan plan.md 8601f1947a23ba2b approve Independent artifact evaluator: risks named with catching tests; no src edit before readiness Go.

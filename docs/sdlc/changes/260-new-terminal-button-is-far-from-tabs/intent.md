@@ -1,6 +1,6 @@
 # Intent: The new-terminal button sits far from the tabs it adds to
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-09
 
 ## Problem

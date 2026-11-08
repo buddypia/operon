@@ -1,0 +1,43 @@
+# Plan: The new-terminal button follows the last tab
+
+- **Spec**: `./spec.md`
+- **Approved**: 2026-11-09
+- **Status**: approved
+
+## Files that change
+
+| File | Change |
+|---|---|
+| `src/app/screens.rs` | Tab region `ScrollArea` auto-shrinks horizontally; empty-workspace + laid out left to right. |
+| `src/tests.rs` | `session_260_plus_follows_last_tab`, `session_260_empty_plus_sits_where_the_first_tab_appears`. |
+| `docs/sdlc/changes/260-new-terminal-button-is-far-from-tabs/` | State, screen, verification, mutation sweep. |
+
+## Order of work
+
+1. Commit spec, screen and plan after the evaluator's verdicts and a readiness Go; no `src/` edit before.
+2. Write the two `session_260_` tests and watch both fail on the unmodified source (the + at the right edge).
+3. Change the two layout lines; the tests pass, and `session_254_` still passes.
+4. Render fixture images at 1100px and 640px, with two tabs, many tabs, split panes and the empty workspace, and look at them.
+5. `make q.fast`; mutation sweep; `verification.yaml`; an independent empirical verifier tries to break it.
+6. Close `state.yaml`, commit, push, wait for CI, merge on main, clean up, package and install.
+
+## Risks
+
+| Risk | How it shows up | What catches it |
+|---|---|---|
+| The + scrolls away or overlaps tabs once they overflow | + missing or drawn over a tab on a narrow pane | `session_254_terminal_action` (20 tabs, clip ends before the +) |
+| Shrinking the region clips the selected tab's underline or the rename editor | Underline missing; editor cut | `session_254_selected_tab_rule_is_visible`, `session_253_` tests |
+| The scroll area keeps a stale width for a frame after a tab is added | + overlaps the new tab for one frame | Rendered fixture after a press; egui measures content in the same frame |
+| A split pane's + follows another pane's tabs | + far from its own tabs | Split-pane fixture image; same code path per pane |
+
+## Proof of completion
+
+- `make q.fast` — passes.
+- `cargo test --locked session_260_` and `cargo test --locked session_254_` — all pass; the two new tests failed before step 3.
+- Mutation sweep — both mutations caught.
+- Fixture images show the + right after the last tab with few tabs and at the right edge with many.
+- CI green on the branch head; the installed app contains the build from main.
+
+## Departures from the plan
+
+None yet.
