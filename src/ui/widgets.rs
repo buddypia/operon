@@ -1300,7 +1300,7 @@ impl SessionStatusGroup {
     pub(crate) fn message_id(self) -> &'static str {
         match self {
             SessionStatusGroup::NeedsYou => "要対応",
-            SessionStatusGroup::Free => "指示待ち",
+            SessionStatusGroup::Free => "手すき",
             SessionStatusGroup::Busy => "実行中",
             SessionStatusGroup::Finished => "終了",
         }
@@ -1331,7 +1331,7 @@ impl SessionStatusGroup {
     pub(crate) fn hint_id(self) -> &'static str {
         match self {
             SessionStatusGroup::NeedsYou => "回答待ち・前提が壊れて止まっているセッション",
-            SessionStatusGroup::Free => "起動していて、次の依頼を待っているセッション",
+            SessionStatusGroup::Free => "ターンを終えて手が空いているセッション",
             SessionStatusGroup::Busy => "実行中・起動中・順番待ちのセッション",
             SessionStatusGroup::Finished => "ターミナルが終了したセッション",
         }
@@ -1400,7 +1400,7 @@ pub(crate) fn session_status_view(
         SessionStatusKind::Starting => tr("tmux と CLI を準備中").to_owned(),
         SessionStatusKind::Working => tr("応答を生成中").to_owned(),
         SessionStatusKind::Waiting => tr("ターミナルを開いて回答してください").to_owned(),
-        SessionStatusKind::Idle => tr("次の依頼を待っています").to_owned(),
+        SessionStatusKind::Idle => tr("ターンを終えて手が空いています").to_owned(),
         SessionStatusKind::Running => tr("ターミナル稼働中").to_owned(),
         // The only hint that is not a constant: it names the prerequisite,
         // which is data, and is why `hint` lives on the view and not on the

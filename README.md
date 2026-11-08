@@ -106,7 +106,7 @@ Settings.
   come back to it. Marks are for the session you are in and do not survive a
   restart.
 - In **履歴**, narrow the session list to what you can act on. Four toggles across its
-  header — **要対応**, **実行中**, **指示待ち**, **終了** — each carry a live count,
+  header — **要対応**, **実行中**, **手すき**, **終了** — each carry a live count,
   and turning one on leaves only those sessions, dropping the projects that have
   none. Several can be on at once, the list says how many it is hiding, and
   nothing is selected when the app starts, so a filter never survives a restart

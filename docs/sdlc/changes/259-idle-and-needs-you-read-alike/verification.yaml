@@ -1,0 +1,11 @@
+# The evidence for change 259. Shape: docs/sdlc/templates/verification.yaml.
+digest: "54fe458169523a47"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked the_idle_group_word_does_not_read_as_waiting_on_you
+  - R2 empirical-test :: cargo test --locked workspace_session_tab_shows_its_status_glyph
+  - R3 empirical-test :: cargo test --locked the_documents_name_the_idle_filter_with_the_windows_word
+  - I1 empirical-test :: cargo test --locked every_message_id_has_a_row_in_every_table
+  - I2 empirical-test :: cargo test --locked every_translation_table_is_sorted_by_message_id
+  - I3 empirical-test :: cargo test --locked sidebar_251_marks_and_accessible_filters
+  - I4 empirical-mutation :: python3 docs/sdlc/changes/259-idle-and-needs-you-read-alike/mutations.py
