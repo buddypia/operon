@@ -70166,6 +70166,58 @@ pub(crate) fn session_260_empty_plus_sits_where_the_first_tab_appears() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// The content-sized region meets its cap somewhere between "fits" and
+// "overflows"; a tab at a time walks across that point.
+#[test]
+pub(crate) fn session_260_plus_stays_clear_at_every_tab_count() {
+    let root = temporary_directory("session-260-every-count");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    for i in 0..30 {
+        let mut session = app.store.sessions[0].clone();
+        session.id = Uuid::new_v4();
+        session.name = format!("t{i}");
+        app.store.sessions.push(session.clone());
+        app.select_session(session.id);
+        let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let add = session_254_add_rect(&app, &out);
+        let area = app.dock.rects(app.dock_area.unwrap(), None).center;
+        let right = project_column_right(&app);
+        assert!(
+            add.left() >= area.left() && add.right() <= area.right(),
+            "{i} tabs added: + {add:?} outside the pane {area:?}"
+        );
+        assert_eq!(
+            drawn_text_rects(&out, |s| s == ICON_ADD)
+                .into_iter()
+                .filter(|r| r.left() > right && r.top() < add.bottom())
+                .count(),
+            1,
+            "{i} tabs added: one + on the strip"
+        );
+        for shape in &out.shapes {
+            if let egui::Shape::Text(t) = &shape.shape {
+                if t.pos.x > right && t.pos.y < add.bottom() && t.galley.text() != ICON_ADD {
+                    let shown = t
+                        .galley
+                        .rect
+                        .translate(t.pos.to_vec2())
+                        .intersect(shape.clip_rect);
+                    assert!(
+                        !shown.is_positive() || shown.right() <= add.left(),
+                        "{i} tabs added: {:?} shows under the + ({shown:?}, + {add:?})",
+                        t.galley.text()
+                    );
+                }
+            }
+        }
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // Change 256: a knowledge entry says whether its conversation confirmed it.
 

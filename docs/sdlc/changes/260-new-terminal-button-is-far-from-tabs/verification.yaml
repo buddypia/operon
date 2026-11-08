@@ -1,11 +1,12 @@
 # Change 260: the new-terminal + sits where the next tab will appear.
 # Each Rn is the spec requirement of that number; I1 is the mutation sweep,
 # I2 the change-254 tests the move must keep, I3 the rename and title tests a
-# narrower tab region could break.
+# narrower tab region could break, I4 the walk across the point where the
+# content-sized region meets its cap (from the verifier's drafted probes).
 # Rendered fixtures (normal, 18 extra tabs at 1100px and 640px, split, light,
 # empty, and the first frame after a tab is added) were inspected from a
 # temporary renderer that is not committed.
-digest: "4e4e591698afb421"
+digest: "5083f2a2b6215ad9"
 
 obligations:
   - R1 empirical-test :: cargo test --locked session_260_plus_follows_last_tab
@@ -14,3 +15,5 @@ obligations:
   - I1 empirical-mutation :: python3 docs/sdlc/changes/260-new-terminal-button-is-far-from-tabs/mutations.py
   - I2 empirical-test :: cargo test --locked session_254_
   - I3 empirical-test :: cargo test --locked session_253_
+  - I4 empirical-test :: cargo test --locked session_260_plus_stays_clear_at_every_tab_count
+  - I5 empirical-test :: cargo test --locked every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran

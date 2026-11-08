@@ -2,8 +2,8 @@
 
 state:
   route: "modify"
-  stage: "test"
-  status: "reviewing"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -11,12 +11,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have empirical-verifier try to break the branch head, record any reproduced failure as Fn, then push and wait for CI."
+resume: "Nothing outlives the change once it is merged on main, packaged with scripts/package-macos.sh, and installed per the ship skill."
 
 contract:
-  three-gates: "machine passed make q.fast; session_260_ (2), session_254_ (6), session_253_ (3) pass"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - the change edits src/app/screens.rs, so /Applications/Operon.app goes stale and ends with bash scripts/package-macos.sh from main"
+  three-gates: "machine passed make q.fast; session_260_ (3), session_254_ (6), session_253_ (3) and the lesson admission test pass; CI run 42502209570 green on 5da4756"
+  bands: "machine passed check-bands.sh exits 0; steering_bytes, largest_module_lines and approval_escapes were already breached on main"
+  release-binary: "machine passed required - src/app/screens.rs changed; package from main after landing"
   guards-verified-by-mutation: "human passed mutations.py 3 of 3 caught: right-edge pin, overflow push-out, centred empty +"
 
 sets:

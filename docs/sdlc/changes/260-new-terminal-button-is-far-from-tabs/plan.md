@@ -52,3 +52,10 @@
 - Rendered fixture images (normal, many tabs at 1100px and 640px, split, light,
   empty, and the first frame after a tab is added) came from a temporary test
   that was removed before the commit; see verification.yaml.
+- The empirical-verifier could not run in its isolated worktree: the worktree
+  policy hook judged that tree as the trunk and refused `cargo`, `git fetch`
+  and file writes. It returned four drafted probes instead; the author ran them
+  in this worktree (tabs added one at a time to 30, scroll then close all but
+  one, inline rename, split with an overflowing left pane) and all held. The
+  first became `session_260_plus_stays_clear_at_every_tab_count`. CI run
+  42502209570 on 5da4756 passed before it was added.
