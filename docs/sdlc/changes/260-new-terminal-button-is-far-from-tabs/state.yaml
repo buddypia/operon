@@ -1,0 +1,29 @@
+# The state of one change. See docs/sdlc/templates/state.yaml for the field meanings.
+
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Nothing outlives the change once it is merged on main, packaged with scripts/package-macos.sh, and installed per the ship skill."
+
+contract:
+  three-gates: "machine passed make q.fast; session_260_ (3), session_254_ (6), session_253_ (3) and the lesson admission test pass; CI run 42502209570 green on 5da4756"
+  bands: "machine passed check-bands.sh exits 0; steering_bytes, largest_module_lines and approval_escapes were already breached on main"
+  release-binary: "machine passed required - src/app/screens.rs changed; package from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py 3 of 3 caught: right-edge pin, overflow push-out, centred empty +"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
