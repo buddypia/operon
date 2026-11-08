@@ -42,8 +42,11 @@ behaviour, only its position.
   tab. The region's maximum width stays `available - CONTROL_HEIGHT - SPACE_SM`,
   so with overflow the + keeps its right-edge slot and the clip that stops
   before it is unchanged.
-- The empty-workspace + uses `Layout::left_to_right` instead of
-  `right_to_left`.
+- The empty-workspace + is drawn in a `horizontal` row instead of
+  `with_layout(Layout::right_to_left(Align::Center))`. That layout took the
+  body's whole height, centred the + vertically at the right edge, and pushed
+  「セッションを選択」 and its line below the window — measured in the test
+  fixture, not visible in change 254's mock.
 - No persisted type, string, icon, colour, size, dependency, process, scan or
   output budget changes. Nothing new is computed per frame: the scroll area
   already measures its content each frame.

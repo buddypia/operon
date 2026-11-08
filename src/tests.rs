@@ -70069,6 +70069,103 @@ pub(crate) fn session_254_selected_tab_rule_is_visible() {
     fs::remove_dir_all(root).unwrap();
 }
 
+// Change 260: the + sits where the next tab will appear, not across the pane.
+#[test]
+pub(crate) fn session_260_plus_follows_last_tab() {
+    let root = temporary_directory("session-260-follows");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let right = project_column_right(&app);
+    // Every tab ends with its close mark, so the rightmost one on the strip's
+    // line is in the last tab, and the tightest tab fill around it is its frame.
+    let close = drawn_text_rects(&out, |s| s == ICON_CLOSE)
+        .into_iter()
+        .filter(|r| r.left() > right && r.top() < add.bottom() && r.bottom() > add.top())
+        .max_by(|a, b| a.right().total_cmp(&b.right()))
+        .expect("the last tab's close mark");
+    let palette = app.store.theme.palette();
+    let last_tab = out
+        .shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Rect(r)
+                if (r.fill == palette.card || r.fill == palette.row_selected)
+                    && r.rect.contains_rect(close) =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.width().total_cmp(&b.width()))
+        .expect("the last tab's frame");
+    // The + glyph sits inside its 28px button, so the space it leaves after
+    // the tab is less than one button.
+    let gap = add.left() - last_tab.right();
+    assert!(gap > 0.0, "the + must not overlap the last tab: gap {gap}");
+    assert!(
+        gap < CONTROL_HEIGHT,
+        "the + must follow the last tab: gap {gap}, + at {add:?}, last tab ends at {last_tab:?}"
+    );
+    let area = app.dock.rects(app.dock_area.unwrap(), None).center;
+    assert!(
+        area.right() - add.right() > 200.0,
+        "two short tabs leave the + well away from the pane's right edge: {add:?} in {area:?}"
+    );
+    // At its new place it is still the button: the press reaches the launch,
+    // which refuses here with the existing missing-tmux notice.
+    let count = app.store.sessions.len();
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert_eq!(app.store.sessions.len(), count);
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_260_empty_plus_sits_where_the_first_tab_appears() {
+    let root = temporary_directory("session-260-empty");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "空のプロジェクト".into(),
+        path: root.clone(),
+        added_at: now(),
+    };
+    app.store.projects.push(project.clone());
+    app.select_workspace_project(project.id);
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    // Until change 260 the + took the body's whole height, centred itself
+    // there, and pushed this heading below the window.
+    let heading = drawn_text_rects(&out, |s| s == "セッションを選択")
+        .into_iter()
+        .find(|r| r.left() > project_column_right(&app))
+        .expect("the empty workspace's heading is on screen");
+    assert!(
+        add.bottom() <= heading.top(),
+        "the + stays above the heading"
+    );
+    assert!(
+        (add.left() - heading.left()).abs() < CONTROL_HEIGHT,
+        "the + starts the strip at the left, where the first tab appears: + {add:?}, heading {heading:?}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 // ---------------------------------------------------------------------------
 // Change 256: a knowledge entry says whether its conversation confirmed it.
 

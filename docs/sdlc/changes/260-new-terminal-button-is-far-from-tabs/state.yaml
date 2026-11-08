@@ -2,8 +2,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the two session_260_ tests, watch them fail, then change the two layout lines in ui_tab_workspace."
+resume: "Have empirical-verifier try to break the branch head, record any reproduced failure as Fn, then push and wait for CI."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed make q.fast; session_260_ (2), session_254_ (6), session_253_ (3) pass"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine pending required - the change edits src/app/screens.rs, so /Applications/Operon.app goes stale and ends with bash scripts/package-macos.sh from main"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 3 of 3 caught: right-edge pin, overflow push-out, centred empty +"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

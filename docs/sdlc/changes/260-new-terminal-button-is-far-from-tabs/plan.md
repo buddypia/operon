@@ -40,4 +40,15 @@
 
 ## Departures from the plan
 
-None yet.
+- The empty-workspace test failed for a reason the spec had not named: the
+  heading 「セッションを選択」 was not on screen at all. The existing
+  `with_layout(right_to_left(Align::Center))` row took the body's full height,
+  so the + sat at the vertical centre of the right edge and the heading fell
+  below the window. `Layout::left_to_right` would have kept that defect, so the
+  row became `body.horizontal`; spec.md's Design says so and was re-evaluated.
+- `session_260_plus_follows_last_tab` first measured from the close glyph,
+  which sits 10px inside its button; it now measures from the last tab's frame,
+  where the gap is the row's 8px item spacing — the same as between two tabs.
+- Rendered fixture images (normal, many tabs at 1100px and 640px, split, light,
+  empty, and the first frame after a tab is added) came from a temporary test
+  that was removed before the commit; see verification.yaml.
