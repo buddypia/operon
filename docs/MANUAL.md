@@ -226,7 +226,7 @@ Every session carries one of four labels, with a hover that gives the detail:
 | --- | --- |
 | **Needs you** | Waiting for an answer, or stopped because a prerequisite failed |
 | **Running** | Starting, working, stopping, or queued |
-| **Idle** | Running and waiting for your next request |
+| **Idle** | Finished its turn and free; the next request is up to you |
 | **Finished** | The terminal has ended (done, failed, stopped, or lost) |
 
 The session list header has four toggle chips — **Needs you**, **Running**,

@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-09
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -35,3 +35,17 @@
 - `mutations.py` catches every mutation.
 
 ## Departures from the plan
+
+The independent empirical verifier ran all seven obligations (all held) and the
+ten mutations (all caught), then found two gaps. First, the guard refused only
+待 / 대기 / "waiting" in the English and Korean hint rows, so replacing them with
+another state's wording ("Needs you now", 「실행 중입니다」, "Sessions that are
+running") survived. The R1 test now pins both hints' exact English and Korean
+rows, as R2 already states them. Second, `docs/MANUAL.md` still described Idle
+as "Running and waiting for your next request". It was not among R3's five
+files, though the English word "Idle" is unchanged. Its state-table row now
+reads "Finished its turn and free; the next request is up to you", and R3's test
+pins it. Four mutations were added for these cases, and the sweep catches 14 of 14.
+
+Bands: `largest_module_lines` is at 9722 in `src/app.rs`, the same on
+`origin/main`. This change does not touch that file.

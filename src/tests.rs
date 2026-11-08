@@ -60541,21 +60541,21 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
         let ko = translation_for(Language::Ko, word).unwrap_or_default();
         assert!(!ko.contains("대기"), "{group:?} 「{ko}」 reads as waiting");
     }
-    for id in [
-        SessionStatusGroup::Free.hint_id(),
-        "ターンを終えて手が空いています",
+    for (id, en, ko) in [
+        (
+            SessionStatusGroup::Free.hint_id(),
+            "Sessions that finished their turn and are free",
+            "턴을 마치고 손이 비어 있는 세션",
+        ),
+        (
+            "ターンを終えて手が空いています",
+            "Turn finished; free for a new request",
+            "턴을 마치고 손이 비어 있습니다",
+        ),
     ] {
         assert!(!id.contains('待'), "idle hint 「{id}」 reads as waiting");
-        let en = translation_for(Language::En, id).unwrap_or_default();
-        assert!(
-            !en.is_empty() && !en.to_lowercase().contains("wait"),
-            "idle hint {en:?} reads as waiting"
-        );
-        let ko = translation_for(Language::Ko, id).unwrap_or_default();
-        assert!(
-            !ko.is_empty() && !ko.contains("대기") && !ko.contains("기다"),
-            "idle hint 「{ko}」 reads as waiting"
-        );
+        assert_eq!(translation_for(Language::En, id), Some(en));
+        assert_eq!(translation_for(Language::Ko, id), Some(ko));
     }
     assert!(
         translation_for(Language::En, "指示待ち").is_none(),
@@ -60688,6 +60688,17 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
             "대기 중인 세션에는 바로 실행하는 **今すぐ開始**(지금 바로 시작)가 나옵니다."
         ),
         "docs/MANUAL.ko.md queued-session sentence must keep 대기 중인 세션"
+    );
+
+    let manual_en = fs::read_to_string("docs/MANUAL.md").unwrap();
+    assert!(
+        manual_en
+            .contains("| **Idle** | Finished its turn and free; the next request is up to you |"),
+        "docs/MANUAL.md state table must describe Idle as a finished turn"
+    );
+    assert!(
+        !manual_en.contains("waiting for your next request"),
+        "docs/MANUAL.md must not describe Idle as waiting on you"
     );
     for (path, text) in [
         ("README.md", &readme),

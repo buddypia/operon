@@ -1,5 +1,5 @@
 # The evidence for change 259. Shape: docs/sdlc/templates/verification.yaml.
-digest: "7f4d20540ad92f97"
+digest: "8fe2944f01ec8db1"
 
 obligations:
   - R1 empirical-test :: cargo test --locked the_idle_group_word_does_not_read_as_waiting_on_you

@@ -64,6 +64,26 @@ MUTATIONS = {
         '"유휴"로 남음',
         '"지시 대기"로 남음',
     ),
+    "the English tab hint becomes another state's": (
+        TABLES,
+        '("ターンを終えて手が空いています", "Turn finished; free for a new request"),',
+        '("ターンを終えて手が空いています", "Needs you now"),',
+    ),
+    "the Korean tab hint says it is running": (
+        TABLES,
+        '("ターンを終えて手が空いています", "턴을 마치고 손이 비어 있습니다"),',
+        '("ターンを終えて手が空いています", "실행 중입니다"),',
+    ),
+    "the English chip hint says running": (
+        TABLES,
+        '("ターンを終えて手が空いているセッション", "Sessions that finished their turn and are free"),',
+        '("ターンを終えて手が空いているセッション", "Sessions that are running"),',
+    ),
+    "the English manual describes Idle as a wait": (
+        ROOT / "docs/MANUAL.md",
+        "| **Idle** | Finished its turn and free; the next request is up to you |",
+        "| **Idle** | Running and waiting for your next request |",
+    ),
     "the Korean README caption names 지시 대기": (
         README_KO,
         "대응 필요·실행 중·유휴·종료로 한눈에",
