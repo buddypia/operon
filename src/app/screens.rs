@@ -6909,7 +6909,10 @@ impl OperonApp {
             .retain(|id, _| self.store.sessions.iter().any(|s| s.id == *id));
         let layout = self.workspace.rects(center);
         if layout.panes.is_empty() {
-            body.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // One row at the top left, where the first tab will appear. A
+            // centred right-to-left layout took the whole body and pushed the
+            // heading below the window (change 260).
+            body.horizontal(|ui| {
                 ui.add_enabled_ui(self.workspace_project.is_some(), |ui| {
                     let add = icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"));
                     add.widget_info(|| {
@@ -6998,6 +7001,9 @@ impl OperonApp {
             let mut close = None;
             pane.horizontal(|ui| {
                 // Keep the action outside the scrolling and clipped tab region.
+                // The region shrinks to its tabs, so the + follows the last
+                // one, and grows only to `width`, where the + holds the pane's
+                // right edge and the tabs scroll beneath the clip (change 260).
                 let width = (ui.available_width() - CONTROL_HEIGHT - SPACE_SM).max(0.0);
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, CONTROL_HEIGHT_SMALL + SPACE_SM),
@@ -7009,7 +7015,7 @@ impl OperonApp {
                         ui.shrink_clip_rect(tab_clip);
                         egui::ScrollArea::horizontal()
                         .id_salt(("workspace-tabs", group))
-                        .auto_shrink([false, true])
+                        .auto_shrink([true, true])
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 for (index, tab) in tabs.tabs.iter().enumerate() {
