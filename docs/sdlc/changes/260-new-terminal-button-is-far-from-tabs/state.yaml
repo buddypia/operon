@@ -1,0 +1,29 @@
+# The state of one change. See docs/sdlc/templates/state.yaml for the field meanings.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Have spec.md, screen.md and plan.md evaluated, run the readiness gate, and commit plan.md before editing src/."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - the change edits src/app/screens.rs, so /Applications/Operon.app goes stale and ends with bash scripts/package-macos.sh from main"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
