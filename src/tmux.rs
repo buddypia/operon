@@ -91,6 +91,91 @@ pub(crate) fn parse_tmux_observation(output: &str) -> TmuxObservation {
     }
 }
 
+/// The agent CLI in the foreground of a managed terminal, read from the
+/// processes on its pane's terminal device (change 271).
+///
+/// A CLI's own hook is not enough to say a terminal now runs it: Codex runs its
+/// hooks in a shared daemon that never sees the pane's variables, and
+/// Antigravity says nothing before the first prompt. tmux's
+/// `pane_current_command` is not enough either: it names Claude by its version
+/// (`2.1.319`) and a wrapped `agy` as `bash`. The executable names `ps`
+/// prints for the foreground process group do name all three.
+pub(crate) fn tmux_foreground_cli(name: &str) -> Option<CliProvider> {
+    let mut panes = tmux_command();
+    panes.args(["list-panes", "-t", name, "-F", "#{pane_tty}"]);
+    let output = run_command_with_timeout(&mut panes, Duration::from_secs(5)).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let device = pane_device(&listing)?;
+    let mut processes = Command::new("/bin/ps");
+    processes.args(["-t", device, "-o", "pid=,ppid=,pgid=,tpgid=,comm="]);
+    let output = run_command_with_timeout(&mut processes, Duration::from_secs(5)).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_foreground_cli(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// The terminal device of the first pane `list-panes -F '#{pane_tty}'`
+/// printed, as `ps -t` takes it: `ttys012` for `/dev/ttys012`. Anything but a
+/// plain device name is refused, since `ps` would read it as an option or a
+/// path.
+pub(crate) fn pane_device(listing: &str) -> Option<&str> {
+    let device = listing.lines().next()?.trim().strip_prefix("/dev/")?;
+    (!device.is_empty() && device.chars().all(|c| c.is_ascii_alphanumeric())).then_some(device)
+}
+
+/// Which CLI a terminal's process listing (`pid ppid pgid tpgid comm` per line)
+/// has in front. Only the foreground process group counts (`pgid == tpgid`): a
+/// CLI's MCP servers sit in groups of their own, and a CLI sent to the
+/// background is not what the person is looking at. A CLI started by another
+/// CLI — Claude running `codex exec` as a tool — is the outer one's, so a named
+/// process with a named ancestor in the group is passed over. Two CLIs left
+/// side by side are not guessed between.
+pub(crate) fn parse_foreground_cli(listing: &str) -> Option<CliProvider> {
+    let foreground = listing
+        .lines()
+        .filter_map(|line| {
+            let mut rest = line.trim_start();
+            let mut numbers = [0u32; 4];
+            for number in &mut numbers {
+                let end = rest.find(char::is_whitespace)?;
+                *number = rest[..end].parse().ok()?;
+                rest = rest[end..].trim_start();
+            }
+            let [pid, ppid, pgid, tpgid] = numbers;
+            let executable = rest.trim_end().rsplit('/').next()?;
+            let provider = [CliProvider::Claude, CliProvider::Codex, CliProvider::Gemini]
+                .into_iter()
+                .find(|provider| provider.executable() == executable);
+            (pgid == tpgid).then_some((pid, ppid, provider))
+        })
+        .collect::<Vec<_>>();
+    let named_parent = |mut pid: u32| {
+        // Bounded by the listing's length, so a pid that is its own ancestor
+        // cannot loop.
+        for _ in 0..foreground.len() {
+            let Some(&(_, ppid, _)) = foreground.iter().find(|(p, ..)| *p == pid) else {
+                return false;
+            };
+            match foreground.iter().find(|(p, ..)| *p == ppid) {
+                Some((_, _, Some(_))) => return true,
+                Some(_) => pid = ppid,
+                None => return false,
+            }
+        }
+        false
+    };
+    let mut outermost = foreground
+        .iter()
+        .filter(|(pid, _, provider)| provider.is_some() && !named_parent(*pid))
+        .filter_map(|(_, _, provider)| *provider);
+    let first = outermost.next()?;
+    outermost.all(|other| other == first).then_some(first)
+}
+
 /// What one tmux observation is allowed to say about a session's state.
 ///
 /// Only an exit status the app actually read is grounds for a verdict: `0` is

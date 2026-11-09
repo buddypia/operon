@@ -75474,3 +75474,260 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
     fs::remove_dir_all(&root).ok();
     assert_eq!(coverage.states, R6_STATES, "{coverage:?}");
 }
+
+/// Change 271: the foreground process group of a terminal names the agent CLI
+/// the person is running in it. Rows are `pid ppid pgid tpgid comm`, the shape
+/// `/bin/ps -o pid=,ppid=,pgid=,tpgid=,comm=` prints; the first three are
+/// shaped after what a scratch tmux server showed on 2026-11-09.
+#[test]
+pub(crate) fn the_cli_in_a_terminals_foreground_is_read_from_its_processes() {
+    let cases: [(&str, &str, Option<CliProvider>); 11] = [
+        (
+            "Claude in front of a login shell",
+            "14629 66301 14629 14629 /Users/me/.local/bin/claude\n66301   229 66301 14629 /bin/zsh\n",
+            Some(CliProvider::Claude),
+        ),
+        (
+            "Codex, its MCP servers in groups of their own",
+            "30145 49254 30145 30145 /opt/codex/vendor/aarch64-apple-darwin/bin/codex\n\
+             34566 30145 34566 30145 /Users/me/.cache/codex-runtimes/node/bin/node\n\
+             34575 30145 34575 30145 npm exec some-mcp@latest\n\
+             49254   229 49254 30145 -zsh\n",
+            Some(CliProvider::Codex),
+        ),
+        (
+            "Antigravity under a wrapper shell, with an MCP child in its group",
+            "49287   229 49287 85001 -zsh\n\
+             85001 49287 85001 85001 /bin/sh\n\
+             85977 85001 85001 85001 /Users/me/.local/bin/agy\n\
+             88239 85977 85001 85001 npm exec mcp-remote@0.15.1 https://example.invalid/mcp\n\
+             89997 88239 85001 85001 node\n",
+            Some(CliProvider::Gemini),
+        ),
+        ("a shell alone", "5297 229 5297 5297 -zsh\n", None),
+        (
+            "Claude running Codex as one of its tools is still Claude",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/claude\n\
+             300 200 200 200 /bin/zsh\n301 300 200 200 /usr/local/bin/codex\n",
+            Some(CliProvider::Claude),
+        ),
+        (
+            "two CLIs side by side in one pipeline are not guessed between",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/codex\n201 100 200 200 /usr/local/bin/claude\n",
+            None,
+        ),
+        (
+            "a CLI sent to the background is not the one in front",
+            "100 1 100 100 -zsh\n200 100 200 100 /usr/local/bin/claude\n",
+            None,
+        ),
+        (
+            "an executable path with a space in it",
+            "100 1 100 200 -zsh\n200 100 200 200 /Applications/Some App.app/Contents/MacOS/codex\n",
+            Some(CliProvider::Codex),
+        ),
+        (
+            "a name that only begins like a CLI's",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/codex-helper\n",
+            None,
+        ),
+        ("nothing listed", "", None),
+        ("a line that is not a process", "PID PPID PGID TPGID COMMAND\n", None),
+    ];
+    for (case, listing, expected) in cases {
+        assert_eq!(parse_foreground_cli(listing), expected, "{case}");
+    }
+    // The device `ps -t` is given, out of what tmux prints for the pane.
+    let devices: [(&str, Option<&str>); 6] = [
+        ("/dev/ttys012\n", Some("ttys012")),
+        ("/dev/ttys012\n/dev/ttys013\n", Some("ttys012")),
+        ("/dev/-A\n", None),
+        ("/dev/../ttys012\n", None),
+        ("ttys012\n", None),
+        ("", None),
+    ];
+    for (listing, expected) in devices {
+        assert_eq!(pane_device(listing), expected, "{listing:?}");
+    }
+}
+
+/// Change 271, through the poll's result as the app receives it: a terminal
+/// whose foreground is a CLI takes that CLI's kind, and drops the conversation
+/// recorded for the CLI it ran before. A session launched as a CLI keeps its
+/// kind, and the same CLI seen again leaves the conversation its hook reported.
+#[test]
+pub(crate) fn a_terminal_takes_the_kind_of_the_cli_seen_running_in_it() {
+    let root = temporary_directory("terminal-cli-271");
+    let data_file = root.join("store-v2.json");
+    let mut app = test_app(data_file.clone());
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let mut was_claude = relaunch_270_session(
+        project.id,
+        "claude",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    was_claude.native_session_id = Some(Uuid::new_v4().to_string());
+    was_claude.native_session_path = Some(root.join("claude.jsonl"));
+    let mut launched = relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    launched.native_session_id = Some(Uuid::new_v4().to_string());
+    app.store.projects.push(project);
+    for session in [&plain, &was_claude, &launched] {
+        app.store.sessions.push(session.clone());
+    }
+    let poll = |app: &mut OperonApp, clis: Vec<(Uuid, CliProvider)>| {
+        app.background_tasks.insert(BackgroundKey::SessionPoll);
+        app.background_sender
+            .send(BackgroundResult::SessionPoll {
+                states: Vec::new(),
+                activities: Vec::new(),
+                previews: Vec::new(),
+                output: Vec::new(),
+                clis,
+            })
+            .unwrap();
+        app.process_background_results();
+    };
+
+    poll(
+        &mut app,
+        vec![
+            (plain.id, CliProvider::Codex),
+            (was_claude.id, CliProvider::Gemini),
+            (launched.id, CliProvider::Codex),
+        ],
+    );
+
+    let codex = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        codex.agent,
+        CliProvider::Codex.agent(),
+        "Codex を動かしているターミナルの種類"
+    );
+    assert_eq!(codex.goal, "", "素のターミナルの説明が残りました");
+    assert_eq!(codex.origin, Some(SessionOrigin::PlainTerminal));
+    let gemini = relaunch_270_find(&app, was_claude.id);
+    assert_eq!(gemini.agent, CliProvider::Gemini.agent());
+    assert_eq!(
+        gemini.native_session_id, None,
+        "前の CLI の会話 ID が残りました"
+    );
+    assert_eq!(gemini.native_session_path, None);
+    let still_launched = relaunch_270_find(&app, launched.id);
+    assert_eq!(
+        still_launched.agent, "claude",
+        "CLI として起動したセッションの種類が変わりました"
+    );
+    assert_eq!(
+        still_launched.native_session_id, launched.native_session_id,
+        "CLI として起動したセッションの会話 ID が消えました"
+    );
+    let stored = load_store_safely(&data_file).store;
+    let stored_kind = |id: Uuid| {
+        stored
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| session.agent.clone())
+    };
+    assert_eq!(
+        stored_kind(plain.id).as_deref(),
+        Some(CliProvider::Codex.agent())
+    );
+    assert_eq!(
+        stored_kind(was_claude.id).as_deref(),
+        Some(CliProvider::Gemini.agent())
+    );
+
+    // The hook of the CLI now in front reports its conversation; seeing the
+    // same CLI on the next poll keeps it.
+    let agy_id = Uuid::new_v4().to_string();
+    relaunch_270_report(
+        &mut app,
+        &was_claude.tmux_name,
+        CliProvider::Gemini,
+        &agy_id,
+    );
+    poll(&mut app, vec![(was_claude.id, CliProvider::Gemini)]);
+    assert_eq!(
+        relaunch_270_find(&app, was_claude.id)
+            .native_session_id
+            .as_deref(),
+        Some(agy_id.as_str())
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 271, through the session poll, tmux and `/bin/ps` themselves: a
+/// program named `codex` started in a live terminal turns the terminal into a
+/// Codex session, and the pane's shell alone is read as no CLI. The program is
+/// `/bin/sleep` under that name, so no CLI is needed.
+#[test]
+pub(crate) fn the_foreground_cli_of_a_live_pane_is_read_through_tmux_and_ps() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("foreground-cli-271");
+    let fake = root.join(CliProvider::Codex.executable());
+    std::os::unix::fs::symlink("/bin/sleep", &fake).unwrap();
+    let mut app = test_app(root.join("store-v2.json"));
+    app.tools.tmux = true;
+    let project = relaunch_270_project(&root);
+    let terminal = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    app.store.projects.push(project);
+    app.store.sessions.push(terminal.clone());
+    let name = terminal.tmux_name.clone();
+    let started = start_empty_tmux_session(&name, &root, &[]);
+    let mut shell_alone = Some(CliProvider::Claude);
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        shell_alone = tmux_foreground_cli(&name);
+        if shell_alone.is_none() {
+            break;
+        }
+    }
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        &format!("'{}' 30", fake.display()),
+        "Enter",
+    ]);
+    let sent = run_command_with_timeout(&mut send, Duration::from_secs(5));
+    let mut kind = String::new();
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        app.request_session_poll();
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionPoll,
+            Duration::from_secs(10),
+        );
+        kind = relaunch_270_find(&app, terminal.id).agent;
+        if kind == CliProvider::Codex.agent() {
+            break;
+        }
+    }
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+    started.unwrap();
+    assert!(sent.is_ok_and(|output| output.status.success()));
+    assert_eq!(shell_alone, None, "シェルだけのペインを CLI と読みました");
+    assert_eq!(
+        kind,
+        CliProvider::Codex.agent(),
+        "ペインで動く codex を読めませんでした"
+    );
+}
