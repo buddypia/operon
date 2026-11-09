@@ -11629,8 +11629,8 @@ pub(crate) fn editor_diff_refreshes_after_a_second_write_with_unchanged_git_stat
     app.diff_file_cache.insert(key.clone(), Vec::new());
 
     app.refresh_editor_git_views(&project);
-    assert!(!app.git_diff_cache.contains_key(&key));
-    assert!(!app.diff_file_cache.contains_key(&key));
+    // The first write's diff stays on screen until the second's arrives
+    // (change 277); what this test holds is that it is then replaced.
     wait_for_background_task(
         &mut app,
         &BackgroundKey::GitDiff(project.id, Some("agent.rs".into())),
@@ -77535,5 +77535,101 @@ fn terminal_276_random_sequences_match_the_oracle() {
             }
         }
     }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// A project with one open document in the Diff view, its diff already read
+/// and parsed. The parse is a sentinel — no file — that no real diff of
+/// `DIFF_277_TEXT` produces, so a test can tell whether it was replaced.
+const DIFF_277_TEXT: &str =
+    "diff --git a/agent.rs b/agent.rs\n--- a/agent.rs\n+++ b/agent.rs\n@@ -1 +1 @@\n-old\n+new\n";
+
+fn diff_277_app(label: &str) -> (PathBuf, OperonApp, Project, (Uuid, Option<String>)) {
+    let root = temporary_directory(label);
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "diff 277".into(),
+        path: root.clone(),
+        added_at: now(),
+    };
+    let mut app = test_app(root.join("store.json"));
+    app.store.projects.push(project.clone());
+    app.editor_view = EditorView::Diff;
+    show_document(&mut app, &project, "agent.rs");
+    let key = (project.id, Some("agent.rs".to_owned()));
+    app.git_diff_cache
+        .insert(key.clone(), Ok(DIFF_277_TEXT.into()));
+    app.diff_file_cache.insert(key.clone(), Vec::new());
+    (root, app, project, key)
+}
+
+fn diff_277_result(app: &mut OperonApp, key: &(Uuid, Option<String>), result: UiResult<String>) {
+    let generation = app.git_diff_generations.get(key).copied().unwrap_or(0);
+    app.background_sender
+        .send(BackgroundResult::GitDiff {
+            project_id: key.0,
+            file: key.1.clone(),
+            generation,
+            result,
+        })
+        .unwrap();
+    app.process_background_results();
+}
+
+#[test]
+fn diff_277_open_diff_stays_on_screen_while_it_is_read_again() {
+    let (root, mut app, project, key) = diff_277_app("diff-277-stays");
+    let before = app.git_diff_generations.get(&key).copied().unwrap_or(0);
+    app.refresh_editor_git_views(&project);
+    assert!(
+        app.git_diff_cache.contains_key(&key) && app.diff_file_cache.contains_key(&key),
+        "読み直しのたびに差分を捨て、「差分を読み込んでいます…」に戻しました"
+    );
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::GitDiff(project.id, key.1.clone())),
+        "開いている差分を読み直しませんでした"
+    );
+    assert!(
+        app.git_diff_generations.get(&key).copied().unwrap_or(0) > before,
+        "読み直しの前に始まっていた取得の結果を、古いまま受け取ります"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn diff_277_an_unchanged_diff_keeps_what_is_on_screen() {
+    let (root, mut app, _project, key) = diff_277_app("diff-277-unchanged");
+    diff_277_result(&mut app, &key, Ok(DIFF_277_TEXT.into()));
+    assert!(
+        app.diff_file_cache.get(&key).is_some_and(Vec::is_empty),
+        "変わっていない差分を解析し直しました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn diff_277_a_changed_diff_replaces_what_is_on_screen() {
+    let (root, mut app, _project, key) = diff_277_app("diff-277-changed");
+    let newer = DIFF_277_TEXT.replace("+new", "+newer");
+    diff_277_result(&mut app, &key, Ok(newer.clone()));
+    assert_eq!(app.git_diff_cache.get(&key), Some(&Ok(newer)));
+    assert!(
+        !app.diff_file_cache.contains_key(&key),
+        "差分が変わったのに、前の解析結果を表示し続けます"
+    );
+    diff_277_result(&mut app, &key, Err("git failed".into()));
+    assert_eq!(
+        app.git_diff_cache.get(&key),
+        Some(&Err("git failed".into()))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn diff_277_choosing_the_diff_view_still_starts_from_nothing() {
+    let (root, mut app, project, key) = diff_277_app("diff-277-choose");
+    assert_eq!(app.invalidate_open_editor_diff(project.id), key.1);
+    assert!(!app.git_diff_cache.contains_key(&key) && !app.diff_file_cache.contains_key(&key));
     fs::remove_dir_all(&root).ok();
 }
