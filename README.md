@@ -170,11 +170,17 @@ Settings.
   and there is no force push in Operon in any spelling: a test forbids the
   strings from appearing in the source at all.
 - Three worktrees mean three dev servers on ports handed out in start order.
-  Each session's header names what its own worktree is listening on — `:5173
-  vite`, `:3001 node` — read from `lsof` and joined to the worktree by the
-  owning process's working directory, so the deepest worktree containing that
-  directory is the one credited. Click to open, right-click to copy the URL. A
-  worktree serving nothing says nothing.
+  Each session's header names what its own folder is listening on — `:5173
+  vite`, `:3001 node` — read from `lsof` and joined by the owning process's
+  working directory to the deepest folder that contains it: a session's
+  worktree, any git worktree of the project (with or without a session), or
+  the project root. The menu behind it lists this folder's servers and, under
+  a separate heading, the rest of the project's, each named by its folder;
+  when only the rest of the project is serving, the header says how many,
+  muted. Each row opens the URL, copies it, or stops the server: Operon shows
+  the process, PID and folder, asks first, checks the PID still holds that
+  port under that name, sends SIGTERM, and says whether it stopped. A project
+  serving nothing says nothing.
 - `⌘F` searches a session's scrollback. Every occurrence is washed where it
   sits — columns counted in terminal cells, so the mark lands on the text even
   on a Japanese line — and Enter steps through them while the pane scrolls to

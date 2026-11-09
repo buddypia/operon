@@ -74,4 +74,20 @@
 
 ## Departures from the plan
 
-Filled in during implementation. What changed, and why the plan was wrong.
+- Tests and code for each step were written in the same sitting rather than
+  each test watched failing first. The mutation sweep (`mutations.py`, 17
+  mutations, one per guard plus three claims) is the evidence that every new
+  guard goes red when its rule is removed.
+- The stop outcome handler also drops a listener that was seen stopped from
+  the list at once, instead of leaving it until the rescan lands a moment
+  later; requirement 10's test asserts it.
+- Requirement 10's test checks the stop outcome and the stale scan as two
+  separate deliveries: delivered together, the stale scan's own rescan request
+  hid a handler that forgot to ask for one.
+- The real-listener test for requirement 7 is recorded as `I6`: the
+  verification record allows one line per id.
+- The background-key partition test counted 55 variants by number; it now
+  counts 56. Its name still says 55, because renaming a test reads as losing
+  one at the commit gate.
+- The READMEs said a right-click copies the URL; the menu has always had a copy
+  control instead, and the rewritten paragraph says so.

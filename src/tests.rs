@@ -34940,9 +34940,32 @@ pub(crate) fn attributes_a_port_to_the_deepest_worktree_that_contains_it() {
         (2, PathBuf::from("/w/project/web")),
     ]);
 
-    let attributed = attribute_ports(&ports, &directories, &[project.clone(), inner.clone()]);
-    assert_eq!(attributed[0].1.as_ref(), Some(&inner));
-    assert_eq!(attributed[1].1.as_ref(), Some(&project));
+    let project_id = Uuid::new_v4();
+    let roots = port_roots(
+        &[(project_id, project.clone())],
+        &[(project_id, inner.clone())],
+        |_| Vec::new(),
+        Path::to_path_buf,
+    );
+    let attributed = attribute_ports(&ports, &directories, &roots);
+    assert_eq!(
+        attributed[0].root.as_ref().map(|root| &root.path),
+        Some(&inner)
+    );
+    assert_eq!(
+        attributed[1].root.as_ref().map(|root| &root.path),
+        Some(&project)
+    );
+}
+
+/// The folders of `/w/project`, known to nothing but the project itself.
+fn project_only_roots() -> Vec<Arc<PortRoot>> {
+    port_roots(
+        &[(Uuid::new_v4(), PathBuf::from("/w/project"))],
+        &[],
+        |_| Vec::new(),
+        Path::to_path_buf,
+    )
 }
 
 /// A port belonging to nothing Operon knows about stays unattributed rather
@@ -34956,13 +34979,13 @@ pub(crate) fn leaves_a_port_unattributed_when_no_worktree_contains_it() {
         host: "localhost".into(),
     }];
     let directories = HashMap::from([(9, PathBuf::from("/usr/local/var/postgres"))]);
-    let attributed = attribute_ports(&ports, &directories, &[PathBuf::from("/w/project")]);
-    assert_eq!(attributed[0].1, None);
+    let attributed = attribute_ports(&ports, &directories, &project_only_roots());
+    assert_eq!(attributed[0].root, None);
 
     // A process whose working directory could not be read is unattributed too,
     // rather than falling through to the first worktree in the list.
-    let attributed = attribute_ports(&ports, &HashMap::new(), &[PathBuf::from("/w/project")]);
-    assert_eq!(attributed[0].1, None);
+    let attributed = attribute_ports(&ports, &HashMap::new(), &project_only_roots());
+    assert_eq!(attributed[0].root, None);
 
     // A sibling whose path merely starts with the same characters is not
     // inside it. `starts_with` on a `Path` compares components, and this is the
@@ -34970,9 +34993,9 @@ pub(crate) fn leaves_a_port_unattributed_when_no_worktree_contains_it() {
     let attributed = attribute_ports(
         &ports,
         &HashMap::from([(9, PathBuf::from("/w/project-other/web"))]),
-        &[PathBuf::from("/w/project")],
+        &project_only_roots(),
     );
-    assert_eq!(attributed[0].1, None);
+    assert_eq!(attributed[0].root, None);
 }
 
 #[test]
@@ -35001,7 +35024,8 @@ pub(crate) fn a_missing_lsof_is_a_reading_of_nothing_rather_than_an_error() {
     // one that needs to find `tmux`.
     let reading = scan_listening_ports_with(
         "operon-there-is-no-such-program",
-        &[PathBuf::from("/w/project")],
+        &[(Uuid::new_v4(), PathBuf::from("/w/project"))],
+        &[],
     );
     assert!(reading.is_empty());
 
@@ -35013,7 +35037,362 @@ pub(crate) fn a_missing_lsof_is_a_reading_of_nothing_rather_than_an_error() {
 
     // The real program on this machine answers without panicking, whatever it
     // finds — the parser meets the live output at least once in the suite.
-    let _ = scan_listening_ports(&[]);
+    let _ = scan_listening_ports(&[], &[]);
+}
+
+fn port_261(pid: u32, process: &str, port: u16) -> ListeningPort {
+    ListeningPort {
+        pid,
+        process: process.into(),
+        port,
+        host: "localhost".into(),
+    }
+}
+
+/// Change 261, requirement 1. Every known folder competes — a session's
+/// worktree, a git worktree nobody has a session on, a project's root — and
+/// the deepest wins, carrying its project and the process's own directory.
+#[test]
+pub(crate) fn ports_261_deepest_known_folder_is_credited() {
+    let project_id = Uuid::new_v4();
+    let other_id = Uuid::new_v4();
+    let roots = port_roots(
+        &[
+            (project_id, PathBuf::from("/w/project")),
+            (other_id, PathBuf::from("/w/other")),
+        ],
+        &[(project_id, PathBuf::from("/w/project"))],
+        |project| {
+            if project == Path::new("/w/project") {
+                vec![
+                    PathBuf::from("/w/project"),
+                    PathBuf::from("/w/project/.worktrees/feature-y"),
+                    PathBuf::from("/w/project-worktrees/feature-z"),
+                ]
+            } else {
+                Vec::new()
+            }
+        },
+        Path::to_path_buf,
+    );
+    let ports = vec![
+        port_261(1, "vite", 5173),
+        port_261(2, "node", 3000),
+        port_261(3, "node", 3001),
+        port_261(4, "rails", 4000),
+        port_261(5, "postgres", 5432),
+        port_261(6, "mystery", 9000),
+    ];
+    let directories = HashMap::from([
+        (1, PathBuf::from("/w/project/web")),
+        (2, PathBuf::from("/w/project/.worktrees/feature-y/web")),
+        (3, PathBuf::from("/w/project-worktrees/feature-z")),
+        (4, PathBuf::from("/w/other/api")),
+        (5, PathBuf::from("/usr/local/var/postgres")),
+    ]);
+    let attributed = attribute_ports(&ports, &directories, &roots);
+    let credited = |index: usize| {
+        attributed[index]
+            .root
+            .as_ref()
+            .map(|root| (root.path.clone(), root.project_id))
+    };
+    assert_eq!(credited(0), Some((PathBuf::from("/w/project"), project_id)));
+    assert_eq!(
+        credited(1),
+        Some((PathBuf::from("/w/project/.worktrees/feature-y"), project_id)),
+        "セッションのない worktree のサーバーがルートに数えられています"
+    );
+    assert_eq!(
+        credited(2),
+        Some((PathBuf::from("/w/project-worktrees/feature-z"), project_id)),
+        "プロジェクトの外にある worktree がプロジェクトのものになっていません"
+    );
+    assert_eq!(credited(3), Some((PathBuf::from("/w/other"), other_id)));
+    assert_eq!(credited(4), None);
+    assert_eq!(credited(5), None);
+    assert_eq!(
+        attributed[1].directory.as_deref(),
+        Some(Path::new("/w/project/.worktrees/feature-y/web"))
+    );
+    assert_eq!(attributed[5].directory, None);
+}
+
+/// Change 261, requirement 2. One folder spelled two ways is one folder that
+/// remembers both spellings, and each folder is named the way the list says it.
+#[test]
+pub(crate) fn ports_261_known_folders_are_named_once() {
+    let project_id = Uuid::new_v4();
+    let canonical = |path: &Path| {
+        path.strip_prefix("/link")
+            .map(|rest| Path::new("/real").join(rest))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+    let roots = port_roots(
+        &[(project_id, PathBuf::from("/link/project"))],
+        &[
+            (
+                project_id,
+                PathBuf::from("/link/project/.worktrees/feature-y"),
+            ),
+            (project_id, PathBuf::from("/link/project")),
+        ],
+        |_| {
+            vec![
+                PathBuf::from("/real/project"),
+                PathBuf::from("/real/project/.worktrees/feature-y"),
+                PathBuf::from("/real/project-worktrees/feature-z"),
+            ]
+        },
+        canonical,
+    );
+    let paths: Vec<&Path> = roots.iter().map(|root| root.path.as_path()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            Path::new("/real/project"),
+            Path::new("/real/project/.worktrees/feature-y"),
+            Path::new("/real/project-worktrees/feature-z"),
+        ],
+        "同じフォルダが綴りの違いで二つになっています"
+    );
+    let labels: Vec<&str> = roots.iter().map(|root| root.label.as_str()).collect();
+    assert_eq!(labels, vec!["", ".worktrees/feature-y", "feature-z"]);
+    assert!(roots[0].spellings.contains(&PathBuf::from("/link/project")));
+    assert!(roots[1]
+        .spellings
+        .contains(&PathBuf::from("/link/project/.worktrees/feature-y")));
+    assert!(roots.iter().all(|root| root.spellings.contains(&root.path)));
+
+    // A directory `lsof` reports in its real form is credited to the folder
+    // that was stored through the link.
+    let attributed = attribute_ports(
+        &[port_261(7, "vite", 5173)],
+        &HashMap::from([(7, PathBuf::from("/real/project/.worktrees/feature-y/web"))]),
+        &roots,
+    );
+    assert_eq!(
+        attributed[0].root.as_ref().map(|root| root.label.as_str()),
+        Some(".worktrees/feature-y")
+    );
+}
+
+/// Change 261, requirement 6. Nothing is run at all for a PID that is not a
+/// dev server by construction.
+#[test]
+pub(crate) fn ports_261_stop_refuses_operon_and_init() {
+    let operon = 4242;
+    for pid in [0, 1, operon, i32::MAX.unsigned_abs() + 1, u32::MAX] {
+        let mut ran = false;
+        let outcome = stop_listening_port_with(
+            &port_261(pid, "node", 3000),
+            operon,
+            Duration::ZERO,
+            |_| {
+                ran = true;
+                Some(true)
+            },
+            |_| -> Result<(), String> {
+                panic!("PID {pid} にシグナルを送ろうとしました")
+            },
+        );
+        assert_eq!(outcome, PortStopOutcome::Refused, "PID {pid}");
+        assert!(!ran, "PID {pid} のために lsof を読みました");
+    }
+}
+
+/// Change 261, requirement 7, without a process: the read comes before the
+/// signal, and a listener that is no longer the confirmed one is not signalled.
+#[test]
+pub(crate) fn ports_261_stop_sequence_checks_before_signalling() {
+    let port = port_261(4821, "vite", 5173);
+
+    let mut signalled = false;
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::ZERO,
+        |_| Some(false),
+        |_| {
+            signalled = true;
+            Ok(())
+        },
+    );
+    assert_eq!(outcome, PortStopOutcome::NotListening);
+    assert!(
+        !signalled,
+        "別のプロセスに変わった PID にシグナルを送りました"
+    );
+
+    let mut reads = Vec::new();
+    let signalled_pid = std::cell::Cell::new(None);
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::from_millis(2_000),
+        |seen| {
+            reads.push(signalled_pid.get().is_some());
+            assert_eq!(seen, &port);
+            // Held before the signal, gone on the first read after it.
+            Some(reads.len() == 1)
+        },
+        |pid| {
+            signalled_pid.set(Some(pid));
+            Ok(())
+        },
+    );
+    assert_eq!(outcome, PortStopOutcome::Stopped);
+    assert_eq!(signalled_pid.get(), Some(4821));
+    assert_eq!(
+        reads,
+        vec![false, true],
+        "シグナルの前に読み、後にもう一度読む順になっていません"
+    );
+
+    let outcome = stop_listening_port_with(&port, 1, Duration::ZERO, |_| Some(true), |_| Ok(()));
+    assert_eq!(outcome, PortStopOutcome::StillListening);
+}
+
+/// Change 261, requirement 8. "Stopped" needs a read that succeeded and saw
+/// the port free; every other path says what it could and could not do.
+#[test]
+pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
+    let port = port_261(4821, "vite", 5173);
+
+    let mut signalled = false;
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::ZERO,
+        |_| None,
+        |_| {
+            signalled = true;
+            Ok(())
+        },
+    );
+    assert_eq!(outcome, PortStopOutcome::Unverified);
+    assert!(!signalled, "確かめられないプロセスにシグナルを送りました");
+
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::ZERO,
+        |_| Some(true),
+        |_| Err("Operation not permitted".into()),
+    );
+    assert_eq!(
+        outcome,
+        PortStopOutcome::Failed("Operation not permitted".into())
+    );
+
+    // Held before the signal; every read after it fails.
+    let mut reads = 0;
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::from_millis(600),
+        |_| {
+            reads += 1;
+            (reads == 1).then_some(true)
+        },
+        |_| Ok(()),
+    );
+    assert_eq!(
+        outcome,
+        PortStopOutcome::Unconfirmed,
+        "読めなかったのに停止したと報告しています"
+    );
+    assert!(reads >= 3, "締め切りまで読み直していません: {reads}");
+
+    // The real helpers say "not known" rather than guessing.
+    assert_eq!(
+        listener_still_held("operon-there-is-no-such-program", &port),
+        None
+    );
+    assert!(send_terminate("operon-there-is-no-such-program", 4821).is_err());
+    let unused = i32::MAX.unsigned_abs() - 7;
+    let refused = send_terminate(PORT_STOP_PROGRAM, unused);
+    assert!(refused.is_err(), "存在しない PID への kill が成功しました");
+}
+
+/// Kills and reaps a test listener on every path out of the test.
+struct ListenerChild(std::process::Child);
+
+impl Drop for ListenerChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Change 261, requirement 7, with a real listener, the real `lsof` and the
+/// real `/bin/kill`: a mismatched name leaves it running, the confirmed one is
+/// stopped and seen gone.
+#[test]
+pub(crate) fn ports_261_stop_signals_only_the_confirmed_listener() {
+    let mut child = Command::new("/usr/bin/python3")
+        .args([
+            "-c",
+            "import socket, time\n\
+             s = socket.socket()\n\
+             s.bind(('127.0.0.1', 0))\n\
+             s.listen()\n\
+             print(s.getsockname()[1], flush=True)\n\
+             time.sleep(60)\n",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("python3 を起動できません");
+    let stdout = child.stdout.take().expect("stdout を取れません");
+    let child = ListenerChild(child);
+    let mut line = String::new();
+    std::io::BufReader::new(stdout)
+        .read_line(&mut line)
+        .expect("ポート番号を読めません");
+    let number: u16 = line.trim().parse().expect("ポート番号ではありません");
+
+    // Whatever `lsof` calls the listener — the interpreter names itself.
+    let mut command = Command::new(PORT_SCAN_PROGRAM);
+    command.args([
+        "-nP",
+        &format!("-iTCP:{number}"),
+        "-sTCP:LISTEN",
+        "-F",
+        "pcn",
+    ]);
+    let listed = run_command_with_output_limit(
+        &mut command,
+        Duration::from_secs(PORT_SCAN_TIMEOUT_SECONDS),
+        PORT_SCAN_MAX_BYTES,
+        COMMAND_ERROR_MAX_BYTES,
+    )
+    .expect("lsof を実行できません");
+    let listener = parse_lsof_listeners(&String::from_utf8_lossy(&listed.output.stdout))
+        .into_iter()
+        .find(|port| port.port == number)
+        .expect("テスト用のリスナーが lsof に見えません");
+
+    let impostor = ListeningPort {
+        process: "not-the-listener".into(),
+        ..listener.clone()
+    };
+    assert_eq!(
+        stop_listening_port(&impostor),
+        PortStopOutcome::NotListening
+    );
+    assert_eq!(
+        listener_still_held(PORT_SCAN_PROGRAM, &listener),
+        Some(true),
+        "名前の違うリスナーが止められました"
+    );
+
+    assert_eq!(stop_listening_port(&listener), PortStopOutcome::Stopped);
+    assert_eq!(
+        listener_still_held(PORT_SCAN_PROGRAM, &listener),
+        Some(false)
+    );
+    drop(child);
 }
 
 fn terminal_test_lines(texts: &[&str]) -> Vec<LayoutJob> {
@@ -46601,16 +46980,21 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
     assert_eq!(draw(&mut app), Vec::<String>::new());
 
     // One port: the badge names it.
-    let port = |number: u16, process: &str| {
-        (
-            ListeningPort {
-                pid: 100,
-                process: process.into(),
-                port: number,
-                host: "localhost".into(),
-            },
-            Some(project_path.clone()),
-        )
+    let folder = Arc::new(PortRoot {
+        path: project_path.clone(),
+        spellings: vec![project_path.clone()],
+        project_id,
+        label: String::new(),
+    });
+    let port = |number: u16, process: &str| AttributedPort {
+        port: ListeningPort {
+            pid: 100,
+            process: process.into(),
+            port: number,
+            host: "localhost".into(),
+        },
+        directory: Some(project_path.clone()),
+        root: Some(folder.clone()),
     };
     app.listening_ports.push(port(8791, "node"));
     let texts = draw(&mut app);
@@ -46634,6 +47018,497 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
     );
 
     let _ = fs::remove_dir_all(&root);
+}
+
+/// Every text shape drawn, with where it landed and its first colour.
+fn text_shapes_261(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect, Color32)>) {
+    match shape {
+        egui::epaint::Shape::Text(text) => {
+            let color = text
+                .galley
+                .job
+                .sections
+                .first()
+                .map(|section| section.format.color)
+                .unwrap_or(text.fallback_color);
+            out.push((
+                text.galley.text().to_owned(),
+                text.galley.rect.translate(text.pos.to_vec2()),
+                color,
+            ));
+        }
+        egui::epaint::Shape::Vec(children) => {
+            for child in children {
+                text_shapes_261(child, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn frame_texts_261(output: &egui::FullOutput) -> Vec<(String, egui::Rect, Color32)> {
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        text_shapes_261(&clipped.shape, &mut texts);
+    }
+    texts
+}
+
+fn screen_261(events: Vec<egui::Event>) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events,
+        ..Default::default()
+    }
+}
+
+/// `/real/project` (stored as `/link/project`), its worktree
+/// `.worktrees/feature-y` with no session, a worktree outside it, and another
+/// project — each serving something.
+fn listening_261(project_id: Uuid, other_id: Uuid) -> Vec<AttributedPort> {
+    let roots = port_roots(
+        &[
+            (project_id, PathBuf::from("/link/project")),
+            (other_id, PathBuf::from("/real/other")),
+        ],
+        &[(project_id, PathBuf::from("/link/project"))],
+        |project| {
+            if project == Path::new("/link/project") {
+                vec![
+                    PathBuf::from("/real/project"),
+                    PathBuf::from("/real/project/.worktrees/feature-y"),
+                    PathBuf::from("/real/project-worktrees/feature-z"),
+                ]
+            } else {
+                Vec::new()
+            }
+        },
+        |path| {
+            path.strip_prefix("/link")
+                .map(|rest| Path::new("/real").join(rest))
+                .unwrap_or_else(|_| path.to_path_buf())
+        },
+    );
+    attribute_ports(
+        &[
+            port_261(11, "storybook", 6006),
+            port_261(12, "vite", 5173),
+            port_261(13, "node", 3001),
+            port_261(14, "node", 3000),
+            port_261(15, "rails", 4000),
+        ],
+        &HashMap::from([
+            (11, PathBuf::from("/real/project")),
+            (12, PathBuf::from("/real/project/web")),
+            (13, PathBuf::from("/real/project-worktrees/feature-z")),
+            (14, PathBuf::from("/real/project/.worktrees/feature-y/web")),
+            (15, PathBuf::from("/real/other")),
+        ]),
+        &roots,
+    )
+}
+
+fn numbers_261(ports: &[AttributedPort]) -> Vec<u16> {
+    ports
+        .iter()
+        .map(|attributed| attributed.port.port)
+        .collect()
+}
+
+/// Change 261, requirement 3. A root session counts only the root's servers;
+/// a worktree's server — with no session open on it — is elsewhere, not own.
+#[test]
+pub(crate) fn ports_261_session_splits_own_from_elsewhere() {
+    let root = temporary_directory("ports-261-split");
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    let other_id = Uuid::new_v4();
+    app.listening_ports = listening_261(project_id, other_id);
+
+    // Stored through the link, as a restored session at the root would be.
+    let mut at_root = test_session(Uuid::new_v4(), SessionStatus::Active);
+    at_root.project_id = project_id;
+    at_root.worktree_path = Some(PathBuf::from("/link/project"));
+    let ports = app.session_ports(&at_root);
+    assert_eq!(
+        numbers_261(&ports.own),
+        vec![5173, 6006],
+        "ルートのセッションが自分のフォルダ以外を数えています"
+    );
+    assert_eq!(numbers_261(&ports.elsewhere), vec![3000, 3001]);
+
+    let mut in_worktree = test_session(Uuid::new_v4(), SessionStatus::Active);
+    in_worktree.project_id = project_id;
+    in_worktree.worktree_path = Some(PathBuf::from("/real/project/.worktrees/feature-y"));
+    let ports = app.session_ports(&in_worktree);
+    assert_eq!(numbers_261(&ports.own), vec![3000]);
+    assert_eq!(
+        numbers_261(&ports.elsewhere),
+        vec![5173, 6006, 3001],
+        "ほかの場所はフォルダ名、次にポートの順です"
+    );
+
+    let mut without_folder = test_session(Uuid::new_v4(), SessionStatus::Active);
+    without_folder.project_id = project_id;
+    without_folder.worktree_path = None;
+    let ports = app.session_ports(&without_folder);
+    assert!(ports.own.is_empty());
+    assert_eq!(ports.elsewhere.len(), 4);
+    assert!(
+        !ports
+            .elsewhere
+            .iter()
+            .any(|attributed| attributed.port.port == 4000),
+        "ほかのプロジェクトのサーバーが混ざっています"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 261, requirement 4. The badge counts this folder; with nothing here
+/// but something elsewhere in the project it says so in the muted ink.
+#[test]
+pub(crate) fn ports_261_badge_counts_own_folder_or_names_the_project() {
+    let root = temporary_directory("ports-261-badge");
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    let other_id = Uuid::new_v4();
+    let palette = app.store.theme.palette();
+    let ctx = egui::Context::default();
+    let draw = |app: &mut OperonApp, session: &Session| {
+        let output = ctx.run(screen_261(Vec::new()), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| app.ui_session_ports(ui, palette, session));
+            });
+        });
+        frame_texts_261(&output)
+    };
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+
+    // A worktree of the project with nothing of its own listening.
+    session.worktree_path = Some(PathBuf::from("/real/project/.worktrees/quiet"));
+    app.listening_ports = listening_261(project_id, other_id);
+    let texts = draw(&mut app, &session);
+    let badge = texts
+        .iter()
+        .find(|(text, _, _)| text.contains("プロジェクトで 4 ポート稼働中"))
+        .unwrap_or_else(|| panic!("プロジェクトのポートを数えるバッジがありません: {texts:?}"));
+    assert_eq!(badge.2, palette.text_muted);
+
+    // The worktree with one server: the badge names that one, in `info`.
+    session.worktree_path = Some(PathBuf::from("/real/project/.worktrees/feature-y"));
+    let texts = draw(&mut app, &session);
+    let badge = texts
+        .iter()
+        .find(|(text, _, _)| text.contains(":3000 node"))
+        .unwrap_or_else(|| panic!("自分のポートを名指ししていません: {texts:?}"));
+    assert_eq!(badge.2, palette.info);
+    assert!(
+        !texts
+            .iter()
+            .any(|(text, _, _)| text.contains("ポート稼働中")),
+        "ほかの場所のポートまでバッジに数えています: {texts:?}"
+    );
+
+    // A project with nothing listening draws nothing, even when another
+    // project is serving.
+    session.project_id = Uuid::new_v4();
+    session.worktree_path = Some(PathBuf::from("/real/quiet-project"));
+    let texts = draw(&mut app, &session);
+    assert!(
+        texts.is_empty(),
+        "関係のないプロジェクトのポートを出しています: {texts:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 261, requirement 5. Two labelled sections, folder names on the
+/// rest of the project, and a stop control that only asks.
+#[test]
+pub(crate) fn ports_261_menu_sections_name_folders_and_offer_stop() {
+    let root = temporary_directory("ports-261-menu");
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    let palette = app.store.theme.palette();
+    app.listening_ports = listening_261(project_id, Uuid::new_v4());
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    session.worktree_path = Some(PathBuf::from("/real/project/.worktrees/feature-y"));
+    let ports = app.session_ports(&session);
+
+    let ctx = egui::Context::default();
+    let menu = |ports: &SessionPorts, stopping: bool, events: Vec<egui::Event>| {
+        let mut action = None;
+        let output = ctx.run(screen_261(events), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                action = session_ports_menu(ui, palette, ports, stopping);
+            });
+        });
+        (frame_texts_261(&output), action)
+    };
+    let (texts, _) = menu(&ports, false, Vec::new());
+    let has = |needle: &str| texts.iter().any(|(text, _, _)| text == needle);
+    for needle in [
+        "この作業フォルダ",
+        "プロジェクト内のほかの場所",
+        ":3000 node",
+        ":5173 vite",
+        "プロジェクトのルート",
+        "feature-z",
+    ] {
+        assert!(has(needle), "「{needle}」がメニューにありません: {texts:?}");
+    }
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|(text, _, _)| text.as_str() == ICON_STOP)
+            .count(),
+        4,
+        "停止ボタンが行の数だけありません"
+    );
+
+    let only_own = SessionPorts {
+        own: ports.own.clone(),
+        elsewhere: Vec::new(),
+    };
+    let (texts, _) = menu(&only_own, false, Vec::new());
+    assert!(!texts
+        .iter()
+        .any(|(text, _, _)| text == "プロジェクト内のほかの場所"));
+    let only_elsewhere = SessionPorts {
+        own: Vec::new(),
+        elsewhere: ports.elsewhere.clone(),
+    };
+    let (texts, _) = menu(&only_elsewhere, false, Vec::new());
+    assert!(!texts.iter().any(|(text, _, _)| text == "この作業フォルダ"));
+
+    // The first stop belongs to this folder's server. Pressing it asks.
+    let (texts, _) = menu(&ports, false, Vec::new());
+    let stop = texts
+        .iter()
+        .find(|(text, _, _)| text.as_str() == ICON_STOP)
+        .map(|(_, rect, _)| rect.center())
+        .expect("停止ボタンが見つかりません");
+    let press = |pressed| {
+        vec![
+            egui::Event::PointerMoved(stop),
+            egui::Event::PointerButton {
+                pos: stop,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::default(),
+            },
+        ]
+    };
+    let _ = menu(&ports, false, press(true));
+    let (_, action) = menu(&ports, false, press(false));
+    assert_eq!(
+        action,
+        Some(PortMenuAction::Stop(ports.own[0].clone())),
+        "停止ボタンが確認を求めていません"
+    );
+
+    // While a stop runs, the same press asks for nothing.
+    let _ = menu(&ports, true, press(true));
+    let (_, action) = menu(&ports, true, press(false));
+    assert_eq!(action, None, "停止中にもう一つ停止を受け付けました");
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 261, requirement 9. The window says which process, which PID and
+/// where; cancelling sends nothing.
+#[test]
+pub(crate) fn ports_261_confirmation_names_pid_and_folder() {
+    let root = temporary_directory("ports-261-confirm");
+    let mut app = test_app(root.join("store.json"));
+    let palette = app.store.theme.palette();
+    let ctx = egui::Context::default();
+    let attributed = |pid: u32, directory: Option<&str>| AttributedPort {
+        port: port_261(pid, "node", 3000),
+        directory: directory.map(PathBuf::from),
+        root: None,
+    };
+    let draw = |app: &mut OperonApp, events: Vec<egui::Event>| {
+        let output = ctx.run(screen_261(events), |ctx| {
+            app.ui_port_stop_modal(ctx, palette);
+        });
+        frame_texts_261(&output)
+    };
+    let click = |app: &mut OperonApp, label: &str| {
+        let texts = draw(app, Vec::new());
+        let at = texts
+            .iter()
+            .find(|(text, _, _)| text == label)
+            .map(|(_, rect, _)| rect.center())
+            .unwrap_or_else(|| panic!("「{label}」がありません: {texts:?}"));
+        let press = |pressed| {
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ]
+        };
+        draw(app, press(true));
+        draw(app, press(false));
+    };
+
+    app.pending_port_stop = Some(attributed(
+        48213,
+        Some("/w/project/.worktrees/feature-y/web"),
+    ));
+    draw(&mut app, Vec::new());
+    let texts = draw(&mut app, Vec::new());
+    for needle in [
+        "ポートを停止",
+        ":3000 node を停止しますか？",
+        "PID",
+        "48213",
+        "フォルダ",
+        "/w/project/.worktrees/feature-y/web",
+        "キャンセル",
+        "停止する",
+    ] {
+        assert!(
+            texts.iter().any(|(text, _, _)| text.contains(needle)),
+            "確認に「{needle}」がありません: {texts:?}"
+        );
+    }
+    click(&mut app, "キャンセル");
+    assert_eq!(app.pending_port_stop, None);
+    assert!(!app.background_tasks.contains(&BackgroundKey::PortStop));
+
+    app.pending_port_stop = Some(attributed(48213, None));
+    draw(&mut app, Vec::new());
+    let texts = draw(&mut app, Vec::new());
+    assert!(texts.iter().any(|(text, _, _)| text == "不明"));
+
+    // Confirmed, against a PID the stop refuses without running anything.
+    app.pending_port_stop = Some(attributed(std::process::id(), None));
+    click(&mut app, "停止する");
+    assert_eq!(app.pending_port_stop, None);
+    assert!(app.background_tasks.contains(&BackgroundKey::PortStop));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while app.background_tasks.contains(&BackgroundKey::PortStop) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(20));
+        app.process_background_results();
+    }
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("このプロセスは停止できません。")
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 261, requirement 10. The outcome is told in its own words, and a
+/// scan that was running when the stop finished cannot bring the server back.
+#[test]
+pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
+    let vite = port_261(4821, "vite", 5173);
+    for (outcome, said) in [
+        (PortStopOutcome::Stopped, "vite を停止しました（:5173）。"),
+        (
+            PortStopOutcome::StillListening,
+            "vite に停止を求めましたが、まだ :5173 で動いています。",
+        ),
+        (
+            PortStopOutcome::Unconfirmed,
+            "vite に停止を求めましたが、止まったか確かめられませんでした。",
+        ),
+        (
+            PortStopOutcome::NotListening,
+            ":5173 はもう vite が使っていないため、何もしませんでした。",
+        ),
+        (
+            PortStopOutcome::Unverified,
+            "ポートの持ち主を確かめられなかったため、停止しませんでした。",
+        ),
+        (PortStopOutcome::Refused, "このプロセスは停止できません。"),
+        (
+            PortStopOutcome::Failed("Operation not permitted".into()),
+            "vite を停止できませんでした: Operation not permitted",
+        ),
+    ] {
+        assert_eq!(port_stop_notice(&vite, &outcome), said);
+    }
+
+    let root = temporary_directory("ports-261-outcome");
+    let mut app = test_app(root.join("store.json"));
+    let stale = AttributedPort {
+        port: vite.clone(),
+        directory: None,
+        root: None,
+    };
+    app.listening_ports = vec![stale.clone()];
+    app.ports_scanned_at = Some(Instant::now());
+    // A periodic scan started before the signal, and the stop itself.
+    app.background_tasks.insert(BackgroundKey::PortScan);
+    app.background_tasks.insert(BackgroundKey::PortStop);
+    let generation = app.ports_generation;
+    app.background_sender
+        .send(BackgroundResult::PortStopped {
+            port: vite.clone(),
+            outcome: PortStopOutcome::Stopped,
+        })
+        .unwrap();
+    app.process_background_results();
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("vite を停止しました（:5173）。")
+    );
+    assert!(!app.background_tasks.contains(&BackgroundKey::PortStop));
+    assert!(
+        app.listening_ports.is_empty(),
+        "止まったサーバーが一覧に残っています"
+    );
+    assert_eq!(
+        app.ports_scanned_at, None,
+        "次のフレームで読み直す状態になっていません"
+    );
+
+    // The scan that started before the signal lands afterwards.
+    app.ports_scanned_at = Some(Instant::now());
+    app.background_sender
+        .send(BackgroundResult::ListeningPorts {
+            generation,
+            ports: vec![stale.clone()],
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(!app.background_tasks.contains(&BackgroundKey::PortScan));
+    assert!(
+        app.listening_ports.is_empty(),
+        "停止したサーバーが一覧に戻っています: {:?}",
+        app.listening_ports
+    );
+    assert_eq!(
+        app.ports_scanned_at, None,
+        "古い読み取りの後に読み直していません"
+    );
+
+    // A scan started after the stop is the truth again.
+    let fresh = AttributedPort {
+        port: port_261(5000, "node", 3000),
+        directory: None,
+        root: None,
+    };
+    app.background_tasks.insert(BackgroundKey::PortScan);
+    app.background_sender
+        .send(BackgroundResult::ListeningPorts {
+            generation: app.ports_generation,
+            ports: vec![fresh.clone()],
+        })
+        .unwrap();
+    app.process_background_results();
+    assert_eq!(app.listening_ports, vec![fresh]);
+    assert!(app.ports_scanned_at.is_some());
+    fs::remove_dir_all(&root).ok();
 }
 
 /// Every text the session list drew, on the second of two frames.
@@ -64509,6 +65384,7 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         BackgroundKey::AiDiffReview(project_id),
         BackgroundKey::Upstream(project_id),
         BackgroundKey::PortScan,
+        BackgroundKey::PortStop,
         BackgroundKey::ToolStatus,
         BackgroundKey::RecoveryScan,
         BackgroundKey::RecoveryAdopt("adopt_session".into()),
@@ -64537,13 +65413,13 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
     );
     assert_eq!(
         non_session_variants.len(),
-        43,
-        "Must test exactly 43 non-session variants"
+        44,
+        "Must test exactly 44 non-session variants"
     );
     assert_eq!(
         session_variants.len() + non_session_variants.len(),
-        55,
-        "Total variants must be 55"
+        56,
+        "Total variants must be 56"
     );
 
     for key in &session_variants {
@@ -64566,7 +65442,10 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         while wakes.try_recv().is_ok() {}
 
         let k = key.clone();
-        app.spawn_background(k, || BackgroundResult::ListeningPorts(Vec::new()));
+        app.spawn_background(k, || BackgroundResult::ListeningPorts {
+            generation: 0,
+            ports: Vec::new(),
+        });
 
         let wake_received = wakes.recv_timeout(Duration::from_millis(60));
         assert!(
@@ -64586,7 +65465,10 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         let _ = context.run(egui::RawInput::default(), |_| {});
 
         let k = key.clone();
-        app.spawn_background(k, || BackgroundResult::ListeningPorts(Vec::new()));
+        app.spawn_background(k, || BackgroundResult::ListeningPorts {
+            generation: 0,
+            ports: Vec::new(),
+        });
 
         let wake_received = wakes.recv_timeout(Duration::from_millis(500));
         assert!(
@@ -64605,7 +65487,10 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         let _ = context.run(egui::RawInput::default(), |_| {});
 
         let k = key.clone();
-        app.spawn_background(k, || BackgroundResult::ListeningPorts(Vec::new()));
+        app.spawn_background(k, || BackgroundResult::ListeningPorts {
+            generation: 0,
+            ports: Vec::new(),
+        });
 
         let wake_received = wakes.recv_timeout(Duration::from_millis(500));
         assert!(

@@ -70,6 +70,9 @@ pub(crate) enum BackgroundKey {
     AiDiffReview(Uuid),
     Upstream(Uuid),
     PortScan,
+    /// Stopping one listener the person confirmed (change 261). One at a
+    /// time: the stop buttons are disabled while it runs.
+    PortStop,
     ToolStatus,
     RecoveryScan,
     RecoveryAdopt(String),
@@ -269,7 +272,16 @@ pub(crate) enum BackgroundResult {
         project_id: Uuid,
         result: UiResult<UpstreamState>,
     },
-    ListeningPorts(Vec<(ListeningPort, Option<PathBuf>)>),
+    ListeningPorts {
+        /// `ports_generation` when the scan started. A stop that finished
+        /// since then makes this reading stale (change 261).
+        generation: u64,
+        ports: Vec<AttributedPort>,
+    },
+    PortStopped {
+        port: ListeningPort,
+        outcome: PortStopOutcome,
+    },
     WorktreeRemoved {
         project_id: Uuid,
         path: PathBuf,
@@ -674,8 +686,14 @@ pub(crate) struct OperonApp {
     /// What the machine is listening on, and which worktree each belongs to.
     /// One reading, shared by every session's header; nothing is persisted,
     /// because a port reading is true for thirty seconds.
-    pub(crate) listening_ports: Vec<(ListeningPort, Option<PathBuf>)>,
+    pub(crate) listening_ports: Vec<AttributedPort>,
     pub(crate) ports_scanned_at: Option<Instant>,
+    /// Bumped by every finished stop, so that a scan which started before it —
+    /// and so still lists the stopped server — is dropped when it lands
+    /// instead of putting that server back for thirty seconds (change 261).
+    pub(crate) ports_generation: u64,
+    /// The listener whose stop is waiting for the person's confirmation.
+    pub(crate) pending_port_stop: Option<AttributedPort>,
     /// Looking through one session's scrollback. Per session, and not
     /// persisted: a search is a question being asked right now.
     pub(crate) terminal_search: HashMap<Uuid, TerminalSearch>,
@@ -1107,6 +1125,8 @@ impl OperonApp {
             upstream_cache: HashMap::new(),
             listening_ports: Vec::new(),
             ports_scanned_at: None,
+            ports_generation: 0,
+            pending_port_stop: None,
             terminal_search: HashMap::new(),
             rate_limits: None,
             resolved_paths: HashMap::new(),
@@ -2097,12 +2117,30 @@ impl OperonApp {
                         ));
                     }
                 }
-                BackgroundResult::ListeningPorts(ports) => {
+                BackgroundResult::ListeningPorts { generation, ports } => {
                     self.background_tasks.remove(&BackgroundKey::PortScan);
+                    if generation != self.ports_generation {
+                        // Started before a stop finished, so it may still name
+                        // the stopped server. Read again on the next frame.
+                        self.ports_scanned_at = None;
+                        continue;
+                    }
                     self.ports_scanned_at = Some(Instant::now());
                     // A reading of nothing replaces the previous one: a server
                     // that stopped should stop being named.
                     self.listening_ports = ports;
+                }
+                BackgroundResult::PortStopped { port, outcome } => {
+                    self.background_tasks.remove(&BackgroundKey::PortStop);
+                    self.ports_generation = self.ports_generation.wrapping_add(1);
+                    self.ports_scanned_at = None;
+                    if outcome == PortStopOutcome::Stopped {
+                        // Seen gone; no need to wait for the rescan to say so.
+                        self.listening_ports.retain(|attributed| {
+                            attributed.port.pid != port.pid || attributed.port.port != port.port
+                        });
+                    }
+                    self.notice = Some(port_stop_notice(&port, &outcome));
                 }
                 BackgroundResult::UpstreamRead { project_id, result } => {
                     self.background_tasks
@@ -7361,6 +7399,7 @@ impl eframe::App for OperonApp {
         self.ui_land_worktree_modal(ctx, palette);
         self.ui_create_pr_modal(ctx, palette);
         self.ui_run_script_modal(ctx, palette);
+        self.ui_port_stop_modal(ctx, palette);
     }
 }
 
@@ -9283,48 +9322,81 @@ impl OperonApp {
         if !due {
             return;
         }
-        // Every folder a session is working in. A session with no worktree path
-        // has nothing to attribute against and contributes nothing.
-        let mut worktrees: Vec<PathBuf> = self
+        // Every project, whose root and git worktrees are folders a server can
+        // run in whether or not a session is open there (change 261), and
+        // every folder a session is working in.
+        let projects: Vec<(Uuid, PathBuf)> = self
+            .store
+            .projects
+            .iter()
+            .map(|project| (project.id, project.path.clone()))
+            .collect();
+        let mut sessions: Vec<(Uuid, PathBuf)> = self
             .store
             .sessions
             .iter()
-            .filter_map(|session| session.worktree_path.clone())
+            .filter_map(|session| {
+                session
+                    .worktree_path
+                    .clone()
+                    .map(|worktree| (session.project_id, worktree))
+            })
             .collect();
-        worktrees.sort();
-        worktrees.dedup();
-        if worktrees.is_empty() {
+        sessions.sort();
+        sessions.dedup();
+        if projects.is_empty() && sessions.is_empty() {
             // Nothing could be attributed, so nothing is worth reading. The
             // clock still moves, so this does not spin.
             self.ports_scanned_at = Some(Instant::now());
             self.listening_ports.clear();
             return;
         }
+        let generation = self.ports_generation;
         self.spawn_background(BackgroundKey::PortScan, move || {
-            BackgroundResult::ListeningPorts(scan_listening_ports(&worktrees))
+            BackgroundResult::ListeningPorts {
+                generation,
+                ports: scan_listening_ports(&projects, &sessions),
+            }
         });
     }
 
-    /// The ports of one session's worktree, in port order so the row does not
-    /// reshuffle itself between scans.
-    pub(crate) fn session_ports(&self, session: &Session) -> Vec<ListeningPort> {
-        let Some(worktree) = session.worktree_path.as_ref() else {
-            return Vec::new();
-        };
-        let mut ports: Vec<ListeningPort> = self
-            .listening_ports
-            .iter()
-            .filter(|(_, owner)| owner.as_ref() == Some(worktree))
-            .map(|(port, _)| port.clone())
-            .collect();
-        ports.sort_by_key(|port| port.port);
-        ports
+    /// One session's ports, split by where they run (change 261): its own
+    /// folder, in port order so the row does not reshuffle between scans, and
+    /// the rest of its project, by folder and then port.
+    pub(crate) fn session_ports(&self, session: &Session) -> SessionPorts {
+        let worktree = session.worktree_path.as_ref();
+        let mut own = Vec::new();
+        let mut elsewhere = Vec::new();
+        for attributed in &self.listening_ports {
+            let Some(root) = attributed.root.as_ref() else {
+                continue;
+            };
+            if worktree.is_some_and(|worktree| root.spellings.contains(worktree)) {
+                own.push(attributed.clone());
+            } else if root.project_id == session.project_id {
+                elsewhere.push(attributed.clone());
+            }
+        }
+        own.sort_by_key(|attributed| attributed.port.port);
+        elsewhere.sort_by(|left, right| {
+            let label = |attributed: &AttributedPort| {
+                attributed
+                    .root
+                    .as_ref()
+                    .map(|root| root.label.clone())
+                    .unwrap_or_default()
+            };
+            label(left)
+                .cmp(&label(right))
+                .then(left.port.port.cmp(&right.port.port))
+        });
+        SessionPorts { own, elsewhere }
     }
 
-    /// One line under the session's title. Not drawn when there is nothing
-    /// listening, and not drawn when the machine cannot be read — this is
-    /// information, not a task, and a standing complaint about a missing
-    /// reading is worse than the missing reading.
+    /// One line under the session's title. Not drawn when nothing in the
+    /// project is listening, and not drawn when the machine cannot be read —
+    /// this is information, not a task, and a standing complaint about a
+    /// missing reading is worse than the missing reading.
     pub(crate) fn ui_session_ports(
         &mut self,
         ui: &mut egui::Ui,
@@ -9332,78 +9404,290 @@ impl OperonApp {
         session: &Session,
     ) {
         let ports = self.session_ports(session);
-        if ports.is_empty() {
+        if ports.own.is_empty() && ports.elsewhere.is_empty() {
             return;
         }
         meta_separator(ui, palette);
-        let badge_text = if ports.len() == 1 {
-            format!(":{p0} {p1}", p0 = ports[0].port, p1 = ports[0].process)
-        } else {
-            tf!("{p0} ポート稼働中", p0 = ports.len())
+        // The badge counts this folder only. A folder serving nothing in a
+        // project that is serving something says so quietly, so the list of
+        // the rest stays one click away.
+        let (badge_text, badge_color) = match ports.own.as_slice() {
+            [] => (
+                tf!(
+                    "プロジェクトで {p0} ポート稼働中",
+                    p0 = ports.elsewhere.len()
+                ),
+                palette.text_muted,
+            ),
+            [only] => (
+                format!(":{p0} {p1}", p0 = only.port.port, p1 = only.port.process),
+                palette.info,
+            ),
+            several => (tf!("{p0} ポート稼働中", p0 = several.len()), palette.info),
         };
-
-        let mut opened_url = None;
-        let mut copied_url = None;
+        let stopping = self.background_tasks.contains(&BackgroundKey::PortStop);
+        let mut action = None;
 
         let badge_res = egui::menu::menu_custom_button(
             ui,
             egui::Button::new(
                 RichText::new(format!("{ICON_OPEN_EXTERNAL} {badge_text}"))
                     .size(11.5)
-                    .color(palette.info),
+                    .color(badge_color),
             )
             .frame(false)
             .min_size(egui::vec2(0.0, CONTROL_HEIGHT_SMALL)),
             |ui| {
-                ui.label(RichText::new(tr("稼働中のポート")).small().weak());
-                ui.separator();
-                egui::ScrollArea::vertical()
-                    .max_height(240.0)
-                    .show(ui, |ui| {
-                        for port in &ports {
-                            let url = port_url(port);
-                            // Security invariant: only accept http/https scheme with loopback/local host
-                            let is_safe_url = (url.starts_with("http://")
-                                || url.starts_with("https://"))
-                                && !url.chars().any(|c| {
-                                    c.is_control() || c.is_whitespace() || c == '"' || c == '\''
-                                });
-                            if !is_safe_url {
-                                continue;
-                            }
-                            let port_display =
-                                format!(":{p0} {p1}", p0 = port.port, p1 = port.process);
-                            ui.horizontal(|ui| {
-                                if ui
-                                    .button(RichText::new(port_display).size(12.0))
-                                    .on_hover_text(tf!("ブラウザで開く: {url}"))
-                                    .clicked()
-                                {
-                                    opened_url = Some(url.clone());
-                                    ui.close_menu();
-                                }
-                                if small_icon_button(ui, palette, ICON_COPY, tr("URL をコピー"))
-                                    .clicked()
-                                {
-                                    copied_url = Some(url);
-                                    ui.close_menu();
-                                }
-                            });
-                        }
-                    });
+                action = session_ports_menu(ui, palette, &ports, stopping);
+                if action.is_some() {
+                    ui.close_menu();
+                }
             },
         )
         .response
         .on_hover_text(tr("稼働中のローカルポート一覧を表示"));
         paint_button_focus(ui, &badge_res, palette);
 
-        if let Some(url) = opened_url {
-            self.request_system_action(tr("ブラウザで開く"), move || open_url(&url));
+        match action {
+            Some(PortMenuAction::Open(url)) => {
+                self.request_system_action(tr("ブラウザで開く"), move || open_url(&url));
+            }
+            Some(PortMenuAction::Copy(url)) => {
+                ui.ctx().copy_text(url);
+                self.notice = Some(tr("URL をコピーしました。").into());
+            }
+            Some(PortMenuAction::Stop(attributed)) => {
+                self.pending_port_stop = Some(attributed);
+            }
+            None => {}
         }
-        if let Some(url) = copied_url {
-            ui.ctx().copy_text(url);
-            self.notice = Some(tr("URL をコピーしました。").into());
+    }
+
+    /// The confirmation before a listener is stopped: which process, which
+    /// PID, working where. Nothing is sent until 「停止する」.
+    pub(crate) fn ui_port_stop_modal(&mut self, ctx: &egui::Context, palette: &Palette) {
+        let Some(attributed) = self.pending_port_stop.clone() else {
+            return;
+        };
+        let port = &attributed.port;
+        let mut open = true;
+        let mut confirmed = false;
+        let mut cancelled = false;
+        egui::Window::new(tr("ポートを停止"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .default_width(440.0)
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(tf!(
+                        ":{port} {process} を停止しますか？",
+                        port = port.port,
+                        process = port.process
+                    ))
+                    .strong(),
+                );
+                ui.add_space(SPACE_SM);
+                egui::Grid::new("port-stop-facts")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new(tr("PID")).color(palette.text_muted));
+                        ui.monospace(port.pid.to_string());
+                        ui.end_row();
+                        ui.label(RichText::new(tr("フォルダ")).color(palette.text_muted));
+                        match &attributed.directory {
+                            Some(directory) => ui.monospace(friendly_path(directory)),
+                            None => ui.label(tr("不明")),
+                        };
+                        ui.end_row();
+                    });
+                ui.add_space(SPACE_SM);
+                ui.label(
+                    RichText::new(tr(
+                        "終了シグナル (SIGTERM) を送ります。Operon の外で起動したプロセスも含まれます。",
+                    ))
+                    .color(palette.text_muted),
+                );
+                ui.add_space(SPACE_MD);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("キャンセル")).clicked() {
+                        cancelled = true;
+                    }
+                    if ui
+                        .button(RichText::new(tr("停止する")).color(palette.danger))
+                        .clicked()
+                    {
+                        confirmed = true;
+                    }
+                });
+            });
+        if confirmed {
+            self.pending_port_stop = None;
+            self.stop_port(attributed.port);
+        } else if cancelled || !open {
+            self.pending_port_stop = None;
         }
+    }
+
+    /// Stop one listener in the background. The read that confirms it is
+    /// still the one the person chose, the signal, and the wait for it to go
+    /// all happen off the frame.
+    pub(crate) fn stop_port(&mut self, port: ListeningPort) {
+        if self.background_tasks.contains(&BackgroundKey::PortStop) {
+            return;
+        }
+        self.spawn_background(BackgroundKey::PortStop, move || {
+            let outcome = stop_listening_port(&port);
+            BackgroundResult::PortStopped { port, outcome }
+        });
+    }
+}
+
+/// One session's ports, split by where they run (change 261).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SessionPorts {
+    /// Credited to the folder the session works in.
+    pub(crate) own: Vec<AttributedPort>,
+    /// Credited to another folder of the same project.
+    pub(crate) elsewhere: Vec<AttributedPort>,
+}
+
+/// What a press in the ports menu asks for. Returned rather than done, so the
+/// menu can be drawn and read in a test.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PortMenuAction {
+    Open(String),
+    Copy(String),
+    Stop(AttributedPort),
+}
+
+/// The ports menu: this folder's servers, then the rest of the project's, each
+/// with open, copy and stop. An empty section is not drawn.
+pub(crate) fn session_ports_menu(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    ports: &SessionPorts,
+    stopping: bool,
+) -> Option<PortMenuAction> {
+    let mut action = None;
+    egui::ScrollArea::vertical()
+        .max_height(240.0)
+        .show(ui, |ui| {
+            if !ports.own.is_empty() {
+                ui.label(RichText::new(tr("この作業フォルダ")).small().weak());
+                ui.separator();
+                port_menu_rows(ui, palette, &ports.own, false, stopping, &mut action);
+            }
+            if !ports.elsewhere.is_empty() {
+                ui.label(
+                    RichText::new(tr("プロジェクト内のほかの場所"))
+                        .small()
+                        .weak(),
+                );
+                ui.separator();
+                port_menu_rows(ui, palette, &ports.elsewhere, true, stopping, &mut action);
+            }
+        });
+    action
+}
+
+fn port_menu_rows(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    ports: &[AttributedPort],
+    with_folder: bool,
+    stopping: bool,
+    action: &mut Option<PortMenuAction>,
+) {
+    for attributed in ports {
+        let port = &attributed.port;
+        let url = port_url(port);
+        // Security invariant: only accept http/https scheme with loopback/local host
+        let is_safe_url = (url.starts_with("http://") || url.starts_with("https://"))
+            && !url
+                .chars()
+                .any(|c| c.is_control() || c.is_whitespace() || c == '"' || c == '\'');
+        if !is_safe_url {
+            continue;
+        }
+        let port_display = format!(":{p0} {p1}", p0 = port.port, p1 = port.process);
+        ui.horizontal(|ui| {
+            if ui
+                .button(RichText::new(port_display).size(12.0))
+                .on_hover_text(tf!("ブラウザで開く: {url}"))
+                .clicked()
+            {
+                *action = Some(PortMenuAction::Open(url.clone()));
+            }
+            if with_folder {
+                if let Some(root) = attributed.root.as_ref() {
+                    let label = if root.label.is_empty() {
+                        tr("プロジェクトのルート").to_owned()
+                    } else {
+                        root.label.clone()
+                    };
+                    ui.scope(|ui| {
+                        ui.set_max_width(180.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(label).size(12.0).color(palette.text_muted),
+                            )
+                            .truncate(),
+                        )
+                        .on_hover_text(friendly_path(&root.path));
+                    });
+                }
+            }
+            if small_icon_button(ui, palette, ICON_COPY, tr("URL をコピー")).clicked() {
+                *action = Some(PortMenuAction::Copy(url.clone()));
+            }
+            let stop = ui
+                .add_enabled_ui(!stopping, |ui| {
+                    small_icon_button(ui, palette, ICON_STOP, tr("このプロセスを停止…"))
+                })
+                .inner
+                .on_disabled_hover_text(tr("停止しています…"));
+            if stop.clicked() {
+                *action = Some(PortMenuAction::Stop(attributed.clone()));
+            }
+        });
+    }
+}
+
+/// What the person is told when a stop finishes.
+pub(crate) fn port_stop_notice(port: &ListeningPort, outcome: &PortStopOutcome) -> String {
+    let process = port.process.as_str();
+    let number = port.port;
+    match outcome {
+        PortStopOutcome::Stopped => tf!(
+            "{process} を停止しました（:{port}）。",
+            process = process,
+            port = number
+        ),
+        PortStopOutcome::StillListening => tf!(
+            "{process} に停止を求めましたが、まだ :{port} で動いています。",
+            process = process,
+            port = number
+        ),
+        PortStopOutcome::Unconfirmed => tf!(
+            "{process} に停止を求めましたが、止まったか確かめられませんでした。",
+            process = process
+        ),
+        PortStopOutcome::NotListening => tf!(
+            ":{port} はもう {process} が使っていないため、何もしませんでした。",
+            port = number,
+            process = process
+        ),
+        PortStopOutcome::Unverified => {
+            tr("ポートの持ち主を確かめられなかったため、停止しませんでした。").to_owned()
+        }
+        PortStopOutcome::Refused => tr("このプロセスは停止できません。").to_owned(),
+        PortStopOutcome::Failed(error) => tf!(
+            "{process} を停止できませんでした: {error}",
+            process = process,
+            error = error
+        ),
     }
 }
 

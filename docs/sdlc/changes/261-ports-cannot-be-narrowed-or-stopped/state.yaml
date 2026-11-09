@@ -2,8 +2,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Build per plan.md order of work: ports.rs contract tests first, then app.rs wiring, strings, READMEs."
+resume: "Have empirical-verifier and formal-verifier try to falsify the branch head; record reproduced findings as Fn, then push and wait for CI."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine pending required - src/git/ports.rs, src/app.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 17 of 17 caught: deepest-wins, git worktrees as folders, stored spellings, own vs project, empty section, stop disabled, three refusals, check-before-signal, name match, unconfirmed, cancel, stale scan, generation, rescan, still-running notice"
   stop-in-running-app: "human pending a server stopped from the menu disappears from it in the installed app"
 
 sets:

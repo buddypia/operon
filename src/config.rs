@@ -443,6 +443,18 @@ pub(crate) const PORT_SCAN_MAX_BYTES: usize = 512 * 1024;
 /// What reads the listening sockets. macOS ships it; a machine without it gets
 /// no port line and no complaint about one.
 pub(crate) const PORT_SCAN_PROGRAM: &str = "lsof";
+/// What stops a listener the person confirmed (change 261). An absolute path:
+/// the program that delivers a signal is not one a `PATH` entry gets to choose.
+pub(crate) const PORT_STOP_PROGRAM: &str = "/bin/kill";
+/// The read that confirms a listener is still the one the person chose, just
+/// before the signal and while waiting for it to go. Shorter than the scan's:
+/// it asks about one PID and one port.
+pub(crate) const PORT_STOP_CHECK_TIMEOUT_SECONDS: u64 = 2;
+pub(crate) const PORT_STOP_SIGNAL_TIMEOUT_SECONDS: u64 = 2;
+/// How long a dev server gets to exit after SIGTERM before the person is told
+/// it is still running, and how often that is read meanwhile.
+pub(crate) const PORT_STOP_WAIT_MILLIS: u64 = 3000;
+pub(crate) const PORT_STOP_POLL_MILLIS: u64 = 250;
 /// How many places a query may be found before the list stops growing. A
 /// one-character query against fifty thousand lines would otherwise build a
 /// vector nobody could use, once per keystroke.
