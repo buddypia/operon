@@ -5,7 +5,7 @@ state:
   stage: "plan"
   status: "blocked"
   attempts: "0 3"
-  questions: "5 7"
+  questions: "6 7"
   autonomy: "supervised"
   risk: "low"
   readiness: "pending"
