@@ -1,11 +1,11 @@
 # Bug report (2026-11-09): in a session terminal, Shift+Enter sends the line in
-# Antigravity CLI where cmux puts a newline in the input. bug.md has the
+# Antigravity CLI where the person's terminal app puts a newline in the input. bug.md has the
 # person's words, the cause and the measurements.
 #
 # The first report read the other way round ("Shift + Enterで勝手に改行されて
 # 困る", and the answer "入力欄に改行→送信したい" was taken as "make it send");
 # a morning of probes looked for a newline Operon never produced. What settled
-# it was the person comparing with cmux, whose Ghostty config sends LF for
+# it was the person comparing with their terminal app, whose config sends LF for
 # Shift+Enter. Probes are under .tmp/probe (git-ignored), not committed.
 #
 # Screen n/a: src/ui is a drawing surface, but this edit changes the bytes a

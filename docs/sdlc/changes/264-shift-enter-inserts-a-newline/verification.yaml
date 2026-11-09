@@ -5,7 +5,7 @@
 # Enter moved, the IME's confirming Shift+Enter leaked). I2-I4 are the key and
 # IME tests the binding sits beside: the Enter a conversion owns, the
 # preedit filter, and the existing chords.
-digest: "4d0623ec5395ca7f"
+digest: "e1bf218e41d514ee"
 
 obligations:
   - R1 empirical-test :: cargo test --locked shift_enter_puts_a_newline_in_the_agents_input_instead_of_sending

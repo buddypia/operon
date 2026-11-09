@@ -3,9 +3,10 @@
 Reported 2026-11-09. In the person's words, after a first report that read the
 other way round ("Shift + Enterで勝手に改行されて困る"):
 
-> やっぱAntigravity CLIではダメだった。キーの設定とかの問題かな？cmuxのターミナルでは問題なくShift + Enterができて改行も問題ない
+> やっぱAntigravity CLIではダメだった。キーの設定とかの問題かな？［普段使っているターミナル］では問題なくShift + Enterができて改行も問題ない
 
-In cmux, Shift+Enter puts a newline in the agent's input and Enter sends it. In
+In the terminal app the person uses day to day, Shift+Enter puts a newline in
+the agent's input and Enter sends it. In
 an Operon session terminal running Antigravity CLI, Shift+Enter sends the line,
 the same as Enter.
 
@@ -19,7 +20,7 @@ panes all report key mode `VT10x`) `send-keys S-Enter` writes `\r` as well
 (od probe, tmux 3.8). An agent CLI therefore cannot tell the two keys apart and
 submits.
 
-cmux is Ghostty-based, and the person's Ghostty config binds
+That terminal app's config binds
 `keybind = shift+enter=text:\x0a`: it sends LF (Ctrl+J) for Shift+Enter.
 
 Evidence that the key reaches Operon as Shift+Enter: a probe built on the same
@@ -32,7 +33,7 @@ committed conversion; Shift+Enter while composing only commits, as Enter does.
 Send Shift+Enter as what Ctrl+J sends, tmux `C-j` (LF). Measured in a scratch
 tmux server, text then `C-j` then more text: Claude Code 2.1.319, Codex 0.167
 and Antigravity CLI 1.5.3 each show the two lines in their input without
-sending. A shell runs the line on LF, exactly as it does in cmux. Enter,
+sending. A shell runs the line on LF, exactly as it does in that terminal app. Enter,
 Ctrl+Enter and Option+Enter keep their current keys, and an Enter that confirms
 a conversion still belongs to the IME.
 

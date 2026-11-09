@@ -21,7 +21,7 @@
 
 | Risk | How it shows up | What catches it |
 |---|---|---|
-| A CLI reads LF as submit | Shift+Enter still sends there | Measured: Claude Code, Codex, Antigravity CLI insert a newline; a shell runs the line, as in cmux. |
+| A CLI reads LF as submit | Shift+Enter still sends there | Measured: Claude Code, Codex, Antigravity CLI insert a newline; a shell runs the line, as in the person's terminal app. |
 | The IME's confirming Enter becomes a newline | A stray line break after a conversion | The ownership count runs before the key binding; the test feeds a commit with a Shift+Enter in the same frame. |
 | Ctrl+Shift+Enter or Option+Shift+Enter change | Different bytes for those chords | `matches_exact(SHIFT)` requires alt, ctrl and command off (`shift_only()` would admit Ctrl, egui 0.31.1 `data/input.rs:739`); the test pins Ctrl+Shift+Enter as `C-Enter` and Option+Shift+Enter as `M-Enter`. |
 
@@ -32,3 +32,5 @@
 - In the installed app, Shift+Enter in an Antigravity session leaves two lines in the input; Enter sends.
 
 ## Departures from the plan
+
+- 2026-11-09: CI's `steering_and_source_do_not_name_external_projects` refused the name of the person's terminal app in bug.md, this plan, state.yaml and the test's doc comment. Each now says "the person's terminal app"; the risk row above changed by those words only, and the plan was judged again.

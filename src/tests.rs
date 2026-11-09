@@ -38461,11 +38461,12 @@ pub(crate) fn a_second_enter_in_the_frame_that_committed_a_conversion_still_send
     assert_eq!(inputs, vec![TerminalInput::Text("日本語".into())]);
 }
 
-/// In cmux, Shift+Enter puts a newline in an agent's input and Enter sends it.
+/// In the person's terminal app, Shift+Enter puts a newline in an agent's input
+/// and Enter sends it.
 /// In a session terminal both sent the line (change 264): the binding mapped
 /// Enter to tmux `Enter` whatever the modifiers, and tmux writes `\r` for
 /// `S-Enter` too, so no CLI behind it could tell the keys apart. Shift+Enter
-/// now sends what Ctrl+J sends — the LF the person's cmux sends, which Claude
+/// now sends what Ctrl+J sends — the LF that terminal is set up to send, which Claude
 /// Code, Codex, and Antigravity CLI read as a newline.
 #[test]
 pub(crate) fn shift_enter_puts_a_newline_in_the_agents_input_instead_of_sending() {
