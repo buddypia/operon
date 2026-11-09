@@ -75,7 +75,7 @@ either can look inside a protected folder nobody pointed Operon at.
      written, before `canonicalize` — a guard moved after it would see
      `other/x.txt` and pass it.
    - `protected_folders_265_project_inside_a_protected_folder_still_resolves` —
-     a project at `<home>/Documents/proj` resolves its own `src/a.rs`, and not
+     a project at `<home>/Documents/proj` resolves its own source file, and not
      `<home>/Documents/other.txt`.
    - `protected_folders_265_record_paths_are_compared_as_spelled` — a symlink to
      the project as Codex `cwd`, Antigravity history `workspace`, and log
@@ -120,4 +120,12 @@ either can look inside a protected folder nobody pointed Operon at.
 
 ## Departures from the plan
 
-None yet.
+- **The registered folders carry both spellings.** Fix 3 compares record paths
+  as written, and the scan fixtures write the `/var/folders` spelling of a
+  temporary project whose canonical form is `/private/var/folders` — the same
+  logical/physical pair a real record could carry. `project_and_worktree_paths`
+  now holds each project and worktree path as given (by Operon or by git) and
+  canonicalized, instead of canonicalized only. Only the registered folders are
+  resolved; the record's path still never is. The Codex, Antigravity and
+  restore tests stay green (66, then 420 across the terminal, launch, session,
+  cli, worktree, restore and path filters).

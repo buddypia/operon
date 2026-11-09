@@ -1301,21 +1301,82 @@ pub(crate) fn home_directory() -> Option<PathBuf> {
 /// Resolve a candidate path string (handling `file://`, `~`, `~/`, absolute, and relative paths)
 /// into a canonicalized PathBuf if it exists on disk as a file.
 pub(crate) fn resolve_candidate_path(base_dir: &Path, path: &str) -> Option<PathBuf> {
+    resolve_candidate_path_under(base_dir, path, home_directory().as_deref())
+}
+
+/// `resolve_candidate_path` with the home folder given, so a guard can supply
+/// one that is not the person's.
+///
+/// A path under a folder macOS guards (`PROTECTED_HOME_FOLDERS`,
+/// `PROTECTED_VOLUMES_ROOT`) is refused as written, before anything touches the
+/// disk, unless it is inside `base_dir`: looking it up would have macOS ask the
+/// person, in Operon's name, about a file only an agent's output pointed at
+/// (change 265).
+pub(crate) fn resolve_candidate_path_under(
+    base_dir: &Path,
+    path: &str,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
     let clean = path.strip_prefix("file://").unwrap_or(path);
     let candidate = if let Some(stripped) = clean.strip_prefix("~/") {
-        home_directory()?.join(stripped)
+        home?.join(stripped)
     } else if clean == "~" {
-        home_directory()?
+        home?.to_path_buf()
     } else if clean.starts_with('/') {
         PathBuf::from(clean)
     } else {
         base_dir.join(clean)
     };
+    let candidate = lexically_normal(&candidate);
+    if is_in_protected_folder(&candidate, home) && !is_inside_folder(&candidate, base_dir) {
+        return None;
+    }
     let resolved = candidate.canonicalize().ok()?;
     if !resolved.is_file() {
         return None;
     }
     Some(resolved)
+}
+
+/// `path` with `.` and `..` taken out by reading it rather than by asking the
+/// disk. The candidates here are absolute, so a `..` at the root stays there.
+fn lexically_normal(path: &Path) -> PathBuf {
+    let mut normal = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normal.pop();
+            }
+            other => normal.push(other),
+        }
+    }
+    normal
+}
+
+/// Whether macOS asks before an app looks at `path`: under the home folder's
+/// Desktop, Documents or Downloads, or on a mounted volume. Compared without
+/// case, because APFS finds `~/downloads` as readily as `~/Downloads`.
+pub(crate) fn is_in_protected_folder(path: &Path, home: Option<&Path>) -> bool {
+    let folded = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
+    let path = folded(path);
+    let under = |root: &Path| path.starts_with(folded(root));
+    under(Path::new(PROTECTED_VOLUMES_ROOT))
+        || home.is_some_and(|home| {
+            let home = lexically_normal(home);
+            PROTECTED_HOME_FOLDERS
+                .iter()
+                .any(|folder| under(&home.join(folder)))
+        })
+}
+
+/// Whether `path` is inside `folder` as given or as canonicalized. Only the
+/// folder is resolved, and it is one the person registered.
+fn is_inside_folder(path: &Path, folder: &Path) -> bool {
+    path.starts_with(lexically_normal(folder))
+        || folder
+            .canonicalize()
+            .is_ok_and(|canonical| path.starts_with(canonical))
 }
 
 /// Where a path found in output actually is, or nothing.

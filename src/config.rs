@@ -489,6 +489,14 @@ pub(crate) const TERMINAL_PATH_MAX_EXTENSION: usize = 12;
 /// screen are the only ones asked about, so this is a ceiling on a number that
 /// is already small.
 pub(crate) const TERMINAL_PATH_PROBE_LIMIT: usize = 64;
+/// The home folders macOS will not let an app look inside without asking the
+/// person first, and in the app's name. A path in agent output under one of
+/// these is never looked up unless it is inside the session's own folders
+/// (change 265): the prompt would name Operon for a file nobody pointed it at.
+/// The same folders as the usage descriptions `scripts/package-macos.sh` writes.
+pub(crate) const PROTECTED_HOME_FOLDERS: &[&str] = &["Desktop", "Documents", "Downloads"];
+/// Where removable and network volumes mount, which macOS guards the same way.
+pub(crate) const PROTECTED_VOLUMES_ROOT: &str = "/Volumes";
 /// The file the keyboard is read from, beside the store and the sidecars rather
 /// than in a second home under a dotfile directory of its own.
 pub(crate) const KEYMAP_FILE_NAME: &str = "keybindings.json";

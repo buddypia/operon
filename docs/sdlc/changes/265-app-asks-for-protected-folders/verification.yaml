@@ -1,0 +1,23 @@
+# The evidence for change 265. Shape: docs/sdlc/templates/verification.yaml.
+# Bugfix route: no spec, so no Rn. I1-I5 are the five tests plan.md names, each
+# watched failing on the unedited code. I6 is the sweep: the probe refusal, its
+# order before canonicalize, case, `..`, volumes, the project exemption, the
+# three record comparisons, both spellings of registered folders, the bundle
+# keys, and the sentences a person reads. I7-I11 are the existing guards the
+# change must keep: change 087's outside-project links and escape refusal, the
+# Codex discovery fixture that spells /var, the launch gate that shows the
+# warning, and the translation tables.
+digest: "9984624a6c17d8a9"
+
+obligations:
+  - I1 empirical-test :: cargo test --locked protected_folders_265_terminal_link_probe_skips_protected_folders
+  - I2 empirical-test :: cargo test --locked protected_folders_265_project_inside_a_protected_folder_still_resolves
+  - I3 empirical-test :: cargo test --locked protected_folders_265_record_paths_are_compared_as_spelled
+  - I4 empirical-test :: cargo test --locked protected_folders_265_bundle_explains_folder_prompts
+  - I5 empirical-test :: cargo test --locked protected_folders_265_dangerous_launch_warning_names_personal_folders
+  - I6 empirical-mutation :: python3 docs/sdlc/changes/265-app-asks-for-protected-folders/mutations.py
+  - I7 empirical-test :: cargo test --locked test_terminal_resolves_tilde_paths_and_cli_tool_calls
+  - I8 empirical-test :: cargo test --locked refuses_a_path_that_escapes_the_session_folder
+  - I9 empirical-test :: cargo test --locked discovers_native_codex_sessions_only_for_the_project
+  - I10 empirical-test :: cargo test --locked a_dangerous_switch_cannot_be_launched_without_the_acknowledgement
+  - I11 empirical-test :: cargo test --locked every_message_the_code_shows_has_a_row_in_every_table

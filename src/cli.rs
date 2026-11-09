@@ -1528,18 +1528,24 @@ pub(crate) fn scan_codex_cli_sessions_for_resolution(project: &Path) -> CliSessi
     )
 }
 
+/// Every spelling of the project and its worktrees that another product's
+/// record may carry: as Operon or git holds it, and canonicalized. Records are
+/// compared against these as written and never resolved themselves, since
+/// resolving a record's path is looking inside whatever folder it names
+/// (change 265).
 pub(crate) fn project_and_worktree_paths(project: &Path) -> HashSet<PathBuf> {
-    let mut paths = HashSet::from([project
-        .canonicalize()
-        .unwrap_or_else(|_| project.to_path_buf())]);
+    let mut folders = vec![project.to_path_buf()];
     if let Ok(worktrees) = list_worktrees(project) {
-        paths.extend(
-            worktrees
-                .into_iter()
-                .map(|worktree| worktree.path.canonicalize().unwrap_or(worktree.path)),
-        );
+        folders.extend(worktrees.into_iter().map(|worktree| worktree.path));
     }
-    paths
+    folders
+        .into_iter()
+        .flat_map(|folder| {
+            let canonical = folder.canonicalize().ok();
+            [Some(folder), canonical]
+        })
+        .flatten()
+        .collect()
 }
 
 pub(crate) fn scan_codex_cli_sessions_in(
@@ -1706,14 +1712,13 @@ pub(crate) fn parse_codex_cli_session_limited(
         .unwrap_or(true);
     let session = session_id.and_then(|id| {
         let cwd = cwd?;
-        let canonical_cwd = cwd.canonicalize().unwrap_or(cwd);
-        allowed_paths.contains(&canonical_cwd).then(|| CliSession {
+        allowed_paths.contains(&cwd).then(|| CliSession {
             title: titles.get(&id).cloned(),
             provider: CliProvider::Codex,
             native_id: id.clone(),
             id,
             last_user_message,
-            branch: git_branch(&canonical_cwd).ok(),
+            branch: git_branch(&cwd).ok(),
             updated_at: metadata
                 .modified()
                 .ok()
@@ -1859,8 +1864,7 @@ pub(crate) fn read_antigravity_history_index(
         let Some(workspace) = value.get("workspace").and_then(|value| value.as_str()) else {
             continue;
         };
-        let workspace = PathBuf::from(workspace);
-        if !allowed_paths.contains(&workspace.canonicalize().unwrap_or(workspace)) {
+        if !allowed_paths.contains(Path::new(workspace)) {
             continue;
         }
         let timestamp = value
@@ -2111,10 +2115,7 @@ pub(crate) fn antigravity_log_workspace_matches(
 ) -> bool {
     std::iter::once(workspaces)
         .chain(workspaces.split(' '))
-        .any(|candidate| {
-            let candidate = PathBuf::from(candidate);
-            allowed_paths.contains(&candidate.canonicalize().unwrap_or(candidate))
-        })
+        .any(|candidate| allowed_paths.contains(Path::new(candidate)))
 }
 
 /// `agy` logs this line every time its terminal attaches to a conversation, so
