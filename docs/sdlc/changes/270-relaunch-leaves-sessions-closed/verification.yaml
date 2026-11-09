@@ -9,7 +9,13 @@
 # tabs, and the module map. F1-F2 are the empirical verifier's two
 # reproductions (plan departure 6): a first look spent on a failed write, and a
 # front tab handed to its neighbour.
-digest: "690695fa82fd0f3f"
+# I9-I12 are the formal verifier's models: I9-I11 hold R5 over every pane tree of
+# one to five leaves, every share class, every refusal shape and every group
+# content of two groups of up to three sessions (about 720 000 cases); I12
+# holds R6 through the real apply_session_poll over every load status, observation and
+# write outcome for up to three polls (164 states). Each was watched failing on
+# the defect it guards (plan departure 8).
+digest: "4bdae59d0881846c"
 
 obligations:
   - R1 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_running_in_it
@@ -30,3 +36,7 @@ obligations:
   - I8 empirical-test :: cargo test --locked claude_md_maps_every_module_that_exists
   - F1 empirical-test :: cargo test --locked a_failed_save_at_the_first_look_keeps_the_relaunch
   - F2 empirical-test :: cargo test --locked the_front_tab_stays_when_a_tab_before_it_is_gone
+  - I9 formal-model :: cargo test --locked model_check_a_restored_layout_is_whole_for_every_tree_and_share
+  - I10 formal-model :: cargo test --locked model_check_a_saved_workspace_is_refused_unless_panes_are_the_groups
+  - I11 formal-model :: cargo test --locked model_check_a_restored_group_keeps_its_front_session_and_no_session_twice
+  - I12 formal-model :: cargo test --locked model_check_a_session_is_relaunched_only_at_its_first_stored_look

@@ -10,8 +10,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "full"
@@ -21,7 +21,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Code and tests committed; next verification.yaml, mutations.py, the verifiers, then CI on the branch."
+resume: "Land after CI passes, then package from main, swap the installed app, and have the person relaunch it."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -40,12 +40,12 @@ resume: "Code and tests committed; next verification.yaml, mutations.py, the ver
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/ui/session_tree.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing (ship skill)"
-  failing-test-first: "machine passed seven of eight failed on the unedited code on their assertions (R8 by stack overflow); the manual-resume guard is watched by mutation (plan departure 2)"
+  three-gates: "machine passed fmt, clippy and the review gate on every commit; make q.fast plus the named tests locally; the full suite in CI"
+  bands: "machine passed bash scripts/check-bands.sh; largest_module_lines diagnose as on main (screens.rs 9989), src/app.rs 9911 after the move to src/app/relaunch.rs"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs, src/ui/session_tree.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing (ship skill)"
+  failing-test-first: "machine passed seven of eight failed on the unedited code on their assertions (R8 by stack overflow); the manual-resume guard is watched by mutation (plan departure 2); F1 and F2 failed at fc61243"
   relaunch-observed: "human pending after the swap, a relaunch brings the tabs back and a terminal running claude shows the Claude mark"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py 34 of 34 caught (kind switch, layout restore and bounds, front tab, relaunch choice, first look and its write, quietness, toast and failure sentences, recursion); four model_check_ tests each watched failing on its defect"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

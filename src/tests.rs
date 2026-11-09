@@ -74642,3 +74642,750 @@ pub(crate) fn the_front_tab_stays_when_a_tab_before_it_is_gone() {
         "front tab moved to {front:?}"
     );
 }
+
+// ── Change 270: exhaustive models of the layout restore and the relaunch ────
+
+const WS_PANE_CAP: usize = PANE_MAX + 1;
+const WS1_STATES: usize = 599_549;
+const WS2_STATES: usize = 140_880;
+const WS3_STATES: usize = 656_525;
+const R6_STATES: usize = 164;
+
+fn ws_group(k: u128) -> Uuid {
+    Uuid::from_u128(0x1_0000 + k)
+}
+
+fn ws_session(k: u128) -> Uuid {
+    Uuid::from_u128(0x2_0000 + k)
+}
+
+#[derive(Clone, Copy)]
+enum WsTok {
+    Split(f32),
+    /// `u128::MAX` means "the next group in reading order".
+    Leaf(u128),
+    Other,
+}
+
+/// How far a prefix of a pane tree written in prefix notation got: leaves
+/// still owed, leaves seen, and where the tree ends. `None` for a token that
+/// is not part of the tree grammar or a tree past `WS_PANE_CAP` leaves.
+fn ws_scan(tokens: &[u8], classify: &dyn Fn(u8) -> WsTok) -> Option<(usize, usize, usize)> {
+    let (mut need, mut leaves, mut end) = (1usize, 0usize, 0usize);
+    for (index, token) in tokens.iter().enumerate() {
+        if need == 0 {
+            break;
+        }
+        match classify(*token) {
+            WsTok::Split(_) => need += 1,
+            WsTok::Leaf(_) => {
+                need -= 1;
+                leaves += 1;
+            }
+            WsTok::Other => return None,
+        }
+        if leaves + need > WS_PANE_CAP {
+            return None;
+        }
+        end = index + 1;
+    }
+    Some((need, leaves, end))
+}
+
+fn ws_decode(
+    tokens: &[u8],
+    position: &mut usize,
+    classify: &dyn Fn(u8) -> WsTok,
+    next: &mut u128,
+) -> PaneNode {
+    let token = tokens[*position];
+    *position += 1;
+    match classify(token) {
+        WsTok::Leaf(label) => {
+            let label = if label == u128::MAX {
+                *next += 1;
+                *next - 1
+            } else {
+                label
+            };
+            PaneNode::Leaf(ws_group(label))
+        }
+        WsTok::Split(share) => {
+            let first = ws_decode(tokens, position, classify, next);
+            let second = ws_decode(tokens, position, classify, next);
+            PaneNode::Split {
+                side_by_side: true,
+                share,
+                first: Box::new(first),
+                second: Box::new(second),
+            }
+        }
+        WsTok::Other => unreachable!("a scanned prefix holds only tree tokens"),
+    }
+}
+
+fn ws_share_outside(node: &PaneNode) -> Option<f32> {
+    match node {
+        PaneNode::Leaf(_) => None,
+        PaneNode::Split {
+            share,
+            first,
+            second,
+            ..
+        } => {
+            if !(0.0..=1.0).contains(share) {
+                Some(*share)
+            } else {
+                ws_share_outside(first).or_else(|| ws_share_outside(second))
+            }
+        }
+    }
+}
+
+/// The R5 property, stated apart from `from_saved`: what a restored workspace
+/// is, checked against the saved one it came from and the sessions that exist.
+fn restored_workspace_violation(
+    saved: &SavedWorkspace,
+    tabs: &WorkspaceTabs,
+    exists: &dyn Fn(Uuid) -> bool,
+) -> Option<String> {
+    let panes = tabs.layout.sessions();
+    let group_ids = tabs.groups.iter().map(|g| g.id).collect::<Vec<_>>();
+    if panes.len() > PANE_MAX {
+        return Some(format!("{} panes, more than PANE_MAX", panes.len()));
+    }
+    let (mut sorted_panes, mut sorted_groups) = (panes.clone(), group_ids.clone());
+    sorted_panes.sort();
+    sorted_groups.sort();
+    if sorted_panes != sorted_groups || sorted_groups.windows(2).any(|w| w[0] == w[1]) {
+        return Some(format!(
+            "panes {panes:?} are not exactly the groups {group_ids:?}, each once"
+        ));
+    }
+    let mut seen = HashSet::new();
+    for group in &tabs.groups {
+        if group.tabs.is_empty() {
+            return Some(format!("group {} has no tab", group.id));
+        }
+        if group.active >= group.tabs.len() {
+            return Some(format!(
+                "group {} front {} of {} tabs",
+                group.id,
+                group.active,
+                group.tabs.len()
+            ));
+        }
+        let home = saved.groups.iter().find(|g| g.id == group.id);
+        for tab in &group.tabs {
+            let WorkspaceTab::Session(id) = tab else {
+                return Some("a document tab appeared".to_owned());
+            };
+            if !exists(*id) {
+                return Some(format!("session {id} does not exist"));
+            }
+            if !seen.insert(*id) {
+                return Some(format!("session {id} is in two groups or twice in one"));
+            }
+            if !home.is_some_and(|g| g.sessions.contains(id)) {
+                return Some(format!("session {id} moved to group {}", group.id));
+            }
+        }
+        if let Some(front) = home.and_then(|g| g.sessions.get(g.active)) {
+            let front = WorkspaceTab::Session(*front);
+            if group.tabs.contains(&front) && group.tabs[group.active] != front {
+                return Some(format!(
+                    "group {} kept {front:?} but fronts {:?}",
+                    group.id, group.tabs[group.active]
+                ));
+            }
+        }
+    }
+    for group in &saved.groups {
+        for id in &group.sessions {
+            if exists(*id) && !seen.contains(id) {
+                return Some(format!("existing session {id} was dropped"));
+            }
+        }
+    }
+    if tabs.focused.is_some_and(|f| !group_ids.contains(&f)) {
+        return Some(format!("focused {:?} is no group", tabs.focused));
+    }
+    if let Some(f) = saved.focused {
+        if group_ids.contains(&f) && tabs.focused != Some(f) {
+            return Some(format!("saved focus {f} lost, focused {:?}", tabs.focused));
+        }
+    }
+    let again = tabs.to_saved(saved.project, None);
+    if let Some(share) = again.layout.as_ref().and_then(ws_share_outside) {
+        return Some(format!("share {share} is outside 0..1"));
+    }
+    if WorkspaceTabs::from_saved(&again, |_| true).as_ref() != Some(tabs) {
+        return Some("from_saved(to_saved(tabs)) is not tabs".to_owned());
+    }
+    None
+}
+
+const WS_SHARES: [f32; 5] = [-0.5, 0.5, 1.5, f32::NAN, f32::INFINITY];
+
+fn ws1_classify(token: u8) -> WsTok {
+    match token {
+        10..=14 => WsTok::Split(WS_SHARES[usize::from(token - 10)]),
+        1 => WsTok::Leaf(u128::MAX),
+        _ => WsTok::Other,
+    }
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 1.
+fn ws1_prefix(tokens: &[u8]) -> Option<bool> {
+    let (need, leaves, end) = ws_scan(tokens, &ws1_classify)?;
+    if need > 0 {
+        return Some(false);
+    }
+    let marks = &tokens[end..];
+    if marks.len() > leaves || marks.iter().any(|m| !matches!(m, 20 | 21)) {
+        return None;
+    }
+    Some(marks.len() == leaves)
+}
+
+#[test]
+/// Change 270, R5 (departure 6): every pane tree of up to `PANE_MAX + 1`
+/// leaves, each split's share one of {-0.5, 0.5, 1.5, NaN, inf}, each leaf the
+/// next of that many groups of one session each, each session existing or
+/// not — 290 422 cases, all of them. Split orientation is fixed: nothing in
+/// `from_saved` reads it.
+///
+/// The property: `from_saved` is `None` exactly when the tree has more than
+/// `PANE_MAX` panes, and otherwise the tabs hold `restored_workspace_violation`
+/// — panes are exactly the surviving groups (a group whose session is gone
+/// takes its pane with it), every share is inside 0..1, and
+/// `from_saved(to_saved(tabs))` is `tabs`.
+pub(crate) fn model_check_a_restored_layout_is_whole_for_every_tree_and_share() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 10, 11, 12, 13, 14, 20, 21],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws1_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws1_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let (_, leaves, end) = ws_scan(tokens, &ws1_classify).unwrap();
+            let marks = &tokens[end..];
+            let (mut position, mut next) = (0, 0);
+            let root = ws_decode(tokens, &mut position, &ws1_classify, &mut next);
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups: (0..leaves as u128)
+                    .map(|k| SavedGroup {
+                        id: ws_group(k),
+                        sessions: vec![ws_session(k)],
+                        active: 0,
+                    })
+                    .collect(),
+                focused: Some(ws_group(0)),
+                layout: Some(root),
+                selected: None,
+            };
+            let exists = |id: Uuid| marks[(id.as_u128() - 0x2_0000) as usize] == 21;
+            match WorkspaceTabs::from_saved(&saved, exists) {
+                None if leaves > PANE_MAX => Ok(()),
+                None => Err("a whole layout was refused".to_owned()),
+                Some(_) if leaves > PANE_MAX => Err(format!(
+                    "{leaves} panes were accepted, PANE_MAX is {PANE_MAX}"
+                )),
+                Some(tabs) => match restored_workspace_violation(&saved, &tabs, &exists) {
+                    Some(why) => Err(why),
+                    None => Ok(()),
+                },
+            }
+        },
+        2_000_000,
+    );
+    // Shapes (Catalan) x 5^splits x 2^leaves, for 1..=5 leaves.
+    assert_eq!(
+        complete.get(),
+        2 + 20 + 400 + 10_000 + 280_000,
+        "not every tree, share and survival was checked"
+    );
+    assert_eq!(coverage.states, WS1_STATES, "{coverage:?}");
+}
+
+fn ws3_classify(token: u8) -> WsTok {
+    match token {
+        2 => WsTok::Split(0.5),
+        10..=15 => WsTok::Leaf(u128::from(token - 10)),
+        _ => WsTok::Other,
+    }
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 3: a layout
+/// (`1` for none, else a tree whose leaves read in nondecreasing order), then
+/// group ids as a restricted-growth string, then `30`.
+fn ws3_prefix(tokens: &[u8]) -> Option<bool> {
+    let end = if tokens.first() == Some(&1) {
+        1
+    } else {
+        let (need, _, end) = ws_scan(tokens, &ws3_classify)?;
+        let labels = tokens[..end]
+            .iter()
+            .filter(|t| matches!(t, 10..=15))
+            .collect::<Vec<_>>();
+        if labels.windows(2).any(|w| w[0] > w[1]) {
+            return None;
+        }
+        if need > 0 {
+            return Some(false);
+        }
+        end
+    };
+    let (mut distinct, mut count) = (0u8, 0usize);
+    let mut finished = false;
+    for token in &tokens[end..] {
+        if finished {
+            return None;
+        }
+        match token {
+            20..=24 if token - 20 <= distinct && count < WS_PANE_CAP => {
+                distinct = distinct.max(token - 20 + 1);
+                count += 1;
+            }
+            30 => finished = true,
+            _ => return None,
+        }
+    }
+    Some(finished)
+}
+
+#[test]
+/// Change 270, R5 (departure 6): which saved workspaces are refused. Every
+/// pane tree of up to `PANE_MAX + 1` leaves whose leaf labels read in
+/// nondecreasing order over {g0..g4, unnamed} (acceptance reads the leaves as
+/// a set, never their order), or no layout; against every list of up to five
+/// groups, their ids named in first-appearance order (the ids are opaque, so
+/// renaming them loses nothing) — 4 298 layouts x 76 lists, 326 648 cases.
+///
+/// The property: `from_saved` is `Some` exactly when the leaves, sorted, equal
+/// the group ids, sorted, with no id twice and at most `PANE_MAX` of them —
+/// a pane without a group, a group without a pane, a pane twice, a group id
+/// twice, more panes than fit are all `None` — and every `Some` holds
+/// `restored_workspace_violation`.
+pub(crate) fn model_check_a_saved_workspace_is_refused_unless_panes_are_the_groups() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 2, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 30],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws3_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws3_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let (layout, end) = if tokens[0] == 1 {
+                (None, 1)
+            } else {
+                let (_, _, end) = ws_scan(tokens, &ws3_classify).unwrap();
+                let (mut position, mut next) = (0, 0);
+                (
+                    Some(ws_decode(tokens, &mut position, &ws3_classify, &mut next)),
+                    end,
+                )
+            };
+            let ids = tokens[end..tokens.len() - 1]
+                .iter()
+                .map(|t| u128::from(t - 20))
+                .collect::<Vec<_>>();
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups: ids
+                    .iter()
+                    .enumerate()
+                    .map(|(entry, id)| SavedGroup {
+                        id: ws_group(*id),
+                        sessions: vec![ws_session(entry as u128)],
+                        active: 0,
+                    })
+                    .collect(),
+                focused: None,
+                layout,
+                selected: None,
+            };
+            let mut leaves = tokens[..end]
+                .iter()
+                .filter(|t| matches!(t, 10..=15))
+                .map(|t| u128::from(t - 10))
+                .collect::<Vec<_>>();
+            let mut sorted_ids = ids.clone();
+            leaves.sort();
+            sorted_ids.sort();
+            let whole = leaves == sorted_ids
+                && sorted_ids.windows(2).all(|w| w[0] != w[1])
+                && sorted_ids.len() <= PANE_MAX;
+            match (WorkspaceTabs::from_saved(&saved, |_| true), whole) {
+                (None, false) => Ok(()),
+                (None, true) => Err("a whole layout was refused".to_owned()),
+                (Some(_), false) => Err(format!(
+                    "panes {leaves:?} against groups {ids:?} were accepted"
+                )),
+                (Some(tabs), true) => {
+                    match restored_workspace_violation(&saved, &tabs, &|_| true) {
+                        Some(why) => Err(why),
+                        None => Ok(()),
+                    }
+                }
+            }
+        },
+        2_000_000,
+    );
+    assert_eq!(
+        complete.get(),
+        (6 + 21 + 2 * 56 + 5 * 126 + 14 * 252 + 1) * (1 + 1 + 2 + 5 + 15 + 52),
+        "not every layout against every group list was checked"
+    );
+    assert_eq!(coverage.states, WS3_STATES, "{coverage:?}");
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 2: for each
+/// of two groups up to three session tokens (1 = a, 2 = b, 3 = not in the
+/// store), `9`, the front index `10..=13`; then the focus `20..=23`.
+fn ws2_prefix(tokens: &[u8]) -> Option<bool> {
+    let mut at = 0;
+    for _ in 0..2 {
+        let mut count = 0;
+        loop {
+            match tokens.get(at) {
+                None => return Some(false),
+                Some(1..=3) if count < 3 => {
+                    count += 1;
+                    at += 1;
+                }
+                Some(9) => {
+                    at += 1;
+                    break;
+                }
+                _ => return None,
+            }
+        }
+        match tokens.get(at) {
+            None => return Some(false),
+            Some(10..=13) => at += 1,
+            _ => return None,
+        }
+    }
+    match tokens.get(at) {
+        None => Some(false),
+        Some(20..=23) if at + 1 == tokens.len() => Some(true),
+        _ => None,
+    }
+}
+
+#[test]
+/// Change 270, R5 (departure 6, F2): the contents of two groups. Each group
+/// lists up to three sessions out of {a, b, gone} — repeats within a group and
+/// across the two allowed — with a front index 0..=3, in or out of range; the
+/// focus is none, either group, or a group that is not there — 40 x 4 per
+/// group, squared, x 4 = 102 400 cases. The two panes are fixed (a split of
+/// the two groups).
+///
+/// The property: `restored_workspace_violation` — no session twice, none that
+/// does not exist, none dropped that does, each front inside its group, the
+/// saved front session still in front whenever it survives in that group, a
+/// group left empty gone with its pane, focus a real group or none.
+pub(crate) fn model_check_a_restored_group_keeps_its_front_session_and_no_session_twice() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 2, 3, 9, 10, 11, 12, 13, 20, 21, 22, 23],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws2_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws2_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let mut groups = Vec::new();
+            let mut at = 0;
+            for k in 0..2u128 {
+                let mut sessions = Vec::new();
+                while tokens[at] != 9 {
+                    sessions.push(ws_session(u128::from(tokens[at])));
+                    at += 1;
+                }
+                let active = usize::from(tokens[at + 1] - 10);
+                at += 2;
+                groups.push(SavedGroup {
+                    id: ws_group(k),
+                    sessions,
+                    active,
+                });
+            }
+            let focused = match tokens[at] {
+                20 => None,
+                21 => Some(ws_group(0)),
+                22 => Some(ws_group(1)),
+                _ => Some(ws_group(9)),
+            };
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups,
+                focused,
+                layout: Some(PaneNode::Split {
+                    side_by_side: true,
+                    share: 0.5,
+                    first: Box::new(PaneNode::Leaf(ws_group(0))),
+                    second: Box::new(PaneNode::Leaf(ws_group(1))),
+                }),
+                selected: None,
+            };
+            let exists = |id: Uuid| id != ws_session(3);
+            match WorkspaceTabs::from_saved(&saved, exists) {
+                None => Err("two groups sharing two panes were refused".to_owned()),
+                Some(tabs) => match restored_workspace_violation(&saved, &tabs, &exists) {
+                    Some(why) => Err(why),
+                    None => Ok(()),
+                },
+            }
+        },
+        2_000_000,
+    );
+    assert_eq!(
+        complete.get(),
+        (40 * 4) * (40 * 4) * 4,
+        "not every pair of groups was checked"
+    );
+    assert_eq!(coverage.states, WS2_STATES, "{coverage:?}");
+}
+
+// R6: the relaunch decision, driven through the real `apply_session_poll`.
+
+const R6_RUNNING: [u8; 3] = [0, 1, 7];
+
+fn r6_status(index: u8) -> SessionStatus {
+    [
+        SessionStatus::Starting,
+        SessionStatus::Active,
+        SessionStatus::Queued,
+        SessionStatus::Exited,
+        SessionStatus::Failed,
+        SessionStatus::Cancelled,
+        SessionStatus::Lost,
+        SessionStatus::Unknown,
+    ][usize::from(index)]
+    .clone()
+}
+
+fn r6_index(status: &SessionStatus) -> u8 {
+    (0..8).find(|i| r6_status(*i) == *status).unwrap()
+}
+
+const R6_OBSERVATIONS: [(TmuxState, Option<i32>); 7] = [
+    (TmuxState::Alive, None),
+    (TmuxState::Dead, Some(0)),
+    (TmuxState::Dead, Some(1)),
+    (TmuxState::Dead, None),
+    (TmuxState::Gone, None),
+    (TmuxState::Gone, Some(1)),
+    (TmuxState::Unknown, None),
+];
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Relaunch6State {
+    /// Status index at load and whether `relaunch_kind` is `Some`.
+    load: Option<(u8, bool)>,
+    status: u8,
+    candidate: bool,
+    looked: bool,
+    relaunched: u8,
+    polls: u8,
+    violation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Relaunch6Event {
+    Load(u8, bool),
+    Poll(u8, bool),
+}
+
+fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uuid) {
+    let project = relaunch_270_project(root);
+    let mut session = if kind {
+        relaunch_270_session(
+            project.id,
+            "terminal",
+            r6_status(status),
+            Some(SessionOrigin::PlainTerminal),
+        )
+    } else {
+        relaunch_270_session(project.id, "claude", r6_status(status), None)
+    };
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let app = OperonApp::from_state(
+        root.join(format!("store-{serial}.json")),
+        store,
+        tools,
+        None,
+    );
+    (app, id)
+}
+
+#[test]
+/// Change 270, R6 (departure 6, F1 and 7): the relaunch decision of
+/// `apply_session_poll`, run for real. The model loads one session in each of
+/// the eight statuses, with and without a `relaunch_kind` (a plain terminal, a
+/// Claude session with no conversation), then takes up to three polls, each
+/// one of seven observations (every `TmuxState`; `Dead` with status 0, nonzero
+/// and none; `Gone` with and without a status) with the store write
+/// succeeding or failing (the folder made read-only around the poll). Every
+/// state of that walk, the real app rebuilt at each step from the state
+/// reached.
+///
+/// The property, kept as its own ledger beside the app: a session is started
+/// again iff it was Starting/Active/Unknown at load, this poll is its first
+/// non-Unknown look whose outcome was stored (a look that changes nothing has
+/// nothing to store; a failed write leaves the look unspent), the outcome is
+/// Lost or Failed, the write succeeded, and `relaunch_kind` is `Some` — and at
+/// most once over the sequence; the real candidate set agrees with the ledger.
+pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("model-relaunch-270");
+    let serial = std::cell::Cell::new(0usize);
+    let mut events = Vec::new();
+    for status in 0..8 {
+        for kind in [false, true] {
+            events.push(Relaunch6Event::Load(status, kind));
+        }
+    }
+    for observation in 0..7 {
+        for stored in [false, true] {
+            events.push(Relaunch6Event::Poll(observation, stored));
+        }
+    }
+    let initial = Relaunch6State {
+        load: None,
+        status: 0,
+        candidate: false,
+        looked: false,
+        relaunched: 0,
+        polls: 0,
+        violation: None,
+    };
+    let step = |state: &Relaunch6State, event: &Relaunch6Event| {
+        serial.set(serial.get() + 1);
+        match (state.load, event) {
+            (None, Relaunch6Event::Load(status, kind)) => {
+                let (app, id) = r6_app(&root, serial.get(), *status, *kind);
+                let effective = r6_index(&app.store.sessions[0].status);
+                let candidate = app.relaunch_candidates.contains(&id);
+                let violation = (candidate != R6_RUNNING.contains(status))
+                    .then(|| format!("status {status} loaded with candidate {candidate}"));
+                Some(Relaunch6State {
+                    load: Some((*status, *kind)),
+                    status: effective,
+                    candidate,
+                    violation,
+                    ..state.clone()
+                })
+            }
+            (Some((loaded, kind)), Relaunch6Event::Poll(observation, stored))
+                if state.polls < 3 && state.violation.is_none() =>
+            {
+                let (state_of, exit) = R6_OBSERVATIONS[usize::from(*observation)];
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                if state.candidate {
+                    app.relaunch_candidates.insert(id);
+                } else {
+                    app.relaunch_candidates.clear();
+                }
+                if !stored {
+                    fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+                }
+                app.apply_session_poll(
+                    vec![(
+                        id,
+                        TmuxObservation {
+                            state: state_of,
+                            exit_status: exit,
+                        },
+                    )],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+                let relaunched = app
+                    .background_tasks
+                    .contains(&BackgroundKey::SessionStart(id));
+                let candidate_now = app.relaunch_candidates.contains(&id);
+                let status_now = r6_index(&app.store.sessions[0].status);
+                // The ledger, from the requirement alone.
+                let was_candidate = R6_RUNNING.contains(&loaded) && !state.looked;
+                let looks = was_candidate && state_of != TmuxState::Unknown;
+                let lost_or_failed = match (state_of, exit) {
+                    (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
+                    (TmuxState::Dead, Some(code)) => code != 0,
+                    _ => false,
+                };
+                let needs_write = match state_of {
+                    TmuxState::Alive => state.status != 1,
+                    TmuxState::Unknown => false,
+                    _ => true,
+                };
+                let expected = looks && lost_or_failed && kind && *stored;
+                let looked = state.looked || (looks && (!needs_write || *stored));
+                let count = state.relaunched + u8::from(relaunched);
+                let violation = if relaunched != expected {
+                    Some(format!(
+                        "relaunched {relaunched}, the requirement says {expected}"
+                    ))
+                } else if count > 1 {
+                    Some("relaunched twice".to_owned())
+                } else if candidate_now != (R6_RUNNING.contains(&loaded) && !looked) {
+                    Some(format!(
+                        "candidate {candidate_now} after a look the ledger calls spent={looked}"
+                    ))
+                } else {
+                    None
+                };
+                Some(Relaunch6State {
+                    load: state.load,
+                    status: status_now,
+                    candidate: candidate_now,
+                    looked,
+                    relaunched: count,
+                    polls: state.polls + 1,
+                    violation,
+                })
+            }
+            _ => None,
+        }
+    };
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        step,
+        |state| state.violation.clone().map_or(Ok(()), Err),
+        100_000,
+    );
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(coverage.states, R6_STATES, "{coverage:?}");
+}

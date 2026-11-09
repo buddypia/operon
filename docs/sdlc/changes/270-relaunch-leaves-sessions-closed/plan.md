@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-09
-- **Status**: in progress
+- **Status**: done
 
 ## Files that change
 
@@ -177,4 +177,16 @@ Claude mark.
    passes sessions it has just marked Lost or Failed, so the second check is
    gone and the decision lives in `apply_session_poll` alone; the mutation is
    now caught by `sessions_running_at_the_quit_come_back_when_their_terminal_is_gone`.
+8. **The formal verifier found no counterexample.** Four `model_check_` tests
+   hold R5 and R6 over every case of their bounds (verification.yaml). Each was
+   watched failing with its defect put back: the front tab kept by position,
+   shares left unbounded, a repeated pane accepted, and the first look spent
+   before the write. Its bounds are part of the claim: two groups in the
+   content model, so a session repeated across three or more groups is not
+   covered there.
+9. **The sweep builds incrementally.** CI builds with `CARGO_INCREMENTAL=0`,
+   which recompiles the whole crate for every mutation; the run on b11051f
+   passed the 900 s obligation ceiling with 34 mutations (32 had taken 631 s).
+   `mutations.py` sets `CARGO_INCREMENTAL=1` for its own builds — 24 s against
+   42 s per mutation measured here — and caught 34 of 34 caught locally.
 

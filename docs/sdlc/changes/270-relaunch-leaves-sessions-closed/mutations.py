@@ -4,6 +4,7 @@ mangle the workspace, hand the front tab to a neighbour, accept a pane tree
 that cannot be drawn, relaunch the wrong sessions or none, spend the first look
 on a failed save, let a relaunch move the screen, miscount it, notify a crash
 it undoes, say a failed write every time, and put the recursion back."""
+import os
 import sys
 from pathlib import Path
 
@@ -22,6 +23,10 @@ TESTS = [
     "a_failed_save_at_the_first_look_keeps_the_relaunch",
     "the_front_tab_stays_when_a_tab_before_it_is_gone",
 ]
+# CI builds with CARGO_INCREMENTAL=0, which recompiles the whole crate for each
+# of the 34 mutations: the second CI run passed the 900 s obligation ceiling.
+# Incremental rebuilds measured 24 s against 42 s per mutation here.
+os.environ["CARGO_INCREMENTAL"] = "1"
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 APP = ROOT / "src/app.rs"
 SCREENS = ROOT / "src/app/screens.rs"
