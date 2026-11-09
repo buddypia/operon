@@ -3,15 +3,15 @@
 state:
   route: "modify"
   stage: "plan"
-  status: "planning"
+  status: "awaiting-user"
   attempts: "0 3"
-  questions: "2 7"
+  questions: "3 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "pending"
 
-resume: "Get evaluator verdicts on intent, spec, screen and plan, run check-readiness, then write the failing session_273_ tests. Adopted defaults (person asked, no answer): vertical menu with mark and name; tabs tightened with 14pt marks."
+resume: "Waiting for the person to approve screen.md (evaluator a170327b escalated it: new menu and re-arranged tabs). On approval add a person screen line to approvals.log, set screen approved and status in-progress, then write the failing session_273_ tests. Intent, spec and plan are approved; readiness Go."
 
 contract:
   three-gates: "machine pending make q.fast; cargo test --locked session_273_, session_254_, session_260_, session_267_, session_253_"
