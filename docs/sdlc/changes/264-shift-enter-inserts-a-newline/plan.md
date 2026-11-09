@@ -2,7 +2,7 @@
 
 - **Spec**: `./bug.md` (bugfix route: the bug report is the intent)
 - **Approved**: 2026-11-09, independent evaluator
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 

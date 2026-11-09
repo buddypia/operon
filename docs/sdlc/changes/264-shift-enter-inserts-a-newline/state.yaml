@@ -14,7 +14,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "1 3"
   questions: "6 7"
   autonomy: "full"
@@ -22,13 +22,13 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Fix committed with its verification record; have empirical-verifier try to break it, then push, wait for CI, land, package."
+resume: "Land after CI passes, then package from main and swap the installed app; the person confirms Shift+Enter in Antigravity."
 
 contract:
-  three-gates: "machine passed make q.fast and 5 named terminal key and IME tests on 2026-11-09"
-  full-ci: "machine pending CI on the branch head"
-  release-binary: "machine pending touches src/ui/terminal.rs, so bash scripts/package-macos.sh runs from the main checkout after landing"
-  installed-app: "human pending Shift+Enter in an Antigravity session leaves two lines in the input in the installed app"
+  three-gates: "machine passed make q.fast and 5 named terminal key and IME tests; the full suite runs in CI on push (the first run caught an external product name, fixed in 7a249a8)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0 on 2026-11-09"
+  release-binary: "machine passed yes - src/ui/terminal.rs changes, so bash scripts/package-macos.sh from main follows the merge"
+  installed-app: "human pending Shift+Enter in an Antigravity session leaves two lines in the input in the installed app; Enter sends"
   guards-verified-by-mutation: "human passed the new test failed with Key(\"Enter\") for Key(\"C-j\") on the unfixed binding; mutations.py 6 of 6 caught"
 
 sets:
