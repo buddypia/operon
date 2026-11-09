@@ -1,0 +1,30 @@
+# The state of one change. See docs/sdlc/templates/state.yaml for the field meanings.
+
+state:
+  route: "feature"
+  stage: "design"
+  status: "planning"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Run the readiness gate on spec.md, then write and commit plan.md before any src edit."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/git/ports.rs, src/app.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  stop-in-running-app: "human pending a server stopped from the menu disappears from it in the installed app"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
