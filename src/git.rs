@@ -2336,7 +2336,7 @@ pub(crate) fn extract_single_hunk_patch(file: &DiffFile, hunk_line_index: usize)
 }
 
 fn apply_git_hunk_patch(worktree: &Path, patch: &str, extra_args: &[&str]) -> Result<()> {
-    let patch_path = std::env::temp_dir().join(format!("operon-hunk-{}.patch", Uuid::new_v4()));
+    let patch_path = std::env::temp_dir().join(format!("hunk-apply-{}.patch", Uuid::new_v4()));
     {
         let mut file = OpenOptions::new()
             .write(true)

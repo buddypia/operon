@@ -1,7 +1,7 @@
 # Change 261: AI-native and OSS IDE loop improvements (per-hunk diff actions,
 # code/error handoff, @ context mentions, external IDE line jumps, parallel
 # arena launch, and ⌘K file/symbol jump).
-digest: "e99dd06178869bbb"
+digest: "8b0ad06e41a42172"
 
 obligations:
   - R1 empirical-test :: cargo test --locked ide_261_extract_and_apply_single_hunk_stage_and_discard
