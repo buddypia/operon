@@ -2529,7 +2529,7 @@ impl OperonApp {
         if dangerous_mode {
             ui.label(
                 RichText::new(tr(
-                    "警告: 確認もサンドボックスもなしにファイルを変更できます。",
+                    "警告: 確認もサンドボックスもなしに、プロジェクトの外（書類・ダウンロード・デスクトップなど）のファイルも読み書きできます。",
                 ))
                 .small()
                 .color(palette.accent_soft),
@@ -7275,6 +7275,8 @@ impl OperonApp {
                                                                 ui.label(&view.hint);
                                                             },
                                                         );
+                                                        // Which CLI, beside how it is (change 267).
+                                                        session_mark(ui, &session.agent);
                                                     }
                                                 }
                                                 let editing = matches!(tab, WorkspaceTab::Session(id)

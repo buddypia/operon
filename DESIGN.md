@@ -757,6 +757,12 @@ order a person already knows from their Dock. Take the app icon and not the
 bare logotype a vendor also ships: three loose logotypes are three silhouettes,
 and the odd one out is what gets noticed instead of the label beside it.
 
+A plain terminal has no vendor, so its mark is ours and borrows theirs: the same
+full-bleed squircle at 128px, a light plate holding a dark screen with a green
+`>` and a light `_` (`assets/terminal-mark.svg`). A session tab draws the CLI's
+mark — vendor or terminal — at 16px between its state mark and its title; a
+custom command has neither and draws none.
+
 ## Do's and Don'ts
 
 **Do** pick a role by what the colour means. If nothing on the table means what
