@@ -365,43 +365,40 @@ impl OperonApp {
                 .or_else(|| self.store.projects.first())
             {
                 if let Some(scan) = self.file_cache.get(&project.id) {
-                    let mut file_candidates = Vec::new();
-                    for path in &scan.paths {
-                        let rel = path.display().to_string();
-                        let name = path
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or(rel.as_str());
-                        let Some(score) = palette_rank(name, &rel, &query) else {
-                            continue;
-                        };
-                        file_candidates.push((score, path.clone(), name.to_owned(), rel));
-                    }
-                    file_candidates
-                        .sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.3.len().cmp(&b.3.len())));
-                    for (score, path, label, rel) in file_candidates
-                        .into_iter()
-                        .take(MAX_PALETTE_FILE_CANDIDATES)
-                    {
-                        entries.push((
-                            PaletteEntry {
+                    let mut cands: Vec<PaletteEntry> = scan
+                        .paths
+                        .iter()
+                        .filter_map(|path| {
+                            let rel = path.display().to_string();
+                            let name = path.file_name()?.to_str().unwrap_or(rel.as_str());
+                            let score = palette_rank(name, &rel, &query)?;
+                            Some(PaletteEntry {
                                 kind: PaletteKind::File {
                                     project: project.id,
-                                    path,
+                                    path: path.clone(),
                                     line: None,
                                 },
-                                label,
+                                label: name.to_owned(),
                                 detail: format!("{} · {rel}", project.name),
                                 chord: String::new(),
                                 score,
-                            },
-                            project.added_at,
-                            false,
-                        ));
-                    }
+                            })
+                        })
+                        .collect();
+                    cands.sort_by(|a, b| {
+                        a.score
+                            .cmp(&b.score)
+                            .then_with(|| a.detail.len().cmp(&b.detail.len()))
+                    });
+                    entries.extend(
+                        cands
+                            .into_iter()
+                            .take(MAX_PALETTE_FILE_CANDIDATES)
+                            .map(|e| (e, project.added_at, false)),
+                    );
                 }
             }
-            let mut symbol_candidates = Vec::new();
+            let mut sym_cands = Vec::new();
             for doc in &self.open_documents {
                 let text = if doc.buffer.is_empty() && doc.viewer.is_some() {
                     &doc.disk
@@ -410,40 +407,32 @@ impl OperonApp {
                 };
                 let doc_rel = doc.path.display().to_string();
                 for sym in extract_file_symbols(&doc.path, text) {
-                    let Some(score) = palette_rank(&sym.name, &doc_rel, &query) else {
-                        continue;
-                    };
-                    symbol_candidates.push((
-                        score,
-                        doc.project,
-                        doc.path.clone(),
-                        sym.line,
-                        format!("{} {}", sym.kind, sym.name),
-                        format!("{doc_rel}:{}", sym.line),
-                    ));
+                    if let Some(score) = palette_rank(&sym.name, &doc_rel, &query) {
+                        sym_cands.push(PaletteEntry {
+                            kind: PaletteKind::File {
+                                project: doc.project,
+                                path: doc.path.clone(),
+                                line: Some(sym.line),
+                            },
+                            label: format!("{} {}", sym.kind, sym.name),
+                            detail: format!("{doc_rel}:{}", sym.line),
+                            chord: String::new(),
+                            score,
+                        });
+                    }
                 }
             }
-            symbol_candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.4.len().cmp(&b.4.len())));
-            for (score, project, path, line, label, detail) in symbol_candidates
-                .into_iter()
-                .take(MAX_PALETTE_SYMBOL_CANDIDATES)
-            {
-                entries.push((
-                    PaletteEntry {
-                        kind: PaletteKind::File {
-                            project,
-                            path,
-                            line: Some(line),
-                        },
-                        label,
-                        detail,
-                        chord: String::new(),
-                        score,
-                    },
-                    0,
-                    false,
-                ));
-            }
+            sym_cands.sort_by(|a, b| {
+                a.score
+                    .cmp(&b.score)
+                    .then_with(|| a.label.len().cmp(&b.label.len()))
+            });
+            entries.extend(
+                sym_cands
+                    .into_iter()
+                    .take(MAX_PALETTE_SYMBOL_CANDIDATES)
+                    .map(|e| (e, 0, false)),
+            );
         }
         entries.sort_by(
             |(left, left_time, left_waiting), (right, right_time, right_waiting)| {
@@ -9502,17 +9491,17 @@ impl OperonApp {
         let Some(diff_file) = self
             .diff_file_cache
             .get(key)
-            .and_then(|files| files.get(file_idx))
+            .and_then(|f| f.get(file_idx))
             .cloned()
         else {
             return;
         };
-        let outcome = if is_stage {
+        let res = if is_stage {
             git_stage_hunk(&project.path, &diff_file, hunk_idx)
         } else {
             git_discard_hunk(&project.path, &diff_file, hunk_idx)
         };
-        match outcome {
+        match res {
             Ok(()) => {
                 if is_stage {
                     self.toggle_staged_file(project.id, &diff_file.path, true);
@@ -9523,15 +9512,15 @@ impl OperonApp {
                     self.notice = Some(tr("ハンクをステージしました。").into());
                 } else {
                     self.notice = Some(tr("ハンクの変更を破棄しました。").into());
-                    let rel_path = PathBuf::from(&diff_file.path);
-                    let to_reload: Vec<DocumentId> = self
+                    let rel = PathBuf::from(&diff_file.path);
+                    let ids: Vec<DocumentId> = self
                         .open_documents
                         .iter()
-                        .filter(|d| d.project == project.id && d.path == rel_path && !d.modified())
+                        .filter(|d| d.project == project.id && d.path == rel && !d.modified())
                         .map(OpenDocument::id)
                         .collect();
-                    for doc_id in to_reload {
-                        self.reload_document(&doc_id);
+                    for id in ids {
+                        self.reload_document(&id);
                     }
                 }
                 self.request_git_changes(project);
@@ -9539,7 +9528,7 @@ impl OperonApp {
                 self.request_git_diff(project, key.1.clone());
             }
             Err(error) => {
-                self.notice = Some(tf!("ハンク操作に失敗しました: {error}", error = error));
+                self.notice = Some(tf!("ハンク操作に失敗しました: {error}", error = error))
             }
         }
     }
@@ -9573,57 +9562,42 @@ impl OperonApp {
         {
             return;
         }
-        let content = if doc.buffer.is_empty() && doc.viewer.is_some() {
+        let text = if doc.buffer.is_empty() && doc.viewer.is_some() {
             &doc.disk
         } else {
             &doc.buffer
         };
-        let total_lines = content.lines().count().max(1);
-        let focus_line = self
+        let total = text.lines().count().max(1);
+        let focus = self
             .editor_jump_line
             .or(self.editor_focus_line)
             .unwrap_or(1)
-            .clamp(1, total_lines);
-        let start_line = focus_line.saturating_sub(15).max(1);
-        let end_line = (focus_line + 15).min(total_lines);
-        let snippet: String = content
+            .clamp(1, total);
+        let (start, end) = (focus.saturating_sub(15).max(1), (focus + 15).min(total));
+        let snippet: String = text
             .lines()
-            .skip(start_line - 1)
-            .take(end_line - start_line + 1)
+            .skip(start - 1)
+            .take(end - start + 1)
             .collect::<Vec<_>>()
             .join("\n");
-        let message =
-            format_code_context_for_agent(&doc.path, start_line, end_line, &snippet, None);
+        let msg = format_code_context_for_agent(&doc.path, start, end, &snippet, None);
         if let Some(target) = self.diff_comment_target(project_id) {
-            let target_id = target.id;
-            let tmux_name = target.tmux_name.clone();
-            if self.session_activity_for(target_id) == Some(AgentActivity::Working) {
+            let (tid, tmux) = (target.id, target.tmux_name.clone());
+            if self.session_activity_for(tid) == Some(AgentActivity::Working) {
                 self.notice = Some(tr("エージェントの応答が終わるまで待ってください。").into());
                 return;
             }
-            match tmux_send_input(
-                &tmux_name,
-                &[
-                    TerminalInput::Text(message),
-                    TerminalInput::Key("Enter".into()),
-                ],
-            ) {
-                Ok(()) => {
-                    self.notice = Some(tr("コード文脈をエージェントに送りました。").into());
-                }
-                Err(error) => {
-                    self.notice = Some(tf!(
-                        "エージェントに送れませんでした: {error}",
-                        error = error
-                    ));
-                }
-            }
+            let inputs = [TerminalInput::Text(msg), TerminalInput::Key("Enter".into())];
+            self.notice = Some(match tmux_send_input(&tmux, &inputs) {
+                Ok(()) => tr("コード文脈をエージェントに送りました。").into(),
+                Err(error) => tf!("エージェントに送れませんでした: {error}", error = error),
+            });
         } else {
             self.open_project_session_setup(project_id);
             self.goal_input = if self.goal_input.trim().is_empty() {
-                message
+                msg
             } else {
-                format!("{}\n\n{message}", self.goal_input)
+                format!("{}\n\n{msg}", self.goal_input)
             };
             self.notice = Some(
                 tr("このプロジェクトで動いているエージェントのセッションがありません。").into(),
@@ -9632,50 +9606,42 @@ impl OperonApp {
     }
 
     pub(crate) fn send_recent_terminal_error_to_agent(&mut self, session_id: Uuid) {
-        let Some(output) = self.session_output.get(&session_id) else {
+        let Some(err_block) = self
+            .session_output
+            .get(&session_id)
+            .and_then(|out| extract_recent_terminal_error(out))
+        else {
             self.notice = Some(tr("直近のターミナル出力にエラーは見つかりませんでした。").into());
             return;
         };
-        let Some(err_block) = extract_recent_terminal_error(output) else {
-            self.notice = Some(tr("直近のターミナル出力にエラーは見つかりませんでした。").into());
+        let Some(s) = self.store.sessions.iter().find(|s| s.id == session_id) else {
             return;
         };
-        let Some(session) = self.store.sessions.iter().find(|s| s.id == session_id) else {
-            return;
-        };
-        let project_id = session.project_id;
-        let is_agent_session = session.origin != Some(SessionOrigin::PlainTerminal)
-            && session.agent != "terminal"
-            && session.status == SessionStatus::Active;
-        let (target_id, tmux_name) = if is_agent_session {
-            (session.id, session.tmux_name.clone())
-        } else if let Some(target) = self.diff_comment_target(project_id) {
-            (target.id, target.tmux_name.clone())
+        let is_agent = s.origin != Some(SessionOrigin::PlainTerminal)
+            && s.agent != "terminal"
+            && s.status == SessionStatus::Active;
+        let (tid, tmux) = if is_agent {
+            (s.id, s.tmux_name.clone())
+        } else if let Some(t) = self.diff_comment_target(s.project_id) {
+            (t.id, t.tmux_name.clone())
         } else {
             self.notice = Some(
                 tr("このプロジェクトで動いているエージェントのセッションがありません。").into(),
             );
             return;
         };
-        if self.session_activity_for(target_id) == Some(AgentActivity::Working) {
+        if self.session_activity_for(tid) == Some(AgentActivity::Working) {
             self.notice = Some(tr("エージェントの応答が終わるまで待ってください。").into());
             return;
         }
-        let prompt = format!("```\n{err_block}\n```");
-        match tmux_send_input(
-            &tmux_name,
-            &[
-                TerminalInput::Text(prompt),
-                TerminalInput::Key("Enter".into()),
-            ],
-        ) {
-            Ok(()) => {
-                self.notice = Some(tr("直近のエラーをエージェントに送りました。").into());
-            }
-            Err(error) => {
-                self.notice = Some(tf!("エラーを送れませんでした: {error}", error = error));
-            }
-        }
+        let inputs = [
+            TerminalInput::Text(format!("```\n{err_block}\n```")),
+            TerminalInput::Key("Enter".into()),
+        ];
+        self.notice = Some(match tmux_send_input(&tmux, &inputs) {
+            Ok(()) => tr("直近のエラーをエージェントに送りました。").into(),
+            Err(error) => tf!("エラーを送れませんでした: {error}", error = error),
+        });
     }
 
     pub(crate) fn launch_parallel_arena_sessions(&mut self, project: &Project) {
@@ -9688,16 +9654,14 @@ impl OperonApp {
             self.notice = Some(tr("worktree 操作の完了を待ってください。").into());
             return;
         }
-        for provider in &providers {
-            if !self.tools.agent_available(provider.agent()) {
-                self.notice = Some(tf!(
-                    "{selected_agent} が PATH 上に見つかりません。インストールしてから、「設定」で「ツールを再確認」を押してください。",
-                    selected_agent = provider.agent()
-                ));
-                return;
-            }
+        if let Some(p) = providers
+            .iter()
+            .find(|p| !self.tools.agent_available(p.agent()))
+        {
+            self.notice = Some(tf!("{selected_agent} が PATH 上に見つかりません。インストールしてから、「設定」で「ツールを再確認」を押してください。", selected_agent = p.agent()));
+            return;
         }
-        let sanitized_name: String = self
+        let slug: String = self
             .session_name_input
             .trim()
             .chars()
@@ -9711,19 +9675,20 @@ impl OperonApp {
             .collect::<String>()
             .trim_matches('-')
             .to_string();
-        let base_branch = if sanitized_name.is_empty() {
+        let base_branch = if slug.is_empty() {
             format!("feature/arena-{}", now() % 100_000)
         } else {
-            format!("feature/{sanitized_name}")
+            format!("feature/{slug}")
         };
-        let saved_goal = self.goal_input.clone();
-        let saved_depends = self.depends_on_input;
-        let saved_agent = self.selected_agent.clone();
-        let saved_account = self.agent_account_input;
-        let saved_name = self.session_name_input.clone();
-        let saved_path = self.session_path_input.clone();
-        let saved_path_proj = self.session_path_project;
-
+        let (saved_goal, saved_depends, saved_agent, saved_acc, saved_name, saved_path, saved_proj) = (
+            self.goal_input.clone(),
+            self.depends_on_input,
+            self.selected_agent.clone(),
+            self.agent_account_input,
+            self.session_name_input.clone(),
+            self.session_path_input.clone(),
+            self.session_path_project,
+        );
         for provider in providers {
             let branch = arena_worktree_branch_name(&base_branch, provider);
             match create_worktree_from_mainline(&project.path, &branch) {
@@ -9733,12 +9698,12 @@ impl OperonApp {
                 }
                 Err(error) => {
                     self.select_agent(&saved_agent);
-                    self.agent_account_input = saved_account;
+                    self.agent_account_input = saved_acc;
                     self.goal_input = saved_goal;
                     self.depends_on_input = saved_depends;
                     self.session_name_input = saved_name;
                     self.session_path_input = saved_path;
-                    self.session_path_project = saved_path_proj;
+                    self.session_path_project = saved_proj;
                     self.notice = Some(tf!(
                         "worktree を作成できませんでした: {error}",
                         error = error
@@ -9751,7 +9716,7 @@ impl OperonApp {
                 .accounts
                 .for_agent(provider.agent())
                 .iter()
-                .any(|acc| Some(acc.id) == self.agent_account_input)
+                .any(|a| Some(a.id) == self.agent_account_input)
             {
                 self.agent_account_input = None;
             }
@@ -9769,9 +9734,8 @@ impl OperonApp {
             };
             self.launch_session();
         }
-
         self.select_agent(&saved_agent);
-        self.agent_account_input = saved_account;
+        self.agent_account_input = saved_acc;
         self.goal_input.clear();
         self.session_name_input.clear();
         self.session_path_input.clear();
