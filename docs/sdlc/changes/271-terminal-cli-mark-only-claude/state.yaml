@@ -7,23 +7,23 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
-  attempts: "0 3"
+  stage: "test"
+  status: "reviewing"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "medium"
   readiness: "go"
   screen: "approved"
 
-resume: "Write the three tests against stubs, watch them fail, then implement per plan.md."
+resume: "Have empirical-verifier and subprocess-safety-reviewer try to break the branch head, then push and wait for CI."
 
 contract:
-  three-gates: "machine pending make q.fast and the named tests in plan.md; the full suite runs in CI on push"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes - src/tmux.rs and src/app.rs change, so bash scripts/package-macos.sh from main follows the merge"
+  three-gates: "machine passed make q.fast and the six named tests in plan.md on 2026-11-10; the full suite runs in CI on push"
+  bands: "machine passed bash scripts/check-bands.sh exit 0 on 2026-11-10"
+  release-binary: "machine passed yes - src/tmux.rs and src/app.rs change, so bash scripts/package-macos.sh from main follows the merge"
   installed-app: "human pending in the installed app, codex and agy typed into a new terminal session put their marks on its tab within about two seconds"
-  guards-verified-by-mutation: "human pending each new guard watched failing; mutations.py catches every mutation"
+  guards-verified-by-mutation: "human passed the three new tests failed against stubs (None, kind still terminal); mutations.py 9 of 9 caught"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
