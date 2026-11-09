@@ -59516,6 +59516,26 @@ pub(crate) fn every_japanese_literal_is_a_message_or_named_data() {
             "原因",
             "a word the ranking looks for in a turn",
         ),
+        (
+            "src/util.rs",
+            "エラー:",
+            "a Japanese compiler/CLI error heading extract_recent_terminal_error scans for",
+        ),
+        (
+            "src/util.rs",
+            "エラー[",
+            "a Japanese rustc error code heading extract_recent_terminal_error scans for",
+        ),
+        (
+            "src/util.rs",
+            "エラー",
+            "a Japanese error marker extract_recent_terminal_error scans for",
+        ),
+        (
+            "src/util.rs",
+            "失敗しました",
+            "a Japanese failure marker extract_recent_terminal_error scans for",
+        ),
     ];
     let is_japanese = |c: char| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}' | '\u{ff01}'..='\u{ff5e}');
     let messages: std::collections::HashSet<&str> = EN_TABLE.iter().map(|(id, _)| *id).collect();
