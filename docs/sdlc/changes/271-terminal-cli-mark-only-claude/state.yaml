@@ -1,0 +1,35 @@
+# Bug report (2026-11-09): a session opened as a terminal takes Claude's mark
+# when the person runs `claude` in it, but keeps the terminal mark for `codex`
+# and `agy`. bug.md has the person's words, the measured cause (Codex 0.167
+# runs hooks in a shared daemon without the pane's variables; Antigravity posts
+# nothing until the first prompt) and the fix (read the foreground CLI from the
+# pane's processes in the session poll).
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the three tests against stubs, watch them fail, then implement per plan.md."
+
+contract:
+  three-gates: "machine pending make q.fast and the named tests in plan.md; the full suite runs in CI on push"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes - src/tmux.rs and src/app.rs change, so bash scripts/package-macos.sh from main follows the merge"
+  installed-app: "human pending in the installed app, codex and agy typed into a new terminal session put their marks on its tab within about two seconds"
+  guards-verified-by-mutation: "human pending each new guard watched failing; mutations.py catches every mutation"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
