@@ -7,8 +7,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -16,13 +16,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the five poll_275_ tests, then the constants, the rule and the update wiring, per plan.md."
+resume: "Done. Outlived the change: a window that is visible but not focused also refreshes every six seconds, because egui 0.31 cannot tell it from a hidden one."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked poll_275_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/config.rs and src/util.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/275-background-window-keeps-polling/mutations.py"
+  three-gates: "machine passed make q.fast; cargo test --locked poll_275_ (6) and repaint_loop_; the full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: no tier newly reached; largest_module_lines stays at diagnose (src/app/screens.rs 9978, src/app.rs 9957)"
+  release-binary: "machine passed required - src/app.rs, src/config.rs and src/util.rs change; packaged from main with the changes that follow it"
+  guards-verified-by-mutation: "machine passed mutations.py 9 of 9 caught; empirical-verifier re-ran every obligation and returned one failing test (a doc comment left on the wrong function), fixed and kept as F1"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
