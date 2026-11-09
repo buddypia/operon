@@ -729,7 +729,7 @@ impl OperonApp {
                             .strong(),
                     );
                     ui.label(
-                        RichText::new(tr("要対応になるとここに先頭表示されます"))
+                        RichText::new(tr("要対応になったセッションは、ここの一番上に表示されます"))
                             .size(12.0)
                             .color(palette.text_muted),
                     );
@@ -1065,7 +1065,7 @@ impl OperonApp {
             );
         } else if cli_provider_for_agent(&session.agent).is_some() {
             ui.label(
-                RichText::new(tr("ネイティブ再開 ID を待機中"))
+                RichText::new(tr("ネイティブ再開 ID を待っています"))
                     .small()
                     .weak(),
             );
@@ -3393,7 +3393,7 @@ impl OperonApp {
                         ui.horizontal(|ui| {
                             ui.label(if worktree.is_main {
                                 tf!(
-                                    "{ICON_TREE_MAIN} メインの作業ツリー",
+                                    "{ICON_TREE_MAIN} メインの worktree",
                                     ICON_TREE_MAIN = ICON_TREE_MAIN
                                 )
                             } else {
@@ -4592,11 +4592,9 @@ impl OperonApp {
             {
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(tr(
-                            "💡 セマンティック検索を有効にすると表記揺れも検索できます。",
-                        ))
-                        .small()
-                        .weak(),
+                        RichText::new(tr("💡 意味検索を有効にすると表記揺れも検索できます。"))
+                            .small()
+                            .weak(),
                     );
                     if ui.link(tr("設定で有効化する")).clicked() {
                         self.open_settings(SettingsSection::Data);
@@ -5065,7 +5063,7 @@ impl OperonApp {
                     palette,
                     |ui| {
                         // Drawn right to left, beside the verdict.
-                        if !available && secondary_button(ui, tr("手順")).clicked() {
+                        if !available && secondary_button(ui, tr("導入手順")).clicked() {
                             open_setup = Some(setup);
                         }
                         if let Some(count) = accounts {
@@ -8468,7 +8466,7 @@ impl OperonApp {
                         if ui.button(tr("閉じる")).clicked() {
                             self.last_commit_failure.remove(&project.id);
                         }
-                        if ui.button(tr("AIで修正")).clicked() {
+                        if ui.button(tr("AI で修正")).clicked() {
                             self.fix_commit_failure_with_ai(project, ui.ctx());
                         }
                     });
@@ -9321,7 +9319,7 @@ impl OperonApp {
         }
         if stale {
             hover.push(tf!(
-                "{p0}の読みです",
+                "{p0}の値です",
                 p0 = relative_time(now().saturating_sub(age))
             ));
         }
@@ -9519,7 +9517,7 @@ impl OperonApp {
                 self.request_git_diff(project, key.1.clone());
             }
             Err(error) => {
-                self.notice = Some(tf!("ハンク操作に失敗しました: {error}", error = error))
+                self.notice = Some(tf!("ハンクを操作できませんでした: {error}", error = error))
             }
         }
     }

@@ -972,7 +972,7 @@ pub(crate) fn restore_classification_notice(classification: &RestoreClassificati
     let dropped = classification.unclassified_named(UnclassifiedOutcome::Dropped);
     if !dropped.is_empty() {
         notice.push_str(&tf!(
-            "次の記録は分類が分からず、読み取れる本文もなかったため復元先へ渡していません: {kinds}。",
+            "次の記録は分類できず、読み取れる本文もなかったため、復元先へ渡していません: {kinds}。",
             kinds = dropped
         ));
     }
@@ -1597,7 +1597,7 @@ CREATE TABLE `battle_mode_infos` (`idx` integer,`data` blob,PRIMARY KEY (`idx`))
         }))
         .map_err(|error| {
             tf!(
-                "Antigravity の履歴エントリのエンコード: {error}",
+                "Antigravity の履歴エントリをエンコードできませんでした: {error}",
                 error = error
             )
         })?;
@@ -1776,7 +1776,7 @@ mod legacy_claude_codex_synthesis {
             )
             .map_err(|error| {
                 tf!(
-                    "復元した Claude Code の会話のエンコード: {error}",
+                    "復元した Claude Code の会話をエンコードできませんでした: {error}",
                     error = error
                 )
             })?;
@@ -1967,9 +1967,9 @@ mod legacy_claude_codex_synthesis {
         for (imported_index, (expected_role, expected_text)) in turns.iter().enumerate() {
             let Some((actual_role, actual_text)) = actual.remove(&imported_index) else {
                 return Err(tf!(
-                "Codex が、取り込みターン operon-import-{imported_index} を永続化しませんでした。",
-                imported_index = imported_index
-            ));
+                    "Codex が取り込みターン operon-import-{imported_index} を保存しませんでした。",
+                    imported_index = imported_index
+                ));
             };
             if &actual_role != expected_role || &actual_text != expected_text {
                 return Err(tf!("Codex が、取り込みターン operon-import-{imported_index} に異なる内容を保存しました。", imported_index = imported_index));
@@ -2051,7 +2051,10 @@ mod legacy_claude_codex_synthesis {
                 let events =
                     codex_replay_turn_events(&session_id, role, text, &mut next_ordinal, turn_sec)
                         .map_err(|error| {
-                            tf!("Codex の再生レコードのエンコード: {error}", error = error)
+                            tf!(
+                                "Codex の再生レコードをエンコードできませんでした: {error}",
+                                error = error
+                            )
                         })?;
                 for event in events {
                     writer

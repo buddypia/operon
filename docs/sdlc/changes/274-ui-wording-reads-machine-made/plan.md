@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-10
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -51,3 +51,53 @@
   `proof_safe_agent_command_admits_no_line_break`.
 
 ## Departures from the plan
+
+- **One message id split.** 「手順」 labelled two things: the knowledge kind and
+  the tool-setup button in Settings. Its English row moved from "Setup" to
+  "Procedure" for the knowledge kind, which would have mislabelled the button,
+  so the button now reads a new id 「導入手順」 ("Setup", 「설치 방법」) and
+  `docs/MANUAL.ja.md` names it. The tables gain one row each; `wording.md`
+  lists the rewritten messages and not this new one.
+- **One more rewording after the evaluator's pass.** The empty-state hint
+  became 「要対応になったセッションは、ここの一番上に表示されます」 (the
+  reviewer's 「ここの先頭に」 read stiffly). `wording.md` was regenerated.
+- **A guard for the durability claim.** The plan's risk row for the
+  `CommittedButNotSynced` notices named only the spec; the claim now has a test,
+  `a_written_but_unconfirmed_notice_never_says_the_write_failed`, which reads
+  every 「書き込まれましたが」 notice in three languages and refuses "failed" in
+  any of them. Two mutations in `mutations.py` watch it go red.
+- **Acceptance commands.** `cargo test` takes one filter before `--`, so the
+  spec's multi-name commands run as `cargo test --locked -- a b c`;
+  `verification.yaml` names one test per obligation.
+- **Documents.** Beyond the labels the spec names, `docs/MANUAL.md`'s English
+  labels moved to sentence case with the app (Insert template, Open in external
+  editor, AI review, Create manual checkpoint, Roll back to checkpoint, Review
+  run script, Open an empty terminal, the notifications setting), and the
+  Korean manual follows 키 바인딩, 변경 내용, 외부 편집기, 빈 터미널, 스테이징
+  and 실행 명령어. Prose outside quoted labels is unchanged.
+- **Bands.** `largest_module_lines` reads 9976 in `src/app/screens.rs`, which
+  was 9978 on `origin/main`; the diagnose-tier breach predates this change.
+- **`src/agents.rs` left untouched.** The first CI run proved every obligation
+  but I6, `cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break`,
+  which the launch-gate surface asks for once `src/agents.rs` changes. Kani
+  did not build: 177 errors under `RUSTFLAGS=-D warnings` in test code this
+  change does not touch (the first, `unused variable: why` at
+  `src/tests.rs:73325`). The only edit there was one permission-mode
+  description, so its Japanese id keeps 「確認なしにファイルとコマンドを実行します。」
+  and the Kani build is left to a change of its own. `wording.md` and the
+  spec's R4 count 187 messages / 228 cells; the plan's file table above still
+  names `src/agents.rs`.
+- **Four tests quoted parts of reworded messages.** CI's full suite failed
+  `history_partial_results_are_disclosed_even_during_automatic_discovery`
+  (上限付き検索 / 上限付きスキャン), `one_durable_cancellation_copy_is_enough_to_allow_stop_and_repair_the_other`
+  (1 つ永続化されました), `prevents_removing_a_record_required_by_a_queued_session`
+  (依存されています) and `the_git_sub_tabs_are_translated_message_ids` (차이점);
+  each now quotes the new wording. The pre-push scan matched whole messages
+  and missed these fragments.
+- **The durability guard was widened on the independent verifier's evidence.**
+  It survived two mutations: a notice outside 「書き込まれましたが」
+  (「取り込んだメタデータをディスクに保存できたか、まだ確認できていません。」)
+  rewritten as "…failed", and "could not be saved" beside "confirm". It now
+  reads every message about a save or write it could not confirm (11 rows)
+  and refuses a longer list of failure words in each language; both mutations
+  are in `mutations.py` (20 of 20 caught).

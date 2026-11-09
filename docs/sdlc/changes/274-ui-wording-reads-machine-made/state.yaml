@@ -1,7 +1,7 @@
 # The state of one change. Field meanings and closed sets:
 # docs/sdlc/templates/state.yaml. Branch: feature/274-ui-wording-reads-machine-made.
 #
-# The UI text reads as machine-made in ja/en/ko; 188 messages are reworded and the
+# The UI text reads as machine-made in ja/en/ko; 187 messages are reworded and the
 # idle status word 「手すき」 becomes 「アイドル」.
 #
 # Route: modify (placement EXTEND in src/i18n_tables.rs, src/ui/widgets.rs, the
@@ -13,8 +13,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "paused"
@@ -22,13 +22,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write R2/R3 tests and move R1/R5 tests, watch them fail, then apply wording.md with the script."
+resume: "Closed: 187 messages reworded, idle word アイドル; land after CI passes, then package from main. The Kani harness build (src/tests.rs under -D warnings) is broken on main and needs its own change."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: touches src/i18n_tables.rs and src/ui/widgets.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "machine pending each new guard watched failing in mutations.py"
+  three-gates: "machine passed make q.fast and the named tests in verification.yaml"
+  bands: "machine passed bash scripts/check-bands.sh exits 0; largest_module_lines is src/app/screens.rs at 9976, 9978 on origin/main"
+  release-binary: "machine passed yes: touches src/i18n_tables.rs and src/ui/widgets.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "machine passed 20 of 20 mutations caught by docs/sdlc/changes/274-ui-wording-reads-machine-made/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

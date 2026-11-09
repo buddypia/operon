@@ -29,8 +29,8 @@
    sessions" / 「로컬 CLI 세션 감지」); ko 「덩어리」 「차이점」 「신선도」 「대응 필요」 「키 할당」 「당신」
    「시간 창」 「리포지토리」. Pinned by `no_message_uses_a_retired_term` (fails on
    `main` for each list).
-4. R4: the 188 messages listed in `wording.md` read as listed there — 229
-   cells: 43 Japanese message ids re-keyed at every call site, 94 English and
+4. R4: the 187 messages listed in `wording.md` read as listed there — 228
+   cells: 42 Japanese message ids re-keyed at every call site, 94 English and
    92 Korean translations — and every table stays complete, sorted, and keeps
    each message id's placeholder names. Pinned by
    `every_translation_table_is_sorted_by_message_id`,
@@ -59,13 +59,12 @@ Status chips, before → after:
 Idle tab tooltip: 「アイドル / ターンを終え、次の依頼を出せます」 (before
 「手すき / ターンを終えて手が空いています」).
 
-Representative rows (all 188 are in `wording.md`):
+Representative rows (all 187 are in `wording.md`):
 
 | Where | Before | After |
 |---|---|---|
 | ja error | Codex の再生レコードのエンコード: {error} | Codex の再生レコードをエンコードできませんでした: {error} |
 | ja notice | …ディスクへの永続化を確認できませんでした。 | …ディスクに保存されたことを確認できませんでした。 |
-| ja permission mode | 確認なしにファイルとコマンドを実行します。 | 確認なしでファイルを編集し、コマンドを実行します。 |
 | en menu | Land worktree into main… | Merge worktree into main… |
 | en notice | Attempting to run .operon/run.sh. | About to run .operon/run.sh. |
 | en branch | Level with {p0}. | Up to date with {p0}. |
@@ -83,16 +82,16 @@ too-large and interrupted states show the same rows, reworded where listed.
 Placement: EXTEND — the wording lives in `src/i18n_tables.rs`
 (`EN_TABLE`, `KO_TABLE`) and in the Japanese message ids at their call sites.
 `SessionStatusGroup::message_id` and `session_status_view` in
-`src/ui/widgets.rs` return the new idle id and hints. The 41 re-keyed ids are
+`src/ui/widgets.rs` return the new idle id and hints. The re-keyed ids are
 replaced as exact string literals across `src/` — call sites in `src/app.rs`,
 `src/app/screens.rs`, `src/app/knowledge.rs`, `src/history.rs`, `src/cli.rs`,
-`src/files.rs`, `src/git.rs`, `src/agents.rs`, `src/agents/accounts.rs`,
+`src/files.rs`, `src/git.rs`, `src/agents/accounts.rs`,
 `src/store.rs` and `src/ui/widgets.rs`, and the assertions in `src/tests.rs` —
 and each table is re-sorted by message id. In `src/store.rs` (two
-`CommittedButNotSynced` notices), `src/agents.rs` (one permission-mode
-description) and `src/git.rs` (one test-run notice) only the literal text
-changes: no write order, persisted shape, cancellation path, launch gate, or
-command. None of the ids is compared against persisted data, so no stored file
+`CommittedButNotSynced` notices) and `src/git.rs` (one test-run notice) only
+the literal text changes: no write order, persisted shape, cancellation path,
+or command. `src/agents.rs` is left untouched, so its launch gate is not a
+surface of this change. None of the ids is compared against persisted data, so no stored file
 changes meaning. No external command, background work, or draw-path cost.
 
 ## Policy conformance

@@ -4,3 +4,4 @@
 2026-11-09T19:30:29Z auto plan plan.md 6c53d05ffe4ff0d2 approve independent evaluator: tests first for R1-R5, each risk names a check, nothing hidden for a person
 2026-11-09T19:30:29Z auto store plan.md 6c53d05ffe4ff0d2 approve independent evaluator: src/store.rs gets two notice literals only; write order, persisted shape, migration and cancellation untouched; CommittedButNotSynced certainty kept
 2026-11-09T19:31:46Z person store plan.md 6c53d05ffe4ff0d2 approve the person approved rewording the two CommittedButNotSynced notices in src/store.rs, nothing else in that file
+2026-11-09T20:40:51Z auto spec spec.md 3a40606f1cdaeb5a approve independent evaluator, re-asked: R4 counts 187 messages / 228 cells after src/agents.rs was left untouched; counts match wording.md
