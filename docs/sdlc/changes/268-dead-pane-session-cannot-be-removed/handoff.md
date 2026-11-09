@@ -59,6 +59,11 @@ file (reverted from the tree; `probe_268_user_store*` need
    `accessibility: denied`), so no input can be sent from here.
 10. Asked the person four times for the ⌘W / other-tab observation; each reply
     was 「承認」 with no observation, and the window stayed unchanged.
+11. The person then answered: **⌘W on 「セッション1」 closes the tab.** So
+    `close_workspace_tab` works in the running app and only the ✕ click is
+    lost. `probe_268_id_stability` (the person's store, 9 s of real frames
+    with polls) shows the ✕ ids stable across frames in the harness, so a
+    per-frame id shift is not reproduced either.
 
 ## What was ruled out
 
@@ -76,6 +81,8 @@ file (reverted from the tree; `probe_268_user_store*` need
 | `WorkspaceTabs` can leave a tab in two groups, or a group outside the layout, so `close` removes a hidden copy | `probe_268_workspace_invariants_random_walk`: 20 000 walks of open/close/insert_tab/move_tab/select/retain, no violation |
 | the terminal still holding the keyboard when the agent exits (the person's ^C^C) eats the click | `probe_268_focused_terminal`: terminal clicked to focus while Active, pane dies, ✕ still closes the tab |
 | the harness used egui's default fonts | probes 4–8 run the full `update`, which calls `apply_appearance` → `configure_macos_fonts` |
+
+| the tab is closed and then reopened | the person: ⌘W, which calls the same `close_workspace_tab`, closes it |
 
 ## Narrowest remaining hypothesis
 

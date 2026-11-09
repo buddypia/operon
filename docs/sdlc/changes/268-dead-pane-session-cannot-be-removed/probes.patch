@@ -1,8 +1,8 @@
 diff --git a/src/tests.rs b/src/tests.rs
-index e0648f9..7dd5837 100644
+index e0648f9..bcde97c 100644
 --- a/src/tests.rs
 +++ b/src/tests.rs
-@@ -73150,3 +73150,834 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
+@@ -73150,3 +73150,895 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
      assert_eq!(app.editor_focus_line, Some(1));
      fs::remove_dir_all(root).ok();
  }
@@ -834,6 +834,67 @@ index e0648f9..7dd5837 100644
 +    for _ in 0..80 { frame(&mut app, vec![]); thread::sleep(Duration::from_millis(30)); }
 +    eprintln!("tabs after: {:?} selected={:?} dead={dead} live={live}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), app.selected_session);
 +    eprintln!("notice={:?}", app.notice);
++    for n in names { kill_tmux_session(&n); }
++    fs::remove_dir_all(&root).ok();
++}
++
++#[test]
++fn probe_268_id_stability() {
++    if !tool_available("tmux") { return; }
++    let src = PathBuf::from(std::env::var("PROBE_STORE").expect("PROBE_STORE"));
++    let root = temporary_directory("probe-268-user");
++    let data = root.join("store-v2.json");
++    fs::copy(&src, &data).unwrap();
++    let store = load_store(&data).unwrap();
++    for s in &store.sessions {
++        let _ = tmux_command().args(["kill-session", "-t", &s.tmux_name]).status();
++        let cmd = if s.status == SessionStatus::Exited { "sleep 0.5; exit 0" } else { "sleep 600" };
++        assert!(tmux_command().args(["new-session", "-d", "-s", &s.tmux_name, "-x", "200", "-y", "50", cmd]).status().unwrap().success());
++        configure_tmux_session(&s.tmux_name).unwrap();
++    }
++    thread::sleep(Duration::from_millis(1200));
++    let names: Vec<String> = store.sessions.iter().map(|s| s.tmux_name.clone()).collect();
++    let by_name = |n: &str| store.sessions.iter().find(|s| s.name == n).unwrap().id;
++    let (s1, s2, s3) = (by_name("セッション1"), by_name("セッション2"), by_name("セッション3"));
++    let mut app = OperonApp::from_state(data.clone(), store, ToolStatus { tmux: true, git: true, ..ToolStatus::default() }, None);
++    app.page = Page::Sessions;
++    app.hooks_started = true; app.hooks_enabled = false; app.handoff_archive_sweep_started = true;
++    let ctx = egui::Context::default();
++    ctx.enable_accesskit();
++    let start = Instant::now();
++    let size = egui::vec2(2560.0, 1382.0);
++    let mut frame = |app: &mut OperonApp, events: Vec<egui::Event>| {
++        ctx.run(
++            egui::RawInput { time: Some(start.elapsed().as_secs_f64()), events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() },
++            |ctx| { app.ports_scanned_at = Some(Instant::now()); let mut f = eframe::Frame::_new_kittest(); <OperonApp as eframe::App>::update(app, ctx, &mut f); },
++        )
++    };
++    frame(&mut app, vec![]);
++    app.open_session_in_terminal(s2);
++    frame(&mut app, vec![]);
++    app.open_session_in_terminal(s3);
++    frame(&mut app, vec![]);
++    app.open_session_in_terminal(s1);
++    for _ in 0..60 { frame(&mut app, vec![]); thread::sleep(Duration::from_millis(30)); }
++    eprintln!("statuses: {:?}", app.store.sessions.iter().map(|s| (s.name.clone(), s.status.clone())).collect::<Vec<_>>());
++    eprintln!("tabs before: {:?} active={:?} s1={s1}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), app.workspace.active());
++    let mut seen: Vec<(f64, Vec<(u64, i64)>)> = Vec::new();
++    let t0 = Instant::now();
++    while t0.elapsed() < Duration::from_secs(9) {
++        let o = frame(&mut app, vec![]);
++        let u = o.platform_output.accesskit_update.unwrap();
++        let mut ids: Vec<(u64, i64)> = u.nodes.iter().filter_map(|(id, n)| {
++            let b = n.bounds()?;
++            (n.label() == Some(ICON_CLOSE) && b.y0 < 120.0).then_some((id.0, b.x0 as i64))
++        }).collect();
++        ids.sort_by_key(|x| x.1);
++        if seen.last().map(|(_, l)| l != &ids).unwrap_or(true) {
++            eprintln!("t={:.2} close ids {:?} notice={:?}", t0.elapsed().as_secs_f64(), ids, app.notice);
++            seen.push((t0.elapsed().as_secs_f64(), ids));
++        }
++        thread::sleep(Duration::from_millis(16));
++    }
++    eprintln!("distinct id sets: {}", seen.len());
 +    for n in names { kill_tmux_session(&n); }
 +    fs::remove_dir_all(&root).ok();
 +}
