@@ -41,7 +41,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Have the empirical verifier re-run verification.yaml at the implementation commit, then close, push and land."
+resume: "Land after CI passes, then package from main and swap the installed app."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -72,7 +72,7 @@ resume: "Have the empirical verifier re-run verification.yaml at the implementat
 contract:
   three-gates: "machine passed make q.fast plus the named tests; full suite runs in CI on push"
   bands: "machine passed bash scripts/check-bands.sh; largest_module_lines diagnose already breached on main (screens.rs 9989), this change adds 2 lines"
-  release-binary: "machine pending yes - src/app/screens.rs, src/ui/widgets.rs and src/glyphs.rs change; package from main after landing"
+  release-binary: "machine passed yes - src/app/screens.rs, src/ui/widgets.rs and src/glyphs.rs change, so packaging from main follows the merge"
   guards-verified-by-mutation: "human passed R1-R3 watched failing against empty helpers; mutation sweep 9 of 9 caught"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_

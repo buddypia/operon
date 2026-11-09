@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-09
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -55,3 +55,7 @@ Before any source edit, R3 dropped its "accessible label" clause: egui only repo
 Screenshot: the worktree build ran against a throwaway HOME and its own tmux server, seeded with Antigravity, Claude Code, terminal, and custom sessions. Synthetic clicks are not permitted on this machine, so a temporary startup patch in `src/app.rs` opened the four tabs; it was reverted with `git checkout -- src/app.rs` before anything was staged. The captured strip reads `[⏸ カスタム ×] [⟳ (terminal mark) セッション3 ×] [⏸ (Claude mark) セッション1 ×] [⏸ (Antigravity mark) セッション2 ×]`, as `screen.md` describes.
 
 Proof: R1–R4 named tests pass, mutation sweep 9 of 9 caught with the source restored, `make q.fast` passes.
+
+The empirical verifier's isolated worktree could not reach the branch commit (the trunk and destructive-git guards refused both a detached checkout and `git worktree add`), so it ran in this worktree at 69d68bd: `scripts/run-obligations.sh` held all eight obligations in 181 s, and its reading of the document-tab, missing-session, other-surface, unknown-agent, and texture-cache cases found nothing to reproduce.
+
+Band diagnosis: `largest_module_lines` was already 9989 (`src/app/screens.rs`) on main, over its 9400 diagnose tier; this change adds two lines.
