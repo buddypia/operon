@@ -7275,6 +7275,8 @@ impl OperonApp {
                                                                 ui.label(&view.hint);
                                                             },
                                                         );
+                                                        // Which CLI, beside how it is (change 267).
+                                                        session_mark(ui, &session.agent);
                                                     }
                                                 }
                                                 let editing = matches!(tab, WorkspaceTab::Session(id)

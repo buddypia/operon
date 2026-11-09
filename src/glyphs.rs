@@ -203,6 +203,21 @@ pub(crate) const AGENT_ICON_ANTIGRAVITY: &[u8] =
 /// the mark carries no tile of its own onto the light theme.
 pub(crate) const BRAND_MARK: &[u8] = include_bytes!("../assets/operon-mark-128.png");
 
+/// The mark a plain or recovered terminal shows where an agent session shows
+/// its vendor's (change 267). A shell has no vendor, so this one is Operon's
+/// own artwork, covered by the repository's licence and kept out of
+/// `assets/agent-icons/`, which holds only third-party marks. It takes their
+/// shape — a full-bleed rounded square at 128x128 — so a terminal tab beside
+/// an Antigravity tab reads as the same kind of thing. The light plate holds a
+/// dark screen so the mark keeps an edge on the dark theme and a body on the
+/// light one. Rendered from `assets/terminal-mark.svg` with
+/// `rsvg-convert -w 1024` and a Lanczos resize to 128.
+pub(crate) const TERMINAL_MARK: &[u8] = include_bytes!("../assets/terminal-mark-128.png");
+
+/// How large a session's CLI mark is drawn beside its 12-point tab title: the
+/// size the left column already gives a vendor mark beside 12-point text.
+pub(crate) const SESSION_MARK_SIZE: f32 = 16.0;
+
 /// Generated vector vocabulary for compact session status badges. All marks
 /// share an enclosure, so they read as status indicators rather than actions.
 /// The 18-point grid uses geometry instead of a font or scaled raster asset.
