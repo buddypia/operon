@@ -34,3 +34,4 @@
 ## Departures from the plan
 
 - 2026-11-09: CI's `steering_and_source_do_not_name_external_projects` refused the name of the person's terminal app in bug.md, this plan, state.yaml and the test's doc comment. Each now says "the person's terminal app"; the risk row above changed by those words only, and the plan was judged again.
+- 2026-11-09: closing the plan (Status: done) after the verification record was written moved the review digest, and the landing merge was refused; the record was re-run and re-stamped on the closing tree.
