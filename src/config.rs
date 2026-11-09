@@ -400,6 +400,15 @@ pub(crate) const SESSION_ARRANGEMENT_FILE_NAME: &str = "session-order.json";
 /// compact JSON, so this is some 27 000 of them, and every save lists only
 /// what the store still holds.
 pub(crate) const SESSION_ARRANGEMENT_FILE_MAX_BYTES: u64 = 1024 * 1024;
+/// Where the workspace's tabs, splits, and front tabs are kept across a
+/// relaunch (change 270): beside the store for the same reason as the
+/// session order — a per-machine arrangement whose loss costs one
+/// rearrangement, not work anybody would miss.
+pub(crate) const WORKSPACE_LAYOUT_FILE_NAME: &str = "workspace-layout.json";
+/// The most of `workspace-layout.json` that is read. A tab is one 38-byte id
+/// and every save lists only what the store still holds, so a real file is a
+/// few kilobytes; past this it is not half-read but ignored.
+pub(crate) const WORKSPACE_LAYOUT_FILE_MAX_BYTES: u64 = 1024 * 1024;
 /// How close to the session column's top or bottom edge a drag is held for
 /// the column to scroll towards that edge.
 pub(crate) const COLUMN_DRAG_EDGE: f32 = 32.0;

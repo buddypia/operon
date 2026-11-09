@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-09
-- **Status**: approved
+- **Status**: in progress
 
 ## Files that change
 
@@ -131,3 +131,26 @@ relaunch is observed: tabs come back, and a terminal running Claude shows the
 Claude mark.
 
 ## Departures from the plan
+
+1. **Placement.** The layout restore/snapshot/save, the relaunch, and the
+   types `LaunchFocus`, `NativeResume`, `RelaunchKind`, `relaunch_kind`, and
+   `terminal_provenance` live in a new child module `src/app/relaunch.rs`
+   (re-exported from `src/app.rs` as `keymap` and `knowledge` are), not in
+   `src/app.rs`: written there, `src/app.rs` reached 10 143 lines and
+   `largest_module_lines` crossed its `propose` tier (10 000). After the move
+   it is 9 902 and the band reads `diagnose` on `screens.rs` (9 989), as on
+   `main`. `CLAUDE.md` gains one line naming the module. `prepare_native_resume`,
+   the `start_session` split, the kind switch, and the `SessionStarted` quiet
+   branch stay in `src/app.rs`, where the code they change is.
+2. **`the_manual_resume_still_makes_a_new_record`** passes on the unedited code:
+   it is the regression guard for the split, so it is watched failing by the
+   mutation sweep rather than before the change. The other seven failed first
+   on their assertions; `resuming_a_session_with_no_transcript_starts_it_fresh_once`
+   by overflowing the stack (SIGABRT).
+3. **The test helper** reports Antigravity with `PreInvocation`: `agy` has no
+   start event, so a `SessionStart` from it never reaches the intake.
+4. **`launch_stored_session_does_not_block_on_workspace_trust_polling`** failed
+   once inside a parallel `cargo test workspace` run on its two-second timing
+   and passed alone and inside `cargo test launch`. `launch_stored_session` is
+   not edited by this change.
+

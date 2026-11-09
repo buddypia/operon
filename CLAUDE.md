@@ -18,6 +18,7 @@ alternatives; commit `plan.md` before editing source files.
   - `src/app.rs` — `OperonApp`: app state, background tasks, top-level UI wiring.
     `src/app/screens.rs` holds toolbar through terminal workspace drawing.
     `src/app/knowledge.rs` holds the knowledge tab, model block, and run wiring.
+    `src/app/relaunch.rs` keeps tabs across a relaunch and restarts gone sessions.
   - `src/tests.rs` — inline `#[cfg(test)]` suite; no other module has tests.
   - `src/cli.rs` — discovering/scanning agent-CLI sessions and shared archive.
   - `src/history.rs` — cross-CLI conversation restore and import.

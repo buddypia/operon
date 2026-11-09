@@ -1,0 +1,28 @@
+# The evidence for change 270. Shape: docs/sdlc/templates/verification.yaml.
+# R1-R8 are the spec's requirements, each the test plan.md names; R3 and R4
+# share one test, and R7's failure sentence has its own (I1). I2 is the sweep:
+# 32 mutations over the kind switch, the layout's restore and bounds, the
+# relaunch's choice of sessions and its quietness, the toast and failure
+# sentences themselves, and the recursion. I3-I8 are existing guards the change
+# must keep: the hook reading's precedence over the screen, every string in
+# every table and in order, the session-start and retry paths, the workspace
+# tabs, and the module map.
+digest: "a3405d2d491b9e50"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_running_in_it
+  - R2 empirical-test :: cargo test --locked a_terminal_running_claude_receives_review_notes
+  - R3 empirical-test :: cargo test --locked the_workspace_comes_back_after_a_relaunch
+  - R4 empirical-test :: cargo test --locked the_workspace_comes_back_after_a_relaunch
+  - R5 empirical-test :: cargo test --locked a_damaged_workspace_file_restores_only_what_is_whole
+  - R6 empirical-test :: cargo test --locked sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
+  - R7 empirical-test :: cargo test --locked the_relaunch_says_how_many_sessions_it_reopened
+  - R8 empirical-test :: cargo test --locked resuming_a_session_with_no_transcript_starts_it_fresh_once
+  - I1 empirical-test :: cargo test --locked a_layout_that_cannot_be_written_is_said_once
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/270-relaunch-leaves-sessions-closed/mutations.py
+  - I3 empirical-test :: cargo test --locked the_manual_resume_still_makes_a_new_record
+  - I4 empirical-test :: cargo test --locked a_fresh_hook_state_outranks_the_screen_and_a_stale_one_yields
+  - I5 empirical-test :: cargo test --locked every_message_the_code_shows_has_a_row_in_every_table
+  - I6 empirical-test :: cargo test --locked every_translation_table_is_sorted_by_message_id
+  - I7 empirical-test :: cargo test --locked session_start
+  - I8 empirical-test :: cargo test --locked claude_md_maps_every_module_that_exists

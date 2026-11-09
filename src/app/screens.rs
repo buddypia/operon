@@ -9619,9 +9619,7 @@ impl OperonApp {
         let Some(s) = self.store.sessions.iter().find(|s| s.id == session_id) else {
             return;
         };
-        let is_agent = s.origin != Some(SessionOrigin::PlainTerminal)
-            && s.agent != "terminal"
-            && s.status == SessionStatus::Active;
+        let is_agent = s.agent != "terminal" && s.status == SessionStatus::Active;
         let (tid, tmux) = if is_agent {
             (s.id, s.tmux_name.clone())
         } else if let Some(t) = self.diff_comment_target(s.project_id) {
