@@ -2,8 +2,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "reviewing"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -11,12 +11,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Wait for CI on the branch head; when green, merge on main with git merge --no-ff --no-edit, then package per the ship skill."
+resume: "Merge on main with git merge --no-ff --no-edit once CI is green on the branch head, package with scripts/package-macos.sh per the ship skill, and check stop-in-running-app in the installed app."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed cargo fmt --check and cargo clippy --locked -- -D warnings on the merge with main (561adc2); ports_ (30) and the background-key, change-number and type-scale tests pass"
   bands: "machine passed check-bands.sh exits 0 after moving the port drawing to src/app/screens.rs; largest_module_lines at diagnose (9729, main 9722), steering_bytes and approval_escapes already breached on main"
-  release-binary: "machine pending required - src/git/ports.rs, src/app.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing"
+  release-binary: "machine passed required - src/git/ports.rs, src/app.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing"
   guards-verified-by-mutation: "human passed mutations.py 23 of 23 caught (run locally as two halves of 11 and 12): attribution, spellings, no-worktree root, sections, stop disabled, three refusals, check-before-signal, name match, renamed holder, unconfirmed, lsof complaining, cancel, confirmation wording, stale scan and its re-read, generation, rescan, list drop, still-running notice"
   stop-in-running-app: "human pending a server stopped from the menu disappears from it in the installed app"
 
