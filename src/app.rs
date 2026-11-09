@@ -776,6 +776,8 @@ pub(crate) struct OperonApp {
     pub(crate) cached_land_base: Option<(Uuid, String)>,
     pub(crate) cached_run_script: Option<(PathBuf, Instant, Option<SetupScript>)>,
     pub(crate) cached_prompt_templates: Option<(Option<PathBuf>, Instant, Vec<PromptTemplate>)>,
+    pub(crate) arena_mode_enabled: bool,
+    pub(crate) arena_agents: Vec<CliProvider>,
 }
 
 /// What became of one folder offered as a project.
@@ -1152,6 +1154,8 @@ impl OperonApp {
             cached_land_base: None,
             cached_run_script: None,
             cached_prompt_templates: None,
+            arena_mode_enabled: false,
+            arena_agents: Vec::new(),
         }
     }
 
@@ -8545,6 +8549,11 @@ pub(crate) enum PaletteKind {
     Action(&'static str),
     Session(Uuid),
     Project(Uuid),
+    File {
+        project: Uuid,
+        path: PathBuf,
+        line: Option<usize>,
+    },
 }
 
 /// How well a row matched, best first.
@@ -8617,6 +8626,7 @@ impl PaletteKind {
             Self::Action(_) => 0,
             Self::Session(_) => 1,
             Self::Project(_) => 2,
+            Self::File { .. } => 3,
         }
     }
 }

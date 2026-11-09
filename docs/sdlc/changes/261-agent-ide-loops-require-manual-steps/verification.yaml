@@ -1,0 +1,14 @@
+# Change 261: AI-native and OSS IDE loop improvements (per-hunk diff actions,
+# code/error handoff, @ context mentions, external IDE line jumps, parallel
+# arena launch, and ⌘K file/symbol jump).
+digest: "e99dd06178869bbb"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked ide_261_extract_and_apply_single_hunk_stage_and_discard
+  - R2 empirical-test :: cargo test --locked ide_261_diff_pane_hunk_buttons_emit_stage_and_discard
+  - R3 empirical-test :: cargo test --locked ide_261_format_code_context_and_extract_terminal_error
+  - R4 empirical-test :: cargo test --locked ide_261_at_mention_query_ranking_and_insertion
+  - R5 empirical-test :: cargo test --locked ide_261_external_ide_catalog_and_line_jump_args
+  - R6 empirical-test :: cargo test --locked ide_261_parallel_arena_agents_and_branch_names
+  - R7 empirical-test :: cargo test --locked ide_261_palette_ranks_project_files_and_document_symbols
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/261-agent-ide-loops-require-manual-steps/mutations.py

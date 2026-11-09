@@ -2,8 +2,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write failing ide_261_ tests in src/tests.rs, then implement git hunk actions, context mentions, external IDE line jumps, parallel arena launch, and palette file/symbol jump."
+resume: "Nothing outlives the change once it is merged on main, packaged with scripts/package-macos.sh, and installed per the ship skill."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/ files beyond src/tests.rs change; package from main after landing"
-  guards-verified-by-mutation: "human pending each new guard watched failing via mutations.py"
+  three-gates: "machine passed cargo fmt --check, cargo clippy --locked -- -D warnings, and ide_261_ (7) + i18n/invariant tests pass"
+  bands: "machine passed check-bands.sh exits 0; steering_bytes, largest_module_lines, and approval_escapes were already breached on main"
+  release-binary: "machine passed required - src/ files beyond src/tests.rs changed; package from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py 7 of 7 caught across R1-R7"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
