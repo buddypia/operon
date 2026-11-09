@@ -1,0 +1,20 @@
+# The state of one change. Template and field meanings: docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "plan"
+  status: "archived"
+  attempts: "0 3"
+  questions: "7 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Archived unreproduced: the build it was seen in is gone, so if a finished session's tab ✕ fails again, open a new change starting from handoff.md's ruled-out table and probes.patch."
+
+contract:
+  three-gates: "machine waived no source change; the branch adds only this directory, and CI runs the three gates on main's tree it carries"
+  bands: "machine passed scripts/check-bands.sh on 6b68dce: 3 of 21 breached (steering_bytes warn, largest_module_lines diagnose, approval_escapes warn), all main's own readings — docs/sdlc/changes is outside every metric's input set"
+  release-binary: "machine waived no fix landed, so /Applications/Operon.app is not made stale by this change"
+  guards-verified-by-mutation: "human waived no guard added; the cause was never named, so there was nothing to guard"
