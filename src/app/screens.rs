@@ -365,11 +365,8 @@ impl OperonApp {
                 .or_else(|| self.store.projects.first())
             {
                 if let Some(scan) = self.file_cache.get(&project.id) {
-                    let mut file_hits = 0usize;
+                    let mut file_candidates = Vec::new();
                     for path in &scan.paths {
-                        if file_hits >= MAX_PALETTE_FILE_CANDIDATES {
-                            break;
-                        }
                         let rel = path.display().to_string();
                         let name = path
                             .file_name()
@@ -378,15 +375,22 @@ impl OperonApp {
                         let Some(score) = palette_rank(name, &rel, &query) else {
                             continue;
                         };
-                        file_hits += 1;
+                        file_candidates.push((score, path.clone(), name.to_owned(), rel));
+                    }
+                    file_candidates
+                        .sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.3.len().cmp(&b.3.len())));
+                    for (score, path, label, rel) in file_candidates
+                        .into_iter()
+                        .take(MAX_PALETTE_FILE_CANDIDATES)
+                    {
                         entries.push((
                             PaletteEntry {
                                 kind: PaletteKind::File {
                                     project: project.id,
-                                    path: path.clone(),
+                                    path,
                                     line: None,
                                 },
-                                label: name.to_owned(),
+                                label,
                                 detail: format!("{} · {rel}", project.name),
                                 chord: String::new(),
                                 score,
@@ -397,36 +401,48 @@ impl OperonApp {
                     }
                 }
             }
-            let mut symbol_hits = 0usize;
+            let mut symbol_candidates = Vec::new();
             for doc in &self.open_documents {
-                if symbol_hits >= MAX_PALETTE_SYMBOL_CANDIDATES {
-                    break;
-                }
-                for sym in extract_file_symbols(&doc.path, &doc.buffer) {
-                    if symbol_hits >= MAX_PALETTE_SYMBOL_CANDIDATES {
-                        break;
-                    }
-                    let haystack = format!("{} {} {}", sym.name, sym.kind, doc.path.display());
-                    let Some(score) = palette_rank(&sym.name, &haystack, &query) else {
+                let text = if doc.buffer.is_empty() && doc.viewer.is_some() {
+                    &doc.disk
+                } else {
+                    &doc.buffer
+                };
+                let doc_rel = doc.path.display().to_string();
+                for sym in extract_file_symbols(&doc.path, text) {
+                    let Some(score) = palette_rank(&sym.name, &doc_rel, &query) else {
                         continue;
                     };
-                    symbol_hits += 1;
-                    entries.push((
-                        PaletteEntry {
-                            kind: PaletteKind::File {
-                                project: doc.project,
-                                path: doc.path.clone(),
-                                line: Some(sym.line),
-                            },
-                            label: format!("{} {}", sym.kind, sym.name),
-                            detail: format!("{}:{}", doc.path.display(), sym.line),
-                            chord: String::new(),
-                            score,
-                        },
-                        0,
-                        false,
+                    symbol_candidates.push((
+                        score,
+                        doc.project,
+                        doc.path.clone(),
+                        sym.line,
+                        format!("{} {}", sym.kind, sym.name),
+                        format!("{doc_rel}:{}", sym.line),
                     ));
                 }
+            }
+            symbol_candidates.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.4.len().cmp(&b.4.len())));
+            for (score, project, path, line, label, detail) in symbol_candidates
+                .into_iter()
+                .take(MAX_PALETTE_SYMBOL_CANDIDATES)
+            {
+                entries.push((
+                    PaletteEntry {
+                        kind: PaletteKind::File {
+                            project,
+                            path,
+                            line: Some(line),
+                        },
+                        label,
+                        detail,
+                        chord: String::new(),
+                        score,
+                    },
+                    0,
+                    false,
+                ));
             }
         }
         entries.sort_by(
@@ -483,13 +499,15 @@ impl OperonApp {
                     .find(|p| p.id == *project)
                     .cloned()
                 {
+                    let root = self
+                        .open_documents
+                        .iter()
+                        .find(|d| d.project == proj.id && d.path == *path)
+                        .map(|d| d.root.clone())
+                        .unwrap_or_else(|| proj.path.clone());
                     self.select_project(Some(proj.id));
                     self.page = Page::Projects;
-                    let root = proj.path.clone();
-                    self.open_document_at(&proj, root, path.clone());
-                    if let Some(line) = *line {
-                        self.editor_jump_line = Some(line);
-                    }
+                    self.navigate_to_file(&proj, root, path.clone(), *line);
                 }
             }
         }
@@ -2145,12 +2163,23 @@ impl OperonApp {
                     && self.arena_mode_enabled
                     && self.arena_agents.len() < 2
                 {
-                    self.arena_agents = vec![CliProvider::Claude, CliProvider::Codex];
+                    self.arena_agents =
+                        [CliProvider::Claude, CliProvider::Codex, CliProvider::Gemini]
+                            .into_iter()
+                            .filter(|p| self.tools.agent_available(p.agent()))
+                            .collect();
                 }
                 if self.arena_mode_enabled {
                     for provider in [CliProvider::Claude, CliProvider::Codex, CliProvider::Gemini] {
-                        let mut selected = self.arena_agents.contains(&provider);
-                        if ui.checkbox(&mut selected, provider.label()).changed() {
+                        let available = self.tools.agent_available(provider.agent());
+                        let mut selected = available && self.arena_agents.contains(&provider);
+                        if ui
+                            .add_enabled(
+                                available,
+                                egui::Checkbox::new(&mut selected, provider.label()),
+                            )
+                            .changed()
+                        {
                             if selected {
                                 if !self.arena_agents.contains(&provider) {
                                     self.arena_agents.push(provider);
@@ -2254,7 +2283,9 @@ impl OperonApp {
                     }
                 }
                 if let Some(token) = picked {
-                    let at = self.goal_input.len();
+                    let at = active_at_mention_query(&self.goal_input)
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(self.goal_input.len());
                     self.goal_input = apply_context_mention(&self.goal_input, at, &token);
                 }
             });
@@ -2761,6 +2792,11 @@ impl OperonApp {
         self.launch_sheet_is_git = self
             .selected_project()
             .is_some_and(|project| has_git_metadata(&project.path));
+        if let Some(project) = self.selected_project().cloned() {
+            if !self.file_cache.contains_key(&project.id) {
+                self.request_files(&project);
+            }
+        }
     }
 
     /// Past CLI conversations, found and restored. It lived under the launch
@@ -3822,7 +3858,7 @@ impl OperonApp {
                 }
                 ui.menu_button(tr("外部エディタで開く"), |ui| {
                     let full = self.open_documents[index].absolute();
-                    let line = self.editor_jump_line.or(Some(1));
+                    let line = self.editor_jump_line.or(self.editor_focus_line).or(Some(1));
                     for ide in ExternalIde::ALL {
                         if ui.button(ide.label()).clicked() {
                             self.open_in_external_ide_action(&full, ide, line);
@@ -3830,7 +3866,11 @@ impl OperonApp {
                         }
                     }
                 });
-                if !is_img && ui.button(tr("エージェントに送る")).clicked() {
+                if !is_img
+                    && !loading
+                    && read_only.is_none()
+                    && ui.button(tr("エージェントに送る")).clicked()
+                {
                     self.send_editor_context_to_agent(project.id, index);
                 }
                 if icon_button(
@@ -4095,9 +4135,11 @@ impl OperonApp {
         let width = cell.x * (digits + 1 + rows.widest * 2) as f32;
         let text = &self.open_documents[index].disk;
         // Spent by this frame, as in the editable pane.
-        let jump = self
-            .editor_jump_line
-            .take()
+        let jump_line = self.editor_jump_line.take();
+        if let Some(line) = jump_line {
+            self.editor_focus_line = Some(line);
+        }
+        let jump = jump_line
             .map(|line| (rows.row_of_line(text, line) as f32 * cell.y - height / 3.0).max(0.0));
         let cache = &mut self.editor_text_layout_cache.viewer;
         egui::Frame::new()
@@ -4175,10 +4217,12 @@ impl OperonApp {
         // scrolling by hand afterwards is not undone on the next one; a third
         // of the way down rather than at the very top, so the lines above the
         // named one are readable.
-        let jump = self
-            .editor_jump_line
-            .take()
-            .map(|line| (line.saturating_sub(1) as f32 * cell.y - height / 3.0).max(0.0));
+        let jump_line = self.editor_jump_line.take();
+        if let Some(line) = jump_line {
+            self.editor_focus_line = Some(line);
+        }
+        let jump =
+            jump_line.map(|line| (line.saturating_sub(1) as f32 * cell.y - height / 3.0).max(0.0));
         egui::Frame::new()
             .fill(palette.inset)
             .stroke(egui::Stroke::new(1.0, palette.border_subtle))
@@ -4209,15 +4253,28 @@ impl OperonApp {
                             },
                         );
                         ui.add_space(8.0);
-                        ui.add(
+                        let output =
                             egui::TextEdit::multiline(&mut self.open_documents[index].buffer)
                                 .code_editor()
                                 .frame(false)
                                 .margin(egui::Margin::ZERO)
                                 .desired_width(f32::INFINITY)
                                 .desired_rows(lines)
-                                .layouter(&mut layouter),
-                        );
+                                .layouter(&mut layouter)
+                                .show(ui);
+                        if jump.is_none() && output.response.has_focus() {
+                            if let Some(range) = output.cursor_range {
+                                let char_idx = range.primary.ccursor.index;
+                                let prefix: String = self.open_documents[index]
+                                    .buffer
+                                    .chars()
+                                    .take(char_idx)
+                                    .collect();
+                                let cursor_line =
+                                    prefix.bytes().filter(|b| *b == b'\n').count() + 1;
+                                self.editor_focus_line = Some(cursor_line);
+                            }
+                        }
                     });
                 });
             });
@@ -9428,6 +9485,10 @@ impl OperonApp {
         key: &(Uuid, Option<String>),
         action: DiffHunkAction,
     ) {
+        if Self::git_worktree_busy(&self.background_tasks, project.id) {
+            self.notice = Some(tr("Git の操作が既に実行中です。").into());
+            return;
+        }
         let (file_idx, hunk_idx, is_stage) = match action {
             DiffHunkAction::Stage {
                 file_index,
@@ -9453,11 +9514,26 @@ impl OperonApp {
         };
         match outcome {
             Ok(()) => {
-                self.notice = Some(if is_stage {
-                    tr("ハンクをステージしました。").into()
+                if is_stage {
+                    self.toggle_staged_file(project.id, &diff_file.path, true);
+                    self.hunk_staged_files
+                        .entry(project.id)
+                        .or_default()
+                        .insert(diff_file.path.clone());
+                    self.notice = Some(tr("ハンクをステージしました。").into());
                 } else {
-                    tr("ハンクの変更を破棄しました。").into()
-                });
+                    self.notice = Some(tr("ハンクの変更を破棄しました。").into());
+                    let rel_path = PathBuf::from(&diff_file.path);
+                    let to_reload: Vec<DocumentId> = self
+                        .open_documents
+                        .iter()
+                        .filter(|d| d.project == project.id && d.path == rel_path && !d.modified())
+                        .map(OpenDocument::id)
+                        .collect();
+                    for doc_id in to_reload {
+                        self.reload_document(&doc_id);
+                    }
+                }
                 self.request_git_changes(project);
                 self.invalidate_open_editor_diff(project.id);
                 self.request_git_diff(project, key.1.clone());
@@ -9491,12 +9567,26 @@ impl OperonApp {
         let Some(doc) = self.open_documents.get(doc_index) else {
             return;
         };
-        let total_lines = doc.buffer.lines().count().max(1);
-        let focus_line = self.editor_jump_line.unwrap_or(1).clamp(1, total_lines);
+        if doc.image_data.is_some()
+            || doc.read_only.is_some()
+            || (doc.buffer.is_empty() && doc.disk.is_empty())
+        {
+            return;
+        }
+        let content = if doc.buffer.is_empty() && doc.viewer.is_some() {
+            &doc.disk
+        } else {
+            &doc.buffer
+        };
+        let total_lines = content.lines().count().max(1);
+        let focus_line = self
+            .editor_jump_line
+            .or(self.editor_focus_line)
+            .unwrap_or(1)
+            .clamp(1, total_lines);
         let start_line = focus_line.saturating_sub(15).max(1);
         let end_line = (focus_line + 15).min(total_lines);
-        let snippet: String = doc
-            .buffer
+        let snippet: String = content
             .lines()
             .skip(start_line - 1)
             .take(end_line - start_line + 1)
@@ -9505,7 +9595,12 @@ impl OperonApp {
         let message =
             format_code_context_for_agent(&doc.path, start_line, end_line, &snippet, None);
         if let Some(target) = self.diff_comment_target(project_id) {
+            let target_id = target.id;
             let tmux_name = target.tmux_name.clone();
+            if self.session_activity_for(target_id) == Some(AgentActivity::Working) {
+                self.notice = Some(tr("エージェントの応答が終わるまで待ってください。").into());
+                return;
+            }
             match tmux_send_input(
                 &tmux_name,
                 &[
@@ -9524,12 +9619,15 @@ impl OperonApp {
                 }
             }
         } else {
+            self.open_project_session_setup(project_id);
             self.goal_input = if self.goal_input.trim().is_empty() {
                 message
             } else {
                 format!("{}\n\n{message}", self.goal_input)
             };
-            self.open_project_session_setup(project_id);
+            self.notice = Some(
+                tr("このプロジェクトで動いているエージェントのセッションがありません。").into(),
+            );
         }
     }
 
@@ -9545,7 +9643,24 @@ impl OperonApp {
         let Some(session) = self.store.sessions.iter().find(|s| s.id == session_id) else {
             return;
         };
-        let tmux_name = session.tmux_name.clone();
+        let project_id = session.project_id;
+        let is_agent_session = session.origin != Some(SessionOrigin::PlainTerminal)
+            && session.agent != "terminal"
+            && session.status == SessionStatus::Active;
+        let (target_id, tmux_name) = if is_agent_session {
+            (session.id, session.tmux_name.clone())
+        } else if let Some(target) = self.diff_comment_target(project_id) {
+            (target.id, target.tmux_name.clone())
+        } else {
+            self.notice = Some(
+                tr("このプロジェクトで動いているエージェントのセッションがありません。").into(),
+            );
+            return;
+        };
+        if self.session_activity_for(target_id) == Some(AgentActivity::Working) {
+            self.notice = Some(tr("エージェントの応答が終わるまで待ってください。").into());
+            return;
+        }
         let prompt = format!("```\n{err_block}\n```");
         match tmux_send_input(
             &tmux_name,
@@ -9569,26 +9684,84 @@ impl OperonApp {
             self.launch_session();
             return;
         }
-        let base_branch = if self.session_name_input.trim().is_empty() {
+        if self.worktree_mutation_running(project.id) {
+            self.notice = Some(tr("worktree 操作の完了を待ってください。").into());
+            return;
+        }
+        for provider in &providers {
+            if !self.tools.agent_available(provider.agent()) {
+                self.notice = Some(tf!(
+                    "{selected_agent} が PATH 上に見つかりません。インストールしてから、「設定」で「ツールを再確認」を押してください。",
+                    selected_agent = provider.agent()
+                ));
+                return;
+            }
+        }
+        let sanitized_name: String = self
+            .session_name_input
+            .trim()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_string();
+        let base_branch = if sanitized_name.is_empty() {
             format!("feature/arena-{}", now() % 100_000)
         } else {
-            format!(
-                "feature/{}",
-                self.session_name_input.trim().replace(' ', "-")
-            )
+            format!("feature/{sanitized_name}")
         };
+        let saved_goal = self.goal_input.clone();
+        let saved_depends = self.depends_on_input;
         let saved_agent = self.selected_agent.clone();
+        let saved_account = self.agent_account_input;
         let saved_name = self.session_name_input.clone();
         let saved_path = self.session_path_input.clone();
         let saved_path_proj = self.session_path_project;
 
         for provider in providers {
             let branch = arena_worktree_branch_name(&base_branch, provider);
-            if let Ok(created) = create_worktree_from_mainline(&project.path, &branch) {
-                self.session_path_input = created.destination.display().to_string();
-                self.session_path_project = Some(project.id);
+            match create_worktree_from_mainline(&project.path, &branch) {
+                Ok(created) => {
+                    self.session_path_input = created.destination.display().to_string();
+                    self.session_path_project = Some(project.id);
+                }
+                Err(error) => {
+                    self.select_agent(&saved_agent);
+                    self.agent_account_input = saved_account;
+                    self.goal_input = saved_goal;
+                    self.depends_on_input = saved_depends;
+                    self.session_name_input = saved_name;
+                    self.session_path_input = saved_path;
+                    self.session_path_project = saved_path_proj;
+                    self.notice = Some(tf!(
+                        "worktree を作成できませんでした: {error}",
+                        error = error
+                    ));
+                    return;
+                }
             }
-            self.selected_agent = provider.agent().to_string();
+            self.select_agent(provider.agent());
+            if !self
+                .accounts
+                .for_agent(provider.agent())
+                .iter()
+                .any(|acc| Some(acc.id) == self.agent_account_input)
+            {
+                self.agent_account_input = None;
+            }
+            self.goal_input = saved_goal.clone();
+            self.depends_on_input = saved_depends;
+            self.resume_conversation_input.clear();
+            if self.launch_input_error().is_some() {
+                self.agent_extra_args_input.clear();
+                self.agent_flag_inputs.clear();
+            }
             self.session_name_input = if saved_name.trim().is_empty() {
                 format!("arena-{}", provider.agent())
             } else {
@@ -9597,10 +9770,13 @@ impl OperonApp {
             self.launch_session();
         }
 
-        self.selected_agent = saved_agent;
-        self.session_name_input = saved_name;
-        self.session_path_input = saved_path;
-        self.session_path_project = saved_path_proj;
+        self.select_agent(&saved_agent);
+        self.agent_account_input = saved_account;
+        self.goal_input.clear();
+        self.session_name_input.clear();
+        self.session_path_input.clear();
+        self.session_path_project = None;
+        self.arena_mode_enabled = false;
         self.request_worktrees(project);
     }
 }

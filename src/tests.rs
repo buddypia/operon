@@ -71586,9 +71586,27 @@ pub(crate) fn ide_261_extract_and_apply_single_hunk_stage_and_discard() {
     assert!(!first_patch.contains("+line 11 modified"));
 
     git_stage_hunk(&root, diff_file, hunk_indices[0]).unwrap();
+    // Idempotent double-stage of the same hunk must succeed without error.
+    git_stage_hunk(&root, diff_file, hunk_indices[0]).unwrap();
     let cached = run_git_capture(&root, &["diff", "--cached"]);
     assert!(cached.contains("+line 2 modified"), "{cached}");
     assert!(!cached.contains("+line 11 modified"), "{cached}");
+
+    // CRITICAL-3: git_stage_for_commit preserves Operon's hunk-staged index while refusing external partial staging.
+    let mut hunk_staged = HashSet::new();
+    hunk_staged.insert("src/demo.txt".to_string());
+    git_stage_for_commit(&root, &["src/demo.txt".to_string()], &hunk_staged).unwrap();
+    let cached_preserved = run_git_capture(&root, &["diff", "--cached"]);
+    assert!(
+        cached_preserved.contains("+line 2 modified"),
+        "{cached_preserved}"
+    );
+    assert!(
+        !cached_preserved.contains("+line 11 modified"),
+        "{cached_preserved}"
+    );
+    // Without hunk_staged entry, external partial staging is still refused.
+    assert!(git_stage_for_commit(&root, &["src/demo.txt".to_string()], &HashSet::new()).is_err());
 
     let unstaged_after_stage = run_git_capture(&root, &["diff"]);
     let after_files = parse_unified_diff(&unstaged_after_stage);
@@ -71605,6 +71623,57 @@ pub(crate) fn ide_261_extract_and_apply_single_hunk_stage_and_discard() {
     assert!(unstaged.trim().is_empty(), "{unstaged}");
     let cached_after = run_git_capture(&root, &["diff", "--cached"]);
     assert!(cached_after.contains("+line 2 modified"), "{cached_after}");
+
+    // HIGH-4: discarding a hunk that was already staged reverses both index and working tree.
+    git_discard_hunk(&root, diff_file, hunk_indices[0]).unwrap();
+    assert!(run_git_capture(&root, &["diff", "--cached"])
+        .trim()
+        .is_empty());
+    assert!(run_git_capture(&root, &["diff"]).trim().is_empty());
+
+    // HIGH-4: Renamed file patch uses the new working-tree path in both --- a/ and +++ b/.
+    let renamed_diff = DiffFile {
+        path: "src/renamed.txt".to_string(),
+        renamed_from: Some("src/demo.txt".to_string()),
+        change: DiffFileChange::Renamed,
+        added: 1,
+        removed: 0,
+        widest: 20,
+        note: None,
+        lines: vec![
+            DiffLine {
+                kind: DiffLineKind::Hunk,
+                old_number: None,
+                new_number: None,
+                text: "@@ -1,1 +1,2 @@".to_string(),
+                highlights: Vec::new(),
+            },
+            DiffLine {
+                kind: DiffLineKind::Context,
+                old_number: Some(1),
+                new_number: Some(1),
+                text: "line 1".to_string(),
+                highlights: Vec::new(),
+            },
+            DiffLine {
+                kind: DiffLineKind::Added,
+                old_number: None,
+                new_number: Some(2),
+                text: "added".to_string(),
+                highlights: Vec::new(),
+            },
+        ],
+    };
+    let renamed_patch = extract_single_hunk_patch(&renamed_diff, 0).unwrap();
+    assert!(
+        renamed_patch.contains("--- a/src/renamed.txt"),
+        "{renamed_patch}"
+    );
+    assert!(
+        renamed_patch.contains("+++ b/src/renamed.txt"),
+        "{renamed_patch}"
+    );
+
     fs::remove_dir_all(root).ok();
 }
 
@@ -71779,7 +71848,85 @@ pub(crate) fn ide_261_format_code_context_and_extract_terminal_error() {
     assert!(extracted.contains("error[E0382]"), "{extracted}");
     assert!(extracted.contains("src/app.rs:42:9"), "{extracted}");
 
+    // MEDIUM-1: Japanese error headings are detected and trailing output is bounded to 25 lines.
+    let mut ja_scrollback = String::from("ビルド中...\nエラー[E0425]: 未定義のシンボル `foo`\n");
+    for i in 1..=40 {
+        ja_scrollback.push_str(&format!("  line {i}\n"));
+    }
+    let ja_extracted = extract_recent_terminal_error(&ja_scrollback).unwrap();
+    assert!(ja_extracted.contains("エラー[E0425]"), "{ja_extracted}");
+    assert!(ja_extracted.lines().count() <= 25);
+    assert!(!ja_extracted.contains("line 35"), "{ja_extracted}");
+
     assert!(extract_recent_terminal_error("Compiling operon\nFinished `dev` profile\n").is_none());
+
+    // CRITICAL-2 & HIGH-2 & HIGH-3: Editor context & terminal error handoff guards.
+    let root = temporary_directory("ide-261-handoff");
+    let mut app = test_app(root.join("store-v2.json"));
+    let project_id = Uuid::new_v4();
+    let project = Project {
+        id: project_id,
+        name: "operon".to_string(),
+        path: root.clone(),
+        added_at: 1,
+    };
+    app.store.projects.push(project);
+    let many_lines: String = (1..=50).map(|n| format!("line {n}\n")).collect();
+    app.open_documents.push(OpenDocument {
+        project: project_id,
+        root: root.clone(),
+        path: PathBuf::from("src/app.rs"),
+        branch: None,
+        project_rooted: true,
+        disk: many_lines.clone(),
+        buffer: many_lines,
+        read_only: None,
+        save_error: None,
+        external_change: false,
+        image_data: None,
+        viewer: None,
+    });
+    app.editor_focus_line = Some(40);
+    app.send_editor_context_to_agent(project_id, 0);
+    assert!(app.launch_sheet_open);
+    assert!(
+        app.goal_input.contains("```src/app.rs:25-50"),
+        "goal_input must survive open_project_session_setup and center on editor_focus_line: {}",
+        app.goal_input
+    );
+
+    // CRITICAL-2: PlainTerminal session must not send error text to its own shell when no agent is active.
+    let plain_id = Uuid::new_v4();
+    app.store.sessions.push(Session {
+        id: plain_id,
+        project_id,
+        name: "shell".to_string(),
+        goal: String::new(),
+        agent: "terminal".to_string(),
+        tmux_name: "operon-plain".to_string(),
+        created_at: 1,
+        launched_at: Some(1),
+        status: SessionStatus::Active,
+        agent_command: String::new(),
+        worktree_path: None,
+        branch: None,
+        depends_on: Vec::new(),
+        native_session_id: None,
+        native_session_path: None,
+        origin: Some(SessionOrigin::PlainTerminal),
+    });
+    app.session_output.insert(
+        plain_id,
+        "error[E0308]: mismatched types\n  --> src/main.rs:1:1\n".to_string(),
+    );
+    app.send_recent_terminal_error_to_agent(plain_id);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr(
+            "このプロジェクトで動いているエージェントのセッションがありません。"
+        ))
+    );
+    fs::remove_dir_all(root).ok();
 }
 
 #[test]
@@ -71809,6 +71956,10 @@ pub(crate) fn ide_261_at_mention_query_ranking_and_insertion() {
     let (at_idx, _) = active_at_mention_query(prompt).unwrap();
     let replaced = apply_context_mention(prompt, at_idx, "@src/git.rs");
     assert_eq!(replaced, "修正をお願いします @src/git.rs ");
+
+    // HIGH-5: menu insertion at prompt end without trailing space inserts a separating space.
+    let appended = apply_context_mention("修正をお願いします", "修正をお願いします".len(), "@diff");
+    assert_eq!(appended, "修正をお願いします @diff ");
 }
 
 #[test]
@@ -71877,6 +72028,10 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
     assert_eq!(symbols[1].name, "ArenaLaunchConfig");
     assert_eq!(symbols[1].line, 2);
 
+    // MEDIUM-3: non-code files (Markdown, JSON, TOML, Plain) return no false-positive symbols.
+    assert!(extract_file_symbols(Path::new("README.md"), source).is_empty());
+    assert!(extract_file_symbols(Path::new("Cargo.toml"), source).is_empty());
+
     let root = temporary_directory("ide-261-palette");
     let src_dir = root.join("src");
     fs::create_dir_all(&src_dir).unwrap();
@@ -71893,10 +72048,15 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
     };
     app.store.projects.push(project.clone());
     app.selected_project = Some(project_id);
+    // HIGH-6: place target file past MAX_PALETTE_FILE_CANDIDATES (64) to prove full-ranking before truncation.
+    let mut scan_paths: Vec<PathBuf> = (0..80)
+        .map(|i| PathBuf::from(format!("src/prefix_{i:03}_git_helper.rs")))
+        .collect();
+    scan_paths.push(rel_file.clone());
     app.file_cache.insert(
         project_id,
         FileScanSnapshot {
-            paths: vec![rel_file.clone()],
+            paths: scan_paths,
             truncated: false,
             unreadable_directories: 0,
         },
@@ -71917,6 +72077,20 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
     });
 
     app.command_palette_open = true;
+    app.command_search = "git.rs".to_string();
+    let file_entries = app.palette_entries();
+    assert!(
+        file_entries.iter().any(|entry| matches!(
+            &entry.kind,
+            PaletteKind::File {
+                path,
+                line: None,
+                ..
+            } if path == &rel_file
+        )),
+        "exact file match past index 64 must not be dropped before sorting"
+    );
+
     app.command_search = "render_diff_hunk".to_string();
     let entries = app.palette_entries();
     let symbol_entry = entries
@@ -71936,10 +72110,12 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
 
     app.activate_palette_entry(&symbol_entry.kind);
     assert_eq!(app.project_tab, ProjectTab::Files);
+    assert_eq!(app.editor_view, EditorView::Edit);
     assert_eq!(
         app.active_document.as_ref().map(|doc| &doc.path),
         Some(&rel_file)
     );
     assert_eq!(app.editor_jump_line, Some(1));
+    assert_eq!(app.editor_focus_line, Some(1));
     fs::remove_dir_all(root).ok();
 }

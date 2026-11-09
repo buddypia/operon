@@ -328,7 +328,7 @@ pub(crate) fn diff_pane_with_actions(
                             let mut hunk_ui = ui.new_child(
                                 egui::UiBuilder::new()
                                     .id_salt(("diff-hunk-actions", path, line_idx))
-                                    .max_rect(rect.shrink2(egui::vec2(6.0, 0.0)))
+                                    .max_rect(rect.shrink2(egui::vec2(6.0, 1.0)))
                                     .layout(egui::Layout::right_to_left(egui::Align::Center)),
                             );
                             hunk_ui.spacing_mut().item_spacing.x = 6.0;
@@ -337,7 +337,8 @@ pub(crate) fn diff_pane_with_actions(
                                     egui::Button::new(
                                         RichText::new(tr("破棄")).size(11.5).color(palette.danger),
                                     )
-                                    .frame(false),
+                                    .fill(palette.raised)
+                                    .stroke(egui::Stroke::new(1.0, palette.border_subtle)),
                                 )
                                 .on_hover_text(tr("このハンクの変更を破棄します"))
                                 .clicked()
@@ -354,7 +355,8 @@ pub(crate) fn diff_pane_with_actions(
                                             .size(11.5)
                                             .color(palette.accent),
                                     )
-                                    .frame(false),
+                                    .fill(palette.raised)
+                                    .stroke(egui::Stroke::new(1.0, palette.border_subtle)),
                                 )
                                 .on_hover_text(tr("このハンクをステージします"))
                                 .clicked()

@@ -1444,6 +1444,106 @@ pub(crate) fn git_stage_exactly(path: &Path, files: &[String]) -> Result<()> {
     }
 }
 
+/// Stage `files` for commit while preserving any partial-file hunk selections
+/// recorded in `hunk_staged` via Operon's diff hunk staging UI.
+pub(crate) fn git_stage_for_commit(
+    path: &Path,
+    files: &[String],
+    hunk_staged: &HashSet<String>,
+) -> Result<()> {
+    if hunk_staged.is_empty() {
+        return git_stage_exactly(path, files);
+    }
+    let partial = partially_staged_files(path)?;
+    let external_partial: Vec<String> = partial
+        .iter()
+        .filter(|file| !hunk_staged.contains(*file))
+        .cloned()
+        .collect();
+    if !external_partial.is_empty() {
+        return Err(anyhow!(tf!(
+            "{files} は一部の変更だけがステージされています。Operon はファイル単位でしかステージできないため、その選択を上書きしてしまいます。ターミナルでコミットするか、`git reset` してからやり直してください。",
+            files = external_partial.join(tr("、"))
+        )));
+    }
+    let staged_now: HashSet<String> = {
+        let mut command = git_command(path);
+        command
+            .args(["-C"])
+            .arg(path)
+            .args(["diff", "--cached", "--name-only"]);
+        let output = run_command_with_timeout(&mut command, Duration::from_secs(30))?;
+        if output.status.success() {
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::to_owned)
+                .filter(|line| !line.is_empty())
+                .collect()
+        } else {
+            HashSet::new()
+        }
+    };
+    let preserve: HashSet<&str> = files
+        .iter()
+        .map(String::as_str)
+        .filter(|file| hunk_staged.contains(*file) && staged_now.contains(*file))
+        .collect();
+    if git_has_head(path) {
+        if preserve.is_empty() {
+            let mut reset = git_command(path);
+            reset
+                .args(["-C"])
+                .arg(path)
+                .args(["reset", "--quiet", "--", "."]);
+            let output = run_command_with_timeout(&mut reset, Duration::from_secs(30))?;
+            if !output.status.success() {
+                return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+                    .trim()
+                    .to_owned()));
+            }
+        } else {
+            let to_reset: Vec<&String> = staged_now
+                .iter()
+                .filter(|file| !preserve.contains(file.as_str()))
+                .collect();
+            if !to_reset.is_empty() {
+                let mut reset = git_command(path);
+                reset
+                    .args(["-C"])
+                    .arg(path)
+                    .args(["reset", "--quiet", "--"])
+                    .args(&to_reset);
+                let output = run_command_with_timeout(&mut reset, Duration::from_secs(30))?;
+                if !output.status.success() {
+                    return Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+                        .trim()
+                        .to_owned()));
+                }
+            }
+        }
+    }
+    let whole_files: Vec<&String> = files
+        .iter()
+        .filter(|file| !preserve.contains(file.as_str()))
+        .collect();
+    if whole_files.is_empty() {
+        return Ok(());
+    }
+    let mut add = git_command(path);
+    add.args(["-C"])
+        .arg(path)
+        .args(["add", "--"])
+        .args(whole_files);
+    let output = run_command_with_timeout(&mut add, Duration::from_secs(30))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!(String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_owned()))
+    }
+}
+
 /// Record the staged change with this message.
 ///
 /// The message travels as one argument in a vector, never through a shell, so a
@@ -2300,7 +2400,7 @@ pub(crate) fn extract_single_hunk_patch(file: &DiffFile, hunk_line_index: usize)
             patch.push_str("+++ /dev/null\n");
         }
         DiffFileChange::Modified | DiffFileChange::Renamed => {
-            patch.push_str(&format!("--- a/{old_path}\n"));
+            patch.push_str(&format!("--- a/{new_path}\n"));
             patch.push_str(&format!("+++ b/{new_path}\n"));
         }
     }
@@ -2367,6 +2467,28 @@ pub(crate) fn git_stage_hunk(
 ) -> Result<()> {
     let patch = extract_single_hunk_patch(file, hunk_line_index)
         .ok_or_else(|| anyhow!(tr("対象ハンクが見つかりません")))?;
+    if apply_git_hunk_patch(worktree, &patch, &["--cached"]).is_ok() {
+        return Ok(());
+    }
+    if apply_git_hunk_patch(worktree, &patch, &["--cached", "--reverse", "--check"]).is_ok() {
+        return Ok(());
+    }
+    if file.change == DiffFileChange::Added {
+        let existing_patch =
+            patch.replacen("--- /dev/null\n", &format!("--- a/{}\n", file.path), 1);
+        if apply_git_hunk_patch(worktree, &existing_patch, &["--cached"]).is_ok() {
+            return Ok(());
+        }
+        if apply_git_hunk_patch(
+            worktree,
+            &existing_patch,
+            &["--cached", "--reverse", "--check"],
+        )
+        .is_ok()
+        {
+            return Ok(());
+        }
+    }
     apply_git_hunk_patch(worktree, &patch, &["--cached"])
 }
 
@@ -2378,8 +2500,11 @@ pub(crate) fn git_discard_hunk(
 ) -> Result<()> {
     let patch = extract_single_hunk_patch(file, hunk_line_index)
         .ok_or_else(|| anyhow!(tr("対象ハンクが見つかりません")))?;
+    if apply_git_hunk_patch(worktree, &patch, &["--reverse", "--index"]).is_ok() {
+        return Ok(());
+    }
     if apply_git_hunk_patch(worktree, &patch, &["--reverse"]).is_ok() {
         return Ok(());
     }
-    apply_git_hunk_patch(worktree, &patch, &["--reverse", "--index"])
+    apply_git_hunk_patch(worktree, &patch, &["--reverse", "--cached"])
 }

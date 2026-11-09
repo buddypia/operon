@@ -707,6 +707,10 @@ pub(crate) struct OperonApp {
     /// The line an editor document should be scrolled to when it next draws.
     /// Spent by the frame that uses it, so scrolling by hand afterwards stands.
     pub(crate) editor_jump_line: Option<usize>,
+    /// The last focused or jumped-to 1-based line in the active editor document.
+    pub(crate) editor_focus_line: Option<usize>,
+    /// Files per project that have had individual hunks staged via the diff pane.
+    pub(crate) hunk_staged_files: HashMap<Uuid, HashSet<String>>,
     /// A right-click on a resolved path, and which session it came from.
     pub(crate) terminal_path_menu: Option<(Uuid, PathBuf)>,
     /// User prompt turns recorded per session for navigation.
@@ -1118,6 +1122,8 @@ impl OperonApp {
             resolved_paths_session: None,
             terminal_path_caches: HashMap::new(),
             editor_jump_line: None,
+            editor_focus_line: None,
+            hunk_staged_files: HashMap::new(),
             terminal_path_menu: None,
             session_prompt_turns: HashMap::new(),
             show_session_inspector: true,
@@ -1293,6 +1299,7 @@ impl OperonApp {
             self.session_library_open = false;
             self.selected_file = None;
             self.git_selected_file = None;
+            self.editor_focus_line = None;
             self.active_document = None;
             self.file_search.clear();
             self.handoff_note_input.clear();
@@ -2125,6 +2132,7 @@ impl OperonApp {
                             self.last_commit_failure.remove(&project_id);
                             self.commit_messages.remove(&project_id);
                             self.git_staged_files.remove(&project_id);
+                            self.hunk_staged_files.remove(&project_id);
                             self.git_changes_cache.remove(&project_id);
                             self.git_status_badge_cache.remove(&project_id);
                             self.upstream_cache.remove(&project_id);
@@ -5639,6 +5647,11 @@ impl OperonApp {
         self.launch_sheet_is_git = self
             .selected_project()
             .is_some_and(|project| has_git_metadata(&project.path));
+        if let Some(project) = self.selected_project().cloned() {
+            if !self.file_cache.contains_key(&project.id) {
+                self.request_files(&project);
+            }
+        }
     }
 
     /// Whether the sheet's launch button is enabled — and so whether ⌘↩
@@ -9064,6 +9077,9 @@ impl OperonApp {
             selected.insert(path.to_owned());
         } else {
             selected.remove(path);
+            if let Some(hunk_set) = self.hunk_staged_files.get_mut(&project) {
+                hunk_set.remove(path);
+            }
         }
     }
 
@@ -9089,9 +9105,15 @@ impl OperonApp {
         }
         let project_id = project.id;
         let path = project.path.clone();
+        let hunk_staged = self
+            .hunk_staged_files
+            .get(&project_id)
+            .cloned()
+            .unwrap_or_default();
         self.spawn_background(BackgroundKey::GitMutation(project_id), move || {
             let result = (|| {
-                git_stage_exactly(&path, &files).map_err(|error| error.to_string())?;
+                git_stage_for_commit(&path, &files, &hunk_staged)
+                    .map_err(|error| error.to_string())?;
                 git_record_staged(&path, &message).map_err(|error| error.to_string())
             })();
             BackgroundResult::StagedChangeRecorded { project_id, result }
@@ -9141,9 +9163,15 @@ impl OperonApp {
         }
         let project_id = project.id;
         let path = project.path.clone();
+        let hunk_staged = self
+            .hunk_staged_files
+            .get(&project_id)
+            .cloned()
+            .unwrap_or_default();
         self.spawn_background(BackgroundKey::CommitMessage(project_id), move || {
             let result = (|| {
-                git_stage_exactly(&path, &files).map_err(|error| error.to_string())?;
+                git_stage_for_commit(&path, &files, &hunk_staged)
+                    .map_err(|error| error.to_string())?;
                 let branch = git_branch(&path).unwrap_or_default();
                 let (staged_files, patch) =
                     git_staged_summary(&path).map_err(|error| error.to_string())?;
@@ -9496,6 +9524,7 @@ impl OperonApp {
         path: PathBuf,
         line: Option<usize>,
     ) {
+        self.editor_focus_line = line;
         self.editor_jump_line = if self.page == Page::Sessions {
             None
         } else {

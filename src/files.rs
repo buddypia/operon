@@ -436,7 +436,7 @@ pub(crate) fn apply_context_mention(
     at_byte_index: usize,
     replacement: &str,
 ) -> String {
-    if at_byte_index > input.len() || !input.is_char_boundary(at_byte_index) {
+    if at_byte_index >= input.len() || !input.is_char_boundary(at_byte_index) {
         if input.is_empty() || input.ends_with(char::is_whitespace) {
             return format!("{input}{replacement} ");
         }
@@ -474,7 +474,21 @@ fn parse_identifier_prefix(s: &str) -> Option<&str> {
 
 /// Extract up to `MAX_SYMBOLS_PER_FILE` function and type definitions from `text`.
 pub(crate) fn extract_file_symbols(path: &Path, text: &str) -> Vec<CodeSymbol> {
-    let _lang = editor_language(path);
+    let lang = editor_language(path);
+    if matches!(
+        lang,
+        EditorLanguage::Plain
+            | EditorLanguage::Markdown
+            | EditorLanguage::Json
+            | EditorLanguage::Toml
+            | EditorLanguage::Yaml
+            | EditorLanguage::Ini
+            | EditorLanguage::Html
+            | EditorLanguage::Xml
+            | EditorLanguage::Css
+    ) {
+        return Vec::new();
+    }
     let mut symbols = Vec::new();
     for (idx, raw_line) in text.lines().enumerate() {
         if symbols.len() >= MAX_SYMBOLS_PER_FILE {
