@@ -1,0 +1,42 @@
+# The evidence for change 270. Shape: docs/sdlc/templates/verification.yaml.
+# R1-R8 are the spec's requirements, each the test plan.md names; R3 and R4
+# share one test, and R7's failure sentence has its own (I1). I2 is the sweep:
+# 34 mutations over the kind switch, the layout's restore and bounds, the
+# relaunch's choice of sessions and its quietness, the toast and failure
+# sentences themselves, and the recursion. I3-I8 are existing guards the change
+# must keep: the hook reading's precedence over the screen, every string in
+# every table and in order, the session-start and retry paths, the workspace
+# tabs, and the module map. F1-F2 are the empirical verifier's two
+# reproductions (plan departure 6): a first look spent on a failed write, and a
+# front tab handed to its neighbour.
+# I9-I12 are the formal verifier's models: I9-I11 hold R5 over every pane tree of
+# one to five leaves, every share class, every refusal shape and every group
+# content of two groups of up to three sessions (about 720 000 cases); I12
+# holds R6 through the real apply_session_poll over every load status, observation and
+# write outcome for up to three polls (164 states). Each was watched failing on
+# the defect it guards (plan departure 8).
+digest: "84bd8571fd76b675"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_running_in_it
+  - R2 empirical-test :: cargo test --locked a_terminal_running_claude_receives_review_notes
+  - R3 empirical-test :: cargo test --locked the_workspace_comes_back_after_a_relaunch
+  - R4 empirical-test :: cargo test --locked the_workspace_comes_back_after_a_relaunch
+  - R5 empirical-test :: cargo test --locked a_damaged_workspace_file_restores_only_what_is_whole
+  - R6 empirical-test :: cargo test --locked sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
+  - R7 empirical-test :: cargo test --locked the_relaunch_says_how_many_sessions_it_reopened
+  - R8 empirical-test :: cargo test --locked resuming_a_session_with_no_transcript_starts_it_fresh_once
+  - I1 empirical-test :: cargo test --locked a_layout_that_cannot_be_written_is_said_once
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/270-relaunch-leaves-sessions-closed/mutations.py
+  - I3 empirical-test :: cargo test --locked the_manual_resume_still_makes_a_new_record
+  - I4 empirical-test :: cargo test --locked a_fresh_hook_state_outranks_the_screen_and_a_stale_one_yields
+  - I5 empirical-test :: cargo test --locked every_message_the_code_shows_has_a_row_in_every_table
+  - I6 empirical-test :: cargo test --locked every_translation_table_is_sorted_by_message_id
+  - I7 empirical-test :: cargo test --locked session_start
+  - I8 empirical-test :: cargo test --locked claude_md_maps_every_module_that_exists
+  - F1 empirical-test :: cargo test --locked a_failed_save_at_the_first_look_keeps_the_relaunch
+  - F2 empirical-test :: cargo test --locked the_front_tab_stays_when_a_tab_before_it_is_gone
+  - I9 formal-model :: cargo test --locked model_check_a_restored_layout_is_whole_for_every_tree_and_share
+  - I10 formal-model :: cargo test --locked model_check_a_saved_workspace_is_refused_unless_panes_are_the_groups
+  - I11 formal-model :: cargo test --locked model_check_a_restored_group_keeps_its_front_session_and_no_session_twice
+  - I12 formal-model :: cargo test --locked model_check_a_session_is_relaunched_only_at_its_first_stored_look

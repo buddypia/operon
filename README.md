@@ -63,6 +63,15 @@ Settings. The projects, sessions, and agent output in them are a demo.
   project's sessions. The order is kept in `session-order.json`, in the same
   folder as the local index, and a project or session added later appears at
   the top.
+- Quitting and reopening Operon puts the workspace back: every project's
+  session tabs, splits, and front tab, kept in `workspace-layout.json` beside
+  the local index, with a tab you closed left closed (file tabs are not
+  reopened). A session that was running when Operon quit and whose terminal
+  is gone at the next start — the Mac restarted, the tmux server died — starts
+  again in its own tab by itself: a CLI reopens its saved conversation, a
+  terminal opens a shell in its folder. One whose CLI you exited is left as it
+  is. A terminal you type `claude`, `codex`, or `agy` into becomes a session of
+  that CLI from its first report, and shows and reopens as one.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
   The launch button sits at its bottom right, and `⌘↩` presses it. A project's

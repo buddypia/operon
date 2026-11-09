@@ -160,6 +160,77 @@ pub(crate) fn save_session_arrangement(
     Ok(())
 }
 
+/// The workspace as it is kept across a relaunch (change 270): the project
+/// it shows, every project's tabs, and the sessions already given a tab once
+/// — so a tab the person closed is not opened again by the next start.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WorkspaceLayout {
+    #[serde(default)]
+    pub(crate) project: Option<Uuid>,
+    #[serde(default)]
+    pub(crate) workspaces: Vec<SavedWorkspace>,
+    #[serde(default)]
+    pub(crate) placed: Vec<Uuid>,
+}
+
+/// One project's tab groups, as `WorkspaceTabs` holds them, with session tabs
+/// only: a document tab is a buffer of this run and is not reopened.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedWorkspace {
+    pub(crate) project: Uuid,
+    #[serde(default)]
+    pub(crate) groups: Vec<SavedGroup>,
+    #[serde(default)]
+    pub(crate) focused: Option<Uuid>,
+    #[serde(default)]
+    pub(crate) layout: Option<PaneNode>,
+    #[serde(default)]
+    pub(crate) selected: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub(crate) struct SavedGroup {
+    pub(crate) id: Uuid,
+    #[serde(default)]
+    pub(crate) sessions: Vec<Uuid>,
+    #[serde(default)]
+    pub(crate) active: usize,
+}
+
+pub(crate) fn workspace_layout_path(data_file: &Path) -> PathBuf {
+    data_file
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(WORKSPACE_LAYOUT_FILE_NAME)
+}
+
+/// Read the way `load_session_arrangement` reads: anything missing,
+/// unreadable, unparsable, or past its ceiling is no layout at all.
+pub(crate) fn load_workspace_layout(data_file: &Path) -> WorkspaceLayout {
+    let Ok(file) = fs::File::open(workspace_layout_path(data_file)) else {
+        return WorkspaceLayout::default();
+    };
+    let mut raw = Vec::new();
+    match file
+        .take(WORKSPACE_LAYOUT_FILE_MAX_BYTES + 1)
+        .read_to_end(&mut raw)
+    {
+        Ok(read) if read as u64 <= WORKSPACE_LAYOUT_FILE_MAX_BYTES => {}
+        _ => return WorkspaceLayout::default(),
+    }
+    serde_json::from_slice(&raw).unwrap_or_default()
+}
+
+/// Compact, as `save_session_arrangement` writes: a list of ids nobody reads
+/// by hand. A write that committed but whose folder was not synced has
+/// landed, and is not reported as a failure.
+pub(crate) fn save_workspace_layout(data_file: &Path, layout: &WorkspaceLayout) -> Result<()> {
+    let mut encoded = serde_json::to_vec(layout)?;
+    encoded.push(b'\n');
+    write_file_atomically(&workspace_layout_path(data_file), &encoded)?;
+    Ok(())
+}
+
 /// Sorts `items`, already in the column's own order, into `listed`'s: what
 /// it does not list first and as it was, then what it lists, in its order.
 /// A stable sort keyed by a position lookup, so it allocates nothing and may
@@ -655,7 +726,7 @@ impl PaneDrop {
 
 /// One terminal, or two arrangements sharing a rect: side by side or stacked,
 /// the first taking `share` of it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum PaneNode {
     Leaf(Uuid),
     Split {
@@ -707,6 +778,26 @@ impl PaneNode {
                 (Some(only), None) | (None, Some(only)) => Some(only),
                 (None, None) => None,
             },
+        }
+    }
+
+    /// Every share brought inside 0..1, and a share that is not a number back
+    /// to an even split: a file read from disk can say anything.
+    fn clamp_shares(&mut self) {
+        if let Self::Split {
+            share,
+            first,
+            second,
+            ..
+        } = self
+        {
+            *share = if share.is_finite() {
+                share.clamp(0.0, 1.0)
+            } else {
+                0.5
+            };
+            first.clamp_shares();
+            second.clamp_shares();
         }
     }
 
@@ -845,8 +936,8 @@ pub(crate) struct PaneRects {
 
 /// The terminals the session workspace shows, and how they share it
 /// (change 226). Empty or a single terminal means the workspace shows the
-/// selected session, as it did before; only a split is a layout. In memory,
-/// as `DockLayout` is.
+/// selected session, as it did before; only a split is a layout. Kept across
+/// a relaunch in `workspace-layout.json` with the tabs it shows (change 270).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct PaneLayout {
     root: Option<PaneNode>,
@@ -1168,6 +1259,127 @@ impl WorkspaceTabs {
         after.focused = Some(id);
         *self = after;
         true
+    }
+
+    /// This project's tabs as a relaunch keeps them.
+    /// A group's front tab is kept as its place among the group's sessions; a
+    /// group that holds only documents is left out, and its pane with it, the
+    /// way closing its last tab would.
+    pub(crate) fn to_saved(&self, project: Uuid, selected: Option<Uuid>) -> SavedWorkspace {
+        let groups = self
+            .groups
+            .iter()
+            .filter_map(|group| {
+                let sessions = group
+                    .tabs
+                    .iter()
+                    .filter_map(|tab| match tab {
+                        WorkspaceTab::Session(id) => Some(*id),
+                        WorkspaceTab::Document(_) => None,
+                    })
+                    .collect::<Vec<_>>();
+                let active = match group.tabs.get(group.active) {
+                    Some(WorkspaceTab::Session(id)) => {
+                        sessions.iter().position(|candidate| candidate == id)
+                    }
+                    _ => None,
+                }
+                .unwrap_or(0);
+                (!sessions.is_empty()).then_some(SavedGroup {
+                    id: group.id,
+                    sessions,
+                    active,
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut layout = self.layout.clone();
+        layout.retain(|id| groups.iter().any(|group| group.id == id));
+        SavedWorkspace {
+            project,
+            focused: self
+                .focused
+                .filter(|id| groups.iter().any(|group| group.id == *id)),
+            groups,
+            layout: layout.root,
+            selected,
+        }
+    }
+
+    /// The tabs `saved` describes, keeping only sessions `exists` admits. A
+    /// session listed twice stays where it was first listed, a group left
+    /// empty goes with its pane, and the indexes and shares are brought inside
+    /// their bounds. `None` when the panes are not exactly the groups — a
+    /// pane with no group behind it, a group no pane shows, a pane twice — or
+    /// there are more panes than fit: nothing about such a file can be trusted
+    /// to draw.
+    pub(crate) fn from_saved(
+        saved: &SavedWorkspace,
+        exists: impl Fn(Uuid) -> bool,
+    ) -> Option<Self> {
+        let mut placed = HashSet::new();
+        let groups = saved
+            .groups
+            .iter()
+            .filter_map(|group| {
+                let sessions = group
+                    .sessions
+                    .iter()
+                    .copied()
+                    .filter(|id| exists(*id) && placed.insert(*id))
+                    .collect::<Vec<_>>();
+                // The front tab is a session, not a position: one gone ahead
+                // of it must not hand the front to its neighbour.
+                let front = group.sessions.get(group.active);
+                let active = sessions
+                    .iter()
+                    .position(|id| Some(id) == front)
+                    .unwrap_or(group.active.min(sessions.len().saturating_sub(1)));
+                (!sessions.is_empty()).then(|| WorkspaceGroup {
+                    id: group.id,
+                    active,
+                    tabs: sessions.into_iter().map(WorkspaceTab::Session).collect(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let saved_panes = PaneLayout {
+            root: saved.layout.clone(),
+        }
+        .sessions();
+        let known = |id: &Uuid| saved.groups.iter().any(|group| group.id == *id);
+        let distinct = saved_panes.iter().collect::<HashSet<_>>().len() == saved_panes.len()
+            && saved
+                .groups
+                .iter()
+                .map(|group| group.id)
+                .collect::<HashSet<_>>()
+                .len()
+                == saved.groups.len();
+        if saved_panes.len() > PANE_MAX
+            || !distinct
+            || !saved_panes.iter().all(known)
+            || !saved
+                .groups
+                .iter()
+                .all(|group| saved_panes.contains(&group.id))
+        {
+            return None;
+        }
+        let mut layout = PaneLayout {
+            root: saved.layout.clone(),
+        };
+        layout.retain(|id| groups.iter().any(|group| group.id == id));
+        if let Some(root) = &mut layout.root {
+            root.clamp_shares();
+        }
+        let focused = saved
+            .focused
+            .filter(|id| groups.iter().any(|group| group.id == *id))
+            .or_else(|| groups.first().map(|group| group.id));
+        Some(Self {
+            groups,
+            focused,
+            layout,
+        })
     }
 
     pub(crate) fn retain(&mut self, keep: impl Fn(&WorkspaceTab) -> bool) {

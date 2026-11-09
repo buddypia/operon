@@ -73669,3 +73669,1808 @@ fn session_tab_mark_names_its_cli_on_hover() {
     }
     fs::remove_dir_all(root).ok();
 }
+
+// ── Change 270: a relaunch brings back the sessions the person had ──────────
+
+fn relaunch_270_project(root: &Path) -> Project {
+    Project {
+        id: Uuid::new_v4(),
+        path: root.to_path_buf(),
+        name: "p".to_owned(),
+        added_at: now(),
+    }
+}
+
+fn relaunch_270_session(
+    project_id: Uuid,
+    agent: &str,
+    status: SessionStatus,
+    origin: Option<SessionOrigin>,
+) -> Session {
+    let id = Uuid::new_v4();
+    let plain = matches!(agent, "terminal" | "existing terminal");
+    Session {
+        id,
+        project_id,
+        name: "s".to_owned(),
+        goal: if plain {
+            tr("AI を起動しない素のターミナルです。").to_owned()
+        } else {
+            String::new()
+        },
+        agent: agent.to_owned(),
+        tmux_name: managed_tmux_name(id),
+        created_at: now(),
+        launched_at: Some(now()),
+        status,
+        worktree_path: None,
+        branch: None,
+        agent_command: if plain {
+            String::new()
+        } else {
+            agent.to_owned()
+        },
+        native_session_id: None,
+        native_session_path: None,
+        origin,
+        depends_on: Vec::new(),
+    }
+}
+
+fn relaunch_270_report(app: &mut OperonApp, tmux_name: &str, source: CliProvider, id: &str) {
+    app.apply_hook_event(HookEvent {
+        source,
+        session: tmux_name.to_owned(),
+        launch_token: String::new(),
+        // `agy` has no start event; its first prompt is the first word it says.
+        event: match source {
+            CliProvider::Gemini => "PreInvocation",
+            _ => "SessionStart",
+        }
+        .to_owned(),
+        payload: serde_json::json!({ "source": "startup", "session_id": id }),
+    });
+}
+
+fn relaunch_270_find(app: &OperonApp, id: Uuid) -> Session {
+    app.store
+        .sessions
+        .iter()
+        .find(|session| session.id == id)
+        .cloned()
+        .unwrap()
+}
+
+#[test]
+/// Change 270: a terminal the person typed `claude` into is a Claude session
+/// from the first hook event that names its conversation — its tab mark, its
+/// label, its state reading, and its resume all read the session's kind, and
+/// the app used to decide that kind once, at creation.
+pub(crate) fn a_terminal_takes_the_kind_of_the_cli_running_in_it() {
+    let root = temporary_directory("terminal-kind-270");
+    let data_file = root.join("store-v2.json");
+    let mut app = test_app(data_file.clone());
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let legacy = relaunch_270_session(project.id, "terminal", SessionStatus::Active, None);
+    let adopted = relaunch_270_session(
+        project.id,
+        "existing terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::Adopted),
+    );
+    let launched = relaunch_270_session(project.id, "codex", SessionStatus::Active, None);
+    app.store.projects.push(project);
+    for session in [&plain, &legacy, &adopted, &launched] {
+        app.store.sessions.push(session.clone());
+    }
+    let claude_id = Uuid::new_v4().to_string();
+
+    relaunch_270_report(&mut app, &plain.tmux_name, CliProvider::Claude, &claude_id);
+    let switched = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        cli_provider_for_agent(&switched.agent),
+        Some(CliProvider::Claude),
+        "Claude が動いているターミナルの種類: {}",
+        switched.agent
+    );
+    assert_eq!(switched.goal, "", "素のターミナルの説明が残りました");
+    assert_eq!(switched.origin, Some(SessionOrigin::PlainTerminal));
+    assert_eq!(
+        switched.native_session_id.as_deref(),
+        Some(claude_id.as_str())
+    );
+    let reloaded = load_store_safely(&data_file).store;
+    let stored = reloaded
+        .sessions
+        .iter()
+        .find(|session| session.id == plain.id)
+        .unwrap();
+    assert_eq!(
+        cli_provider_for_agent(&stored.agent),
+        Some(CliProvider::Claude)
+    );
+
+    // The ID the CLI repeats is the one already recorded; the kind still
+    // follows it.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == plain.id)
+        .unwrap()
+        .agent = "terminal".to_owned();
+    relaunch_270_report(&mut app, &plain.tmux_name, CliProvider::Claude, &claude_id);
+    assert_eq!(
+        cli_provider_for_agent(&relaunch_270_find(&app, plain.id).agent),
+        Some(CliProvider::Claude),
+        "同じ会話 ID の報告で種類が戻りませんでした"
+    );
+
+    // Another CLI started in the same terminal later moves it again.
+    let codex_id = Uuid::new_v4().to_string();
+    relaunch_270_report(&mut app, &plain.tmux_name, CliProvider::Codex, &codex_id);
+    let moved = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        cli_provider_for_agent(&moved.agent),
+        Some(CliProvider::Codex)
+    );
+    assert_eq!(moved.native_session_id.as_deref(), Some(codex_id.as_str()));
+
+    // A record from before `origin` existed says it was a terminal by its kind.
+    relaunch_270_report(&mut app, &legacy.tmux_name, CliProvider::Claude, &claude_id);
+    let legacy_now = relaunch_270_find(&app, legacy.id);
+    assert_eq!(
+        cli_provider_for_agent(&legacy_now.agent),
+        Some(CliProvider::Claude)
+    );
+    assert_eq!(legacy_now.origin, Some(SessionOrigin::PlainTerminal));
+
+    relaunch_270_report(
+        &mut app,
+        &adopted.tmux_name,
+        CliProvider::Gemini,
+        &claude_id,
+    );
+    let adopted_now = relaunch_270_find(&app, adopted.id);
+    assert_eq!(
+        cli_provider_for_agent(&adopted_now.agent),
+        Some(CliProvider::Gemini)
+    );
+    assert_eq!(adopted_now.origin, Some(SessionOrigin::Adopted));
+
+    // A session launched as one CLI is that CLI, whatever reports from it.
+    relaunch_270_report(
+        &mut app,
+        &launched.tmux_name,
+        CliProvider::Claude,
+        &claude_id,
+    );
+    assert_eq!(relaunch_270_find(&app, launched.id).agent, "codex");
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: once it runs Claude, a terminal is an agent wherever the app
+/// asks — the review notes go to it.
+pub(crate) fn a_terminal_running_claude_receives_review_notes() {
+    let root = temporary_directory("terminal-notes-270");
+    let mut app = test_app(root.join("store-v2.json"));
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let other = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let project_id = project.id;
+    app.store.projects.push(project);
+    app.store.sessions.push(plain.clone());
+    app.store.sessions.push(other);
+    assert!(app.diff_comment_target(project_id).is_none());
+    relaunch_270_report(
+        &mut app,
+        &plain.tmux_name,
+        CliProvider::Claude,
+        &Uuid::new_v4().to_string(),
+    );
+    assert_eq!(
+        app.diff_comment_target(project_id)
+            .map(|session| session.id),
+        Some(plain.id),
+        "Claude が動いているターミナルにレビューメモを送れません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: quitting and reopening puts every project's tabs, splits,
+/// front tabs, and selection back, keeps a closed tab closed, and writes the
+/// file only when something changed.
+pub(crate) fn the_workspace_comes_back_after_a_relaunch() {
+    use std::os::unix::fs::MetadataExt;
+    let root = temporary_directory("workspace-relaunch-270");
+    let data_file = root.join("store-v2.json");
+    let mut store = Store::default();
+    let project_a = relaunch_270_project(&root);
+    let project_b = relaunch_270_project(&root);
+    let session = |project: Uuid| {
+        relaunch_270_session(
+            project,
+            "terminal",
+            SessionStatus::Active,
+            Some(SessionOrigin::PlainTerminal),
+        )
+    };
+    let (a1, a2, a3, a4) = (
+        session(project_a.id),
+        session(project_a.id),
+        session(project_a.id),
+        session(project_a.id),
+    );
+    let b1 = session(project_b.id);
+    let (a, b) = (project_a.id, project_b.id);
+    store.projects.push(project_a);
+    store.projects.push(project_b);
+    for session in [&a1, &a2, &a3, &a4, &b1] {
+        store.sessions.push(session.clone());
+    }
+
+    // Never laid out: nothing is written.
+    let mut fresh = OperonApp::from_state(
+        data_file.clone(),
+        store.clone(),
+        ToolStatus::default(),
+        None,
+    );
+    fresh.save_workspace_layout_if_changed();
+    assert!(!workspace_layout_path(&data_file).exists());
+
+    let mut app = OperonApp::from_state(
+        data_file.clone(),
+        store.clone(),
+        ToolStatus::default(),
+        None,
+    );
+    app.workspace_project = Some(a);
+    app.workspace_initialized = true;
+    for session in [&a1, &a2, &a3, &a4] {
+        app.workspace.open(WorkspaceTab::Session(session.id));
+        app.workspace_seen_sessions.insert(session.id);
+    }
+    let first = app.workspace.groups[0].id;
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(4000.0, 3000.0));
+    assert!(app
+        .workspace
+        .move_tab(&WorkspaceTab::Session(a2.id), first, PaneDrop::Right, area));
+    app.workspace.layout.set_share(0, 0.3);
+    app.workspace.close(&WorkspaceTab::Session(a3.id));
+    assert!(app.workspace.select(first, &WorkspaceTab::Session(a4.id)));
+    let second = app
+        .workspace
+        .groups
+        .iter()
+        .find(|group| group.tabs.contains(&WorkspaceTab::Session(a2.id)))
+        .unwrap()
+        .id;
+    app.workspace.focused = Some(second);
+    app.selected_session = Some(a2.id);
+    let mut b_tabs = WorkspaceTabs::default();
+    b_tabs.open(WorkspaceTab::Session(b1.id));
+    app.project_workspaces.insert(b, (b_tabs, Some(b1.id)));
+    app.workspace_seen_sessions.insert(b1.id);
+
+    app.save_workspace_layout_if_changed();
+    let path = workspace_layout_path(&data_file);
+    assert!(path.exists(), "タブの配置が保存されませんでした");
+    let written = fs::read(&path).unwrap();
+    let inode = fs::metadata(&path).unwrap().ino();
+    app.save_workspace_layout_if_changed();
+    assert_eq!(fs::read(&path).unwrap(), written);
+    assert_eq!(
+        fs::metadata(&path).unwrap().ino(),
+        inode,
+        "変わっていない配置を書き直しました"
+    );
+
+    // A session the store gained while Operon was closed.
+    let a5 = session(a);
+    store.sessions.push(a5.clone());
+    let mut relaunched =
+        OperonApp::from_state(data_file.clone(), store, ToolStatus::default(), None);
+    assert_eq!(relaunched.workspace_project, Some(a));
+    assert!(relaunched.workspace_initialized);
+    assert_eq!(
+        relaunched.workspace, app.workspace,
+        "タブ・分割・前面タブが戻りません"
+    );
+    assert_eq!(relaunched.selected_session, Some(a2.id));
+    assert_eq!(
+        relaunched.project_workspaces.get(&b),
+        app.project_workspaces.get(&b),
+        "別のプロジェクトのタブが戻りません"
+    );
+    relaunched.sync_workspace_live_sessions();
+    let tabs = relaunched
+        .workspace
+        .groups
+        .iter()
+        .flat_map(|group| group.tabs.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        !tabs.contains(&WorkspaceTab::Session(a3.id)),
+        "閉じたタブが再起動で開き直されました"
+    );
+    assert!(tabs.contains(&WorkspaceTab::Session(a5.id)));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: a file that is damaged, too large, or names what the store no
+/// longer holds restores only what is whole, and never a pane without a group.
+pub(crate) fn a_damaged_workspace_file_restores_only_what_is_whole() {
+    let root = temporary_directory("workspace-damaged-270");
+    let data_file = root.join("store-v2.json");
+    let path = workspace_layout_path(&data_file);
+    let mut store = Store::default();
+    let project_a = relaunch_270_project(&root);
+    let project_b = relaunch_270_project(&root);
+    let project_d = relaunch_270_project(&root);
+    let session = |project: Uuid| {
+        relaunch_270_session(
+            project,
+            "terminal",
+            SessionStatus::Active,
+            Some(SessionOrigin::PlainTerminal),
+        )
+    };
+    let (s1, s2, b1, d1) = (
+        session(project_a.id),
+        session(project_a.id),
+        session(project_b.id),
+        session(project_d.id),
+    );
+    let (a, b, d) = (project_a.id, project_b.id, project_d.id);
+    store.projects.extend([project_a, project_b, project_d]);
+    store
+        .sessions
+        .extend([s1.clone(), s2.clone(), b1.clone(), d1.clone()]);
+    let start = |store: &Store| {
+        OperonApp::from_state(
+            data_file.clone(),
+            store.clone(),
+            ToolStatus::default(),
+            None,
+        )
+    };
+
+    for bytes in [b"not json at all".to_vec(), b"{}".to_vec(), {
+        let mut padded = serde_json::to_vec(&serde_json::json!({ "project": a })).unwrap();
+        padded.resize(WORKSPACE_LAYOUT_FILE_MAX_BYTES as usize + 1, b' ');
+        padded
+    }] {
+        fs::write(&path, &bytes).unwrap();
+        let app = start(&store);
+        assert!(!app.workspace_initialized);
+        assert!(app.workspace_project.is_none());
+        assert!(app.workspace.groups.is_empty());
+    }
+
+    let leaf = |id: Uuid| serde_json::json!({ "Leaf": id });
+    let split = |first: serde_json::Value, second: serde_json::Value, share: f64| serde_json::json!({ "Split": { "side_by_side": true, "share": share, "first": first, "second": second } });
+    let (g1, g2, g3, gb) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let deleted = Uuid::new_v4();
+    let layout = serde_json::json!({
+        "project": a,
+        "placed": [s1.id, s2.id, b1.id, d1.id],
+        "workspaces": [
+            {
+                "project": a,
+                "groups": [
+                    { "id": g1, "sessions": [deleted, s1.id], "active": 9 },
+                    { "id": g2, "sessions": [s1.id, s2.id], "active": 0 },
+                    { "id": g3, "sessions": [deleted], "active": 0 }
+                ],
+                "focused": g3,
+                "layout": split(leaf(g1), split(leaf(g2), leaf(g3), 0.5), 7.0),
+                "selected": deleted
+            },
+            { "project": b, "groups": [{ "id": gb, "sessions": [b1.id], "active": 0 }],
+              "focused": gb, "layout": leaf(gb), "selected": b1.id },
+            { "project": Uuid::new_v4(), "groups": [], "focused": null, "layout": null }
+        ]
+    });
+    fs::write(&path, serde_json::to_vec(&layout).unwrap()).unwrap();
+    let app = start(&store);
+    assert_eq!(app.workspace_project, Some(a));
+    let groups = &app.workspace.groups;
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    assert_eq!(groups[0].tabs, vec![WorkspaceTab::Session(s1.id)]);
+    assert_eq!(groups[0].active, 0);
+    assert_eq!(
+        groups[1].tabs,
+        vec![WorkspaceTab::Session(s2.id)],
+        "二つのグループに同じセッション"
+    );
+    assert_eq!(
+        app.workspace.layout.sessions(),
+        vec![g1, g2],
+        "空になったグループの区画が残りました"
+    );
+    assert!(app
+        .workspace
+        .focused
+        .is_some_and(|focused| groups.iter().any(|group| group.id == focused)));
+    match app.workspace.to_saved(a, None).layout {
+        Some(PaneNode::Split { share, .. }) => assert!((0.0..=1.0).contains(&share), "{share}"),
+        other => panic!("分割が戻りません: {other:?}"),
+    }
+    assert!(app.selected_session.is_none());
+    assert_eq!(
+        app.project_workspaces
+            .get(&b)
+            .map(|(tabs, _)| tabs.groups.len()),
+        Some(1)
+    );
+    assert_eq!(
+        app.project_workspaces.len(),
+        1,
+        "知らないプロジェクトを復元しました"
+    );
+
+    // Each way a pane tree can fail to be exactly its groups, one per file:
+    // that project is left to today's start, and its live sessions come back
+    // as tabs then; another project in the same file is still restored.
+    let mut store = store;
+    let d2 = session(d);
+    store.sessions.push(d2.clone());
+    let (ga, gz) = (Uuid::new_v4(), Uuid::new_v4());
+    let group = |id: Uuid, sessions: Vec<Uuid>| serde_json::json!({ "id": id, "sessions": sessions, "active": 0 });
+    let more = (0..=PANE_MAX).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+    let mut many = leaf(more[0]);
+    for id in &more[1..] {
+        many = split(many, leaf(*id), 0.5);
+    }
+    let cases = [
+        (
+            "区画が存在しないグループを指す",
+            vec![group(ga, vec![d1.id])],
+            split(leaf(ga), leaf(Uuid::new_v4()), 0.5),
+        ),
+        (
+            "同じ区画が二つ",
+            vec![group(ga, vec![d1.id])],
+            split(leaf(ga), leaf(ga), 0.5),
+        ),
+        (
+            "区画が多すぎる",
+            more.iter()
+                .enumerate()
+                .map(|(index, id)| group(*id, if index == 0 { vec![d1.id] } else { Vec::new() }))
+                .collect::<Vec<_>>(),
+            many,
+        ),
+        (
+            "どの区画にも出ないグループ",
+            vec![group(ga, vec![d1.id]), group(gz, vec![d2.id])],
+            leaf(ga),
+        ),
+        (
+            "同じ id のグループが二つ",
+            vec![group(ga, vec![d1.id]), group(ga, vec![d2.id])],
+            leaf(ga),
+        ),
+    ];
+    for (case, groups, broken) in cases {
+        let file = serde_json::json!({
+            "project": d,
+            "placed": [d1.id, d2.id, b1.id],
+            "workspaces": [
+                { "project": d, "groups": groups, "focused": null, "layout": broken },
+                { "project": b, "groups": [{ "id": gb, "sessions": [b1.id], "active": 0 }],
+                  "focused": gb, "layout": leaf(gb), "selected": b1.id }
+            ]
+        });
+        fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+        let mut app = start(&store);
+        assert_eq!(app.workspace_project, Some(d), "{case}");
+        assert!(
+            app.workspace.groups.is_empty(),
+            "{case}: 壊れた区画を受け入れました: {:?}",
+            app.workspace
+        );
+        assert!(app.project_workspaces.contains_key(&b), "{case}");
+        app.sync_workspace_live_sessions();
+        for id in [d1.id, d2.id] {
+            assert!(
+                app.workspace
+                    .groups
+                    .iter()
+                    .any(|group| group.tabs.contains(&WorkspaceTab::Session(id))),
+                "{case}: 実行中のセッションがタブに戻りません"
+            );
+        }
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: a layout that cannot be written is said once, not every two
+/// seconds, and a write that succeeds again ends the streak.
+pub(crate) fn a_layout_that_cannot_be_written_is_said_once() {
+    let root = temporary_directory("workspace-unwritable-270");
+    // The store's folder is a file, so nothing can be written beside it;
+    // putting a folder there lets the next write land.
+    let folder = root.join("not-yet");
+    fs::write(&folder, b"").unwrap();
+    let data_file = folder.join("store-v2.json");
+    let mut store = Store::default();
+    let project = relaunch_270_project(&root);
+    let session = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let project_id = project.id;
+    store.projects.push(project);
+    store.sessions.push(session.clone());
+    let mut app = OperonApp::from_state(data_file.clone(), store, ToolStatus::default(), None);
+    app.workspace_project = Some(project_id);
+    app.workspace.open(WorkspaceTab::Session(session.id));
+    app.notice = None;
+    app.save_workspace_layout_if_changed();
+    let said = app.notice.clone().unwrap_or_default();
+    assert!(
+        said.starts_with(&tf!(
+            "タブの配置を保存できませんでした: {error}",
+            error = ""
+        )),
+        "{said:?}"
+    );
+    app.notice = None;
+    app.save_workspace_layout_if_changed();
+    assert_eq!(app.notice, None, "同じ失敗を繰り返し知らせました");
+    fs::remove_file(&folder).unwrap();
+    fs::create_dir_all(&folder).unwrap();
+    app.save_workspace_layout_if_changed();
+    assert!(workspace_layout_path(&data_file).exists());
+    assert!(!app.workspace_layout_save_failed);
+    fs::remove_dir_all(&root).ok();
+}
+
+struct Relaunch270 {
+    root: PathBuf,
+    app: OperonApp,
+    terminal: Uuid,
+    resumable: Uuid,
+    claude_without_id: Uuid,
+    exited: Uuid,
+    lost_before: Uuid,
+    alive: Uuid,
+    crashed: Uuid,
+    quit_cleanly: Uuid,
+    no_transcript: Uuid,
+    resume_id: String,
+    crashed_id: String,
+}
+
+/// Seven sessions as a store might hold them at a relaunch, their worktree a
+/// folder that does not exist so that every launch stops before tmux.
+fn relaunch_270_fixture(label: &str) -> Relaunch270 {
+    let root = temporary_directory(label);
+    let data_file = root.join("store-v2.json");
+    let missing = root.join("gone");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+    let make = |agent: &str, status: SessionStatus, id: Option<&str>| {
+        let mut session = relaunch_270_session(
+            project.id,
+            agent,
+            status,
+            (agent == "terminal").then_some(SessionOrigin::PlainTerminal),
+        );
+        session.worktree_path = Some(missing.clone());
+        if let Some(id) = id {
+            session.native_session_id = Some(id.to_owned());
+            session.native_session_path = Some(transcript.clone());
+        }
+        session
+    };
+    let resume_id = Uuid::new_v4().to_string();
+    let crashed_id = Uuid::new_v4().to_string();
+    let other_id = Uuid::new_v4().to_string();
+    let terminal = make("terminal", SessionStatus::Active, None);
+    let resumable = make("codex", SessionStatus::Active, Some(&resume_id));
+    let claude_without_id = make("claude", SessionStatus::Active, None);
+    let exited = make("codex", SessionStatus::Exited, Some(&other_id));
+    let lost_before = make("codex", SessionStatus::Lost, Some(&other_id));
+    let alive = make("terminal", SessionStatus::Active, None);
+    let crashed = make("codex", SessionStatus::Active, Some(&crashed_id));
+    let quit_cleanly = make("codex", SessionStatus::Active, Some(&other_id));
+    // An ID with no transcript anywhere: the resume finds nothing to reopen.
+    let mut no_transcript = make(
+        "codex",
+        SessionStatus::Active,
+        Some(&Uuid::new_v4().to_string()),
+    );
+    no_transcript.native_session_path = None;
+    let (quit_cleanly_id, no_transcript_id) = (quit_cleanly.id, no_transcript.id);
+    let mut store = Store::default();
+    store.projects.push(project);
+    let ids = (
+        terminal.id,
+        resumable.id,
+        claude_without_id.id,
+        exited.id,
+        lost_before.id,
+        alive.id,
+        crashed.id,
+    );
+    store.sessions.extend([
+        terminal,
+        resumable,
+        claude_without_id,
+        exited,
+        lost_before,
+        alive,
+        crashed,
+        quit_cleanly,
+        no_transcript,
+    ]);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.selected_session = Some(ids.5);
+    app.page = Page::Projects;
+    Relaunch270 {
+        root,
+        app,
+        terminal: ids.0,
+        resumable: ids.1,
+        claude_without_id: ids.2,
+        exited: ids.3,
+        lost_before: ids.4,
+        alive: ids.5,
+        crashed: ids.6,
+        quit_cleanly: quit_cleanly_id,
+        no_transcript: no_transcript_id,
+        resume_id,
+        crashed_id,
+    }
+}
+
+fn relaunch_270_first_look(fixture: &Relaunch270) -> Vec<(Uuid, TmuxObservation)> {
+    let gone = TmuxObservation {
+        state: TmuxState::Gone,
+        exit_status: None,
+    };
+    vec![
+        (fixture.terminal, gone),
+        (fixture.resumable, gone),
+        (fixture.claude_without_id, gone),
+        (fixture.exited, gone),
+        (fixture.lost_before, gone),
+        (
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Alive,
+                exit_status: None,
+            },
+        ),
+        (
+            fixture.crashed,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        ),
+        (
+            fixture.quit_cleanly,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        ),
+        (fixture.no_transcript, gone),
+    ]
+}
+
+#[test]
+/// Change 270: after a restart takes the tmux server with it, every session
+/// that was running at the quit starts again in its own record and tab — a
+/// CLI reopening its conversation, a terminal opening a shell — and nothing
+/// the person ended, nothing already stopped, and nothing without a
+/// conversation to reopen.
+pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone() {
+    let mut fixture = relaunch_270_fixture("relaunch-270");
+    let before = fixture.app.store.sessions.len();
+    let states = relaunch_270_first_look(&fixture);
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    let app = &fixture.app;
+    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+        let session = relaunch_270_find(app, id);
+        assert_eq!(session.status, SessionStatus::Starting, "{}", session.agent);
+        assert!(
+            app.background_tasks
+                .contains(&BackgroundKey::SessionStart(id)),
+            "{} が再開されませんでした",
+            session.agent
+        );
+        assert_eq!(session.tmux_name, managed_tmux_name(id));
+    }
+    assert_eq!(
+        relaunch_270_find(app, fixture.resumable).agent_command,
+        CliProvider::Codex.native_resume_command(&fixture.resume_id)
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.crashed).agent_command,
+        CliProvider::Codex.native_resume_command(&fixture.crashed_id)
+    );
+    assert_eq!(app.store.sessions.len(), before, "再開で記録が増えました");
+    assert_eq!(
+        app.selected_session,
+        Some(fixture.alive),
+        "再開で選択が動きました"
+    );
+    assert_eq!(app.page, Page::Projects, "再開で画面が切り替わりました");
+    assert_eq!(
+        relaunch_270_find(app, fixture.claude_without_id).status,
+        SessionStatus::Lost
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.exited).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.lost_before).status,
+        SessionStatus::Lost
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.alive).status,
+        SessionStatus::Active
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.quit_cleanly).status,
+        SessionStatus::Exited,
+        "自分で終了した CLI を再開しました"
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.no_transcript).status,
+        SessionStatus::Lost
+    );
+    for id in [
+        fixture.claude_without_id,
+        fixture.exited,
+        fixture.lost_before,
+        fixture.alive,
+        fixture.quit_cleanly,
+        fixture.no_transcript,
+    ] {
+        assert!(!app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+    }
+
+    // Only the first look decides: a session that dies later in this run is
+    // not started again by itself.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.alive).status,
+        SessionStatus::Lost
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.alive)));
+    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 270: the relaunch says how many sessions it reopened, does not
+/// notify a crash it is about to undo, and its launches finishing — failed or
+/// not — leave the selection, the page, and the notice where they were.
+pub(crate) fn the_relaunch_says_how_many_sessions_it_reopened() {
+    let mut fixture = relaunch_270_fixture("relaunch-notice-270");
+    fixture.app.store.notifications_enabled = true;
+    // The clean exit is announced as finished, which is right and is not what
+    // this asks; only the crash about to be undone must stay quiet.
+    let mut states = relaunch_270_first_look(&fixture);
+    states.retain(|(id, _)| *id != fixture.quit_cleanly);
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "前回開いていたセッションを {count} 件再開しました。",
+                count = 3
+            )
+            .as_str()
+        )
+    );
+    assert!(
+        !fixture
+            .app
+            .background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "再開するセッションの失敗を通知しました"
+    );
+    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            relaunch_270_find(&fixture.app, id).status,
+            SessionStatus::Failed
+        );
+    }
+    assert!(
+        fixture.app.launch_progress.is_none(),
+        "再開の失敗で起動ダイアログが開きました"
+    );
+    assert_eq!(fixture.app.selected_session, Some(fixture.alive));
+    assert_eq!(fixture.app.page, Page::Projects);
+
+    // A quiet launch that succeeds keeps the notice, the selection, and the
+    // page — even for the session that is selected.
+    fixture.app.selected_session = Some(fixture.terminal);
+    fixture.app.notice = Some("keep".to_owned());
+    fixture.app.quiet_launches.insert(fixture.terminal);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::SessionStart(fixture.terminal));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: fixture.terminal,
+            result: Ok(None),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Active
+    );
+    assert_eq!(fixture.app.notice.as_deref(), Some("keep"));
+    assert_eq!(fixture.app.selected_session, Some(fixture.terminal));
+    assert_eq!(
+        fixture.app.page,
+        Page::Projects,
+        "静かな起動の完了で画面が切り替わりました"
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 270: a stopped CLI session whose conversation was never written
+/// starts fresh, once. The resume used to hand it back to `start_session`,
+/// which handed it straight back to the resume until the stack overflowed.
+pub(crate) fn resuming_a_session_with_no_transcript_starts_it_fresh_once() {
+    let root = temporary_directory("resume-empty-270");
+    let project = relaunch_270_project(&root);
+    let mut session = relaunch_270_session(project.id, "codex", SessionStatus::Lost, None);
+    session.native_session_id = Some(Uuid::new_v4().to_string());
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store-v2.json"), store, tools, None);
+    app.start_session(id);
+    assert_eq!(app.store.sessions.len(), 1);
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(id)));
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: the manual 「再開」 still opens the conversation in a new
+/// record, as it did before `start_session` was split.
+pub(crate) fn the_manual_resume_still_makes_a_new_record() {
+    let root = temporary_directory("resume-manual-270");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+    let native = Uuid::new_v4().to_string();
+    let mut session = relaunch_270_session(project.id, "codex", SessionStatus::Lost, None);
+    session.native_session_id = Some(native.clone());
+    session.native_session_path = Some(transcript);
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store-v2.json"), store, tools, None);
+    app.start_session(id);
+    assert_eq!(app.store.sessions.len(), 2);
+    let resumed = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id != id)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        resumed.origin,
+        Some(SessionOrigin::Resumed {
+            from: CliProvider::Codex
+        })
+    );
+    assert_eq!(
+        resumed.agent_command,
+        CliProvider::Codex.native_resume_command(&native)
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(resumed.id),
+        Duration::from_secs(30),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270, found by the empirical verifier: a first look whose status
+/// write fails does not use up the session's one relaunch; the next poll
+/// looks again.
+pub(crate) fn a_failed_save_at_the_first_look_keeps_the_relaunch() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = relaunch_270_fixture("relaunch-270-failed-save");
+    let states = relaunch_270_first_look(&fixture);
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o555)).unwrap();
+    fixture
+        .app
+        .apply_session_poll(states.clone(), Vec::new(), Vec::new(), Vec::new());
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o755)).unwrap();
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    let started = fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.terminal));
+    fs::remove_dir_all(&fixture.root).ok();
+    assert!(
+        started,
+        "the plain terminal was never relaunched after the first save failed"
+    );
+}
+
+#[test]
+/// Change 270, found by the empirical verifier: the front tab stays the same
+/// session when a tab before it is gone, rather than passing to its neighbour.
+pub(crate) fn the_front_tab_stays_when_a_tab_before_it_is_gone() {
+    let project = Uuid::new_v4();
+    let (a, b, c, group) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let saved = SavedWorkspace {
+        project,
+        groups: vec![SavedGroup {
+            id: group,
+            sessions: vec![a, b, c],
+            active: 1,
+        }],
+        focused: Some(group),
+        layout: Some(PaneNode::Leaf(group)),
+        selected: None,
+    };
+    let tabs = WorkspaceTabs::from_saved(&saved, |id| id != a).unwrap();
+    let front = &tabs.groups[0].tabs[tabs.groups[0].active];
+    assert_eq!(
+        *front,
+        WorkspaceTab::Session(b),
+        "front tab moved to {front:?}"
+    );
+}
+
+// ── Change 270: exhaustive models of the layout restore and the relaunch ────
+
+const WS_PANE_CAP: usize = PANE_MAX + 1;
+const WS1_STATES: usize = 599_549;
+const WS2_STATES: usize = 140_880;
+const WS3_STATES: usize = 656_525;
+const R6_STATES: usize = 164;
+
+fn ws_group(k: u128) -> Uuid {
+    Uuid::from_u128(0x1_0000 + k)
+}
+
+fn ws_session(k: u128) -> Uuid {
+    Uuid::from_u128(0x2_0000 + k)
+}
+
+#[derive(Clone, Copy)]
+enum WsTok {
+    Split(f32),
+    /// `u128::MAX` means "the next group in reading order".
+    Leaf(u128),
+    Other,
+}
+
+/// How far a prefix of a pane tree written in prefix notation got: leaves
+/// still owed, leaves seen, and where the tree ends. `None` for a token that
+/// is not part of the tree grammar or a tree past `WS_PANE_CAP` leaves.
+fn ws_scan(tokens: &[u8], classify: &dyn Fn(u8) -> WsTok) -> Option<(usize, usize, usize)> {
+    let (mut need, mut leaves, mut end) = (1usize, 0usize, 0usize);
+    for (index, token) in tokens.iter().enumerate() {
+        if need == 0 {
+            break;
+        }
+        match classify(*token) {
+            WsTok::Split(_) => need += 1,
+            WsTok::Leaf(_) => {
+                need -= 1;
+                leaves += 1;
+            }
+            WsTok::Other => return None,
+        }
+        if leaves + need > WS_PANE_CAP {
+            return None;
+        }
+        end = index + 1;
+    }
+    Some((need, leaves, end))
+}
+
+fn ws_decode(
+    tokens: &[u8],
+    position: &mut usize,
+    classify: &dyn Fn(u8) -> WsTok,
+    next: &mut u128,
+) -> PaneNode {
+    let token = tokens[*position];
+    *position += 1;
+    match classify(token) {
+        WsTok::Leaf(label) => {
+            let label = if label == u128::MAX {
+                *next += 1;
+                *next - 1
+            } else {
+                label
+            };
+            PaneNode::Leaf(ws_group(label))
+        }
+        WsTok::Split(share) => {
+            let first = ws_decode(tokens, position, classify, next);
+            let second = ws_decode(tokens, position, classify, next);
+            PaneNode::Split {
+                side_by_side: true,
+                share,
+                first: Box::new(first),
+                second: Box::new(second),
+            }
+        }
+        WsTok::Other => unreachable!("a scanned prefix holds only tree tokens"),
+    }
+}
+
+fn ws_share_outside(node: &PaneNode) -> Option<f32> {
+    match node {
+        PaneNode::Leaf(_) => None,
+        PaneNode::Split {
+            share,
+            first,
+            second,
+            ..
+        } => {
+            if !(0.0..=1.0).contains(share) {
+                Some(*share)
+            } else {
+                ws_share_outside(first).or_else(|| ws_share_outside(second))
+            }
+        }
+    }
+}
+
+/// The R5 property, stated apart from `from_saved`: what a restored workspace
+/// is, checked against the saved one it came from and the sessions that exist.
+fn restored_workspace_violation(
+    saved: &SavedWorkspace,
+    tabs: &WorkspaceTabs,
+    exists: &dyn Fn(Uuid) -> bool,
+) -> Option<String> {
+    let panes = tabs.layout.sessions();
+    let group_ids = tabs.groups.iter().map(|g| g.id).collect::<Vec<_>>();
+    if panes.len() > PANE_MAX {
+        return Some(format!("{} panes, more than PANE_MAX", panes.len()));
+    }
+    let (mut sorted_panes, mut sorted_groups) = (panes.clone(), group_ids.clone());
+    sorted_panes.sort();
+    sorted_groups.sort();
+    if sorted_panes != sorted_groups || sorted_groups.windows(2).any(|w| w[0] == w[1]) {
+        return Some(format!(
+            "panes {panes:?} are not exactly the groups {group_ids:?}, each once"
+        ));
+    }
+    let mut seen = HashSet::new();
+    for group in &tabs.groups {
+        if group.tabs.is_empty() {
+            return Some(format!("group {} has no tab", group.id));
+        }
+        if group.active >= group.tabs.len() {
+            return Some(format!(
+                "group {} front {} of {} tabs",
+                group.id,
+                group.active,
+                group.tabs.len()
+            ));
+        }
+        let home = saved.groups.iter().find(|g| g.id == group.id);
+        for tab in &group.tabs {
+            let WorkspaceTab::Session(id) = tab else {
+                return Some("a document tab appeared".to_owned());
+            };
+            if !exists(*id) {
+                return Some(format!("session {id} does not exist"));
+            }
+            if !seen.insert(*id) {
+                return Some(format!("session {id} is in two groups or twice in one"));
+            }
+            if !home.is_some_and(|g| g.sessions.contains(id)) {
+                return Some(format!("session {id} moved to group {}", group.id));
+            }
+        }
+        if let Some(front) = home.and_then(|g| g.sessions.get(g.active)) {
+            let front = WorkspaceTab::Session(*front);
+            if group.tabs.contains(&front) && group.tabs[group.active] != front {
+                return Some(format!(
+                    "group {} kept {front:?} but fronts {:?}",
+                    group.id, group.tabs[group.active]
+                ));
+            }
+        }
+    }
+    for group in &saved.groups {
+        for id in &group.sessions {
+            if exists(*id) && !seen.contains(id) {
+                return Some(format!("existing session {id} was dropped"));
+            }
+        }
+    }
+    if tabs.focused.is_some_and(|f| !group_ids.contains(&f)) {
+        return Some(format!("focused {:?} is no group", tabs.focused));
+    }
+    if let Some(f) = saved.focused {
+        if group_ids.contains(&f) && tabs.focused != Some(f) {
+            return Some(format!("saved focus {f} lost, focused {:?}", tabs.focused));
+        }
+    }
+    let again = tabs.to_saved(saved.project, None);
+    if let Some(share) = again.layout.as_ref().and_then(ws_share_outside) {
+        return Some(format!("share {share} is outside 0..1"));
+    }
+    if WorkspaceTabs::from_saved(&again, |_| true).as_ref() != Some(tabs) {
+        return Some("from_saved(to_saved(tabs)) is not tabs".to_owned());
+    }
+    None
+}
+
+const WS_SHARES: [f32; 5] = [-0.5, 0.5, 1.5, f32::NAN, f32::INFINITY];
+
+fn ws1_classify(token: u8) -> WsTok {
+    match token {
+        10..=14 => WsTok::Split(WS_SHARES[usize::from(token - 10)]),
+        1 => WsTok::Leaf(u128::MAX),
+        _ => WsTok::Other,
+    }
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 1.
+fn ws1_prefix(tokens: &[u8]) -> Option<bool> {
+    let (need, leaves, end) = ws_scan(tokens, &ws1_classify)?;
+    if need > 0 {
+        return Some(false);
+    }
+    let marks = &tokens[end..];
+    if marks.len() > leaves || marks.iter().any(|m| !matches!(m, 20 | 21)) {
+        return None;
+    }
+    Some(marks.len() == leaves)
+}
+
+#[test]
+/// Change 270, R5 (departure 6): every pane tree of up to `PANE_MAX + 1`
+/// leaves, each split's share one of {-0.5, 0.5, 1.5, NaN, inf}, each leaf the
+/// next of that many groups of one session each, each session existing or
+/// not — 290 422 cases, all of them. Split orientation is fixed: nothing in
+/// `from_saved` reads it.
+///
+/// The property: `from_saved` is `None` exactly when the tree has more than
+/// `PANE_MAX` panes, and otherwise the tabs hold `restored_workspace_violation`
+/// — panes are exactly the surviving groups (a group whose session is gone
+/// takes its pane with it), every share is inside 0..1, and
+/// `from_saved(to_saved(tabs))` is `tabs`.
+pub(crate) fn model_check_a_restored_layout_is_whole_for_every_tree_and_share() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 10, 11, 12, 13, 14, 20, 21],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws1_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws1_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let (_, leaves, end) = ws_scan(tokens, &ws1_classify).unwrap();
+            let marks = &tokens[end..];
+            let (mut position, mut next) = (0, 0);
+            let root = ws_decode(tokens, &mut position, &ws1_classify, &mut next);
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups: (0..leaves as u128)
+                    .map(|k| SavedGroup {
+                        id: ws_group(k),
+                        sessions: vec![ws_session(k)],
+                        active: 0,
+                    })
+                    .collect(),
+                focused: Some(ws_group(0)),
+                layout: Some(root),
+                selected: None,
+            };
+            let exists = |id: Uuid| marks[(id.as_u128() - 0x2_0000) as usize] == 21;
+            match WorkspaceTabs::from_saved(&saved, exists) {
+                None if leaves > PANE_MAX => Ok(()),
+                None => Err("a whole layout was refused".to_owned()),
+                Some(_) if leaves > PANE_MAX => Err(format!(
+                    "{leaves} panes were accepted, PANE_MAX is {PANE_MAX}"
+                )),
+                Some(tabs) => match restored_workspace_violation(&saved, &tabs, &exists) {
+                    Some(why) => Err(why),
+                    None => Ok(()),
+                },
+            }
+        },
+        2_000_000,
+    );
+    // Shapes (Catalan) x 5^splits x 2^leaves, for 1..=5 leaves.
+    assert_eq!(
+        complete.get(),
+        2 + 20 + 400 + 10_000 + 280_000,
+        "not every tree, share and survival was checked"
+    );
+    assert_eq!(coverage.states, WS1_STATES, "{coverage:?}");
+}
+
+fn ws3_classify(token: u8) -> WsTok {
+    match token {
+        2 => WsTok::Split(0.5),
+        10..=15 => WsTok::Leaf(u128::from(token - 10)),
+        _ => WsTok::Other,
+    }
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 3: a layout
+/// (`1` for none, else a tree whose leaves read in nondecreasing order), then
+/// group ids as a restricted-growth string, then `30`.
+fn ws3_prefix(tokens: &[u8]) -> Option<bool> {
+    let end = if tokens.first() == Some(&1) {
+        1
+    } else {
+        let (need, _, end) = ws_scan(tokens, &ws3_classify)?;
+        let labels = tokens[..end]
+            .iter()
+            .filter(|t| matches!(t, 10..=15))
+            .collect::<Vec<_>>();
+        if labels.windows(2).any(|w| w[0] > w[1]) {
+            return None;
+        }
+        if need > 0 {
+            return Some(false);
+        }
+        end
+    };
+    let (mut distinct, mut count) = (0u8, 0usize);
+    let mut finished = false;
+    for token in &tokens[end..] {
+        if finished {
+            return None;
+        }
+        match token {
+            20..=24 if token - 20 <= distinct && count < WS_PANE_CAP => {
+                distinct = distinct.max(token - 20 + 1);
+                count += 1;
+            }
+            30 => finished = true,
+            _ => return None,
+        }
+    }
+    Some(finished)
+}
+
+#[test]
+/// Change 270, R5 (departure 6): which saved workspaces are refused. Every
+/// pane tree of up to `PANE_MAX + 1` leaves whose leaf labels read in
+/// nondecreasing order over {g0..g4, unnamed} (acceptance reads the leaves as
+/// a set, never their order), or no layout; against every list of up to five
+/// groups, their ids named in first-appearance order (the ids are opaque, so
+/// renaming them loses nothing) — 4 298 layouts x 76 lists, 326 648 cases.
+///
+/// The property: `from_saved` is `Some` exactly when the leaves, sorted, equal
+/// the group ids, sorted, with no id twice and at most `PANE_MAX` of them —
+/// a pane without a group, a group without a pane, a pane twice, a group id
+/// twice, more panes than fit are all `None` — and every `Some` holds
+/// `restored_workspace_violation`.
+pub(crate) fn model_check_a_saved_workspace_is_refused_unless_panes_are_the_groups() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 2, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 30],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws3_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws3_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let (layout, end) = if tokens[0] == 1 {
+                (None, 1)
+            } else {
+                let (_, _, end) = ws_scan(tokens, &ws3_classify).unwrap();
+                let (mut position, mut next) = (0, 0);
+                (
+                    Some(ws_decode(tokens, &mut position, &ws3_classify, &mut next)),
+                    end,
+                )
+            };
+            let ids = tokens[end..tokens.len() - 1]
+                .iter()
+                .map(|t| u128::from(t - 20))
+                .collect::<Vec<_>>();
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups: ids
+                    .iter()
+                    .enumerate()
+                    .map(|(entry, id)| SavedGroup {
+                        id: ws_group(*id),
+                        sessions: vec![ws_session(entry as u128)],
+                        active: 0,
+                    })
+                    .collect(),
+                focused: None,
+                layout,
+                selected: None,
+            };
+            let mut leaves = tokens[..end]
+                .iter()
+                .filter(|t| matches!(t, 10..=15))
+                .map(|t| u128::from(t - 10))
+                .collect::<Vec<_>>();
+            let mut sorted_ids = ids.clone();
+            leaves.sort();
+            sorted_ids.sort();
+            let whole = leaves == sorted_ids
+                && sorted_ids.windows(2).all(|w| w[0] != w[1])
+                && sorted_ids.len() <= PANE_MAX;
+            match (WorkspaceTabs::from_saved(&saved, |_| true), whole) {
+                (None, false) => Ok(()),
+                (None, true) => Err("a whole layout was refused".to_owned()),
+                (Some(_), false) => Err(format!(
+                    "panes {leaves:?} against groups {ids:?} were accepted"
+                )),
+                (Some(tabs), true) => {
+                    match restored_workspace_violation(&saved, &tabs, &|_| true) {
+                        Some(why) => Err(why),
+                        None => Ok(()),
+                    }
+                }
+            }
+        },
+        2_000_000,
+    );
+    assert_eq!(
+        complete.get(),
+        (6 + 21 + 2 * 56 + 5 * 126 + 14 * 252 + 1) * (1 + 1 + 2 + 5 + 15 + 52),
+        "not every layout against every group list was checked"
+    );
+    assert_eq!(coverage.states, WS3_STATES, "{coverage:?}");
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 2: for each
+/// of two groups up to three session tokens (1 = a, 2 = b, 3 = not in the
+/// store), `9`, the front index `10..=13`; then the focus `20..=23`.
+fn ws2_prefix(tokens: &[u8]) -> Option<bool> {
+    let mut at = 0;
+    for _ in 0..2 {
+        let mut count = 0;
+        loop {
+            match tokens.get(at) {
+                None => return Some(false),
+                Some(1..=3) if count < 3 => {
+                    count += 1;
+                    at += 1;
+                }
+                Some(9) => {
+                    at += 1;
+                    break;
+                }
+                _ => return None,
+            }
+        }
+        match tokens.get(at) {
+            None => return Some(false),
+            Some(10..=13) => at += 1,
+            _ => return None,
+        }
+    }
+    match tokens.get(at) {
+        None => Some(false),
+        Some(20..=23) if at + 1 == tokens.len() => Some(true),
+        _ => None,
+    }
+}
+
+#[test]
+/// Change 270, R5 (departure 6, F2): the contents of two groups. Each group
+/// lists up to three sessions out of {a, b, gone} — repeats within a group and
+/// across the two allowed — with a front index 0..=3, in or out of range; the
+/// focus is none, either group, or a group that is not there — 40 x 4 per
+/// group, squared, x 4 = 102 400 cases. The two panes are fixed (a split of
+/// the two groups).
+///
+/// The property: `restored_workspace_violation` — no session twice, none that
+/// does not exist, none dropped that does, each front inside its group, the
+/// saved front session still in front whenever it survives in that group, a
+/// group left empty gone with its pane, focus a real group or none.
+pub(crate) fn model_check_a_restored_group_keeps_its_front_session_and_no_session_twice() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 2, 3, 9, 10, 11, 12, 13, 20, 21, 22, 23],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws2_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws2_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let mut groups = Vec::new();
+            let mut at = 0;
+            for k in 0..2u128 {
+                let mut sessions = Vec::new();
+                while tokens[at] != 9 {
+                    sessions.push(ws_session(u128::from(tokens[at])));
+                    at += 1;
+                }
+                let active = usize::from(tokens[at + 1] - 10);
+                at += 2;
+                groups.push(SavedGroup {
+                    id: ws_group(k),
+                    sessions,
+                    active,
+                });
+            }
+            let focused = match tokens[at] {
+                20 => None,
+                21 => Some(ws_group(0)),
+                22 => Some(ws_group(1)),
+                _ => Some(ws_group(9)),
+            };
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups,
+                focused,
+                layout: Some(PaneNode::Split {
+                    side_by_side: true,
+                    share: 0.5,
+                    first: Box::new(PaneNode::Leaf(ws_group(0))),
+                    second: Box::new(PaneNode::Leaf(ws_group(1))),
+                }),
+                selected: None,
+            };
+            let exists = |id: Uuid| id != ws_session(3);
+            match WorkspaceTabs::from_saved(&saved, exists) {
+                None => Err("two groups sharing two panes were refused".to_owned()),
+                Some(tabs) => match restored_workspace_violation(&saved, &tabs, &exists) {
+                    Some(why) => Err(why),
+                    None => Ok(()),
+                },
+            }
+        },
+        2_000_000,
+    );
+    assert_eq!(
+        complete.get(),
+        (40 * 4) * (40 * 4) * 4,
+        "not every pair of groups was checked"
+    );
+    assert_eq!(coverage.states, WS2_STATES, "{coverage:?}");
+}
+
+// R6: the relaunch decision, driven through the real `apply_session_poll`.
+
+const R6_RUNNING: [u8; 3] = [0, 1, 7];
+
+fn r6_status(index: u8) -> SessionStatus {
+    [
+        SessionStatus::Starting,
+        SessionStatus::Active,
+        SessionStatus::Queued,
+        SessionStatus::Exited,
+        SessionStatus::Failed,
+        SessionStatus::Cancelled,
+        SessionStatus::Lost,
+        SessionStatus::Unknown,
+    ][usize::from(index)]
+    .clone()
+}
+
+fn r6_index(status: &SessionStatus) -> u8 {
+    (0..8).find(|i| r6_status(*i) == *status).unwrap()
+}
+
+const R6_OBSERVATIONS: [(TmuxState, Option<i32>); 7] = [
+    (TmuxState::Alive, None),
+    (TmuxState::Dead, Some(0)),
+    (TmuxState::Dead, Some(1)),
+    (TmuxState::Dead, None),
+    (TmuxState::Gone, None),
+    (TmuxState::Gone, Some(1)),
+    (TmuxState::Unknown, None),
+];
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Relaunch6State {
+    /// Status index at load and whether `relaunch_kind` is `Some`.
+    load: Option<(u8, bool)>,
+    status: u8,
+    candidate: bool,
+    looked: bool,
+    relaunched: u8,
+    polls: u8,
+    violation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Relaunch6Event {
+    Load(u8, bool),
+    Poll(u8, bool),
+}
+
+fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uuid) {
+    let project = relaunch_270_project(root);
+    let mut session = if kind {
+        relaunch_270_session(
+            project.id,
+            "terminal",
+            r6_status(status),
+            Some(SessionOrigin::PlainTerminal),
+        )
+    } else {
+        relaunch_270_session(project.id, "claude", r6_status(status), None)
+    };
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let app = OperonApp::from_state(
+        root.join(format!("store-{serial}.json")),
+        store,
+        tools,
+        None,
+    );
+    (app, id)
+}
+
+#[test]
+/// Change 270, R6 (departure 6, F1 and 7): the relaunch decision of
+/// `apply_session_poll`, run for real. The model loads one session in each of
+/// the eight statuses, with and without a `relaunch_kind` (a plain terminal, a
+/// Claude session with no conversation), then takes up to three polls, each
+/// one of seven observations (every `TmuxState`; `Dead` with status 0, nonzero
+/// and none; `Gone` with and without a status) with the store write
+/// succeeding or failing (the folder made read-only around the poll). Every
+/// state of that walk, the real app rebuilt at each step from the state
+/// reached.
+///
+/// The property, kept as its own ledger beside the app: a session is started
+/// again iff it was Starting/Active/Unknown at load, this poll is its first
+/// non-Unknown look whose outcome was stored (a look that changes nothing has
+/// nothing to store; a failed write leaves the look unspent), the outcome is
+/// Lost or Failed, the write succeeded, and `relaunch_kind` is `Some` — and at
+/// most once over the sequence; the real candidate set agrees with the ledger.
+pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("model-relaunch-270");
+    let serial = std::cell::Cell::new(0usize);
+    let mut events = Vec::new();
+    for status in 0..8 {
+        for kind in [false, true] {
+            events.push(Relaunch6Event::Load(status, kind));
+        }
+    }
+    for observation in 0..7 {
+        for stored in [false, true] {
+            events.push(Relaunch6Event::Poll(observation, stored));
+        }
+    }
+    let initial = Relaunch6State {
+        load: None,
+        status: 0,
+        candidate: false,
+        looked: false,
+        relaunched: 0,
+        polls: 0,
+        violation: None,
+    };
+    let step = |state: &Relaunch6State, event: &Relaunch6Event| {
+        serial.set(serial.get() + 1);
+        match (state.load, event) {
+            (None, Relaunch6Event::Load(status, kind)) => {
+                let (app, id) = r6_app(&root, serial.get(), *status, *kind);
+                let effective = r6_index(&app.store.sessions[0].status);
+                let candidate = app.relaunch_candidates.contains(&id);
+                let violation = (candidate != R6_RUNNING.contains(status))
+                    .then(|| format!("status {status} loaded with candidate {candidate}"));
+                Some(Relaunch6State {
+                    load: Some((*status, *kind)),
+                    status: effective,
+                    candidate,
+                    violation,
+                    ..state.clone()
+                })
+            }
+            (Some((loaded, kind)), Relaunch6Event::Poll(observation, stored))
+                if state.polls < 3 && state.violation.is_none() =>
+            {
+                let (state_of, exit) = R6_OBSERVATIONS[usize::from(*observation)];
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                if state.candidate {
+                    app.relaunch_candidates.insert(id);
+                } else {
+                    app.relaunch_candidates.clear();
+                }
+                if !stored {
+                    fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+                }
+                app.apply_session_poll(
+                    vec![(
+                        id,
+                        TmuxObservation {
+                            state: state_of,
+                            exit_status: exit,
+                        },
+                    )],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+                let relaunched = app
+                    .background_tasks
+                    .contains(&BackgroundKey::SessionStart(id));
+                let candidate_now = app.relaunch_candidates.contains(&id);
+                let status_now = r6_index(&app.store.sessions[0].status);
+                // The ledger, from the requirement alone.
+                let was_candidate = R6_RUNNING.contains(&loaded) && !state.looked;
+                let looks = was_candidate && state_of != TmuxState::Unknown;
+                let lost_or_failed = match (state_of, exit) {
+                    (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
+                    (TmuxState::Dead, Some(code)) => code != 0,
+                    _ => false,
+                };
+                let needs_write = match state_of {
+                    TmuxState::Alive => state.status != 1,
+                    TmuxState::Unknown => false,
+                    _ => true,
+                };
+                let expected = looks && lost_or_failed && kind && *stored;
+                let looked = state.looked || (looks && (!needs_write || *stored));
+                let count = state.relaunched + u8::from(relaunched);
+                let violation = if relaunched != expected {
+                    Some(format!(
+                        "relaunched {relaunched}, the requirement says {expected}"
+                    ))
+                } else if count > 1 {
+                    Some("relaunched twice".to_owned())
+                } else if candidate_now != (R6_RUNNING.contains(&loaded) && !looked) {
+                    Some(format!(
+                        "candidate {candidate_now} after a look the ledger calls spent={looked}"
+                    ))
+                } else {
+                    None
+                };
+                Some(Relaunch6State {
+                    load: state.load,
+                    status: status_now,
+                    candidate: candidate_now,
+                    looked,
+                    relaunched: count,
+                    polls: state.polls + 1,
+                    violation,
+                })
+            }
+            _ => None,
+        }
+    };
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        step,
+        |state| state.violation.clone().map_or(Ok(()), Err),
+        100_000,
+    );
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(coverage.states, R6_STATES, "{coverage:?}");
+}
