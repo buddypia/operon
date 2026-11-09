@@ -2,7 +2,7 @@
 
 - **Spec**: none — route `refactor`; the request and the measurement are below
 - **Approved**: 2026-11-10
-- **Status**: approved
+- **Status**: done
 
 ## Why
 
@@ -109,4 +109,14 @@ gone. The fingerprints are pruned with the same `retain` that prunes
 
 ## Departures from the plan
 
-None yet.
+- When a capture's text is the text already held, with rows, its fingerprint
+  is recorded too. The verifier found that rows the frame had laid out never
+  got one, so every later capture of the same text was laid out again on the
+  capture thread: wasted work, never wrong rows.
+- `LaidOutTerminal` is not `Clone` (the reviewer): nothing copies a layout.
+- The session poll lays its on-screen captures out inside the poll task, so
+  with N panes on screen the poll's other results arrive about N × 3 ms later
+  than before. Accepted: the poll runs every two seconds.
+- `terminal_276_random_sequences_match_the_oracle`, written by the verifier,
+  stays: 300 seeded sequences of results, theme switches and failures, each
+  step compared with `terminal_line_layouts` of the held text.

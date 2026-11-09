@@ -64887,6 +64887,7 @@ fn background_task_completion_only_wakes_visible_sessions() {
                 output: "hidden output\n".into(),
                 cursor: None,
             }),
+            laid_out: None,
         }
     });
 
@@ -64905,6 +64906,7 @@ fn background_task_completion_only_wakes_visible_sessions() {
                 output: "visible output\n".into(),
                 cursor: None,
             }),
+            laid_out: None,
         }
     });
 
@@ -71131,6 +71133,7 @@ pub(crate) fn session_254_terminal_context() {
             .send(BackgroundResult::SessionOutput {
                 session_id: second,
                 result: Err("injected concurrent output read failure".into()),
+                laid_out: None,
             })
             .unwrap();
         app.process_background_results();
@@ -76729,6 +76732,7 @@ pub(crate) fn a_terminal_takes_the_kind_of_the_cli_seen_running_in_it() {
                 activities: Vec::new(),
                 previews: Vec::new(),
                 output: Vec::new(),
+                laid_out: Vec::new(),
                 clis,
             })
             .unwrap();
@@ -77010,4 +77014,362 @@ fn poll_275_doc_comments_stay_on_the_function_they_describe() {
             );
         }
     }
+}
+
+/// Rows no parser would produce from any text, so a test can tell whose rows
+/// a pane holds.
+fn terminal_276_sentinel(theme: AppTheme, output: &str) -> app::terminal_output::LaidOutTerminal {
+    let mut job = LayoutJob::default();
+    job.append("laid out off the frame", 0.0, egui::TextFormat::default());
+    app::terminal_output::LaidOutTerminal {
+        theme,
+        fingerprint: app::terminal_output::terminal_output_fingerprint(output),
+        layouts: Some(vec![job]),
+    }
+}
+
+fn terminal_276_row_text(app: &OperonApp, session: Uuid) -> Vec<String> {
+    app.terminal_layouts[&session]
+        .iter()
+        .map(|job| job.text.clone())
+        .collect()
+}
+
+fn terminal_276_send_output(
+    app: &mut OperonApp,
+    session: Uuid,
+    output: &str,
+    laid_out: Option<app::terminal_output::LaidOutTerminal>,
+) {
+    app.background_sender
+        .send(BackgroundResult::SessionOutput {
+            session_id: session,
+            result: Ok(TerminalCapture {
+                output: output.into(),
+                cursor: None,
+            }),
+            laid_out,
+        })
+        .unwrap();
+    app.process_background_results();
+}
+
+#[test]
+fn terminal_276_a_capture_laid_out_off_the_frame_is_shown_as_is() {
+    let root = temporary_directory("terminal-276-as-is");
+    let mut app = test_app(root.join("store.json"));
+    let session = Uuid::new_v4();
+    let laid_out = terminal_276_sentinel(app.store.theme, "one\ntwo\n");
+    let fingerprint = laid_out.fingerprint;
+    terminal_276_send_output(&mut app, session, "one\ntwo\n", Some(laid_out));
+    assert_eq!(
+        terminal_276_row_text(&app, session),
+        ["laid out off the frame"],
+        "取得スレッドが整形した行を、フレームが整形し直しました"
+    );
+    assert_eq!(app.session_output[&session], "one\ntwo\n");
+    assert_eq!(app.terminal_output_generations[&session], 1);
+    assert_eq!(
+        app.terminal_output_fingerprints.get(&session),
+        Some(&fingerprint)
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_a_layout_from_another_theme_is_laid_out_again() {
+    let root = temporary_directory("terminal-276-theme");
+    let mut app = test_app(root.join("store.json"));
+    app.store.theme = AppTheme::Light;
+    let session = Uuid::new_v4();
+    let laid_out = terminal_276_sentinel(AppTheme::Dark, "one\ntwo");
+    terminal_276_send_output(&mut app, session, "one\ntwo", Some(laid_out));
+    assert_eq!(
+        terminal_276_row_text(&app, session),
+        ["one", "two"],
+        "前のテーマで整形した行が、切り替え後のペインに残りました"
+    );
+    assert!(
+        !app.terminal_output_fingerprints.contains_key(&session),
+        "フレームが整形した行に、取得スレッドの指紋が残りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_unchanged_text_is_not_laid_out_again() {
+    let output = "\u{1b}[32mgreen\u{1b}[0m\nplain";
+    let theme = AppTheme::Dark;
+    let first = app::terminal_output::lay_out_capture(output, theme, None);
+    assert_eq!(
+        first.layouts.as_deref(),
+        Some(terminal_line_layouts(output, theme.palette()).as_slice()),
+        "取得スレッドの整形が、フレームの整形と違う行を作りました"
+    );
+    assert_eq!(first.theme, theme);
+    let again = app::terminal_output::lay_out_capture(output, theme, Some(first.fingerprint));
+    assert!(
+        again.layouts.is_none(),
+        "変わっていない出力を整形し直しました"
+    );
+    let changed = app::terminal_output::lay_out_capture("other", theme, Some(first.fingerprint));
+    assert!(
+        changed.layouts.is_some(),
+        "変わった出力を整形しませんでした"
+    );
+    assert_ne!(changed.fingerprint, first.fingerprint);
+}
+
+#[test]
+fn terminal_276_bare_text_is_still_laid_out() {
+    let root = temporary_directory("terminal-276-bare");
+    let mut app = test_app(root.join("store.json"));
+    let session = Uuid::new_v4();
+    app.set_session_output(session, "one\ntwo".into(), None);
+    assert_eq!(terminal_276_row_text(&app, session), ["one", "two"]);
+    terminal_276_send_output(&mut app, session, "three", None);
+    assert_eq!(terminal_276_row_text(&app, session), ["three"]);
+    // Rows the frame laid out replace a capture thread's: its fingerprint
+    // must go, or the next capture of that older text is called unchanged.
+    let laid_out = terminal_276_sentinel(app.store.theme, "four");
+    terminal_276_send_output(&mut app, session, "four", Some(laid_out));
+    assert!(app.terminal_output_fingerprints.contains_key(&session));
+    terminal_276_send_output(&mut app, session, "five", None);
+    assert!(
+        !app.terminal_output_fingerprints.contains_key(&session),
+        "フレームが整形した行に、前の取得の指紋が残りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_a_theme_switch_keeps_rows_until_the_next_capture() {
+    let root = temporary_directory("terminal-276-switch");
+    let mut app = test_app(root.join("store.json"));
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    let session = Uuid::new_v4();
+    let laid_out = terminal_276_sentinel(app.store.theme, "one");
+    terminal_276_send_output(&mut app, session, "one", Some(laid_out));
+    app.store.theme = AppTheme::Light;
+    app.apply_appearance(&ctx);
+    assert!(
+        !app.terminal_layouts.contains_key(&session),
+        "前のテーマの行が、現在の行として残りました"
+    );
+    assert_eq!(
+        app.terminal_fallback_layouts[&session].len(),
+        1,
+        "テーマを切り替えたら、次の取得までペインが空になりました"
+    );
+    assert!(
+        app.terminal_output_fingerprints.is_empty(),
+        "テーマ切り替え後も指紋が残り、次の取得が整形されません"
+    );
+    // The same text again: it must be laid out in the new theme.
+    terminal_276_send_output(&mut app, session, "one", None);
+    assert_eq!(terminal_276_row_text(&app, session), ["one"]);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_output_is_not_copied_beside_itself() {
+    let root = temporary_directory("terminal-276-copy");
+    let mut app = test_app(root.join("store.json"));
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    let session = Uuid::new_v4();
+    app.set_session_output(session, "one".into(), None);
+    assert!(
+        !app.terminal_fallback_layouts.contains_key(&session),
+        "取得のたびに、整形済みの行をもう一組持ちました"
+    );
+    app.store.theme = AppTheme::Light;
+    app.apply_appearance(&ctx);
+    assert!(app.terminal_fallback_layouts.contains_key(&session));
+    app.set_session_output(session, "two".into(), None);
+    assert!(
+        !app.terminal_fallback_layouts.contains_key(&session),
+        "テーマ切り替え前の行が、次の取得のあとも残りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_no_layout_for_text_the_app_does_not_hold_is_laid_out() {
+    let root = temporary_directory("terminal-276-unchanged");
+    let mut app = test_app(root.join("store.json"));
+    let session = Uuid::new_v4();
+    let unchanged = |output: &str| app::terminal_output::LaidOutTerminal {
+        theme: AppTheme::default(),
+        fingerprint: app::terminal_output::terminal_output_fingerprint(output),
+        layouts: None,
+    };
+    // Another result changed the text while this one was in flight.
+    app.set_session_output(session, "newer".into(), None);
+    terminal_276_send_output(&mut app, session, "older", Some(unchanged("older")));
+    assert_eq!(
+        terminal_276_row_text(&app, session),
+        ["older"],
+        "「変わっていない」という結果で、別の出力の行を表示し続けました"
+    );
+    // The text is held but its rows are gone.
+    app.terminal_layouts.remove(&session);
+    terminal_276_send_output(&mut app, session, "older", Some(unchanged("older")));
+    assert_eq!(terminal_276_row_text(&app, session), ["older"]);
+    // Held text and rows: nothing is redone.
+    let generation = app.terminal_output_generations[&session];
+    terminal_276_send_output(&mut app, session, "older", Some(unchanged("older")));
+    assert_eq!(app.terminal_output_generations[&session], generation);
+    assert_eq!(
+        app.terminal_output_fingerprints.get(&session),
+        Some(&app::terminal_output::terminal_output_fingerprint("older")),
+        "フレームが整形した行の出力を、次の取得がまた整形します"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_a_stash_does_not_outlive_its_result() {
+    let root = temporary_directory("terminal-276-stash");
+    let mut app = test_app(root.join("store.json"));
+    let session = Uuid::new_v4();
+    let theme = app.store.theme;
+    // A failed capture that still carries rows.
+    app.background_sender
+        .send(BackgroundResult::SessionOutput {
+            session_id: session,
+            result: Err("gone".into()),
+            laid_out: Some(terminal_276_sentinel(theme, "one")),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(app.terminal_prelaid.is_empty());
+    terminal_276_send_output(
+        &mut app,
+        session,
+        "one",
+        Some(terminal_276_sentinel(theme, "one")),
+    );
+    assert!(app.terminal_prelaid.is_empty());
+    // The poll: one failed capture and one session with no capture at all.
+    let other = Uuid::new_v4();
+    app.background_sender
+        .send(BackgroundResult::SessionPoll {
+            states: Vec::new(),
+            activities: Vec::new(),
+            previews: Vec::new(),
+            output: vec![(session, Err("gone".into()))],
+            laid_out: vec![
+                (session, terminal_276_sentinel(theme, "two")),
+                (other, terminal_276_sentinel(theme, "two")),
+            ],
+            clis: Vec::new(),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        app.terminal_prelaid.is_empty(),
+        "読めなかった取得の行が、次の取得に渡るところでした"
+    );
+    app.set_session_output(session, "two".into(), None);
+    assert_eq!(terminal_276_row_text(&app, session), ["two"]);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn terminal_276_random_sequences_match_the_oracle() {
+    let root = temporary_directory("terminal-276-random");
+    let mut app = test_app(root.join("store.json"));
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    let session = Uuid::new_v4();
+    let texts = ["\u{1b}[31mred\u{1b}[0m\nx", "plain", "\u{1b}[32mg\u{1b}[0m"];
+    let themes = [AppTheme::Dark, AppTheme::Light, AppTheme::HighContrast];
+    let mut seed: u64 = 0x9E3779B97F4A7C15;
+    let mut next = move |n: u64| {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        (seed >> 33) % n
+    };
+    for round in 0..300 {
+        let mut inflight: Vec<(usize, app::terminal_output::LaidOutTerminal)> = Vec::new();
+        let mut log = Vec::new();
+        for _ in 0..12 {
+            let op = next(6);
+            log.push(op);
+            match op {
+                0 => {
+                    let t = next(3) as usize;
+                    let known = app.terminal_output_fingerprints.get(&session).copied();
+                    let laid =
+                        app::terminal_output::lay_out_capture(texts[t], app.store.theme, known);
+                    inflight.push((t, laid));
+                }
+                1 | 2 if !inflight.is_empty() => {
+                    let i = next(inflight.len() as u64) as usize;
+                    let (t, laid) = inflight.remove(i);
+                    if op == 1 {
+                        terminal_276_send_output(&mut app, session, texts[t], Some(laid));
+                    } else {
+                        app.background_sender
+                            .send(BackgroundResult::SessionPoll {
+                                states: vec![],
+                                activities: vec![],
+                                previews: vec![],
+                                output: vec![(
+                                    session,
+                                    Ok(TerminalCapture {
+                                        output: texts[t].into(),
+                                        cursor: None,
+                                    }),
+                                )],
+                                laid_out: vec![(session, laid)],
+                                clis: vec![],
+                            })
+                            .unwrap();
+                        app.process_background_results();
+                    }
+                }
+                3 => {
+                    app.store.theme = themes[next(3) as usize];
+                    app.apply_appearance(&ctx);
+                }
+                4 => {
+                    let t = next(3) as usize;
+                    terminal_276_send_output(&mut app, session, texts[t], None);
+                }
+                _ => {
+                    app.background_sender
+                        .send(BackgroundResult::SessionOutput {
+                            session_id: session,
+                            result: Err("x".into()),
+                            laid_out: None,
+                        })
+                        .unwrap();
+                    app.process_background_results();
+                }
+            }
+            if let Some(rows) = app.terminal_layouts.get(&session) {
+                let want =
+                    terminal_line_layouts(&app.session_output[&session], app.store.theme.palette());
+                assert!(*rows == want, "round {round} ops {log:?}: rows differ");
+            }
+            if let Some(fp) = app.terminal_output_fingerprints.get(&session) {
+                assert!(
+                    app.terminal_layouts.contains_key(&session),
+                    "round {round} {log:?}: fingerprint without rows"
+                );
+                assert_eq!(
+                    *fp,
+                    app::terminal_output::terminal_output_fingerprint(
+                        &app.session_output[&session]
+                    ),
+                    "round {round} {log:?}: stale fingerprint"
+                );
+            }
+        }
+    }
+    fs::remove_dir_all(&root).ok();
 }

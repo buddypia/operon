@@ -5,6 +5,7 @@ pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
+pub(crate) mod terminal_output;
 
 // The keyboard is data this module reads and `screens.rs` draws, so it is
 // reachable by symbol name from anywhere the way every other module's is.
@@ -206,6 +207,7 @@ pub(crate) enum BackgroundResult {
         activities: Vec<(Uuid, AgentActivity)>,
         previews: Vec<(Uuid, ConversationPreview)>,
         output: Vec<(Uuid, UiResult<TerminalCapture>)>,
+        laid_out: Vec<(Uuid, terminal_output::LaidOutTerminal)>,
         clis: Vec<(Uuid, CliProvider)>,
     },
     CliSessions {
@@ -232,6 +234,7 @@ pub(crate) enum BackgroundResult {
     SessionOutput {
         session_id: Uuid,
         result: UiResult<TerminalCapture>,
+        laid_out: Option<terminal_output::LaidOutTerminal>,
     },
     TerminalInputSent {
         session_id: Uuid,
@@ -495,6 +498,12 @@ pub(crate) struct OperonApp {
     pub(crate) terminal_resize_requested: HashMap<Uuid, (u16, u16)>,
     pub(crate) terminal_resize_applied: HashMap<Uuid, (u16, u16)>,
     pub(crate) terminal_fallback_layouts: HashMap<Uuid, Vec<LayoutJob>>,
+    /// Rows a capture thread laid out, held from the moment its result is
+    /// read until the handler that read it returns (change 276).
+    pub(crate) terminal_prelaid: HashMap<Uuid, terminal_output::LaidOutTerminal>,
+    /// The fingerprint of each terminal's text whose rows a capture thread
+    /// laid out, which lets the next capture skip an unchanged one.
+    pub(crate) terminal_output_fingerprints: HashMap<Uuid, u64>,
     pub(crate) terminal_pane_render_cache: TerminalPaneRenderCache,
     pub(crate) terminal_output_generations: HashMap<Uuid, u64>,
     pub(crate) workspace_divider_drag: bool,
@@ -1069,6 +1078,8 @@ impl OperonApp {
             terminal_resize_requested: HashMap::new(),
             terminal_resize_applied: HashMap::new(),
             terminal_fallback_layouts: HashMap::new(),
+            terminal_prelaid: HashMap::new(),
+            terminal_output_fingerprints: HashMap::new(),
             terminal_pane_render_cache: TerminalPaneRenderCache::default(),
             terminal_output_generations: HashMap::new(),
             workspace_divider_drag: false,
@@ -1434,8 +1445,12 @@ impl OperonApp {
             // then kept as a laid-out job. Those jobs hold the previous
             // theme's ANSI table, so a theme switch has to throw them away or
             // every open terminal keeps the colours of the theme it was
-            // captured under.
-            self.terminal_layouts.clear();
+            // captured under. They stay on screen, as the fallback, until
+            // each pane's next capture: no fingerprint is kept, so that
+            // capture is laid out again whatever its text (change 276).
+            self.terminal_fallback_layouts
+                .extend(self.terminal_layouts.drain());
+            self.terminal_output_fingerprints.clear();
             self.terminal_pane_render_cache.clear();
         }
         if self.applied_terminal_font != Some(self.store.terminal_font) {
@@ -1659,13 +1674,18 @@ impl OperonApp {
                     activities,
                     previews,
                     output,
+                    laid_out,
                     clis,
                 } => {
                     self.background_tasks.remove(&BackgroundKey::SessionPoll);
                     for (session_id, provider) in clis {
                         self.adopt_terminal_cli(session_id, provider);
                     }
+                    self.terminal_prelaid.extend(laid_out);
                     self.apply_session_poll(states, activities, previews, output);
+                    // A capture the poll skipped must not lend its rows to a
+                    // later one.
+                    self.terminal_prelaid.clear();
                 }
                 BackgroundResult::CliSessions {
                     project_id,
@@ -1974,12 +1994,20 @@ impl OperonApp {
                         }
                     }
                 }
-                BackgroundResult::SessionOutput { session_id, result } => {
+                BackgroundResult::SessionOutput {
+                    session_id,
+                    result,
+                    laid_out,
+                } => {
                     self.background_tasks
                         .remove(&BackgroundKey::SessionOutput(session_id));
                     match result {
                         Ok(capture) => {
+                            if let Some(laid_out) = laid_out {
+                                self.terminal_prelaid.insert(session_id, laid_out);
+                            }
                             self.set_session_output(session_id, capture.output, capture.cursor);
+                            self.terminal_prelaid.remove(&session_id);
                         }
                         Err(error) => {
                             self.notice = Some(tf!(
@@ -3434,8 +3462,13 @@ impl OperonApp {
         let on_screen = self
             .terminals_on_screen()
             .into_iter()
-            .filter_map(|shown| active.iter().find(|(id, ..)| *id == shown).cloned())
+            .filter_map(|shown| active.iter().find(|(id, ..)| *id == shown))
+            .map(|(id, name, ..)| {
+                let known = self.terminal_output_fingerprints.get(id).copied();
+                (*id, name.clone(), known)
+            })
             .collect::<Vec<_>>();
+        let theme = self.store.theme;
         self.spawn_background(BackgroundKey::SessionPoll, move || {
             let mut states = Vec::with_capacity(active.len());
             let mut activities = Vec::new();
@@ -3487,20 +3520,19 @@ impl OperonApp {
                     }
                 });
             }
-            let output = on_screen
-                .into_iter()
-                .map(|(id, name, ..)| {
-                    (
-                        id,
-                        tmux_capture_with_cursor(&name).map_err(|error| error.to_string()),
-                    )
-                })
-                .collect();
+            let mut output = Vec::with_capacity(on_screen.len());
+            let mut laid_out = Vec::with_capacity(on_screen.len());
+            for (id, name, known) in on_screen {
+                let (capture, rows) = terminal_output::capture_laid_out(&name, theme, known);
+                output.push((id, capture));
+                laid_out.extend(rows.map(|rows| (id, rows)));
+            }
             BackgroundResult::SessionPoll {
                 states,
                 activities,
                 previews,
                 output,
+                laid_out,
                 clis,
             }
         });
@@ -4445,6 +4477,8 @@ impl OperonApp {
         self.terminal_path_caches
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
         self.terminal_fallback_layouts
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.terminal_output_fingerprints
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
         self.terminal_pane_render_cache
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
@@ -6840,6 +6874,7 @@ impl OperonApp {
         self.session_output.remove(&session_id);
         self.terminal_layouts.remove(&session_id);
         self.terminal_fallback_layouts.remove(&session_id);
+        self.terminal_output_fingerprints.remove(&session_id);
         self.terminal_path_caches.remove(&session_id);
         self.terminal_pane_render_cache.remove(&session_id);
         self.terminal_output_generations.remove(&session_id);
@@ -7243,84 +7278,6 @@ impl OperonApp {
     pub(crate) fn note_session_activity_change(&mut self, session_id: Uuid) {
         if !self.is_session_on_screen(session_id) {
             self.unread_sessions.insert(session_id);
-        }
-    }
-
-    pub(crate) fn request_session_output(&mut self, session_id: Uuid) {
-        let Some(session) = self
-            .store
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
-            return;
-        };
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::SessionOutput(session_id))
-        {
-            return;
-        }
-        let tmux_name = session.tmux_name.clone();
-        self.spawn_background(BackgroundKey::SessionOutput(session_id), move || {
-            BackgroundResult::SessionOutput {
-                session_id,
-                result: tmux_capture_with_cursor(&tmux_name).map_err(|error| error.to_string()),
-            }
-        });
-    }
-
-    pub(crate) fn set_session_output(
-        &mut self,
-        session_id: Uuid,
-        output: String,
-        cursor: Option<TerminalCursor>,
-    ) {
-        if let Some(cursor) = cursor {
-            self.terminal_cursors.insert(session_id, cursor);
-        } else {
-            // A capture without the marker line is the pane saying it does not
-            // know where the caret is (tmux exits 0 on the lost-target path
-            // with no marker at all). Keeping the previous one here would map
-            // old pane rows onto every new buffer length — rows of scrollback
-            // get a box forever, exactly the drift change 155 removed. Clear
-            // before the identical-output early return below, so the stale
-            // entry cannot survive on the dedup path either.
-            self.terminal_cursors.remove(&session_id);
-        }
-        // ANSI parsing is noticeably more expensive than drawing a button.
-        // Parse only when tmux has supplied fresh output (or when a theme change
-        // cleared `terminal_layouts`), rather than once per poll while the
-        // terminal pane is idle.
-        if self
-            .session_output
-            .get(&session_id)
-            .is_some_and(|existing| *existing == output)
-            && self.terminal_layouts.contains_key(&session_id)
-        {
-            return;
-        }
-        let palette = self.store.theme.palette();
-        let layouts = terminal_line_layouts(&output, palette);
-        self.terminal_fallback_layouts
-            .insert(session_id, layouts.clone());
-        self.terminal_layouts.insert(session_id, layouts);
-        self.session_output.insert(session_id, output);
-        let gen = self
-            .terminal_output_generations
-            .entry(session_id)
-            .or_insert(0);
-        *gen = gen.saturating_add(1);
-        // The buffer moved, so where the query occurs moved with it. Here
-        // rather than per frame: this walks every line, and the lines only
-        // change when tmux has said something new.
-        self.refresh_terminal_search(session_id);
-        if let Some(cache) = self.terminal_path_caches.get_mut(&session_id) {
-            cache.retain(|_, resolved| resolved.is_some());
-        }
-        if self.resolved_paths_session == Some(session_id) {
-            self.resolved_paths.retain(|_, resolved| resolved.is_some());
-            self.resolved_paths_generation += 1;
         }
     }
 

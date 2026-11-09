@@ -8,8 +8,8 @@
 
 state:
   route: "refactor"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 2"
   questions: "1 7"
   autonomy: "full"
@@ -17,13 +17,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the terminal_276_ tests, then src/app/terminal_output.rs and its wiring, per plan.md."
+resume: "Done. Outlived the change: copying the session lists each frame (35 µs at 400 sessions) and rebuilding diff rows (60 µs at 20 000 lines) were measured and are not worth a change."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked terminal_276_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs and src/app/terminal_output.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/276-terminal-output-stalls-the-frame/mutations.py"
+  three-gates: "machine passed make q.fast; cargo test --locked terminal_276_ (9), terminal (108), session_255_, claude_md, harness; the full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: no tier newly reached; src/app.rs falls from 9957 to about 9915 lines"
+  release-binary: "machine passed required - src/app.rs and src/app/terminal_output.rs change; packaged from main with the changes that follow it"
+  guards-verified-by-mutation: "machine passed mutations.py 16 of 16 caught; empirical-verifier re-ran every obligation and found no failing test; rust-reviewer found nothing Important"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
