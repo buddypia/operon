@@ -1,0 +1,20 @@
+# The state of one change. Template and field meanings: docs/sdlc/templates/state.yaml.
+
+state:
+  route: "bugfix"
+  stage: "plan"
+  status: "blocked"
+  attempts: "0 3"
+  questions: "3 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Ask whether ⌘W closes the dead session's tab and whether another tab's ✕ closes, then follow handoff.md's narrowest hypothesis."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending unknown until the cause is named; a fix in src/app/screens.rs or src/ui/session_tree.rs makes /Applications/Operon.app stale and ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
