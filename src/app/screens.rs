@@ -231,12 +231,12 @@ impl OperonApp {
     /// The fixed actions: the key the dispatch matches, the label a person reads
     /// and searches, and the keymap id whose chord is drawn beside it.
     ///
-    /// The four rows that have a chord take their label from the keymap
+    /// The rows that have a chord take their label from the keymap
     /// registry rather than writing it a second time, and none of them has a
     /// shortcut typed into the label any more. That was a place the application
     /// told a person which key to press and was under no obligation to be
     /// right; the chord is now read from the map the frame loop listens with.
-    pub(crate) fn palette_actions() -> [(&'static str, &'static str, &'static str); 8] {
+    pub(crate) fn palette_actions() -> [(&'static str, &'static str, &'static str); 10] {
         [
             (
                 "New session",
@@ -266,6 +266,14 @@ impl OperonApp {
             ),
             ("Scan a workspace", tr("ワークスペースをスキャン…"), ""),
             ("Open the keymap file", tr("キー割り当てファイルを開く"), ""),
+            // Change 272. Closing and stepping act on the tab behind the
+            // palette, so only the two that start something are rows.
+            ("New terminal tab", tr(action_label("tab.new")), "tab.new"),
+            (
+                "Reopen closed tab",
+                tr(action_label("tab.reopen")),
+                "tab.reopen",
+            ),
         ]
     }
 
@@ -460,6 +468,10 @@ impl OperonApp {
     pub(crate) fn activate_palette_entry(&mut self, kind: &PaletteKind) {
         match kind {
             PaletteKind::Action("New session") => self.open_new_session(),
+            PaletteKind::Action("New terminal tab") => {
+                self.launch_workspace_terminal(self.workspace.focused);
+            }
+            PaletteKind::Action("Reopen closed tab") => self.reopen_closed_tab(),
             PaletteKind::Action("Open history") => {
                 self.page = Page::Sessions;
                 self.session_library_open = true;
@@ -7099,37 +7111,8 @@ impl OperonApp {
             self.ui_dock_drop(ui, area, palette);
             return;
         }
-        let close_key = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::W));
-        if close_key {
-            if let Some(tab) = self.workspace.active().cloned() {
-                self.close_workspace_tab(&tab);
-            }
-        }
-        let next_key = ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));
-        let prev_key = ui.input_mut(|i| {
-            i.consume_key(
-                egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
-                egui::Key::Tab,
-            )
-        });
-        if next_key || prev_key {
-            if let Some(group) = self
-                .workspace
-                .groups
-                .iter()
-                .find(|g| Some(g.id) == self.workspace.focused)
-            {
-                let index = if prev_key {
-                    (group.active + group.tabs.len() - 1) % group.tabs.len()
-                } else {
-                    (group.active + 1) % group.tabs.len()
-                };
-                let id = group.id;
-                let tab = group.tabs[index].clone();
-                self.workspace.select(id, &tab);
-                self.activate_workspace_tab(&tab);
-            }
-        }
+        // ⌘W and ⌃Tab are `handle_app_shortcuts`'s, through the keymap
+        // (change 272); ⌘S stays with the editor it saves.
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
             if let Some(WorkspaceTab::Document(id)) = self.workspace.active().cloned() {
                 self.active_document = Some(id);

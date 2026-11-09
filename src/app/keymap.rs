@@ -1,7 +1,7 @@
 //! The keyboard, as data rather than as literals inside the frame loop.
 //!
-//! Ten actions have ids. A file names them and gives each a chord; what is
-//! not named keeps its default. The whole of the decision — parsing, conflict,
+//! The remappable actions have ids. A file names them and gives each a chord;
+//! what is not named keeps its default. The whole of the decision — parsing, conflict,
 //! and every way a file can be wrong — is `resolve_keymap`, which takes a
 //! string and returns either a map or the sentence that says what is wrong with
 //! it. Nothing in that path touches a disk or a window, because a keymap that
@@ -102,6 +102,34 @@ pub(crate) const KEYMAP_ACTIONS: &[KeymapAction] = &[
         label: "サイドパネルを開閉",
         default: "Mod+Alt+B",
     },
+    // The tab keys every browser, editor, and terminal on a Mac answers to
+    // (change 272). The + in the strip is named 「空のターミナルを開く」, and
+    // ⌘T is that button, so it carries the same name.
+    KeymapAction {
+        id: "tab.new",
+        label: "空のターミナルを開く",
+        default: "Mod+T",
+    },
+    KeymapAction {
+        id: "tab.close",
+        label: "タブを閉じる",
+        default: "Mod+W",
+    },
+    KeymapAction {
+        id: "tab.reopen",
+        label: "閉じたタブを開き直す",
+        default: "Mod+Shift+T",
+    },
+    KeymapAction {
+        id: "tab.next",
+        label: "次のタブへ",
+        default: "Mod+Shift+]",
+    },
+    KeymapAction {
+        id: "tab.previous",
+        label: "前のタブへ",
+        default: "Mod+Shift+[",
+    },
 ];
 
 /// A chord, compared the way "the same chord" means.
@@ -150,6 +178,55 @@ impl Keymap {
     pub(crate) fn label_for(&self, id: &str) -> String {
         self.chord_for(id).map(chord_label).unwrap_or_default()
     }
+
+    /// The one action a key press triggers, if any.
+    ///
+    /// egui matches a chord leniently — an extra Shift or Alt held is ignored —
+    /// so ⇧⌘T matches ⌘T as well as itself. Lenient matching is worth keeping:
+    /// on a JIS keyboard `=` needs Shift, and `Mod+=` should still answer. So
+    /// a press goes to the binding whose Shift and Alt match exactly, and only
+    /// a press with no exact binding falls back to the first lenient one, which
+    /// is what every chord did before change 272. The conflict check in
+    /// `resolve_keymap` already treats ⌘T and ⇧⌘T as two chords; this is the
+    /// dispatch agreeing with it.
+    pub(crate) fn action_for(
+        &self,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    ) -> Option<&'static str> {
+        let mut lenient = None;
+        for (id, chord) in &self.bindings {
+            let Some(chord) = chord else { continue };
+            if !key_matches(chord.key, key, modifiers.shift)
+                || !modifiers.matches_logically(chord.modifiers)
+            {
+                continue;
+            }
+            if modifiers.matches_exact(chord.modifiers) {
+                return Some(id);
+            }
+            lenient = lenient.or(Some(*id));
+        }
+        lenient
+    }
+}
+
+/// Whether a pressed key is the key a chord names.
+///
+/// With ⌘ held, macOS reports the character Shift makes, not the key: ⇧⌘]
+/// arrives as `}` (winit 0.30's `create_key_event` keeps Shift's effect, and
+/// egui-winit 0.31 sends that logical key). `[` and `]` are the pair whose
+/// shifted characters are the same on US and JIS keyboards, so they are the
+/// pair read through Shift. Other shifted symbols differ by layout — ⇧; is `:`
+/// on one and `+` on the other — and guessing one would be wrong on the other.
+fn key_matches(chord_key: egui::Key, pressed: egui::Key, shift: bool) -> bool {
+    chord_key == pressed
+        || (shift
+            && matches!(
+                (chord_key, pressed),
+                (egui::Key::OpenBracket, egui::Key::OpenCurlyBracket)
+                    | (egui::Key::CloseBracket, egui::Key::CloseCurlyBracket)
+            ))
 }
 
 /// A chord from the file's spelling, or `None` when it is not one.

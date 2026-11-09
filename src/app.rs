@@ -751,6 +751,11 @@ pub(crate) struct OperonApp {
     /// any. In memory, as `dock_drag` is.
     pub(crate) column_drag: Option<ColumnDrag>,
     pub(crate) workspace: WorkspaceTabs,
+    /// Tabs the person closed, newest last, for ⇧⌘T (change 272). Ids only:
+    /// what they point at is looked up again when one is reopened, because a
+    /// session can be removed and a project forgotten in between. In memory,
+    /// at most `CLOSED_TAB_LIMIT`.
+    pub(crate) closed_tabs: Vec<WorkspaceTab>,
     pub(crate) workspace_initialized: bool,
     /// Runtime tab layouts and terminal context belong to the selected project.
     pub(crate) workspace_project: Option<Uuid>,
@@ -1167,6 +1172,7 @@ impl OperonApp {
             session_arrangement,
             column_drag: None,
             workspace: WorkspaceTabs::default(),
+            closed_tabs: Vec::new(),
             workspace_initialized: false,
             workspace_project: None,
             workspace_project_drag: None,
@@ -7119,10 +7125,90 @@ impl OperonApp {
             self.workspace_editor_views.remove(id);
             self.workspace_editor_jumps.remove(id);
         }
-        self.workspace.close(tab);
+        if self.workspace.close(tab) {
+            self.closed_tabs.retain(|closed| closed != tab);
+            self.closed_tabs.push(tab.clone());
+            let excess = self.closed_tabs.len().saturating_sub(CLOSED_TAB_LIMIT);
+            self.closed_tabs.drain(..excess);
+        }
         if let Some(next) = self.workspace.active().cloned() {
             self.activate_workspace_tab(&next);
         }
+    }
+
+    /// ⇧⌘T: the newest closed tab that can still be shown, shown again.
+    ///
+    /// One that is already open again by another route, whose session was
+    /// removed, or whose project was forgotten is passed over and dropped —
+    /// reopening a tab for nothing would be worse than reopening the one
+    /// before it.
+    pub(crate) fn reopen_closed_tab(&mut self) {
+        while let Some(tab) = self.closed_tabs.pop() {
+            if self
+                .workspace
+                .groups
+                .iter()
+                .any(|group| group.tabs.contains(&tab))
+            {
+                continue;
+            }
+            match &tab {
+                WorkspaceTab::Session(id) => {
+                    if !self.store.sessions.iter().any(|session| session.id == *id) {
+                        continue;
+                    }
+                    self.page = Page::Sessions;
+                    self.session_library_open = false;
+                    self.select_session(*id);
+                }
+                WorkspaceTab::Document(id) => {
+                    let Some(project) = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|project| project.id == id.project)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    // `open_document_at` puts the tab in the workspace only
+                    // when the workspace is the page showing.
+                    self.page = Page::Sessions;
+                    self.session_library_open = false;
+                    self.open_document_at(&project, id.root.clone(), id.path.clone());
+                }
+            }
+            return;
+        }
+        self.notice_briefly(tr("開き直せるタブはありません。"));
+    }
+
+    /// ⇧⌘] / ⇧⌘[ and ⌃Tab / ⌃⇧Tab: the focused pane's next or previous tab,
+    /// wrapping round.
+    pub(crate) fn step_workspace_tab(&mut self, forward: bool) {
+        let Some(group) = self
+            .workspace
+            .groups
+            .iter()
+            .find(|group| Some(group.id) == self.workspace.focused)
+        else {
+            return;
+        };
+        let count = group.tabs.len();
+        // `settle` drops an emptied group, so this is a group nobody settled;
+        // stepping in it would divide by zero.
+        if count == 0 {
+            return;
+        }
+        let index = if forward {
+            (group.active + 1) % count
+        } else {
+            (group.active + count - 1) % count
+        };
+        let id = group.id;
+        let tab = group.tabs[index].clone();
+        self.workspace.select(id, &tab);
+        self.activate_workspace_tab(&tab);
     }
 
     /// Both paths that decide a session changed state call this, at the point
@@ -8291,6 +8377,40 @@ impl OperonApp {
             if self.chord_pressed(ctx, "panel.toggle") {
                 self.show_session_inspector = !self.show_session_inspector;
             }
+            // ⌘T is the strip's +, and like ⌘N it answers from any page.
+            if self.chord_consumed(ctx, "tab.new") {
+                self.launch_workspace_terminal(self.workspace.focused);
+            }
+            if self.chord_consumed(ctx, "tab.reopen") {
+                self.reopen_closed_tab();
+            }
+            // The rest act on the tabs on screen, so only where they are. They
+            // are consumed here, before any pane draws, so a terminal never
+            // receives ⌃Tab and nothing later sees the ⌘ chords again.
+            if self.page == Page::Sessions && !self.session_library_open {
+                if self.chord_consumed(ctx, "tab.close") {
+                    if let Some(tab) = self.workspace.active().cloned() {
+                        self.close_workspace_tab(&tab);
+                    }
+                }
+                // ⌃⇧Tab first: egui's lenient match lets ⌃Tab swallow it, which
+                // is why it used to step forward. Fixed rather than remappable,
+                // as every browser keeps them beside ⇧⌘[ and ⇧⌘].
+                let back = ctx.input_mut(|input| {
+                    input.consume_key(
+                        egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
+                        egui::Key::Tab,
+                    )
+                });
+                let forward =
+                    ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));
+                if self.chord_consumed(ctx, "tab.previous") || back {
+                    self.step_workspace_tab(false);
+                }
+                if self.chord_consumed(ctx, "tab.next") || forward {
+                    self.step_workspace_tab(true);
+                }
+            }
             for (action, page) in [
                 ("page.home", Page::Home),
                 ("page.projects", Page::Projects),
@@ -8308,21 +8428,39 @@ impl OperonApp {
     }
 
     pub(crate) fn chord_pressed(&self, ctx: &egui::Context, action: &str) -> bool {
-        let Some(chord) = self.keymap.chord_for(action) else {
-            return false;
-        };
-        ctx.input(|input| input.modifiers.matches_logically(chord.modifiers))
-            && ctx.input(|input| input.key_pressed(chord.key))
+        ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| self.event_triggers(event, action))
+        })
     }
 
     /// The same question, for a chord that must not also reach whatever has
-    /// focus. `consume_key` removes the event, which is the whole of "the agent
-    /// never sees it".
+    /// focus. Removing the event is the whole of "the agent never sees it".
     pub(crate) fn chord_consumed(&self, ctx: &egui::Context, action: &str) -> bool {
-        let Some(chord) = self.keymap.chord_for(action) else {
-            return false;
-        };
-        ctx.input_mut(|input| input.consume_key(chord.modifiers, chord.key))
+        ctx.input_mut(|input| {
+            let before = input.events.len();
+            input
+                .events
+                .retain(|event| !self.event_triggers(event, action));
+            input.events.len() != before
+        })
+    }
+
+    /// Whether one input event is a press of `action`'s chord — decided by
+    /// `Keymap::action_for`, so a press that is a more specific chord's is not
+    /// this one's (change 272).
+    fn event_triggers(&self, event: &egui::Event, action: &str) -> bool {
+        matches!(
+            event,
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } if self.keymap.action_for(*key, *modifiers) == Some(action)
+        )
     }
 
     /// Put the keymap where a person can edit it: write the defaults if there
