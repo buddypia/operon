@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have empirical-verifier and formal-verifier try to falsify the branch head; record reproduced findings as Fn, then push and wait for CI."
+resume: "Wait for CI on the branch head; when green, merge on main with git merge --no-ff --no-edit, then package per the ship skill."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed check-bands.sh exits 0 after moving the port drawing to src/app/screens.rs; largest_module_lines at diagnose (9729, main 9722), steering_bytes and approval_escapes already breached on main"
   release-binary: "machine pending required - src/git/ports.rs, src/app.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "human passed mutations.py 17 of 17 caught: deepest-wins, git worktrees as folders, stored spellings, own vs project, empty section, stop disabled, three refusals, check-before-signal, name match, unconfirmed, cancel, stale scan, generation, rescan, still-running notice"
+  guards-verified-by-mutation: "human passed mutations.py 23 of 23 caught (run locally as two halves of 11 and 12): attribution, spellings, no-worktree root, sections, stop disabled, three refusals, check-before-signal, name match, renamed holder, unconfirmed, lsof complaining, cancel, confirmation wording, stale scan and its re-read, generation, rescan, list drop, still-running notice"
   stop-in-running-app: "human pending a server stopped from the menu disappears from it in the installed app"
 
 sets:

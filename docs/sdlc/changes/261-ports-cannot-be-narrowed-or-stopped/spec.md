@@ -18,13 +18,16 @@
    root, the path relative to the project root when the folder is inside it,
    the folder's own name when it is not. Test:
    `ports_261_known_folders_are_named_once`.
-3. A session's ports split in two: **own** — credited to the folder that the
-   session's stored worktree path is a spelling of — and **elsewhere** — credited to another folder of the same
+3. A session's ports split in two: **own** — credited to the folder the
+   session works in, which is the folder its stored worktree path is a
+   spelling of, or the project root when it has no worktree (it then runs in
+   the project checkout) — and **elsewhere** — credited to another folder of the same
    project. A session at a project's root does not count a server in one of
    that project's git worktrees as own, whether or not a session is open on it;
    another project's servers appear in neither. Own is in port order,
-   elsewhere in folder-name then port order. Test:
-   `ports_261_session_splits_own_from_elsewhere`.
+   elsewhere in folder-name then port order. Tests:
+   `ports_261_session_splits_own_from_elsewhere`,
+   `ports_261_session_without_worktree_owns_the_project_root`.
 4. The header badge names the own ports as today (`:5173 vite` for one,
    「{n} ポート稼働中」 for more); with no own ports but some elsewhere it reads
    「プロジェクトで {n} ポート稼働中」 in `text-muted`; with neither nothing is
@@ -41,7 +44,9 @@
 7. Stopping signals only the listener the person confirmed: when the PID no
    longer listens on that port under that process name, nothing is sent and
    the process keeps running; when it does, SIGTERM is sent and the outcome is
-   "stopped" once a successful read shows the port no longer held by it.
+   "stopped" once a successful read shows the port no longer held by that PID
+   under any name — a PID that keeps the port under a new name has not
+   stopped (`ports_261_stop_does_not_take_a_renamed_holder_for_gone`).
    Tests: `ports_261_stop_signals_only_the_confirmed_listener` (a real
    `python3` listener, real `lsof` and `/bin/kill`) and
    `ports_261_stop_sequence_checks_before_signalling` (injected check and
@@ -113,21 +118,22 @@ Placement: `EXTEND`. `src/git/ports.rs` already joins listeners to folders
 (`attribute_ports`, tests from `ports_` in change 077) and `src/app.rs` already
 draws the badge (`ui_session_ports`, test
 `ui_session_ports_renders_compact_popover_button_when_active`). Both grow; no
-module is added.
+module is added. The badge's drawing moves into `src/app/screens.rs` with the
+other modals, to keep `src/app.rs` under its size band.
 
 `src/git/ports.rs`:
 
 - `PortRoot { path, spellings: Vec<PathBuf>, project_id: Uuid, label: String }`
   — a known folder: `path` is canonical, `spellings` every stored path that
   resolved to it (and `path` itself).
-- `AttributedPort { port: ListeningPort, directory: Option<PathBuf>, root: Option<PortRoot> }`
+- `AttributedPort { port: ListeningPort, directory: Option<PathBuf>, root: Option<Arc<PortRoot>> }`
   replaces `(ListeningPort, Option<PathBuf>)`.
-- `port_roots(projects: &[(Uuid, PathBuf)], sessions: &[(Uuid, PathBuf)], worktrees_of: impl Fn(&Path) -> Vec<PathBuf>, canonical: impl Fn(&Path) -> PathBuf) -> Vec<PortRoot>`
+- `port_roots(projects: &[(Uuid, PathBuf)], sessions: &[(Uuid, PathBuf)], worktrees_of: impl Fn(&Path) -> Vec<PathBuf>, canonical: impl Fn(&Path) -> PathBuf) -> Vec<Arc<PortRoot>>`
   — requirement 2; pure, so a test injects both the git listing and the
   canonicalisation. The scan passes `list_worktrees` and
   `Path::canonicalize` (falling back to the path itself), both on the
   background thread. Labels are computed between canonical paths.
-- `attribute_ports(ports, directories, roots: &[PortRoot]) -> Vec<AttributedPort>`
+- `attribute_ports(ports, directories, roots: &[Arc<PortRoot>]) -> Vec<AttributedPort>`
   — requirement 1, same deepest-wins rule as today.
 - `scan_listening_ports(projects, sessions)` / `scan_listening_ports_with(program, projects, sessions)`:
   the two existing `lsof` reads, then — only when a listener was found —
@@ -135,11 +141,14 @@ module is added.
   through `run_command_with_timeout`, 20 s, `COMMAND_OUTPUT_MAX_BYTES`), then
   attribution. A project whose listing fails contributes only its root.
 - `PortStopOutcome { Stopped, StillListening, Unconfirmed, NotListening, Unverified, Refused, Failed(String) }`.
-- `listener_still_held(program, port) -> Option<bool>`:
+- `ListenerRead { Same, Renamed, Free }` and
+  `read_listener(program, port) -> Option<ListenerRead>`:
   `lsof -nP -a -p <pid> -iTCP:<port> -sTCP:LISTEN -F pcn`, parsed by the
-  existing `parse_lsof_listeners`; `Some(true)` when the pid, port and process
-  name all match, `Some(false)` when `lsof` ran and they do not, `None` when it
-  could not run or timed out. `lsof_output` gains a timeout parameter: the scan
+  existing `parse_lsof_listeners`; `Same` when the PID holds the port under
+  the confirmed name, `Renamed` when it holds it under another, `Free` when
+  `lsof` ran and the PID does not hold it (exit 0, or exit 1 with nothing on
+  stderr), `None` when it could not run, timed out, or found nothing while
+  writing to stderr. `lsof_output` gains a timeout parameter: the scan
   keeps `PORT_SCAN_TIMEOUT_SECONDS`, this check uses
   `PORT_STOP_CHECK_TIMEOUT_SECONDS` = 2; both keep `PORT_SCAN_MAX_BYTES`.
 - `send_terminate(program, pid) -> Result<(), String>`:
@@ -150,11 +159,11 @@ module is added.
   `stop_listening_port_with(port, std::process::id(), wait, check, signal)`
   with the two functions above; the `_with` form takes the check and the signal
   as closures so the sequence is tested without processes. Order: refuse PID
-  ≤ 1, PID > `i32::MAX` or Operon's PID; check — `None` → `Unverified`,
-  `Some(false)` → `NotListening`; signal — `Err` → `Failed`; then check every
-  `PORT_STOP_POLL_MILLIS` = 250 until `PORT_STOP_WAIT_MILLIS` = 3000 has
-  passed: the first `Some(false)` → `Stopped`; at the deadline `StillListening`
-  if any read said held, else `Unconfirmed`. Worst case: 2 s check + 2 s
+  ≤ 1, PID > `i32::MAX` or Operon's PID; read — `None` → `Unverified`,
+  `Renamed` or `Free` → `NotListening`; signal — `Err` → `Failed`; then read
+  every `PORT_STOP_POLL_MILLIS` = 250 until `PORT_STOP_WAIT_MILLIS` = 3000 has
+  passed: the first `Free` → `Stopped`; at the deadline `StillListening` if
+  any read saw `Same` or `Renamed`, else `Unconfirmed`. Worst case: 2 s check + 2 s
   signal + 3 s wait + one 2 s read overrunning it ≈ 9 s, with `PortStop` held.
   A PID reused between the check and the signal, under the same name, in that
   window of milliseconds, is the residual risk; the name match is what narrows
@@ -168,22 +177,33 @@ module is added.
   `(project.id, project.path)` for every project and
   `(session.project_id, worktree)` for every session with a worktree; with
   neither it clears as today.
-- `SessionPorts { own, elsewhere }` and `session_ports(&self, &Session)` —
-  requirement 3, own when the root's `spellings` contain the session's stored
-  worktree path (no filesystem call in the frame); the same small
+- `session_ports(&self, &Session) -> SessionPorts` — requirement 3, own when
+  the root's `spellings` contain the session's stored worktree path, or the
+  stored project path when the session has none (a lookup in
+  `store.projects`, no filesystem call in the frame); the same small
   clone-and-sort per frame as today, over at most `PORT_SCAN_MAX_ENTRIES`.
+  `stop_port` spawns the stop.
+
+`src/app/screens.rs`, beside the other modals, which keeps `src/app.rs` under
+the `largest_module_lines` band's propose tier (10 000):
+
 - `ui_session_ports` draws the badge (requirement 4) and calls
-  `ui_session_ports_menu(ui, palette, &SessionPorts, stopping) -> PortMenuAction`
+  `session_ports_menu(ui, palette, &SessionPorts, stopping) -> Option<PortMenuAction>`
   (requirement 5), which returns what was pressed instead of mutating state, so
   it can be drawn and read in a test. The stop control is the existing
   `small_icon_button` inside `ui.add_enabled_ui(!stopping, …)`, with
   `on_disabled_hover_text` — no new button helper and no raw button.
-- `pending_port_stop: Option<AttributedPort>`; `ui_port_stop_modal(ctx, palette)`
-  beside `ui_run_script_modal` (requirement 9).
+- `ui_port_stop_modal(ctx, palette)`, called beside `ui_run_script_modal`
+  (requirement 9), reading `pending_port_stop: Option<AttributedPort>` on
+  `OperonApp`.
+
+`src/app.rs` again:
+
 - `BackgroundKey::PortStop` (one stop at a time) and
   `BackgroundResult::PortStopped { port, outcome }`; its handler removes the
-  key, sets the notice, bumps `ports_generation` and clears
-  `ports_scanned_at` (requirement 10). `BackgroundResult::ListeningPorts`
+  key, sets the notice, bumps `ports_generation`, clears `ports_scanned_at`,
+  and on `Stopped` drops that one (pid, port) from the list at once
+  (requirement 10). `BackgroundResult::ListeningPorts`
   carries the generation its scan started at; a result from an older
   generation is dropped and `ports_scanned_at` cleared, so the next frame
   reads again.
@@ -191,6 +211,9 @@ module is added.
 Nothing new runs in the draw path: the scan, the git listing, both `lsof`
 checks and `kill` run on the background thread; the frame reads
 `listening_ports` and `pending_port_stop`. No persisted shape changes.
+
+`src/git/ports.rs` also holds `SessionPorts { own, elsewhere }` and
+`port_stop_notice(port, outcome)`, the words for each outcome.
 
 `src/config.rs`: the five `PORT_STOP_*` constants. `src/i18n_tables.rs`: every
 new string in `EN_TABLE` and `KO_TABLE`; 「稼働中のポート」 removed with its last

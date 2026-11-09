@@ -91,3 +91,23 @@
   one at the commit gate.
 - The READMEs said a right-click copies the URL; the menu has always had a copy
   control instead, and the rewritten paragraph says so.
+- Two findings were reproduced against the first commit (94f2252) and fixed,
+  each kept as a regression test: a session with no worktree runs in the
+  project checkout but owned nothing (`F1`,
+  `ports_261_session_without_worktree_owns_the_project_root`); and a PID that
+  kept the port under a new name after SIGTERM was reported stopped (`F2`,
+  `ports_261_stop_does_not_take_a_renamed_holder_for_gone`), so a read now
+  says `Same`, `Renamed` or `Free` instead of yes or no. Requirements 3 and 7
+  in `spec.md` say so and were approved again. With them the proof above
+  reads `13 passed` for `cargo test --locked ports_261_`, not eleven.
+- CI's `Control bands` step failed on the first branch run: `src/app.rs`
+  reached 10 013 lines, past the `largest_module_lines` propose tier. The
+  badge, menu and confirmation drawing moved to `src/app/screens.rs` beside
+  the other modals, and `SessionPorts` and the outcome words to
+  `src/git/ports.rs`; `src/app.rs` is now 9 729 lines (9 722 on `main`).
+- The sweep grew to 23 mutations for the findings and for the guards the
+  verifier read as unwatched (lsof complaining, the confirmation's wording,
+  the stale scan's re-read, the list drop). All 23 were caught locally, run
+  as two halves; the record keeps one `mutations.py`, which is the only sweep
+  file the gate admits, and at the 24 s per mutation CI measured on the first
+  branch run it fits inside CI's 900 s per obligation.

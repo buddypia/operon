@@ -35190,7 +35190,7 @@ pub(crate) fn ports_261_stop_refuses_operon_and_init() {
             Duration::ZERO,
             |_| {
                 ran = true;
-                Some(true)
+                Some(ListenerRead::Same)
             },
             |_| -> Result<(), String> {
                 panic!("PID {pid} にシグナルを送ろうとしました")
@@ -35207,22 +35207,24 @@ pub(crate) fn ports_261_stop_refuses_operon_and_init() {
 pub(crate) fn ports_261_stop_sequence_checks_before_signalling() {
     let port = port_261(4821, "vite", 5173);
 
-    let mut signalled = false;
-    let outcome = stop_listening_port_with(
-        &port,
-        1,
-        Duration::ZERO,
-        |_| Some(false),
-        |_| {
-            signalled = true;
-            Ok(())
-        },
-    );
-    assert_eq!(outcome, PortStopOutcome::NotListening);
-    assert!(
-        !signalled,
-        "別のプロセスに変わった PID にシグナルを送りました"
-    );
+    for before in [ListenerRead::Renamed, ListenerRead::Free] {
+        let mut signalled = false;
+        let outcome = stop_listening_port_with(
+            &port,
+            1,
+            Duration::ZERO,
+            |_| Some(before),
+            |_| {
+                signalled = true;
+                Ok(())
+            },
+        );
+        assert_eq!(outcome, PortStopOutcome::NotListening, "{before:?}");
+        assert!(
+            !signalled,
+            "別のプロセスに変わった PID にシグナルを送りました: {before:?}"
+        );
+    }
 
     let mut reads = Vec::new();
     let signalled_pid = std::cell::Cell::new(None);
@@ -35234,7 +35236,11 @@ pub(crate) fn ports_261_stop_sequence_checks_before_signalling() {
             reads.push(signalled_pid.get().is_some());
             assert_eq!(seen, &port);
             // Held before the signal, gone on the first read after it.
-            Some(reads.len() == 1)
+            Some(if reads.len() == 1 {
+                ListenerRead::Same
+            } else {
+                ListenerRead::Free
+            })
         },
         |pid| {
             signalled_pid.set(Some(pid));
@@ -35249,7 +35255,13 @@ pub(crate) fn ports_261_stop_sequence_checks_before_signalling() {
         "シグナルの前に読み、後にもう一度読む順になっていません"
     );
 
-    let outcome = stop_listening_port_with(&port, 1, Duration::ZERO, |_| Some(true), |_| Ok(()));
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::ZERO,
+        |_| Some(ListenerRead::Same),
+        |_| Ok(()),
+    );
     assert_eq!(outcome, PortStopOutcome::StillListening);
 }
 
@@ -35277,7 +35289,7 @@ pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
         &port,
         1,
         Duration::ZERO,
-        |_| Some(true),
+        |_| Some(ListenerRead::Same),
         |_| Err("Operation not permitted".into()),
     );
     assert_eq!(
@@ -35293,7 +35305,7 @@ pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
         Duration::from_millis(600),
         |_| {
             reads += 1;
-            (reads == 1).then_some(true)
+            (reads == 1).then_some(ListenerRead::Same)
         },
         |_| Ok(()),
     );
@@ -35306,13 +35318,84 @@ pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
 
     // The real helpers say "not known" rather than guessing.
     assert_eq!(
-        listener_still_held("operon-there-is-no-such-program", &port),
+        read_listener("operon-there-is-no-such-program", &port),
         None
     );
+    // `lsof` finding nothing exits 1 in silence: that is a free port. Finding
+    // nothing while complaining is not known to be one.
+    let dir = temporary_directory("ports-261-quiet-lsof");
+    fs::create_dir_all(&dir).unwrap();
+    let quiet = fake_lsof_261(&dir, "lsof-quiet", "", "", 1);
+    assert_eq!(
+        read_listener(quiet.to_str().unwrap(), &port),
+        Some(ListenerRead::Free)
+    );
+    let complaining = fake_lsof_261(
+        &dir,
+        "lsof-complaining",
+        "",
+        "lsof: WARNING: can not stat() nfs file system\\n",
+        1,
+    );
+    assert_eq!(
+        read_listener(complaining.to_str().unwrap(), &port),
+        None,
+        "lsof が文句を言いながら何も見つけなかったのを、空いたと読みました"
+    );
+    fs::remove_dir_all(&dir).ok();
     assert!(send_terminate("operon-there-is-no-such-program", 4821).is_err());
     let unused = i32::MAX.unsigned_abs() - 7;
     let refused = send_terminate(PORT_STOP_PROGRAM, unused);
     assert!(refused.is_err(), "存在しない PID への kill が成功しました");
+}
+
+/// A stand-in for `lsof` that prints `stdout` and `stderr` and exits with `code`.
+fn fake_lsof_261(dir: &Path, name: &str, stdout: &str, stderr: &str, code: i32) -> PathBuf {
+    let script = dir.join(name);
+    fs::write(
+        &script,
+        format!("#!/bin/sh\nprintf '{stdout}'\nprintf '{stderr}' >&2\nexit {code}\n"),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&script).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
+    fs::set_permissions(&script, permissions).unwrap();
+    script
+}
+
+/// Change 261, finding 2. After the signal, the PID still holding the port
+/// under another name has not stopped: only a free port is "stopped".
+#[test]
+pub(crate) fn ports_261_stop_does_not_take_a_renamed_holder_for_gone() {
+    let dir = temporary_directory("ports-261-renamed");
+    fs::create_dir_all(&dir).unwrap();
+    let renamed = fake_lsof_261(&dir, "lsof-renamed", "p4821\\ncrenamed\\nn*:5173\\n", "", 0);
+    let port = port_261(4821, "vite", 5173);
+    assert_eq!(
+        read_listener(renamed.to_str().unwrap(), &port),
+        Some(ListenerRead::Renamed)
+    );
+    let mut reads = 0;
+    let outcome = stop_listening_port_with(
+        &port,
+        1,
+        Duration::ZERO,
+        |port| {
+            reads += 1;
+            if reads == 1 {
+                Some(ListenerRead::Same)
+            } else {
+                read_listener(renamed.to_str().unwrap(), port)
+            }
+        },
+        |_| Ok(()),
+    );
+    assert_eq!(
+        outcome,
+        PortStopOutcome::StillListening,
+        "名前を変えて同じポートを持ち続けるプロセスを停止済みと報告しました"
+    );
+    fs::remove_dir_all(&dir).ok();
 }
 
 /// Kills and reaps a test listener on every path out of the test.
@@ -35382,15 +35465,15 @@ pub(crate) fn ports_261_stop_signals_only_the_confirmed_listener() {
         PortStopOutcome::NotListening
     );
     assert_eq!(
-        listener_still_held(PORT_SCAN_PROGRAM, &listener),
-        Some(true),
+        read_listener(PORT_SCAN_PROGRAM, &listener),
+        Some(ListenerRead::Same),
         "名前の違うリスナーが止められました"
     );
 
     assert_eq!(stop_listening_port(&listener), PortStopOutcome::Stopped);
     assert_eq!(
-        listener_still_held(PORT_SCAN_PROGRAM, &listener),
-        Some(false)
+        read_listener(PORT_SCAN_PROGRAM, &listener),
+        Some(ListenerRead::Free)
     );
     drop(child);
 }
@@ -47151,6 +47234,7 @@ pub(crate) fn ports_261_session_splits_own_from_elsewhere() {
         "ほかの場所はフォルダ名、次にポートの順です"
     );
 
+    // No worktree and a project the store does not know: no folder at all.
     let mut without_folder = test_session(Uuid::new_v4(), SessionStatus::Active);
     without_folder.project_id = project_id;
     without_folder.worktree_path = None;
@@ -47164,6 +47248,34 @@ pub(crate) fn ports_261_session_splits_own_from_elsewhere() {
             .any(|attributed| attributed.port.port == 4000),
         "ほかのプロジェクトのサーバーが混ざっています"
     );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 261, finding 1. A session with no worktree runs in the project
+/// checkout (`landing_blocked_by_session`), so the project root is its own
+/// folder, not "elsewhere".
+#[test]
+pub(crate) fn ports_261_session_without_worktree_owns_the_project_root() {
+    let root = temporary_directory("ports-261-no-worktree");
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: PathBuf::from("/link/project"),
+        name: "project".into(),
+        added_at: now(),
+    });
+    app.listening_ports = listening_261(project_id, Uuid::new_v4());
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    session.worktree_path = None;
+    let ports = app.session_ports(&session);
+    assert_eq!(
+        numbers_261(&ports.own),
+        vec![5173, 6006],
+        "プロジェクトのチェックアウトで動くセッションが、ルートのサーバーを自分のものにしていません"
+    );
+    assert_eq!(numbers_261(&ports.elsewhere), vec![3000, 3001]);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -47244,7 +47356,7 @@ pub(crate) fn ports_261_menu_sections_name_folders_and_offer_stop() {
         let mut action = None;
         let output = ctx.run(screen_261(events), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                action = session_ports_menu(ui, palette, ports, stopping);
+                action = crate::screens::session_ports_menu(ui, palette, ports, stopping);
             });
         });
         (frame_texts_261(&output), action)
@@ -47307,7 +47419,7 @@ pub(crate) fn ports_261_menu_sections_name_folders_and_offer_stop() {
     let (_, action) = menu(&ports, false, press(false));
     assert_eq!(
         action,
-        Some(PortMenuAction::Stop(ports.own[0].clone())),
+        Some(crate::screens::PortMenuAction::Stop(ports.own[0].clone())),
         "停止ボタンが確認を求めていません"
     );
 
@@ -47372,6 +47484,7 @@ pub(crate) fn ports_261_confirmation_names_pid_and_folder() {
         "48213",
         "フォルダ",
         "/w/project/.worktrees/feature-y/web",
+        "終了シグナル (SIGTERM) を送ります。Operon の外で起動したプロセスも含まれます。",
         "キャンセル",
         "停止する",
     ] {
@@ -47445,7 +47558,19 @@ pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
         directory: None,
         root: None,
     };
-    app.listening_ports = vec![stale.clone()];
+    // The same process's other port, and another process, are not known to
+    // have gone and stay until the rescan says otherwise.
+    let sibling = AttributedPort {
+        port: port_261(4821, "vite", 24678),
+        directory: None,
+        root: None,
+    };
+    let neighbour = AttributedPort {
+        port: port_261(5000, "node", 3000),
+        directory: None,
+        root: None,
+    };
+    app.listening_ports = vec![stale.clone(), sibling.clone(), neighbour.clone()];
     app.ports_scanned_at = Some(Instant::now());
     // A periodic scan started before the signal, and the stop itself.
     app.background_tasks.insert(BackgroundKey::PortScan);
@@ -47463,9 +47588,10 @@ pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
         Some("vite を停止しました（:5173）。")
     );
     assert!(!app.background_tasks.contains(&BackgroundKey::PortStop));
-    assert!(
-        app.listening_ports.is_empty(),
-        "止まったサーバーが一覧に残っています"
+    assert_eq!(
+        app.listening_ports,
+        vec![sibling.clone(), neighbour.clone()],
+        "止まったサーバーだけを一覧から外していません"
     );
     assert_eq!(
         app.ports_scanned_at, None,
@@ -47482,10 +47608,10 @@ pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
         .unwrap();
     app.process_background_results();
     assert!(!app.background_tasks.contains(&BackgroundKey::PortScan));
-    assert!(
-        app.listening_ports.is_empty(),
-        "停止したサーバーが一覧に戻っています: {:?}",
-        app.listening_ports
+    assert_eq!(
+        app.listening_ports,
+        vec![sibling, neighbour],
+        "停止したサーバーが一覧に戻っています"
     );
     assert_eq!(
         app.ports_scanned_at, None,
