@@ -8,7 +8,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "1 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -16,7 +16,7 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have empirical-verifier and subprocess-safety-reviewer try to break the branch head, then push and wait for CI."
+resume: "Land after CI passes, then package from main and swap the installed app; the person confirms codex and agy marks in a terminal."
 
 contract:
   three-gates: "machine passed make q.fast and the six named tests in plan.md on 2026-11-10; the full suite runs in CI on push"

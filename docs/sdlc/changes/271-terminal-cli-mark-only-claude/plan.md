@@ -2,7 +2,7 @@
 
 - **Spec**: `./bug.md` (bugfix route: the bug report is the intent)
 - **Approved**: 2026-11-09, independent evaluator
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -40,4 +40,6 @@
 - In the installed app: a new terminal session, `codex` typed in it, shows the Codex mark on its tab within about two seconds; the same for `agy` and Antigravity's mark; `claude` still shows Claude's.
 
 ## Departures from the plan
+
+- 2026-11-10: the tty check moved into `pane_device`, so the refusal is a unit-tested function and a mutation of it is caught; the live test goes through `request_session_poll` rather than calling `tmux_foreground_cli` alone, so the poll's wiring is exercised too. The subprocess review approved with minor notes (5 s timeouts kept, matching `tmux_observation`; managed names are fixed-length, so the bare `-t` target cannot match another session by prefix). The empirical verifier could not check out the branch in its isolated tree; the interleaving it suspected is the stale-poll row under Risks.
 
