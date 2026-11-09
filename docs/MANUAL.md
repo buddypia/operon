@@ -143,7 +143,7 @@ Press **New session** (⌘N) from any page. A sheet opens over the current page:
    accounts (see [Settings](#9-settings-and-language)). The default is
    **This machine**.
 3. **Request (optional)** — what you want the agent to do. It is typed into the
-   agent as the first message. **Insert Template** adds a built-in request
+   agent as the first message. **Insert template** adds a built-in request
    (review this diff, fix the CI error, resolve merge conflicts, add tests) or
    one of the repository's `.operon/prompts/*.md`. **Fetch from GitHub Issue…**
    lists open issues through `gh`; choosing one fills the request and the
@@ -210,10 +210,10 @@ Other actions:
 - The `···` menu in the terminal header offers **Terminal.app で開く**
   (open the `tmux` session in Terminal.app, for mouse use and `tmux` commands),
   **表示中のログをすべてコピー** (copy the whole buffer without colour codes), and
-  **今すぐ同期** (refresh now). It also holds **Open in External Editor**,
+  **今すぐ同期** (refresh now). It also holds **Open in external editor**,
   **Send recent error to agent**, and — where they apply —
   **Run script (.operon/run.sh)…**, **Checkpoints**, **Create PR…**, and
-  **Land worktree into main…** ([section 5](#5-git-diffs-files-and-the-editor)).
+  **Merge worktree into main…** ([section 5](#5-git-diffs-files-and-the-editor)).
 
 ### The terminal pane
 
@@ -256,7 +256,7 @@ Every session carries one of four labels, with a hover that gives the detail:
 | --- | --- |
 | **Needs you** | Waiting for an answer, or stopped because a prerequisite failed |
 | **Running** | Starting, working, stopping, or queued |
-| **Idle** | Finished its turn and free; the next request is up to you |
+| **Idle** | Finished its turn; ready for your next request |
 | **Finished** | The terminal has ended (done, failed, stopped, or lost) |
 
 The **Session** page lists each project's live sessions in the order you act on
@@ -303,7 +303,7 @@ only the CLI's "do you trust this folder" question; it approves nothing else.
 
 ### Notifications
 
-**Settings → Notifications → Notify on turn completion, input waits, and exits**
+**Settings → Notifications → Notify when a turn finishes, input is needed, or a session exits**
 shows a macOS notification when an agent finishes a turn, stops on a prompt, or
 exits. macOS asks for permission the first time you turn it on.
 
@@ -347,7 +347,7 @@ The **Changes** tab has three views, **Changed files**, **Diff**, and
 - **Diff** draws each file folded, numbered on both sides, with the changed words
   marked inside a modified line. Every hunk header carries **Stage** and
   **Discard**, which act on that hunk of the project's checkout and nothing else
-  in the file. **Discard does not ask first.** **AI Review** asks a local agent
+  in the file. **Discard does not ask first.** **AI review** asks a local agent
   CLI to review the diff (45-second limit); **Copy** copies the result.
 - **Commit history** shows recent commits.
 
@@ -360,9 +360,9 @@ already be pushed; Operon never pushes behind your back.
 
 In a worktree session with the status hooks on, every request you send records a
 snapshot of the worktree under `refs/operon/checkpoints/`, without touching the
-index. **Create Manual Checkpoint** in the terminal menu's **Checkpoints** takes
+index. **Create manual checkpoint** in the terminal menu's **Checkpoints** takes
 one by hand. The same menu lists the latest five: copy the diff since one, or
-**Rollback to Checkpoint**. A rollback restores the tracked files at once and
+**Roll back to checkpoint**. A rollback restores the tracked files at once and
 leaves files created since then in place.
 
 ### Notes on a diff
@@ -385,7 +385,7 @@ number is used (`name-2`, `name-3`, …). Each worktree offers **この場所で
 (New session here) and **削除…** (Delete…); only clean, inactive worktrees are
 removed, after a confirmation, and the branch is kept.
 
-**Merge into main…** on a worktree (or **Land worktree into main…** in a
+**Merge into main…** on a worktree (or **Merge worktree into main…** in a
 session's terminal menu) merges its branch into the mainline locally with
 `git merge --no-ff`. It refuses while either tree has uncommitted changes, while
 a session is running or queued in that worktree or the main checkout, or when the
@@ -401,7 +401,7 @@ asks again.
 
 A repository that checks in `.operon/run.sh` (a dev server or a build) gets
 **Run script (.operon/run.sh)…** in the terminal menu. Each run shows the script
-and asks (**Review Run Script**); the file is read again on approval and must
+and asks (**Review run script**); the file is read again on approval and must
 still match what you saw. The approved copy runs in a terminal of its own, and
 **Stop the run script** in the same menu stops it.
 
@@ -427,7 +427,7 @@ project's skills and instruction files.
 
 From the editor:
 
-- **Open in External Editor** opens the file, a worktree, or the project folder
+- **Open in external editor** opens the file, a worktree, or the project folder
   in VS Code, Cursor, Zed, Windsurf, Antigravity, Void, or Finder, picked from a
   menu.
 - **Send to agent** sends an excerpt of the open file to the newest agent running
@@ -543,7 +543,7 @@ Knowledge is stored in Operon's data folder on this Mac
 | ⌘↩ | Start the session | In the new-session sheet |
 | Esc | Close the new-session sheet | |
 | ⌘S | Save the open file | In **Files** |
-| ⌘T | Open a plain terminal | In the focused pane; the tab strip's **+** → Terminal without the menu. From any page |
+| ⌘T | Open an empty terminal | In the focused pane; the tab strip's **+** → Terminal without the menu. From any page |
 | ⌘W | Close the active tab | A session's agent keeps running |
 | ⇧⌘T | Reopen closed tab | Newest first; a removed session's tab is skipped |
 | ⇧⌘] / ⇧⌘[ | Next / previous tab | Wraps round within the focused pane |

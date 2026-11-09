@@ -863,7 +863,7 @@ impl OperonApp {
         app.store_retry_pending = migration.durability_retry_needed;
         if migration.durability_retry_needed {
             app.durability_warning = Some(
-                tr("取り込んだメタデータのディスク永続化はまだ確認できていません。再試行が終わるまで Operon を開いたままにしてください。")
+                tr("取り込んだメタデータをディスクに保存できたか、まだ確認できていません。再試行が終わるまで Operon を開いたままにしてください。")
                     .into(),
             );
         }
@@ -1450,7 +1450,7 @@ impl OperonApp {
             Ok(WriteOutcome::Durable) => true,
             Ok(WriteOutcome::CommittedButNotSynced(error)) => {
                 self.store_retry_pending = true;
-                let warning = tf!("変更は書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。確認が済むまで強制終了しないでください。エラー: {error}", error = error);
+                let warning = tf!("変更は書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。確認が済むまで強制終了しないでください。エラー: {error}", error = error);
                 self.durability_warning = Some(warning);
                 true
             }
@@ -1473,7 +1473,7 @@ impl OperonApp {
             }
             Ok(WriteOutcome::CommittedButNotSynced(error)) => {
                 self.store_retry_pending = true;
-                let warning = tf!("{external_effect}。メタデータは書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。確認が済むまで強制終了しないでください。エラー: {error}", error = error, external_effect = external_effect);
+                let warning = tf!("{external_effect}。メタデータは書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。確認が済むまで強制終了しないでください。エラー: {error}", error = error, external_effect = external_effect);
                 self.durability_warning = Some(warning);
             }
             Err(error) => {
@@ -1494,7 +1494,7 @@ impl OperonApp {
                 self.notice = Some(tr("保留していたセッションのメタデータを保存しました。").into());
             }
             Ok(WriteOutcome::CommittedButNotSynced(error)) => {
-                let warning = tf!("セッションのメタデータを再度書き込みましたが、ディスクへの永続化はまだ確認できていません。Operon が再試行します。エラー: {error}", error = error);
+                let warning = tf!("セッションのメタデータを再度書き込みましたが、ディスクに保存されたかはまだ確認できていません。Operon が再試行します。エラー: {error}", error = error);
                 self.durability_warning = Some(warning);
             }
             Err(error) => {
@@ -1680,7 +1680,7 @@ impl OperonApp {
                     if announce || scan.truncated || scan.unreadable_entries > 0 {
                         self.notice = Some(if scan.truncated || scan.unreadable_entries > 0 {
                             tf!(
-                                "上限付きスキャンで、このマシンの Codex・Claude・Antigravity のセッションを {count} 件見つけました。一部の履歴は省略されています{unreadable}。",
+                                "スキャンの上限内で、このマシンの Codex・Claude・Antigravity のセッションを {count} 件見つけました。一部の履歴は省略されています{unreadable}。",
                                 count = count,
                                 unreadable = if scan.unreadable_entries > 0 {
                                     tf!("（{unreadable_entries} 件のエントリを読み取れませんでした）", unreadable_entries = scan.unreadable_entries)
@@ -1739,7 +1739,7 @@ impl OperonApp {
                     self.transcript_matches = scan.matches;
                     self.notice = Some(if scan.truncated || scan.unreadable_entries > 0 {
                         tf!(
-                            "上限付き検索で “{query}” に一致するローカル履歴を {count} 件見つけました（{files} ファイル、{mebibytes} MiB、{lines} 行を走査）。一部の履歴は省略されています{unreadable}。",
+                            "検索の上限内で “{query}” に一致するローカル履歴を {count} 件見つけました（{files} ファイル、{mebibytes} MiB、{lines} 行を走査）。一部の履歴は省略されています{unreadable}。",
                             query = query,
                             count = count,
                             files = scan.scanned_files,
@@ -1969,7 +1969,7 @@ impl OperonApp {
                                 self.remove_after_close.insert(session_id);
                                 self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。削除は保留中です。もう一度「停止」を実行すると、停止を確かめてから記録を削除します。", error = error));
                             } else {
-                                self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。永続化されたキャンセル指示は保留のままです。もう一度「停止」を実行してください。", error = error));
+                                self.notice = Some(tf!("セッションが停止したか確認できませんでした: {error}。保存済みのキャンセル指示は保留のままです。もう一度「停止」を実行してください。", error = error));
                             }
                         }
                     }
@@ -2622,7 +2622,7 @@ impl OperonApp {
                         }
                         Err(e) => {
                             self.notice = Some(tf!(
-                                "チェックポイントの復元に失敗しました: {error}",
+                                "チェックポイントを復元できませんでした: {error}",
                                 error = e
                             ));
                         }
@@ -3606,7 +3606,7 @@ impl OperonApp {
                 Ok(WriteOutcome::Durable) => {}
                 Ok(WriteOutcome::CommittedButNotSynced(error)) => {
                     self.store_retry_pending = true;
-                    let warning = tf!("キャンセル復旧用メタデータは書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。エラー: {error}", error = error);
+                    let warning = tf!("キャンセル復旧用メタデータは書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。エラー: {error}", error = error);
                     self.durability_warning = Some(warning);
                 }
                 Err(error) => {
@@ -4375,7 +4375,7 @@ impl OperonApp {
                 tr("3 階層以内に新しい Git リポジトリは見つかりませんでした。").into()
             }
         } else if truncated {
-            tf!("{imported} 件の Git プロジェクトを取り込みました。上限付きスキャンの限度に達したため、一部のフォルダは省略されている可能性があります。", imported = imported)
+            tf!("{imported} 件の Git プロジェクトを取り込みました。スキャンの上限に達したため、一部のフォルダは省略されている可能性があります。", imported = imported)
         } else {
             tf!(
                 "ワークスペースから {imported} 件の Git プロジェクトを取り込みました。",
@@ -5719,7 +5719,7 @@ impl OperonApp {
             match recovered {
                 Ok(session) => session,
                 Err(error) => {
-                    self.notice = Some(tf!("{p0} 会話履歴の自動復旧に失敗しました。元の会話は変更されていません: {error}", error = error, p0 = source_provider.label()));
+                    self.notice = Some(tf!("{p0} の会話履歴の自動復旧に失敗しました。元の会話は変更されていません: {error}", error = error, p0 = source_provider.label()));
                     return;
                 }
             }
@@ -5736,7 +5736,7 @@ impl OperonApp {
                     .map(|session| session.native_id.clone())
             })
         else {
-            self.notice = Some(tf!("このセッションの {label} 会話IDを復元できませんでした。Discover local CLI sessions から該当する {label} 会話を選んで復元してください。", label = source_provider.label()));
+            self.notice = Some(tf!("このセッションの {label} 会話IDを復元できませんでした。「ローカル CLI セッションを検出」から該当する {label} 会話を選んで復元してください。", label = source_provider.label()));
             return;
         };
         let native_session_path = source
@@ -6716,7 +6716,7 @@ impl OperonApp {
         .filter_map(|(label, result)| match result {
             Ok(WriteOutcome::Durable) => None,
             Ok(WriteOutcome::CommittedButNotSynced(error)) => Some(tf!(
-                "{label}: 永続化未確認（{error}）",
+                "{label}: 保存未確認（{error}）",
                 error = error,
                 label = label
             )),
@@ -6734,16 +6734,16 @@ impl OperonApp {
                 self.durability_warning = None;
             } else {
                 self.store_retry_pending = true;
-                self.durability_warning = Some(tf!("キャンセル指示の復旧コピーは 1 つ永続化されましたが、複製の修復が必要です。停止しても安全です。Operon が自動的に再試行します。{write_details}", write_details = write_details));
+                self.durability_warning = Some(tf!("キャンセル指示の復旧コピーは 1 つ保存されましたが、複製の修復が必要です。停止しても安全です。Operon が自動的に再試行します。{write_details}", write_details = write_details));
             }
             return true;
         }
 
         if recovery_was_committed {
             self.store_retry_pending = true;
-            self.durability_warning = Some(tf!("キャンセル指示は書き込まれましたが、どちらの復旧コピーも永続化を確認できていません。Operon が自動的に再試行し、tmux は動作したままになります。{write_details}", write_details = write_details));
+            self.durability_warning = Some(tf!("キャンセル指示は書き込まれましたが、どちらの復旧コピーもディスクへの保存を確認できていません。Operon が自動的に再試行し、tmux は動作したままになります。{write_details}", write_details = write_details));
             self.notice = Some(
-                tr("キャンセル復旧の永続化が未確認のため、tmux は変更していません。Operon を開いたままにし、警告が消えてからもう一度「停止」を選んでください。")
+                tr("キャンセル復旧の情報を保存できたか確認できていないため、tmux は変更していません。Operon を開いたままにし、警告が消えてからもう一度「停止」を選んでください。")
                     .into(),
             );
             return false;
@@ -6826,7 +6826,7 @@ impl OperonApp {
         }
         let dependent_count = queued_dependency_count(&self.store.sessions, session_id);
         if dependent_count > 0 {
-            self.notice = Some(tf!("このセッションは待機中の {dependent_count} 件から依存されています。先にそれらを開始または削除してください。", dependent_count = dependent_count));
+            self.notice = Some(tf!("このセッションに依存している待機中のセッションが {dependent_count} 件あります。先にそれらを開始または削除してください。", dependent_count = dependent_count));
             return;
         }
         let previous_store = self.store.clone();
@@ -9343,7 +9343,7 @@ impl OperonApp {
             })();
             BackgroundResult::StagedChangeRecorded { project_id, result }
         });
-        self.notice = Some(tr("記録しています…").into());
+        self.notice = Some(tr("コミットしています…").into());
     }
 
     pub(crate) fn push_project(&mut self, project: &Project) {

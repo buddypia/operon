@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml. Branch: feature/274-ui-wording-reads-machine-made.
+#
+# The UI text reads as machine-made in ja/en/ko; 187 messages are reworded and the
+# idle status word 「手すき」 becomes 「アイドル」.
+#
+# Route: modify (placement EXTEND in src/i18n_tables.rs, src/ui/widgets.rs, the
+# message ids at their call sites, the READMEs and the manuals).
+#
+# Risk high, autonomy paused: src/store.rs is a paused surface. Its edit is two
+# notice literals, no persisted shape, write order, migration or cancellation,
+# so approval.md gives the store category to the evaluator.
+
+state:
+  route: "modify"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Closed: 187 messages reworded, idle word アイドル; land after CI passes, then package from main. The Kani harness build (src/tests.rs under -D warnings) is broken on main and needs its own change."
+
+contract:
+  three-gates: "machine passed make q.fast and the named tests in verification.yaml"
+  bands: "machine passed bash scripts/check-bands.sh exits 0; largest_module_lines is src/app/screens.rs at 9976, 9978 on origin/main"
+  release-binary: "machine passed yes: touches src/i18n_tables.rs and src/ui/widgets.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
+  guards-verified-by-mutation: "machine passed 20 of 20 mutations caught by docs/sdlc/changes/274-ui-wording-reads-machine-made/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
