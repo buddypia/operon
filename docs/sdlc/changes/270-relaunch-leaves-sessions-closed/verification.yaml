@@ -1,13 +1,15 @@
 # The evidence for change 270. Shape: docs/sdlc/templates/verification.yaml.
 # R1-R8 are the spec's requirements, each the test plan.md names; R3 and R4
 # share one test, and R7's failure sentence has its own (I1). I2 is the sweep:
-# 32 mutations over the kind switch, the layout's restore and bounds, the
+# 34 mutations over the kind switch, the layout's restore and bounds, the
 # relaunch's choice of sessions and its quietness, the toast and failure
 # sentences themselves, and the recursion. I3-I8 are existing guards the change
 # must keep: the hook reading's precedence over the screen, every string in
 # every table and in order, the session-start and retry paths, the workspace
-# tabs, and the module map.
-digest: "a3405d2d491b9e50"
+# tabs, and the module map. F1-F2 are the empirical verifier's two
+# reproductions (plan departure 6): a first look spent on a failed write, and a
+# front tab handed to its neighbour.
+digest: "690695fa82fd0f3f"
 
 obligations:
   - R1 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_running_in_it
@@ -26,3 +28,5 @@ obligations:
   - I6 empirical-test :: cargo test --locked every_translation_table_is_sorted_by_message_id
   - I7 empirical-test :: cargo test --locked session_start
   - I8 empirical-test :: cargo test --locked claude_md_maps_every_module_that_exists
+  - F1 empirical-test :: cargo test --locked a_failed_save_at_the_first_look_keeps_the_relaunch
+  - F2 empirical-test :: cargo test --locked the_front_tab_stays_when_a_tab_before_it_is_gone

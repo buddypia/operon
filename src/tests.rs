@@ -74584,3 +74584,61 @@ pub(crate) fn the_manual_resume_still_makes_a_new_record() {
     );
     fs::remove_dir_all(&root).ok();
 }
+
+#[test]
+/// Change 270, found by the empirical verifier: a first look whose status
+/// write fails does not use up the session's one relaunch; the next poll
+/// looks again.
+pub(crate) fn a_failed_save_at_the_first_look_keeps_the_relaunch() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = relaunch_270_fixture("relaunch-270-failed-save");
+    let states = relaunch_270_first_look(&fixture);
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o555)).unwrap();
+    fixture
+        .app
+        .apply_session_poll(states.clone(), Vec::new(), Vec::new(), Vec::new());
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o755)).unwrap();
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    let started = fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.terminal));
+    fs::remove_dir_all(&fixture.root).ok();
+    assert!(
+        started,
+        "the plain terminal was never relaunched after the first save failed"
+    );
+}
+
+#[test]
+/// Change 270, found by the empirical verifier: the front tab stays the same
+/// session when a tab before it is gone, rather than passing to its neighbour.
+pub(crate) fn the_front_tab_stays_when_a_tab_before_it_is_gone() {
+    let project = Uuid::new_v4();
+    let (a, b, c, group) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let saved = SavedWorkspace {
+        project,
+        groups: vec![SavedGroup {
+            id: group,
+            sessions: vec![a, b, c],
+            active: 1,
+        }],
+        focused: Some(group),
+        layout: Some(PaneNode::Leaf(group)),
+        selected: None,
+    };
+    let tabs = WorkspaceTabs::from_saved(&saved, |id| id != a).unwrap();
+    let front = &tabs.groups[0].tabs[tabs.groups[0].active];
+    assert_eq!(
+        *front,
+        WorkspaceTab::Session(b),
+        "front tab moved to {front:?}"
+    );
+}

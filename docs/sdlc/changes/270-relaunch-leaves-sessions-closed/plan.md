@@ -153,4 +153,28 @@ Claude mark.
    once inside a parallel `cargo test workspace` run on its two-second timing
    and passed alone and inside `cargo test launch`. `launch_stored_session` is
    not edited by this change.
+5. **The verifiers ran in this worktree, not in isolated ones.** Started with
+   worktree isolation, both stopped before reading code: the worktree-policy
+   hook judged the agent worktree (`worktree-agent-*`, at `main`) as the
+   trunk and refused `git checkout` of the change's head, as it did for change
+   260. They were re-run in place, one after the other, each adding tests
+   only to `src/tests.rs`.
+6. **The empirical verifier reproduced two defects, now fixed (F1, F2).**
+   F1: `apply_session_poll` spent a candidate's first look before the store
+   write, so a failed write rolled the status back but left the session never
+   relaunched; the look is now spent after the write succeeds
+   (`a_failed_save_at_the_first_look_keeps_the_relaunch`). F2: `from_saved`
+   kept the front tab's index, so a session gone ahead of it passed the front
+   to its neighbour; the front is now found by session
+   (`the_front_tab_stays_when_a_tab_before_it_is_gone`). Both failed at
+   fc61243 and pass after the fix. A third probe — a session whose project is
+   gone is relaunched into no folder — is not reachable: `remove_project`
+   refuses while a session runs and drops the project's sessions with it; it
+   was not kept.
+7. **One guard was a restatement.** CI's sweep on fc61243 caught 31 of 32:
+   adding `Exited` to the relaunch decision changed nothing, because
+   `relaunch_lost_session` checked `can_retry_session` again. Its only caller
+   passes sessions it has just marked Lost or Failed, so the second check is
+   gone and the decision lives in `apply_session_poll` alone; the mutation is
+   now caught by `sessions_running_at_the_quit_come_back_when_their_terminal_is_gone`.
 

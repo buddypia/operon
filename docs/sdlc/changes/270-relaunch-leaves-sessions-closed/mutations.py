@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Change 270: keep a terminal's kind, let a launched CLI change kind, forget or
-mangle the workspace, accept a pane tree that cannot be drawn, relaunch the
-wrong sessions or none, let a relaunch move the screen, miscount it, notify a
-crash it undoes, say a failed write every time, and put the recursion back."""
+mangle the workspace, hand the front tab to a neighbour, accept a pane tree
+that cannot be drawn, relaunch the wrong sessions or none, spend the first look
+on a failed save, let a relaunch move the screen, miscount it, notify a crash
+it undoes, say a failed write every time, and put the recursion back."""
 import sys
 from pathlib import Path
 
@@ -18,6 +19,8 @@ TESTS = [
     "the_relaunch_says_how_many_sessions_it_reopened",
     "resuming_a_session_with_no_transcript_starts_it_fresh_once",
     "the_manual_resume_still_makes_a_new_record",
+    "a_failed_save_at_the_first_look_keeps_the_relaunch",
+    "the_front_tab_stays_when_a_tab_before_it_is_gone",
 ]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 APP = ROOT / "src/app.rs"
@@ -93,16 +96,26 @@ MUTATIONS = {
     "a session stays in two groups": (TREE, "exists(*id) && placed.insert(*id)", "exists(*id)"),
     "a front-tab index is not bounded": (
         TREE,
-        "active: group.active.min(tabs.len() - 1),",
-        "active: group.active,",
+        ".unwrap_or(group.active.min(sessions.len().saturating_sub(1)));",
+        ".unwrap_or(group.active);",
+    ),
+    "the front tab is kept by position, not by session": (
+        TREE,
+        "        let front = group.sessions.get(group.active);\n",
+        "        let front: Option<&Uuid> = None;\n",
     ),
     "a share is not bounded": (TREE, "                share.clamp(0.0, 1.0)\n", "                *share\n"),
     # R6
     "nothing is relaunched": (APP, "                relaunch.push(id);\n", ""),
     "a session that dies later in the run is relaunched too": (
         APP,
+        "observation.state != TmuxState::Unknown && self.relaunch_candidates.contains(&id);",
+        "observation.state != TmuxState::Unknown;",
+    ),
+    "a failed save spends the first look": (
+        APP,
+        "observation.state != TmuxState::Unknown && self.relaunch_candidates.contains(&id);",
         "observation.state != TmuxState::Unknown && self.relaunch_candidates.remove(&id);",
-        "observation.state != TmuxState::Unknown && { self.relaunch_candidates.remove(&id); true };",
     ),
     "a crashed CLI is left stopped": (
         APP,

@@ -3479,6 +3479,7 @@ impl OperonApp {
         let mut completed_cancellations = Vec::new();
         let mut finished_setups: Vec<(Uuid, Option<i32>)> = Vec::new();
         let mut relaunch = Vec::new();
+        let mut looked = Vec::new();
         for (id, observation) in states {
             let cancellation_pending = self.cancellation_pending(id);
             let Some(idx) = self.store.sessions.iter().position(|session| {
@@ -3499,9 +3500,14 @@ impl OperonApp {
             };
             // The first look after a start decides whether a session that was
             // running at the last quit is started again; a later death in this
-            // run is the person's to deal with (change 270).
+            // run is the person's to deal with (change 270). The look is spent
+            // only once its outcome is stored: a failed write rolls the store
+            // back, and the next poll looks again.
             let first_look =
-                observation.state != TmuxState::Unknown && self.relaunch_candidates.remove(&id);
+                observation.state != TmuxState::Unknown && self.relaunch_candidates.contains(&id);
+            if first_look {
+                looked.push(id);
+            }
             let relaunching = first_look
                 && matches!(next, Some(SessionStatus::Lost | SessionStatus::Failed))
                 && relaunch_kind(&self.store.sessions[idx]).is_some();
@@ -3549,6 +3555,9 @@ impl OperonApp {
                 self.store = previous_store;
             }
             return;
+        }
+        for id in looked {
+            self.relaunch_candidates.remove(&id);
         }
         if changed {
             match save_cancellation_intents(&self.data_file, &self.store.pending_cancellations) {

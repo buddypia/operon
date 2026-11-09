@@ -196,6 +196,8 @@ impl OperonApp {
     /// with; a plain terminal opens a shell in its folder. A conversation
     /// whose transcript was never written is not started fresh by itself —
     /// that would send its first request again — and keeps its 「再試行」.
+    /// Which sessions come here — Lost or Failed at the first look, never one
+    /// the person exited — is `apply_session_poll`'s decision alone.
     pub(crate) fn relaunch_lost_session(&mut self, session_id: Uuid) -> bool {
         let Some(session) = self
             .store
@@ -206,9 +208,6 @@ impl OperonApp {
         else {
             return false;
         };
-        if !can_retry_session(&session.status) {
-            return false;
-        }
         let provider = match relaunch_kind(&session) {
             None => return false,
             Some(RelaunchKind::Shell) => {

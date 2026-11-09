@@ -1321,17 +1321,23 @@ impl WorkspaceTabs {
             .groups
             .iter()
             .filter_map(|group| {
-                let tabs = group
+                let sessions = group
                     .sessions
                     .iter()
                     .copied()
                     .filter(|id| exists(*id) && placed.insert(*id))
-                    .map(WorkspaceTab::Session)
                     .collect::<Vec<_>>();
-                (!tabs.is_empty()).then(|| WorkspaceGroup {
+                // The front tab is a session, not a position: one gone ahead
+                // of it must not hand the front to its neighbour.
+                let front = group.sessions.get(group.active);
+                let active = sessions
+                    .iter()
+                    .position(|id| Some(id) == front)
+                    .unwrap_or(group.active.min(sessions.len().saturating_sub(1)));
+                (!sessions.is_empty()).then(|| WorkspaceGroup {
                     id: group.id,
-                    active: group.active.min(tabs.len() - 1),
-                    tabs,
+                    active,
+                    tabs: sessions.into_iter().map(WorkspaceTab::Session).collect(),
                 })
             })
             .collect::<Vec<_>>();
