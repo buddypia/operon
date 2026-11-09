@@ -34535,7 +34535,8 @@ pub(crate) fn every_pane_that_takes_a_note_offers_a_way_to_send_it() {
                 continue;
             }
             let source = fs::read_to_string(&path).unwrap();
-            panes += source.matches("diff_pane(").count();
+            panes += source.matches("diff_pane(").count()
+                + source.matches("diff_pane_with_actions(").count();
             footers += source.matches("ui_diff_comment_footer(").count();
         }
     }
@@ -71541,5 +71542,404 @@ pub(crate) fn knowledge_258_opt_in_says_what_agents_are_given() {
     );
     // The numbers the text states are the ones the brief uses.
     assert!(bullet.contains(&format!("最大 {KNOWLEDGE_BRIEF_ENTRIES} 件")));
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+pub(crate) fn ide_261_extract_and_apply_single_hunk_stage_and_discard() {
+    let root = temporary_directory("ide-261-hunk");
+    let _ = run_git_capture(&root, &["init"]);
+    let _ = run_git_capture(&root, &["config", "user.email", "test@example.com"]);
+    let _ = run_git_capture(&root, &["config", "user.name", "Test"]);
+    let file_path = root.join("src/demo.txt");
+    fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+    let initial: String = (1..=12).map(|n| format!("line {n}\n")).collect();
+    fs::write(&file_path, &initial).unwrap();
+    let _ = run_git_capture(&root, &["add", "src/demo.txt"]);
+    let _ = run_git_capture(&root, &["commit", "-m", "initial"]);
+
+    let modified: String = (1..=12)
+        .map(|n| match n {
+            2 => "line 2 modified\n".to_string(),
+            11 => "line 11 modified\n".to_string(),
+            _ => format!("line {n}\n"),
+        })
+        .collect();
+    fs::write(&file_path, &modified).unwrap();
+
+    let raw_diff = git_working_tree_diff(&root, None).unwrap();
+    let files = parse_unified_diff(&raw_diff);
+    assert_eq!(files.len(), 1);
+    let diff_file = &files[0];
+    let hunk_indices: Vec<usize> = diff_file
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| (line.kind == DiffLineKind::Hunk).then_some(idx))
+        .collect();
+    assert_eq!(hunk_indices.len(), 2);
+
+    let first_patch = extract_single_hunk_patch(diff_file, hunk_indices[0]).unwrap();
+    assert!(first_patch.contains("--- a/src/demo.txt"));
+    assert!(first_patch.contains("+++ b/src/demo.txt"));
+    assert!(first_patch.contains("+line 2 modified"));
+    assert!(!first_patch.contains("+line 11 modified"));
+
+    git_stage_hunk(&root, diff_file, hunk_indices[0]).unwrap();
+    let cached = run_git_capture(&root, &["diff", "--cached"]);
+    assert!(cached.contains("+line 2 modified"), "{cached}");
+    assert!(!cached.contains("+line 11 modified"), "{cached}");
+
+    let unstaged_after_stage = run_git_capture(&root, &["diff"]);
+    let after_files = parse_unified_diff(&unstaged_after_stage);
+    assert_eq!(after_files.len(), 1);
+    let remaining_file = &after_files[0];
+    let remaining_hunk = remaining_file
+        .lines
+        .iter()
+        .position(|line| line.kind == DiffLineKind::Hunk)
+        .unwrap();
+    git_discard_hunk(&root, remaining_file, remaining_hunk).unwrap();
+
+    let unstaged = run_git_capture(&root, &["diff"]);
+    assert!(unstaged.trim().is_empty(), "{unstaged}");
+    let cached_after = run_git_capture(&root, &["diff", "--cached"]);
+    assert!(cached_after.contains("+line 2 modified"), "{cached_after}");
+    fs::remove_dir_all(root).ok();
+}
+
+fn run_git_capture(repo: &Path, args: &[&str]) -> String {
+    let output = git_command(repo).args(args).output().unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+pub(crate) fn ide_261_diff_pane_hunk_buttons_emit_stage_and_discard() {
+    let files = vec![DiffFile {
+        path: "src/lib.rs".to_string(),
+        renamed_from: None,
+        change: DiffFileChange::Modified,
+        added: 1,
+        removed: 0,
+        widest: 20,
+        note: None,
+        lines: vec![
+            DiffLine {
+                kind: DiffLineKind::Hunk,
+                old_number: None,
+                new_number: None,
+                text: "@@ -1,1 +1,1 @@".to_string(),
+                highlights: Vec::new(),
+            },
+            DiffLine {
+                kind: DiffLineKind::Added,
+                old_number: None,
+                new_number: Some(1),
+                text: "pub fn demo() {}".to_string(),
+                highlights: Vec::new(),
+            },
+        ],
+    }];
+    let ctx = egui::Context::default();
+    let mut collapsed = HashSet::new();
+    let palette = AppTheme::Dark.palette();
+    let project = Uuid::new_v4();
+    let mut annotations = DiffAnnotations::default();
+    let mut action = None;
+    let output = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 400.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                diff_pane_with_actions(
+                    ui,
+                    &files,
+                    &mut collapsed,
+                    palette,
+                    320.0,
+                    project,
+                    &mut annotations,
+                    &mut action,
+                );
+            });
+        },
+    );
+    assert!(action.is_none());
+    let texts = painted_text_rects(&output.shapes);
+    let stage_rect = texts
+        .iter()
+        .find(|(text, _)| text == "ステージ")
+        .map(|(_, rect)| *rect)
+        .expect("Stage button must be rendered on hunk row");
+    let discard_rect = texts
+        .iter()
+        .find(|(text, _)| text == "破棄")
+        .map(|(_, rect)| *rect)
+        .expect("Discard button must be rendered on hunk row");
+
+    let click_at = |ctx: &egui::Context,
+                    pos: egui::Pos2,
+                    collapsed: &mut HashSet<String>,
+                    annotations: &mut DiffAnnotations| {
+        let mut out_action = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 400.0),
+                )),
+                events: vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    diff_pane_with_actions(
+                        ui,
+                        &files,
+                        collapsed,
+                        palette,
+                        320.0,
+                        project,
+                        annotations,
+                        &mut out_action,
+                    );
+                });
+            },
+        );
+        out_action
+    };
+
+    assert_eq!(
+        click_at(&ctx, stage_rect.center(), &mut collapsed, &mut annotations),
+        Some(DiffHunkAction::Stage {
+            file_index: 0,
+            hunk_line_index: 0
+        })
+    );
+    assert_eq!(
+        click_at(
+            &ctx,
+            discard_rect.center(),
+            &mut collapsed,
+            &mut annotations
+        ),
+        Some(DiffHunkAction::Discard {
+            file_index: 0,
+            hunk_line_index: 0
+        })
+    );
+}
+
+#[test]
+pub(crate) fn ide_261_format_code_context_and_extract_terminal_error() {
+    let formatted = format_code_context_for_agent(
+        Path::new("src/git.rs"),
+        10,
+        12,
+        "fn demo() {\n    todo!()\n}",
+        Some("error[E0308]: mismatched types"),
+    );
+    assert!(formatted.contains("```src/git.rs:10-12"), "{formatted}");
+    assert!(formatted.contains("fn demo()"), "{formatted}");
+    assert!(
+        formatted.contains("error[E0308]: mismatched types"),
+        "{formatted}"
+    );
+
+    let oversized = "x".repeat(MAX_CODE_CONTEXT_SNIPPET_BYTES + 500);
+    let bounded = format_code_context_for_agent(Path::new("src/big.rs"), 1, 900, &oversized, None);
+    assert!(bounded.len() <= MAX_CODE_CONTEXT_SNIPPET_BYTES + 128);
+
+    let scrollback = "Compiling operon v0.1.0\nerror[E0382]: borrow of moved value: `x`\n  --> src/app.rs:42:9\n   |\n42 |     use(x);\n   |         ^ value used here after move\n";
+    let extracted = extract_recent_terminal_error(scrollback).unwrap();
+    assert!(extracted.contains("error[E0382]"), "{extracted}");
+    assert!(extracted.contains("src/app.rs:42:9"), "{extracted}");
+
+    assert!(extract_recent_terminal_error("Compiling operon\nFinished `dev` profile\n").is_none());
+}
+
+#[test]
+pub(crate) fn ide_261_at_mention_query_ranking_and_insertion() {
+    assert_eq!(active_at_mention_query("確認して @dif"), Some((13, "dif")));
+    assert_eq!(active_at_mention_query("@src/git"), Some((0, "src/git")));
+    assert_eq!(active_at_mention_query("user@example.com"), None);
+
+    let files = vec![
+        PathBuf::from("src/git.rs"),
+        PathBuf::from("src/files.rs"),
+        PathBuf::from("README.md"),
+    ];
+    let knowledge = vec!["Git Worktree 運用ルール".to_string()];
+    let ranked = rank_context_mentions("git", true, &files, &knowledge);
+    assert!(!ranked.is_empty());
+    assert!(ranked.len() <= MAX_AT_MENTION_SUGGESTIONS);
+    assert!(ranked.iter().any(|c| c.token == "@src/git.rs"));
+    assert!(ranked
+        .iter()
+        .any(|c| c.token == "@knowledge:Git Worktree 運用ルール"));
+
+    let diff_ranked = rank_context_mentions("dif", true, &files, &knowledge);
+    assert_eq!(diff_ranked[0].token, "@diff");
+
+    let prompt = "修正をお願いします @dif";
+    let (at_idx, _) = active_at_mention_query(prompt).unwrap();
+    let replaced = apply_context_mention(prompt, at_idx, "@src/git.rs");
+    assert_eq!(replaced, "修正をお願いします @src/git.rs ");
+}
+
+#[test]
+pub(crate) fn ide_261_external_ide_catalog_and_line_jump_args() {
+    assert!(ExternalIde::ALL.contains(&ExternalIde::Windsurf));
+    assert!(ExternalIde::ALL.contains(&ExternalIde::Antigravity));
+    assert!(ExternalIde::ALL.contains(&ExternalIde::Void));
+
+    let path = Path::new("/tmp/sample.rs");
+    let (program, args) = external_ide_command_args(ExternalIde::Windsurf, path, Some(27));
+    assert_eq!(program, "windsurf");
+    assert_eq!(
+        args,
+        vec!["-g".to_string(), "/tmp/sample.rs:27".to_string()]
+    );
+
+    let (agy_prog, agy_args) = external_ide_command_args(ExternalIde::Antigravity, path, Some(9));
+    assert_eq!(agy_prog, "agy");
+    assert_eq!(
+        agy_args,
+        vec!["-g".to_string(), "/tmp/sample.rs:9".to_string()]
+    );
+
+    let (void_prog, void_args) = external_ide_command_args(ExternalIde::Void, path, Some(3));
+    assert_eq!(void_prog, "void");
+    assert_eq!(
+        void_args,
+        vec!["-g".to_string(), "/tmp/sample.rs:3".to_string()]
+    );
+
+    let (zed_prog, zed_args) = external_ide_command_args(ExternalIde::Zed, path, Some(15));
+    assert_eq!(zed_prog, "zed");
+    assert_eq!(zed_args, vec!["/tmp/sample.rs:15".to_string()]);
+}
+
+#[test]
+pub(crate) fn ide_261_parallel_arena_agents_and_branch_names() {
+    assert!(parallel_arena_agents(&[CliProvider::Claude]).is_empty());
+    let selected = parallel_arena_agents(&[
+        CliProvider::Gemini,
+        CliProvider::Claude,
+        CliProvider::Gemini,
+    ]);
+    assert_eq!(selected, vec![CliProvider::Claude, CliProvider::Gemini]);
+    assert_eq!(
+        arena_worktree_branch_name("feature/arena", CliProvider::Claude),
+        "feature/arena-claude"
+    );
+    assert_eq!(
+        arena_worktree_branch_name("feature/arena", CliProvider::Codex),
+        "feature/arena-codex"
+    );
+    assert_eq!(
+        arena_worktree_branch_name("feature/arena", CliProvider::Gemini),
+        "feature/arena-gemini"
+    );
+}
+
+#[test]
+pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
+    let source = "pub fn render_diff_hunk() {}\npub struct ArenaLaunchConfig {\n}\n";
+    let symbols = extract_file_symbols(Path::new("src/git.rs"), source);
+    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[0].name, "render_diff_hunk");
+    assert_eq!(symbols[0].line, 1);
+    assert_eq!(symbols[1].name, "ArenaLaunchConfig");
+    assert_eq!(symbols[1].line, 2);
+
+    let root = temporary_directory("ide-261-palette");
+    let src_dir = root.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let rel_file = PathBuf::from("src/git.rs");
+    fs::write(root.join(&rel_file), source).unwrap();
+
+    let mut app = test_app(root.join("store-v2.json"));
+    let project_id = Uuid::new_v4();
+    let project = Project {
+        id: project_id,
+        name: "operon".to_string(),
+        path: root.clone(),
+        added_at: 1,
+    };
+    app.store.projects.push(project.clone());
+    app.selected_project = Some(project_id);
+    app.file_cache.insert(
+        project_id,
+        FileScanSnapshot {
+            paths: vec![rel_file.clone()],
+            truncated: false,
+            unreadable_directories: 0,
+        },
+    );
+    app.open_documents.push(OpenDocument {
+        project: project_id,
+        root: root.clone(),
+        path: rel_file.clone(),
+        branch: None,
+        project_rooted: true,
+        disk: source.to_string(),
+        buffer: source.to_string(),
+        read_only: None,
+        save_error: None,
+        external_change: false,
+        image_data: None,
+        viewer: None,
+    });
+
+    app.command_palette_open = true;
+    app.command_search = "render_diff_hunk".to_string();
+    let entries = app.palette_entries();
+    let symbol_entry = entries
+        .iter()
+        .find(|entry| {
+            matches!(
+                &entry.kind,
+                PaletteKind::File {
+                    path,
+                    line: Some(1),
+                    ..
+                } if path == &rel_file
+            )
+        })
+        .cloned()
+        .expect("symbol entry should be ranked in palette");
+
+    app.activate_palette_entry(&symbol_entry.kind);
+    assert_eq!(app.project_tab, ProjectTab::Files);
+    assert_eq!(
+        app.active_document.as_ref().map(|doc| &doc.path),
+        Some(&rel_file)
+    );
+    assert_eq!(app.editor_jump_line, Some(1));
     fs::remove_dir_all(root).ok();
 }

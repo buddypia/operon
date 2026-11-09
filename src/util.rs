@@ -209,6 +209,7 @@ pub(crate) fn open_in_external_editor(
     path: &Path,
     editor: crate::models::ExternalEditor,
 ) -> Result<()> {
+    let _ = crate::models::ExternalEditor::ALL;
     if !path.exists() {
         anyhow::bail!(tf!("{path} が見つかりません", path = path.display()));
     }
@@ -244,4 +245,218 @@ pub(crate) fn open_in_external_editor(
         "{editor} を起動できませんでした",
         editor = editor.label()
     ));
+}
+
+pub(crate) const MAX_CODE_CONTEXT_SNIPPET_BYTES: usize = 8_192;
+pub(crate) const MAX_TERMINAL_ERROR_BYTES: usize = 4_096;
+pub(crate) const MAX_TERMINAL_ERROR_SCAN_LINES: usize = 80;
+
+/// Extended catalog of external IDEs, including AI-native and OSS editors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExternalIde {
+    VsCode,
+    Cursor,
+    Zed,
+    Windsurf,
+    Antigravity,
+    Void,
+    Finder,
+}
+
+impl ExternalIde {
+    pub(crate) const ALL: [Self; 7] = [
+        Self::VsCode,
+        Self::Cursor,
+        Self::Zed,
+        Self::Windsurf,
+        Self::Antigravity,
+        Self::Void,
+        Self::Finder,
+    ];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::VsCode => "VS Code",
+            Self::Cursor => "Cursor",
+            Self::Zed => "Zed",
+            Self::Windsurf => "Windsurf",
+            Self::Antigravity => "Antigravity",
+            Self::Void => "Void",
+            Self::Finder => "Finder",
+        }
+    }
+
+    pub(crate) fn command(self) -> &'static str {
+        match self {
+            Self::VsCode => "code",
+            Self::Cursor => "cursor",
+            Self::Zed => "zed",
+            Self::Windsurf => "windsurf",
+            Self::Antigravity => "agy",
+            Self::Void => "void",
+            Self::Finder => "open",
+        }
+    }
+
+    pub(crate) fn app_bundle_name(self) -> Option<&'static str> {
+        match self {
+            Self::VsCode => Some("Visual Studio Code"),
+            Self::Cursor => Some("Cursor"),
+            Self::Zed => Some("Zed"),
+            Self::Windsurf => Some("Windsurf"),
+            Self::Antigravity => Some("Antigravity"),
+            Self::Void => Some("Void"),
+            Self::Finder => None,
+        }
+    }
+
+    pub(crate) fn legacy_editor(self) -> Option<crate::models::ExternalEditor> {
+        crate::models::ExternalEditor::ALL
+            .into_iter()
+            .find(|editor| editor.command() == self.command() && editor.label() == self.label())
+    }
+}
+
+pub(crate) fn external_ide_command_args(
+    ide: ExternalIde,
+    path: &Path,
+    line: Option<usize>,
+) -> (&'static str, Vec<String>) {
+    let display = path.display().to_string();
+    match (ide, line.filter(|&l| l >= 1)) {
+        (
+            ExternalIde::VsCode
+            | ExternalIde::Cursor
+            | ExternalIde::Windsurf
+            | ExternalIde::Antigravity
+            | ExternalIde::Void,
+            Some(line),
+        ) => (
+            ide.command(),
+            vec!["-g".to_string(), format!("{display}:{line}")],
+        ),
+        (ExternalIde::Zed, Some(line)) => (ide.command(), vec![format!("{display}:{line}")]),
+        (ExternalIde::Finder, Some(_)) => (ide.command(), vec!["-R".to_string(), display]),
+        (_, None) => (ide.command(), vec![display]),
+    }
+}
+
+pub(crate) fn open_in_external_ide(
+    path: &Path,
+    ide: ExternalIde,
+    line: Option<usize>,
+) -> Result<()> {
+    if !path.exists() {
+        anyhow::bail!(tf!("{path} が見つかりません", path = path.display()));
+    }
+    let (program, args) = external_ide_command_args(ide, path, line);
+    let mut command = Command::new(program);
+    command.args(&args);
+    if let Ok(output) = crate::exec::run_command_with_timeout(&mut command, Duration::from_secs(5))
+    {
+        if output.status.success() {
+            return Ok(());
+        }
+    }
+    if let Some(app) = ide.app_bundle_name() {
+        let mut fallback = Command::new("open");
+        fallback.args(["-a", app]).arg(path);
+        let fb_output =
+            crate::exec::run_command_with_timeout(&mut fallback, Duration::from_secs(5))
+                .map_err(|e| anyhow!("{}: {e}", ide.label()))?;
+        if fb_output.status.success() {
+            return Ok(());
+        }
+    }
+    anyhow::bail!(tf!("{editor} を起動できませんでした", editor = ide.label()));
+}
+
+fn truncate_utf8_prefix(text: &str, max_bytes: usize) -> &str {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// Format a file-and-line code block ready to send into an active agent terminal.
+pub(crate) fn format_code_context_for_agent(
+    path: &Path,
+    start_line: usize,
+    end_line: usize,
+    snippet: &str,
+    note: Option<&str>,
+) -> String {
+    let start = start_line.max(1);
+    let end = end_line.max(start);
+    let body = truncate_utf8_prefix(
+        snippet.trim_end_matches('\n'),
+        MAX_CODE_CONTEXT_SNIPPET_BYTES,
+    );
+    let mut out = format!("```{}:{start}-{end}\n{body}\n```", path.display());
+    if let Some(note) = note.map(str::trim).filter(|n| !n.is_empty()) {
+        out.push('\n');
+        out.push_str(note);
+    }
+    out
+}
+
+/// Extract the most recent compiler, test, or runtime error block from terminal scrollback.
+pub(crate) fn extract_recent_terminal_error(scrollback: &str) -> Option<String> {
+    let plain = strip_terminal_escapes(scrollback);
+    let lines: Vec<&str> = plain.lines().collect();
+    let window_start = lines.len().saturating_sub(MAX_TERMINAL_ERROR_SCAN_LINES);
+    let window = &lines[window_start..];
+    let is_error_head = |line: &str| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with("error[")
+            || trimmed.starts_with("error:")
+            || trimmed.starts_with("Error:")
+            || trimmed.contains("panicked at")
+            || trimmed.starts_with("FAILED")
+            || trimmed.starts_with("FAIL ")
+            || trimmed.starts_with("Traceback (most recent call last)")
+            || trimmed.starts_with("npm ERR!")
+    };
+    let start_idx = window.iter().rposition(|line| is_error_head(line))?;
+    let joined = window[start_idx..].join("\n");
+    let trimmed = truncate_utf8_prefix(joined.trim(), MAX_TERMINAL_ERROR_BYTES);
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+/// Canonical deduplicated list of providers for parallel arena launch (empty if < 2).
+pub(crate) fn parallel_arena_agents(selected: &[crate::CliProvider]) -> Vec<crate::CliProvider> {
+    let mut out = Vec::new();
+    for candidate in [
+        crate::CliProvider::Claude,
+        crate::CliProvider::Codex,
+        crate::CliProvider::Gemini,
+    ] {
+        if selected.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+    if out.len() < 2 {
+        Vec::new()
+    } else {
+        out
+    }
+}
+
+/// Deterministic per-agent branch name for an isolated parallel arena worktree.
+pub(crate) fn arena_worktree_branch_name(
+    base_branch: &str,
+    provider: crate::CliProvider,
+) -> String {
+    let base = base_branch.trim().trim_end_matches('/');
+    let prefix = if base.is_empty() { "arena" } else { base };
+    let suffix = match provider {
+        crate::CliProvider::Claude => "claude",
+        crate::CliProvider::Codex => "codex",
+        crate::CliProvider::Gemini => "gemini",
+    };
+    format!("{prefix}-{suffix}")
 }

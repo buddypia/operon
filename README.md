@@ -208,8 +208,18 @@ Settings.
 - **Checkpoints & rollback**: Capture lightweight snapshots (`refs/operon/checkpoints/`)
   automatically per turn or manually. Review diffs since any checkpoint or roll back
   instantly if an agent makes unwanted modifications.
-- **External editor launch**: Open any worktree or project folder directly in VS Code,
-  Cursor, Zed, or Finder from the worktree list or session menu.
+- **External editor launch & line jump**: Open any worktree, project folder, or active file
+  directly in VS Code, Cursor, Zed, Windsurf, Antigravity, Void, or Finder — jumping straight
+  to the active cursor line from the built-in editor.
+- **Per-hunk diff stage & discard**: Stage or discard individual `@@ ... @@` hunks directly from
+  the diff pane (`git apply --cached --unidiff-zero` / `git apply --reverse --unidiff-zero`)
+  without touching other hunks in the same file.
+- **`@` context mentions & parallel arena**: Insert `@diff`, `@knowledge:<title>`, or `@<file>`
+  tokens via inline `@` completion in the new session sheet, or run the same request across
+  multiple agents simultaneously in isolated worktrees (Best-of-N parallel arena).
+- **One-click code & error handoff**: Send the active editor selection (or current line context)
+  or the latest terminal error/stack trace to the running agent in one click, and jump to project
+  files or document symbols (`fn`, `struct`, `enum`, `trait`, `class`, `def`, `func`) from `⌘K`.
 - **Prompt templates**: Quickly insert reusable instructions into session prompts from
   built-in templates (code review, CI fix, merge conflict resolution, test generation)
   or repository-specific templates in `.operon/prompts/*.md`.
