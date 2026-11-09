@@ -2,8 +2,8 @@
 
 state:
   route: "feature"
-  stage: "design"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -11,7 +11,7 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Run the readiness gate on spec.md, then write and commit plan.md before any src edit."
+resume: "Build per plan.md order of work: ports.rs contract tests first, then app.rs wiring, strings, READMEs."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"

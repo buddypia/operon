@@ -1,0 +1,4 @@
+2026-11-09T03:28:13Z person screen screen.md b9f6f320b5a605ab approve The person chose the two-section menu with a per-row stop and confirmation window over a persisted scope toggle.
+2026-11-09T03:35:04Z auto intent intent.md a9fb42533e8c14aa approve Independent artifact evaluator: restates the two quoted requests; defaults recorded under open questions.
+2026-11-09T03:35:04Z auto spec spec.md 3c4e59a844b1bfaf approve Independent artifact evaluator after two revisions: in-flight scan generation, post-signal read failure, canonical spellings, absolute kill, bounded stop.
+2026-11-09T03:35:04Z auto plan plan.md 24373243a59dc824 approve Independent artifact evaluator: eleven tests, risks with catching tests, mutation list covers every new guard; src untouched.
