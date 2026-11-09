@@ -31,7 +31,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "paused"
@@ -39,13 +39,13 @@ state:
   readiness: "conditional"
   screen: "approved"
 
-resume: "Wait for CI on the branch head, then merge on main with git merge --no-ff --no-edit, push, clean up the worktree, and package to dist/ only (installed app left as is until the person says)."
+resume: "Done; lesson 111. Lands after CI; packaged to dist/ from main. The installed Operon Stable.app is replaced only when the person says so (dialog-names-the-agent waits on that)."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed gate-commit.sh admitted 3b50349 and 1782ae1 (fmt, clippy, record tests); make q.fast clean"
+  bands: "machine passed check-bands.sh exit 0; steering_bytes, largest_module_lines (screens.rs 9989 here, 9991 on main) and approval_escapes already breached on main"
   failing-test-first: "machine passed all five protected_folders_265 tests failed on the unedited code, each on its assertion (pass-through stub first)"
-  release-binary: "machine pending required - src/ui/terminal.rs, src/cli.rs, src/app/screens.rs, src/i18n_tables.rs and scripts/package-macos.sh change; package from main after landing (ship skill)"
+  release-binary: "machine passed required - src/ui/terminal.rs, src/cli.rs, src/app/screens.rs, src/i18n_tables.rs and scripts/package-macos.sh change; package from main after landing (ship skill)"
   guards-verified-by-mutation: "human passed mutations.py 19 of 19 caught: data-volume spelling (F1), probe refusal, its order before canonicalize, `..`, case, volumes, Desktop, project exemption and its canonical form, three record comparisons, both spellings, two bundle keys, four claim mutations"
   dialog-names-the-agent: "human pending after the swap, the next folder prompt attributed to Operon shows the usage description"
 
