@@ -503,6 +503,7 @@ pub(crate) struct OperonApp {
     pub(crate) depends_on_input: Option<Uuid>,
     pub(crate) window_maximized: bool,
     pub(crate) last_session_refresh: Instant,
+    pub(crate) last_session_poll: Instant,
     /// The Files view is a collaboration surface: an agent can write its
     /// working tree while a person holds the Diff tab open. Refresh status and
     /// the open Diff at a modest cadence so a cached comparison is never
@@ -1076,6 +1077,7 @@ impl OperonApp {
             depends_on_input: None,
             window_maximized: false,
             last_session_refresh: Instant::now(),
+            last_session_poll: Instant::now(),
             last_editor_git_refresh: HashMap::new(),
             store_retry_pending: false,
             search: String::new(),
@@ -3384,6 +3386,17 @@ impl OperonApp {
             );
             BackgroundResult::Rules { project_id, scan }
         });
+    }
+
+    /// Reads every session once the interval for the window's focus has
+    /// passed: less often behind another application (change 275).
+    pub(crate) fn poll_sessions_when_due(&mut self, focused: bool, now: Instant) -> bool {
+        if now.saturating_duration_since(self.last_session_poll) < session_poll_interval(focused) {
+            return false;
+        }
+        self.last_session_poll = now;
+        self.request_session_poll();
+        true
     }
 
     pub(crate) fn request_session_poll(&mut self) {
@@ -7526,12 +7539,12 @@ impl eframe::App for OperonApp {
         if !dropped.is_empty() {
             self.add_dropped_folders(dropped);
         }
-        if self.last_session_refresh.elapsed() >= Duration::from_secs(2) {
+        if self.last_session_refresh.elapsed() >= SESSION_POLL_INTERVAL {
             self.retry_pending_store();
             self.save_workspace_layout_if_changed();
-            self.request_session_poll();
             self.last_session_refresh = Instant::now();
         }
+        self.poll_sessions_when_due(ctx.input(|input| input.focused), Instant::now());
         ctx.request_repaint_after(Duration::from_secs(2));
         // A toast leaves on time even when nothing else would wake the frame.
         if let Some(remaining) = self.expire_brief_notice(Instant::now()) {
