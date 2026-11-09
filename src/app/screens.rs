@@ -24,6 +24,20 @@
 
 use crate::*;
 
+/// What a tab strip's + offers, top to bottom (change 273): the session agent
+/// value of a plain terminal, then the agent CLIs in the order the person
+/// named them. Each is also what the row's mark is looked up by.
+pub(crate) const WORKSPACE_LAUNCH_CHOICES: [&str; 4] = ["terminal", "claude", "codex", "gemini"];
+
+/// The popup the + of `group`'s pane opens, or the empty workspace's for `None`.
+fn workspace_launch_menu_id(group: Option<Uuid>) -> egui::Id {
+    egui::Id::new(("workspace-launch-menu", group))
+}
+
+/// The + menu's width: the longest name, 「Antigravity」, with its mark and the
+/// button padding, so the four rows line up as one column.
+const LAUNCH_MENU_WIDTH: f32 = 168.0;
+
 impl OperonApp {
     /// The toolbar, which on macOS is also the window's title bar.
     ///
@@ -6958,8 +6972,67 @@ impl OperonApp {
         self.ui_tab_workspace(ui);
     }
 
+    /// The menu under a tab strip's + (change 273): a plain terminal or one
+    /// of the agent CLIs, started in `group`'s pane. Pressing the + opens and
+    /// closes it; a choice, a click elsewhere or Escape closes it. The choice
+    /// is acted on after the popup is drawn, so the launch sees a closed menu.
+    fn ui_workspace_launch_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        add: &egui::Response,
+        group: Option<Uuid>,
+    ) {
+        let popup = workspace_launch_menu_id(group);
+        if add.clicked() {
+            ui.memory_mut(|memory| memory.toggle_popup(popup));
+        }
+        let tools = &self.tools;
+        let chosen = egui::popup_below_widget(
+            ui,
+            popup,
+            add,
+            egui::PopupCloseBehavior::CloseOnClick,
+            |ui| {
+                ui.set_min_width(LAUNCH_MENU_WIDTH);
+                ui.spacing_mut().item_spacing.y = SPACE_XS;
+                let mut chosen = None;
+                for choice in WORKSPACE_LAUNCH_CHOICES {
+                    let (label, enabled) = if choice == "terminal" {
+                        (agent_short_label(choice), true)
+                    } else {
+                        (agent_choice_copy(choice).0, tools.agent_available(choice))
+                    };
+                    let mark = session_mark_texture(ui.ctx(), choice);
+                    if launch_choice_button(ui, mark, label, enabled, tr("未準備（設定で確認）"))
+                        .clicked()
+                    {
+                        chosen = Some(choice);
+                    }
+                }
+                chosen
+            },
+        )
+        .flatten();
+        match chosen {
+            Some("terminal") => self.launch_workspace_terminal(group),
+            Some(agent) => self.launch_workspace_agent(group, agent),
+            None => {}
+        }
+    }
+
     /// The central workspace shares one navigation model for sessions and files.
     fn ui_tab_workspace(&mut self, ui: &mut egui::Ui) {
+        // An Escape that closes a + menu belongs to the menu. Taken before any
+        // pane is drawn, so no terminal — this pane's or another's — sends it
+        // on and interrupts its agent's turn (change 273).
+        let launch_menu_open = std::iter::once(None)
+            .chain(self.workspace.groups.iter().map(|g| Some(g.id)))
+            .any(|group| ui.memory(|m| m.is_popup_open(workspace_launch_menu_id(group))));
+        if launch_menu_open
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            ui.memory_mut(|m| m.close_popup());
+        }
         if !self.session_library_open
             || ui.input(|input| input.pointer.any_pressed() || input.key_pressed(egui::Key::Escape))
         {
@@ -7145,17 +7218,15 @@ impl OperonApp {
             // heading below the window (change 260).
             body.horizontal(|ui| {
                 ui.add_enabled_ui(self.workspace_project.is_some(), |ui| {
-                    let add = icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"));
+                    let add = icon_button(ui, palette, ICON_ADD, tr("ターミナルや AI を起動"));
                     add.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
                             ui.is_enabled(),
-                            tr("空のターミナルを開く"),
+                            tr("ターミナルや AI を起動"),
                         )
                     });
-                    if add.clicked() {
-                        self.launch_workspace_terminal(None);
-                    }
+                    self.ui_workspace_launch_menu(ui, &add, None);
                 });
             });
             body.heading(tr("セッションを選択"));
@@ -7237,7 +7308,7 @@ impl OperonApp {
                 // right edge and the tabs scroll beneath the clip (change 260).
                 let width = (ui.available_width() - CONTROL_HEIGHT - SPACE_SM).max(0.0);
                 ui.allocate_ui_with_layout(
-                    egui::vec2(width, CONTROL_HEIGHT_SMALL + SPACE_SM),
+                    egui::vec2(width, CONTROL_HEIGHT),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         ui.set_max_width(width);
@@ -7249,13 +7320,22 @@ impl OperonApp {
                         .auto_shrink([true, true])
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                // Compact tabs (change 273): 4px between them.
+                                ui.spacing_mut().item_spacing.x = SPACE_XS;
                                 for (index, tab) in tabs.tabs.iter().enumerate() {
                                     let (title, hover, dirty) = self.workspace_tab_title(tab);
                                     let active = tabs.active == index;
                                     let tab_frame = egui::Frame::new()
                                         .fill(if active { palette.row_selected } else { palette.card })
-                                        .inner_margin(egui::Margin::symmetric(8, 4))
+                                        .inner_margin(egui::Margin::symmetric(6, 2))
                                         .show(ui, |ui| {
+                                            // 4px inside, a 24px row rather than the shared
+                                            // 28px one, and the close button at its own 24px
+                                            // rather than grown by the shared padding: with the
+                                            // margin the tab is the 28px strip (change 273).
+                                            ui.spacing_mut().item_spacing.x = SPACE_XS;
+                                            ui.spacing_mut().interact_size.y = CONTROL_HEIGHT_SMALL;
+                                            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
                                             ui.horizontal(|ui| {
                                                 // State wording belongs in the hover, not the tab.
                                                 if let WorkspaceTab::Session(id) = tab {
@@ -7382,12 +7462,10 @@ impl OperonApp {
                 });
                 let add = ui.scope(|ui| {
                     ui.spacing_mut().button_padding.x = 0.0;
-                    icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"))
+                    icon_button(ui, palette, ICON_ADD, tr("ターミナルや AI を起動"))
                 }).inner;
-                add.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("空のターミナルを開く")));
-                if add.clicked() {
-                    self.launch_workspace_terminal(Some(*group));
-                }
+                add.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("ターミナルや AI を起動")));
+                self.ui_workspace_launch_menu(ui, &add, Some(*group));
             });
             if let Some(tab) = chosen {
                 self.workspace.select(*group, &tab);

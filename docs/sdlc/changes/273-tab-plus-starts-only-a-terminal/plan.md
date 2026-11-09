@@ -61,3 +61,32 @@
 - CI green on the branch head; the installed app is the build from main.
 
 ## Departures from the plan
+
+- The tab measured 148×36, not the 138×32 the spec had computed: the close
+  button inherits the shared 10/5 button padding and was 34×28, and egui's
+  `horizontal` row takes the shared 28px interact height. Inside the tab frame
+  the row height is `CONTROL_HEIGHT_SMALL` and the button padding is zero, so
+  the close button is its documented 24px and the tab is the 28px strip. The
+  spec's Requirement 7 and Tab geometry now give the measured figures.
+- `workspace_agent_launch` returns `Start`/`Confirm` instead of a struct with a
+  flag, and decides the danger acknowledgement before tmux: the sheet needs no
+  tmux to open, and the test guarding consent can then run without tmux, so a
+  mutation that skips the check meets the missing-tmux refusal instead of
+  starting a real CLI. Recording the session moved into
+  `open_workspace_agent_session`, so a test can check the record without
+  starting the agent. The spec's Design and the No-tmux state say so.
+- The menu's rows are 4px apart instead of the default 8, after the rendered
+  fixture showed four 28px rows reading as separate buttons.
+- egui shows a tooltip only for a pointer at rest that has not moved since a
+  click within 0.1s, so `session_273_missing_cli_is_disabled` lets frames pass
+  before and after moving onto the disabled row.
+- Rendered fixture images (menu open in dark and light, a disabled row with its
+  hover, the + at the right edge with 18 tabs, the empty workspace, the compact
+  tabs) came from a temporary renderer removed before the commit.
+- Review found that the Escape closing the menu also reached the focused
+  terminal, which would send ESC to a running agent and interrupt its turn:
+  egui's popup only reads the key. `ui_tab_workspace` now consumes Escape
+  before any pane draws while one of the + menus is open, checked by
+  `session_273_plus_opens_launch_menu` and the `menu-escape-passed-on` mutation.
+  Other popups (the sheet's combo boxes) are left alone: the check names the
+  + menus' ids rather than asking whether any popup is open.

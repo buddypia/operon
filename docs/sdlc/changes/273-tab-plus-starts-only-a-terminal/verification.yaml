@@ -1,0 +1,26 @@
+# Change 273: the tab strip's + asks what to start, and the session tabs are
+# compact. Each Rn is the spec requirement of that number; I1 is the mutation
+# sweep; I2-I4 are the earlier tab-strip tests the change had to keep (253
+# rename, 260 placement, 267 marks); I5 the translation and design guards the
+# new string and sizes pass through.
+# Rendered fixtures (menu open in dark and light, a disabled row with its
+# hover, the + at the right edge with 18 tabs, the empty workspace, the
+# compact tabs) were inspected from a temporary renderer that is not committed.
+# F1 is the review finding that the Escape closing the menu also reached the
+# focused terminal; the menu test now asserts the key is taken.
+digest: "0333f8839e79f452"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_273_plus_opens_launch_menu
+  - R2 empirical-test :: cargo test --locked session_254_terminal_
+  - R3 empirical-test :: cargo test --locked session_273_agent_
+  - R4 empirical-test :: cargo test --locked session_273_dangerous_options_open_the_sheet
+  - R5 empirical-test :: cargo test --locked session_273_missing_cli_is_disabled
+  - R6 empirical-test :: cargo test --locked session_254_empty_workspace
+  - R7 empirical-test :: cargo test --locked session_273_tabs_are_compact
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/273-tab-plus-starts-only-a-terminal/mutations.py
+  - I2 empirical-test :: cargo test --locked session_253_
+  - I3 empirical-test :: cargo test --locked session_260_
+  - I4 empirical-test :: cargo test --locked session_tab
+  - I5 empirical-test :: cargo test --locked every_translation_table
+  - F1 empirical-test :: cargo test --locked session_273_plus_opens_launch_menu

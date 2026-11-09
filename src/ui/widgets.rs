@@ -1249,13 +1249,13 @@ pub(crate) fn session_status_icon(
     kind: SessionStatusKind,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(STATUS_ICON_SIZE, CONTROL_HEIGHT_SMALL),
+        egui::vec2(TAB_STATUS_MARK_SIZE, CONTROL_HEIGHT_SMALL),
         egui::Sense::hover(),
     );
     if ui.is_rect_visible(rect) {
         kind.status_mark().paint(
             ui.painter(),
-            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(STATUS_ICON_SIZE)),
+            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(TAB_STATUS_MARK_SIZE)),
             palette.status(kind.tone()),
         );
     }
@@ -1547,6 +1547,28 @@ pub(crate) fn session_mark(ui: &mut egui::Ui, agent: &str) {
         egui::Vec2::splat(SESSION_MARK_SIZE),
     )))
     .on_hover_text(agent_short_label(agent));
+}
+
+/// One choice in the tab strip's + menu (change 273): the mark of what it
+/// starts and its name, a 28px row like every menu item. `None` for the mark
+/// keeps the name alone rather than leaving a gap. A row that cannot be chosen
+/// is drawn disabled and says why on hover.
+pub(crate) fn launch_choice_button(
+    ui: &mut egui::Ui,
+    mark: Option<egui::TextureHandle>,
+    label: &str,
+    enabled: bool,
+    disabled_reason: &str,
+) -> egui::Response {
+    let image =
+        mark.map(|texture| egui::Image::new((texture.id(), egui::Vec2::splat(SESSION_MARK_SIZE))));
+    ui.add_enabled(
+        enabled,
+        egui::Button::opt_image_and_text(image, Some(label.into()))
+            .stroke(egui::Stroke::NONE)
+            .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
+    )
+    .on_disabled_hover_text(disabled_reason)
 }
 
 pub(crate) fn code_block(ui: &mut egui::Ui, text: &str) {

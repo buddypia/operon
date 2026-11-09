@@ -44,8 +44,9 @@
    project; ターミナル there keeps the missing-tmux notice. Tests:
    `session_254_empty_workspace`, `session_260_empty_plus_sits_where_the_first_tab_appears`.
 7. Session tabs are compact: a tab is at most `CONTROL_HEIGHT` (28px) tall, a
-   tab whose title fits the 40px minimum is at most 116px wide (138px before:
-   16 margin + 18 + 16 + 40 + 24 + 3×8; after: 12 + 14 + 14 + 40 + 24 + 3×4),
+   tab whose title fits the 40px minimum is at most 116px wide (measured
+   148×36 before: 16 margin + 18 + 16 + 40 + a 34×28 close button + 3×8;
+   after: 12 + 14 + 14 + 40 + 24 + 3×4),
    the state mark and the CLI mark are drawn at 14px, and the + still follows
    the last tab. Tests: `session_273_tabs_are_compact`,
    `session_260_plus_follows_last_tab`, `session_254_compact_tabs`.
@@ -67,8 +68,10 @@ States:
   appears in that pane and is selected, and the existing notice
   「セッションを起動しています…」 shows; the tab moves to running, or to failed
   with the existing launch diagnostic.
-- **No tmux**: any choice gives 「tmux が必要です。「設定」を開いてください。」 and
-  creates nothing.
+- **No tmux**: ターミナル and every agent choice give 「tmux が必要です。「設定」を開いてください。」
+  and create nothing — except an agent whose remembered options need the danger
+  acknowledgement, which opens the launch sheet as in Requirement 4 (the sheet
+  needs no tmux to open, and reports it itself).
 - **worktree operation running**: 「worktree 操作の完了を待ってください。」, nothing
   created.
 - **Login not ready** (pinned login gone or signed out): the existing
@@ -86,8 +89,10 @@ States:
 
 Tab geometry: frame margin 6px across and 2px down (was 8 and 4), 4px between
 items inside a tab and between tabs (was 8), state mark 14px (was 18), CLI mark
-14px (was 16), title 12pt unchanged, close button 24px unchanged, selected
-underline unchanged. The strip row is `CONTROL_HEIGHT` tall (was 32px).
+14px (was 16), title 12pt unchanged, close button at its own 24px (the shared
+10/5 button padding had grown it to 34×28) inside a 24px row, selected
+underline unchanged. The strip row is `CONTROL_HEIGHT` tall (was 32px, which
+the 36px tabs overflowed). The menu's rows are 4px apart.
 
 ## Design
 
@@ -101,28 +106,34 @@ Placement: `EXTEND`. The + and the strip are `ui_tab_workspace` in
     folder text `launch_workspace_terminal` already derives from the pane's
     current tab; that function now calls it.
   - `workspace_agent_launch(group, agent) -> UiResult<PaneAgentLaunch>`: the
-    whole decision, with no side effect — project and resolved folder, the
-    settings (pin for this CLI, else `recent_agent_settings.agents[agent]`, else
-    empty), the account (the pin's when the pin is for this CLI and the login
-    still exists, else none), the built command (`build_agent_launch_command`, the
-    existing gate) and whether the danger acknowledgement is missing
-    (`launch_needs_acknowledgement` against the pin's `acknowledged`). Refusals
-    (no project, worktree operation, no tmux, CLI missing, login, bad options,
-    folder) are its `Err` strings, the same strings `launch_session` uses.
-  - `launch_workspace_agent(group, agent)`: on `Err` sets `notice`; when the
-    acknowledgement is missing calls `open_project_session_setup`, then
+    whole decision, with no side effect. `PaneAgentLaunch` is
+    `Start(PaneAgentStart)` — project, resolved folder, agent, the built
+    command (`build_agent_launch_command`, the existing gate) and the account
+    — or `Confirm { project_id, path_input }` when the danger acknowledgement is
+    missing (`launch_needs_acknowledgement` on the settings, against the pin's
+    `acknowledged`). Settings: the pin for this CLI, else
+    `recent_agent_settings.agents[agent]`, else empty; account: the pin's when
+    the pin is for this CLI and the login still exists, else none. Order: an
+    agent not in `AGENTS`, no project, CLI missing → `Err`; then the danger
+    check → `Confirm`; then worktree operation, no tmux, login, bad options,
+    folder → `Err`. The danger check comes before tmux so that a combination
+    needing consent is never one check away from starting. Every `Err` is the
+    string `launch_session` uses for it.
+  - `open_workspace_agent_session(group, &start) -> Option<Uuid>`: pushes the
+    `Session` (managed native id via `command_with_managed_native_session_id`,
+    tracking token via `goal_with_native_tracking_token` on an empty request,
+    `origin: None`, no dependency), persists (restoring the store on failure, as
+    `launch_session` does), `remember_session_account`, focuses the pane, sets
+    `launch_progress` and selects the session; it does not start it.
+  - `launch_workspace_agent(group, agent)`: on `Err` sets `notice`; on `Start`
+    calls `open_workspace_agent_session` then `start_session`; on `Confirm`
+    calls `open_project_session_setup`, then
     — when the form is on another CLI — sets `selected_agent`, calls
     `apply_agent_launch_settings(agent)`, clears `acknowledged_launch`, the
     conversation ID and `agent_account_input` (never `select_agent`, which
     records the form into the remembered options and writes the file), and
-    sets the sheet's folder to the pane's; otherwise
-    focuses the pane, pushes the `Session` (managed native id via
-    `command_with_managed_native_session_id`, tracking token via
-    `goal_with_native_tracking_token` on an empty request, `origin: None`, no
-    dependency), persists (restoring the store on failure, as `launch_session`
-    does), `remember_session_account`, sets `launch_progress`, and calls
-    `start_session`. It never calls `persist_recent_agent_settings`, which
-    records the sheet's draft.
+    sets the sheet's folder to the pane's. Neither path calls
+    `persist_recent_agent_settings`, which records the sheet's draft.
 - `src/app/screens.rs`: `WORKSPACE_LAUNCH_CHOICES`, the menu's four agent
   values in order. `ui_workspace_launch_menu(ui, add, group)` toggles an
   `egui::popup_below_widget` (`PopupCloseBehavior::CloseOnClick`, id per pane)
@@ -132,9 +143,10 @@ Placement: `EXTEND`. The + and the strip are `ui_tab_workspace` in
   `launch_workspace_terminal` or `launch_workspace_agent`. Both the pane + and
   the empty-workspace + call it. Tab margins, spacings and the strip height
   change as in Behaviour.
-- `src/ui/widgets.rs`: `launch_choice_button(ui, texture, label, enabled)` — a
-  frameless-at-rest `egui::Button::image_and_text` at `CONTROL_HEIGHT`, the mark
-  at `SESSION_MARK_SIZE`; `session_status_icon` allocates and paints at
+- `src/ui/widgets.rs`: `launch_choice_button(ui, mark, label, enabled,
+  disabled_reason)` — an `egui::Button::opt_image_and_text` with no stroke at
+  `CONTROL_HEIGHT`, the mark (an optional texture) at `SESSION_MARK_SIZE`, the
+  reason on hover when disabled; `session_status_icon` allocates and paints at
   `TAB_STATUS_MARK_SIZE`.
 - `src/glyphs.rs`: `SESSION_MARK_SIZE` 16 → 14; new `TAB_STATUS_MARK_SIZE = 14.0`
   (the 18-point grid `STATUS_ICON_SIZE` stays the geometry's unit, so the marks

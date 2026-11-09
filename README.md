@@ -105,7 +105,7 @@ Settings. The projects, sessions, and agent output in them are a demo.
 
 ### Supervision
 
-- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below, up to four panes; drag a divider to resize. Each session tab starts with its state mark, the **+** for a plain terminal sits right after the last tab, and closing a session tab (✕ or `⌘W`) leaves its agent running.
+- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below, up to four panes; drag a divider to resize. Each session tab starts with its state mark; the **+** right after the last tab offers a terminal, Claude Code, Codex CLI or Antigravity and starts the one you pick in that pane's folder (an agent starts with the options pinned for that CLI, or else the ones it last launched with; options that need the danger acknowledgement open the launch sheet instead). Closing a session tab (✕ or `⌘W`) leaves its agent running.
 - Inspect and message a live agent session without leaving the app.
 - A turn that finishes, or stops to ask, while you are reading another session
   leaves that session marked in the list until you open it, and the banner at
