@@ -1,0 +1,15 @@
+# Change 264: Shift+Enter in a session terminal sends what Ctrl+J sends (LF),
+# a newline in Claude Code, Codex and Antigravity CLI, where it used to send
+# the same Enter as Enter. R1 is bug.md's requirement. I1 is the sweep of six
+# mutations (the arm removed, Ctrl or Option admitted, another key sent, plain
+# Enter moved, the IME's confirming Shift+Enter leaked). I2-I4 are the key and
+# IME tests the binding sits beside: the Enter a conversion owns, the
+# preedit filter, and the existing chords.
+digest: "e850f03e7c838b66"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked shift_enter_puts_a_newline_in_the_agents_input_instead_of_sending
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/264-shift-enter-inserts-a-newline/mutations.py
+  - I2 empirical-test :: cargo test --locked a_second_enter_in_the_frame_that_committed_a_conversion_still_sends
+  - I3 empirical-test :: cargo test --locked terminal_input_events_handles_ime_preedit_and_commit_enter_suppression
+  - I4 empirical-test :: cargo test --locked maps_tui_control_keys_without_intercepting_macos_commands

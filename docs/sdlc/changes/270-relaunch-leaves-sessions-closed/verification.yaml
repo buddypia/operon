@@ -15,7 +15,7 @@
 # holds R6 through the real apply_session_poll over every load status, observation and
 # write outcome for up to three polls (164 states). Each was watched failing on
 # the defect it guards (plan departure 8).
-digest: "4bdae59d0881846c"
+digest: "84bd8571fd76b675"
 
 obligations:
   - R1 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_running_in_it

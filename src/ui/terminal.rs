@@ -452,6 +452,14 @@ pub(crate) fn terminal_key_binding(key: egui::Key, modifiers: egui::Modifiers) -
     if modifiers.command {
         return None;
     }
+    // Shift+Enter is a newline in an agent's input, Enter a submit. tmux
+    // writes `\r` for `S-Enter` as for `Enter`, so the Shift cannot ride on
+    // the Enter; send what Ctrl+J sends instead — the LF a terminal set up for
+    // Shift+Enter sends, which Claude Code, Codex, and Antigravity CLI read as
+    // a newline (change 264). Exactly Shift: Ctrl or Option keep their chords.
+    if key == egui::Key::Enter && modifiers.matches_exact(egui::Modifiers::SHIFT) {
+        return terminal_key_binding(egui::Key::J, egui::Modifiers::CTRL);
+    }
     let named = match key {
         egui::Key::ArrowDown => Some("Down"),
         egui::Key::ArrowLeft => Some("Left"),
