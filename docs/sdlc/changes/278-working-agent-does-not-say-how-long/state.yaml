@@ -21,7 +21,7 @@ resume: "Done. Package from main after landing."
 contract:
   three-gates: "machine passed make q.fast and cargo test --locked working_278_"
   bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs and src/app/working_time.rs change; package from main after landing"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs and src/app/working_time.rs change; packaged from main with the changes that follow it"
   guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/278-working-agent-does-not-say-how-long/mutations.py"
 
 sets:
