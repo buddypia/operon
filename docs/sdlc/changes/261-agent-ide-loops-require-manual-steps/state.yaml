@@ -1,0 +1,29 @@
+# The state of one change. See docs/sdlc/templates/state.yaml for the field meanings.
+
+state:
+  route: "feature"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write failing ide_261_ tests in src/tests.rs, then implement git hunk actions, context mentions, external IDE line jumps, parallel arena launch, and palette file/symbol jump."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/ files beyond src/tests.rs change; package from main after landing"
+  guards-verified-by-mutation: "human pending each new guard watched failing via mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
