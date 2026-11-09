@@ -76086,3 +76086,788 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
     fs::remove_dir_all(&root).ok();
     assert_eq!(coverage.states, R6_STATES, "{coverage:?}");
 }
+
+/// ⌘ as macOS reports it: both the platform-neutral and the Mac flag.
+fn shortcut_272_command(extra: egui::Modifiers) -> egui::Modifiers {
+    egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        ..Default::default()
+    } | extra
+}
+
+/// One frame with one key press: the app-wide chords first, as `update` runs
+/// them, then the workspace when it is the page showing — so a key handled in
+/// both places would be seen acting twice.
+fn shortcut_272_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+) {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 820.0),
+        )),
+        events: vec![key_press(key, modifiers)],
+        modifiers,
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        app.handle_app_shortcuts(ctx);
+        if app.page == Page::Sessions {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        }
+    });
+}
+
+/// A frame with no input, as the window has drawn many times before anyone
+/// presses a key: the workspace marks its live sessions seen on its first
+/// draw, and a tab closed before that draw is added back as newly live.
+fn shortcut_272_settle(app: &mut OperonApp, ctx: &egui::Context) {
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    });
+}
+
+fn shortcut_272_tabs(app: &OperonApp) -> Vec<WorkspaceTab> {
+    app.workspace
+        .groups
+        .iter()
+        .flat_map(|group| group.tabs.clone())
+        .collect()
+}
+
+fn shortcut_272_third_session(app: &mut OperonApp) -> Uuid {
+    let mut session = app.store.sessions[0].clone();
+    session.id = Uuid::new_v4();
+    session.name = "third".into();
+    session.tmux_name = managed_tmux_name(session.id);
+    app.store.sessions.push(session.clone());
+    session.id
+}
+
+/// Change 272 (R1): ⌘T is the strip's +, from any page, and not while the
+/// palette or the launch sheet holds the keyboard. With no tmux the + answers
+/// with the tmux notice, so reaching that notice is reaching the + 's launch.
+#[test]
+pub(crate) fn shortcut_272_command_t_opens_a_terminal_like_the_plus() {
+    let root = temporary_directory("shortcut-272-new");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    let tmux_notice = |app: &OperonApp| {
+        app.notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tmux が必要")
+    };
+
+    for page in [Page::Sessions, Page::Home, Page::Projects] {
+        app.page = page;
+        app.notice = None;
+        shortcut_272_frame(
+            &mut app,
+            &ctx,
+            egui::Key::T,
+            shortcut_272_command(egui::Modifiers::NONE),
+        );
+        assert!(tmux_notice(&app), "{page:?}: ⌘T reaches the + 's launch");
+    }
+
+    app.page = Page::Sessions;
+    app.notice = None;
+    app.command_palette_open = true;
+    shortcut_272_frame(
+        &mut app,
+        &ctx,
+        egui::Key::T,
+        shortcut_272_command(egui::Modifiers::NONE),
+    );
+    assert!(!tmux_notice(&app), "the palette holds the keyboard");
+    app.command_palette_open = false;
+
+    // ⇧⌘T is its own chord: it must not open a terminal on the way.
+    app.notice = None;
+    shortcut_272_frame(
+        &mut app,
+        &ctx,
+        egui::Key::T,
+        shortcut_272_command(egui::Modifiers::SHIFT),
+    );
+    assert!(!tmux_notice(&app), "⇧⌘T also ran ⌘T");
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R2): one key press is one action. egui matches an extra Shift
+/// leniently, so ⇧⌘T matched ⌘T; the exact binding now wins, and a press with
+/// no exact binding still falls back to the lenient one as before.
+#[test]
+pub(crate) fn shortcut_272_the_most_specific_chord_wins() {
+    let command = shortcut_272_command(egui::Modifiers::NONE);
+    let shifted = shortcut_272_command(egui::Modifiers::SHIFT);
+    let keymap = Keymap::defaults();
+    assert_eq!(keymap.action_for(egui::Key::T, command), Some("tab.new"));
+    assert_eq!(keymap.action_for(egui::Key::T, shifted), Some("tab.reopen"));
+    assert_eq!(
+        keymap.action_for(egui::Key::K, shifted),
+        Some("palette.open"),
+        "with nothing exact, the lenient match still answers"
+    );
+    assert_eq!(keymap.action_for(egui::Key::K, egui::Modifiers::NONE), None);
+    assert_eq!(keymap.action_for(egui::Key::T, egui::Modifiers::CTRL), None);
+
+    let moved = resolve_keymap(r#"{"keybindings": {"terminal.find": "Mod+Shift+K"}}"#)
+        .expect("⇧⌘K is free");
+    assert_eq!(
+        moved.action_for(egui::Key::K, shifted),
+        Some("terminal.find")
+    );
+    assert_eq!(
+        moved.action_for(egui::Key::K, command),
+        Some("palette.open")
+    );
+
+    // The rule reaches the frame loop: ⇧⌘T opens nothing new, it reopens.
+    let root = temporary_directory("shortcut-272-specific");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, shifted);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("開き直せるタブはありません。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R3): ⌘W is the keymap's `tab.close`, handled once — a second
+/// handler left in the workspace would close two tabs on one press — and a
+/// keymap file can turn it off.
+#[test]
+pub(crate) fn shortcut_272_close_is_a_keymap_action() {
+    let root = temporary_directory("shortcut-272-close");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    app.select_session(second);
+    let ctx = egui::Context::default();
+    let command = shortcut_272_command(egui::Modifiers::NONE);
+    shortcut_272_settle(&mut app, &ctx);
+
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first)],
+        "one press closes the active tab and only that"
+    );
+
+    app.keymap =
+        resolve_keymap(r#"{"keybindings": {"tab.close": null}}"#).expect("a keymap without ⌘W");
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+
+    app.keymap = Keymap::defaults();
+    app.page = Page::Home;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first)],
+        "no tab is showing on Home"
+    );
+    app.page = Page::Sessions;
+    app.session_library_open = true;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    app.session_library_open = false;
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first)],
+        "the session library covers the tabs"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R4): ⇧⌘T brings back the last closed tab that can still be
+/// shown, once, and remembers a bounded number of them.
+#[test]
+pub(crate) fn shortcut_272_reopen_brings_back_the_last_closed_tab() {
+    let root = temporary_directory("shortcut-272-reopen");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    app.select_session(second);
+    let ctx = egui::Context::default();
+    let command = shortcut_272_command(egui::Modifiers::NONE);
+    let reopen = shortcut_272_command(egui::Modifiers::SHIFT);
+    let nothing = Some(tr("開き直せるタブはありません。"));
+
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.notice.as_deref(), nothing, "nothing closed yet");
+    assert_eq!(shortcut_272_tabs(&app).len(), 2);
+
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+    app.page = Page::Home;
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.page, Page::Sessions, "the reopened tab is shown");
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    assert_eq!(shortcut_272_tabs(&app).len(), 2);
+
+    // A tab whose session is gone is passed over for the one before it.
+    app.close_workspace_tab(&WorkspaceTab::Session(first));
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    assert!(shortcut_272_tabs(&app).is_empty());
+    app.store.sessions.retain(|session| session.id != second);
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(
+        app.notice.as_deref(),
+        nothing,
+        "each closed tab comes back once"
+    );
+
+    // Open again by another route: not a tab to reopen.
+    app.close_workspace_tab(&WorkspaceTab::Session(first));
+    app.select_session(first);
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.notice.as_deref(), nothing);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+
+    // Remembered once, and no more than the limit.
+    app.closed_tabs.clear();
+    for _ in 0..3 {
+        app.select_session(first);
+        app.close_workspace_tab(&WorkspaceTab::Session(first));
+    }
+    assert_eq!(app.closed_tabs, vec![WorkspaceTab::Session(first)]);
+    let extra = (0..CLOSED_TAB_LIMIT + 5)
+        .map(|_| shortcut_272_third_session(&mut app))
+        .collect::<Vec<_>>();
+    for id in &extra {
+        app.select_session(*id);
+        app.close_workspace_tab(&WorkspaceTab::Session(*id));
+    }
+    assert_eq!(app.closed_tabs.len(), CLOSED_TAB_LIMIT);
+    assert_eq!(
+        app.closed_tabs.last(),
+        extra.last().map(|id| WorkspaceTab::Session(*id)).as_ref()
+    );
+    assert!(!app.closed_tabs.contains(&WorkspaceTab::Session(first)));
+
+    // A document: a refused close is not remembered; a closed one reopens
+    // from disk; one whose project is gone is passed over.
+    app.closed_tabs.clear();
+    let file = root.join("notes.txt");
+    fs::write(&file, "hello\n").unwrap();
+    let project = app.store.projects[0].clone();
+    app.page = Page::Sessions;
+    app.open_document_at(&project, project.path.clone(), file.clone());
+    let document = match app.workspace.active().cloned() {
+        Some(WorkspaceTab::Document(id)) => id,
+        other => panic!("the file opened as a tab: {other:?}"),
+    };
+    let index = app.document_index(&document).expect("open");
+    app.open_documents[index].read_only = None;
+    app.open_documents[index].disk = "hello\n".into();
+    app.open_documents[index].buffer = "edited\n".into();
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    assert!(app.closed_tabs.is_empty(), "a refused close is not a close");
+    app.open_documents[index].buffer = "hello\n".into();
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    assert!(app.document_index(&document).is_none());
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Document(document.clone()))
+    );
+    assert!(app.document_index(&document).is_some(), "read again");
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    app.store.projects.clear();
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.notice.as_deref(), nothing);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R5): ⇧⌘] and ⇧⌘[ step through the focused pane's tabs. macOS
+/// reports the bracket with Shift held as `}` / `{` on US and JIS keyboards,
+/// so that is the key that has to match; ⌃⇧Tab goes back, not forward.
+#[test]
+pub(crate) fn shortcut_272_brackets_and_control_tab_step_through_tabs() {
+    let shifted = shortcut_272_command(egui::Modifiers::SHIFT);
+    let keymap = Keymap::defaults();
+    for (key, action) in [
+        (egui::Key::CloseCurlyBracket, "tab.next"),
+        (egui::Key::CloseBracket, "tab.next"),
+        (egui::Key::OpenCurlyBracket, "tab.previous"),
+        (egui::Key::OpenBracket, "tab.previous"),
+    ] {
+        assert_eq!(keymap.action_for(key, shifted), Some(action), "{key:?}");
+    }
+    assert_eq!(
+        keymap.action_for(
+            egui::Key::CloseCurlyBracket,
+            shortcut_272_command(egui::Modifiers::NONE)
+        ),
+        None,
+        "a }} typed without Shift is not ⇧⌘]"
+    );
+
+    let root = temporary_directory("shortcut-272-step");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let third = shortcut_272_third_session(&mut app);
+    for id in [first, second, third] {
+        app.select_session(id);
+    }
+    let ctx = egui::Context::default();
+    let control_shift = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    for (key, modifiers, expected) in [
+        (egui::Key::CloseCurlyBracket, shifted, first),
+        (egui::Key::CloseCurlyBracket, shifted, second),
+        (egui::Key::OpenCurlyBracket, shifted, first),
+        (egui::Key::OpenCurlyBracket, shifted, third),
+        (egui::Key::Tab, control_shift, second),
+        (egui::Key::Tab, egui::Modifiers::CTRL, third),
+    ] {
+        shortcut_272_frame(&mut app, &ctx, key, modifiers);
+        assert_eq!(
+            app.workspace.active(),
+            Some(&WorkspaceTab::Session(expected)),
+            "{key:?} {modifiers:?}"
+        );
+        assert_eq!(app.selected_session, Some(expected));
+    }
+
+    for id in [first, second, third] {
+        app.close_workspace_tab(&WorkspaceTab::Session(id));
+    }
+    shortcut_272_frame(&mut app, &ctx, egui::Key::CloseCurlyBracket, shifted);
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert!(
+        shortcut_272_tabs(&app).is_empty(),
+        "no tab, nothing to step to"
+    );
+
+    // A group nobody settled has no tab to step to; stepping in it must not
+    // divide by zero and take the window with it.
+    let empty = Uuid::new_v4();
+    app.workspace.groups.push(WorkspaceGroup {
+        id: empty,
+        tabs: Vec::new(),
+        active: 0,
+    });
+    app.workspace.focused = Some(empty);
+    app.step_workspace_tab(true);
+    app.step_workspace_tab(false);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R6): the palette offers the two tab actions that make sense
+/// from it, with their chords, and choosing one does what the key does.
+#[test]
+pub(crate) fn shortcut_272_palette_rows_run_the_tab_actions() {
+    let actions = OperonApp::palette_actions();
+    for (dispatch, id) in [
+        ("New terminal tab", "tab.new"),
+        ("Reopen closed tab", "tab.reopen"),
+    ] {
+        assert!(
+            actions
+                .iter()
+                .any(|(action, label, keymap)| *action == dispatch
+                    && *keymap == id
+                    && *label == tr(action_label(id))),
+            "{dispatch} is a palette row drawing {id}"
+        );
+    }
+
+    let root = temporary_directory("shortcut-272-palette");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.select_session(first);
+    app.select_session(second);
+    app.activate_palette_entry(&PaletteKind::Action("New terminal tab"));
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    app.activate_palette_entry(&PaletteKind::Action("Reopen closed tab"));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R7): the manual's key table is where a person looks first, so
+/// every remappable action's default chord is in it, in all three languages,
+/// spelled as the app draws it — and ⌘W, now remappable, is not called fixed.
+#[test]
+pub(crate) fn shortcut_272_every_manual_lists_every_default_chord() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for manual in ["docs/MANUAL.md", "docs/MANUAL.ja.md", "docs/MANUAL.ko.md"] {
+        let text = fs::read_to_string(root.join(manual)).unwrap();
+        let section = text
+            .split("\n## 8.")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap_or_else(|| panic!("{manual} has a section 8"));
+        for action in KEYMAP_ACTIONS {
+            let chord = chord_label(parse_chord(action.default).expect("defaults parse"));
+            assert!(
+                section.contains(&chord),
+                "{manual} does not list {chord} ({})",
+                action.id
+            );
+        }
+        let fixed = section
+            .lines()
+            .find(|line| line.contains("⌘↩") && !line.starts_with('|'))
+            .unwrap_or_else(|| panic!("{manual} names its fixed keys"));
+        assert!(!fixed.contains("⌘W"), "{manual}: ⌘W is no longer fixed");
+    }
+}
+
+/// Change 272, found by trying to break it: a keymap file that moves
+/// `tab.previous` onto ⌃Tab must get what it asked for. The fixed ⌃Tab read
+/// the press first and stepped forward.
+#[test]
+pub(crate) fn shortcut_272_a_control_tab_binding_is_the_keymaps() {
+    let root = temporary_directory("shortcut-272-control-tab");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let third = shortcut_272_third_session(&mut app);
+    for id in [first, second, third] {
+        app.select_session(id);
+    }
+    app.keymap = resolve_keymap(r#"{"keybindings": {"tab.previous": "Ctrl+Tab"}}"#)
+        .expect("⌃Tab is free in the keymap");
+    let ctx = egui::Context::default();
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Session(second)),
+        "⌃Tab is tab.previous in this keymap"
+    );
+    // A page bound to ⌃Tab gets the press too, and no tab moves.
+    app.keymap = resolve_keymap(r#"{"keybindings": {"page.home": "Ctrl+Tab"}}"#)
+        .expect("⌃Tab is free in the keymap");
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert_eq!(app.page, Page::Home);
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272: a tab closed in one project comes back in that project's
+/// workspace while another project is showing.
+#[test]
+pub(crate) fn shortcut_272_reopen_crosses_back_to_the_tabs_project() {
+    let root = temporary_directory("shortcut-272-cross");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let a = app.store.projects[0].id;
+    let other_root = root.join("other");
+    fs::create_dir_all(&other_root).unwrap();
+    let b = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: b,
+        path: other_root.clone(),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    let elsewhere = shortcut_272_third_session(&mut app);
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == elsewhere) {
+        session.project_id = b;
+        session.worktree_path = Some(other_root.clone());
+    }
+    app.select_session(first);
+    app.select_session(second);
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    app.select_session(elsewhere);
+    assert_eq!(app.workspace_project, Some(b));
+
+    app.reopen_closed_tab();
+    assert_eq!(app.workspace_project, Some(a));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    assert_eq!(app.selected_session, Some(second));
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first), WorkspaceTab::Session(second)],
+        "project A's other tab is still there"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 271: the foreground process group of a terminal names the agent CLI
+/// the person is running in it. Rows are `pid ppid pgid tpgid comm`, the shape
+/// `/bin/ps -o pid=,ppid=,pgid=,tpgid=,comm=` prints; the first three are
+/// shaped after what a scratch tmux server showed on 2026-11-09.
+#[test]
+pub(crate) fn the_cli_in_a_terminals_foreground_is_read_from_its_processes() {
+    let cases: [(&str, &str, Option<CliProvider>); 11] = [
+        (
+            "Claude in front of a login shell",
+            "14629 66301 14629 14629 /Users/me/.local/bin/claude\n66301   229 66301 14629 /bin/zsh\n",
+            Some(CliProvider::Claude),
+        ),
+        (
+            "Codex, its MCP servers in groups of their own",
+            "30145 49254 30145 30145 /opt/codex/vendor/aarch64-apple-darwin/bin/codex\n\
+             34566 30145 34566 30145 /Users/me/.cache/codex-runtimes/node/bin/node\n\
+             34575 30145 34575 30145 npm exec some-mcp@latest\n\
+             49254   229 49254 30145 -zsh\n",
+            Some(CliProvider::Codex),
+        ),
+        (
+            "Antigravity under a wrapper shell, with an MCP child in its group",
+            "49287   229 49287 85001 -zsh\n\
+             85001 49287 85001 85001 /bin/sh\n\
+             85977 85001 85001 85001 /Users/me/.local/bin/agy\n\
+             88239 85977 85001 85001 npm exec mcp-remote@0.15.1 https://example.invalid/mcp\n\
+             89997 88239 85001 85001 node\n",
+            Some(CliProvider::Gemini),
+        ),
+        ("a shell alone", "5297 229 5297 5297 -zsh\n", None),
+        (
+            "Claude running Codex as one of its tools is still Claude",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/claude\n\
+             300 200 200 200 /bin/zsh\n301 300 200 200 /usr/local/bin/codex\n",
+            Some(CliProvider::Claude),
+        ),
+        (
+            "two CLIs side by side in one pipeline are not guessed between",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/codex\n201 100 200 200 /usr/local/bin/claude\n",
+            None,
+        ),
+        (
+            "a CLI sent to the background is not the one in front",
+            "100 1 100 100 -zsh\n200 100 200 100 /usr/local/bin/claude\n",
+            None,
+        ),
+        (
+            "an executable path with a space in it",
+            "100 1 100 200 -zsh\n200 100 200 200 /Applications/Some App.app/Contents/MacOS/codex\n",
+            Some(CliProvider::Codex),
+        ),
+        (
+            "a name that only begins like a CLI's",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/codex-helper\n",
+            None,
+        ),
+        ("nothing listed", "", None),
+        ("a line that is not a process", "PID PPID PGID TPGID COMMAND\n", None),
+    ];
+    for (case, listing, expected) in cases {
+        assert_eq!(parse_foreground_cli(listing), expected, "{case}");
+    }
+    // The device `ps -t` is given, out of what tmux prints for the pane.
+    let devices: [(&str, Option<&str>); 6] = [
+        ("/dev/ttys012\n", Some("ttys012")),
+        ("/dev/ttys012\n/dev/ttys013\n", Some("ttys012")),
+        ("/dev/-A\n", None),
+        ("/dev/../ttys012\n", None),
+        ("ttys012\n", None),
+        ("", None),
+    ];
+    for (listing, expected) in devices {
+        assert_eq!(pane_device(listing), expected, "{listing:?}");
+    }
+}
+
+/// Change 271, through the poll's result as the app receives it: a terminal
+/// whose foreground is a CLI takes that CLI's kind, and drops the conversation
+/// recorded for the CLI it ran before. A session launched as a CLI keeps its
+/// kind, and the same CLI seen again leaves the conversation its hook reported.
+#[test]
+pub(crate) fn a_terminal_takes_the_kind_of_the_cli_seen_running_in_it() {
+    let root = temporary_directory("terminal-cli-271");
+    let data_file = root.join("store-v2.json");
+    let mut app = test_app(data_file.clone());
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let mut was_claude = relaunch_270_session(
+        project.id,
+        "claude",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    was_claude.native_session_id = Some(Uuid::new_v4().to_string());
+    was_claude.native_session_path = Some(root.join("claude.jsonl"));
+    let mut launched = relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    launched.native_session_id = Some(Uuid::new_v4().to_string());
+    app.store.projects.push(project);
+    for session in [&plain, &was_claude, &launched] {
+        app.store.sessions.push(session.clone());
+    }
+    let poll = |app: &mut OperonApp, clis: Vec<(Uuid, CliProvider)>| {
+        app.background_tasks.insert(BackgroundKey::SessionPoll);
+        app.background_sender
+            .send(BackgroundResult::SessionPoll {
+                states: Vec::new(),
+                activities: Vec::new(),
+                previews: Vec::new(),
+                output: Vec::new(),
+                clis,
+            })
+            .unwrap();
+        app.process_background_results();
+    };
+
+    poll(
+        &mut app,
+        vec![
+            (plain.id, CliProvider::Codex),
+            (was_claude.id, CliProvider::Gemini),
+            (launched.id, CliProvider::Codex),
+        ],
+    );
+
+    let codex = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        codex.agent,
+        CliProvider::Codex.agent(),
+        "Codex を動かしているターミナルの種類"
+    );
+    assert_eq!(codex.goal, "", "素のターミナルの説明が残りました");
+    assert_eq!(codex.origin, Some(SessionOrigin::PlainTerminal));
+    let gemini = relaunch_270_find(&app, was_claude.id);
+    assert_eq!(gemini.agent, CliProvider::Gemini.agent());
+    assert_eq!(
+        gemini.native_session_id, None,
+        "前の CLI の会話 ID が残りました"
+    );
+    assert_eq!(gemini.native_session_path, None);
+    let still_launched = relaunch_270_find(&app, launched.id);
+    assert_eq!(
+        still_launched.agent, "claude",
+        "CLI として起動したセッションの種類が変わりました"
+    );
+    assert_eq!(
+        still_launched.native_session_id, launched.native_session_id,
+        "CLI として起動したセッションの会話 ID が消えました"
+    );
+    let stored = load_store_safely(&data_file).store;
+    let stored_kind = |id: Uuid| {
+        stored
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| session.agent.clone())
+    };
+    assert_eq!(
+        stored_kind(plain.id).as_deref(),
+        Some(CliProvider::Codex.agent())
+    );
+    assert_eq!(
+        stored_kind(was_claude.id).as_deref(),
+        Some(CliProvider::Gemini.agent())
+    );
+
+    // The hook of the CLI now in front reports its conversation; seeing the
+    // same CLI on the next poll keeps it.
+    let agy_id = Uuid::new_v4().to_string();
+    relaunch_270_report(
+        &mut app,
+        &was_claude.tmux_name,
+        CliProvider::Gemini,
+        &agy_id,
+    );
+    poll(&mut app, vec![(was_claude.id, CliProvider::Gemini)]);
+    assert_eq!(
+        relaunch_270_find(&app, was_claude.id)
+            .native_session_id
+            .as_deref(),
+        Some(agy_id.as_str())
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 271, through the session poll, tmux and `/bin/ps` themselves: a
+/// program named `codex` started in a live terminal turns the terminal into a
+/// Codex session, and the pane's shell alone is read as no CLI. The program is
+/// `/bin/sleep` under that name, so no CLI is needed.
+#[test]
+pub(crate) fn the_foreground_cli_of_a_live_pane_is_read_through_tmux_and_ps() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("foreground-cli-271");
+    let fake = root.join(CliProvider::Codex.executable());
+    std::os::unix::fs::symlink("/bin/sleep", &fake).unwrap();
+    let mut app = test_app(root.join("store-v2.json"));
+    app.tools.tmux = true;
+    let project = relaunch_270_project(&root);
+    let terminal = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    app.store.projects.push(project);
+    app.store.sessions.push(terminal.clone());
+    let name = terminal.tmux_name.clone();
+    let started = start_empty_tmux_session(&name, &root, &[]);
+    let mut shell_alone = Some(CliProvider::Claude);
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        shell_alone = tmux_foreground_cli(&name);
+        if shell_alone.is_none() {
+            break;
+        }
+    }
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        &format!("'{}' 30", fake.display()),
+        "Enter",
+    ]);
+    let sent = run_command_with_timeout(&mut send, Duration::from_secs(5));
+    let mut kind = String::new();
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        app.request_session_poll();
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionPoll,
+            Duration::from_secs(10),
+        );
+        kind = relaunch_270_find(&app, terminal.id).agent;
+        if kind == CliProvider::Codex.agent() {
+            break;
+        }
+    }
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+    started.unwrap();
+    assert!(sent.is_ok_and(|output| output.status.success()));
+    assert_eq!(shell_alone, None, "シェルだけのペインを CLI と読みました");
+    assert_eq!(
+        kind,
+        CliProvider::Codex.agent(),
+        "ペインで動く codex を読めませんでした"
+    );
+}

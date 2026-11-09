@@ -102,3 +102,8 @@
   worktree guard judges the Agent tool's worktree, outside `.worktrees/`, to be
   the trunk, and refuses a second worktree from this session. It changed no
   file and reproduced nothing.
+- Merging main brought change 272's ⌘T, labelled 「空のターミナルを開く」 as
+  "the + in the strip". ⌘T still opens a plain terminal, so it keeps that
+  name and its translation rows come back; `docs/MANUAL*.md` and the keymap
+  comment now call it the + menu's ターミナル row without the menu, and the
+  manuals' tab paragraph says the + asks what to start.

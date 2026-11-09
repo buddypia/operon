@@ -1,0 +1,14 @@
+# Change 271: a terminal takes the kind of the CLI seen in its pane's
+# foreground process group, so Codex and Antigravity put their marks on a
+# terminal's tab as Claude already did. R1 is the reading (parser and device),
+# R2 the adoption through the poll's result, R3 the whole path through the
+# poll, tmux and /bin/ps. I1 is the sweep of nine mutations; I2 is change
+# 270's hook-driven adoption, which now shares take_cli_kind.
+digest: "9a5b8b341f64d5eb"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked the_cli_in_a_terminals_foreground_is_read_from_its_processes
+  - R2 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_seen_running_in_it
+  - R3 empirical-test :: cargo test --locked the_foreground_cli_of_a_live_pane_is_read_through_tmux_and_ps
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/271-terminal-cli-mark-only-claude/mutations.py
+  - I2 empirical-test :: cargo test --locked a_terminal_takes_the_kind_of_the_cli_running_in_it

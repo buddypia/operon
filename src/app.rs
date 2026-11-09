@@ -206,6 +206,7 @@ pub(crate) enum BackgroundResult {
         activities: Vec<(Uuid, AgentActivity)>,
         previews: Vec<(Uuid, ConversationPreview)>,
         output: Vec<(Uuid, UiResult<TerminalCapture>)>,
+        clis: Vec<(Uuid, CliProvider)>,
     },
     CliSessions {
         project_id: Uuid,
@@ -752,6 +753,11 @@ pub(crate) struct OperonApp {
     /// any. In memory, as `dock_drag` is.
     pub(crate) column_drag: Option<ColumnDrag>,
     pub(crate) workspace: WorkspaceTabs,
+    /// Tabs the person closed, newest last, for ⇧⌘T (change 272). Ids only:
+    /// what they point at is looked up again when one is reopened, because a
+    /// session can be removed and a project forgotten in between. In memory,
+    /// at most `CLOSED_TAB_LIMIT`.
+    pub(crate) closed_tabs: Vec<WorkspaceTab>,
     pub(crate) workspace_initialized: bool,
     /// Runtime tab layouts and terminal context belong to the selected project.
     pub(crate) workspace_project: Option<Uuid>,
@@ -1168,6 +1174,7 @@ impl OperonApp {
             session_arrangement,
             column_drag: None,
             workspace: WorkspaceTabs::default(),
+            closed_tabs: Vec::new(),
             workspace_initialized: false,
             workspace_project: None,
             workspace_project_drag: None,
@@ -1650,8 +1657,12 @@ impl OperonApp {
                     activities,
                     previews,
                     output,
+                    clis,
                 } => {
                     self.background_tasks.remove(&BackgroundKey::SessionPoll);
+                    for (session_id, provider) in clis {
+                        self.adopt_terminal_cli(session_id, provider);
+                    }
                     self.apply_session_poll(states, activities, previews, output);
                 }
                 BackgroundResult::CliSessions {
@@ -3394,7 +3405,14 @@ impl OperonApp {
                             .background_tasks
                             .contains(&BackgroundKey::EmptySessionStart(session.id)))
             })
-            .map(|session| (session.id, session.tmux_name.clone(), session.agent.clone()))
+            .map(|session| {
+                (
+                    session.id,
+                    session.tmux_name.clone(),
+                    session.agent.clone(),
+                    terminal_provenance(session).is_some(),
+                )
+            })
             .collect::<Vec<_>>();
         if active.is_empty() {
             return;
@@ -3409,11 +3427,12 @@ impl OperonApp {
             let mut states = Vec::with_capacity(active.len());
             let mut activities = Vec::new();
             let mut previews = Vec::new();
+            let mut clis = Vec::new();
             for batch in active.chunks(16) {
                 thread::scope(|scope| {
                     let workers = batch
                         .iter()
-                        .map(|(id, name, agent)| {
+                        .map(|(id, name, agent, from_terminal)| {
                             // A plain terminal has no agent turn to finish and
                             // no conversation to quote, so its screen is never
                             // read. Every managed agent's is, whether or not
@@ -3430,14 +3449,22 @@ impl OperonApp {
                                 let preview = screen
                                     .as_deref()
                                     .map(|screen| read_conversation_preview(agent, screen));
-                                (*id, observation, activity, preview)
+                                // A terminal can become any CLI the person
+                                // types into it (change 271).
+                                let cli = (*from_terminal && observation.state == TmuxState::Alive)
+                                    .then(|| tmux_foreground_cli(name.as_str()))
+                                    .flatten();
+                                (*id, observation, activity, preview, cli)
                             })
                         })
                         .collect::<Vec<_>>();
-                    for (id, observation, activity, preview) in
+                    for (id, observation, activity, preview, cli) in
                         workers.into_iter().filter_map(|worker| worker.join().ok())
                     {
                         states.push((id, observation));
+                        if let Some(cli) = cli {
+                            clis.push((id, cli));
+                        }
                         if let Some(activity) = activity {
                             activities.push((id, activity));
                         }
@@ -3449,7 +3476,7 @@ impl OperonApp {
             }
             let output = on_screen
                 .into_iter()
-                .map(|(id, name, _)| {
+                .map(|(id, name, ..)| {
                     (
                         id,
                         tmux_capture_with_cursor(&name).map_err(|error| error.to_string()),
@@ -3461,6 +3488,7 @@ impl OperonApp {
                 activities,
                 previews,
                 output,
+                clis,
             }
         });
     }
@@ -3893,17 +3921,11 @@ impl OperonApp {
         else {
             return;
         };
-        // A terminal the person typed a CLI into is a session of that CLI
-        // from here on (change 270): the mark, the label, the state reading,
-        // and the resume all read the kind, which was otherwise decided once,
-        // at creation. A session launched as a CLI keeps its kind.
-        let takes_kind =
-            terminal_provenance(session).filter(|_| session.agent != reading.source.agent());
-        if let Some(provenance) = takes_kind {
-            session.agent = reading.source.agent().to_owned();
-            session.goal.clear();
-            session.origin = Some(provenance);
-        } else if session.native_session_id.as_deref() == Some(native_id.as_str())
+        // The kind changes even when the reported ID is the one already
+        // recorded (change 270).
+        let took_kind = take_cli_kind(session, reading.source);
+        if !took_kind
+            && session.native_session_id.as_deref() == Some(native_id.as_str())
             && (path.is_none() || session.native_session_path == path)
         {
             return;
@@ -3912,6 +3934,30 @@ impl OperonApp {
         if path.is_some() {
             session.native_session_path = path;
         }
+        if !self.persist() {
+            self.store = previous_store;
+        }
+    }
+
+    /// The CLI the session poll saw in front of a terminal (change 271): the
+    /// terminal takes its kind the moment it is seen, rather than when that
+    /// CLI's hook speaks, which for Codex is never and for Antigravity is the
+    /// first prompt. The conversation recorded under the previous kind is
+    /// another CLI's, or none; this one's arrives with its first hook event.
+    pub(crate) fn adopt_terminal_cli(&mut self, session_id: Uuid, provider: CliProvider) {
+        // Asked before the store is cloned: every poll repeats the reading.
+        let Some(index) = self.store.sessions.iter().position(|session| {
+            session.id == session_id
+                && session.agent != provider.agent()
+                && terminal_provenance(session).is_some()
+        }) else {
+            return;
+        };
+        let previous_store = self.store.clone();
+        let session = &mut self.store.sessions[index];
+        take_cli_kind(session, provider);
+        session.native_session_id = None;
+        session.native_session_path = None;
         if !self.persist() {
             self.store = previous_store;
         }
@@ -7092,10 +7138,90 @@ impl OperonApp {
             self.workspace_editor_views.remove(id);
             self.workspace_editor_jumps.remove(id);
         }
-        self.workspace.close(tab);
+        if self.workspace.close(tab) {
+            self.closed_tabs.retain(|closed| closed != tab);
+            self.closed_tabs.push(tab.clone());
+            let excess = self.closed_tabs.len().saturating_sub(CLOSED_TAB_LIMIT);
+            self.closed_tabs.drain(..excess);
+        }
         if let Some(next) = self.workspace.active().cloned() {
             self.activate_workspace_tab(&next);
         }
+    }
+
+    /// ⇧⌘T: the newest closed tab that can still be shown, shown again.
+    ///
+    /// One that is already open again by another route, whose session was
+    /// removed, or whose project was forgotten is passed over and dropped —
+    /// reopening a tab for nothing would be worse than reopening the one
+    /// before it.
+    pub(crate) fn reopen_closed_tab(&mut self) {
+        while let Some(tab) = self.closed_tabs.pop() {
+            if self
+                .workspace
+                .groups
+                .iter()
+                .any(|group| group.tabs.contains(&tab))
+            {
+                continue;
+            }
+            match &tab {
+                WorkspaceTab::Session(id) => {
+                    if !self.store.sessions.iter().any(|session| session.id == *id) {
+                        continue;
+                    }
+                    self.page = Page::Sessions;
+                    self.session_library_open = false;
+                    self.select_session(*id);
+                }
+                WorkspaceTab::Document(id) => {
+                    let Some(project) = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|project| project.id == id.project)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    // `open_document_at` puts the tab in the workspace only
+                    // when the workspace is the page showing.
+                    self.page = Page::Sessions;
+                    self.session_library_open = false;
+                    self.open_document_at(&project, id.root.clone(), id.path.clone());
+                }
+            }
+            return;
+        }
+        self.notice_briefly(tr("開き直せるタブはありません。"));
+    }
+
+    /// ⇧⌘] / ⇧⌘[ and ⌃Tab / ⌃⇧Tab: the focused pane's next or previous tab,
+    /// wrapping round.
+    pub(crate) fn step_workspace_tab(&mut self, forward: bool) {
+        let Some(group) = self
+            .workspace
+            .groups
+            .iter()
+            .find(|group| Some(group.id) == self.workspace.focused)
+        else {
+            return;
+        };
+        let count = group.tabs.len();
+        // `settle` drops an emptied group, so this is a group nobody settled;
+        // stepping in it would divide by zero.
+        if count == 0 {
+            return;
+        }
+        let index = if forward {
+            (group.active + 1) % count
+        } else {
+            (group.active + count - 1) % count
+        };
+        let id = group.id;
+        let tab = group.tabs[index].clone();
+        self.workspace.select(id, &tab);
+        self.activate_workspace_tab(&tab);
     }
 
     /// Both paths that decide a session changed state call this, at the point
@@ -8227,75 +8353,6 @@ impl OperonApp {
         } else {
             format!("{heading} · {shown} · {}", tf!("ほか {p0} 件", p0 = rest))
         }
-    }
-
-    /// Whether this frame saw the chord bound to an action. An action with no
-    /// chord is never pressed, which is what `null` in the keymap file buys.
-    /// The app-wide chords, read once per frame before anything draws.
-    pub(crate) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
-        // The launch sheet holds a request being typed. ⌘K opens a palette
-        // that can switch project, and ⌘2 clears the project outright: either
-        // would throw the request away, so neither is live while it is open.
-        if !self.launch_sheet_open && self.chord_pressed(ctx, "palette.open") {
-            self.open_command_palette();
-        }
-        // Before the window draws, so the selection it paints is the one the
-        // arrows just moved — and so an arrow never reaches the text field and
-        // moves the caret instead.
-        self.handle_palette_keys(ctx);
-        // Adding a project selects it, which clears the sheet's request too.
-        if !self.launch_sheet_open && self.chord_pressed(ctx, "project.add") {
-            self.choose_project_folder();
-        }
-        // The shortcuts a person brings with them from every other Mac app of
-        // this shape: ⌘1–3 for the three places, ⌘, for settings, unless a
-        // keymap file says otherwise. They stay live while a terminal has
-        // focus: a TUI owns its own keys, but `⌘` is the one modifier macOS
-        // keeps for the app, and the pane drops every ⌘ chord rather than
-        // sending it (`terminal_key_binding`). That is what lets ⌘J leave the
-        // pane a person is typing in for the next one that is waiting.
-        if !self.command_palette_open && !self.launch_sheet_open {
-            if self.chord_pressed(ctx, "session.new") {
-                self.open_new_session();
-            }
-            if self.chord_pressed(ctx, "attention.next") {
-                self.open_next_waiting_session();
-            }
-            if self.chord_pressed(ctx, "panel.toggle") {
-                self.show_session_inspector = !self.show_session_inspector;
-            }
-            for (action, page) in [
-                ("page.home", Page::Home),
-                ("page.projects", Page::Projects),
-                ("page.sessions", Page::Sessions),
-                ("page.settings", Page::Settings),
-            ] {
-                if self.chord_pressed(ctx, action) {
-                    if page == Page::Projects {
-                        self.select_project(None);
-                    }
-                    self.page = page;
-                }
-            }
-        }
-    }
-
-    pub(crate) fn chord_pressed(&self, ctx: &egui::Context, action: &str) -> bool {
-        let Some(chord) = self.keymap.chord_for(action) else {
-            return false;
-        };
-        ctx.input(|input| input.modifiers.matches_logically(chord.modifiers))
-            && ctx.input(|input| input.key_pressed(chord.key))
-    }
-
-    /// The same question, for a chord that must not also reach whatever has
-    /// focus. `consume_key` removes the event, which is the whole of "the agent
-    /// never sees it".
-    pub(crate) fn chord_consumed(&self, ctx: &egui::Context, action: &str) -> bool {
-        let Some(chord) = self.keymap.chord_for(action) else {
-            return false;
-        };
-        ctx.input_mut(|input| input.consume_key(chord.modifiers, chord.key))
     }
 
     /// Put the keymap where a person can edit it: write the defaults if there

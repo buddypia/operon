@@ -8,7 +8,7 @@
 # compact tabs) were inspected from a temporary renderer that is not committed.
 # F1 is the review finding that the Escape closing the menu also reached the
 # focused terminal; the menu test now asserts the key is taken.
-digest: "93b061583228f80b"
+digest: "5cc3541d0eda0019"
 
 obligations:
   - R1 empirical-test :: cargo test --locked session_273_plus_opens_launch_menu

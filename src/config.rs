@@ -512,9 +512,13 @@ pub(crate) const SYSTEM_DATA_VOLUME_ROOT: &str = "/System/Volumes/Data";
 /// The file the keyboard is read from, beside the store and the sidecars rather
 /// than in a second home under a dotfile directory of its own.
 pub(crate) const KEYMAP_FILE_NAME: &str = "keybindings.json";
-/// Past this a keymap is not a keymap. Seven actions is the whole vocabulary,
-/// so a file this size is a file that is not what it says it is.
+/// Past this a keymap is not a keymap. The whole vocabulary is a few hundred
+/// bytes, so a file this size is a file that is not what it says it is.
 pub(crate) const KEYMAP_FILE_MAX_BYTES: u64 = 64 * 1024;
+/// How many closed workspace tabs ⇧⌘T can bring back. Each is an id, so the
+/// cost is nothing; the bound is there because a list nobody empties grows for
+/// as long as the window is open (change 272).
+pub(crate) const CLOSED_TAB_LIMIT: usize = 20;
 /// The variable each CLI reads to be told which directory holds its login,
 /// settings, and history. Named once here because two places have to agree on
 /// them: the launch that sets one, and the hook installer that writes into the
