@@ -417,12 +417,23 @@ pub(crate) fn extract_recent_terminal_error(scrollback: &str) -> Option<String> 
             || trimmed.starts_with("Error:")
             || trimmed.contains("panicked at")
             || trimmed.starts_with("FAILED")
+            || trimmed.contains(" FAILED")
             || trimmed.starts_with("FAIL ")
             || trimmed.starts_with("Traceback (most recent call last)")
             || trimmed.starts_with("npm ERR!")
+            || trimmed.contains("ERR!")
+            || trimmed.contains("エラー:")
+            || trimmed.contains("エラー[")
+            || trimmed.starts_with("エラー")
+            || trimmed.contains("失敗しました")
     };
     let start_idx = window.iter().rposition(|line| is_error_head(line))?;
-    let joined = window[start_idx..].join("\n");
+    let joined = window[start_idx..]
+        .iter()
+        .copied()
+        .take(25)
+        .collect::<Vec<_>>()
+        .join("\n");
     let trimmed = truncate_utf8_prefix(joined.trim(), MAX_TERMINAL_ERROR_BYTES);
     (!trimmed.is_empty()).then(|| trimmed.to_owned())
 }

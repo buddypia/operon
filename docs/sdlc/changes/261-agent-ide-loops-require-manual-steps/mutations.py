@@ -54,7 +54,7 @@ MUTATIONS = {
     # R7: command palette omits open-document symbols.
     "palette-omits-document-symbols": (
         SCREENS,
-        "for sym in extract_file_symbols(&doc.path, &doc.buffer) {",
+        "for sym in extract_file_symbols(&doc.path, text) {",
         "for sym in Vec::<CodeSymbol>::new() {",
     ),
 }
