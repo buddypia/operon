@@ -195,6 +195,14 @@ pub(crate) const FILE_TREE_LIMIT: usize = 12_000;
 /// but laying out even 2000 rows at once costs about 150 ms, so this number
 /// must not grow without keeping that viewport virtualised.
 pub(crate) const TERMINAL_SCROLLBACK_LINES: usize = 5_000;
+/// How often every live session's tmux state and screen are read while the
+/// window has the focus, and while another application has it (change 275):
+/// each reading is two or three child processes per session, and nobody is
+/// looking at a window behind another one. Returning to the window reads at
+/// the first interval again, so the longer wait is never finished in front.
+pub(crate) const SESSION_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+pub(crate) const SESSION_POLL_INTERVAL_UNFOCUSED: std::time::Duration =
+    std::time::Duration::from_secs(6);
 /// How often the terminal pane re-reads tmux after a keystroke, and for how
 /// long. `send-keys` returns once the byte is in the pane, before the CLI has
 /// redrawn its prompt, so the capture that follows it can miss the echo; the

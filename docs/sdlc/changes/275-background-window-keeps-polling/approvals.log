@@ -1,0 +1,4 @@
+2026-11-09T20:35:30Z auto intent intent.md a833f84839156736 approve Independent evaluator ac7c33b8: restates the quoted request and the candidate the person selected; outcome, constraints and non-goals stay inside that selection.
+2026-11-09T20:35:30Z auto spec spec.md aaed8b60f054692c approve Independent evaluator ac7c33b8: five failable requirements match the code; the hook, echo and manual-refresh paths are untouched; focus is available and settable in tests.
+2026-11-09T20:35:30Z auto screen screen.md c613abfc8659c4db approve Independent evaluator ac7c33b8: nothing painted changes; unfocused refresh slows from 2 s to 6 s inside existing roles, the side-by-side caveat is in the spec and intent.
+2026-11-09T20:35:30Z auto plan plan.md d6b9c13bf84be8d1 approve Independent evaluator ac7c33b8: implements the spec in a sound order with a failing test or mutation per risk.

@@ -6,6 +6,15 @@ pub(crate) fn now() -> u64 {
         .unwrap_or_default()
         .as_secs()
 }
+/// How long to leave between two readings of every session (change 275).
+pub(crate) fn session_poll_interval(focused: bool) -> Duration {
+    if focused {
+        crate::SESSION_POLL_INTERVAL
+    } else {
+        crate::SESSION_POLL_INTERVAL_UNFOCUSED
+    }
+}
+
 /// SHA-256 as FIPS 180-4 describes it. Written out rather than taken from a
 /// crate because the one caller — the trust hash Codex expects beside a hook
 /// entry — is not worth a dependency, and a dependency is a paused surface.

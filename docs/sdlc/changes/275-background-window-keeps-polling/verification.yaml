@@ -1,0 +1,12 @@
+# The evidence for change 275. Format: docs/sdlc/templates/verification.yaml.
+digest: "113245a467806a28"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked poll_275_front_window_reads_sessions_every_two_seconds
+  - R2 empirical-test :: cargo test --locked poll_275_background_window_waits_longer_between_reads
+  - R3 empirical-test :: cargo test --locked poll_275_returning_to_the_window_reads_at_once
+  - R4 empirical-test :: cargo test --locked poll_275_frame_reads_the_windows_focus
+  - R5 empirical-test :: cargo test --locked poll_275_pending_store_retry_keeps_its_cadence_in_the_background
+  - F1 empirical-test :: cargo test --locked poll_275_doc_comments_stay_on_the_function_they_describe
+  - I1 empirical-test :: cargo test --locked repaint_loop_idle_interval_is_not_polling_100ms
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/275-background-window-keeps-polling/mutations.py

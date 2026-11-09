@@ -77035,3 +77035,143 @@ pub(crate) fn the_foreground_cli_of_a_live_pane_is_read_through_tmux_and_ps() {
         "ペインで動く codex を読めませんでした"
     );
 }
+
+/// An app whose last session reading was `ago` before the returned instant.
+fn poll_275_app(label: &str, ago: Duration) -> (PathBuf, OperonApp, Instant) {
+    let root = temporary_directory(label);
+    let mut app = test_app(root.join("store.json"));
+    let now = Instant::now();
+    app.last_session_poll = now - ago;
+    (root, app, now)
+}
+
+#[test]
+fn poll_275_front_window_reads_sessions_every_two_seconds() {
+    let early = SESSION_POLL_INTERVAL - Duration::from_millis(1);
+    let (root, mut app, now) = poll_275_app("poll-275-front", early);
+    assert!(
+        !app.poll_sessions_when_due(true, now),
+        "前面のウィンドウが間隔より早くセッションを読みました"
+    );
+    assert_eq!(app.last_session_poll, now - early);
+    let due = now + Duration::from_millis(1);
+    assert!(
+        app.poll_sessions_when_due(true, due),
+        "前面のウィンドウが 2 秒たってもセッションを読みませんでした"
+    );
+    assert_eq!(app.last_session_poll, due);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn poll_275_background_window_waits_longer_between_reads() {
+    assert!(SESSION_POLL_INTERVAL_UNFOCUSED >= SESSION_POLL_INTERVAL * 3);
+    let early = SESSION_POLL_INTERVAL_UNFOCUSED - Duration::from_millis(1);
+    let (root, mut app, now) = poll_275_app("poll-275-behind", early);
+    assert!(
+        !app.poll_sessions_when_due(false, now),
+        "背面のウィンドウが前面と同じ間隔でセッションを読みました"
+    );
+    assert_eq!(app.last_session_poll, now - early);
+    let due = now + Duration::from_millis(1);
+    assert!(
+        app.poll_sessions_when_due(false, due),
+        "背面のウィンドウがセッションを読まなくなりました"
+    );
+    assert_eq!(app.last_session_poll, due);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn poll_275_returning_to_the_window_reads_at_once() {
+    let (root, mut app, now) = poll_275_app("poll-275-return", SESSION_POLL_INTERVAL);
+    assert!(!app.poll_sessions_when_due(false, now));
+    assert!(
+        app.poll_sessions_when_due(true, now),
+        "前面に戻ったのに、背面の長い待ち時間が終わるまで読みませんでした"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// One whole frame, with or without the window's focus.
+fn poll_275_frame(app: &mut OperonApp, ctx: &egui::Context, focused: bool) {
+    app.ports_scanned_at = Some(Instant::now());
+    let mut frame = eframe::Frame::_new_kittest();
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            focused,
+            ..Default::default()
+        },
+        |ctx| <OperonApp as eframe::App>::update(app, ctx, &mut frame),
+    );
+}
+
+fn poll_275_frame_app(label: &str) -> (PathBuf, OperonApp, egui::Context) {
+    let root = temporary_directory(label);
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    app.hooks_started = true;
+    app.hooks_enabled = false;
+    app.handoff_archive_sweep_started = true;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    (root, app, ctx)
+}
+
+#[test]
+fn poll_275_frame_reads_the_windows_focus() {
+    let (root, mut app, ctx) = poll_275_frame_app("poll-275-frame");
+    let between = (SESSION_POLL_INTERVAL + SESSION_POLL_INTERVAL_UNFOCUSED) / 2;
+    let last = Instant::now() - between;
+    app.last_session_poll = last;
+    poll_275_frame(&mut app, &ctx, false);
+    assert_eq!(
+        app.last_session_poll, last,
+        "フォーカスのないフレームが前面の間隔でセッションを読みました"
+    );
+    poll_275_frame(&mut app, &ctx, true);
+    assert!(
+        app.last_session_poll > last,
+        "フォーカスのあるフレームがセッションを読みませんでした"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn poll_275_pending_store_retry_keeps_its_cadence_in_the_background() {
+    let (root, mut app, ctx) = poll_275_frame_app("poll-275-retry");
+    app.store_retry_pending = true;
+    app.last_session_poll = Instant::now();
+    app.last_session_refresh = Instant::now() - SESSION_POLL_INTERVAL;
+    poll_275_frame(&mut app, &ctx, false);
+    assert!(
+        !app.store_retry_pending,
+        "背面のウィンドウで、保存待ちの再試行が 2 秒の周期から外れました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn poll_275_doc_comments_stay_on_the_function_they_describe() {
+    let source = include_str!("util.rs");
+    let lines: Vec<&str> = source.lines().collect();
+    for (index, line) in lines.iter().enumerate() {
+        if line.starts_with("pub(crate) fn session_poll_interval") {
+            let doc = lines[..index]
+                .iter()
+                .rev()
+                .take_while(|l| l.starts_with("///"))
+                .copied()
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                !doc.contains("SHA-256"),
+                "SHA-256 doc sits on session_poll_interval:\n{doc}"
+            );
+        }
+    }
+}
