@@ -38461,6 +38461,90 @@ pub(crate) fn a_second_enter_in_the_frame_that_committed_a_conversion_still_send
     assert_eq!(inputs, vec![TerminalInput::Text("日本語".into())]);
 }
 
+/// In cmux, Shift+Enter puts a newline in an agent's input and Enter sends it.
+/// In a session terminal both sent the line (change 264): the binding mapped
+/// Enter to tmux `Enter` whatever the modifiers, and tmux writes `\r` for
+/// `S-Enter` too, so no CLI behind it could tell the keys apart. Shift+Enter
+/// now sends what Ctrl+J sends — the LF the person's cmux sends, which Claude
+/// Code, Codex, and Antigravity CLI read as a newline.
+#[test]
+pub(crate) fn shift_enter_puts_a_newline_in_the_agents_input_instead_of_sending() {
+    let ctx = egui::Context::default();
+    let key = |modifiers: egui::Modifiers| egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    let ctrl_j = terminal_key_binding(egui::Key::J, egui::Modifiers::CTRL);
+    assert_eq!(ctrl_j, Some("C-j".into()));
+
+    // What the person's keyboard delivered after confirming a conversion with
+    // Enter (the probe of change 264): the commit, then Shift+Enter on its own.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input
+            .events
+            .push(egui::Event::Ime(egui::ImeEvent::Commit("てすと".into())));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, true);
+    assert_eq!(inputs, vec![TerminalInput::Text("てすと".into())]);
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input.events.push(key(egui::Modifiers::SHIFT));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, false);
+    assert_eq!(
+        inputs,
+        vec![TerminalInput::Key(ctrl_j.clone().unwrap_or_default())],
+        "Shift+Enter is a newline in the input, not a submit"
+    );
+
+    // Enter still sends.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input.events.push(key(egui::Modifiers::NONE));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, false);
+    assert_eq!(inputs, vec![TerminalInput::Key("Enter".into())]);
+
+    // A Shift+Enter that confirms a conversion is the IME's, as Enter is.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input
+            .events
+            .push(egui::Event::Ime(egui::ImeEvent::Commit("てすと".into())));
+        input.events.push(key(egui::Modifiers::SHIFT));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, true);
+    assert_eq!(inputs, vec![TerminalInput::Text("てすと".into())]);
+
+    // While composing, Shift+Enter sends nothing.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input.events.push(key(egui::Modifiers::SHIFT));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, true);
+    assert!(inputs.is_empty(), "{inputs:?}");
+
+    // Only Shift alone: the chords that add Ctrl or Option keep their keys.
+    assert_eq!(
+        terminal_key_binding(
+            egui::Key::Enter,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT
+        ),
+        Some("C-Enter".into())
+    );
+    assert_eq!(
+        terminal_key_binding(
+            egui::Key::Enter,
+            egui::Modifiers::ALT | egui::Modifiers::SHIFT
+        ),
+        Some("M-Enter".into())
+    );
+}
+
 /// An account is one variable, and the launch is where it takes effect. The
 /// name is read from the same constant the hook installer reads, so a rename
 /// moves both or neither.
