@@ -534,9 +534,11 @@ Colour carries the meaning first (see *Status is a meaning, not a colour*), but
 it may not carry it alone.
 
 Session tabs use the generated `StatusMark` vector family in `src/glyphs.rs`:
-18px circular enclosures with 1.5px strokes and distinct progress, pause,
-exclamation, power, play, hourglass, check, cross, stop, minus and question
-centres. Geometry stays sharp across display scales and all three themes;
+circular enclosures drawn on an 18px grid with 1.5px strokes and distinct
+progress, pause, exclamation, power, play, hourglass, check, cross, stop, minus
+and question centres, shown at 14px in a tab (`TAB_STATUS_MARK_SIZE`) so the
+tab fits its 28px strip; the whole mark scales, strokes included. Geometry
+stays sharp across display scales and all three themes;
 `Palette::status` supplies the ink. These passive indicators show no permanent
 state word. Hover displays the current localized state name and explanation.
 Existing status chips keep their shared Phosphor glyphs and text.
@@ -688,6 +690,7 @@ control as `secondary_button`; everything else goes through its helper:
 | the quiet action beside a heading | `quiet_button` |
 | an icon in a toolbar | `icon_button` (28px) |
 | an icon in a list row, a find bar, or a menu row | `small_icon_button` (24px) |
+| a choice in the tab strip's + menu: the mark of what it starts and its name | `launch_choice_button` (28px) |
 | a word with its icon | `icon_text_button` |
 | a session's state verb, danger or not | `verb_button` |
 | a page or in-page tab | `nav_tab`, `tab_item_with_count` |
@@ -756,6 +759,14 @@ a 128px box — the same squircle three times, at one optical weight, in the
 order a person already knows from their Dock. Take the app icon and not the
 bare logotype a vendor also ships: three loose logotypes are three silhouettes,
 and the odd one out is what gets noticed instead of the label beside it.
+
+A plain terminal has no vendor, so its mark is ours and borrows theirs: the same
+full-bleed squircle at 128px, a light plate holding a dark screen with a green
+`>` and a light `_` (`assets/terminal-mark.svg`). A session tab draws the CLI's
+mark — vendor or terminal — at 14px between its state mark and its title; a
+custom command has neither and draws none. The menu under the tab strip's +
+leads each of its choices — ターミナル, Claude Code, Codex CLI, Antigravity —
+with the same mark at the same size, beside its name.
 
 ## Do's and Don'ts
 

@@ -400,6 +400,15 @@ pub(crate) const SESSION_ARRANGEMENT_FILE_NAME: &str = "session-order.json";
 /// compact JSON, so this is some 27 000 of them, and every save lists only
 /// what the store still holds.
 pub(crate) const SESSION_ARRANGEMENT_FILE_MAX_BYTES: u64 = 1024 * 1024;
+/// Where the workspace's tabs, splits, and front tabs are kept across a
+/// relaunch (change 270): beside the store for the same reason as the
+/// session order — a per-machine arrangement whose loss costs one
+/// rearrangement, not work anybody would miss.
+pub(crate) const WORKSPACE_LAYOUT_FILE_NAME: &str = "workspace-layout.json";
+/// The most of `workspace-layout.json` that is read. A tab is one 38-byte id
+/// and every save lists only what the store still holds, so a real file is a
+/// few kilobytes; past this it is not half-read but ignored.
+pub(crate) const WORKSPACE_LAYOUT_FILE_MAX_BYTES: u64 = 1024 * 1024;
 /// How close to the session column's top or bottom edge a drag is held for
 /// the column to scroll towards that edge.
 pub(crate) const COLUMN_DRAG_EDGE: f32 = 32.0;
@@ -489,12 +498,27 @@ pub(crate) const TERMINAL_PATH_MAX_EXTENSION: usize = 12;
 /// screen are the only ones asked about, so this is a ceiling on a number that
 /// is already small.
 pub(crate) const TERMINAL_PATH_PROBE_LIMIT: usize = 64;
+/// The home folders macOS will not let an app look inside without asking the
+/// person first, and in the app's name. A path in agent output under one of
+/// these is never looked up unless it is inside the session's own folders
+/// (change 265): the prompt would name Operon for a file nobody pointed it at.
+/// The same folders as the usage descriptions `scripts/package-macos.sh` writes.
+pub(crate) const PROTECTED_HOME_FOLDERS: &[&str] = &["Desktop", "Documents", "Downloads"];
+/// Where removable and network volumes mount, which macOS guards the same way.
+pub(crate) const PROTECTED_VOLUMES_ROOT: &str = "/Volumes";
+/// The data volume, through which macOS also reaches the home folder: a path
+/// spelled under it names the same Desktop as the path without it.
+pub(crate) const SYSTEM_DATA_VOLUME_ROOT: &str = "/System/Volumes/Data";
 /// The file the keyboard is read from, beside the store and the sidecars rather
 /// than in a second home under a dotfile directory of its own.
 pub(crate) const KEYMAP_FILE_NAME: &str = "keybindings.json";
-/// Past this a keymap is not a keymap. Seven actions is the whole vocabulary,
-/// so a file this size is a file that is not what it says it is.
+/// Past this a keymap is not a keymap. The whole vocabulary is a few hundred
+/// bytes, so a file this size is a file that is not what it says it is.
 pub(crate) const KEYMAP_FILE_MAX_BYTES: u64 = 64 * 1024;
+/// How many closed workspace tabs ⇧⌘T can bring back. Each is an id, so the
+/// cost is nothing; the bound is there because a list nobody empties grows for
+/// as long as the window is open (change 272).
+pub(crate) const CLOSED_TAB_LIMIT: usize = 20;
 /// The variable each CLI reads to be told which directory holds its login,
 /// settings, and history. Named once here because two places have to agree on
 /// them: the launch that sets one, and the hook installer that writes into the

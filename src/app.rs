@@ -2,12 +2,15 @@ use crate::*;
 
 mod keymap;
 pub(crate) mod knowledge;
+pub(crate) mod launch_menu;
+pub(crate) mod relaunch;
 pub(crate) mod screens;
 
 // The keyboard is data this module reads and `screens.rs` draws, so it is
 // reachable by symbol name from anywhere the way every other module's is.
 pub(crate) use keymap::*;
 pub(crate) use knowledge::*;
+pub(crate) use relaunch::*;
 
 pub(crate) type UiResult<T> = std::result::Result<T, String>;
 
@@ -203,6 +206,7 @@ pub(crate) enum BackgroundResult {
         activities: Vec<(Uuid, AgentActivity)>,
         previews: Vec<(Uuid, ConversationPreview)>,
         output: Vec<(Uuid, UiResult<TerminalCapture>)>,
+        clis: Vec<(Uuid, CliProvider)>,
     },
     CliSessions {
         project_id: Uuid,
@@ -749,6 +753,11 @@ pub(crate) struct OperonApp {
     /// any. In memory, as `dock_drag` is.
     pub(crate) column_drag: Option<ColumnDrag>,
     pub(crate) workspace: WorkspaceTabs,
+    /// Tabs the person closed, newest last, for ⇧⌘T (change 272). Ids only:
+    /// what they point at is looked up again when one is reopened, because a
+    /// session can be removed and a project forgotten in between. In memory,
+    /// at most `CLOSED_TAB_LIMIT`.
+    pub(crate) closed_tabs: Vec<WorkspaceTab>,
     pub(crate) workspace_initialized: bool,
     /// Runtime tab layouts and terminal context belong to the selected project.
     pub(crate) workspace_project: Option<Uuid>,
@@ -756,6 +765,19 @@ pub(crate) struct OperonApp {
     pub(crate) project_workspaces: HashMap<Uuid, (WorkspaceTabs, Option<Uuid>)>,
     /// A tab closed by the person stays closed when that project is revisited.
     pub(crate) workspace_seen_sessions: HashSet<Uuid>,
+    /// The layout last written to `workspace-layout.json`, so the two-second
+    /// tick writes only a change (change 270).
+    pub(crate) saved_workspace_layout: Option<WorkspaceLayout>,
+    /// Whether the last write of the layout failed: the person is told once
+    /// per streak of failures, not every two seconds.
+    pub(crate) workspace_layout_save_failed: bool,
+    /// Sessions that were running when Operon last closed, waiting for the
+    /// first look at their terminals. One that is found gone is started
+    /// again in place (change 270).
+    pub(crate) relaunch_candidates: HashSet<Uuid>,
+    /// Launches started without bringing their session forward. Their
+    /// completion leaves the selection, the page, and the notice alone.
+    pub(crate) quiet_launches: HashSet<Uuid>,
     pub(crate) workspace_drag: Option<WorkspaceTab>,
     pub(crate) workspace_editor_views: HashMap<DocumentId, EditorView>,
     /// One syntax/preview cache per visible group, bounded by PANE_MAX.
@@ -989,7 +1011,7 @@ impl OperonApp {
             ..DiffAnnotations::default()
         };
         let (background_sender, background_receiver) = mpsc::channel();
-        Self {
+        let mut app = Self {
             _instance_locks: Vec::new(),
             store,
             knowledge: KnowledgeState::beside(&data_file),
@@ -1152,11 +1174,16 @@ impl OperonApp {
             session_arrangement,
             column_drag: None,
             workspace: WorkspaceTabs::default(),
+            closed_tabs: Vec::new(),
             workspace_initialized: false,
             workspace_project: None,
             workspace_project_drag: None,
             project_workspaces: HashMap::new(),
             workspace_seen_sessions: HashSet::new(),
+            saved_workspace_layout: None,
+            workspace_layout_save_failed: false,
+            relaunch_candidates: HashSet::new(),
+            quiet_launches: HashSet::new(),
             workspace_drag: None,
             workspace_editor_views: HashMap::new(),
             workspace_editor_caches: HashMap::new(),
@@ -1182,7 +1209,23 @@ impl OperonApp {
             cached_prompt_templates: None,
             arena_mode_enabled: false,
             arena_agents: Vec::new(),
-        }
+        };
+        app.relaunch_candidates = app
+            .store
+            .sessions
+            .iter()
+            .filter(|session| {
+                matches!(
+                    session.status,
+                    SessionStatus::Starting | SessionStatus::Active | SessionStatus::Unknown
+                )
+            })
+            .map(|session| session.id)
+            .collect();
+        let layout = load_workspace_layout(&app.data_file);
+        app.restore_workspace_layout(&layout);
+        app.saved_workspace_layout = app.workspace_layout_snapshot();
+        app
     }
 
     pub(crate) fn cached_land_worktree_base(&mut self, project: &Project) -> String {
@@ -1614,8 +1657,12 @@ impl OperonApp {
                     activities,
                     previews,
                     output,
+                    clis,
                 } => {
                     self.background_tasks.remove(&BackgroundKey::SessionPoll);
+                    for (session_id, provider) in clis {
+                        self.adopt_terminal_cli(session_id, provider);
+                    }
                     self.apply_session_poll(states, activities, previews, output);
                 }
                 BackgroundResult::CliSessions {
@@ -1713,6 +1760,7 @@ impl OperonApp {
                 BackgroundResult::SessionStarted { session_id, result } => {
                     self.background_tasks
                         .remove(&BackgroundKey::SessionStart(session_id));
+                    let quiet = self.quiet_launches.remove(&session_id);
                     let previous_store = self.store.clone();
                     match result {
                         Ok(branch) => {
@@ -1736,8 +1784,9 @@ impl OperonApp {
                             {
                                 self.launch_progress = None;
                             }
-                            if self.selected_session.is_none()
-                                || self.selected_session == Some(session_id)
+                            if !quiet
+                                && (self.selected_session.is_none()
+                                    || self.selected_session == Some(session_id))
                             {
                                 self.select_session(session_id);
                                 self.page = Page::Sessions;
@@ -1746,10 +1795,19 @@ impl OperonApp {
                                 self.last_terminal_input = Some(Instant::now());
                                 self.terminal_focus_request = Some(session_id);
                             }
+                            let shown = self.notice.clone();
+                            let success = tr(
+                                "エージェントセッションを起動し、アプリ内ターミナルで開きました。",
+                            );
                             self.persist_external_transition(
-                                tr("エージェントセッションを起動し、アプリ内ターミナルで開きました。"),
+                                success,
                                 tr("エージェントセッションは tmux で起動しました"),
                             );
+                            // A relaunch at start-up says what it did once, for
+                            // all of them; a warning or an error still shows.
+                            if quiet && self.notice.as_deref() == Some(success) {
+                                self.notice = shown;
+                            }
                             self.request_native_session_resolution(session_id);
                         }
                         Err(error) => {
@@ -3347,7 +3405,14 @@ impl OperonApp {
                             .background_tasks
                             .contains(&BackgroundKey::EmptySessionStart(session.id)))
             })
-            .map(|session| (session.id, session.tmux_name.clone(), session.agent.clone()))
+            .map(|session| {
+                (
+                    session.id,
+                    session.tmux_name.clone(),
+                    session.agent.clone(),
+                    terminal_provenance(session).is_some(),
+                )
+            })
             .collect::<Vec<_>>();
         if active.is_empty() {
             return;
@@ -3362,11 +3427,12 @@ impl OperonApp {
             let mut states = Vec::with_capacity(active.len());
             let mut activities = Vec::new();
             let mut previews = Vec::new();
+            let mut clis = Vec::new();
             for batch in active.chunks(16) {
                 thread::scope(|scope| {
                     let workers = batch
                         .iter()
-                        .map(|(id, name, agent)| {
+                        .map(|(id, name, agent, from_terminal)| {
                             // A plain terminal has no agent turn to finish and
                             // no conversation to quote, so its screen is never
                             // read. Every managed agent's is, whether or not
@@ -3383,14 +3449,22 @@ impl OperonApp {
                                 let preview = screen
                                     .as_deref()
                                     .map(|screen| read_conversation_preview(agent, screen));
-                                (*id, observation, activity, preview)
+                                // A terminal can become any CLI the person
+                                // types into it (change 271).
+                                let cli = (*from_terminal && observation.state == TmuxState::Alive)
+                                    .then(|| tmux_foreground_cli(name.as_str()))
+                                    .flatten();
+                                (*id, observation, activity, preview, cli)
                             })
                         })
                         .collect::<Vec<_>>();
-                    for (id, observation, activity, preview) in
+                    for (id, observation, activity, preview, cli) in
                         workers.into_iter().filter_map(|worker| worker.join().ok())
                     {
                         states.push((id, observation));
+                        if let Some(cli) = cli {
+                            clis.push((id, cli));
+                        }
                         if let Some(activity) = activity {
                             activities.push((id, activity));
                         }
@@ -3402,7 +3476,7 @@ impl OperonApp {
             }
             let output = on_screen
                 .into_iter()
-                .map(|(id, name, _)| {
+                .map(|(id, name, ..)| {
                     (
                         id,
                         tmux_capture_with_cursor(&name).map_err(|error| error.to_string()),
@@ -3414,6 +3488,7 @@ impl OperonApp {
                 activities,
                 previews,
                 output,
+                clis,
             }
         });
     }
@@ -3432,6 +3507,8 @@ impl OperonApp {
         let mut failed = Vec::new();
         let mut completed_cancellations = Vec::new();
         let mut finished_setups: Vec<(Uuid, Option<i32>)> = Vec::new();
+        let mut relaunch = Vec::new();
+        let mut looked = Vec::new();
         for (id, observation) in states {
             let cancellation_pending = self.cancellation_pending(id);
             let Some(idx) = self.store.sessions.iter().position(|session| {
@@ -3450,12 +3527,29 @@ impl OperonApp {
             } else {
                 session_status_after_observation(&self.store.sessions[idx].status, observation)
             };
+            // The first look after a start decides whether a session that was
+            // running at the last quit is started again; a later death in this
+            // run is the person's to deal with (change 270). The look is spent
+            // only once its outcome is stored: a failed write rolls the store
+            // back, and the next poll looks again.
+            let first_look =
+                observation.state != TmuxState::Unknown && self.relaunch_candidates.contains(&id);
+            if first_look {
+                looked.push(id);
+            }
+            let relaunching = first_look
+                && matches!(next, Some(SessionStatus::Lost | SessionStatus::Failed))
+                && relaunch_kind(&self.store.sessions[idx]).is_some();
+            if relaunching {
+                relaunch.push(id);
+            }
             if let Some(next) = next {
                 previous_store.get_or_insert_with(|| self.store.clone());
                 let session = &mut self.store.sessions[idx];
                 if next == SessionStatus::Exited {
                     completed.push(session.name.clone());
-                } else if next == SessionStatus::Failed {
+                } else if next == SessionStatus::Failed && !relaunching {
+                    // A crash about to be undone by the relaunch is not news.
                     failed.push(session.name.clone());
                 } else if next == SessionStatus::Cancelled {
                     completed_cancellations.push(id);
@@ -3490,6 +3584,9 @@ impl OperonApp {
                 self.store = previous_store;
             }
             return;
+        }
+        for id in looked {
+            self.relaunch_candidates.remove(&id);
         }
         if changed {
             match save_cancellation_intents(&self.data_file, &self.store.pending_cancellations) {
@@ -3530,6 +3627,7 @@ impl OperonApp {
                 .into(),
             });
         }
+        self.relaunch_remembered_sessions(relaunch);
         self.apply_session_activities(activities);
     }
 
@@ -3823,7 +3921,11 @@ impl OperonApp {
         else {
             return;
         };
-        if session.native_session_id.as_deref() == Some(native_id.as_str())
+        // The kind changes even when the reported ID is the one already
+        // recorded (change 270).
+        let took_kind = take_cli_kind(session, reading.source);
+        if !took_kind
+            && session.native_session_id.as_deref() == Some(native_id.as_str())
             && (path.is_none() || session.native_session_path == path)
         {
             return;
@@ -3832,6 +3934,30 @@ impl OperonApp {
         if path.is_some() {
             session.native_session_path = path;
         }
+        if !self.persist() {
+            self.store = previous_store;
+        }
+    }
+
+    /// The CLI the session poll saw in front of a terminal (change 271): the
+    /// terminal takes its kind the moment it is seen, rather than when that
+    /// CLI's hook speaks, which for Codex is never and for Antigravity is the
+    /// first prompt. The conversation recorded under the previous kind is
+    /// another CLI's, or none; this one's arrives with its first hook event.
+    pub(crate) fn adopt_terminal_cli(&mut self, session_id: Uuid, provider: CliProvider) {
+        // Asked before the store is cloned: every poll repeats the reading.
+        let Some(index) = self.store.sessions.iter().position(|session| {
+            session.id == session_id
+                && session.agent != provider.agent()
+                && terminal_provenance(session).is_some()
+        }) else {
+            return;
+        };
+        let previous_store = self.store.clone();
+        let session = &mut self.store.sessions[index];
+        take_cli_kind(session, provider);
+        session.native_session_id = None;
+        session.native_session_path = None;
         if !self.persist() {
             self.store = previous_store;
         }
@@ -4496,38 +4622,10 @@ impl OperonApp {
         self.launch_empty_session_at(project, self.session_path_project, &input);
     }
 
-    /// The plus belongs to its pane, not a possibly stale launch-sheet draft.
     pub(crate) fn launch_workspace_terminal(&mut self, group: Option<Uuid>) {
-        let tab = group
-            .and_then(|id| self.workspace.groups.iter().find(|g| g.id == id))
-            .and_then(|g| g.tabs.get(g.active))
-            .or_else(|| self.workspace.active())
-            .cloned();
-        let project_id = tab
-            .as_ref()
-            .and_then(|tab| self.workspace_tab_project(tab))
-            .or(self.workspace_project)
-            .or(self.selected_project);
-        let Some(project) = self
-            .store
-            .projects
-            .iter()
-            .find(|p| Some(p.id) == project_id)
-            .cloned()
-        else {
+        let Some((project, path)) = self.workspace_pane_place(group) else {
             self.notice = Some(tr("先にプロジェクトを選んでください。").into());
             return;
-        };
-        let path = match &tab {
-            Some(WorkspaceTab::Session(id)) => self
-                .store
-                .sessions
-                .iter()
-                .find(|s| s.id == *id)
-                .and_then(|s| s.worktree_path.as_ref())
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            _ => String::new(),
         };
         if let Some(group) = group {
             self.workspace.focused = Some(group);
@@ -5158,6 +5256,91 @@ impl OperonApp {
         );
     }
 
+    /// Everything a resume checks before it reopens a conversation: an ID that
+    /// is safe to put on a command line, the tools on `PATH`, the identity
+    /// Claude actually holds for this terminal, and a transcript that exists
+    /// (repaired when its last line was cut off). The manual 「再開」 and the
+    /// relaunch at start-up both reopen through this. `Err` is the sentence
+    /// that says why not.
+    pub(crate) fn prepare_native_resume(
+        &self,
+        source: &Session,
+        provider: CliProvider,
+    ) -> Result<NativeResume, String> {
+        let Some(native_session_id) = source.native_session_id.clone() else {
+            return Err(
+                tr("このターミナルにはネイティブ再開 ID がまだ保存されていません。初回起動の完了を待つか、ローカル CLI セッションを検出してください。")
+                    .into(),
+            );
+        };
+        if !is_safe_cli_session_id(&native_session_id) {
+            return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
+        }
+        let missing = self.tools.missing_session_tools(provider);
+        if !missing.is_empty() {
+            return Err(tf!(
+                "この会話を再開するには {tools} が PATH 上に必要です。",
+                tools = missing.join(tr(" と "))
+            ));
+        }
+        let project_path = self
+            .store
+            .projects
+            .iter()
+            .find(|project| project.id == source.project_id)
+            .map(|project| project.path.clone())
+            .unwrap_or_default();
+        let workspace = source.worktree_path.clone().unwrap_or(project_path);
+        let recorded_transcript = source
+            .native_session_path
+            .clone()
+            .or_else(|| native_session_path_for_project(provider, &workspace, &native_session_id));
+        // Reopening the wrong conversation is exactly as wrong as restoring it
+        // elsewhere, so the stored identity is re-checked here too.
+        let (native_session_id, native_session_path) = match corrected_managed_claude_conversation(
+            source,
+            &workspace,
+            recorded_transcript.as_deref(),
+        ) {
+            Ok(Some(corrected)) => (corrected.native_id, Some(corrected.path)),
+            Ok(None) => (native_session_id, source.native_session_path.clone()),
+            Err(error) => {
+                return Err(tf!(
+                    "このターミナルの実際の会話を特定できませんでした: {error}",
+                    error = error
+                ));
+            }
+        };
+        if !is_safe_cli_session_id(&native_session_id) {
+            return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
+        }
+        Ok(
+            match validate_session_transcript_for_resume(
+                provider,
+                &workspace,
+                &native_session_id,
+                native_session_path
+                    .as_deref()
+                    .or(recorded_transcript.as_deref()),
+            ) {
+                TranscriptResumeReadiness::Ready(path) => NativeResume::Ready {
+                    native_id: native_session_id,
+                    path: Some(path),
+                    repaired_bytes: None,
+                },
+                TranscriptResumeReadiness::Sanitized {
+                    path,
+                    removed_bytes,
+                } => NativeResume::Ready {
+                    native_id: native_session_id,
+                    path: Some(path),
+                    repaired_bytes: Some(removed_bytes),
+                },
+                TranscriptResumeReadiness::EmptyOrMissing => NativeResume::NoTranscript,
+            },
+        )
+    }
+
     pub(crate) fn resume_managed_native_session(&mut self, source_id: Uuid) {
         let Some(source) = self
             .store
@@ -5171,91 +5354,38 @@ impl OperonApp {
         let Some(provider) = cli_provider_for_agent(&source.agent) else {
             return;
         };
-        let Some(native_session_id) = source.native_session_id.clone() else {
-            self.notice = Some(
-                tr("このターミナルにはネイティブ再開 ID がまだ保存されていません。初回起動の完了を待つか、ローカル CLI セッションを検出してください。")
-                    .into(),
-            );
-            return;
-        };
-        if !is_safe_cli_session_id(&native_session_id) {
-            self.notice =
-                Some(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
-            return;
-        }
-        let missing = self.tools.missing_session_tools(provider);
-        if !missing.is_empty() {
-            self.notice = Some(tf!(
-                "この会話を再開するには {tools} が PATH 上に必要です。",
-                tools = missing.join(tr(" と "))
-            ));
-            return;
-        }
-        let project_path = self
-            .store
-            .projects
-            .iter()
-            .find(|project| project.id == source.project_id)
-            .map(|project| project.path.clone())
-            .unwrap_or_default();
-        let workspace = source.worktree_path.clone().unwrap_or(project_path.clone());
-        let recorded_transcript = source
-            .native_session_path
-            .clone()
-            .or_else(|| native_session_path_for_project(provider, &workspace, &native_session_id));
-        // Reopening the wrong conversation is exactly as wrong as restoring it
-        // elsewhere, so the stored identity is re-checked here too.
-        let (native_session_id, mut native_session_path) =
-            match corrected_managed_claude_conversation(
-                &source,
-                &workspace,
-                recorded_transcript.as_deref(),
-            ) {
-                Ok(Some(corrected)) => (corrected.native_id, Some(corrected.path)),
-                Ok(None) => (native_session_id, source.native_session_path.clone()),
-                Err(error) => {
-                    self.notice = Some(tf!(
-                        "このターミナルの実際の会話を特定できませんでした: {error}",
-                        error = error
-                    ));
-                    return;
-                }
-            };
-        if !is_safe_cli_session_id(&native_session_id) {
-            self.notice =
-                Some(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
-            return;
-        }
-        match validate_session_transcript_for_resume(
-            provider,
-            &workspace,
-            &native_session_id,
-            native_session_path
-                .as_deref()
-                .or(recorded_transcript.as_deref()),
-        ) {
-            TranscriptResumeReadiness::Ready(path) => {
-                native_session_path = Some(path);
-            }
-            TranscriptResumeReadiness::Sanitized {
-                path,
-                removed_bytes,
-            } => {
-                native_session_path = Some(path);
-                self.notice = Some(tf!(
-                    "強制終了で破損したトランスクリプトの末尾（{removed_bytes} バイト）を安全に修復して再開します。",
-                    removed_bytes = removed_bytes
-                ));
-            }
-            TranscriptResumeReadiness::EmptyOrMissing => {
-                self.notice = Some(
-                    tr("会話ログが記録される前に終了したため、会話 ID からの再開はできません。新しいセッションとして開始します。")
-                        .into(),
-                );
-                self.start_session(source_id);
+        let (native_session_id, native_session_path) = match self
+            .prepare_native_resume(&source, provider)
+        {
+            Err(notice) => {
+                self.notice = Some(notice);
                 return;
             }
-        }
+            Ok(NativeResume::NoTranscript) => {
+                self.notice = Some(
+                        tr("会話ログが記録される前に終了したため、会話 ID からの再開はできません。新しいセッションとして開始します。")
+                            .into(),
+                    );
+                // Not `start_session`: for a stopped session with an ID
+                // that hands it straight back here, until the stack runs
+                // out (change 270).
+                self.launch_session_record(source_id, LaunchFocus::Bring);
+                return;
+            }
+            Ok(NativeResume::Ready {
+                native_id,
+                path,
+                repaired_bytes,
+            }) => {
+                if let Some(removed_bytes) = repaired_bytes {
+                    self.notice = Some(tf!(
+                            "強制終了で破損したトランスクリプトの末尾（{removed_bytes} バイト）を安全に修復して再開します。",
+                            removed_bytes = removed_bytes
+                        ));
+                }
+                (native_id, path)
+            }
+        };
         let id = Uuid::new_v4();
         let tmux_name = managed_tmux_name(id);
         let previous_store = self.store.clone();
@@ -6279,13 +6409,7 @@ impl OperonApp {
     }
 
     pub(crate) fn start_session(&mut self, session_id: Uuid) {
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::SessionStart(session_id))
-            || self
-                .background_tasks
-                .contains(&BackgroundKey::EmptySessionStart(session_id))
-        {
+        if self.session_launch_running(session_id) {
             return;
         }
         let Some(session) = self
@@ -6308,6 +6432,35 @@ impl OperonApp {
             self.resume_managed_native_session(session_id);
             return;
         }
+        self.launch_session_record(session_id, LaunchFocus::Bring);
+    }
+
+    fn session_launch_running(&self, session_id: Uuid) -> bool {
+        self.background_tasks
+            .contains(&BackgroundKey::SessionStart(session_id))
+            || self
+                .background_tasks
+                .contains(&BackgroundKey::EmptySessionStart(session_id))
+    }
+
+    /// Launches the session's own record as it stands — its command, its
+    /// folder, its tmux name — and says whether the launch was started.
+    /// `LaunchFocus::Keep` starts it where it is: the selection, the page, and
+    /// the notice stay as they are, now and when the launch finishes, and no
+    /// launch dialog is kept for it (change 270).
+    pub(crate) fn launch_session_record(&mut self, session_id: Uuid, focus: LaunchFocus) -> bool {
+        if self.session_launch_running(session_id) {
+            return false;
+        }
+        let Some(session) = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            return false;
+        };
         if self.worktree_mutation_running(session.project_id) {
             self.notice = Some(if session.status == SessionStatus::Queued {
                 tr("実行中の worktree 操作が完了するまで、準備できたセッションはキューに残ります。")
@@ -6315,7 +6468,7 @@ impl OperonApp {
             } else {
                 tr("worktree 操作の完了を待ってください。").into()
             });
-            return;
+            return false;
         }
         let project_path = self
             .store
@@ -6351,7 +6504,7 @@ impl OperonApp {
                 stored.status = previous_status;
                 stored.launched_at = previous_launched_at;
             }
-            return;
+            return false;
         }
         let auto_approve_workspace_prompts = self.store.auto_approve_workspace_prompts;
         // A launch token per launch, not per session: a retried pane replaces
@@ -6373,10 +6526,12 @@ impl OperonApp {
                 stored.launched_at = previous_launched_at;
             }
             self.notice = Some(reason);
-            return;
+            return false;
         }
         let account = account_variables(&self.accounts, account);
-        if let Some(progress) = self
+        if focus == LaunchFocus::Keep {
+            self.quiet_launches.insert(session_id);
+        } else if let Some(progress) = self
             .launch_progress
             .as_mut()
             .filter(|p| p.session_id == session_id)
@@ -6407,9 +6562,11 @@ impl OperonApp {
                 dismissed: true,
             });
         }
-        self.select_session(session_id);
-        self.page = Page::Sessions;
-        self.session_library_open = false;
+        if focus == LaunchFocus::Bring {
+            self.select_session(session_id);
+            self.page = Page::Sessions;
+            self.session_library_open = false;
+        }
         self.spawn_background(BackgroundKey::SessionStart(session_id), move || {
             let result = launch_stored_session(
                 &session,
@@ -6421,11 +6578,14 @@ impl OperonApp {
             );
             BackgroundResult::SessionStarted { session_id, result }
         });
-        self.notice = Some(if retrying {
-            tr("セッションを再試行しています…").into()
-        } else {
-            tr("セッションを起動しています…").into()
-        });
+        if focus == LaunchFocus::Bring {
+            self.notice = Some(if retrying {
+                tr("セッションを再試行しています…").into()
+            } else {
+                tr("セッションを起動しています…").into()
+            });
+        }
+        true
     }
 
     pub(crate) fn stop_session(&mut self, session_id: Uuid) {
@@ -6978,10 +7138,90 @@ impl OperonApp {
             self.workspace_editor_views.remove(id);
             self.workspace_editor_jumps.remove(id);
         }
-        self.workspace.close(tab);
+        if self.workspace.close(tab) {
+            self.closed_tabs.retain(|closed| closed != tab);
+            self.closed_tabs.push(tab.clone());
+            let excess = self.closed_tabs.len().saturating_sub(CLOSED_TAB_LIMIT);
+            self.closed_tabs.drain(..excess);
+        }
         if let Some(next) = self.workspace.active().cloned() {
             self.activate_workspace_tab(&next);
         }
+    }
+
+    /// ⇧⌘T: the newest closed tab that can still be shown, shown again.
+    ///
+    /// One that is already open again by another route, whose session was
+    /// removed, or whose project was forgotten is passed over and dropped —
+    /// reopening a tab for nothing would be worse than reopening the one
+    /// before it.
+    pub(crate) fn reopen_closed_tab(&mut self) {
+        while let Some(tab) = self.closed_tabs.pop() {
+            if self
+                .workspace
+                .groups
+                .iter()
+                .any(|group| group.tabs.contains(&tab))
+            {
+                continue;
+            }
+            match &tab {
+                WorkspaceTab::Session(id) => {
+                    if !self.store.sessions.iter().any(|session| session.id == *id) {
+                        continue;
+                    }
+                    self.page = Page::Sessions;
+                    self.session_library_open = false;
+                    self.select_session(*id);
+                }
+                WorkspaceTab::Document(id) => {
+                    let Some(project) = self
+                        .store
+                        .projects
+                        .iter()
+                        .find(|project| project.id == id.project)
+                        .cloned()
+                    else {
+                        continue;
+                    };
+                    // `open_document_at` puts the tab in the workspace only
+                    // when the workspace is the page showing.
+                    self.page = Page::Sessions;
+                    self.session_library_open = false;
+                    self.open_document_at(&project, id.root.clone(), id.path.clone());
+                }
+            }
+            return;
+        }
+        self.notice_briefly(tr("開き直せるタブはありません。"));
+    }
+
+    /// ⇧⌘] / ⇧⌘[ and ⌃Tab / ⌃⇧Tab: the focused pane's next or previous tab,
+    /// wrapping round.
+    pub(crate) fn step_workspace_tab(&mut self, forward: bool) {
+        let Some(group) = self
+            .workspace
+            .groups
+            .iter()
+            .find(|group| Some(group.id) == self.workspace.focused)
+        else {
+            return;
+        };
+        let count = group.tabs.len();
+        // `settle` drops an emptied group, so this is a group nobody settled;
+        // stepping in it would divide by zero.
+        if count == 0 {
+            return;
+        }
+        let index = if forward {
+            (group.active + 1) % count
+        } else {
+            (group.active + count - 1) % count
+        };
+        let id = group.id;
+        let tab = group.tabs[index].clone();
+        self.workspace.select(id, &tab);
+        self.activate_workspace_tab(&tab);
     }
 
     /// Both paths that decide a session changed state call this, at the point
@@ -7250,8 +7490,10 @@ pub(crate) fn terminal_echo_poll_wait(
 
 impl eframe::App for OperonApp {
     /// A model download in flight is killed with the app; its `.part` stays
-    /// for the next 「モデルを取得」 to resume.
+    /// for the next 「モデルを取得」 to resume. The workspace's tabs are
+    /// written one last time so the next start finds them (change 270).
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_workspace_layout_if_changed();
         self.stop_model_download_for_exit();
         release_shared_embedder();
     }
@@ -7286,6 +7528,7 @@ impl eframe::App for OperonApp {
         }
         if self.last_session_refresh.elapsed() >= Duration::from_secs(2) {
             self.retry_pending_store();
+            self.save_workspace_layout_if_changed();
             self.request_session_poll();
             self.last_session_refresh = Instant::now();
         }
@@ -8112,75 +8355,6 @@ impl OperonApp {
         }
     }
 
-    /// Whether this frame saw the chord bound to an action. An action with no
-    /// chord is never pressed, which is what `null` in the keymap file buys.
-    /// The app-wide chords, read once per frame before anything draws.
-    pub(crate) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
-        // The launch sheet holds a request being typed. ⌘K opens a palette
-        // that can switch project, and ⌘2 clears the project outright: either
-        // would throw the request away, so neither is live while it is open.
-        if !self.launch_sheet_open && self.chord_pressed(ctx, "palette.open") {
-            self.open_command_palette();
-        }
-        // Before the window draws, so the selection it paints is the one the
-        // arrows just moved — and so an arrow never reaches the text field and
-        // moves the caret instead.
-        self.handle_palette_keys(ctx);
-        // Adding a project selects it, which clears the sheet's request too.
-        if !self.launch_sheet_open && self.chord_pressed(ctx, "project.add") {
-            self.choose_project_folder();
-        }
-        // The shortcuts a person brings with them from every other Mac app of
-        // this shape: ⌘1–3 for the three places, ⌘, for settings, unless a
-        // keymap file says otherwise. They stay live while a terminal has
-        // focus: a TUI owns its own keys, but `⌘` is the one modifier macOS
-        // keeps for the app, and the pane drops every ⌘ chord rather than
-        // sending it (`terminal_key_binding`). That is what lets ⌘J leave the
-        // pane a person is typing in for the next one that is waiting.
-        if !self.command_palette_open && !self.launch_sheet_open {
-            if self.chord_pressed(ctx, "session.new") {
-                self.open_new_session();
-            }
-            if self.chord_pressed(ctx, "attention.next") {
-                self.open_next_waiting_session();
-            }
-            if self.chord_pressed(ctx, "panel.toggle") {
-                self.show_session_inspector = !self.show_session_inspector;
-            }
-            for (action, page) in [
-                ("page.home", Page::Home),
-                ("page.projects", Page::Projects),
-                ("page.sessions", Page::Sessions),
-                ("page.settings", Page::Settings),
-            ] {
-                if self.chord_pressed(ctx, action) {
-                    if page == Page::Projects {
-                        self.select_project(None);
-                    }
-                    self.page = page;
-                }
-            }
-        }
-    }
-
-    pub(crate) fn chord_pressed(&self, ctx: &egui::Context, action: &str) -> bool {
-        let Some(chord) = self.keymap.chord_for(action) else {
-            return false;
-        };
-        ctx.input(|input| input.modifiers.matches_logically(chord.modifiers))
-            && ctx.input(|input| input.key_pressed(chord.key))
-    }
-
-    /// The same question, for a chord that must not also reach whatever has
-    /// focus. `consume_key` removes the event, which is the whole of "the agent
-    /// never sees it".
-    pub(crate) fn chord_consumed(&self, ctx: &egui::Context, action: &str) -> bool {
-        let Some(chord) = self.keymap.chord_for(action) else {
-            return false;
-        };
-        ctx.input_mut(|input| input.consume_key(chord.modifiers, chord.key))
-    }
-
     /// Put the keymap where a person can edit it: write the defaults if there
     /// is nothing there, then open the folder. Never overwrites a file — the
     /// keymap is theirs once it exists.
@@ -8914,7 +9088,6 @@ impl OperonApp {
             .filter(|session| {
                 session.project_id == project
                     && session.status == SessionStatus::Active
-                    && session.origin != Some(SessionOrigin::PlainTerminal)
                     && session.agent != "terminal"
             })
             .max_by_key(|session| session.launched_at.unwrap_or(session.created_at))

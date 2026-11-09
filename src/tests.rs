@@ -38461,6 +38461,91 @@ pub(crate) fn a_second_enter_in_the_frame_that_committed_a_conversion_still_send
     assert_eq!(inputs, vec![TerminalInput::Text("日本語".into())]);
 }
 
+/// In the person's terminal app, Shift+Enter puts a newline in an agent's input
+/// and Enter sends it.
+/// In a session terminal both sent the line (change 264): the binding mapped
+/// Enter to tmux `Enter` whatever the modifiers, and tmux writes `\r` for
+/// `S-Enter` too, so no CLI behind it could tell the keys apart. Shift+Enter
+/// now sends what Ctrl+J sends — the LF that terminal is set up to send, which Claude
+/// Code, Codex, and Antigravity CLI read as a newline.
+#[test]
+pub(crate) fn shift_enter_puts_a_newline_in_the_agents_input_instead_of_sending() {
+    let ctx = egui::Context::default();
+    let key = |modifiers: egui::Modifiers| egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers,
+    };
+    let ctrl_j = terminal_key_binding(egui::Key::J, egui::Modifiers::CTRL);
+    assert_eq!(ctrl_j, Some("C-j".into()));
+
+    // What the person's keyboard delivered after confirming a conversion with
+    // Enter (the probe of change 264): the commit, then Shift+Enter on its own.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input
+            .events
+            .push(egui::Event::Ime(egui::ImeEvent::Commit("てすと".into())));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, true);
+    assert_eq!(inputs, vec![TerminalInput::Text("てすと".into())]);
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input.events.push(key(egui::Modifiers::SHIFT));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, false);
+    assert_eq!(
+        inputs,
+        vec![TerminalInput::Key(ctrl_j.clone().unwrap_or_default())],
+        "Shift+Enter is a newline in the input, not a submit"
+    );
+
+    // Enter still sends.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input.events.push(key(egui::Modifiers::NONE));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, false);
+    assert_eq!(inputs, vec![TerminalInput::Key("Enter".into())]);
+
+    // A Shift+Enter that confirms a conversion is the IME's, as Enter is.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input
+            .events
+            .push(egui::Event::Ime(egui::ImeEvent::Commit("てすと".into())));
+        input.events.push(key(egui::Modifiers::SHIFT));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, true);
+    assert_eq!(inputs, vec![TerminalInput::Text("てすと".into())]);
+
+    // While composing, Shift+Enter sends nothing.
+    ctx.input_mut(|input| {
+        input.events.clear();
+        input.events.push(key(egui::Modifiers::SHIFT));
+    });
+    let (inputs, _) = terminal_input_events(&ctx, true);
+    assert!(inputs.is_empty(), "{inputs:?}");
+
+    // Only Shift alone: the chords that add Ctrl or Option keep their keys.
+    assert_eq!(
+        terminal_key_binding(
+            egui::Key::Enter,
+            egui::Modifiers::CTRL | egui::Modifiers::SHIFT
+        ),
+        Some("C-Enter".into())
+    );
+    assert_eq!(
+        terminal_key_binding(
+            egui::Key::Enter,
+            egui::Modifiers::ALT | egui::Modifiers::SHIFT
+        ),
+        Some("M-Enter".into())
+    );
+}
+
 /// An account is one variable, and the launch is where it takes effect. The
 /// name is read from the same constant the hook installer reads, so a rename
 /// moves both or neither.
@@ -39880,7 +39965,7 @@ pub(crate) fn a_dangerous_switch_cannot_be_launched_without_the_acknowledgement(
     );
     assert!(
         asked
-            .contains(&tr("警告: 確認もサンドボックスもなしにファイルを変更できます。").to_owned()),
+            .contains(&tr("警告: 確認もサンドボックスもなしに、プロジェクトの外（書類・ダウンロード・デスクトップなど）のファイルも読み書きできます。").to_owned()),
         "the checkbox appeared without the sentence that says what is being agreed to"
     );
 
@@ -67281,8 +67366,10 @@ fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Op
         .shapes
         .iter()
         .filter_map(|shape| match &shape.shape {
+            // The enclosure is 8 units on the 18-unit grid, drawn at the
+            // tab's mark size (change 273).
             egui::Shape::Circle(circle)
-                if (circle.radius - 8.0).abs() < 0.01
+                if (circle.radius - 8.0 * TAB_STATUS_MARK_SIZE / STATUS_ICON_SIZE).abs() < 0.01
                 && circle.center.x >= column_right(output)
                 && circle.center.x < title.left()
                 // Use the nearest mark: compact tabs may place both within this range.
@@ -67291,7 +67378,7 @@ fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Op
             {
                 Some(egui::Rect::from_center_size(
                     circle.center,
-                    egui::Vec2::splat(STATUS_ICON_SIZE),
+                    egui::Vec2::splat(TAB_STATUS_MARK_SIZE),
                 ))
             }
             _ => None,
@@ -70883,9 +70970,12 @@ pub(crate) fn session_254_compact_tabs() {
         texts[1].pos.x - texts[0].pos.x < 150.0,
         "short names must not reserve large empty labels"
     );
+    // Since change 267 the CLI mark sits between the state mark and the
+    // title: one mark and one gap further right, and no more.
+    let mark = SESSION_MARK_SIZE + ctx.style().spacing.item_spacing.x;
     assert!(
-        texts[0].pos.x - right < 65.0,
-        "title is left aligned beside status icon"
+        texts[0].pos.x - right < 65.0 + mark,
+        "title is left aligned beside the status icon and CLI mark"
     );
     let selected = texts[0].visual_bounding_rect();
     assert!(
@@ -70943,11 +71033,12 @@ pub(crate) fn session_254_terminal_action() {
             &ctx,
             vec![egui::Event::PointerMoved(add.center())],
         );
-        named |= !drawn_text_rects(&hover, |s| s == "空のターミナルを開く").is_empty();
+        named |= !drawn_text_rects(&hover, |s| s == "ターミナルや AI を起動").is_empty();
     }
-    assert!(named, "plus explains that it starts a plain terminal");
+    assert!(named, "plus says it starts a terminal or an agent");
     let count = app.store.sessions.len();
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    // Since change 273 the + opens a menu; ターミナル is the old action.
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     assert_eq!(app.store.sessions.len(), count);
     assert!(app
         .notice
@@ -71015,7 +71106,7 @@ pub(crate) fn session_254_terminal_context() {
         .filter(|r| r.left() > project_column_right(&app))
         .max_by(|a, b| a.left().total_cmp(&b.left()))
         .expect("right pane plus");
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     let created = app.store.sessions.last().unwrap().clone();
     assert_ne!(created.id, second);
     assert_ne!(created.id, first);
@@ -71116,9 +71207,13 @@ pub(crate) fn session_254_empty_workspace() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    let pressed = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
     assert!(app.store.sessions.is_empty());
     assert!(app.notice.is_none(), "no-project action is disabled");
+    assert!(
+        session_273_menu_rows(&pressed, add).is_empty(),
+        "a disabled + opens no menu"
+    );
     let project = Project {
         id: Uuid::new_v4(),
         name: "空のプロジェクト".into(),
@@ -71131,7 +71226,7 @@ pub(crate) fn session_254_empty_workspace() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     assert!(app.store.sessions.is_empty());
     assert!(app
         .notice
@@ -71224,7 +71319,7 @@ pub(crate) fn session_260_plus_follows_last_tab() {
     // At its new place it is still the button: the press reaches the launch,
     // which refuses here with the existing missing-tmux notice.
     let count = app.store.sessions.len();
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     assert_eq!(app.store.sessions.len(), count);
     assert!(app
         .notice
@@ -71318,6 +71413,611 @@ pub(crate) fn session_260_plus_stays_clear_at_every_tab_count() {
             }
         }
     }
+    fs::remove_dir_all(root).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Change 273: the + offers what to start, and the session tabs are compact.
+
+/// The names the + menu shows, top to bottom (Requirement 1).
+const SESSION_273_ROWS: [&str; 4] = ["ターミナル", "Claude Code", "Codex CLI", "Antigravity"];
+
+/// The rows of the menu that opened under `add`: each name's nearest text
+/// below the +, sorted top to bottom.
+fn session_273_menu_rows(
+    out: &egui::FullOutput,
+    add: egui::Rect,
+) -> Vec<(&'static str, egui::Rect)> {
+    let mut rows: Vec<_> = SESSION_273_ROWS
+        .iter()
+        .filter_map(|name| {
+            drawn_text_rects(out, |s| s == *name)
+                .into_iter()
+                .filter(|r| {
+                    r.top() >= add.bottom() - 1.0
+                        && r.top() <= add.bottom() + 6.0 * CONTROL_HEIGHT
+                        && r.right() > add.left() - 320.0
+                        && r.left() < add.right() + 320.0
+                })
+                .min_by(|a, b| a.top().total_cmp(&b.top()))
+                .map(|r| (*name, r))
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+    rows
+}
+
+/// Presses `add`, then the row called `name` in the menu that opens under it.
+fn session_273_choose(app: &mut OperonApp, ctx: &egui::Context, add: egui::Rect, name: &str) {
+    let out = session_253_pointer(app, ctx, add.center(), egui::PointerButton::Primary);
+    let row = session_273_menu_rows(&out, add)
+        .into_iter()
+        .find(|(row, _)| *row == name)
+        .unwrap_or_else(|| panic!("{name} in the menu under the +"))
+        .1;
+    session_253_pointer(app, ctx, row.center(), egui::PointerButton::Primary);
+}
+
+fn session_273_every_cli(app: &mut OperonApp) {
+    app.tools.claude = true;
+    app.tools.codex = true;
+    app.tools.antigravity = true;
+}
+
+#[test]
+pub(crate) fn session_273_plus_opens_launch_menu() {
+    let root = temporary_directory("session-273-menu");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    session_273_every_cli(&mut app);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    assert!(
+        session_273_menu_rows(&out, add).is_empty(),
+        "the menu is closed until the + is pressed"
+    );
+    let count = app.store.sessions.len();
+    let out = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert_eq!(
+        app.store.sessions.len(),
+        count,
+        "the + alone starts nothing"
+    );
+    assert!(
+        app.notice.is_none(),
+        "the + alone asks nothing: {:?}",
+        app.notice
+    );
+    assert!(!app.launch_sheet_open);
+    let rows = session_273_menu_rows(&out, add);
+    assert_eq!(
+        rows.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        SESSION_273_ROWS,
+        "four rows under the +, in the order the person named them"
+    );
+    for pair in rows.windows(2) {
+        let step = pair[1].1.center().y - pair[0].1.center().y;
+        assert!(
+            step >= CONTROL_HEIGHT - 0.5,
+            "each row is a 28px control: {pair:?}"
+        );
+    }
+    assert!(
+        rows[0].1.top() - add.bottom() < CONTROL_HEIGHT,
+        "the menu opens directly below the +: {rows:?}, + {add:?}"
+    );
+    // Each row leads with its CLI's mark, drawn from the value it launches.
+    let choices = crate::launch_menu::WORKSPACE_LAUNCH_CHOICES;
+    assert_eq!(choices.len(), rows.len());
+    for (choice, (name, text)) in choices.iter().zip(&rows) {
+        let texture = session_mark_texture(&ctx, choice)
+            .unwrap_or_else(|| panic!("{choice} has a mark"))
+            .id();
+        let marks: Vec<_> = sidebar_251_mesh_rects(&out, texture)
+            .into_iter()
+            .filter(|r| {
+                r.right() <= text.left() + 0.5
+                    && r.left() >= text.left() - CONTROL_HEIGHT
+                    && (r.center().y - text.center().y).abs() < 4.0
+            })
+            .collect();
+        assert_eq!(marks.len(), 1, "{name}: its mark before its name");
+        assert!(
+            (marks[0].width() - SESSION_MARK_SIZE).abs() < 0.5,
+            "{name}: {marks:?}"
+        );
+        // The round trip: every agent row is a value the launch gate accepts.
+        if *choice != "terminal" {
+            assert!(
+                build_agent_launch_command(choice, "", "", "", "", &[], "").is_ok(),
+                "{choice} must be an agent the launch accepts"
+            );
+        }
+    }
+    // Escape closes it; pressing the + again closes it.
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        }],
+    );
+    // The menu takes that Escape for itself: a terminal drawn later in the
+    // frame would otherwise send it on and interrupt its agent's turn.
+    assert!(
+        !ctx.input(|i| i.key_pressed(egui::Key::Escape)),
+        "the Escape that closes the menu is not passed on"
+    );
+    // The frame that reads Escape still draws the menu; the next does not.
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        session_273_menu_rows(&out, add).is_empty(),
+        "Escape closes the menu"
+    );
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    let out = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert!(
+        session_273_menu_rows(&out, add).is_empty(),
+        "a second press closes it"
+    );
+    // ターミナル does what the + used to: here it meets the missing tmux.
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
+    assert_eq!(app.store.sessions.len(), count);
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// A git project whose first session works in a linked worktree, split so that
+/// session sits in the right pane while the left pane has the focus.
+fn session_273_split_fixture(root: &Path) -> (OperonApp, Uuid, PathBuf) {
+    let project_path = root.join("project");
+    fs::create_dir_all(&project_path).unwrap();
+    run_fixture_git(&project_path, &["init", "-q"]);
+    run_fixture_git(
+        &project_path,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        ],
+    );
+    let worktree = root.join("worktree");
+    run_fixture_git(
+        &project_path,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "feature/agent",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let (mut app, first, second) = app_with_two_sessions(&project_path);
+    app.store.sessions[0].worktree_path = Some(worktree.clone());
+    app.select_session(first);
+    app.select_session(second);
+    app.show_session_inspector = false;
+    let group = app.workspace.groups[0].id;
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(first),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
+    let right = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(first)))
+        .expect("first is in its own pane")
+        .id;
+    assert_ne!(right, group);
+    app.workspace.select(group, &WorkspaceTab::Session(second));
+    app.activate_workspace_tab(&WorkspaceTab::Session(second));
+    (app, right, worktree.canonicalize().unwrap())
+}
+
+#[test]
+pub(crate) fn session_273_agent_launch_uses_pane_and_remembered_options() {
+    let root = temporary_directory("session-273-agent");
+    let (mut app, right, worktree) = session_273_split_fixture(&root);
+    app.tools.tmux = true;
+    session_273_every_cli(&mut app);
+    app.recent_agent_settings.agents.insert(
+        "claude".into(),
+        AgentLaunchSettings {
+            model: "claude-remembered".into(),
+            ..Default::default()
+        },
+    );
+    // A pin for another CLI says nothing about this one.
+    app.recent_agent_settings.pinned = Some(PinnedLaunch {
+        agent: "codex".into(),
+        settings: AgentLaunchSettings {
+            model: "codex-pinned".into(),
+            ..Default::default()
+        },
+        account: None,
+        acknowledged: false,
+    });
+    // The launch sheet's draft, which a quick launch must leave alone.
+    app.selected_agent = "codex".into();
+    app.goal_input = "下書きの依頼".into();
+    app.session_name_input = "下書きの名前".into();
+    let unrelated_project = Uuid::new_v4();
+    let unrelated = root.join("unrelated").display().to_string();
+    app.session_path_project = Some(unrelated_project);
+    app.session_path_input = unrelated.clone();
+    let remembered = app.recent_agent_settings.clone();
+    let project = app.store.projects[0].id;
+
+    let Ok(crate::launch_menu::PaneAgentLaunch::Start(start)) =
+        app.workspace_agent_launch(Some(right), "claude")
+    else {
+        panic!("a plain remembered combination starts directly");
+    };
+    assert_eq!(start.project.id, project);
+    assert_eq!(start.worktree_path, worktree, "the clicked pane's folder");
+    assert!(
+        start.command.contains("claude-remembered"),
+        "{}",
+        start.command
+    );
+    assert!(!start.command.contains("codex-pinned"));
+    assert_eq!(start.account, None, "no login without a pin for this CLI");
+
+    let count = app.store.sessions.len();
+    let id = app
+        .open_workspace_agent_session(Some(right), &start)
+        .expect("the session is recorded");
+    assert_eq!(app.store.sessions.len(), count + 1);
+    let created = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .unwrap()
+        .clone();
+    assert_eq!(created.agent, "claude");
+    assert_eq!(created.project_id, project);
+    assert_eq!(created.worktree_path, Some(worktree.clone()));
+    assert!(created.agent_command.contains("claude-remembered"));
+    assert!(
+        created.native_session_id.is_some(),
+        "Operon names the conversation, as a sheet launch does"
+    );
+    assert_eq!(created.origin, None);
+    assert!(created.depends_on.is_empty());
+    assert!(
+        !created.goal.contains("下書き"),
+        "no request text: {}",
+        created.goal
+    );
+    assert!(!created.name.contains("下書き"));
+    assert_eq!(created.status, SessionStatus::Starting);
+    let pane = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(id)))
+        .expect("the new session has a tab");
+    assert_eq!(pane.id, right, "the tab opens in the pane whose + was used");
+    assert!(fs::read_to_string(&app.data_file)
+        .unwrap()
+        .contains(&id.to_string()));
+    assert_eq!(app.selected_agent, "codex");
+    assert_eq!(app.goal_input, "下書きの依頼");
+    assert_eq!(app.session_name_input, "下書きの名前");
+    assert_eq!(app.session_path_project, Some(unrelated_project));
+    assert_eq!(app.session_path_input, unrelated);
+    assert_eq!(
+        app.recent_agent_settings, remembered,
+        "nothing is remembered anew"
+    );
+    assert!(!app.launch_sheet_open);
+
+    // A pin for this CLI wins and carries its consent; a login it names
+    // that no longer exists is not used.
+    app.recent_agent_settings.pinned = Some(PinnedLaunch {
+        agent: "claude".into(),
+        settings: AgentLaunchSettings {
+            model: "claude-pinned".into(),
+            mode: "bypassPermissions".into(),
+            ..Default::default()
+        },
+        account: Some(Uuid::new_v4()),
+        acknowledged: true,
+    });
+    let Ok(crate::launch_menu::PaneAgentLaunch::Start(start)) =
+        app.workspace_agent_launch(Some(right), "claude")
+    else {
+        panic!("an acknowledged pin starts directly");
+    };
+    assert!(start.command.contains("claude-pinned"), "{}", start.command);
+    assert_eq!(start.account, None);
+    if let Some(pin) = app.recent_agent_settings.pinned.as_mut() {
+        pin.acknowledged = false;
+    }
+    assert!(matches!(
+        app.workspace_agent_launch(Some(right), "claude"),
+        Ok(crate::launch_menu::PaneAgentLaunch::Confirm { .. })
+    ));
+    app.recent_agent_settings.pinned = None;
+
+    // Refusals carry the sheet's own words.
+    app.tools.tmux = false;
+    let refused = app.workspace_agent_launch(Some(right), "claude");
+    assert!(
+        matches!(&refused, Err(reason) if reason.contains("tmux が必要")),
+        "{:?}",
+        refused.as_ref().err()
+    );
+    app.tools.tmux = true;
+    app.tools.claude = false;
+    let refused = app.workspace_agent_launch(Some(right), "claude");
+    assert!(
+        matches!(&refused, Err(reason) if reason.contains("PATH 上に見つかりません")),
+        "{:?}",
+        refused.as_ref().err()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_273_agent_choice_reaches_the_launch() {
+    let root = temporary_directory("session-273-choice");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    // No tmux: whatever the choice reaches, nothing can start a real CLI.
+    app.tools.tmux = false;
+    session_273_every_cli(&mut app);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    app.goal_input = "下書きの依頼".into();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let count = app.store.sessions.len();
+    for name in ["Claude Code", "Codex CLI", "Antigravity"] {
+        app.notice = None;
+        session_273_choose(&mut app, &ctx, add, name);
+        assert_eq!(app.store.sessions.len(), count, "{name}");
+        assert!(
+            app.notice
+                .as_deref()
+                .unwrap_or_default()
+                .contains("tmux が必要"),
+            "{name}: {:?}",
+            app.notice
+        );
+        assert!(!app.launch_sheet_open, "{name}");
+        assert_eq!(app.goal_input, "下書きの依頼", "{name}");
+        let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        assert!(
+            session_273_menu_rows(&out, add).is_empty(),
+            "{name}: choosing closes the menu"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_273_dangerous_options_open_the_sheet() {
+    let root = temporary_directory("session-273-danger");
+    let (mut app, right, worktree) = session_273_split_fixture(&root);
+    // No tmux, so a launch that skipped the consent could never start a CLI:
+    // it would stop at the missing-tmux notice and this test would fail.
+    app.tools.tmux = false;
+    session_273_every_cli(&mut app);
+    app.recent_agent_settings.agents.insert(
+        "claude".into(),
+        AgentLaunchSettings {
+            model: "claude-remembered".into(),
+            mode: "bypassPermissions".into(),
+            ..Default::default()
+        },
+    );
+    app.recent_agent_settings.pinned = Some(PinnedLaunch {
+        agent: "codex".into(),
+        settings: AgentLaunchSettings {
+            model: "codex-pinned".into(),
+            ..Default::default()
+        },
+        account: None,
+        acknowledged: false,
+    });
+    save_recent_agent_settings(&app.data_file, &app.recent_agent_settings).unwrap();
+    let file = recent_agent_settings_path(&app.data_file);
+    let written = fs::read(&file).unwrap();
+    let remembered = app.recent_agent_settings.clone();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = drawn_text_rects(&out, |s| s == ICON_ADD)
+        .into_iter()
+        .filter(|r| r.left() > project_column_right(&app))
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("right pane plus");
+    let count = app.store.sessions.len();
+    session_273_choose(&mut app, &ctx, add, "Claude Code");
+    assert_eq!(
+        app.store.sessions.len(),
+        count,
+        "nothing starts without consent"
+    );
+    assert!(app.launch_sheet_open, "the sheet asks instead");
+    assert_eq!(app.selected_agent, "claude");
+    assert_eq!(app.agent_model_input, "claude-remembered");
+    assert_eq!(app.agent_mode_input, "bypassPermissions");
+    assert!(
+        !app.launch_acknowledged(),
+        "the consent is the person's to give"
+    );
+    assert_eq!(app.agent_account_input, None);
+    assert_eq!(
+        app.workspace.focused,
+        Some(right),
+        "the pane whose + was used has the focus behind the sheet"
+    );
+    assert_eq!(app.session_path_project, Some(app.store.projects[0].id));
+    assert_eq!(
+        PathBuf::from(&app.session_path_input)
+            .canonicalize()
+            .unwrap(),
+        worktree,
+        "the sheet starts in the clicked pane's folder"
+    );
+    assert_eq!(
+        app.recent_agent_settings, remembered,
+        "nothing is remembered anew"
+    );
+    assert_eq!(
+        fs::read(&file).unwrap(),
+        written,
+        "the file is not rewritten"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_273_missing_cli_is_disabled() {
+    let root = temporary_directory("session-273-missing");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    // Every CLI missing: the agent rows are off, the terminal row is not.
+    app.tools = ToolStatus::default();
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let count = app.store.sessions.len();
+    for name in ["Claude Code", "Codex CLI", "Antigravity"] {
+        app.notice = None;
+        let out = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+        let row = session_273_menu_rows(&out, add)
+            .into_iter()
+            .find(|(row, _)| *row == name)
+            .unwrap_or_else(|| panic!("{name} is still listed"))
+            .1;
+        // egui shows no tooltip for a pointer that has not moved since a
+        // click, so let a tenth of a second pass before the pointer arrives.
+        for _ in 0..8 {
+            workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        }
+        // One move onto the row, then still frames: egui shows a tooltip only
+        // for a pointer at rest.
+        workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(row.center())],
+        );
+        let mut explained = false;
+        for _ in 0..12 {
+            let hover = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            explained |= !drawn_text_rects(&hover, |s| s == "未準備（設定で確認）").is_empty();
+        }
+        assert!(explained, "{name}: the hover says why it is off");
+        session_253_pointer(&mut app, &ctx, row.center(), egui::PointerButton::Primary);
+        assert_eq!(app.store.sessions.len(), count, "{name}");
+        assert!(
+            app.notice.is_none(),
+            "{name} cannot be chosen: {:?}",
+            app.notice
+        );
+        assert!(!app.launch_sheet_open, "{name}");
+    }
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tmux が必要"),
+        "the terminal row is never off for a missing CLI: {:?}",
+        app.notice
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// The tab frame around `title`: the tightest tab fill that contains it.
+fn session_273_tab_frame(app: &OperonApp, out: &egui::FullOutput, title: egui::Rect) -> egui::Rect {
+    let palette = app.store.theme.palette();
+    out.shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Rect(r)
+                if (r.fill == palette.card || r.fill == palette.row_selected)
+                    && r.rect.contains_rect(title) =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.width().total_cmp(&b.width()))
+        .expect("the tab's frame")
+}
+
+#[test]
+pub(crate) fn session_273_tabs_are_compact() {
+    let root = temporary_directory("session-273-compact");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let right = project_column_right(&app);
+    for name in ["first", "second"] {
+        let title = drawn_text_rects(&out, |s| s == name)
+            .into_iter()
+            .filter(|r| r.left() > right && r.top() < add.bottom())
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("{name}'s tab title"));
+        let frame = session_273_tab_frame(&app, &out, title);
+        assert!(
+            frame.height() <= CONTROL_HEIGHT + 0.5,
+            "{name}: a tab is at most 28px tall: {frame:?}"
+        );
+        // 6 + 14 + 4 + 14 + 4 + title + 4 + 24 + 6: margins, two marks, the
+        // title's slot (at least 40px) and the close button, 4px apart — 116px
+        // for a title that fits the minimum.
+        let slot = title.width().max(40.0);
+        assert!(
+            frame.width() <= 76.5 + slot,
+            "{name}: a short tab is at most 76px plus its title: {frame:?}, title {title:?}"
+        );
+        let state = session_tab_status_circle(&out, title).expect("the state mark");
+        assert!(
+            (state.width() - TAB_STATUS_MARK_SIZE).abs() < 0.5,
+            "{name}: the state mark is drawn at 14px: {state:?}"
+        );
+    }
+    assert!((SESSION_MARK_SIZE - 14.0).abs() < f32::EPSILON);
+    assert!((TAB_STATUS_MARK_SIZE - 14.0).abs() < f32::EPSILON);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -73149,4 +73849,3025 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
     assert_eq!(app.editor_jump_line, Some(1));
     assert_eq!(app.editor_focus_line, Some(1));
     fs::remove_dir_all(root).ok();
+}
+
+/// Change 265: macOS asks for Desktop, Documents, Downloads and volumes in the
+/// name of whichever app is responsible, and the terminal link probe used to
+/// look up every absolute or `~` path an agent printed. A path under one of
+/// those folders is now refused as written, before `canonicalize` touches it,
+/// unless it is inside the folder being resolved against.
+#[test]
+pub(crate) fn protected_folders_265_terminal_link_probe_skips_protected_folders() {
+    let home = temporary_directory("protected-home");
+    let project = home.join("dev").join("proj");
+    fs::create_dir_all(&project).unwrap();
+    for (folder, file) in [
+        ("Downloads", "x.pptx"),
+        ("Documents", "a.txt"),
+        ("Desktop", "b.txt"),
+        ("other", "x.txt"),
+    ] {
+        fs::create_dir_all(home.join(folder)).unwrap();
+        fs::write(home.join(folder).join(file), "x").unwrap();
+    }
+    // Read as written, the link is in Downloads; resolved, it is not. A
+    // refusal that ran after `canonicalize` would see `other/x.txt` and pass.
+    std::os::unix::fs::symlink(
+        home.join("other").join("x.txt"),
+        home.join("Downloads").join("link.txt"),
+    )
+    .unwrap();
+    let resolve = |path: &str| resolve_candidate_path_under(&project, path, Some(&home));
+    let spelled = home.display().to_string();
+    for refused in [
+        format!("{spelled}/Downloads/x.pptx"),
+        format!("file://{spelled}/Documents/a.txt"),
+        "~/Downloads/x.pptx".to_owned(),
+        "~/Documents/a.txt".to_owned(),
+        "~/Desktop/b.txt".to_owned(),
+        // APFS finds `Downloads` under any case, so the refusal does too.
+        format!("{spelled}/downloads/x.pptx"),
+        "~/DESKTOP/b.txt".to_owned(),
+        format!("{spelled}/other/../Downloads/x.pptx"),
+        "../../Downloads/x.pptx".to_owned(),
+        "~/Downloads/link.txt".to_owned(),
+    ] {
+        assert!(
+            home.join("Downloads").join("x.pptx").is_file(),
+            "the fixture holds the file, so a None is a refusal"
+        );
+        assert_eq!(resolve(&refused), None, "{refused} must not be looked up");
+    }
+    // Everything else keeps resolving: change 087's outside-project links.
+    let other = home.join("other").join("x.txt").canonicalize().unwrap();
+    assert_eq!(resolve("~/other/x.txt"), Some(other.clone()));
+    assert_eq!(resolve(&format!("{spelled}/other/x.txt")), Some(other));
+    // Mounted volumes are guarded the same way, with or without a home.
+    assert!(is_in_protected_folder(
+        Path::new("/Volumes/USB/brief.pptx"),
+        None
+    ));
+    assert!(is_in_protected_folder(
+        Path::new("/volumes/usb/a.txt"),
+        None
+    ));
+    assert!(!is_in_protected_folder(
+        Path::new("/opt/homebrew/a.txt"),
+        None
+    ));
+    fs::remove_dir_all(home).unwrap();
+}
+
+/// A project the person registered inside Documents is theirs to open: its own
+/// files resolve under every spelling of the project, and its neighbours do not.
+#[test]
+pub(crate) fn protected_folders_265_project_inside_a_protected_folder_still_resolves() {
+    let home = temporary_directory("protected-project");
+    let project = home.join("Documents").join("proj");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(project.join("src").join("a.rs"), "fn a() {}\n").unwrap();
+    fs::write(home.join("Documents").join("other.txt"), "x").unwrap();
+    let own = project.join("src").join("a.rs").canonicalize().unwrap();
+    let resolve = |path: &str| resolve_candidate_path_under(&project, path, Some(&home));
+
+    assert_eq!(resolve("src/a.rs"), Some(own.clone()));
+    assert_eq!(resolve("~/Documents/proj/src/a.rs"), Some(own.clone()));
+    assert_eq!(
+        resolve(&format!("{}/src/a.rs", project.display())),
+        Some(own.clone())
+    );
+    assert_eq!(resolve("../other.txt"), None);
+    assert_eq!(resolve("~/Documents/other.txt"), None);
+
+    // The folder resolved against counts as given or canonicalized: a home
+    // spelled the canonical way and a project spelled the way it was handed in.
+    let canonical_home = home.canonicalize().unwrap();
+    assert_eq!(
+        resolve_candidate_path_under(
+            &project,
+            &format!("{}/Documents/proj/src/a.rs", canonical_home.display()),
+            Some(&canonical_home),
+        ),
+        Some(own)
+    );
+    fs::remove_dir_all(home).unwrap();
+}
+
+/// Change 265: a path read out of another product's record is compared as
+/// written against the project's own spellings, never resolved — resolving it
+/// is looking inside whatever folder the record names. A symlink to the project
+/// is therefore not the project; the project's own spelling still is.
+#[test]
+pub(crate) fn protected_folders_265_record_paths_are_compared_as_spelled() {
+    let root = temporary_root().join(format!("operon-record-spelling-{}", Uuid::new_v4()));
+    let project = root.join("project");
+    let link = root.join("link");
+    fs::create_dir_all(&project).unwrap();
+    std::os::unix::fs::symlink(&project, &link).unwrap();
+
+    // Codex: the rollout's `cwd`.
+    let sessions = root.join("sessions").join("2026").join("11");
+    fs::create_dir_all(&sessions).unwrap();
+    for (id, cwd) in [
+        ("265a0000-0000-0000-0000-000000000001", &link),
+        ("265a0000-0000-0000-0000-000000000002", &project),
+    ] {
+        fs::write(
+            sessions.join(format!("rollout-2026-11-09T00-00-00-{id}.jsonl")),
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{id}\",\"cwd\":\"{}\"}}}}\n",
+                cwd.display()
+            ),
+        )
+        .unwrap();
+    }
+    let index = root.join("session_index.jsonl");
+    fs::write(&index, "").unwrap();
+    let codex = scan_codex_cli_sessions_in(&root.join("sessions"), &index, &project, 10);
+    let ids: Vec<&str> = codex.sessions.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["265a0000-0000-0000-0000-000000000002"]);
+
+    // Antigravity: the history index's `workspace` and a process log's
+    // workspace list, each naming the link.
+    let agy = root.join("agy");
+    fs::create_dir_all(&agy).unwrap();
+    let history = agy.join("history.jsonl");
+    fs::write(
+        &history,
+        format!(
+            "{{\"workspace\":\"{}\",\"conversationId\":\"through-link\",\"display\":\"Turn\",\"timestamp\":1787153900000}}\n",
+            link.display()
+        ),
+    )
+    .unwrap();
+    write_antigravity_process_log(&agy, "cli-20261109_000000.log", &link, &["logged-link"]);
+    write_antigravity_transcript(&agy, "through-link", "ping");
+    write_antigravity_transcript(&agy, "logged-link", "ping");
+    assert!(
+        scan_gemini_cli_sessions_in(&history, &project, 10)
+            .sessions
+            .is_empty(),
+        "a record naming a link to the project is not attributed to it"
+    );
+    let allowed = project_and_worktree_paths(&project);
+    assert!(!antigravity_log_workspace_matches(
+        &link.display().to_string(),
+        &allowed
+    ));
+    assert!(antigravity_log_workspace_matches(
+        &project.display().to_string(),
+        &allowed
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 265: the folder prompts name Operon, so they say where the request
+/// usually comes from. One reason, spelled once, for every folder the probe
+/// leaves alone and both kinds of volume.
+#[test]
+pub(crate) fn protected_folders_265_bundle_explains_folder_prompts() {
+    let script = include_str!("../scripts/package-macos.sh");
+    let assignments: Vec<&str> = script
+        .lines()
+        .filter(|line| line.trim_start().starts_with("folder_access_reason="))
+        .collect();
+    assert_eq!(assignments.len(), 1, "the reason is spelled once");
+    for needle in ["ターミナル", "エージェント", "「許可しない」", "多くの場合"]
+    {
+        assert!(
+            assignments[0].contains(needle),
+            "the reason names {needle}: {}",
+            assignments[0]
+        );
+    }
+    let keys = PROTECTED_HOME_FOLDERS
+        .iter()
+        .map(|folder| format!("NS{folder}FolderUsageDescription"))
+        .chain(
+            [
+                "NSRemovableVolumesUsageDescription",
+                "NSNetworkVolumesUsageDescription",
+            ]
+            .map(str::to_owned),
+        );
+    for key in keys {
+        let insert = format!("plutil -insert {key} -string \"$folder_access_reason\" \"$plist\"");
+        assert!(script.contains(&insert), "missing: {insert}");
+    }
+}
+
+/// Change 265: the dangerous-launch warning says the agent reaches past the
+/// project into the person's own folders, in every language.
+#[test]
+pub(crate) fn protected_folders_265_dangerous_launch_warning_names_personal_folders() {
+    let screens = include_str!("app/screens.rs");
+    let warning = "警告: 確認もサンドボックスもなしに、プロジェクトの外（書類・ダウンロード・デスクトップなど）のファイルも読み書きできます。";
+    assert!(screens.contains(warning));
+    assert!(!screens.contains("警告: 確認もサンドボックスもなしにファイルを変更できます。"));
+    for table in [EN_TABLE, KO_TABLE] {
+        assert!(
+            table.iter().any(|(japanese, _)| *japanese == warning),
+            "every table carries the warning"
+        );
+    }
+}
+
+/// Change 265, found by the empirical verifier: macOS reaches the home folder
+/// through the data volume's firmlink as well, so `/System/Volumes/Data/Users/…/
+/// Desktop` is the same Desktop and is refused the same way.
+#[test]
+pub(crate) fn protected_folders_265_data_volume_spelling_is_the_same_folder() {
+    let home = temporary_directory("protected-firmlink");
+    let through_data_volume = Path::new(SYSTEM_DATA_VOLUME_ROOT)
+        .join(home.strip_prefix("/").unwrap())
+        .join("Desktop")
+        .join("f.txt");
+    assert!(is_in_protected_folder(&through_data_volume, Some(&home)));
+    assert!(!is_in_protected_folder(
+        &Path::new(SYSTEM_DATA_VOLUME_ROOT)
+            .join(home.strip_prefix("/").unwrap())
+            .join("other")
+            .join("f.txt"),
+        Some(&home)
+    ));
+    fs::remove_dir_all(home).unwrap();
+}
+
+// --- Change 267: session tabs show which CLI runs in them -------------------
+
+/// A session tab's title, in the central strip rather than the left column.
+fn tab_267_title(output: &egui::FullOutput, title: &str) -> egui::Rect {
+    drawn_text_rects(output, |text| text == title)
+        .into_iter()
+        .filter(|rect| rect.left() >= column_right(output))
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("central tab title")
+}
+
+/// Where `texture` is drawn between a tab's state mark and its title, on the
+/// title's row.
+fn tab_267_marks(
+    output: &egui::FullOutput,
+    texture: egui::TextureId,
+    state: egui::Rect,
+    title: egui::Rect,
+) -> Vec<egui::Rect> {
+    sidebar_251_mesh_rects(output, texture)
+        .into_iter()
+        .filter(|rect| {
+            rect.left() >= state.right() - 0.5
+                && rect.right() <= title.left() + 0.5
+                && (rect.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .collect()
+}
+
+/// The status-column fixture with its first session on Antigravity and its
+/// second a plain terminal.
+fn tab_267_fixture(root: &Path) -> (OperonApp, Uuid, Uuid) {
+    let (mut app, _populated, _empty, first, second) = status_column_fixture(root);
+    for (id, agent) in [(first, "gemini"), (second, "terminal")] {
+        if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == id) {
+            session.agent = agent.to_owned();
+        }
+    }
+    app.select_session(first);
+    (app, first, second)
+}
+
+#[test]
+fn the_terminal_mark_is_a_rounded_square_for_terminal_sessions_only() {
+    let mark = decode_png_mark(TERMINAL_MARK).expect("the terminal mark should be a decodable PNG");
+    // The vendor marks' box, so the terminal sits in the same square.
+    assert_eq!(mark.size, [128, 128]);
+    let alpha = |x: usize, y: usize| mark.pixels[y * 128 + x].a();
+    // A full-bleed plate: opaque through the middle and at each edge's
+    // midpoint, clear in the corners the rounding takes away.
+    for (x, y) in [(64, 64), (64, 1), (1, 64), (126, 64), (64, 126)] {
+        assert_eq!(alpha(x, y), 255, "({x}, {y}) should be on the plate");
+    }
+    for (x, y) in [(0, 0), (127, 0), (0, 127), (127, 127)] {
+        assert_eq!(
+            alpha(x, y),
+            0,
+            "({x}, {y}) should be outside the rounded corner"
+        );
+    }
+    let ctx = egui::Context::default();
+    let id = |agent: &str| session_mark_texture(&ctx, agent).map(|texture| texture.id());
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    for agent in ["terminal", "existing terminal"] {
+        assert_eq!(id(agent), Some(terminal), "{agent}");
+    }
+    for agent in ["claude", "codex", "gemini"] {
+        let vendor = agent_icon_texture(&ctx, agent).map(|texture| texture.id());
+        assert!(vendor.is_some(), "{agent}");
+        assert_eq!(id(agent), vendor, "{agent} keeps its vendor's mark");
+    }
+    // A custom command, an older record's binary, or nothing at all has
+    // neither a vendor nor a shell behind it.
+    for agent in ["custom", "my-agent", ""] {
+        assert_eq!(id(agent), None, "{agent}");
+    }
+}
+
+#[test]
+fn session_tabs_show_the_cli_mark_after_the_state() {
+    let root = temporary_directory("session-tab-cli-mark");
+    let (mut app, _first, second) = tab_267_fixture(&root);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let antigravity = agent_icon_texture(&ctx, "gemini")
+        .expect("Antigravity mark")
+        .id();
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    for (title, texture, other) in [
+        ("first", antigravity, terminal),
+        ("second", terminal, antigravity),
+    ] {
+        let title_rect = tab_267_title(&output, title);
+        let state = session_tab_status_circle(&output, title_rect).expect("state mark");
+        let marks = tab_267_marks(&output, texture, state, title_rect);
+        assert_eq!(
+            marks.len(),
+            1,
+            "{title}: one mark between the state and the title"
+        );
+        let mark = marks[0];
+        assert!(
+            (mark.width() - SESSION_MARK_SIZE).abs() < 0.5
+                && (mark.height() - SESSION_MARK_SIZE).abs() < 0.5,
+            "{title}: {mark:?}"
+        );
+        assert!(
+            (mark.center().y - title_rect.center().y).abs() < 2.0,
+            "{title}: the mark is centred on the tab row"
+        );
+        assert!(
+            tab_267_marks(&output, other, state, title_rect).is_empty(),
+            "{title}: only its own CLI's mark"
+        );
+    }
+    // A command with no vendor and no shell behind it draws nothing and
+    // keeps no gap where a mark would be.
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == second) {
+        session.agent = "custom".to_owned();
+    }
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let title_rect = tab_267_title(&output, "second");
+    let state = session_tab_status_circle(&output, title_rect).expect("state mark");
+    for texture in [antigravity, terminal] {
+        assert!(tab_267_marks(&output, texture, state, title_rect).is_empty());
+    }
+    assert!(
+        title_rect.left() - state.right() < SESSION_MARK_SIZE,
+        "no space is held for a mark that is not there: {state:?} {title_rect:?}"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_tab_mark_names_its_cli_on_hover() {
+    let root = temporary_directory("session-tab-cli-hover");
+    let (mut app, _first, _second) = tab_267_fixture(&root);
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let antigravity = agent_icon_texture(&ctx, "gemini")
+        .expect("Antigravity mark")
+        .id();
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    for (title, texture, name) in [
+        ("first", antigravity, "Antigravity"),
+        ("second", terminal, tr("ターミナル")),
+    ] {
+        let away = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let title_rect = tab_267_title(&away, title);
+        let state = session_tab_status_circle(&away, title_rect).expect("state mark");
+        let mark = *tab_267_marks(&away, texture, state, title_rect)
+            .first()
+            .expect("the tab's mark");
+        // The left column may already spell the word on a row, so the
+        // hover is what adds one more.
+        let before = drawn_text_rects(&away, |text| text == name).len();
+        workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(mark.center())],
+        );
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let hovered = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        assert!(
+            drawn_text_rects(&hovered, |text| text == name).len() > before,
+            "{title}: hovering the mark names {name}"
+        );
+        workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(700.0, 500.0))],
+        );
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    }
+    fs::remove_dir_all(root).ok();
+}
+
+// ── Change 270: a relaunch brings back the sessions the person had ──────────
+
+fn relaunch_270_project(root: &Path) -> Project {
+    Project {
+        id: Uuid::new_v4(),
+        path: root.to_path_buf(),
+        name: "p".to_owned(),
+        added_at: now(),
+    }
+}
+
+fn relaunch_270_session(
+    project_id: Uuid,
+    agent: &str,
+    status: SessionStatus,
+    origin: Option<SessionOrigin>,
+) -> Session {
+    let id = Uuid::new_v4();
+    let plain = matches!(agent, "terminal" | "existing terminal");
+    Session {
+        id,
+        project_id,
+        name: "s".to_owned(),
+        goal: if plain {
+            tr("AI を起動しない素のターミナルです。").to_owned()
+        } else {
+            String::new()
+        },
+        agent: agent.to_owned(),
+        tmux_name: managed_tmux_name(id),
+        created_at: now(),
+        launched_at: Some(now()),
+        status,
+        worktree_path: None,
+        branch: None,
+        agent_command: if plain {
+            String::new()
+        } else {
+            agent.to_owned()
+        },
+        native_session_id: None,
+        native_session_path: None,
+        origin,
+        depends_on: Vec::new(),
+    }
+}
+
+fn relaunch_270_report(app: &mut OperonApp, tmux_name: &str, source: CliProvider, id: &str) {
+    app.apply_hook_event(HookEvent {
+        source,
+        session: tmux_name.to_owned(),
+        launch_token: String::new(),
+        // `agy` has no start event; its first prompt is the first word it says.
+        event: match source {
+            CliProvider::Gemini => "PreInvocation",
+            _ => "SessionStart",
+        }
+        .to_owned(),
+        payload: serde_json::json!({ "source": "startup", "session_id": id }),
+    });
+}
+
+fn relaunch_270_find(app: &OperonApp, id: Uuid) -> Session {
+    app.store
+        .sessions
+        .iter()
+        .find(|session| session.id == id)
+        .cloned()
+        .unwrap()
+}
+
+#[test]
+/// Change 270: a terminal the person typed `claude` into is a Claude session
+/// from the first hook event that names its conversation — its tab mark, its
+/// label, its state reading, and its resume all read the session's kind, and
+/// the app used to decide that kind once, at creation.
+pub(crate) fn a_terminal_takes_the_kind_of_the_cli_running_in_it() {
+    let root = temporary_directory("terminal-kind-270");
+    let data_file = root.join("store-v2.json");
+    let mut app = test_app(data_file.clone());
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let legacy = relaunch_270_session(project.id, "terminal", SessionStatus::Active, None);
+    let adopted = relaunch_270_session(
+        project.id,
+        "existing terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::Adopted),
+    );
+    let launched = relaunch_270_session(project.id, "codex", SessionStatus::Active, None);
+    app.store.projects.push(project);
+    for session in [&plain, &legacy, &adopted, &launched] {
+        app.store.sessions.push(session.clone());
+    }
+    let claude_id = Uuid::new_v4().to_string();
+
+    relaunch_270_report(&mut app, &plain.tmux_name, CliProvider::Claude, &claude_id);
+    let switched = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        cli_provider_for_agent(&switched.agent),
+        Some(CliProvider::Claude),
+        "Claude が動いているターミナルの種類: {}",
+        switched.agent
+    );
+    assert_eq!(switched.goal, "", "素のターミナルの説明が残りました");
+    assert_eq!(switched.origin, Some(SessionOrigin::PlainTerminal));
+    assert_eq!(
+        switched.native_session_id.as_deref(),
+        Some(claude_id.as_str())
+    );
+    let reloaded = load_store_safely(&data_file).store;
+    let stored = reloaded
+        .sessions
+        .iter()
+        .find(|session| session.id == plain.id)
+        .unwrap();
+    assert_eq!(
+        cli_provider_for_agent(&stored.agent),
+        Some(CliProvider::Claude)
+    );
+
+    // The ID the CLI repeats is the one already recorded; the kind still
+    // follows it.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == plain.id)
+        .unwrap()
+        .agent = "terminal".to_owned();
+    relaunch_270_report(&mut app, &plain.tmux_name, CliProvider::Claude, &claude_id);
+    assert_eq!(
+        cli_provider_for_agent(&relaunch_270_find(&app, plain.id).agent),
+        Some(CliProvider::Claude),
+        "同じ会話 ID の報告で種類が戻りませんでした"
+    );
+
+    // Another CLI started in the same terminal later moves it again.
+    let codex_id = Uuid::new_v4().to_string();
+    relaunch_270_report(&mut app, &plain.tmux_name, CliProvider::Codex, &codex_id);
+    let moved = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        cli_provider_for_agent(&moved.agent),
+        Some(CliProvider::Codex)
+    );
+    assert_eq!(moved.native_session_id.as_deref(), Some(codex_id.as_str()));
+
+    // A record from before `origin` existed says it was a terminal by its kind.
+    relaunch_270_report(&mut app, &legacy.tmux_name, CliProvider::Claude, &claude_id);
+    let legacy_now = relaunch_270_find(&app, legacy.id);
+    assert_eq!(
+        cli_provider_for_agent(&legacy_now.agent),
+        Some(CliProvider::Claude)
+    );
+    assert_eq!(legacy_now.origin, Some(SessionOrigin::PlainTerminal));
+
+    relaunch_270_report(
+        &mut app,
+        &adopted.tmux_name,
+        CliProvider::Gemini,
+        &claude_id,
+    );
+    let adopted_now = relaunch_270_find(&app, adopted.id);
+    assert_eq!(
+        cli_provider_for_agent(&adopted_now.agent),
+        Some(CliProvider::Gemini)
+    );
+    assert_eq!(adopted_now.origin, Some(SessionOrigin::Adopted));
+
+    // A session launched as one CLI is that CLI, whatever reports from it.
+    relaunch_270_report(
+        &mut app,
+        &launched.tmux_name,
+        CliProvider::Claude,
+        &claude_id,
+    );
+    assert_eq!(relaunch_270_find(&app, launched.id).agent, "codex");
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: once it runs Claude, a terminal is an agent wherever the app
+/// asks — the review notes go to it.
+pub(crate) fn a_terminal_running_claude_receives_review_notes() {
+    let root = temporary_directory("terminal-notes-270");
+    let mut app = test_app(root.join("store-v2.json"));
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let other = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let project_id = project.id;
+    app.store.projects.push(project);
+    app.store.sessions.push(plain.clone());
+    app.store.sessions.push(other);
+    assert!(app.diff_comment_target(project_id).is_none());
+    relaunch_270_report(
+        &mut app,
+        &plain.tmux_name,
+        CliProvider::Claude,
+        &Uuid::new_v4().to_string(),
+    );
+    assert_eq!(
+        app.diff_comment_target(project_id)
+            .map(|session| session.id),
+        Some(plain.id),
+        "Claude が動いているターミナルにレビューメモを送れません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: quitting and reopening puts every project's tabs, splits,
+/// front tabs, and selection back, keeps a closed tab closed, and writes the
+/// file only when something changed.
+pub(crate) fn the_workspace_comes_back_after_a_relaunch() {
+    use std::os::unix::fs::MetadataExt;
+    let root = temporary_directory("workspace-relaunch-270");
+    let data_file = root.join("store-v2.json");
+    let mut store = Store::default();
+    let project_a = relaunch_270_project(&root);
+    let project_b = relaunch_270_project(&root);
+    let session = |project: Uuid| {
+        relaunch_270_session(
+            project,
+            "terminal",
+            SessionStatus::Active,
+            Some(SessionOrigin::PlainTerminal),
+        )
+    };
+    let (a1, a2, a3, a4) = (
+        session(project_a.id),
+        session(project_a.id),
+        session(project_a.id),
+        session(project_a.id),
+    );
+    let b1 = session(project_b.id);
+    let (a, b) = (project_a.id, project_b.id);
+    store.projects.push(project_a);
+    store.projects.push(project_b);
+    for session in [&a1, &a2, &a3, &a4, &b1] {
+        store.sessions.push(session.clone());
+    }
+
+    // Never laid out: nothing is written.
+    let mut fresh = OperonApp::from_state(
+        data_file.clone(),
+        store.clone(),
+        ToolStatus::default(),
+        None,
+    );
+    fresh.save_workspace_layout_if_changed();
+    assert!(!workspace_layout_path(&data_file).exists());
+
+    let mut app = OperonApp::from_state(
+        data_file.clone(),
+        store.clone(),
+        ToolStatus::default(),
+        None,
+    );
+    app.workspace_project = Some(a);
+    app.workspace_initialized = true;
+    for session in [&a1, &a2, &a3, &a4] {
+        app.workspace.open(WorkspaceTab::Session(session.id));
+        app.workspace_seen_sessions.insert(session.id);
+    }
+    let first = app.workspace.groups[0].id;
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(4000.0, 3000.0));
+    assert!(app
+        .workspace
+        .move_tab(&WorkspaceTab::Session(a2.id), first, PaneDrop::Right, area));
+    app.workspace.layout.set_share(0, 0.3);
+    app.workspace.close(&WorkspaceTab::Session(a3.id));
+    assert!(app.workspace.select(first, &WorkspaceTab::Session(a4.id)));
+    let second = app
+        .workspace
+        .groups
+        .iter()
+        .find(|group| group.tabs.contains(&WorkspaceTab::Session(a2.id)))
+        .unwrap()
+        .id;
+    app.workspace.focused = Some(second);
+    app.selected_session = Some(a2.id);
+    let mut b_tabs = WorkspaceTabs::default();
+    b_tabs.open(WorkspaceTab::Session(b1.id));
+    app.project_workspaces.insert(b, (b_tabs, Some(b1.id)));
+    app.workspace_seen_sessions.insert(b1.id);
+
+    app.save_workspace_layout_if_changed();
+    let path = workspace_layout_path(&data_file);
+    assert!(path.exists(), "タブの配置が保存されませんでした");
+    let written = fs::read(&path).unwrap();
+    let inode = fs::metadata(&path).unwrap().ino();
+    app.save_workspace_layout_if_changed();
+    assert_eq!(fs::read(&path).unwrap(), written);
+    assert_eq!(
+        fs::metadata(&path).unwrap().ino(),
+        inode,
+        "変わっていない配置を書き直しました"
+    );
+
+    // A session the store gained while Operon was closed.
+    let a5 = session(a);
+    store.sessions.push(a5.clone());
+    let mut relaunched =
+        OperonApp::from_state(data_file.clone(), store, ToolStatus::default(), None);
+    assert_eq!(relaunched.workspace_project, Some(a));
+    assert!(relaunched.workspace_initialized);
+    assert_eq!(
+        relaunched.workspace, app.workspace,
+        "タブ・分割・前面タブが戻りません"
+    );
+    assert_eq!(relaunched.selected_session, Some(a2.id));
+    assert_eq!(
+        relaunched.project_workspaces.get(&b),
+        app.project_workspaces.get(&b),
+        "別のプロジェクトのタブが戻りません"
+    );
+    relaunched.sync_workspace_live_sessions();
+    let tabs = relaunched
+        .workspace
+        .groups
+        .iter()
+        .flat_map(|group| group.tabs.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        !tabs.contains(&WorkspaceTab::Session(a3.id)),
+        "閉じたタブが再起動で開き直されました"
+    );
+    assert!(tabs.contains(&WorkspaceTab::Session(a5.id)));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: a file that is damaged, too large, or names what the store no
+/// longer holds restores only what is whole, and never a pane without a group.
+pub(crate) fn a_damaged_workspace_file_restores_only_what_is_whole() {
+    let root = temporary_directory("workspace-damaged-270");
+    let data_file = root.join("store-v2.json");
+    let path = workspace_layout_path(&data_file);
+    let mut store = Store::default();
+    let project_a = relaunch_270_project(&root);
+    let project_b = relaunch_270_project(&root);
+    let project_d = relaunch_270_project(&root);
+    let session = |project: Uuid| {
+        relaunch_270_session(
+            project,
+            "terminal",
+            SessionStatus::Active,
+            Some(SessionOrigin::PlainTerminal),
+        )
+    };
+    let (s1, s2, b1, d1) = (
+        session(project_a.id),
+        session(project_a.id),
+        session(project_b.id),
+        session(project_d.id),
+    );
+    let (a, b, d) = (project_a.id, project_b.id, project_d.id);
+    store.projects.extend([project_a, project_b, project_d]);
+    store
+        .sessions
+        .extend([s1.clone(), s2.clone(), b1.clone(), d1.clone()]);
+    let start = |store: &Store| {
+        OperonApp::from_state(
+            data_file.clone(),
+            store.clone(),
+            ToolStatus::default(),
+            None,
+        )
+    };
+
+    for bytes in [b"not json at all".to_vec(), b"{}".to_vec(), {
+        let mut padded = serde_json::to_vec(&serde_json::json!({ "project": a })).unwrap();
+        padded.resize(WORKSPACE_LAYOUT_FILE_MAX_BYTES as usize + 1, b' ');
+        padded
+    }] {
+        fs::write(&path, &bytes).unwrap();
+        let app = start(&store);
+        assert!(!app.workspace_initialized);
+        assert!(app.workspace_project.is_none());
+        assert!(app.workspace.groups.is_empty());
+    }
+
+    let leaf = |id: Uuid| serde_json::json!({ "Leaf": id });
+    let split = |first: serde_json::Value, second: serde_json::Value, share: f64| serde_json::json!({ "Split": { "side_by_side": true, "share": share, "first": first, "second": second } });
+    let (g1, g2, g3, gb) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let deleted = Uuid::new_v4();
+    let layout = serde_json::json!({
+        "project": a,
+        "placed": [s1.id, s2.id, b1.id, d1.id],
+        "workspaces": [
+            {
+                "project": a,
+                "groups": [
+                    { "id": g1, "sessions": [deleted, s1.id], "active": 9 },
+                    { "id": g2, "sessions": [s1.id, s2.id], "active": 0 },
+                    { "id": g3, "sessions": [deleted], "active": 0 }
+                ],
+                "focused": g3,
+                "layout": split(leaf(g1), split(leaf(g2), leaf(g3), 0.5), 7.0),
+                "selected": deleted
+            },
+            { "project": b, "groups": [{ "id": gb, "sessions": [b1.id], "active": 0 }],
+              "focused": gb, "layout": leaf(gb), "selected": b1.id },
+            { "project": Uuid::new_v4(), "groups": [], "focused": null, "layout": null }
+        ]
+    });
+    fs::write(&path, serde_json::to_vec(&layout).unwrap()).unwrap();
+    let app = start(&store);
+    assert_eq!(app.workspace_project, Some(a));
+    let groups = &app.workspace.groups;
+    assert_eq!(groups.len(), 2, "{groups:?}");
+    assert_eq!(groups[0].tabs, vec![WorkspaceTab::Session(s1.id)]);
+    assert_eq!(groups[0].active, 0);
+    assert_eq!(
+        groups[1].tabs,
+        vec![WorkspaceTab::Session(s2.id)],
+        "二つのグループに同じセッション"
+    );
+    assert_eq!(
+        app.workspace.layout.sessions(),
+        vec![g1, g2],
+        "空になったグループの区画が残りました"
+    );
+    assert!(app
+        .workspace
+        .focused
+        .is_some_and(|focused| groups.iter().any(|group| group.id == focused)));
+    match app.workspace.to_saved(a, None).layout {
+        Some(PaneNode::Split { share, .. }) => assert!((0.0..=1.0).contains(&share), "{share}"),
+        other => panic!("分割が戻りません: {other:?}"),
+    }
+    assert!(app.selected_session.is_none());
+    assert_eq!(
+        app.project_workspaces
+            .get(&b)
+            .map(|(tabs, _)| tabs.groups.len()),
+        Some(1)
+    );
+    assert_eq!(
+        app.project_workspaces.len(),
+        1,
+        "知らないプロジェクトを復元しました"
+    );
+
+    // Each way a pane tree can fail to be exactly its groups, one per file:
+    // that project is left to today's start, and its live sessions come back
+    // as tabs then; another project in the same file is still restored.
+    let mut store = store;
+    let d2 = session(d);
+    store.sessions.push(d2.clone());
+    let (ga, gz) = (Uuid::new_v4(), Uuid::new_v4());
+    let group = |id: Uuid, sessions: Vec<Uuid>| serde_json::json!({ "id": id, "sessions": sessions, "active": 0 });
+    let more = (0..=PANE_MAX).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+    let mut many = leaf(more[0]);
+    for id in &more[1..] {
+        many = split(many, leaf(*id), 0.5);
+    }
+    let cases = [
+        (
+            "区画が存在しないグループを指す",
+            vec![group(ga, vec![d1.id])],
+            split(leaf(ga), leaf(Uuid::new_v4()), 0.5),
+        ),
+        (
+            "同じ区画が二つ",
+            vec![group(ga, vec![d1.id])],
+            split(leaf(ga), leaf(ga), 0.5),
+        ),
+        (
+            "区画が多すぎる",
+            more.iter()
+                .enumerate()
+                .map(|(index, id)| group(*id, if index == 0 { vec![d1.id] } else { Vec::new() }))
+                .collect::<Vec<_>>(),
+            many,
+        ),
+        (
+            "どの区画にも出ないグループ",
+            vec![group(ga, vec![d1.id]), group(gz, vec![d2.id])],
+            leaf(ga),
+        ),
+        (
+            "同じ id のグループが二つ",
+            vec![group(ga, vec![d1.id]), group(ga, vec![d2.id])],
+            leaf(ga),
+        ),
+    ];
+    for (case, groups, broken) in cases {
+        let file = serde_json::json!({
+            "project": d,
+            "placed": [d1.id, d2.id, b1.id],
+            "workspaces": [
+                { "project": d, "groups": groups, "focused": null, "layout": broken },
+                { "project": b, "groups": [{ "id": gb, "sessions": [b1.id], "active": 0 }],
+                  "focused": gb, "layout": leaf(gb), "selected": b1.id }
+            ]
+        });
+        fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+        let mut app = start(&store);
+        assert_eq!(app.workspace_project, Some(d), "{case}");
+        assert!(
+            app.workspace.groups.is_empty(),
+            "{case}: 壊れた区画を受け入れました: {:?}",
+            app.workspace
+        );
+        assert!(app.project_workspaces.contains_key(&b), "{case}");
+        app.sync_workspace_live_sessions();
+        for id in [d1.id, d2.id] {
+            assert!(
+                app.workspace
+                    .groups
+                    .iter()
+                    .any(|group| group.tabs.contains(&WorkspaceTab::Session(id))),
+                "{case}: 実行中のセッションがタブに戻りません"
+            );
+        }
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: a layout that cannot be written is said once, not every two
+/// seconds, and a write that succeeds again ends the streak.
+pub(crate) fn a_layout_that_cannot_be_written_is_said_once() {
+    let root = temporary_directory("workspace-unwritable-270");
+    // The store's folder is a file, so nothing can be written beside it;
+    // putting a folder there lets the next write land.
+    let folder = root.join("not-yet");
+    fs::write(&folder, b"").unwrap();
+    let data_file = folder.join("store-v2.json");
+    let mut store = Store::default();
+    let project = relaunch_270_project(&root);
+    let session = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let project_id = project.id;
+    store.projects.push(project);
+    store.sessions.push(session.clone());
+    let mut app = OperonApp::from_state(data_file.clone(), store, ToolStatus::default(), None);
+    app.workspace_project = Some(project_id);
+    app.workspace.open(WorkspaceTab::Session(session.id));
+    app.notice = None;
+    app.save_workspace_layout_if_changed();
+    let said = app.notice.clone().unwrap_or_default();
+    assert!(
+        said.starts_with(&tf!(
+            "タブの配置を保存できませんでした: {error}",
+            error = ""
+        )),
+        "{said:?}"
+    );
+    app.notice = None;
+    app.save_workspace_layout_if_changed();
+    assert_eq!(app.notice, None, "同じ失敗を繰り返し知らせました");
+    fs::remove_file(&folder).unwrap();
+    fs::create_dir_all(&folder).unwrap();
+    app.save_workspace_layout_if_changed();
+    assert!(workspace_layout_path(&data_file).exists());
+    assert!(!app.workspace_layout_save_failed);
+    fs::remove_dir_all(&root).ok();
+}
+
+struct Relaunch270 {
+    root: PathBuf,
+    app: OperonApp,
+    terminal: Uuid,
+    resumable: Uuid,
+    claude_without_id: Uuid,
+    exited: Uuid,
+    lost_before: Uuid,
+    alive: Uuid,
+    crashed: Uuid,
+    quit_cleanly: Uuid,
+    no_transcript: Uuid,
+    resume_id: String,
+    crashed_id: String,
+}
+
+/// Seven sessions as a store might hold them at a relaunch, their worktree a
+/// folder that does not exist so that every launch stops before tmux.
+fn relaunch_270_fixture(label: &str) -> Relaunch270 {
+    let root = temporary_directory(label);
+    let data_file = root.join("store-v2.json");
+    let missing = root.join("gone");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+    let make = |agent: &str, status: SessionStatus, id: Option<&str>| {
+        let mut session = relaunch_270_session(
+            project.id,
+            agent,
+            status,
+            (agent == "terminal").then_some(SessionOrigin::PlainTerminal),
+        );
+        session.worktree_path = Some(missing.clone());
+        if let Some(id) = id {
+            session.native_session_id = Some(id.to_owned());
+            session.native_session_path = Some(transcript.clone());
+        }
+        session
+    };
+    let resume_id = Uuid::new_v4().to_string();
+    let crashed_id = Uuid::new_v4().to_string();
+    let other_id = Uuid::new_v4().to_string();
+    let terminal = make("terminal", SessionStatus::Active, None);
+    let resumable = make("codex", SessionStatus::Active, Some(&resume_id));
+    let claude_without_id = make("claude", SessionStatus::Active, None);
+    let exited = make("codex", SessionStatus::Exited, Some(&other_id));
+    let lost_before = make("codex", SessionStatus::Lost, Some(&other_id));
+    let alive = make("terminal", SessionStatus::Active, None);
+    let crashed = make("codex", SessionStatus::Active, Some(&crashed_id));
+    let quit_cleanly = make("codex", SessionStatus::Active, Some(&other_id));
+    // An ID with no transcript anywhere: the resume finds nothing to reopen.
+    let mut no_transcript = make(
+        "codex",
+        SessionStatus::Active,
+        Some(&Uuid::new_v4().to_string()),
+    );
+    no_transcript.native_session_path = None;
+    let (quit_cleanly_id, no_transcript_id) = (quit_cleanly.id, no_transcript.id);
+    let mut store = Store::default();
+    store.projects.push(project);
+    let ids = (
+        terminal.id,
+        resumable.id,
+        claude_without_id.id,
+        exited.id,
+        lost_before.id,
+        alive.id,
+        crashed.id,
+    );
+    store.sessions.extend([
+        terminal,
+        resumable,
+        claude_without_id,
+        exited,
+        lost_before,
+        alive,
+        crashed,
+        quit_cleanly,
+        no_transcript,
+    ]);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.selected_session = Some(ids.5);
+    app.page = Page::Projects;
+    Relaunch270 {
+        root,
+        app,
+        terminal: ids.0,
+        resumable: ids.1,
+        claude_without_id: ids.2,
+        exited: ids.3,
+        lost_before: ids.4,
+        alive: ids.5,
+        crashed: ids.6,
+        quit_cleanly: quit_cleanly_id,
+        no_transcript: no_transcript_id,
+        resume_id,
+        crashed_id,
+    }
+}
+
+fn relaunch_270_first_look(fixture: &Relaunch270) -> Vec<(Uuid, TmuxObservation)> {
+    let gone = TmuxObservation {
+        state: TmuxState::Gone,
+        exit_status: None,
+    };
+    vec![
+        (fixture.terminal, gone),
+        (fixture.resumable, gone),
+        (fixture.claude_without_id, gone),
+        (fixture.exited, gone),
+        (fixture.lost_before, gone),
+        (
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Alive,
+                exit_status: None,
+            },
+        ),
+        (
+            fixture.crashed,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        ),
+        (
+            fixture.quit_cleanly,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        ),
+        (fixture.no_transcript, gone),
+    ]
+}
+
+#[test]
+/// Change 270: after a restart takes the tmux server with it, every session
+/// that was running at the quit starts again in its own record and tab — a
+/// CLI reopening its conversation, a terminal opening a shell — and nothing
+/// the person ended, nothing already stopped, and nothing without a
+/// conversation to reopen.
+pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone() {
+    let mut fixture = relaunch_270_fixture("relaunch-270");
+    let before = fixture.app.store.sessions.len();
+    let states = relaunch_270_first_look(&fixture);
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    let app = &fixture.app;
+    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+        let session = relaunch_270_find(app, id);
+        assert_eq!(session.status, SessionStatus::Starting, "{}", session.agent);
+        assert!(
+            app.background_tasks
+                .contains(&BackgroundKey::SessionStart(id)),
+            "{} が再開されませんでした",
+            session.agent
+        );
+        assert_eq!(session.tmux_name, managed_tmux_name(id));
+    }
+    assert_eq!(
+        relaunch_270_find(app, fixture.resumable).agent_command,
+        CliProvider::Codex.native_resume_command(&fixture.resume_id)
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.crashed).agent_command,
+        CliProvider::Codex.native_resume_command(&fixture.crashed_id)
+    );
+    assert_eq!(app.store.sessions.len(), before, "再開で記録が増えました");
+    assert_eq!(
+        app.selected_session,
+        Some(fixture.alive),
+        "再開で選択が動きました"
+    );
+    assert_eq!(app.page, Page::Projects, "再開で画面が切り替わりました");
+    assert_eq!(
+        relaunch_270_find(app, fixture.claude_without_id).status,
+        SessionStatus::Lost
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.exited).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.lost_before).status,
+        SessionStatus::Lost
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.alive).status,
+        SessionStatus::Active
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.quit_cleanly).status,
+        SessionStatus::Exited,
+        "自分で終了した CLI を再開しました"
+    );
+    assert_eq!(
+        relaunch_270_find(app, fixture.no_transcript).status,
+        SessionStatus::Lost
+    );
+    for id in [
+        fixture.claude_without_id,
+        fixture.exited,
+        fixture.lost_before,
+        fixture.alive,
+        fixture.quit_cleanly,
+        fixture.no_transcript,
+    ] {
+        assert!(!app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+    }
+
+    // Only the first look decides: a session that dies later in this run is
+    // not started again by itself.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.alive).status,
+        SessionStatus::Lost
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.alive)));
+    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 270: the relaunch says how many sessions it reopened, does not
+/// notify a crash it is about to undo, and its launches finishing — failed or
+/// not — leave the selection, the page, and the notice where they were.
+pub(crate) fn the_relaunch_says_how_many_sessions_it_reopened() {
+    let mut fixture = relaunch_270_fixture("relaunch-notice-270");
+    fixture.app.store.notifications_enabled = true;
+    // The clean exit is announced as finished, which is right and is not what
+    // this asks; only the crash about to be undone must stay quiet.
+    let mut states = relaunch_270_first_look(&fixture);
+    states.retain(|(id, _)| *id != fixture.quit_cleanly);
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "前回開いていたセッションを {count} 件再開しました。",
+                count = 3
+            )
+            .as_str()
+        )
+    );
+    assert!(
+        !fixture
+            .app
+            .background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "再開するセッションの失敗を通知しました"
+    );
+    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            relaunch_270_find(&fixture.app, id).status,
+            SessionStatus::Failed
+        );
+    }
+    assert!(
+        fixture.app.launch_progress.is_none(),
+        "再開の失敗で起動ダイアログが開きました"
+    );
+    assert_eq!(fixture.app.selected_session, Some(fixture.alive));
+    assert_eq!(fixture.app.page, Page::Projects);
+
+    // A quiet launch that succeeds keeps the notice, the selection, and the
+    // page — even for the session that is selected.
+    fixture.app.selected_session = Some(fixture.terminal);
+    fixture.app.notice = Some("keep".to_owned());
+    fixture.app.quiet_launches.insert(fixture.terminal);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::SessionStart(fixture.terminal));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: fixture.terminal,
+            result: Ok(None),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Active
+    );
+    assert_eq!(fixture.app.notice.as_deref(), Some("keep"));
+    assert_eq!(fixture.app.selected_session, Some(fixture.terminal));
+    assert_eq!(
+        fixture.app.page,
+        Page::Projects,
+        "静かな起動の完了で画面が切り替わりました"
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 270: a stopped CLI session whose conversation was never written
+/// starts fresh, once. The resume used to hand it back to `start_session`,
+/// which handed it straight back to the resume until the stack overflowed.
+pub(crate) fn resuming_a_session_with_no_transcript_starts_it_fresh_once() {
+    let root = temporary_directory("resume-empty-270");
+    let project = relaunch_270_project(&root);
+    let mut session = relaunch_270_session(project.id, "codex", SessionStatus::Lost, None);
+    session.native_session_id = Some(Uuid::new_v4().to_string());
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store-v2.json"), store, tools, None);
+    app.start_session(id);
+    assert_eq!(app.store.sessions.len(), 1);
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(id)));
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270: the manual 「再開」 still opens the conversation in a new
+/// record, as it did before `start_session` was split.
+pub(crate) fn the_manual_resume_still_makes_a_new_record() {
+    let root = temporary_directory("resume-manual-270");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+    let native = Uuid::new_v4().to_string();
+    let mut session = relaunch_270_session(project.id, "codex", SessionStatus::Lost, None);
+    session.native_session_id = Some(native.clone());
+    session.native_session_path = Some(transcript);
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store-v2.json"), store, tools, None);
+    app.start_session(id);
+    assert_eq!(app.store.sessions.len(), 2);
+    let resumed = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id != id)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        resumed.origin,
+        Some(SessionOrigin::Resumed {
+            from: CliProvider::Codex
+        })
+    );
+    assert_eq!(
+        resumed.agent_command,
+        CliProvider::Codex.native_resume_command(&native)
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(resumed.id),
+        Duration::from_secs(30),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 270, found by the empirical verifier: a first look whose status
+/// write fails does not use up the session's one relaunch; the next poll
+/// looks again.
+pub(crate) fn a_failed_save_at_the_first_look_keeps_the_relaunch() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = relaunch_270_fixture("relaunch-270-failed-save");
+    let states = relaunch_270_first_look(&fixture);
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o555)).unwrap();
+    fixture
+        .app
+        .apply_session_poll(states.clone(), Vec::new(), Vec::new(), Vec::new());
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o755)).unwrap();
+    fixture
+        .app
+        .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
+    let started = fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.terminal));
+    fs::remove_dir_all(&fixture.root).ok();
+    assert!(
+        started,
+        "the plain terminal was never relaunched after the first save failed"
+    );
+}
+
+#[test]
+/// Change 270, found by the empirical verifier: the front tab stays the same
+/// session when a tab before it is gone, rather than passing to its neighbour.
+pub(crate) fn the_front_tab_stays_when_a_tab_before_it_is_gone() {
+    let project = Uuid::new_v4();
+    let (a, b, c, group) = (
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+        Uuid::new_v4(),
+    );
+    let saved = SavedWorkspace {
+        project,
+        groups: vec![SavedGroup {
+            id: group,
+            sessions: vec![a, b, c],
+            active: 1,
+        }],
+        focused: Some(group),
+        layout: Some(PaneNode::Leaf(group)),
+        selected: None,
+    };
+    let tabs = WorkspaceTabs::from_saved(&saved, |id| id != a).unwrap();
+    let front = &tabs.groups[0].tabs[tabs.groups[0].active];
+    assert_eq!(
+        *front,
+        WorkspaceTab::Session(b),
+        "front tab moved to {front:?}"
+    );
+}
+
+// ── Change 270: exhaustive models of the layout restore and the relaunch ────
+
+const WS_PANE_CAP: usize = PANE_MAX + 1;
+const WS1_STATES: usize = 599_549;
+const WS2_STATES: usize = 140_880;
+const WS3_STATES: usize = 656_525;
+const R6_STATES: usize = 164;
+
+fn ws_group(k: u128) -> Uuid {
+    Uuid::from_u128(0x1_0000 + k)
+}
+
+fn ws_session(k: u128) -> Uuid {
+    Uuid::from_u128(0x2_0000 + k)
+}
+
+#[derive(Clone, Copy)]
+enum WsTok {
+    Split(f32),
+    /// `u128::MAX` means "the next group in reading order".
+    Leaf(u128),
+    Other,
+}
+
+/// How far a prefix of a pane tree written in prefix notation got: leaves
+/// still owed, leaves seen, and where the tree ends. `None` for a token that
+/// is not part of the tree grammar or a tree past `WS_PANE_CAP` leaves.
+fn ws_scan(tokens: &[u8], classify: &dyn Fn(u8) -> WsTok) -> Option<(usize, usize, usize)> {
+    let (mut need, mut leaves, mut end) = (1usize, 0usize, 0usize);
+    for (index, token) in tokens.iter().enumerate() {
+        if need == 0 {
+            break;
+        }
+        match classify(*token) {
+            WsTok::Split(_) => need += 1,
+            WsTok::Leaf(_) => {
+                need -= 1;
+                leaves += 1;
+            }
+            WsTok::Other => return None,
+        }
+        if leaves + need > WS_PANE_CAP {
+            return None;
+        }
+        end = index + 1;
+    }
+    Some((need, leaves, end))
+}
+
+fn ws_decode(
+    tokens: &[u8],
+    position: &mut usize,
+    classify: &dyn Fn(u8) -> WsTok,
+    next: &mut u128,
+) -> PaneNode {
+    let token = tokens[*position];
+    *position += 1;
+    match classify(token) {
+        WsTok::Leaf(label) => {
+            let label = if label == u128::MAX {
+                *next += 1;
+                *next - 1
+            } else {
+                label
+            };
+            PaneNode::Leaf(ws_group(label))
+        }
+        WsTok::Split(share) => {
+            let first = ws_decode(tokens, position, classify, next);
+            let second = ws_decode(tokens, position, classify, next);
+            PaneNode::Split {
+                side_by_side: true,
+                share,
+                first: Box::new(first),
+                second: Box::new(second),
+            }
+        }
+        WsTok::Other => unreachable!("a scanned prefix holds only tree tokens"),
+    }
+}
+
+fn ws_share_outside(node: &PaneNode) -> Option<f32> {
+    match node {
+        PaneNode::Leaf(_) => None,
+        PaneNode::Split {
+            share,
+            first,
+            second,
+            ..
+        } => {
+            if !(0.0..=1.0).contains(share) {
+                Some(*share)
+            } else {
+                ws_share_outside(first).or_else(|| ws_share_outside(second))
+            }
+        }
+    }
+}
+
+/// The R5 property, stated apart from `from_saved`: what a restored workspace
+/// is, checked against the saved one it came from and the sessions that exist.
+fn restored_workspace_violation(
+    saved: &SavedWorkspace,
+    tabs: &WorkspaceTabs,
+    exists: &dyn Fn(Uuid) -> bool,
+) -> Option<String> {
+    let panes = tabs.layout.sessions();
+    let group_ids = tabs.groups.iter().map(|g| g.id).collect::<Vec<_>>();
+    if panes.len() > PANE_MAX {
+        return Some(format!("{} panes, more than PANE_MAX", panes.len()));
+    }
+    let (mut sorted_panes, mut sorted_groups) = (panes.clone(), group_ids.clone());
+    sorted_panes.sort();
+    sorted_groups.sort();
+    if sorted_panes != sorted_groups || sorted_groups.windows(2).any(|w| w[0] == w[1]) {
+        return Some(format!(
+            "panes {panes:?} are not exactly the groups {group_ids:?}, each once"
+        ));
+    }
+    let mut seen = HashSet::new();
+    for group in &tabs.groups {
+        if group.tabs.is_empty() {
+            return Some(format!("group {} has no tab", group.id));
+        }
+        if group.active >= group.tabs.len() {
+            return Some(format!(
+                "group {} front {} of {} tabs",
+                group.id,
+                group.active,
+                group.tabs.len()
+            ));
+        }
+        let home = saved.groups.iter().find(|g| g.id == group.id);
+        for tab in &group.tabs {
+            let WorkspaceTab::Session(id) = tab else {
+                return Some("a document tab appeared".to_owned());
+            };
+            if !exists(*id) {
+                return Some(format!("session {id} does not exist"));
+            }
+            if !seen.insert(*id) {
+                return Some(format!("session {id} is in two groups or twice in one"));
+            }
+            if !home.is_some_and(|g| g.sessions.contains(id)) {
+                return Some(format!("session {id} moved to group {}", group.id));
+            }
+        }
+        if let Some(front) = home.and_then(|g| g.sessions.get(g.active)) {
+            let front = WorkspaceTab::Session(*front);
+            if group.tabs.contains(&front) && group.tabs[group.active] != front {
+                return Some(format!(
+                    "group {} kept {front:?} but fronts {:?}",
+                    group.id, group.tabs[group.active]
+                ));
+            }
+        }
+    }
+    for group in &saved.groups {
+        for id in &group.sessions {
+            if exists(*id) && !seen.contains(id) {
+                return Some(format!("existing session {id} was dropped"));
+            }
+        }
+    }
+    if tabs.focused.is_some_and(|f| !group_ids.contains(&f)) {
+        return Some(format!("focused {:?} is no group", tabs.focused));
+    }
+    if let Some(f) = saved.focused {
+        if group_ids.contains(&f) && tabs.focused != Some(f) {
+            return Some(format!("saved focus {f} lost, focused {:?}", tabs.focused));
+        }
+    }
+    let again = tabs.to_saved(saved.project, None);
+    if let Some(share) = again.layout.as_ref().and_then(ws_share_outside) {
+        return Some(format!("share {share} is outside 0..1"));
+    }
+    if WorkspaceTabs::from_saved(&again, |_| true).as_ref() != Some(tabs) {
+        return Some("from_saved(to_saved(tabs)) is not tabs".to_owned());
+    }
+    None
+}
+
+const WS_SHARES: [f32; 5] = [-0.5, 0.5, 1.5, f32::NAN, f32::INFINITY];
+
+fn ws1_classify(token: u8) -> WsTok {
+    match token {
+        10..=14 => WsTok::Split(WS_SHARES[usize::from(token - 10)]),
+        1 => WsTok::Leaf(u128::MAX),
+        _ => WsTok::Other,
+    }
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 1.
+fn ws1_prefix(tokens: &[u8]) -> Option<bool> {
+    let (need, leaves, end) = ws_scan(tokens, &ws1_classify)?;
+    if need > 0 {
+        return Some(false);
+    }
+    let marks = &tokens[end..];
+    if marks.len() > leaves || marks.iter().any(|m| !matches!(m, 20 | 21)) {
+        return None;
+    }
+    Some(marks.len() == leaves)
+}
+
+#[test]
+/// Change 270, R5 (departure 6): every pane tree of up to `PANE_MAX + 1`
+/// leaves, each split's share one of {-0.5, 0.5, 1.5, NaN, inf}, each leaf the
+/// next of that many groups of one session each, each session existing or
+/// not — 290 422 cases, all of them. Split orientation is fixed: nothing in
+/// `from_saved` reads it.
+///
+/// The property: `from_saved` is `None` exactly when the tree has more than
+/// `PANE_MAX` panes, and otherwise the tabs hold `restored_workspace_violation`
+/// — panes are exactly the surviving groups (a group whose session is gone
+/// takes its pane with it), every share is inside 0..1, and
+/// `from_saved(to_saved(tabs))` is `tabs`.
+pub(crate) fn model_check_a_restored_layout_is_whole_for_every_tree_and_share() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 10, 11, 12, 13, 14, 20, 21],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws1_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws1_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let (_, leaves, end) = ws_scan(tokens, &ws1_classify).unwrap();
+            let marks = &tokens[end..];
+            let (mut position, mut next) = (0, 0);
+            let root = ws_decode(tokens, &mut position, &ws1_classify, &mut next);
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups: (0..leaves as u128)
+                    .map(|k| SavedGroup {
+                        id: ws_group(k),
+                        sessions: vec![ws_session(k)],
+                        active: 0,
+                    })
+                    .collect(),
+                focused: Some(ws_group(0)),
+                layout: Some(root),
+                selected: None,
+            };
+            let exists = |id: Uuid| marks[(id.as_u128() - 0x2_0000) as usize] == 21;
+            match WorkspaceTabs::from_saved(&saved, exists) {
+                None if leaves > PANE_MAX => Ok(()),
+                None => Err("a whole layout was refused".to_owned()),
+                Some(_) if leaves > PANE_MAX => Err(format!(
+                    "{leaves} panes were accepted, PANE_MAX is {PANE_MAX}"
+                )),
+                Some(tabs) => match restored_workspace_violation(&saved, &tabs, &exists) {
+                    Some(why) => Err(why),
+                    None => Ok(()),
+                },
+            }
+        },
+        2_000_000,
+    );
+    // Shapes (Catalan) x 5^splits x 2^leaves, for 1..=5 leaves.
+    assert_eq!(
+        complete.get(),
+        2 + 20 + 400 + 10_000 + 280_000,
+        "not every tree, share and survival was checked"
+    );
+    assert_eq!(coverage.states, WS1_STATES, "{coverage:?}");
+}
+
+fn ws3_classify(token: u8) -> WsTok {
+    match token {
+        2 => WsTok::Split(0.5),
+        10..=15 => WsTok::Leaf(u128::from(token - 10)),
+        _ => WsTok::Other,
+    }
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 3: a layout
+/// (`1` for none, else a tree whose leaves read in nondecreasing order), then
+/// group ids as a restricted-growth string, then `30`.
+fn ws3_prefix(tokens: &[u8]) -> Option<bool> {
+    let end = if tokens.first() == Some(&1) {
+        1
+    } else {
+        let (need, _, end) = ws_scan(tokens, &ws3_classify)?;
+        let labels = tokens[..end]
+            .iter()
+            .filter(|t| matches!(t, 10..=15))
+            .collect::<Vec<_>>();
+        if labels.windows(2).any(|w| w[0] > w[1]) {
+            return None;
+        }
+        if need > 0 {
+            return Some(false);
+        }
+        end
+    };
+    let (mut distinct, mut count) = (0u8, 0usize);
+    let mut finished = false;
+    for token in &tokens[end..] {
+        if finished {
+            return None;
+        }
+        match token {
+            20..=24 if token - 20 <= distinct && count < WS_PANE_CAP => {
+                distinct = distinct.max(token - 20 + 1);
+                count += 1;
+            }
+            30 => finished = true,
+            _ => return None,
+        }
+    }
+    Some(finished)
+}
+
+#[test]
+/// Change 270, R5 (departure 6): which saved workspaces are refused. Every
+/// pane tree of up to `PANE_MAX + 1` leaves whose leaf labels read in
+/// nondecreasing order over {g0..g4, unnamed} (acceptance reads the leaves as
+/// a set, never their order), or no layout; against every list of up to five
+/// groups, their ids named in first-appearance order (the ids are opaque, so
+/// renaming them loses nothing) — 4 298 layouts x 76 lists, 326 648 cases.
+///
+/// The property: `from_saved` is `Some` exactly when the leaves, sorted, equal
+/// the group ids, sorted, with no id twice and at most `PANE_MAX` of them —
+/// a pane without a group, a group without a pane, a pane twice, a group id
+/// twice, more panes than fit are all `None` — and every `Some` holds
+/// `restored_workspace_violation`.
+pub(crate) fn model_check_a_saved_workspace_is_refused_unless_panes_are_the_groups() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 2, 10, 11, 12, 13, 14, 15, 20, 21, 22, 23, 24, 30],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws3_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws3_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let (layout, end) = if tokens[0] == 1 {
+                (None, 1)
+            } else {
+                let (_, _, end) = ws_scan(tokens, &ws3_classify).unwrap();
+                let (mut position, mut next) = (0, 0);
+                (
+                    Some(ws_decode(tokens, &mut position, &ws3_classify, &mut next)),
+                    end,
+                )
+            };
+            let ids = tokens[end..tokens.len() - 1]
+                .iter()
+                .map(|t| u128::from(t - 20))
+                .collect::<Vec<_>>();
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups: ids
+                    .iter()
+                    .enumerate()
+                    .map(|(entry, id)| SavedGroup {
+                        id: ws_group(*id),
+                        sessions: vec![ws_session(entry as u128)],
+                        active: 0,
+                    })
+                    .collect(),
+                focused: None,
+                layout,
+                selected: None,
+            };
+            let mut leaves = tokens[..end]
+                .iter()
+                .filter(|t| matches!(t, 10..=15))
+                .map(|t| u128::from(t - 10))
+                .collect::<Vec<_>>();
+            let mut sorted_ids = ids.clone();
+            leaves.sort();
+            sorted_ids.sort();
+            let whole = leaves == sorted_ids
+                && sorted_ids.windows(2).all(|w| w[0] != w[1])
+                && sorted_ids.len() <= PANE_MAX;
+            match (WorkspaceTabs::from_saved(&saved, |_| true), whole) {
+                (None, false) => Ok(()),
+                (None, true) => Err("a whole layout was refused".to_owned()),
+                (Some(_), false) => Err(format!(
+                    "panes {leaves:?} against groups {ids:?} were accepted"
+                )),
+                (Some(tabs), true) => {
+                    match restored_workspace_violation(&saved, &tabs, &|_| true) {
+                        Some(why) => Err(why),
+                        None => Ok(()),
+                    }
+                }
+            }
+        },
+        2_000_000,
+    );
+    assert_eq!(
+        complete.get(),
+        (6 + 21 + 2 * 56 + 5 * 126 + 14 * 252 + 1) * (1 + 1 + 2 + 5 + 15 + 52),
+        "not every layout against every group list was checked"
+    );
+    assert_eq!(coverage.states, WS3_STATES, "{coverage:?}");
+}
+
+/// `Some(complete)` when `tokens` is a prefix of a case of model 2: for each
+/// of two groups up to three session tokens (1 = a, 2 = b, 3 = not in the
+/// store), `9`, the front index `10..=13`; then the focus `20..=23`.
+fn ws2_prefix(tokens: &[u8]) -> Option<bool> {
+    let mut at = 0;
+    for _ in 0..2 {
+        let mut count = 0;
+        loop {
+            match tokens.get(at) {
+                None => return Some(false),
+                Some(1..=3) if count < 3 => {
+                    count += 1;
+                    at += 1;
+                }
+                Some(9) => {
+                    at += 1;
+                    break;
+                }
+                _ => return None,
+            }
+        }
+        match tokens.get(at) {
+            None => return Some(false),
+            Some(10..=13) => at += 1,
+            _ => return None,
+        }
+    }
+    match tokens.get(at) {
+        None => Some(false),
+        Some(20..=23) if at + 1 == tokens.len() => Some(true),
+        _ => None,
+    }
+}
+
+#[test]
+/// Change 270, R5 (departure 6, F2): the contents of two groups. Each group
+/// lists up to three sessions out of {a, b, gone} — repeats within a group and
+/// across the two allowed — with a front index 0..=3, in or out of range; the
+/// focus is none, either group, or a group that is not there — 40 x 4 per
+/// group, squared, x 4 = 102 400 cases. The two panes are fixed (a split of
+/// the two groups).
+///
+/// The property: `restored_workspace_violation` — no session twice, none that
+/// does not exist, none dropped that does, each front inside its group, the
+/// saved front session still in front whenever it survives in that group, a
+/// group left empty gone with its pane, focus a real group or none.
+pub(crate) fn model_check_a_restored_group_keeps_its_front_session_and_no_session_twice() {
+    let complete = std::cell::Cell::new(0usize);
+    let coverage = exhaustive_check(
+        Vec::<u8>::new(),
+        &[1u8, 2, 3, 9, 10, 11, 12, 13, 20, 21, 22, 23],
+        |state: &Vec<u8>, token: &u8| {
+            let mut next = state.clone();
+            next.push(*token);
+            ws2_prefix(&next).map(|_| next)
+        },
+        |tokens: &Vec<u8>| {
+            if ws2_prefix(tokens) != Some(true) {
+                return Ok(());
+            }
+            complete.set(complete.get() + 1);
+            let mut groups = Vec::new();
+            let mut at = 0;
+            for k in 0..2u128 {
+                let mut sessions = Vec::new();
+                while tokens[at] != 9 {
+                    sessions.push(ws_session(u128::from(tokens[at])));
+                    at += 1;
+                }
+                let active = usize::from(tokens[at + 1] - 10);
+                at += 2;
+                groups.push(SavedGroup {
+                    id: ws_group(k),
+                    sessions,
+                    active,
+                });
+            }
+            let focused = match tokens[at] {
+                20 => None,
+                21 => Some(ws_group(0)),
+                22 => Some(ws_group(1)),
+                _ => Some(ws_group(9)),
+            };
+            let saved = SavedWorkspace {
+                project: Uuid::from_u128(1),
+                groups,
+                focused,
+                layout: Some(PaneNode::Split {
+                    side_by_side: true,
+                    share: 0.5,
+                    first: Box::new(PaneNode::Leaf(ws_group(0))),
+                    second: Box::new(PaneNode::Leaf(ws_group(1))),
+                }),
+                selected: None,
+            };
+            let exists = |id: Uuid| id != ws_session(3);
+            match WorkspaceTabs::from_saved(&saved, exists) {
+                None => Err("two groups sharing two panes were refused".to_owned()),
+                Some(tabs) => match restored_workspace_violation(&saved, &tabs, &exists) {
+                    Some(why) => Err(why),
+                    None => Ok(()),
+                },
+            }
+        },
+        2_000_000,
+    );
+    assert_eq!(
+        complete.get(),
+        (40 * 4) * (40 * 4) * 4,
+        "not every pair of groups was checked"
+    );
+    assert_eq!(coverage.states, WS2_STATES, "{coverage:?}");
+}
+
+// R6: the relaunch decision, driven through the real `apply_session_poll`.
+
+const R6_RUNNING: [u8; 3] = [0, 1, 7];
+
+fn r6_status(index: u8) -> SessionStatus {
+    [
+        SessionStatus::Starting,
+        SessionStatus::Active,
+        SessionStatus::Queued,
+        SessionStatus::Exited,
+        SessionStatus::Failed,
+        SessionStatus::Cancelled,
+        SessionStatus::Lost,
+        SessionStatus::Unknown,
+    ][usize::from(index)]
+    .clone()
+}
+
+fn r6_index(status: &SessionStatus) -> u8 {
+    (0..8).find(|i| r6_status(*i) == *status).unwrap()
+}
+
+const R6_OBSERVATIONS: [(TmuxState, Option<i32>); 7] = [
+    (TmuxState::Alive, None),
+    (TmuxState::Dead, Some(0)),
+    (TmuxState::Dead, Some(1)),
+    (TmuxState::Dead, None),
+    (TmuxState::Gone, None),
+    (TmuxState::Gone, Some(1)),
+    (TmuxState::Unknown, None),
+];
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Relaunch6State {
+    /// Status index at load and whether `relaunch_kind` is `Some`.
+    load: Option<(u8, bool)>,
+    status: u8,
+    candidate: bool,
+    looked: bool,
+    relaunched: u8,
+    polls: u8,
+    violation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Relaunch6Event {
+    Load(u8, bool),
+    Poll(u8, bool),
+}
+
+fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uuid) {
+    let project = relaunch_270_project(root);
+    let mut session = if kind {
+        relaunch_270_session(
+            project.id,
+            "terminal",
+            r6_status(status),
+            Some(SessionOrigin::PlainTerminal),
+        )
+    } else {
+        relaunch_270_session(project.id, "claude", r6_status(status), None)
+    };
+    session.worktree_path = Some(root.join("gone"));
+    let id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let app = OperonApp::from_state(
+        root.join(format!("store-{serial}.json")),
+        store,
+        tools,
+        None,
+    );
+    (app, id)
+}
+
+#[test]
+/// Change 270, R6 (departure 6, F1 and 7): the relaunch decision of
+/// `apply_session_poll`, run for real. The model loads one session in each of
+/// the eight statuses, with and without a `relaunch_kind` (a plain terminal, a
+/// Claude session with no conversation), then takes up to three polls, each
+/// one of seven observations (every `TmuxState`; `Dead` with status 0, nonzero
+/// and none; `Gone` with and without a status) with the store write
+/// succeeding or failing (the folder made read-only around the poll). Every
+/// state of that walk, the real app rebuilt at each step from the state
+/// reached.
+///
+/// The property, kept as its own ledger beside the app: a session is started
+/// again iff it was Starting/Active/Unknown at load, this poll is its first
+/// non-Unknown look whose outcome was stored (a look that changes nothing has
+/// nothing to store; a failed write leaves the look unspent), the outcome is
+/// Lost or Failed, the write succeeded, and `relaunch_kind` is `Some` — and at
+/// most once over the sequence; the real candidate set agrees with the ledger.
+pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("model-relaunch-270");
+    let serial = std::cell::Cell::new(0usize);
+    let mut events = Vec::new();
+    for status in 0..8 {
+        for kind in [false, true] {
+            events.push(Relaunch6Event::Load(status, kind));
+        }
+    }
+    for observation in 0..7 {
+        for stored in [false, true] {
+            events.push(Relaunch6Event::Poll(observation, stored));
+        }
+    }
+    let initial = Relaunch6State {
+        load: None,
+        status: 0,
+        candidate: false,
+        looked: false,
+        relaunched: 0,
+        polls: 0,
+        violation: None,
+    };
+    let step = |state: &Relaunch6State, event: &Relaunch6Event| {
+        serial.set(serial.get() + 1);
+        match (state.load, event) {
+            (None, Relaunch6Event::Load(status, kind)) => {
+                let (app, id) = r6_app(&root, serial.get(), *status, *kind);
+                let effective = r6_index(&app.store.sessions[0].status);
+                let candidate = app.relaunch_candidates.contains(&id);
+                let violation = (candidate != R6_RUNNING.contains(status))
+                    .then(|| format!("status {status} loaded with candidate {candidate}"));
+                Some(Relaunch6State {
+                    load: Some((*status, *kind)),
+                    status: effective,
+                    candidate,
+                    violation,
+                    ..state.clone()
+                })
+            }
+            (Some((loaded, kind)), Relaunch6Event::Poll(observation, stored))
+                if state.polls < 3 && state.violation.is_none() =>
+            {
+                let (state_of, exit) = R6_OBSERVATIONS[usize::from(*observation)];
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                if state.candidate {
+                    app.relaunch_candidates.insert(id);
+                } else {
+                    app.relaunch_candidates.clear();
+                }
+                if !stored {
+                    fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+                }
+                app.apply_session_poll(
+                    vec![(
+                        id,
+                        TmuxObservation {
+                            state: state_of,
+                            exit_status: exit,
+                        },
+                    )],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+                let relaunched = app
+                    .background_tasks
+                    .contains(&BackgroundKey::SessionStart(id));
+                let candidate_now = app.relaunch_candidates.contains(&id);
+                let status_now = r6_index(&app.store.sessions[0].status);
+                // The ledger, from the requirement alone.
+                let was_candidate = R6_RUNNING.contains(&loaded) && !state.looked;
+                let looks = was_candidate && state_of != TmuxState::Unknown;
+                let lost_or_failed = match (state_of, exit) {
+                    (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
+                    (TmuxState::Dead, Some(code)) => code != 0,
+                    _ => false,
+                };
+                let needs_write = match state_of {
+                    TmuxState::Alive => state.status != 1,
+                    TmuxState::Unknown => false,
+                    _ => true,
+                };
+                let expected = looks && lost_or_failed && kind && *stored;
+                let looked = state.looked || (looks && (!needs_write || *stored));
+                let count = state.relaunched + u8::from(relaunched);
+                let violation = if relaunched != expected {
+                    Some(format!(
+                        "relaunched {relaunched}, the requirement says {expected}"
+                    ))
+                } else if count > 1 {
+                    Some("relaunched twice".to_owned())
+                } else if candidate_now != (R6_RUNNING.contains(&loaded) && !looked) {
+                    Some(format!(
+                        "candidate {candidate_now} after a look the ledger calls spent={looked}"
+                    ))
+                } else {
+                    None
+                };
+                Some(Relaunch6State {
+                    load: state.load,
+                    status: status_now,
+                    candidate: candidate_now,
+                    looked,
+                    relaunched: count,
+                    polls: state.polls + 1,
+                    violation,
+                })
+            }
+            _ => None,
+        }
+    };
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        step,
+        |state| state.violation.clone().map_or(Ok(()), Err),
+        100_000,
+    );
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(coverage.states, R6_STATES, "{coverage:?}");
+}
+
+/// ⌘ as macOS reports it: both the platform-neutral and the Mac flag.
+fn shortcut_272_command(extra: egui::Modifiers) -> egui::Modifiers {
+    egui::Modifiers {
+        command: true,
+        mac_cmd: true,
+        ..Default::default()
+    } | extra
+}
+
+/// One frame with one key press: the app-wide chords first, as `update` runs
+/// them, then the workspace when it is the page showing — so a key handled in
+/// both places would be seen acting twice.
+fn shortcut_272_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    key: egui::Key,
+    modifiers: egui::Modifiers,
+) {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 820.0),
+        )),
+        events: vec![key_press(key, modifiers)],
+        modifiers,
+        ..Default::default()
+    };
+    let _ = ctx.run(input, |ctx| {
+        app.handle_app_shortcuts(ctx);
+        if app.page == Page::Sessions {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        }
+    });
+}
+
+/// A frame with no input, as the window has drawn many times before anyone
+/// presses a key: the workspace marks its live sessions seen on its first
+/// draw, and a tab closed before that draw is added back as newly live.
+fn shortcut_272_settle(app: &mut OperonApp, ctx: &egui::Context) {
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::NONE)
+            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    });
+}
+
+fn shortcut_272_tabs(app: &OperonApp) -> Vec<WorkspaceTab> {
+    app.workspace
+        .groups
+        .iter()
+        .flat_map(|group| group.tabs.clone())
+        .collect()
+}
+
+fn shortcut_272_third_session(app: &mut OperonApp) -> Uuid {
+    let mut session = app.store.sessions[0].clone();
+    session.id = Uuid::new_v4();
+    session.name = "third".into();
+    session.tmux_name = managed_tmux_name(session.id);
+    app.store.sessions.push(session.clone());
+    session.id
+}
+
+/// Change 272 (R1): ⌘T is the strip's +, from any page, and not while the
+/// palette or the launch sheet holds the keyboard. With no tmux the + answers
+/// with the tmux notice, so reaching that notice is reaching the + 's launch.
+#[test]
+pub(crate) fn shortcut_272_command_t_opens_a_terminal_like_the_plus() {
+    let root = temporary_directory("shortcut-272-new");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    let tmux_notice = |app: &OperonApp| {
+        app.notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tmux が必要")
+    };
+
+    for page in [Page::Sessions, Page::Home, Page::Projects] {
+        app.page = page;
+        app.notice = None;
+        shortcut_272_frame(
+            &mut app,
+            &ctx,
+            egui::Key::T,
+            shortcut_272_command(egui::Modifiers::NONE),
+        );
+        assert!(tmux_notice(&app), "{page:?}: ⌘T reaches the + 's launch");
+    }
+
+    app.page = Page::Sessions;
+    app.notice = None;
+    app.command_palette_open = true;
+    shortcut_272_frame(
+        &mut app,
+        &ctx,
+        egui::Key::T,
+        shortcut_272_command(egui::Modifiers::NONE),
+    );
+    assert!(!tmux_notice(&app), "the palette holds the keyboard");
+    app.command_palette_open = false;
+
+    // ⇧⌘T is its own chord: it must not open a terminal on the way.
+    app.notice = None;
+    shortcut_272_frame(
+        &mut app,
+        &ctx,
+        egui::Key::T,
+        shortcut_272_command(egui::Modifiers::SHIFT),
+    );
+    assert!(!tmux_notice(&app), "⇧⌘T also ran ⌘T");
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R2): one key press is one action. egui matches an extra Shift
+/// leniently, so ⇧⌘T matched ⌘T; the exact binding now wins, and a press with
+/// no exact binding still falls back to the lenient one as before.
+#[test]
+pub(crate) fn shortcut_272_the_most_specific_chord_wins() {
+    let command = shortcut_272_command(egui::Modifiers::NONE);
+    let shifted = shortcut_272_command(egui::Modifiers::SHIFT);
+    let keymap = Keymap::defaults();
+    assert_eq!(keymap.action_for(egui::Key::T, command), Some("tab.new"));
+    assert_eq!(keymap.action_for(egui::Key::T, shifted), Some("tab.reopen"));
+    assert_eq!(
+        keymap.action_for(egui::Key::K, shifted),
+        Some("palette.open"),
+        "with nothing exact, the lenient match still answers"
+    );
+    assert_eq!(keymap.action_for(egui::Key::K, egui::Modifiers::NONE), None);
+    assert_eq!(keymap.action_for(egui::Key::T, egui::Modifiers::CTRL), None);
+
+    let moved = resolve_keymap(r#"{"keybindings": {"terminal.find": "Mod+Shift+K"}}"#)
+        .expect("⇧⌘K is free");
+    assert_eq!(
+        moved.action_for(egui::Key::K, shifted),
+        Some("terminal.find")
+    );
+    assert_eq!(
+        moved.action_for(egui::Key::K, command),
+        Some("palette.open")
+    );
+
+    // The rule reaches the frame loop: ⇧⌘T opens nothing new, it reopens.
+    let root = temporary_directory("shortcut-272-specific");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.select_session(first);
+    let ctx = egui::Context::default();
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, shifted);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("開き直せるタブはありません。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R3): ⌘W is the keymap's `tab.close`, handled once — a second
+/// handler left in the workspace would close two tabs on one press — and a
+/// keymap file can turn it off.
+#[test]
+pub(crate) fn shortcut_272_close_is_a_keymap_action() {
+    let root = temporary_directory("shortcut-272-close");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    app.select_session(second);
+    let ctx = egui::Context::default();
+    let command = shortcut_272_command(egui::Modifiers::NONE);
+    shortcut_272_settle(&mut app, &ctx);
+
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first)],
+        "one press closes the active tab and only that"
+    );
+
+    app.keymap =
+        resolve_keymap(r#"{"keybindings": {"tab.close": null}}"#).expect("a keymap without ⌘W");
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+
+    app.keymap = Keymap::defaults();
+    app.page = Page::Home;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first)],
+        "no tab is showing on Home"
+    );
+    app.page = Page::Sessions;
+    app.session_library_open = true;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    app.session_library_open = false;
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first)],
+        "the session library covers the tabs"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R4): ⇧⌘T brings back the last closed tab that can still be
+/// shown, once, and remembers a bounded number of them.
+#[test]
+pub(crate) fn shortcut_272_reopen_brings_back_the_last_closed_tab() {
+    let root = temporary_directory("shortcut-272-reopen");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    app.select_session(first);
+    app.select_session(second);
+    let ctx = egui::Context::default();
+    let command = shortcut_272_command(egui::Modifiers::NONE);
+    let reopen = shortcut_272_command(egui::Modifiers::SHIFT);
+    let nothing = Some(tr("開き直せるタブはありません。"));
+
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.notice.as_deref(), nothing, "nothing closed yet");
+    assert_eq!(shortcut_272_tabs(&app).len(), 2);
+
+    shortcut_272_frame(&mut app, &ctx, egui::Key::W, command);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+    app.page = Page::Home;
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.page, Page::Sessions, "the reopened tab is shown");
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    assert_eq!(shortcut_272_tabs(&app).len(), 2);
+
+    // A tab whose session is gone is passed over for the one before it.
+    app.close_workspace_tab(&WorkspaceTab::Session(first));
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    assert!(shortcut_272_tabs(&app).is_empty());
+    app.store.sessions.retain(|session| session.id != second);
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(
+        app.notice.as_deref(),
+        nothing,
+        "each closed tab comes back once"
+    );
+
+    // Open again by another route: not a tab to reopen.
+    app.close_workspace_tab(&WorkspaceTab::Session(first));
+    app.select_session(first);
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.notice.as_deref(), nothing);
+    assert_eq!(shortcut_272_tabs(&app), vec![WorkspaceTab::Session(first)]);
+
+    // Remembered once, and no more than the limit.
+    app.closed_tabs.clear();
+    for _ in 0..3 {
+        app.select_session(first);
+        app.close_workspace_tab(&WorkspaceTab::Session(first));
+    }
+    assert_eq!(app.closed_tabs, vec![WorkspaceTab::Session(first)]);
+    let extra = (0..CLOSED_TAB_LIMIT + 5)
+        .map(|_| shortcut_272_third_session(&mut app))
+        .collect::<Vec<_>>();
+    for id in &extra {
+        app.select_session(*id);
+        app.close_workspace_tab(&WorkspaceTab::Session(*id));
+    }
+    assert_eq!(app.closed_tabs.len(), CLOSED_TAB_LIMIT);
+    assert_eq!(
+        app.closed_tabs.last(),
+        extra.last().map(|id| WorkspaceTab::Session(*id)).as_ref()
+    );
+    assert!(!app.closed_tabs.contains(&WorkspaceTab::Session(first)));
+
+    // A document: a refused close is not remembered; a closed one reopens
+    // from disk; one whose project is gone is passed over.
+    app.closed_tabs.clear();
+    let file = root.join("notes.txt");
+    fs::write(&file, "hello\n").unwrap();
+    let project = app.store.projects[0].clone();
+    app.page = Page::Sessions;
+    app.open_document_at(&project, project.path.clone(), file.clone());
+    let document = match app.workspace.active().cloned() {
+        Some(WorkspaceTab::Document(id)) => id,
+        other => panic!("the file opened as a tab: {other:?}"),
+    };
+    let index = app.document_index(&document).expect("open");
+    app.open_documents[index].read_only = None;
+    app.open_documents[index].disk = "hello\n".into();
+    app.open_documents[index].buffer = "edited\n".into();
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    assert!(app.closed_tabs.is_empty(), "a refused close is not a close");
+    app.open_documents[index].buffer = "hello\n".into();
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    assert!(app.document_index(&document).is_none());
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Document(document.clone()))
+    );
+    assert!(app.document_index(&document).is_some(), "read again");
+    app.close_workspace_tab(&WorkspaceTab::Document(document.clone()));
+    app.store.projects.clear();
+    app.notice = None;
+    shortcut_272_frame(&mut app, &ctx, egui::Key::T, reopen);
+    assert_eq!(app.notice.as_deref(), nothing);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R5): ⇧⌘] and ⇧⌘[ step through the focused pane's tabs. macOS
+/// reports the bracket with Shift held as `}` / `{` on US and JIS keyboards,
+/// so that is the key that has to match; ⌃⇧Tab goes back, not forward.
+#[test]
+pub(crate) fn shortcut_272_brackets_and_control_tab_step_through_tabs() {
+    let shifted = shortcut_272_command(egui::Modifiers::SHIFT);
+    let keymap = Keymap::defaults();
+    for (key, action) in [
+        (egui::Key::CloseCurlyBracket, "tab.next"),
+        (egui::Key::CloseBracket, "tab.next"),
+        (egui::Key::OpenCurlyBracket, "tab.previous"),
+        (egui::Key::OpenBracket, "tab.previous"),
+    ] {
+        assert_eq!(keymap.action_for(key, shifted), Some(action), "{key:?}");
+    }
+    assert_eq!(
+        keymap.action_for(
+            egui::Key::CloseCurlyBracket,
+            shortcut_272_command(egui::Modifiers::NONE)
+        ),
+        None,
+        "a }} typed without Shift is not ⇧⌘]"
+    );
+
+    let root = temporary_directory("shortcut-272-step");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let third = shortcut_272_third_session(&mut app);
+    for id in [first, second, third] {
+        app.select_session(id);
+    }
+    let ctx = egui::Context::default();
+    let control_shift = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
+    for (key, modifiers, expected) in [
+        (egui::Key::CloseCurlyBracket, shifted, first),
+        (egui::Key::CloseCurlyBracket, shifted, second),
+        (egui::Key::OpenCurlyBracket, shifted, first),
+        (egui::Key::OpenCurlyBracket, shifted, third),
+        (egui::Key::Tab, control_shift, second),
+        (egui::Key::Tab, egui::Modifiers::CTRL, third),
+    ] {
+        shortcut_272_frame(&mut app, &ctx, key, modifiers);
+        assert_eq!(
+            app.workspace.active(),
+            Some(&WorkspaceTab::Session(expected)),
+            "{key:?} {modifiers:?}"
+        );
+        assert_eq!(app.selected_session, Some(expected));
+    }
+
+    for id in [first, second, third] {
+        app.close_workspace_tab(&WorkspaceTab::Session(id));
+    }
+    shortcut_272_frame(&mut app, &ctx, egui::Key::CloseCurlyBracket, shifted);
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert!(
+        shortcut_272_tabs(&app).is_empty(),
+        "no tab, nothing to step to"
+    );
+
+    // A group nobody settled has no tab to step to; stepping in it must not
+    // divide by zero and take the window with it.
+    let empty = Uuid::new_v4();
+    app.workspace.groups.push(WorkspaceGroup {
+        id: empty,
+        tabs: Vec::new(),
+        active: 0,
+    });
+    app.workspace.focused = Some(empty);
+    app.step_workspace_tab(true);
+    app.step_workspace_tab(false);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R6): the palette offers the two tab actions that make sense
+/// from it, with their chords, and choosing one does what the key does.
+#[test]
+pub(crate) fn shortcut_272_palette_rows_run_the_tab_actions() {
+    let actions = OperonApp::palette_actions();
+    for (dispatch, id) in [
+        ("New terminal tab", "tab.new"),
+        ("Reopen closed tab", "tab.reopen"),
+    ] {
+        assert!(
+            actions
+                .iter()
+                .any(|(action, label, keymap)| *action == dispatch
+                    && *keymap == id
+                    && *label == tr(action_label(id))),
+            "{dispatch} is a palette row drawing {id}"
+        );
+    }
+
+    let root = temporary_directory("shortcut-272-palette");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.select_session(first);
+    app.select_session(second);
+    app.activate_palette_entry(&PaletteKind::Action("New terminal tab"));
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    app.activate_palette_entry(&PaletteKind::Action("Reopen closed tab"));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272 (R7): the manual's key table is where a person looks first, so
+/// every remappable action's default chord is in it, in all three languages,
+/// spelled as the app draws it — and ⌘W, now remappable, is not called fixed.
+#[test]
+pub(crate) fn shortcut_272_every_manual_lists_every_default_chord() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for manual in ["docs/MANUAL.md", "docs/MANUAL.ja.md", "docs/MANUAL.ko.md"] {
+        let text = fs::read_to_string(root.join(manual)).unwrap();
+        let section = text
+            .split("\n## 8.")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## ").next())
+            .unwrap_or_else(|| panic!("{manual} has a section 8"));
+        for action in KEYMAP_ACTIONS {
+            let chord = chord_label(parse_chord(action.default).expect("defaults parse"));
+            assert!(
+                section.contains(&chord),
+                "{manual} does not list {chord} ({})",
+                action.id
+            );
+        }
+        let fixed = section
+            .lines()
+            .find(|line| line.contains("⌘↩") && !line.starts_with('|'))
+            .unwrap_or_else(|| panic!("{manual} names its fixed keys"));
+        assert!(!fixed.contains("⌘W"), "{manual}: ⌘W is no longer fixed");
+    }
+}
+
+/// Change 272, found by trying to break it: a keymap file that moves
+/// `tab.previous` onto ⌃Tab must get what it asked for. The fixed ⌃Tab read
+/// the press first and stepped forward.
+#[test]
+pub(crate) fn shortcut_272_a_control_tab_binding_is_the_keymaps() {
+    let root = temporary_directory("shortcut-272-control-tab");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let third = shortcut_272_third_session(&mut app);
+    for id in [first, second, third] {
+        app.select_session(id);
+    }
+    app.keymap = resolve_keymap(r#"{"keybindings": {"tab.previous": "Ctrl+Tab"}}"#)
+        .expect("⌃Tab is free in the keymap");
+    let ctx = egui::Context::default();
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Session(second)),
+        "⌃Tab is tab.previous in this keymap"
+    );
+    // A page bound to ⌃Tab gets the press too, and no tab moves.
+    app.keymap = resolve_keymap(r#"{"keybindings": {"page.home": "Ctrl+Tab"}}"#)
+        .expect("⌃Tab is free in the keymap");
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert_eq!(app.page, Page::Home);
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272: a tab closed in one project comes back in that project's
+/// workspace while another project is showing.
+#[test]
+pub(crate) fn shortcut_272_reopen_crosses_back_to_the_tabs_project() {
+    let root = temporary_directory("shortcut-272-cross");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let a = app.store.projects[0].id;
+    let other_root = root.join("other");
+    fs::create_dir_all(&other_root).unwrap();
+    let b = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: b,
+        path: other_root.clone(),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    let elsewhere = shortcut_272_third_session(&mut app);
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == elsewhere) {
+        session.project_id = b;
+        session.worktree_path = Some(other_root.clone());
+    }
+    app.select_session(first);
+    app.select_session(second);
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    app.select_session(elsewhere);
+    assert_eq!(app.workspace_project, Some(b));
+
+    app.reopen_closed_tab();
+    assert_eq!(app.workspace_project, Some(a));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    assert_eq!(app.selected_session, Some(second));
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first), WorkspaceTab::Session(second)],
+        "project A's other tab is still there"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 271: the foreground process group of a terminal names the agent CLI
+/// the person is running in it. Rows are `pid ppid pgid tpgid comm`, the shape
+/// `/bin/ps -o pid=,ppid=,pgid=,tpgid=,comm=` prints; the first three are
+/// shaped after what a scratch tmux server showed on 2026-11-09.
+#[test]
+pub(crate) fn the_cli_in_a_terminals_foreground_is_read_from_its_processes() {
+    let cases: [(&str, &str, Option<CliProvider>); 11] = [
+        (
+            "Claude in front of a login shell",
+            "14629 66301 14629 14629 /Users/me/.local/bin/claude\n66301   229 66301 14629 /bin/zsh\n",
+            Some(CliProvider::Claude),
+        ),
+        (
+            "Codex, its MCP servers in groups of their own",
+            "30145 49254 30145 30145 /opt/codex/vendor/aarch64-apple-darwin/bin/codex\n\
+             34566 30145 34566 30145 /Users/me/.cache/codex-runtimes/node/bin/node\n\
+             34575 30145 34575 30145 npm exec some-mcp@latest\n\
+             49254   229 49254 30145 -zsh\n",
+            Some(CliProvider::Codex),
+        ),
+        (
+            "Antigravity under a wrapper shell, with an MCP child in its group",
+            "49287   229 49287 85001 -zsh\n\
+             85001 49287 85001 85001 /bin/sh\n\
+             85977 85001 85001 85001 /Users/me/.local/bin/agy\n\
+             88239 85977 85001 85001 npm exec mcp-remote@0.15.1 https://example.invalid/mcp\n\
+             89997 88239 85001 85001 node\n",
+            Some(CliProvider::Gemini),
+        ),
+        ("a shell alone", "5297 229 5297 5297 -zsh\n", None),
+        (
+            "Claude running Codex as one of its tools is still Claude",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/claude\n\
+             300 200 200 200 /bin/zsh\n301 300 200 200 /usr/local/bin/codex\n",
+            Some(CliProvider::Claude),
+        ),
+        (
+            "two CLIs side by side in one pipeline are not guessed between",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/codex\n201 100 200 200 /usr/local/bin/claude\n",
+            None,
+        ),
+        (
+            "a CLI sent to the background is not the one in front",
+            "100 1 100 100 -zsh\n200 100 200 100 /usr/local/bin/claude\n",
+            None,
+        ),
+        (
+            "an executable path with a space in it",
+            "100 1 100 200 -zsh\n200 100 200 200 /Applications/Some App.app/Contents/MacOS/codex\n",
+            Some(CliProvider::Codex),
+        ),
+        (
+            "a name that only begins like a CLI's",
+            "100 1 100 200 -zsh\n200 100 200 200 /usr/local/bin/codex-helper\n",
+            None,
+        ),
+        ("nothing listed", "", None),
+        ("a line that is not a process", "PID PPID PGID TPGID COMMAND\n", None),
+    ];
+    for (case, listing, expected) in cases {
+        assert_eq!(parse_foreground_cli(listing), expected, "{case}");
+    }
+    // The device `ps -t` is given, out of what tmux prints for the pane.
+    let devices: [(&str, Option<&str>); 6] = [
+        ("/dev/ttys012\n", Some("ttys012")),
+        ("/dev/ttys012\n/dev/ttys013\n", Some("ttys012")),
+        ("/dev/-A\n", None),
+        ("/dev/../ttys012\n", None),
+        ("ttys012\n", None),
+        ("", None),
+    ];
+    for (listing, expected) in devices {
+        assert_eq!(pane_device(listing), expected, "{listing:?}");
+    }
+}
+
+/// Change 271, through the poll's result as the app receives it: a terminal
+/// whose foreground is a CLI takes that CLI's kind, and drops the conversation
+/// recorded for the CLI it ran before. A session launched as a CLI keeps its
+/// kind, and the same CLI seen again leaves the conversation its hook reported.
+#[test]
+pub(crate) fn a_terminal_takes_the_kind_of_the_cli_seen_running_in_it() {
+    let root = temporary_directory("terminal-cli-271");
+    let data_file = root.join("store-v2.json");
+    let mut app = test_app(data_file.clone());
+    let project = relaunch_270_project(&root);
+    let plain = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let mut was_claude = relaunch_270_session(
+        project.id,
+        "claude",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    was_claude.native_session_id = Some(Uuid::new_v4().to_string());
+    was_claude.native_session_path = Some(root.join("claude.jsonl"));
+    let mut launched = relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    launched.native_session_id = Some(Uuid::new_v4().to_string());
+    app.store.projects.push(project);
+    for session in [&plain, &was_claude, &launched] {
+        app.store.sessions.push(session.clone());
+    }
+    let poll = |app: &mut OperonApp, clis: Vec<(Uuid, CliProvider)>| {
+        app.background_tasks.insert(BackgroundKey::SessionPoll);
+        app.background_sender
+            .send(BackgroundResult::SessionPoll {
+                states: Vec::new(),
+                activities: Vec::new(),
+                previews: Vec::new(),
+                output: Vec::new(),
+                clis,
+            })
+            .unwrap();
+        app.process_background_results();
+    };
+
+    poll(
+        &mut app,
+        vec![
+            (plain.id, CliProvider::Codex),
+            (was_claude.id, CliProvider::Gemini),
+            (launched.id, CliProvider::Codex),
+        ],
+    );
+
+    let codex = relaunch_270_find(&app, plain.id);
+    assert_eq!(
+        codex.agent,
+        CliProvider::Codex.agent(),
+        "Codex を動かしているターミナルの種類"
+    );
+    assert_eq!(codex.goal, "", "素のターミナルの説明が残りました");
+    assert_eq!(codex.origin, Some(SessionOrigin::PlainTerminal));
+    let gemini = relaunch_270_find(&app, was_claude.id);
+    assert_eq!(gemini.agent, CliProvider::Gemini.agent());
+    assert_eq!(
+        gemini.native_session_id, None,
+        "前の CLI の会話 ID が残りました"
+    );
+    assert_eq!(gemini.native_session_path, None);
+    let still_launched = relaunch_270_find(&app, launched.id);
+    assert_eq!(
+        still_launched.agent, "claude",
+        "CLI として起動したセッションの種類が変わりました"
+    );
+    assert_eq!(
+        still_launched.native_session_id, launched.native_session_id,
+        "CLI として起動したセッションの会話 ID が消えました"
+    );
+    let stored = load_store_safely(&data_file).store;
+    let stored_kind = |id: Uuid| {
+        stored
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .map(|session| session.agent.clone())
+    };
+    assert_eq!(
+        stored_kind(plain.id).as_deref(),
+        Some(CliProvider::Codex.agent())
+    );
+    assert_eq!(
+        stored_kind(was_claude.id).as_deref(),
+        Some(CliProvider::Gemini.agent())
+    );
+
+    // The hook of the CLI now in front reports its conversation; seeing the
+    // same CLI on the next poll keeps it.
+    let agy_id = Uuid::new_v4().to_string();
+    relaunch_270_report(
+        &mut app,
+        &was_claude.tmux_name,
+        CliProvider::Gemini,
+        &agy_id,
+    );
+    poll(&mut app, vec![(was_claude.id, CliProvider::Gemini)]);
+    assert_eq!(
+        relaunch_270_find(&app, was_claude.id)
+            .native_session_id
+            .as_deref(),
+        Some(agy_id.as_str())
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 271, through the session poll, tmux and `/bin/ps` themselves: a
+/// program named `codex` started in a live terminal turns the terminal into a
+/// Codex session, and the pane's shell alone is read as no CLI. The program is
+/// `/bin/sleep` under that name, so no CLI is needed.
+#[test]
+pub(crate) fn the_foreground_cli_of_a_live_pane_is_read_through_tmux_and_ps() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("foreground-cli-271");
+    let fake = root.join(CliProvider::Codex.executable());
+    std::os::unix::fs::symlink("/bin/sleep", &fake).unwrap();
+    let mut app = test_app(root.join("store-v2.json"));
+    app.tools.tmux = true;
+    let project = relaunch_270_project(&root);
+    let terminal = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    app.store.projects.push(project);
+    app.store.sessions.push(terminal.clone());
+    let name = terminal.tmux_name.clone();
+    let started = start_empty_tmux_session(&name, &root, &[]);
+    let mut shell_alone = Some(CliProvider::Claude);
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(50));
+        shell_alone = tmux_foreground_cli(&name);
+        if shell_alone.is_none() {
+            break;
+        }
+    }
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        &format!("'{}' 30", fake.display()),
+        "Enter",
+    ]);
+    let sent = run_command_with_timeout(&mut send, Duration::from_secs(5));
+    let mut kind = String::new();
+    for _ in 0..50 {
+        std::thread::sleep(Duration::from_millis(100));
+        app.request_session_poll();
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionPoll,
+            Duration::from_secs(10),
+        );
+        kind = relaunch_270_find(&app, terminal.id).agent;
+        if kind == CliProvider::Codex.agent() {
+            break;
+        }
+    }
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+    started.unwrap();
+    assert!(sent.is_ok_and(|output| output.status.success()));
+    assert_eq!(shell_alone, None, "シェルだけのペインを CLI と読みました");
+    assert_eq!(
+        kind,
+        CliProvider::Codex.agent(),
+        "ペインで動く codex を読めませんでした"
+    );
 }

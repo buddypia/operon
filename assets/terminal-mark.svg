@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F8F9FB"/>
+      <stop offset="1" stop-color="#D5DAE2"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2E353F"/>
+      <stop offset="1" stop-color="#14181E"/>
+    </linearGradient>
+    <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="url(#plate)"/>
+  <rect x="6" y="6" width="1012" height="1012" rx="222" fill="none" stroke="#000000" stroke-opacity="0.10" stroke-width="12"/>
+  <rect x="100" y="136" width="824" height="752" rx="116" fill="url(#screen)"/>
+  <rect x="100" y="136" width="824" height="752" rx="116" fill="url(#gloss)"/>
+  <polyline points="276,346 484,512 276,678" fill="none" stroke="#5BE08F" stroke-width="106" stroke-linecap="round" stroke-linejoin="round"/>
+  <line x1="566" y1="678" x2="764" y2="678" stroke="#F1F3F6" stroke-width="106" stroke-linecap="round"/>
+</svg>

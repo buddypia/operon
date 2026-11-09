@@ -1249,13 +1249,13 @@ pub(crate) fn session_status_icon(
     kind: SessionStatusKind,
 ) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(STATUS_ICON_SIZE, CONTROL_HEIGHT_SMALL),
+        egui::vec2(TAB_STATUS_MARK_SIZE, CONTROL_HEIGHT_SMALL),
         egui::Sense::hover(),
     );
     if ui.is_rect_visible(rect) {
         kind.status_mark().paint(
             ui.painter(),
-            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(STATUS_ICON_SIZE)),
+            egui::Rect::from_center_size(rect.center(), egui::Vec2::splat(TAB_STATUS_MARK_SIZE)),
             palette.status(kind.tone()),
         );
     }
@@ -1514,6 +1514,61 @@ pub(crate) fn brand_mark_image(ctx: &egui::Context, size: f32) -> Option<egui::I
     // that this one could never name a tmux session.
     let texture = png_texture(ctx, "brand-mark", BRAND_MARK)?;
     Some(egui::Image::new((texture.id(), egui::vec2(size, size))))
+}
+
+/// The mark that says which CLI a session runs (change 267): its vendor's for
+/// the three agents, Operon's terminal mark for a plain or recovered terminal,
+/// and `None` for a custom command or an older record's binary, which have
+/// neither a vendor nor a shell behind them.
+///
+/// It sits beside `agent_icon_texture` rather than inside it so that "vendor
+/// mark" keeps meaning exactly that: the left column, the CLI filter and the
+/// launch sheet draw what they drew before, and `src/agents.rs`, the launch
+/// gates' file, is not touched for a picture.
+pub(crate) fn session_mark_texture(
+    ctx: &egui::Context,
+    agent: &str,
+) -> Option<egui::TextureHandle> {
+    match agent {
+        "terminal" | "existing terminal" => png_texture(ctx, "terminal-mark", TERMINAL_MARK),
+        _ => agent_icon_texture(ctx, agent),
+    }
+}
+
+/// A session's CLI mark at `SESSION_MARK_SIZE`, named on hover with the words
+/// the left column uses. A session without a mark draws nothing and reserves
+/// no space, so its title keeps the place it had.
+pub(crate) fn session_mark(ui: &mut egui::Ui, agent: &str) {
+    let Some(texture) = session_mark_texture(ui.ctx(), agent) else {
+        return;
+    };
+    ui.add(egui::Image::new((
+        texture.id(),
+        egui::Vec2::splat(SESSION_MARK_SIZE),
+    )))
+    .on_hover_text(agent_short_label(agent));
+}
+
+/// One choice in the tab strip's + menu (change 273): the mark of what it
+/// starts and its name, a 28px row like every menu item. `None` for the mark
+/// keeps the name alone rather than leaving a gap. A row that cannot be chosen
+/// is drawn disabled and says why on hover.
+pub(crate) fn launch_choice_button(
+    ui: &mut egui::Ui,
+    mark: Option<egui::TextureHandle>,
+    label: &str,
+    enabled: bool,
+    disabled_reason: &str,
+) -> egui::Response {
+    let image =
+        mark.map(|texture| egui::Image::new((texture.id(), egui::Vec2::splat(SESSION_MARK_SIZE))));
+    ui.add_enabled(
+        enabled,
+        egui::Button::opt_image_and_text(image, Some(label.into()))
+            .stroke(egui::Stroke::NONE)
+            .min_size(egui::vec2(0.0, CONTROL_HEIGHT)),
+    )
+    .on_disabled_hover_text(disabled_reason)
 }
 
 pub(crate) fn code_block(ui: &mut egui::Ui, text: &str) {

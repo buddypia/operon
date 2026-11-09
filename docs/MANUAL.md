@@ -206,7 +206,7 @@ Other actions:
 - **ターミナルを閉じる** (Close terminal) removes the leftover terminal of a
   finished or failed session.
 - Closing a session's tab (its ✕, or ⌘W) only takes it off the screen; the
-  agent keeps running and the session stays in the list.
+  agent keeps running and the session stays in the list. ⇧⌘T reopens it.
 - The `···` menu in the terminal header offers **Terminal.app で開く**
   (open the `tmux` session in Terminal.app, for mouse use and `tmux` commands),
   **表示中のログをすべてコピー** (copy the whole buffer without colour codes), and
@@ -218,7 +218,9 @@ Other actions:
 ### The terminal pane
 
 Each session tab starts with its state mark; the **+** right after the last tab
-opens a plain terminal. ⌃Tab and ⌃⇧Tab move to the next and previous tab. A
+asks what to start — a terminal, Claude Code, Codex CLI or Antigravity — and
+⌘T opens a plain terminal directly. ⇧⌘] and ⇧⌘[, or ⌃Tab and ⌃⇧Tab, move to the next
+and previous tab. A
 group can be split by dragging a tab to an edge of the workspace — up to four
 groups, each at least 320 × 200 points — and a divider resizes them. Each
 project keeps its own tabs and layout when you switch.
@@ -541,11 +543,14 @@ Knowledge is stored in Operon's data folder on this Mac
 | ⌘↩ | Start the session | In the new-session sheet |
 | Esc | Close the new-session sheet | |
 | ⌘S | Save the open file | In **Files** |
+| ⌘T | Open a plain terminal | In the focused pane; the tab strip's **+** → Terminal without the menu. From any page |
 | ⌘W | Close the active tab | A session's agent keeps running |
+| ⇧⌘T | Reopen closed tab | Newest first; a removed session's tab is skipped |
+| ⇧⌘] / ⇧⌘[ | Next / previous tab | Wraps round within the focused pane |
 | ⌃Tab / ⌃⇧Tab | Next / previous tab | |
 | ⌥ + click / ⌘ + click | Open a path or URL in terminal output | In the editor / externally |
 
-⌘↩, Esc, ⌘S, ⌘W, ⌃Tab, and the clicks are fixed; the others can be changed.
+⌘↩, Esc, ⌘S, ⌃Tab, ⌃⇧Tab, and the clicks are fixed; the others can be changed.
 To change a shortcut, open **Settings → Key bindings** and press
 **Open the keymap file**. The first time, Operon writes `keybindings.json` from
 the current keys and reveals it; it never overwrites an existing file. The format:

@@ -63,6 +63,15 @@ Settings. The projects, sessions, and agent output in them are a demo.
   project's sessions. The order is kept in `session-order.json`, in the same
   folder as the local index, and a project or session added later appears at
   the top.
+- Quitting and reopening Operon puts the workspace back: every project's
+  session tabs, splits, and front tab, kept in `workspace-layout.json` beside
+  the local index, with a tab you closed left closed (file tabs are not
+  reopened). A session that was running when Operon quit and whose terminal
+  is gone at the next start — the Mac restarted, the tmux server died — starts
+  again in its own tab by itself: a CLI reopens its saved conversation, a
+  terminal opens a shell in its folder. One whose CLI you exited is left as it
+  is. A terminal you type `claude`, `codex`, or `agy` into becomes a session of
+  that CLI from its first report, and shows and reopens as one.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
   The launch button sits at its bottom right, and `⌘↩` presses it. A project's
@@ -96,7 +105,7 @@ Settings. The projects, sessions, and agent output in them are a demo.
 
 ### Supervision
 
-- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below, up to four panes; drag a divider to resize. Each session tab starts with its state mark, the **+** for a plain terminal sits right after the last tab, and closing a session tab (✕ or `⌘W`) leaves its agent running.
+- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below, up to four panes; drag a divider to resize. Each session tab starts with its state mark; the **+** right after the last tab offers a terminal, Claude Code, Codex CLI or Antigravity and starts the one you pick in that pane's folder (an agent starts with the options pinned for that CLI, or else the ones it last launched with; options that need the danger acknowledgement open the launch sheet instead). Closing a session tab (✕ or `⌘W`) leaves its agent running.
 - Inspect and message a live agent session without leaving the app.
 - A turn that finishes, or stops to ask, while you are reading another session
   leaves that session marked in the list until you open it, and the banner at

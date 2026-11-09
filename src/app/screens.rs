@@ -231,12 +231,12 @@ impl OperonApp {
     /// The fixed actions: the key the dispatch matches, the label a person reads
     /// and searches, and the keymap id whose chord is drawn beside it.
     ///
-    /// The four rows that have a chord take their label from the keymap
+    /// The rows that have a chord take their label from the keymap
     /// registry rather than writing it a second time, and none of them has a
     /// shortcut typed into the label any more. That was a place the application
     /// told a person which key to press and was under no obligation to be
     /// right; the chord is now read from the map the frame loop listens with.
-    pub(crate) fn palette_actions() -> [(&'static str, &'static str, &'static str); 8] {
+    pub(crate) fn palette_actions() -> [(&'static str, &'static str, &'static str); 10] {
         [
             (
                 "New session",
@@ -266,6 +266,14 @@ impl OperonApp {
             ),
             ("Scan a workspace", tr("ワークスペースをスキャン…"), ""),
             ("Open the keymap file", tr("キー割り当てファイルを開く"), ""),
+            // Change 272. Closing and stepping act on the tab behind the
+            // palette, so only the two that start something are rows.
+            ("New terminal tab", tr(action_label("tab.new")), "tab.new"),
+            (
+                "Reopen closed tab",
+                tr(action_label("tab.reopen")),
+                "tab.reopen",
+            ),
         ]
     }
 
@@ -460,6 +468,10 @@ impl OperonApp {
     pub(crate) fn activate_palette_entry(&mut self, kind: &PaletteKind) {
         match kind {
             PaletteKind::Action("New session") => self.open_new_session(),
+            PaletteKind::Action("New terminal tab") => {
+                self.launch_workspace_terminal(self.workspace.focused);
+            }
+            PaletteKind::Action("Reopen closed tab") => self.reopen_closed_tab(),
             PaletteKind::Action("Open history") => {
                 self.page = Page::Sessions;
                 self.session_library_open = true;
@@ -2529,7 +2541,7 @@ impl OperonApp {
         if dangerous_mode {
             ui.label(
                 RichText::new(tr(
-                    "警告: 確認もサンドボックスもなしにファイルを変更できます。",
+                    "警告: 確認もサンドボックスもなしに、プロジェクトの外（書類・ダウンロード・デスクトップなど）のファイルも読み書きできます。",
                 ))
                 .small()
                 .color(palette.accent_soft),
@@ -6960,6 +6972,7 @@ impl OperonApp {
 
     /// The central workspace shares one navigation model for sessions and files.
     fn ui_tab_workspace(&mut self, ui: &mut egui::Ui) {
+        self.take_launch_menu_escape(ui);
         if !self.session_library_open
             || ui.input(|input| input.pointer.any_pressed() || input.key_pressed(egui::Key::Escape))
         {
@@ -7099,37 +7112,8 @@ impl OperonApp {
             self.ui_dock_drop(ui, area, palette);
             return;
         }
-        let close_key = ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::W));
-        if close_key {
-            if let Some(tab) = self.workspace.active().cloned() {
-                self.close_workspace_tab(&tab);
-            }
-        }
-        let next_key = ui.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));
-        let prev_key = ui.input_mut(|i| {
-            i.consume_key(
-                egui::Modifiers::CTRL | egui::Modifiers::SHIFT,
-                egui::Key::Tab,
-            )
-        });
-        if next_key || prev_key {
-            if let Some(group) = self
-                .workspace
-                .groups
-                .iter()
-                .find(|g| Some(g.id) == self.workspace.focused)
-            {
-                let index = if prev_key {
-                    (group.active + group.tabs.len() - 1) % group.tabs.len()
-                } else {
-                    (group.active + 1) % group.tabs.len()
-                };
-                let id = group.id;
-                let tab = group.tabs[index].clone();
-                self.workspace.select(id, &tab);
-                self.activate_workspace_tab(&tab);
-            }
-        }
+        // ⌘W and ⌃Tab are `handle_app_shortcuts`'s, through the keymap
+        // (change 272); ⌘S stays with the editor it saves.
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
             if let Some(WorkspaceTab::Document(id)) = self.workspace.active().cloned() {
                 self.active_document = Some(id);
@@ -7145,17 +7129,15 @@ impl OperonApp {
             // heading below the window (change 260).
             body.horizontal(|ui| {
                 ui.add_enabled_ui(self.workspace_project.is_some(), |ui| {
-                    let add = icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"));
+                    let add = icon_button(ui, palette, ICON_ADD, tr("ターミナルや AI を起動"));
                     add.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::WidgetType::Button,
                             ui.is_enabled(),
-                            tr("空のターミナルを開く"),
+                            tr("ターミナルや AI を起動"),
                         )
                     });
-                    if add.clicked() {
-                        self.launch_workspace_terminal(None);
-                    }
+                    self.ui_workspace_launch_menu(ui, &add, None);
                 });
             });
             body.heading(tr("セッションを選択"));
@@ -7237,7 +7219,7 @@ impl OperonApp {
                 // right edge and the tabs scroll beneath the clip (change 260).
                 let width = (ui.available_width() - CONTROL_HEIGHT - SPACE_SM).max(0.0);
                 ui.allocate_ui_with_layout(
-                    egui::vec2(width, CONTROL_HEIGHT_SMALL + SPACE_SM),
+                    egui::vec2(width, CONTROL_HEIGHT),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         ui.set_max_width(width);
@@ -7249,13 +7231,22 @@ impl OperonApp {
                         .auto_shrink([true, true])
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
+                                // Compact tabs (change 273): 4px between them.
+                                ui.spacing_mut().item_spacing.x = SPACE_XS;
                                 for (index, tab) in tabs.tabs.iter().enumerate() {
                                     let (title, hover, dirty) = self.workspace_tab_title(tab);
                                     let active = tabs.active == index;
                                     let tab_frame = egui::Frame::new()
                                         .fill(if active { palette.row_selected } else { palette.card })
-                                        .inner_margin(egui::Margin::symmetric(8, 4))
+                                        .inner_margin(egui::Margin::symmetric(6, 2))
                                         .show(ui, |ui| {
+                                            // 4px inside, a 24px row rather than the shared
+                                            // 28px one, and the close button at its own 24px
+                                            // rather than grown by the shared padding: with the
+                                            // margin the tab is the 28px strip (change 273).
+                                            ui.spacing_mut().item_spacing.x = SPACE_XS;
+                                            ui.spacing_mut().interact_size.y = CONTROL_HEIGHT_SMALL;
+                                            ui.spacing_mut().button_padding = egui::Vec2::ZERO;
                                             ui.horizontal(|ui| {
                                                 // State wording belongs in the hover, not the tab.
                                                 if let WorkspaceTab::Session(id) = tab {
@@ -7275,6 +7266,8 @@ impl OperonApp {
                                                                 ui.label(&view.hint);
                                                             },
                                                         );
+                                                        // Which CLI, beside how it is (change 267).
+                                                        session_mark(ui, &session.agent);
                                                     }
                                                 }
                                                 let editing = matches!(tab, WorkspaceTab::Session(id)
@@ -7380,12 +7373,10 @@ impl OperonApp {
                 });
                 let add = ui.scope(|ui| {
                     ui.spacing_mut().button_padding.x = 0.0;
-                    icon_button(ui, palette, ICON_ADD, tr("空のターミナルを開く"))
+                    icon_button(ui, palette, ICON_ADD, tr("ターミナルや AI を起動"))
                 }).inner;
-                add.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("空のターミナルを開く")));
-                if add.clicked() {
-                    self.launch_workspace_terminal(Some(*group));
-                }
+                add.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr("ターミナルや AI を起動")));
+                self.ui_workspace_launch_menu(ui, &add, Some(*group));
             });
             if let Some(tab) = chosen {
                 self.workspace.select(*group, &tab);
@@ -9617,9 +9608,7 @@ impl OperonApp {
         let Some(s) = self.store.sessions.iter().find(|s| s.id == session_id) else {
             return;
         };
-        let is_agent = s.origin != Some(SessionOrigin::PlainTerminal)
-            && s.agent != "terminal"
-            && s.status == SessionStatus::Active;
+        let is_agent = s.agent != "terminal" && s.status == SessionStatus::Active;
         let (tid, tmux) = if is_agent {
             (s.id, s.tmux_name.clone())
         } else if let Some(t) = self.diff_comment_target(s.project_id) {
