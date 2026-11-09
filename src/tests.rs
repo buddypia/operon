@@ -39880,7 +39880,7 @@ pub(crate) fn a_dangerous_switch_cannot_be_launched_without_the_acknowledgement(
     );
     assert!(
         asked
-            .contains(&tr("警告: 確認もサンドボックスもなしにファイルを変更できます。").to_owned()),
+            .contains(&tr("警告: 確認もサンドボックスもなしに、プロジェクトの外（書類・ダウンロード・デスクトップなど）のファイルも読み書きできます。").to_owned()),
         "the checkbox appeared without the sentence that says what is being agreed to"
     );
 
@@ -73152,6 +73152,248 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
     assert_eq!(app.editor_jump_line, Some(1));
     assert_eq!(app.editor_focus_line, Some(1));
     fs::remove_dir_all(root).ok();
+}
+
+/// Change 265: macOS asks for Desktop, Documents, Downloads and volumes in the
+/// name of whichever app is responsible, and the terminal link probe used to
+/// look up every absolute or `~` path an agent printed. A path under one of
+/// those folders is now refused as written, before `canonicalize` touches it,
+/// unless it is inside the folder being resolved against.
+#[test]
+pub(crate) fn protected_folders_265_terminal_link_probe_skips_protected_folders() {
+    let home = temporary_directory("protected-home");
+    let project = home.join("dev").join("proj");
+    fs::create_dir_all(&project).unwrap();
+    for (folder, file) in [
+        ("Downloads", "x.pptx"),
+        ("Documents", "a.txt"),
+        ("Desktop", "b.txt"),
+        ("other", "x.txt"),
+    ] {
+        fs::create_dir_all(home.join(folder)).unwrap();
+        fs::write(home.join(folder).join(file), "x").unwrap();
+    }
+    // Read as written, the link is in Downloads; resolved, it is not. A
+    // refusal that ran after `canonicalize` would see `other/x.txt` and pass.
+    std::os::unix::fs::symlink(
+        home.join("other").join("x.txt"),
+        home.join("Downloads").join("link.txt"),
+    )
+    .unwrap();
+    let resolve = |path: &str| resolve_candidate_path_under(&project, path, Some(&home));
+    let spelled = home.display().to_string();
+    for refused in [
+        format!("{spelled}/Downloads/x.pptx"),
+        format!("file://{spelled}/Documents/a.txt"),
+        "~/Downloads/x.pptx".to_owned(),
+        "~/Documents/a.txt".to_owned(),
+        "~/Desktop/b.txt".to_owned(),
+        // APFS finds `Downloads` under any case, so the refusal does too.
+        format!("{spelled}/downloads/x.pptx"),
+        "~/DESKTOP/b.txt".to_owned(),
+        format!("{spelled}/other/../Downloads/x.pptx"),
+        "../../Downloads/x.pptx".to_owned(),
+        "~/Downloads/link.txt".to_owned(),
+    ] {
+        assert!(
+            home.join("Downloads").join("x.pptx").is_file(),
+            "the fixture holds the file, so a None is a refusal"
+        );
+        assert_eq!(resolve(&refused), None, "{refused} must not be looked up");
+    }
+    // Everything else keeps resolving: change 087's outside-project links.
+    let other = home.join("other").join("x.txt").canonicalize().unwrap();
+    assert_eq!(resolve("~/other/x.txt"), Some(other.clone()));
+    assert_eq!(resolve(&format!("{spelled}/other/x.txt")), Some(other));
+    // Mounted volumes are guarded the same way, with or without a home.
+    assert!(is_in_protected_folder(
+        Path::new("/Volumes/USB/brief.pptx"),
+        None
+    ));
+    assert!(is_in_protected_folder(
+        Path::new("/volumes/usb/a.txt"),
+        None
+    ));
+    assert!(!is_in_protected_folder(
+        Path::new("/opt/homebrew/a.txt"),
+        None
+    ));
+    fs::remove_dir_all(home).unwrap();
+}
+
+/// A project the person registered inside Documents is theirs to open: its own
+/// files resolve under every spelling of the project, and its neighbours do not.
+#[test]
+pub(crate) fn protected_folders_265_project_inside_a_protected_folder_still_resolves() {
+    let home = temporary_directory("protected-project");
+    let project = home.join("Documents").join("proj");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::write(project.join("src").join("a.rs"), "fn a() {}\n").unwrap();
+    fs::write(home.join("Documents").join("other.txt"), "x").unwrap();
+    let own = project.join("src").join("a.rs").canonicalize().unwrap();
+    let resolve = |path: &str| resolve_candidate_path_under(&project, path, Some(&home));
+
+    assert_eq!(resolve("src/a.rs"), Some(own.clone()));
+    assert_eq!(resolve("~/Documents/proj/src/a.rs"), Some(own.clone()));
+    assert_eq!(
+        resolve(&format!("{}/src/a.rs", project.display())),
+        Some(own.clone())
+    );
+    assert_eq!(resolve("../other.txt"), None);
+    assert_eq!(resolve("~/Documents/other.txt"), None);
+
+    // The folder resolved against counts as given or canonicalized: a home
+    // spelled the canonical way and a project spelled the way it was handed in.
+    let canonical_home = home.canonicalize().unwrap();
+    assert_eq!(
+        resolve_candidate_path_under(
+            &project,
+            &format!("{}/Documents/proj/src/a.rs", canonical_home.display()),
+            Some(&canonical_home),
+        ),
+        Some(own)
+    );
+    fs::remove_dir_all(home).unwrap();
+}
+
+/// Change 265: a path read out of another product's record is compared as
+/// written against the project's own spellings, never resolved — resolving it
+/// is looking inside whatever folder the record names. A symlink to the project
+/// is therefore not the project; the project's own spelling still is.
+#[test]
+pub(crate) fn protected_folders_265_record_paths_are_compared_as_spelled() {
+    let root = temporary_root().join(format!("operon-record-spelling-{}", Uuid::new_v4()));
+    let project = root.join("project");
+    let link = root.join("link");
+    fs::create_dir_all(&project).unwrap();
+    std::os::unix::fs::symlink(&project, &link).unwrap();
+
+    // Codex: the rollout's `cwd`.
+    let sessions = root.join("sessions").join("2026").join("11");
+    fs::create_dir_all(&sessions).unwrap();
+    for (id, cwd) in [
+        ("265a0000-0000-0000-0000-000000000001", &link),
+        ("265a0000-0000-0000-0000-000000000002", &project),
+    ] {
+        fs::write(
+            sessions.join(format!("rollout-2026-11-09T00-00-00-{id}.jsonl")),
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{id}\",\"cwd\":\"{}\"}}}}\n",
+                cwd.display()
+            ),
+        )
+        .unwrap();
+    }
+    let index = root.join("session_index.jsonl");
+    fs::write(&index, "").unwrap();
+    let codex = scan_codex_cli_sessions_in(&root.join("sessions"), &index, &project, 10);
+    let ids: Vec<&str> = codex.sessions.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["265a0000-0000-0000-0000-000000000002"]);
+
+    // Antigravity: the history index's `workspace` and a process log's
+    // workspace list, each naming the link.
+    let agy = root.join("agy");
+    fs::create_dir_all(&agy).unwrap();
+    let history = agy.join("history.jsonl");
+    fs::write(
+        &history,
+        format!(
+            "{{\"workspace\":\"{}\",\"conversationId\":\"through-link\",\"display\":\"Turn\",\"timestamp\":1787153900000}}\n",
+            link.display()
+        ),
+    )
+    .unwrap();
+    write_antigravity_process_log(&agy, "cli-20261109_000000.log", &link, &["logged-link"]);
+    write_antigravity_transcript(&agy, "through-link", "ping");
+    write_antigravity_transcript(&agy, "logged-link", "ping");
+    assert!(
+        scan_gemini_cli_sessions_in(&history, &project, 10)
+            .sessions
+            .is_empty(),
+        "a record naming a link to the project is not attributed to it"
+    );
+    let allowed = project_and_worktree_paths(&project);
+    assert!(!antigravity_log_workspace_matches(
+        &link.display().to_string(),
+        &allowed
+    ));
+    assert!(antigravity_log_workspace_matches(
+        &project.display().to_string(),
+        &allowed
+    ));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 265: the folder prompts name Operon, so they say where the request
+/// usually comes from. One reason, spelled once, for every folder the probe
+/// leaves alone and both kinds of volume.
+#[test]
+pub(crate) fn protected_folders_265_bundle_explains_folder_prompts() {
+    let script = include_str!("../scripts/package-macos.sh");
+    let assignments: Vec<&str> = script
+        .lines()
+        .filter(|line| line.trim_start().starts_with("folder_access_reason="))
+        .collect();
+    assert_eq!(assignments.len(), 1, "the reason is spelled once");
+    for needle in ["ターミナル", "エージェント", "「許可しない」", "多くの場合"]
+    {
+        assert!(
+            assignments[0].contains(needle),
+            "the reason names {needle}: {}",
+            assignments[0]
+        );
+    }
+    let keys = PROTECTED_HOME_FOLDERS
+        .iter()
+        .map(|folder| format!("NS{folder}FolderUsageDescription"))
+        .chain(
+            [
+                "NSRemovableVolumesUsageDescription",
+                "NSNetworkVolumesUsageDescription",
+            ]
+            .map(str::to_owned),
+        );
+    for key in keys {
+        let insert = format!("plutil -insert {key} -string \"$folder_access_reason\" \"$plist\"");
+        assert!(script.contains(&insert), "missing: {insert}");
+    }
+}
+
+/// Change 265: the dangerous-launch warning says the agent reaches past the
+/// project into the person's own folders, in every language.
+#[test]
+pub(crate) fn protected_folders_265_dangerous_launch_warning_names_personal_folders() {
+    let screens = include_str!("app/screens.rs");
+    let warning = "警告: 確認もサンドボックスもなしに、プロジェクトの外（書類・ダウンロード・デスクトップなど）のファイルも読み書きできます。";
+    assert!(screens.contains(warning));
+    assert!(!screens.contains("警告: 確認もサンドボックスもなしにファイルを変更できます。"));
+    for table in [EN_TABLE, KO_TABLE] {
+        assert!(
+            table.iter().any(|(japanese, _)| *japanese == warning),
+            "every table carries the warning"
+        );
+    }
+}
+
+/// Change 265, found by the empirical verifier: macOS reaches the home folder
+/// through the data volume's firmlink as well, so `/System/Volumes/Data/Users/…/
+/// Desktop` is the same Desktop and is refused the same way.
+#[test]
+pub(crate) fn protected_folders_265_data_volume_spelling_is_the_same_folder() {
+    let home = temporary_directory("protected-firmlink");
+    let through_data_volume = Path::new(SYSTEM_DATA_VOLUME_ROOT)
+        .join(home.strip_prefix("/").unwrap())
+        .join("Desktop")
+        .join("f.txt");
+    assert!(is_in_protected_folder(&through_data_volume, Some(&home)));
+    assert!(!is_in_protected_folder(
+        &Path::new(SYSTEM_DATA_VOLUME_ROOT)
+            .join(home.strip_prefix("/").unwrap())
+            .join("other")
+            .join("f.txt"),
+        Some(&home)
+    ));
+    fs::remove_dir_all(home).unwrap();
 }
 
 // --- Change 267: session tabs show which CLI runs in them -------------------

@@ -82,6 +82,19 @@ plutil -insert CFBundleVersion -string "1" "$plist"
 plutil -insert LSMinimumSystemVersion -string "12.0" "$plist"
 plutil -insert NSHighResolutionCapable -bool true "$plist"
 
+# What macOS shows under its own question when something asks for these
+# folders in Operon's name. Every process under the tmux server Operon started
+# is Operon's to macOS, so the request is usually an agent's command; without a
+# reason the dialog read as Operon reaching for the person's files (change 265).
+# One reason, spelled here once; `protected_folders_265_bundle_explains_folder_prompts`
+# checks that every folder in PROTECTED_HOME_FOLDERS and both volume kinds get it.
+folder_access_reason="多くの場合、Operon のターミナルで動いているエージェントやコマンドがこのフォルダを使おうとしています（macOS は Operon が起動したプロセスの操作を Operon の名前で尋ねます）。心当たりがなければ「許可しない」を選んでください。このフォルダにプロジェクトを置いていなければ、Operon の動作には影響しません。"
+plutil -insert NSDesktopFolderUsageDescription -string "$folder_access_reason" "$plist"
+plutil -insert NSDocumentsFolderUsageDescription -string "$folder_access_reason" "$plist"
+plutil -insert NSDownloadsFolderUsageDescription -string "$folder_access_reason" "$plist"
+plutil -insert NSRemovableVolumesUsageDescription -string "$folder_access_reason" "$plist"
+plutil -insert NSNetworkVolumesUsageDescription -string "$folder_access_reason" "$plist"
+
 # Which commit this bundle was built from, so the installed application can be
 # compared against the repository instead of guessed at from a diff.
 # `CFBundleShortVersionString` cannot answer that: it has read 0.1.0 since the
