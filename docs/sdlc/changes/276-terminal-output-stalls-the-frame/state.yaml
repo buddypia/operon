@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: refactor — the terminal shows the same rows; where they are laid out
+# moves. No intent or spec: the person's request and the measurement are in
+# plan.md. Risk: low (risk.yaml `drawing`: src/app.rs), full autonomy;
+# screen.md records that nothing painted changes.
+
+state:
+  route: "refactor"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 2"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the terminal_276_ tests, then src/app/terminal_output.rs and its wiring, per plan.md."
+
+contract:
+  three-gates: "machine pending make q.fast and cargo test --locked terminal_276_"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/app.rs and src/app/terminal_output.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/276-terminal-output-stalls-the-frame/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
