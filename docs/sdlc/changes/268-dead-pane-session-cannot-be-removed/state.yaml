@@ -5,13 +5,13 @@ state:
   stage: "plan"
   status: "blocked"
   attempts: "0 3"
-  questions: "3 7"
+  questions: "5 7"
   autonomy: "supervised"
   risk: "low"
   readiness: "pending"
   screen: "n/a"
 
-resume: "Ask whether ⌘W closes the dead session's tab and whether another tab's ✕ closes, then follow handoff.md's narrowest hypothesis."
+resume: "Need one observation from the person (⌘W on the dead tab, ✕ on another tab) or Accessibility granted to cmux.app; then follow handoff.md."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
