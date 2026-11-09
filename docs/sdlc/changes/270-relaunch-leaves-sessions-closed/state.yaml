@@ -11,17 +11,17 @@
 state:
   route: "feature"
   stage: "plan"
-  status: "planning"
+  status: "ready"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Intent drafted; next spec.md, screen.md, readiness, plan.md."
+resume: "Plan approved; write the eight failing tests in src/tests.rs, watch each fail, then build in plan order."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -42,9 +42,9 @@ resume: "Intent drafted; next spec.md, screen.md, readiness, plan.md."
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
   bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending does this change touch src/ except src/tests.rs,
-    Cargo.toml, or Cargo.lock? If so it makes /Applications/Operon.app stale and
-    ends with bash scripts/package-macos.sh. Answer when writing this contract"
+  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/ui/session_tree.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing (ship skill)"
+  failing-test-first: "machine pending each of the eight plan tests watched failing on the unedited code"
+  relaunch-observed: "human pending after the swap, a relaunch brings the tabs back and a terminal running claude shows the Claude mark"
   guards-verified-by-mutation: "human pending each new guard watched failing"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_

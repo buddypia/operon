@@ -1,6 +1,6 @@
 # Intent: a relaunch does not bring back the sessions the person had, and a terminal running Claude Code reads as a terminal
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-09
 
 ## Problem
@@ -78,8 +78,10 @@ None left: both were put to the person and answered (see Desired outcome).
 ## Not in scope
 
 - Document (file) tabs: they are not reopened at launch; only session tabs are.
-- Starting again a session that was already stopped before the quit, one that
-  exited by itself or failed, or a queued one.
+- Starting again a session that was already stopped before the quit, one whose
+  CLI exited cleanly (exit status 0 — the person typed `/exit`), a cancelled
+  one, or a queued one. A CLI that died with a non-zero status while Operon was
+  closed is "gone", not "ended", and is started again.
 - A CLI session with no saved conversation: it keeps its manual 「再試行」.
 - Changing a session that was launched as one CLI into another when a different
   CLI is typed inside it.
