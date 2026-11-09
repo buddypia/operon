@@ -460,7 +460,7 @@ pub(crate) fn import_legacy_store_if_needed_with_writer(
                 matches!(write_outcome, WriteOutcome::CommittedButNotSynced(_));
             let durability_notice = match write_outcome {
                 WriteOutcome::Durable => String::new(),
-                WriteOutcome::CommittedButNotSynced(sync_error) => tf!(" 新しい空の記録は書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。エラー: {sync_error}", sync_error = sync_error),
+                WriteOutcome::CommittedButNotSynced(sync_error) => tf!(" 新しい空の記録は書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。エラー: {sync_error}", sync_error = sync_error),
             };
             return Ok(MigrationOutcome {
                 notice: Some(tf!("既存のメタデータを取り込めなかったため、{p0} は変更していません。Operon は有効な復旧メタデータを備えた空の記録を作成しました。プロジェクトのファイルは変更していません。エラー: {error}。{durability_notice}", durability_notice = durability_notice, error = error, p0 = legacy.display())),
@@ -499,7 +499,7 @@ pub(crate) fn import_legacy_store_if_needed_with_writer(
     let durability_retry_needed = matches!(write_outcome, WriteOutcome::CommittedButNotSynced(_));
     let durability_notice = match write_outcome {
         WriteOutcome::Durable => String::new(),
-        WriteOutcome::CommittedButNotSynced(error) => tf!(" 取り込みは書き込まれましたが、ディスクへの永続化を確認できませんでした。Operon が自動的に再試行します。エラー: {error}", error = error),
+        WriteOutcome::CommittedButNotSynced(error) => tf!(" 取り込みは書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。エラー: {error}", error = error),
     };
     Ok(MigrationOutcome {
         notice: Some(tf!("既存のセッションメタデータを保護された現在の記録に取り込みました。旧形式のスナップショットは {p0} のまま変更していません。{sidecar_notice}{durability_notice}", durability_notice = durability_notice, p0 = legacy.display(), sidecar_notice = sidecar_notice)),

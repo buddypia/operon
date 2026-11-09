@@ -13,8 +13,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "paused"
@@ -22,13 +22,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write R2/R3 tests and move R1/R5 tests, watch them fail, then apply wording.md with the script."
+resume: "Have empirical-verifier try to break the wording guards, then close, push, and land after CI."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast and the named tests in verification.yaml"
+  bands: "machine passed bash scripts/check-bands.sh exits 0; largest_module_lines is src/app/screens.rs at 9976, 9978 on origin/main"
   release-binary: "machine pending yes: touches src/i18n_tables.rs and src/ui/widgets.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh"
-  guards-verified-by-mutation: "machine pending each new guard watched failing in mutations.py"
+  guards-verified-by-mutation: "machine passed 18 of 18 mutations caught by docs/sdlc/changes/274-ui-wording-reads-machine-made/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

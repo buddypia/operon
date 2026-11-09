@@ -1339,7 +1339,7 @@ pub(crate) fn corrected_managed_claude_conversation_in(
         RegisteredConversation::Named(registered) => {
             let Some(path) = claude_transcript_path_in(projects_root, workspace, &registered)
             else {
-                return Err(tr("このターミナルは新しい会話を開始したばかりで、まだ会話ログが書かれていません。1 度発言してから、もう一度お試しください。").into());
+                return Err(tr("このターミナルは新しい会話を開始したばかりで、まだ会話ログが書かれていません。1 度メッセージを送ってから、もう一度お試しください。").into());
             };
             return Ok(Some(claude_cli_session_at(&path)));
         }
@@ -1367,7 +1367,7 @@ pub(crate) fn corrected_managed_claude_conversation_in(
     )? {
         Some(recovered) => Ok(Some(recovered)),
         None => Err(
-            tr("このターミナルに記録されていた Claude 会話は、ターミナルが作られる前に終わった別の会話でした。実際の会話ログを特定できません。Discover local CLI sessions から該当する会話を選んでください。")
+            tr("このターミナルに記録されていた Claude 会話は、ターミナルが作られる前に終わった別の会話でした。実際の会話ログを特定できません。「ローカル CLI セッションを検出」から該当する会話を選んでください。")
                 .into(),
         ),
     }

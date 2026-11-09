@@ -1,0 +1,19 @@
+# The evidence for change 274. Shape: docs/sdlc/templates/verification.yaml.
+digest: "155d519755e27b62"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked the_idle_group_word_does_not_read_as_waiting_on_you
+  - R2 empirical-test :: cargo test --locked no_translation_carries_japanese_script_or_a_stray_backslash
+  - R3 empirical-test :: cargo test --locked no_message_uses_a_retired_term
+  - R4 empirical-test :: cargo test --locked every_message_the_code_shows_has_a_row_in_every_table
+  - R5 empirical-test :: cargo test --locked the_documents_name_the_idle_filter_with_the_windows_word
+  - I1 empirical-test :: cargo test --locked a_written_but_unconfirmed_notice_never_says_the_write_failed
+  - I2 empirical-test :: cargo test --locked sidebar_251_marks_and_accessible_filters
+  - I3 empirical-test :: cargo test --locked workspace_session_tab_shows_its_status_glyph
+  - I4 empirical-mutation :: python3 docs/sdlc/changes/274-ui-wording-reads-machine-made/mutations.py
+  - I5 formal-model :: cargo test --locked model_check_store_survives_every_interruption_of_a_write
+  - I6 formal-proof :: cargo kani --tests --harness proof_safe_agent_command_admits_no_line_break
+  - I7 empirical-test :: cargo test --locked every_translation_table_is_sorted_by_message_id
+  - I8 empirical-test :: cargo test --locked every_message_id_has_a_row_in_every_table
+  - I9 empirical-test :: cargo test --locked every_translation_keeps_the_placeholder_names_of_its_message_id
+  - I10 empirical-test :: cargo test --locked every_message_row_is_one_the_code_shows

@@ -1684,7 +1684,7 @@ pub(crate) const CLAUDE_FLAGS: &[AgentFlag] = &[
         id: "skip-permissions",
         args: &["--dangerously-skip-permissions"],
         label: "権限確認をすべてスキップする",
-        detail: "確認なしにファイルとコマンドを実行します。",
+        detail: "確認なしでファイルを編集し、コマンドを実行します。",
         group: "permission-escape",
         dangerous: true,
         conflicts_with_mode: false,

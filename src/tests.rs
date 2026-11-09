@@ -34370,7 +34370,7 @@ pub(crate) fn summarizes_various_git_commit_failures() {
     let test_err = "running 40 tests\ntest foo ... FAILED\nfailures:\nerror: test failed, run with `cargo test`";
     assert_eq!(
         summarize_commit_failure(test_err),
-        "テストの実行に失敗しました"
+        "テストを実行できませんでした"
     );
 
     let fmt_err = "Diff in src/app.rs at line 10\ncargo fmt failed";
@@ -48121,7 +48121,7 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         false,
         Some(AgentActivity::Idle),
     );
-    assert_eq!(view.label, tr("手すき"));
+    assert_eq!(view.label, tr("アイドル"));
     let mut ids: Vec<&str> = SessionStatusGroup::GROUPS
         .iter()
         .map(|group| group.message_id())
@@ -61617,19 +61617,21 @@ pub(crate) fn the_git_sub_tabs_are_translated_message_ids() {
     }
 }
 
-/// Change 259: the idle status group is worded 「手すき」, and both of its hover
-/// explanations say the turn is over, so 要対応 is the only status that reads
-/// as waiting on the person. It still does not share 「待機中」 with queued
-/// sessions waiting behind a prerequisite (change 221).
+/// Changes 259 and 274: the idle status group is worded 「アイドル」 — 259's
+/// 「手すき」 read as odd to the person — and both of its hover explanations
+/// say the turn is over, so 要対応 is the only status that reads as waiting on
+/// the person; Korean names that one 「확인 필요」. It still does not share
+/// 「待機中」 with queued sessions waiting behind a prerequisite (change 221).
 #[test]
 pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
-    assert_eq!(SessionStatusGroup::Free.message_id(), "手すき");
-    assert_eq!(SessionStatusKind::Idle.label(), "手すき");
-    assert_eq!(translation_for(Language::En, "手すき"), Some("Idle"));
-    assert_eq!(translation_for(Language::Ko, "手すき"), Some("유휴"));
+    assert_eq!(SessionStatusGroup::Free.message_id(), "アイドル");
+    assert_eq!(SessionStatusKind::Idle.label(), "アイドル");
+    assert_eq!(translation_for(Language::En, "アイドル"), Some("Idle"));
+    assert_eq!(translation_for(Language::Ko, "アイドル"), Some("유휴"));
+    assert_eq!(translation_for(Language::Ko, "要対応"), Some("확인 필요"));
     assert_eq!(
         SessionStatusGroup::Free.hint_id(),
-        "ターンを終えて手が空いているセッション"
+        "ターンを終え、次の依頼を出せるセッション"
     );
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let view = session_status_view(
@@ -61638,7 +61640,7 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
         false,
         Some(AgentActivity::Idle),
     );
-    assert_eq!(view.hint, tr("ターンを終えて手が空いています"));
+    assert_eq!(view.hint, tr("ターンを終え、次の依頼を出せます"));
     for group in SessionStatusGroup::GROUPS {
         let word = group.message_id();
         assert!(
@@ -61651,27 +61653,140 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
     for (id, en, ko) in [
         (
             SessionStatusGroup::Free.hint_id(),
-            "Sessions that finished their turn and are free",
-            "턴을 마치고 손이 비어 있는 세션",
+            "Sessions that finished their turn",
+            "턴을 마치고 다음 요청을 보낼 수 있는 세션",
         ),
         (
-            "ターンを終えて手が空いています",
-            "Turn finished; free for a new request",
-            "턴을 마치고 손이 비어 있습니다",
+            "ターンを終え、次の依頼を出せます",
+            "Turn finished; ready for your next request",
+            "턴을 마쳤습니다. 다음 요청을 보낼 수 있습니다",
         ),
     ] {
         assert!(!id.contains('待'), "idle hint 「{id}」 reads as waiting");
+        assert!(!en.contains("waiting"), "idle hint {en:?} reads as waiting");
+        assert!(!ko.contains("대기"), "idle hint 「{ko}」 reads as waiting");
         assert_eq!(translation_for(Language::En, id), Some(en));
         assert_eq!(translation_for(Language::Ko, id), Some(ko));
     }
-    assert!(
-        translation_for(Language::En, "指示待ち").is_none(),
-        "the old idle group row must be gone"
-    );
+    for old in ["指示待ち", "手すき"] {
+        assert!(
+            translation_for(Language::En, old).is_none(),
+            "the old idle group row 「{old}」 must be gone"
+        );
+    }
     assert!(
         translation_for(Language::En, "待機中").is_none(),
         "the bare group row for 待機中 must be gone while queued-session sentences remain"
     );
+}
+
+/// Change 274: a Korean row read 「병合합니다」, an English and a Korean row kept
+/// 「停止」, and three rows wrote `\\\"` where a quote was meant, so backslashes
+/// reached the screen. Japanese script in an English or Korean row is text
+/// nobody translated, and no message means to show a backslash.
+#[test]
+pub(crate) fn no_translation_carries_japanese_script_or_a_stray_backslash() {
+    fn is_japanese(c: char) -> bool {
+        matches!(c, '\u{3040}'..='\u{30FF}' | '\u{3400}'..='\u{9FFF}' | '「' | '」')
+    }
+    for (name, table) in [("EN_TABLE", EN_TABLE), ("KO_TABLE", KO_TABLE)] {
+        for (id, text) in table {
+            assert!(
+                !text.chars().any(is_japanese),
+                "{name} の {id:?} に日本語が残っています: {text:?}"
+            );
+            assert!(
+                !id.contains('\\') && !text.contains('\\'),
+                "{name} の {id:?} はバックスラッシュを画面に出します: {text:?}"
+            );
+        }
+    }
+}
+
+/// Change 274 reworded the notices for a write whose rename committed but whose
+/// directory sync was not confirmed (`WriteOutcome::CommittedButNotSynced`).
+/// The data is already on disk there, so every language has to keep saying the
+/// save is unconfirmed — never that it failed, which would tell a person a
+/// change was lost when it landed (durability-invariants).
+#[test]
+pub(crate) fn a_written_but_unconfirmed_notice_never_says_the_write_failed() {
+    let mut notices = 0;
+    for (id, en) in EN_TABLE {
+        if !(id.contains("書き込まれましたが") || id.contains("書き込みましたが"))
+        {
+            continue;
+        }
+        notices += 1;
+        let ko = translation_for(Language::Ko, id).unwrap_or_default();
+        assert!(
+            id.contains("確認でき") && !id.contains("保存できませんでした") && !id.contains("失敗"),
+            "{id:?} must say the save is unconfirmed, not failed"
+        );
+        assert!(
+            en.contains("confirm") && !en.contains("failed") && !en.contains("could not save"),
+            "{en:?} must say the save is unconfirmed, not failed"
+        );
+        assert!(
+            ko.contains("확인") && !ko.contains("실패") && !ko.contains("저장하지 못했"),
+            "{ko:?} must say the save is unconfirmed, not failed"
+        );
+    }
+    assert!(
+        notices >= 7,
+        "only {notices} written-but-unconfirmed notices found"
+    );
+}
+
+/// Change 274: the terms the wording review retired, one list per language.
+/// Each was a calque, jargon, or a second name for something the app already
+/// names, and a row written later by copying an old one would bring it back.
+/// The menu "Discover local CLI sessions" never existed under that name in any
+/// language: it is 「ローカル CLI セッションを検出」.
+#[test]
+pub(crate) fn no_message_uses_a_retired_term() {
+    let everywhere = ["Discover local CLI sessions"];
+    let japanese = ["手すき", "手が空い", "永続化", "上限付き"];
+    let english = [
+        "Attempting to",
+        "Land worktree",
+        "Landing",
+        "landing",
+        "Level with",
+        "in two goes",
+    ];
+    let korean = [
+        "덩어리",
+        "차이점",
+        "신선도",
+        "대응 필요",
+        "키 할당",
+        "당신",
+        "시간 창",
+        "리포지토리",
+    ];
+    let languages: [(&str, Vec<&str>, &[&str]); 3] = [
+        ("ja", catalog_keys().collect(), &japanese),
+        (
+            "en",
+            EN_TABLE.iter().map(|(_, text)| *text).collect(),
+            &english,
+        ),
+        (
+            "ko",
+            KO_TABLE.iter().map(|(_, text)| *text).collect(),
+            &korean,
+        ),
+    ];
+    for (language, texts, retired) in languages {
+        for text in texts {
+            for term in retired.iter().chain(&everywhere) {
+                assert!(
+                    !text.contains(term),
+                    "{language}: {term:?} was retired by change 274: {text:?}"
+                );
+            }
+        }
+    }
 }
 
 /// Change 221: the launch sheet's primary button is filled with `palette.accent`
@@ -61727,50 +61842,52 @@ pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Changes 221 and 259: the documents that name the idle filter use 「手すき」 /
-/// 「유휴」 and describe it as a finished turn, nowhere the old 「指示待ち」 /
-/// 「지시 대기」, while the sentences about queued sessions in the manual keep
-/// 「待機中」 / 「대기 중」.
+/// Changes 221, 259 and 274: the documents that name the idle filter use
+/// 「アイドル」 / 「유휴」 and describe it as a finished turn, Korean names the
+/// needs-you filter 「확인 필요」, and the English manual names the menu
+/// "Merge worktree into main…"; nowhere the old 「指示待ち」 / 「지시 대기」 /
+/// 「手すき」 / 「대응 필요」 / "Land worktree into main", while the sentences about
+/// queued sessions in the manual keep 「待機中」 / 「대기 중」.
 #[test]
 pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
     let readme = fs::read_to_string("README.md").unwrap();
     assert!(
-        readme.contains("header — **要対応**, **実行中**, **手すき**, **終了** —"),
-        "README.md must name the idle filter 手すき"
+        readme.contains("header — **要対応**, **実行中**, **アイドル**, **終了** —"),
+        "README.md must name the idle filter アイドル"
     );
 
     let readme_ja = fs::read_to_string("README.ja.md").unwrap();
     assert!(
-        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・手すき・終了で一覧"),
-        "README.ja.md hero caption must name 手すき"
+        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・アイドル・終了で一覧"),
+        "README.ja.md hero caption must name アイドル"
     );
     assert!(
-        readme_ja.contains("**要対応**・**実行中**・**手すき**・**終了** の 4 つのトグル"),
-        "README.ja.md filter toggles must name 手すき"
+        readme_ja.contains("**要対応**・**実行中**・**アイドル**・**終了** の 4 つのトグル"),
+        "README.ja.md filter toggles must name アイドル"
     );
 
     let readme_ko = fs::read_to_string("README.ko.md").unwrap();
     assert!(
-        readme_ko.contains("모든 프로젝트의 세션을 대응 필요·실행 중·유휴·종료로 한눈에"),
-        "README.ko.md hero caption must name 유휴"
+        readme_ko.contains("모든 프로젝트의 세션을 확인 필요·실행 중·유휴·종료로 한눈에"),
+        "README.ko.md hero caption must name 확인 필요 and 유휴"
     );
     assert!(
-        readme_ko.contains("**대응 필요**·**실행 중**·**유휴**·**종료** 네 개의 토글"),
-        "README.ko.md filter toggles must name 유휴"
+        readme_ko.contains("**확인 필요**·**실행 중**·**유휴**·**종료** 네 개의 토글"),
+        "README.ko.md filter toggles must name 확인 필요 and 유휴"
     );
 
     let manual_ja = fs::read_to_string("docs/MANUAL.ja.md").unwrap();
     assert!(
-        manual_ja.contains("| **手すき** | ターンを終えて手が空いている。次の依頼を出すかは自由 |"),
-        "docs/MANUAL.ja.md state table must name 手すき as a finished turn"
+        manual_ja.contains("| **アイドル** | ターンを終え、次の依頼を出せる状態 |"),
+        "docs/MANUAL.ja.md state table must name アイドル as a finished turn"
     );
     assert!(
-        manual_ja.contains("**要対応**・**実行中**・**手すき**・**終了** の 4 つのトグル"),
-        "docs/MANUAL.ja.md filter toggles must name 手すき"
+        manual_ja.contains("**要対応**・**実行中**・**アイドル**・**終了** の 4 つのトグル"),
+        "docs/MANUAL.ja.md filter toggles must name アイドル"
     );
     assert!(
-        manual_ja.contains("**状態が「実行中」のまま変わらない／「手すき」のまま**"),
-        "docs/MANUAL.ja.md troubleshooting must name 手すき"
+        manual_ja.contains("**状態が「実行中」のまま変わらない／「アイドル」のまま**"),
+        "docs/MANUAL.ja.md troubleshooting must name アイドル"
     );
     assert!(
         manual_ja.contains("待機中のセッションには **今すぐ開始** が出て"),
@@ -61779,12 +61896,12 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
 
     let manual_ko = fs::read_to_string("docs/MANUAL.ko.md").unwrap();
     assert!(
-        manual_ko.contains("| **유휴** | 턴을 마치고 손이 비어 있는 상태. 다음 요청은 자유 |"),
+        manual_ko.contains("| **유휴** | 턴을 마치고 다음 요청을 보낼 수 있는 상태 |"),
         "docs/MANUAL.ko.md state table must name 유휴 as a finished turn"
     );
     assert!(
-        manual_ko.contains("**대응 필요**, **실행 중**, **유휴**, **종료** 네 개의 토글 칩"),
-        "docs/MANUAL.ko.md filter toggles must name 유휴"
+        manual_ko.contains("**확인 필요**, **실행 중**, **유휴**, **종료** 네 개의 토글 칩"),
+        "docs/MANUAL.ko.md filter toggles must name 확인 필요 and 유휴"
     );
     assert!(
         manual_ko.contains("**상태가 \"실행 중\"에서 바뀌지 않거나 \"유휴\"로 남음**"),
@@ -61799,9 +61916,12 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
 
     let manual_en = fs::read_to_string("docs/MANUAL.md").unwrap();
     assert!(
-        manual_en
-            .contains("| **Idle** | Finished its turn and free; the next request is up to you |"),
+        manual_en.contains("| **Idle** | Finished its turn; ready for your next request |"),
         "docs/MANUAL.md state table must describe Idle as a finished turn"
+    );
+    assert!(
+        manual_en.contains("**Merge worktree into main…**"),
+        "docs/MANUAL.md must name the merge menu as the app does"
     );
     assert!(
         !manual_en.contains("waiting for your next request"),
@@ -61811,14 +61931,18 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         ("README.md", &readme),
         ("README.ja.md", &readme_ja),
         ("README.ko.md", &readme_ko),
+        ("docs/MANUAL.md", &manual_en),
         ("docs/MANUAL.ja.md", &manual_ja),
         ("docs/MANUAL.ko.md", &manual_ko),
     ] {
-        for old in ["指示待ち", "지시 대기"] {
-            assert!(
-                !text.contains(old),
-                "{path} still names the idle filter {old}"
-            );
+        for old in [
+            "指示待ち",
+            "지시 대기",
+            "手すき",
+            "대응 필요",
+            "Land worktree into main",
+        ] {
+            assert!(!text.contains(old), "{path} still names {old}");
         }
     }
 }
@@ -67430,9 +67554,9 @@ fn workspace_session_tab_shows_its_status_glyph() {
     );
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let changed = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    assert!(drawn_text_rect(&changed, |text| text == tr("手すき")).is_some());
+    assert!(drawn_text_rect(&changed, |text| text == tr("アイドル")).is_some());
     assert!(drawn_text_rect(&changed, |text| text
-        == tr("ターンを終えて手が空いています"))
+        == tr("ターンを終え、次の依頼を出せます"))
     .is_some());
     assert!(drawn_text_rect(&changed, |text| text == tr("ターミナル稼働中")).is_none());
     workspace_pointer_frame(
@@ -70180,7 +70304,7 @@ fn sidebar_251_marks_and_accessible_filters() {
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert_eq!(app.selected_session, selected_before);
     assert_eq!(app.workspace.active().cloned(), active_before);
-    for label in ["要対応", "実行中", "手すき", "終了"] {
+    for label in ["要対応", "実行中", "アイドル", "終了"] {
         for rect in drawn_text_rects(&output, |text| text == label) {
             assert!(
                 rect.right() < right,
@@ -73257,7 +73381,7 @@ pub(crate) fn knowledge_258_hook_environment_names_the_operon_executable() {
 pub(crate) fn knowledge_258_opt_in_says_what_agents_are_given() {
     let (mut app, project, snapshot, root) = map_test_app("kn-258-tab", &[3]);
     let enabled = knowledge_tab_texts(&mut app, &project);
-    let standing = tr("Claude Code と Codex のセッション開始時に、ナレッジの題名 (最大 10 件) と検索方法をその CLI に渡しています。");
+    let standing = tr("Claude Code と Codex のセッション開始時に、ナレッジの題名（最大 10 件）と検索方法をその CLI に渡しています。");
     assert!(enabled.iter().any(|text| text == standing), "{enabled:?}");
     let off = Arc::new(KnowledgeSnapshot {
         enabled: false,

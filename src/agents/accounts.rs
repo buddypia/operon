@@ -190,7 +190,7 @@ pub(crate) fn account_ready_to_launch(
         return Ok(());
     };
     let Some(account) = accounts.get(account) else {
-        return Err(tr("選ばれたアカウントが見つかりません。").into());
+        return Err(tr("選んだアカウントが見つかりません。").into());
     };
     if !account.path.is_dir() {
         return Err(tf!(
