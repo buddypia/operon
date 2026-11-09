@@ -46,4 +46,12 @@
 
 ## Departures from the plan
 
-None yet.
+Before any source edit, R3 dropped its "accessible label" clause: egui only reports a widget's name on a click or focus event, and the mark is hover-only, so no guard in this suite could watch that claim fail. The spec was re-evaluated at its new digest.
+
+`session_254_compact_tabs` pinned the old layout ("title within 65pt of the column edge"). Its bound now grows by exactly one `SESSION_MARK_SIZE` plus one item gap, so it still catches a title pushed right by anything else.
+
+`launch_stored_session_does_not_block_on_workspace_trust_polling` failed once while the related tests ran in parallel (it times a real tmux launch against two seconds) and passed when run alone; this change touches no launch code.
+
+Screenshot: the worktree build ran against a throwaway HOME and its own tmux server, seeded with Antigravity, Claude Code, terminal, and custom sessions. Synthetic clicks are not permitted on this machine, so a temporary startup patch in `src/app.rs` opened the four tabs; it was reverted with `git checkout -- src/app.rs` before anything was staged. The captured strip reads `[⏸ カスタム ×] [⟳ (terminal mark) セッション3 ×] [⏸ (Claude mark) セッション1 ×] [⏸ (Antigravity mark) セッション2 ×]`, as `screen.md` describes.
+
+Proof: R1–R4 named tests pass, mutation sweep 9 of 9 caught with the source restored, `make q.fast` passes.

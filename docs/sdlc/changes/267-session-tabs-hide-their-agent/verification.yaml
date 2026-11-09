@@ -1,0 +1,19 @@
+# Change 267: a session tab shows its CLI's mark between the state mark and
+# the title — the vendor's for Antigravity, Claude Code and Codex, Operon's own
+# terminal mark for a plain or recovered terminal, nothing for a custom command.
+# R1–R3 are the spec requirements; R4 is the tab's existing behaviour, pinned by
+# change 248's status-glyph test and the workspace pointer test. I1 is the
+# mutation sweep (nine mutations, claims included: the hover words and the
+# plate's shape). I2 is change 254's compact-tab guard, whose bound grew by one
+# mark and one gap. I3 keeps the vendor marks' own guard.
+digest: "6dbfa40cd12406ca"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_tabs_show_the_cli_mark_after_the_state
+  - R2 empirical-test :: cargo test --locked the_terminal_mark_is_a_rounded_square_for_terminal_sessions_only
+  - R3 empirical-test :: cargo test --locked session_tab_mark_names_its_cli_on_hover
+  - R4 empirical-test :: cargo test --locked workspace_session_tab_shows_its_status_glyph
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/267-session-tabs-hide-their-agent/mutations.py
+  - I2 empirical-test :: cargo test --locked session_254_compact_tabs
+  - I3 empirical-test :: cargo test --locked every_launchable_agent_ships_a_decodable_mark
+  - I4 empirical-test :: cargo test --locked workspace_pointer_switch_reorder_split_and_close_document
