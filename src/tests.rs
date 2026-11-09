@@ -77633,3 +77633,295 @@ fn diff_277_choosing_the_diff_view_still_starts_from_nothing() {
     assert!(!app.git_diff_cache.contains_key(&key) && !app.diff_file_cache.contains_key(&key));
     fs::remove_dir_all(&root).ok();
 }
+
+/// Two live sessions in one project; `first`'s agent is working.
+fn working_278_app(label: &str) -> (PathBuf, OperonApp, Uuid, Uuid) {
+    let root = temporary_directory(label);
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    working_278_settle(&mut app, first, AgentActivity::Working);
+    (root, app, first, second)
+}
+
+fn working_278_settle(app: &mut OperonApp, session: Uuid, activity: AgentActivity) {
+    let mut tracker = ActivityTracker::default();
+    for _ in 0..ACTIVITY_CONFIRMATIONS {
+        observe_agent_activity(&mut tracker, activity);
+    }
+    app.session_activity.insert(session, tracker);
+}
+
+const WORKING_278_TWELVE_MINUTES: Duration = Duration::from_secs(12 * 60 + 5);
+
+#[test]
+fn working_278_clock_runs_only_while_the_agent_works() {
+    let (root, mut app, first, second) = working_278_app("working-278-clock");
+    // A session that is starting shares the word 実行中 and is not working.
+    let mut starting = test_session(Uuid::new_v4(), SessionStatus::Starting);
+    starting.project_id = app.store.sessions[0].project_id;
+    let starting_id = starting.id;
+    assert_eq!(
+        app.session_status_kind_for(&starting).label(),
+        "実行中",
+        "この前提が崩れたら、起動中の例を選び直してください"
+    );
+    app.store.sessions.insert(0, starting);
+    let began = Instant::now();
+    app.track_working(began);
+    assert_eq!(
+        app.working_time(first, began + WORKING_278_TWELVE_MINUTES),
+        Some(WORKING_278_TWELVE_MINUTES)
+    );
+    assert_eq!(
+        app.working_time(second, began),
+        None,
+        "作業していないセッションに経過時間が付きました"
+    );
+    assert_eq!(
+        app.working_time(starting_id, began),
+        None,
+        "起動中のセッションに作業時間が付きました"
+    );
+    // A later frame does not move the start.
+    let minute = Duration::from_secs(60);
+    app.track_working(began + minute);
+    assert_eq!(app.working_time(first, began + minute), Some(minute));
+    // The turn ends.
+    working_278_settle(&mut app, first, AgentActivity::AwaitingInput);
+    app.track_working(began + minute * 2);
+    assert_eq!(
+        app.working_time(first, began + minute * 2),
+        None,
+        "ターンが終わっても作業時間が残りました"
+    );
+    // A session that is gone leaves nothing behind.
+    working_278_settle(&mut app, second, AgentActivity::Working);
+    app.track_working(began);
+    assert!(app.working_time(second, began).is_some());
+    app.store.sessions.retain(|session| session.id != second);
+    app.track_working(began);
+    assert!(
+        app.working_since.is_empty(),
+        "なくなったセッションの作業時間が残りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn working_278_a_new_turn_starts_from_zero() {
+    let (root, mut app, first, _) = working_278_app("working-278-turn");
+    let minute = Duration::from_secs(60);
+    let began = Instant::now();
+    app.track_working(began);
+    working_278_settle(&mut app, first, AgentActivity::Idle);
+    app.track_working(began + minute * 40);
+    working_278_settle(&mut app, first, AgentActivity::Working);
+    let again = began + minute * 41;
+    app.track_working(again);
+    assert_eq!(
+        app.working_time(first, again + minute),
+        Some(minute),
+        "新しいターンが、前のターンの時間を引き継ぎました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn working_278_time_is_said_in_minutes_then_hours() {
+    use app::working_time::working_time_label;
+    let seconds = Duration::from_secs;
+    assert_eq!(working_time_label(Duration::ZERO), None);
+    assert_eq!(working_time_label(seconds(59)), None);
+    assert_eq!(working_time_label(seconds(60)), Some(tf!("{p0}分", p0 = 1)));
+    assert_eq!(
+        working_time_label(seconds(59 * 60 + 59)),
+        Some(tf!("{p0}分", p0 = 59))
+    );
+    assert_eq!(
+        working_time_label(seconds(60 * 60)),
+        Some(tf!("{p0}時間", p0 = 1))
+    );
+    assert_eq!(
+        working_time_label(seconds(12 * 60 * 60 + 59 * 60)),
+        Some(tf!("{p0}時間", p0 = 12))
+    );
+    // The waiting time's units, so one list reads in one vocabulary.
+    assert_eq!(
+        working_time_label(WORKING_278_TWELVE_MINUTES),
+        Some(attention_wait_label(WORKING_278_TWELVE_MINUTES))
+    );
+}
+
+/// The state word with twelve minutes after it, as a row prints it.
+fn working_278_timed(text: &str) -> String {
+    tf!("{p0} · {p1}", p0 = text, p1 = tf!("{p0}分", p0 = 12))
+}
+
+#[test]
+fn working_278_row_says_how_long_the_agent_has_worked() {
+    let (root, mut app, first, _) = working_278_app("working-278-row");
+    app.working_since
+        .insert(first, Instant::now() - WORKING_278_TWELVE_MINUTES);
+    let state = tr("実行中");
+    let timed = working_278_timed(state);
+    // The per-project session list: 履歴's list and the docked session panel.
+    let texts = session_tabs_texts(&mut app);
+    assert_eq!(
+        texts.iter().filter(|text| **text == timed).count(),
+        1,
+        "作業中のセッションの行が、何分作業しているかを言いません: {texts:?}"
+    );
+    assert!(
+        texts.iter().any(|text| text == state),
+        "作業していないセッションの行は、状態の語だけのはずです: {texts:?}"
+    );
+    // Under a minute the row is as it was.
+    app.working_since.insert(first, Instant::now());
+    let texts = session_tabs_texts(&mut app);
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.starts_with(&tf!("{p0} · {p1}", p0 = state, p1 = ""))),
+        "1 分未満なのに時間を表示しました: {texts:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn working_278_open_pane_says_how_long_the_agent_has_worked() {
+    let (root, mut app, first, _) = working_278_app("working-278-pane");
+    let project = app.store.sessions[0].project_id;
+    app.select_workspace_project(project);
+    app.select_session(first);
+    app.working_since
+        .insert(first, Instant::now() - WORKING_278_TWELVE_MINUTES);
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&workspace_pointer_frame(&mut app, &ctx, Vec::new()));
+    let timed = working_278_timed(tr("実行中"));
+    assert!(
+        texts.iter().any(|text| text.ends_with(&timed)),
+        "開いているペインの見出しが、何分作業しているかを言いません: {texts:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// What the workspace paints with the pointer resting on the text `pick`
+/// chooses, tooltips shown at once.
+fn working_278_hover_texts(
+    app: &mut OperonApp,
+    pick: impl Fn(&[(String, egui::Pos2)], f32) -> Option<egui::Pos2>,
+) -> Vec<String> {
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(app, &ctx, Vec::new());
+    let positions = text_positions(&workspace_pointer_frame(app, &ctx, Vec::new()));
+    let column = project_column_right(app);
+    let at =
+        pick(&positions, column).expect("the text to hover is on screen") + egui::vec2(3.0, 3.0);
+    let moved = || vec![egui::Event::PointerMoved(at)];
+    workspace_pointer_frame(app, &ctx, moved());
+    workspace_pointer_frame(app, &ctx, moved());
+    painted_texts(&workspace_pointer_frame(app, &ctx, moved()))
+}
+
+#[test]
+fn working_278_column_and_tab_hovers_say_how_long() {
+    let (root, mut app, first, _) = working_278_app("working-278-hovers");
+    let project = app.store.sessions[0].project_id;
+    app.select_workspace_project(project);
+    app.select_session(first);
+    app.working_since
+        .insert(first, Instant::now() - WORKING_278_TWELVE_MINUTES);
+    let timed = working_278_timed(tr("応答を生成中"));
+    // The session's row in the project column: the leftmost 「first」.
+    let row = working_278_hover_texts(&mut app, |texts, column| {
+        texts
+            .iter()
+            .filter(|(text, pos)| text == "first" && pos.x < column)
+            .map(|(_, pos)| *pos)
+            .next()
+    });
+    assert!(
+        row.iter().any(|text| *text == timed),
+        "セッション列の行のホバーが作業時間を言いません: {row:?}"
+    );
+    // The tab's state mark is painted, not text: it sits left of the tab's
+    // title, before the agent's mark, so walk left from the title until a
+    // hover opens.
+    let tab = (2..16)
+        .map(|step| step as f32 * 4.0)
+        .map(|left| {
+            working_278_hover_texts(&mut app, |texts, column| {
+                texts
+                    .iter()
+                    .filter(|(text, pos)| text == "first" && pos.x > column)
+                    .map(|(_, pos)| *pos - egui::vec2(left, 0.0))
+                    .min_by(|a, b| a.y.total_cmp(&b.y))
+            })
+        })
+        .find(|texts| {
+            texts
+                .iter()
+                .any(|text| text == tr("応答を生成中") || *text == timed)
+        })
+        .expect("the tab's state mark answers a hover");
+    assert!(
+        tab.iter().any(|text| *text == timed),
+        "タブのホバーが作業時間を言いません: {tab:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn working_278_hover_says_how_long_too() {
+    let (root, mut app, first, second) = working_278_app("working-278-hover");
+    app.working_since
+        .insert(first, Instant::now() - WORKING_278_TWELVE_MINUTES);
+    let session = |app: &OperonApp, id: Uuid| {
+        app.store
+            .sessions
+            .iter()
+            .find(|session| session.id == id)
+            .cloned()
+            .unwrap()
+    };
+    let working = app.status_view(&session(&app, first));
+    assert_eq!(
+        working.hint,
+        tf!(
+            "{p0} · {p1}",
+            p0 = tr("応答を生成中"),
+            p1 = tf!("{p0}分", p0 = 12)
+        ),
+        "行のホバーが作業時間を言いません"
+    );
+    assert_eq!(working.label, tr("実行中"), "状態の語そのものは変えません");
+    let other = app.status_view(&session(&app, second));
+    assert_eq!(other.hint, tr("ターミナル稼働中"));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn working_278_frame_keeps_the_clocks() {
+    let (root, mut app, first, second) = working_278_app("working-278-frame");
+    app.page = Page::Sessions;
+    app.hooks_started = true;
+    app.hooks_enabled = false;
+    app.handoff_archive_sweep_started = true;
+    app.last_session_poll = Instant::now();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    assert!(app.working_since.is_empty());
+    poll_275_frame(&mut app, &ctx, true);
+    assert!(
+        app.working_since.contains_key(&first),
+        "フレームが、作業中のセッションの時計を始めませんでした"
+    );
+    assert!(!app.working_since.contains_key(&second));
+    fs::remove_dir_all(&root).ok();
+}

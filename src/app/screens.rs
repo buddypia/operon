@@ -6098,15 +6098,20 @@ impl OperonApp {
                                 ui.label(RichText::new("·").size(11.5).color(second_ink));
                                 // Four words for fourteen states: which one it
                                 // is, is the hover's to say.
-                                ui.label(
-                                    RichText::new(&status.label)
-                                        .size(11.5)
-                                        .color(if is_selected {
-                                            second_ink
-                                        } else {
-                                            palette.status(status.tone)
-                                        }),
-                                )
+                                // A working agent also says for how long
+                                // (change 278).
+                                let state = self.with_working_time(
+                                    &status.label,
+                                    candidate.id,
+                                    Instant::now(),
+                                );
+                                ui.label(RichText::new(state).size(11.5).color(
+                                    if is_selected {
+                                        second_ink
+                                    } else {
+                                        palette.status(status.tone)
+                                    },
+                                ))
                                 .on_hover_text(&status.hint);
                                 // The branch only when the session runs in a
                                 // worktree: in the project's own checkout it is
@@ -6310,7 +6315,10 @@ impl OperonApp {
             .as_ref()
             .map(|project| project.name.clone())
             .unwrap_or_else(|| tr("登録されていないプロジェクト").into());
-        let status = self.status_view(session);
+        let mut status = self.status_view(session);
+        // The open pane's heading says how long its agent has worked
+        // (change 278).
+        status.label = self.with_working_time(&status.label, session_id, Instant::now());
         let title = session_list_title(
             session,
             self.session_prompt_turns
@@ -7261,7 +7269,11 @@ impl OperonApp {
                                                                     self.session_activity_for(*id),
                                                                 );
                                                                 ui.label(&view.label);
-                                                                ui.label(&view.hint);
+                                                                ui.label(self.with_working_time(
+                                                                    &view.hint,
+                                                                    *id,
+                                                                    Instant::now(),
+                                                                ));
                                                             },
                                                         );
                                                         // Which CLI, beside how it is (change 267).
@@ -7956,7 +7968,11 @@ impl OperonApp {
                                         );
                                         ui.label(&title);
                                         ui.label(&view.label);
-                                        ui.label(&view.hint);
+                                        ui.label(self.with_working_time(
+                                            &view.hint,
+                                            id,
+                                            Instant::now(),
+                                        ));
                                     });
                                 if row.hovered() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
