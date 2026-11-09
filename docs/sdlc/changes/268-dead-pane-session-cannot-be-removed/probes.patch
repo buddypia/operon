@@ -1,8 +1,8 @@
 diff --git a/src/tests.rs b/src/tests.rs
-index e0648f9..70174e4 100644
+index e0648f9..7dd5837 100644
 --- a/src/tests.rs
 +++ b/src/tests.rs
-@@ -73150,3 +73150,750 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
+@@ -73150,3 +73150,834 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
      assert_eq!(app.editor_focus_line, Some(1));
      fs::remove_dir_all(root).ok();
  }
@@ -749,6 +749,90 @@ index e0648f9..70174e4 100644
 +    eprintln!("tabs right after click: {:?}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>());
 +    for _ in 0..80 { frame(&mut app, vec![]); thread::sleep(Duration::from_millis(30)); }
 +    eprintln!("tabs after: {:?} selected={:?}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), app.selected_session);
++    eprintln!("notice={:?}", app.notice);
++    for n in names { kill_tmux_session(&n); }
++    fs::remove_dir_all(&root).ok();
++}
++
++#[test]
++fn probe_268_focused_terminal() {
++    if !tool_available("tmux") { return; }
++    let root = temporary_directory("probe-268-real");
++    let mut app = OperonApp::from_state(root.join("store.json"), Store::default(), ToolStatus { tmux: true, ..ToolStatus::default() }, None);
++    app.page = Page::Sessions;
++    app.hooks_started = true; app.hooks_enabled = false; app.handoff_archive_sweep_started = true;
++    let project_id = Uuid::new_v4();
++    app.store.projects.push(Project { id: project_id, path: root.clone(), name: "p".into(), added_at: now() });
++    let mut names = Vec::new();
++    let mut make = |app: &mut OperonApp, name: &str, cmd: &str| {
++        let mut s = test_session(Uuid::new_v4(), SessionStatus::Active);
++        s.project_id = project_id;
++        s.name = name.into();
++        s.agent = if name == "term3" { "terminal".into() } else { "gemini".into() };
++        s.agent_command = "agy".into();
++        s.worktree_path = Some(root.clone());
++        s.launched_at = Some(now());
++        s.tmux_name = format!("operon-f268-{}", &s.id.simple().to_string()[..8]);
++        assert!(tmux_command().args(["new-session", "-d", "-s", &s.tmux_name, "-x", "120", "-y", "30", cmd]).status().unwrap().success());
++        configure_tmux_session(&s.tmux_name).unwrap();
++        names.push(s.tmux_name.clone());
++        let id = s.id;
++        app.store.sessions.push(s);
++        id
++    };
++    let dead = make(&mut app, "deadone", "sleep 4; exit 0");
++    let live = make(&mut app, "liveone", "sleep 60");
++    let _t3 = make(&mut app, "term3", "sleep 60");
++    let ctx = egui::Context::default();
++    ctx.enable_accesskit();
++    let start = Instant::now();
++    let mut frame = |app: &mut OperonApp, events: Vec<egui::Event>| {
++        ctx.run(
++            egui::RawInput { time: Some(start.elapsed().as_secs_f64()), events, screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1512.0, 900.0))), ..Default::default() },
++            |ctx| { app.ports_scanned_at = Some(Instant::now()); let mut f = eframe::Frame::_new_kittest(); <OperonApp as eframe::App>::update(app, ctx, &mut f); },
++        )
++    };
++    frame(&mut app, vec![]);
++    app.open_session_in_terminal(dead);
++    for _ in 0..10 { frame(&mut app, vec![]); thread::sleep(Duration::from_millis(30)); }
++    {
++        let p = egui::pos2(800.0, 500.0);
++        frame(&mut app, vec![egui::Event::PointerMoved(p)]);
++        frame(&mut app, vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
++        frame(&mut app, vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
++        for _ in 0..3 { frame(&mut app, vec![]); }
++        eprintln!("focused widget after terminal click: {:?}", ctx.memory(|m| m.focused()));
++    }
++    let deadline = Instant::now() + Duration::from_secs(8);
++    while Instant::now() < deadline && app.store.sessions.iter().find(|s| s.id == dead).unwrap().status == SessionStatus::Active {
++        frame(&mut app, vec![]);
++        thread::sleep(Duration::from_millis(30));
++    }
++    for _ in 0..10 { frame(&mut app, vec![]); thread::sleep(Duration::from_millis(30)); }
++    eprintln!("focus before close: {:?}", ctx.memory(|m| m.focused()));
++    eprintln!("dead status now {:?}", app.store.sessions.iter().find(|s| s.id == dead).unwrap().status);
++    eprintln!("dead output: {:?}", app.session_output.get(&dead).map(|o| o.chars().rev().take(120).collect::<String>().chars().rev().collect::<String>()));
++    eprintln!("tabs before: {:?} active={:?}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), app.workspace.active());
++    let out = frame(&mut app, vec![]);
++    let update = out.platform_output.accesskit_update.expect("accesskit");
++    let mut closes = Vec::new();
++    for (_, node) in &update.nodes {
++        if let Some(b) = node.bounds() { if node.label() == Some(ICON_CLOSE) && b.y0 < 120.0 { closes.push(b); } }
++    }
++    eprintln!("closes {closes:?}");
++    // the dead tab is the one opened first => leftmost? find via order
++    let dead_index = app.workspace.groups[0].tabs.iter().position(|t| *t == WorkspaceTab::Session(dead)).unwrap();
++    closes.sort_by(|a, b| a.x0.partial_cmp(&b.x0).unwrap());
++    let target = closes[dead_index];
++    let pos = egui::pos2(((target.x0 + target.x1) / 2.0) as f32, ((target.y0 + target.y1) / 2.0) as f32);
++    frame(&mut app, vec![egui::Event::PointerMoved(pos)]);
++    thread::sleep(Duration::from_millis(30));
++    frame(&mut app, vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
++    thread::sleep(Duration::from_millis(60));
++    frame(&mut app, vec![egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
++    eprintln!("tabs right after click: {:?}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>());
++    for _ in 0..80 { frame(&mut app, vec![]); thread::sleep(Duration::from_millis(30)); }
++    eprintln!("tabs after: {:?} selected={:?} dead={dead} live={live}", app.workspace.groups.iter().map(|g| g.tabs.clone()).collect::<Vec<_>>(), app.selected_session);
 +    eprintln!("notice={:?}", app.notice);
 +    for n in names { kill_tmux_session(&n); }
 +    fs::remove_dir_all(&root).ok();

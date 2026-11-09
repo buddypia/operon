@@ -74,6 +74,7 @@ file (reverted from the tree; `probe_268_user_store*` need
 | fast click (press+release in one frame) or a shown tooltip eats it | probe 8 variants |
 | the app is hung | `sample 31483`: main thread idle in the run loop, frames flushing |
 | `WorkspaceTabs` can leave a tab in two groups, or a group outside the layout, so `close` removes a hidden copy | `probe_268_workspace_invariants_random_walk`: 20 000 walks of open/close/insert_tab/move_tab/select/retain, no violation |
+| the terminal still holding the keyboard when the agent exits (the person's ^C^C) eats the click | `probe_268_focused_terminal`: terminal clicked to focus while Active, pane dies, ✕ still closes the tab |
 | the harness used egui's default fonts | probes 4–8 run the full `update`, which calls `apply_appearance` → `configure_macos_fonts` |
 
 ## Narrowest remaining hypothesis
