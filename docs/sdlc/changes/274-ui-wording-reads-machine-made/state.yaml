@@ -1,24 +1,28 @@
 # The state of one change. Field meanings and closed sets:
 # docs/sdlc/templates/state.yaml. Branch: feature/274-ui-wording-reads-machine-made.
 #
-# The UI text reads as machine-made in ja/en/ko; 170 rows are rewritten and the
+# The UI text reads as machine-made in ja/en/ko; 188 messages are reworded and the
 # idle status word 「手すき」 becomes 「アイドル」.
 #
 # Route: modify (placement EXTEND in src/i18n_tables.rs, src/ui/widgets.rs, the
 # message ids at their call sites, the READMEs and the manuals).
+#
+# Risk high, autonomy paused: src/store.rs is a paused surface. Its edit is two
+# notice literals, no persisted shape, write order, migration or cancellation,
+# so approval.md gives the store category to the evaluator.
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
-  questions: "0 7"
-  autonomy: "full"
-  risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Write spec.md and screen.md from intent.md and wording.md, then pass readiness."
+resume: "Write R2/R3 tests and move R1/R5 tests, watch them fail, then apply wording.md with the script."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
