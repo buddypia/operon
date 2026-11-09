@@ -1,0 +1,4 @@
+2026-11-09T22:44:01Z auto intent intent.md 076ba9164fb13fc3 approve Independent evaluator a2bcd399, second round: quotes the request and the selected candidate; keeping tabs out honours change 250; the scope line now matches where the hint is read.
+2026-11-09T22:44:01Z auto spec spec.md ec95af472967e266 approve Independent evaluator a2bcd399, second round: requirement 5 limited to the row's hover, hint appended after the hook's tool; five requirements each with a named test.
+2026-11-09T22:44:01Z auto screen screen.md 9bb67cc66dbc0e28 approve Independent evaluator a2bcd399: the row layout is true to screens.rs 6094-6112; the time is part of the label in the same ink, wording only.
+2026-11-09T22:44:01Z auto plan plan.md a4ed57e00ef09eb6 approve Independent evaluator a2bcd399: files, order, a screen-level test for the row and the starting/queued risk match the spec.
