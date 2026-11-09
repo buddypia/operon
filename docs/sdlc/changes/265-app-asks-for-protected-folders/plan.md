@@ -138,3 +138,9 @@ either can look inside a protected folder nobody pointed Operon at.
   check out the branch in its isolated worktree (the trunk-allowlist hook
   refused `git checkout --detach`), so the lead came from its reading and the
   reproduction was run here.
+- **The sweep finds its checkout from its own path.** The first CI run failed
+  only on I6: `mutations.py` named this worktree's absolute path as `ROOT`,
+  which does not exist on the runner. It now uses
+  `Path(__file__).resolve().parents[4]`, as changes 241-262 do. The template's
+  comment still asks for an absolute path; several tests pin that placeholder
+  line, so changing it is a change of its own.

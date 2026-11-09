@@ -6,7 +6,7 @@ the last group mutates the sentences a person reads.
 import sys
 from pathlib import Path
 
-ROOT = Path("/Users/a13973/dev/buddypia/operon/.worktrees/fix/265-app-asks-for-protected-folders")
+ROOT = Path(__file__).resolve().parents[4]
 
 RUN_SECONDS = 1800
 
