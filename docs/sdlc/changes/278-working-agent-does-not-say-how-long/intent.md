@@ -24,7 +24,8 @@ the one that needs a look, and nothing on the list says which that is.
 ## Desired outcome
 
 - A session whose agent has been working for a minute or more says for how
-  long, in the session list, without being opened.
+  long, wherever its state is put into words: beside the word where one is
+  printed, and in the hover where only a mark is.
 - The time is the current turn's: when the agent stops and later starts again,
   the count starts again.
 - Nothing is added for a session that is not working, or has only just begun.
@@ -48,6 +49,6 @@ None.
 ## Not in scope
 
 - Warning about, or acting on, a long turn (a threshold, a notification).
-- The time on a session tab, the home page cards, or the history grid's rows:
-  only the session column's row, and the hover of its state word, say it.
+- The time printed on a session tab or on a project column row, which changes
+  250 and 253 left without a state word: their hover says it.
 - How long a finished turn took.

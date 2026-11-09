@@ -1,0 +1,13 @@
+# The evidence for change 278. Format: docs/sdlc/templates/verification.yaml.
+digest: "92d0c6a9cd6e794d"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked working_278_clock_runs_only_while_the_agent_works
+  - I2 empirical-test :: cargo test --locked working_278_frame_keeps_the_clocks
+  - R2 empirical-test :: cargo test --locked working_278_a_new_turn_starts_from_zero
+  - R3 empirical-test :: cargo test --locked working_278_time_is_said_in_minutes_then_hours
+  - R4 empirical-test :: cargo test --locked working_278_row_says_how_long_the_agent_has_worked
+  - R5 empirical-test :: cargo test --locked working_278_open_pane_says_how_long_the_agent_has_worked
+  - R6 empirical-test :: cargo test --locked working_278_hover_says_how_long_too
+  - I3 empirical-test :: cargo test --locked working_278_column_and_tab_hovers_say_how_long
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/278-working-agent-does-not-say-how-long/mutations.py

@@ -277,6 +277,12 @@ has finished a turn — what the agent last said, or 許可または回答を待
 the keyboard already in its terminal; the toolbar's **要対応 N** button does the
 same while any session waits. Once answered, it returns to its project group.
 
+A session whose agent is working says for how long once a minute has passed:
+実行中 · 12分 in the heading of its open pane and on its row in the per-project
+session list, and the same time when you hover its state on a tab or in the
+project column. The time is the current turn's — it starts again when the agent
+stops and works again — and it is not kept across a restart.
+
 On **Home**, a banner counts the sessions waiting for you (waiting for an answer,
 blocked, or finished unread) and opens the list already narrowed to them. A turn
 that finishes while you are looking at another session leaves that session

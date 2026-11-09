@@ -2,3 +2,7 @@
 2026-11-09T22:44:01Z auto spec spec.md ec95af472967e266 approve Independent evaluator a2bcd399, second round: requirement 5 limited to the row's hover, hint appended after the hook's tool; five requirements each with a named test.
 2026-11-09T22:44:01Z auto screen screen.md 9bb67cc66dbc0e28 approve Independent evaluator a2bcd399: the row layout is true to screens.rs 6094-6112; the time is part of the label in the same ink, wording only.
 2026-11-09T22:44:01Z auto plan plan.md a4ed57e00ef09eb6 approve Independent evaluator a2bcd399: files, order, a screen-level test for the row and the starting/queued risk match the spec.
+2026-11-09T23:03:11Z auto intent intent.md 7385ffd5552abaf2 approve Independent evaluators a0b1c426 and a3165f95, after the correction: the scope now says where the time is printed and where only the hover says it.
+2026-11-09T23:03:11Z auto spec spec.md 1bbd407f6f3fc398 approve Independent evaluator a3165f95: six requirements, each with an existing test that exercises it; the design matches the code.
+2026-11-09T23:03:11Z auto screen screen.md c552c2b8e2512024 approve Independent evaluator a3165f95: no layout change; the list row, the pane heading and both hovers are drawn as the code draws them.
+2026-11-09T23:03:11Z auto plan plan.md fb714aa3bf089aa7 approve Independent evaluator a3165f95: files, order, proof and the two departures agree with the spec and the code.

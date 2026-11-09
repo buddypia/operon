@@ -6,6 +6,7 @@ pub(crate) mod launch_menu;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
 pub(crate) mod terminal_output;
+pub(crate) mod working_time;
 
 // The keyboard is data this module reads and `screens.rs` draws, so it is
 // reachable by symbol name from anywhere the way every other module's is.
@@ -645,6 +646,8 @@ pub(crate) struct OperonApp {
     /// When each session that needs a person started needing one. In memory
     /// only: after a restart every waiting session is timed from the launch.
     pub(crate) attention_since: HashMap<Uuid, Instant>,
+    /// When each working agent's current turn was first seen (change 278).
+    pub(crate) working_since: HashMap<Uuid, Instant>,
     /// The same sessions, longest-waiting first. Rebuilt only when someone
     /// joins or leaves, so the frames in between read it without sorting.
     pub(crate) attention_order: Vec<Uuid>,
@@ -1148,6 +1151,7 @@ impl OperonApp {
             hook_events: None,
             hook_status: HashMap::new(),
             attention_since: HashMap::new(),
+            working_since: HashMap::new(),
             attention_order: Vec::new(),
             terminal_focus_request: None,
             hook_launch_tokens: HashMap::new(),
@@ -6361,6 +6365,7 @@ impl OperonApp {
         {
             view.hint = tf!("{p0} を実行中", p0 = tool);
         }
+        view.hint = self.with_working_time(&view.hint, session.id, Instant::now());
         view
     }
 
@@ -7502,6 +7507,7 @@ impl eframe::App for OperonApp {
         self.tick_knowledge();
         self.start_ready_queued_sessions();
         self.track_attention(Instant::now());
+        self.track_working(Instant::now());
         self.handle_app_shortcuts(ctx);
         if self.command_palette_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.close_command_palette();

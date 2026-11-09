@@ -52,7 +52,9 @@ Settings. The projects, sessions, and agent output in them are a demo.
   act on them — waiting on you first, then running, then idle — each with its
   agent's mark and state; finished ones stay in **履歴** unless unread. There,
   sessions that wait for you are pinned above the projects, longest wait first,
-  each with how long it has waited and what its agent last said. `⌘J` opens the
+  each with how long it has waited and what its agent last said. An agent that
+  has been working for a minute or more says for how long — 実行中 · 12分 — in
+  its pane's heading and when you hover its state. `⌘J` opens the
   next one and puts the keyboard in its terminal, and the toolbar's **要対応 N**
   does the same while one waits. `⌘K` also finds a session by what its agent
   last said, and among equal matches a waiting session comes first. The side
