@@ -2,8 +2,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Follow plan.md Order of work from step 1; the shortcut set in intent.md is the adopted default, not asked."
+resume: "Nothing outlives the change once it is merged on main, packaged with scripts/package-macos.sh, and installed per the ship skill."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/app/keymap.rs and src/app/screens.rs change; package from main after landing"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed make q.fast; cargo test --locked shortcut_272_ (9), the keymap, palette, chord and lesson tests pass; CI re-runs every obligation on the branch head"
+  bands: "machine passed check-bands.sh exits 0; steering_bytes and approval_escapes were already breached on main, and largest_module_lines is back at diagnose after the keyboard dispatch moved to src/app/keymap.rs"
+  release-binary: "machine passed required - src/app.rs, src/app/keymap.rs and src/app/screens.rs change; package from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py 17 of 17 caught, including the notice and the manual row a person reads"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

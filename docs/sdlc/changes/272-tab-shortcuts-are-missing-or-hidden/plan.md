@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-09
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -61,4 +61,26 @@
 
 ## Departures from the plan
 
-None yet.
+- **⌃Tab is read after the keymap, not before (F1).** The plan read the fixed
+  ⌃Tab / ⌃⇧Tab with `consume_key` ahead of `tab.previous` / `tab.next`. The
+  empirical verifier's lead — a keymap file that moves `tab.previous` onto ⌃Tab
+  — reproduced as `shortcut_272_a_control_tab_binding_is_the_keymaps`: the
+  fixed read took the press and stepped forward. `consume_fixed_control_tab`
+  now runs after the keymap actions and takes only a press `Keymap::action_for`
+  gives to no action, reading Shift off the press itself. Lesson 112.
+- **The keyboard dispatch moved to `src/app/keymap.rs`.** The change took
+  `src/app.rs` from 9911 to 10069 lines, past the `largest_module_lines`
+  propose tier (10000). `handle_app_shortcuts`, `chord_pressed`,
+  `chord_consumed` and the two new matching helpers moved unchanged into an
+  `impl OperonApp` block beside the map they read; `src/app.rs` is now 9928
+  and the band is back at the diagnose tier main already had. The misplaced
+  first two doc lines of `handle_app_shortcuts` went to `chord_pressed`, which
+  they describe.
+- **More of the sweep.** The verifier read the sweep for claims no mutation
+  asked about; five were added (the `{` pair, the empty-group guard, the
+  already-open skip, the ⌘T palette row, the fixed ⌃Tab yielding to the
+  keymap): 17 mutations in all.
+- **Two tests beyond the plan's seven.** `shortcut_272_a_control_tab_binding_is_the_keymaps`
+  (F1) and `shortcut_272_reopen_crosses_back_to_the_tabs_project` (the
+  verifier's second lead, which held: reopening switches back to the tab's
+  project).

@@ -30,29 +30,33 @@ MUTATIONS = {
         'id: "tab.next",\n        label: "次のタブへ",\n        default: "Mod+Shift+]",',
         'id: "tab.next",\n        label: "次のタブへ",\n        default: "Mod+Alt+]",',
     ),
-    # R5: ⌃Tab is read before ⌃⇧Tab and swallows it, as before change 272.
-    "control-tab-swallows-shift": (
+    # R5: ⌃⇧Tab steps forward, as it did before change 272.
+    "control-shift-tab-forward": (
+        KEYMAP,
+        "steps.push(!modifiers.shift);",
+        "steps.push(true);",
+    ),
+    # F1: the fixed ⌃Tab takes a press the keymap file gave to an action.
+    "fixed-control-tab-ignores-the-keymap": (
+        KEYMAP,
+        "&& self.keymap.action_for(egui::Key::Tab, *modifiers).is_none()",
+        "",
+    ),
+    # R5: ⇧⌘[ as macOS reports it (`{`) is not read as [.
+    "shifted-open-bracket-unread": (
+        KEYMAP,
+        "(egui::Key::OpenBracket, egui::Key::OpenCurlyBracket)",
+        "(egui::Key::OpenBracket, egui::Key::OpenBracket)",
+    ),
+    # R5: a group with no tab divides by zero.
+    "empty-group-steps": (
         APP,
-        "let back = ctx.input_mut(|input| {\n"
-        "                    input.consume_key(\n"
-        "                        egui::Modifiers::CTRL | egui::Modifiers::SHIFT,\n"
-        "                        egui::Key::Tab,\n"
-        "                    )\n"
-        "                });\n"
-        "                let forward =\n"
-        "                    ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));",
-        "let forward =\n"
-        "                    ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Tab));\n"
-        "                let back = ctx.input_mut(|input| {\n"
-        "                    input.consume_key(\n"
-        "                        egui::Modifiers::CTRL | egui::Modifiers::SHIFT,\n"
-        "                        egui::Key::Tab,\n"
-        "                    )\n"
-        "                });",
+        "if count == 0 {\n            return;\n        }",
+        "",
     ),
     # R3: ⌘W acts on whatever page is showing.
     "close-ignores-the-page": (
-        APP,
+        KEYMAP,
         "if self.page == Page::Sessions && !self.session_library_open {\n"
         '                if self.chord_consumed(ctx, "tab.close") {',
         "if true {\n"
@@ -76,6 +80,13 @@ MUTATIONS = {
         "self.closed_tabs.drain(..excess);",
         "let _ = excess;",
     ),
+    # R4: a tab already open again by another route is "reopened" instead of
+    # the one before it.
+    "reopen-of-an-open-tab": (
+        APP,
+        ".any(|group| group.tabs.contains(&tab))\n            {\n                continue;",
+        ".any(|group| group.tabs.contains(&tab))\n                && false\n            {\n                continue;",
+    ),
     # R4: a removed session's tab comes back for nothing.
     "reopen-of-a-removed-session": (
         APP,
@@ -88,7 +99,13 @@ MUTATIONS = {
         'self.notice_briefly(tr("開き直せるタブはありません。"));',
         "",
     ),
-    # R6: the palette row does nothing.
+    # R6: the ⌘T palette row does nothing.
+    "palette-new-tab-row-inert": (
+        SCREENS,
+        'PaletteKind::Action("New terminal tab") => {\n                self.launch_workspace_terminal(self.workspace.focused);\n            }',
+        "",
+    ),
+    # R6: the reopen palette row does nothing.
     "palette-reopen-row-inert": (
         SCREENS,
         'PaletteKind::Action("Reopen closed tab") => self.reopen_closed_tab(),',

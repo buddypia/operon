@@ -75851,6 +75851,18 @@ pub(crate) fn shortcut_272_brackets_and_control_tab_step_through_tabs() {
         shortcut_272_tabs(&app).is_empty(),
         "no tab, nothing to step to"
     );
+
+    // A group nobody settled has no tab to step to; stepping in it must not
+    // divide by zero and take the window with it.
+    let empty = Uuid::new_v4();
+    app.workspace.groups.push(WorkspaceGroup {
+        id: empty,
+        tabs: Vec::new(),
+        active: 0,
+    });
+    app.workspace.focused = Some(empty);
+    app.step_workspace_tab(true);
+    app.step_workspace_tab(false);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -75917,4 +75929,76 @@ pub(crate) fn shortcut_272_every_manual_lists_every_default_chord() {
             .unwrap_or_else(|| panic!("{manual} names its fixed keys"));
         assert!(!fixed.contains("⌘W"), "{manual}: ⌘W is no longer fixed");
     }
+}
+
+/// Change 272, found by trying to break it: a keymap file that moves
+/// `tab.previous` onto ⌃Tab must get what it asked for. The fixed ⌃Tab read
+/// the press first and stepped forward.
+#[test]
+pub(crate) fn shortcut_272_a_control_tab_binding_is_the_keymaps() {
+    let root = temporary_directory("shortcut-272-control-tab");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let third = shortcut_272_third_session(&mut app);
+    for id in [first, second, third] {
+        app.select_session(id);
+    }
+    app.keymap = resolve_keymap(r#"{"keybindings": {"tab.previous": "Ctrl+Tab"}}"#)
+        .expect("⌃Tab is free in the keymap");
+    let ctx = egui::Context::default();
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert_eq!(
+        app.workspace.active(),
+        Some(&WorkspaceTab::Session(second)),
+        "⌃Tab is tab.previous in this keymap"
+    );
+    // A page bound to ⌃Tab gets the press too, and no tab moves.
+    app.keymap = resolve_keymap(r#"{"keybindings": {"page.home": "Ctrl+Tab"}}"#)
+        .expect("⌃Tab is free in the keymap");
+    shortcut_272_frame(&mut app, &ctx, egui::Key::Tab, egui::Modifiers::CTRL);
+    assert_eq!(app.page, Page::Home);
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 272: a tab closed in one project comes back in that project's
+/// workspace while another project is showing.
+#[test]
+pub(crate) fn shortcut_272_reopen_crosses_back_to_the_tabs_project() {
+    let root = temporary_directory("shortcut-272-cross");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    app.show_session_inspector = false;
+    let a = app.store.projects[0].id;
+    let other_root = root.join("other");
+    fs::create_dir_all(&other_root).unwrap();
+    let b = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: b,
+        path: other_root.clone(),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    let elsewhere = shortcut_272_third_session(&mut app);
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == elsewhere) {
+        session.project_id = b;
+        session.worktree_path = Some(other_root.clone());
+    }
+    app.select_session(first);
+    app.select_session(second);
+    app.close_workspace_tab(&WorkspaceTab::Session(second));
+    app.select_session(elsewhere);
+    assert_eq!(app.workspace_project, Some(b));
+
+    app.reopen_closed_tab();
+    assert_eq!(app.workspace_project, Some(a));
+    assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
+    assert_eq!(app.selected_session, Some(second));
+    assert_eq!(
+        shortcut_272_tabs(&app),
+        vec![WorkspaceTab::Session(first), WorkspaceTab::Session(second)],
+        "project A's other tab is still there"
+    );
+    fs::remove_dir_all(&root).ok();
 }

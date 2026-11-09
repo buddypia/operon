@@ -132,6 +132,153 @@ pub(crate) const KEYMAP_ACTIONS: &[KeymapAction] = &[
     },
 ];
 
+/// The frame loop's half of the keyboard: which action this frame's key
+/// presses trigger, and what each does. Beside the map it reads so that the
+/// matching rule and the dispatch that depends on it are read together
+/// (change 272, lesson 112).
+impl OperonApp {
+    /// The app-wide chords, read once per frame before anything draws.
+    pub(crate) fn handle_app_shortcuts(&mut self, ctx: &egui::Context) {
+        // The launch sheet holds a request being typed. ⌘K opens a palette
+        // that can switch project, and ⌘2 clears the project outright: either
+        // would throw the request away, so neither is live while it is open.
+        if !self.launch_sheet_open && self.chord_pressed(ctx, "palette.open") {
+            self.open_command_palette();
+        }
+        // Before the window draws, so the selection it paints is the one the
+        // arrows just moved — and so an arrow never reaches the text field and
+        // moves the caret instead.
+        self.handle_palette_keys(ctx);
+        // Adding a project selects it, which clears the sheet's request too.
+        if !self.launch_sheet_open && self.chord_pressed(ctx, "project.add") {
+            self.choose_project_folder();
+        }
+        // The shortcuts a person brings with them from every other Mac app of
+        // this shape: ⌘1–3 for the three places, ⌘, for settings, unless a
+        // keymap file says otherwise. They stay live while a terminal has
+        // focus: a TUI owns its own keys, but `⌘` is the one modifier macOS
+        // keeps for the app, and the pane drops every ⌘ chord rather than
+        // sending it (`terminal_key_binding`). That is what lets ⌘J leave the
+        // pane a person is typing in for the next one that is waiting.
+        if !self.command_palette_open && !self.launch_sheet_open {
+            if self.chord_pressed(ctx, "session.new") {
+                self.open_new_session();
+            }
+            if self.chord_pressed(ctx, "attention.next") {
+                self.open_next_waiting_session();
+            }
+            if self.chord_pressed(ctx, "panel.toggle") {
+                self.show_session_inspector = !self.show_session_inspector;
+            }
+            // ⌘T is the strip's +, and like ⌘N it answers from any page.
+            if self.chord_consumed(ctx, "tab.new") {
+                self.launch_workspace_terminal(self.workspace.focused);
+            }
+            if self.chord_consumed(ctx, "tab.reopen") {
+                self.reopen_closed_tab();
+            }
+            // The rest act on the tabs on screen, so only where they are. They
+            // are consumed here, before any pane draws, so a terminal never
+            // receives ⌃Tab and nothing later sees the ⌘ chords again.
+            if self.page == Page::Sessions && !self.session_library_open {
+                if self.chord_consumed(ctx, "tab.close") {
+                    if let Some(tab) = self.workspace.active().cloned() {
+                        self.close_workspace_tab(&tab);
+                    }
+                }
+                if self.chord_consumed(ctx, "tab.previous") {
+                    self.step_workspace_tab(false);
+                }
+                if self.chord_consumed(ctx, "tab.next") {
+                    self.step_workspace_tab(true);
+                }
+                for forward in self.consume_fixed_control_tab(ctx) {
+                    self.step_workspace_tab(forward);
+                }
+            }
+            for (action, page) in [
+                ("page.home", Page::Home),
+                ("page.projects", Page::Projects),
+                ("page.sessions", Page::Sessions),
+                ("page.settings", Page::Settings),
+            ] {
+                if self.chord_pressed(ctx, action) {
+                    if page == Page::Projects {
+                        self.select_project(None);
+                    }
+                    self.page = page;
+                }
+            }
+        }
+    }
+
+    /// Whether this frame saw the chord bound to an action. An action with no
+    /// chord is never pressed, which is what `null` in the keymap file buys.
+    pub(crate) fn chord_pressed(&self, ctx: &egui::Context, action: &str) -> bool {
+        ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| self.event_triggers(event, action))
+        })
+    }
+
+    /// The same question, for a chord that must not also reach whatever has
+    /// focus. Removing the event is the whole of "the agent never sees it".
+    pub(crate) fn chord_consumed(&self, ctx: &egui::Context, action: &str) -> bool {
+        ctx.input_mut(|input| {
+            let before = input.events.len();
+            input
+                .events
+                .retain(|event| !self.event_triggers(event, action));
+            input.events.len() != before
+        })
+    }
+
+    /// ⌃Tab and ⌃⇧Tab, fixed beside the remappable ⇧⌘] and ⇧⌘[ as every
+    /// browser keeps them: one step per press, `true` forward. A press the
+    /// keymap file gave to an action is that action's and is left alone, so a
+    /// file that moves `tab.previous` onto ⌃Tab gets what it asked for. Shift
+    /// is read off the press rather than through egui's lenient match, under
+    /// which ⌃Tab swallowed ⌃⇧Tab and stepped forward.
+    fn consume_fixed_control_tab(&self, ctx: &egui::Context) -> Vec<bool> {
+        let mut steps = Vec::new();
+        ctx.input_mut(|input| {
+            input.events.retain(|event| match event {
+                egui::Event::Key {
+                    key: egui::Key::Tab,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.ctrl
+                    && !modifiers.command
+                    && self.keymap.action_for(egui::Key::Tab, *modifiers).is_none() =>
+                {
+                    steps.push(!modifiers.shift);
+                    false
+                }
+                _ => true,
+            });
+        });
+        steps
+    }
+
+    /// Whether one input event is a press of `action`'s chord — decided by
+    /// `Keymap::action_for`, so a press that is a more specific chord's is not
+    /// this one's (change 272).
+    fn event_triggers(&self, event: &egui::Event, action: &str) -> bool {
+        matches!(
+            event,
+            egui::Event::Key {
+                key,
+                pressed: true,
+                modifiers,
+                ..
+            } if self.keymap.action_for(*key, *modifiers) == Some(action)
+        )
+    }
+}
+
 /// A chord, compared the way "the same chord" means.
 ///
 /// `egui::Modifiers` derives `PartialEq` over its own fields, so two chords are
