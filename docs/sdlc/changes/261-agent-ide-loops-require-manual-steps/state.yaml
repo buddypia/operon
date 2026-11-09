@@ -1,0 +1,29 @@
+# The state of one change. See docs/sdlc/templates/state.yaml for the field meanings.
+
+state:
+  route: "feature"
+  stage: "maintain"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Nothing outlives the change once it is merged on main, packaged with scripts/package-macos.sh, and installed per the ship skill."
+
+contract:
+  three-gates: "machine passed cargo fmt --check, cargo clippy --locked -- -D warnings, and ide_261_ (7) + i18n/invariant tests pass"
+  bands: "machine passed check-bands.sh exits 0; steering_bytes, largest_module_lines, and approval_escapes were already breached on main"
+  release-binary: "machine passed required - src/ files beyond src/tests.rs changed; package from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py 7 of 7 caught across R1-R7"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -443,7 +443,7 @@ pub(crate) const PORT_SCAN_MAX_BYTES: usize = 512 * 1024;
 /// What reads the listening sockets. macOS ships it; a machine without it gets
 /// no port line and no complaint about one.
 pub(crate) const PORT_SCAN_PROGRAM: &str = "lsof";
-/// What stops a listener the person confirmed (change 261). An absolute path:
+/// What stops a listener the person confirmed (change 262). An absolute path:
 /// the program that delivers a signal is not one a `PATH` entry gets to choose.
 pub(crate) const PORT_STOP_PROGRAM: &str = "/bin/kill";
 /// The read that confirms a listener is still the one the person chose, just

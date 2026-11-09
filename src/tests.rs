@@ -34535,7 +34535,8 @@ pub(crate) fn every_pane_that_takes_a_note_offers_a_way_to_send_it() {
                 continue;
             }
             let source = fs::read_to_string(&path).unwrap();
-            panes += source.matches("diff_pane(").count();
+            panes += source.matches("diff_pane(").count()
+                + source.matches("diff_pane_with_actions(").count();
             footers += source.matches("ui_diff_comment_footer(").count();
         }
     }
@@ -35040,7 +35041,7 @@ pub(crate) fn a_missing_lsof_is_a_reading_of_nothing_rather_than_an_error() {
     let _ = scan_listening_ports(&[], &[]);
 }
 
-fn port_261(pid: u32, process: &str, port: u16) -> ListeningPort {
+fn port_262(pid: u32, process: &str, port: u16) -> ListeningPort {
     ListeningPort {
         pid,
         process: process.into(),
@@ -35049,11 +35050,11 @@ fn port_261(pid: u32, process: &str, port: u16) -> ListeningPort {
     }
 }
 
-/// Change 261, requirement 1. Every known folder competes — a session's
+/// Change 262, requirement 1. Every known folder competes — a session's
 /// worktree, a git worktree nobody has a session on, a project's root — and
 /// the deepest wins, carrying its project and the process's own directory.
 #[test]
-pub(crate) fn ports_261_deepest_known_folder_is_credited() {
+pub(crate) fn ports_262_deepest_known_folder_is_credited() {
     let project_id = Uuid::new_v4();
     let other_id = Uuid::new_v4();
     let roots = port_roots(
@@ -35076,12 +35077,12 @@ pub(crate) fn ports_261_deepest_known_folder_is_credited() {
         Path::to_path_buf,
     );
     let ports = vec![
-        port_261(1, "vite", 5173),
-        port_261(2, "node", 3000),
-        port_261(3, "node", 3001),
-        port_261(4, "rails", 4000),
-        port_261(5, "postgres", 5432),
-        port_261(6, "mystery", 9000),
+        port_262(1, "vite", 5173),
+        port_262(2, "node", 3000),
+        port_262(3, "node", 3001),
+        port_262(4, "rails", 4000),
+        port_262(5, "postgres", 5432),
+        port_262(6, "mystery", 9000),
     ];
     let directories = HashMap::from([
         (1, PathBuf::from("/w/project/web")),
@@ -35118,10 +35119,10 @@ pub(crate) fn ports_261_deepest_known_folder_is_credited() {
     assert_eq!(attributed[5].directory, None);
 }
 
-/// Change 261, requirement 2. One folder spelled two ways is one folder that
+/// Change 262, requirement 2. One folder spelled two ways is one folder that
 /// remembers both spellings, and each folder is named the way the list says it.
 #[test]
-pub(crate) fn ports_261_known_folders_are_named_once() {
+pub(crate) fn ports_262_known_folders_are_named_once() {
     let project_id = Uuid::new_v4();
     let canonical = |path: &Path| {
         path.strip_prefix("/link")
@@ -35167,7 +35168,7 @@ pub(crate) fn ports_261_known_folders_are_named_once() {
     // A directory `lsof` reports in its real form is credited to the folder
     // that was stored through the link.
     let attributed = attribute_ports(
-        &[port_261(7, "vite", 5173)],
+        &[port_262(7, "vite", 5173)],
         &HashMap::from([(7, PathBuf::from("/real/project/.worktrees/feature-y/web"))]),
         &roots,
     );
@@ -35177,15 +35178,15 @@ pub(crate) fn ports_261_known_folders_are_named_once() {
     );
 }
 
-/// Change 261, requirement 6. Nothing is run at all for a PID that is not a
+/// Change 262, requirement 6. Nothing is run at all for a PID that is not a
 /// dev server by construction.
 #[test]
-pub(crate) fn ports_261_stop_refuses_operon_and_init() {
+pub(crate) fn ports_262_stop_refuses_operon_and_init() {
     let operon = 4242;
     for pid in [0, 1, operon, i32::MAX.unsigned_abs() + 1, u32::MAX] {
         let mut ran = false;
         let outcome = stop_listening_port_with(
-            &port_261(pid, "node", 3000),
+            &port_262(pid, "node", 3000),
             operon,
             Duration::ZERO,
             |_| {
@@ -35201,11 +35202,11 @@ pub(crate) fn ports_261_stop_refuses_operon_and_init() {
     }
 }
 
-/// Change 261, requirement 7, without a process: the read comes before the
+/// Change 262, requirement 7, without a process: the read comes before the
 /// signal, and a listener that is no longer the confirmed one is not signalled.
 #[test]
-pub(crate) fn ports_261_stop_sequence_checks_before_signalling() {
-    let port = port_261(4821, "vite", 5173);
+pub(crate) fn ports_262_stop_sequence_checks_before_signalling() {
+    let port = port_262(4821, "vite", 5173);
 
     for before in [ListenerRead::Renamed, ListenerRead::Free] {
         let mut signalled = false;
@@ -35265,11 +35266,11 @@ pub(crate) fn ports_261_stop_sequence_checks_before_signalling() {
     assert_eq!(outcome, PortStopOutcome::StillListening);
 }
 
-/// Change 261, requirement 8. "Stopped" needs a read that succeeded and saw
+/// Change 262, requirement 8. "Stopped" needs a read that succeeded and saw
 /// the port free; every other path says what it could and could not do.
 #[test]
-pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
-    let port = port_261(4821, "vite", 5173);
+pub(crate) fn ports_262_stop_never_reports_stopped_without_seeing_it_gone() {
+    let port = port_262(4821, "vite", 5173);
 
     let mut signalled = false;
     let outcome = stop_listening_port_with(
@@ -35323,14 +35324,14 @@ pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
     );
     // `lsof` finding nothing exits 1 in silence: that is a free port. Finding
     // nothing while complaining is not known to be one.
-    let dir = temporary_directory("ports-261-quiet-lsof");
+    let dir = temporary_directory("ports-262-quiet-lsof");
     fs::create_dir_all(&dir).unwrap();
-    let quiet = fake_lsof_261(&dir, "lsof-quiet", "", "", 1);
+    let quiet = fake_lsof_262(&dir, "lsof-quiet", "", "", 1);
     assert_eq!(
         read_listener(quiet.to_str().unwrap(), &port),
         Some(ListenerRead::Free)
     );
-    let complaining = fake_lsof_261(
+    let complaining = fake_lsof_262(
         &dir,
         "lsof-complaining",
         "",
@@ -35350,7 +35351,7 @@ pub(crate) fn ports_261_stop_never_reports_stopped_without_seeing_it_gone() {
 }
 
 /// A stand-in for `lsof` that prints `stdout` and `stderr` and exits with `code`.
-fn fake_lsof_261(dir: &Path, name: &str, stdout: &str, stderr: &str, code: i32) -> PathBuf {
+fn fake_lsof_262(dir: &Path, name: &str, stdout: &str, stderr: &str, code: i32) -> PathBuf {
     let script = dir.join(name);
     fs::write(
         &script,
@@ -35363,14 +35364,14 @@ fn fake_lsof_261(dir: &Path, name: &str, stdout: &str, stderr: &str, code: i32) 
     script
 }
 
-/// Change 261, finding 2. After the signal, the PID still holding the port
+/// Change 262, finding 2. After the signal, the PID still holding the port
 /// under another name has not stopped: only a free port is "stopped".
 #[test]
-pub(crate) fn ports_261_stop_does_not_take_a_renamed_holder_for_gone() {
-    let dir = temporary_directory("ports-261-renamed");
+pub(crate) fn ports_262_stop_does_not_take_a_renamed_holder_for_gone() {
+    let dir = temporary_directory("ports-262-renamed");
     fs::create_dir_all(&dir).unwrap();
-    let renamed = fake_lsof_261(&dir, "lsof-renamed", "p4821\\ncrenamed\\nn*:5173\\n", "", 0);
-    let port = port_261(4821, "vite", 5173);
+    let renamed = fake_lsof_262(&dir, "lsof-renamed", "p4821\\ncrenamed\\nn*:5173\\n", "", 0);
+    let port = port_262(4821, "vite", 5173);
     assert_eq!(
         read_listener(renamed.to_str().unwrap(), &port),
         Some(ListenerRead::Renamed)
@@ -35408,11 +35409,11 @@ impl Drop for ListenerChild {
     }
 }
 
-/// Change 261, requirement 7, with a real listener, the real `lsof` and the
+/// Change 262, requirement 7, with a real listener, the real `lsof` and the
 /// real `/bin/kill`: a mismatched name leaves it running, the confirmed one is
 /// stopped and seen gone.
 #[test]
-pub(crate) fn ports_261_stop_signals_only_the_confirmed_listener() {
+pub(crate) fn ports_262_stop_signals_only_the_confirmed_listener() {
     let mut child = Command::new("/usr/bin/python3")
         .args([
             "-c",
@@ -47104,7 +47105,7 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
 }
 
 /// Every text shape drawn, with where it landed and its first colour.
-fn text_shapes_261(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect, Color32)>) {
+fn text_shapes_262(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rect, Color32)>) {
     match shape {
         egui::epaint::Shape::Text(text) => {
             let color = text
@@ -47122,22 +47123,22 @@ fn text_shapes_261(shape: &egui::epaint::Shape, out: &mut Vec<(String, egui::Rec
         }
         egui::epaint::Shape::Vec(children) => {
             for child in children {
-                text_shapes_261(child, out);
+                text_shapes_262(child, out);
             }
         }
         _ => {}
     }
 }
 
-fn frame_texts_261(output: &egui::FullOutput) -> Vec<(String, egui::Rect, Color32)> {
+fn frame_texts_262(output: &egui::FullOutput) -> Vec<(String, egui::Rect, Color32)> {
     let mut texts = Vec::new();
     for clipped in &output.shapes {
-        text_shapes_261(&clipped.shape, &mut texts);
+        text_shapes_262(&clipped.shape, &mut texts);
     }
     texts
 }
 
-fn screen_261(events: Vec<egui::Event>) -> egui::RawInput {
+fn screen_262(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
@@ -47151,7 +47152,7 @@ fn screen_261(events: Vec<egui::Event>) -> egui::RawInput {
 /// `/real/project` (stored as `/link/project`), its worktree
 /// `.worktrees/feature-y` with no session, a worktree outside it, and another
 /// project — each serving something.
-fn listening_261(project_id: Uuid, other_id: Uuid) -> Vec<AttributedPort> {
+fn listening_262(project_id: Uuid, other_id: Uuid) -> Vec<AttributedPort> {
     let roots = port_roots(
         &[
             (project_id, PathBuf::from("/link/project")),
@@ -47177,11 +47178,11 @@ fn listening_261(project_id: Uuid, other_id: Uuid) -> Vec<AttributedPort> {
     );
     attribute_ports(
         &[
-            port_261(11, "storybook", 6006),
-            port_261(12, "vite", 5173),
-            port_261(13, "node", 3001),
-            port_261(14, "node", 3000),
-            port_261(15, "rails", 4000),
+            port_262(11, "storybook", 6006),
+            port_262(12, "vite", 5173),
+            port_262(13, "node", 3001),
+            port_262(14, "node", 3000),
+            port_262(15, "rails", 4000),
         ],
         &HashMap::from([
             (11, PathBuf::from("/real/project")),
@@ -47194,22 +47195,22 @@ fn listening_261(project_id: Uuid, other_id: Uuid) -> Vec<AttributedPort> {
     )
 }
 
-fn numbers_261(ports: &[AttributedPort]) -> Vec<u16> {
+fn numbers_262(ports: &[AttributedPort]) -> Vec<u16> {
     ports
         .iter()
         .map(|attributed| attributed.port.port)
         .collect()
 }
 
-/// Change 261, requirement 3. A root session counts only the root's servers;
+/// Change 262, requirement 3. A root session counts only the root's servers;
 /// a worktree's server — with no session open on it — is elsewhere, not own.
 #[test]
-pub(crate) fn ports_261_session_splits_own_from_elsewhere() {
-    let root = temporary_directory("ports-261-split");
+pub(crate) fn ports_262_session_splits_own_from_elsewhere() {
+    let root = temporary_directory("ports-262-split");
     let mut app = test_app(root.join("store.json"));
     let project_id = Uuid::new_v4();
     let other_id = Uuid::new_v4();
-    app.listening_ports = listening_261(project_id, other_id);
+    app.listening_ports = listening_262(project_id, other_id);
 
     // Stored through the link, as a restored session at the root would be.
     let mut at_root = test_session(Uuid::new_v4(), SessionStatus::Active);
@@ -47217,19 +47218,19 @@ pub(crate) fn ports_261_session_splits_own_from_elsewhere() {
     at_root.worktree_path = Some(PathBuf::from("/link/project"));
     let ports = app.session_ports(&at_root);
     assert_eq!(
-        numbers_261(&ports.own),
+        numbers_262(&ports.own),
         vec![5173, 6006],
         "ルートのセッションが自分のフォルダ以外を数えています"
     );
-    assert_eq!(numbers_261(&ports.elsewhere), vec![3000, 3001]);
+    assert_eq!(numbers_262(&ports.elsewhere), vec![3000, 3001]);
 
     let mut in_worktree = test_session(Uuid::new_v4(), SessionStatus::Active);
     in_worktree.project_id = project_id;
     in_worktree.worktree_path = Some(PathBuf::from("/real/project/.worktrees/feature-y"));
     let ports = app.session_ports(&in_worktree);
-    assert_eq!(numbers_261(&ports.own), vec![3000]);
+    assert_eq!(numbers_262(&ports.own), vec![3000]);
     assert_eq!(
-        numbers_261(&ports.elsewhere),
+        numbers_262(&ports.elsewhere),
         vec![5173, 6006, 3001],
         "ほかの場所はフォルダ名、次にポートの順です"
     );
@@ -47251,12 +47252,12 @@ pub(crate) fn ports_261_session_splits_own_from_elsewhere() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Change 261, finding 1. A session with no worktree runs in the project
+/// Change 262, finding 1. A session with no worktree runs in the project
 /// checkout (`landing_blocked_by_session`), so the project root is its own
 /// folder, not "elsewhere".
 #[test]
-pub(crate) fn ports_261_session_without_worktree_owns_the_project_root() {
-    let root = temporary_directory("ports-261-no-worktree");
+pub(crate) fn ports_262_session_without_worktree_owns_the_project_root() {
+    let root = temporary_directory("ports-262-no-worktree");
     let mut app = test_app(root.join("store.json"));
     let project_id = Uuid::new_v4();
     app.store.projects.push(Project {
@@ -47265,44 +47266,44 @@ pub(crate) fn ports_261_session_without_worktree_owns_the_project_root() {
         name: "project".into(),
         added_at: now(),
     });
-    app.listening_ports = listening_261(project_id, Uuid::new_v4());
+    app.listening_ports = listening_262(project_id, Uuid::new_v4());
     let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
     session.project_id = project_id;
     session.worktree_path = None;
     let ports = app.session_ports(&session);
     assert_eq!(
-        numbers_261(&ports.own),
+        numbers_262(&ports.own),
         vec![5173, 6006],
         "プロジェクトのチェックアウトで動くセッションが、ルートのサーバーを自分のものにしていません"
     );
-    assert_eq!(numbers_261(&ports.elsewhere), vec![3000, 3001]);
+    assert_eq!(numbers_262(&ports.elsewhere), vec![3000, 3001]);
     fs::remove_dir_all(&root).ok();
 }
 
-/// Change 261, requirement 4. The badge counts this folder; with nothing here
+/// Change 262, requirement 4. The badge counts this folder; with nothing here
 /// but something elsewhere in the project it says so in the muted ink.
 #[test]
-pub(crate) fn ports_261_badge_counts_own_folder_or_names_the_project() {
-    let root = temporary_directory("ports-261-badge");
+pub(crate) fn ports_262_badge_counts_own_folder_or_names_the_project() {
+    let root = temporary_directory("ports-262-badge");
     let mut app = test_app(root.join("store.json"));
     let project_id = Uuid::new_v4();
     let other_id = Uuid::new_v4();
     let palette = app.store.theme.palette();
     let ctx = egui::Context::default();
     let draw = |app: &mut OperonApp, session: &Session| {
-        let output = ctx.run(screen_261(Vec::new()), |ctx| {
+        let output = ctx.run(screen_262(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.horizontal(|ui| app.ui_session_ports(ui, palette, session));
             });
         });
-        frame_texts_261(&output)
+        frame_texts_262(&output)
     };
     let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
     session.project_id = project_id;
 
     // A worktree of the project with nothing of its own listening.
     session.worktree_path = Some(PathBuf::from("/real/project/.worktrees/quiet"));
-    app.listening_ports = listening_261(project_id, other_id);
+    app.listening_ports = listening_262(project_id, other_id);
     let texts = draw(&mut app, &session);
     let badge = texts
         .iter()
@@ -47337,15 +47338,15 @@ pub(crate) fn ports_261_badge_counts_own_folder_or_names_the_project() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Change 261, requirement 5. Two labelled sections, folder names on the
+/// Change 262, requirement 5. Two labelled sections, folder names on the
 /// rest of the project, and a stop control that only asks.
 #[test]
-pub(crate) fn ports_261_menu_sections_name_folders_and_offer_stop() {
-    let root = temporary_directory("ports-261-menu");
+pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
+    let root = temporary_directory("ports-262-menu");
     let mut app = test_app(root.join("store.json"));
     let project_id = Uuid::new_v4();
     let palette = app.store.theme.palette();
-    app.listening_ports = listening_261(project_id, Uuid::new_v4());
+    app.listening_ports = listening_262(project_id, Uuid::new_v4());
     let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
     session.project_id = project_id;
     session.worktree_path = Some(PathBuf::from("/real/project/.worktrees/feature-y"));
@@ -47354,12 +47355,12 @@ pub(crate) fn ports_261_menu_sections_name_folders_and_offer_stop() {
     let ctx = egui::Context::default();
     let menu = |ports: &SessionPorts, stopping: bool, events: Vec<egui::Event>| {
         let mut action = None;
-        let output = ctx.run(screen_261(events), |ctx| {
+        let output = ctx.run(screen_262(events), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 action = crate::screens::session_ports_menu(ui, palette, ports, stopping);
             });
         });
-        (frame_texts_261(&output), action)
+        (frame_texts_262(&output), action)
     };
     let (texts, _) = menu(&ports, false, Vec::new());
     let has = |needle: &str| texts.iter().any(|(text, _, _)| text == needle);
@@ -47430,24 +47431,24 @@ pub(crate) fn ports_261_menu_sections_name_folders_and_offer_stop() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Change 261, requirement 9. The window says which process, which PID and
+/// Change 262, requirement 9. The window says which process, which PID and
 /// where; cancelling sends nothing.
 #[test]
-pub(crate) fn ports_261_confirmation_names_pid_and_folder() {
-    let root = temporary_directory("ports-261-confirm");
+pub(crate) fn ports_262_confirmation_names_pid_and_folder() {
+    let root = temporary_directory("ports-262-confirm");
     let mut app = test_app(root.join("store.json"));
     let palette = app.store.theme.palette();
     let ctx = egui::Context::default();
     let attributed = |pid: u32, directory: Option<&str>| AttributedPort {
-        port: port_261(pid, "node", 3000),
+        port: port_262(pid, "node", 3000),
         directory: directory.map(PathBuf::from),
         root: None,
     };
     let draw = |app: &mut OperonApp, events: Vec<egui::Event>| {
-        let output = ctx.run(screen_261(events), |ctx| {
+        let output = ctx.run(screen_262(events), |ctx| {
             app.ui_port_stop_modal(ctx, palette);
         });
-        frame_texts_261(&output)
+        frame_texts_262(&output)
     };
     let click = |app: &mut OperonApp, label: &str| {
         let texts = draw(app, Vec::new());
@@ -47519,11 +47520,11 @@ pub(crate) fn ports_261_confirmation_names_pid_and_folder() {
     fs::remove_dir_all(&root).ok();
 }
 
-/// Change 261, requirement 10. The outcome is told in its own words, and a
+/// Change 262, requirement 10. The outcome is told in its own words, and a
 /// scan that was running when the stop finished cannot bring the server back.
 #[test]
-pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
-    let vite = port_261(4821, "vite", 5173);
+pub(crate) fn ports_262_stop_outcome_is_told_and_rescanned() {
+    let vite = port_262(4821, "vite", 5173);
     for (outcome, said) in [
         (PortStopOutcome::Stopped, "vite を停止しました（:5173）。"),
         (
@@ -47551,7 +47552,7 @@ pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
         assert_eq!(port_stop_notice(&vite, &outcome), said);
     }
 
-    let root = temporary_directory("ports-261-outcome");
+    let root = temporary_directory("ports-262-outcome");
     let mut app = test_app(root.join("store.json"));
     let stale = AttributedPort {
         port: vite.clone(),
@@ -47561,12 +47562,12 @@ pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
     // The same process's other port, and another process, are not known to
     // have gone and stay until the rescan says otherwise.
     let sibling = AttributedPort {
-        port: port_261(4821, "vite", 24678),
+        port: port_262(4821, "vite", 24678),
         directory: None,
         root: None,
     };
     let neighbour = AttributedPort {
-        port: port_261(5000, "node", 3000),
+        port: port_262(5000, "node", 3000),
         directory: None,
         root: None,
     };
@@ -47620,7 +47621,7 @@ pub(crate) fn ports_261_stop_outcome_is_told_and_rescanned() {
 
     // A scan started after the stop is the truth again.
     let fresh = AttributedPort {
-        port: port_261(5000, "node", 3000),
+        port: port_262(5000, "node", 3000),
         directory: None,
         root: None,
     };
@@ -72552,5 +72553,404 @@ pub(crate) fn knowledge_258_opt_in_says_what_agents_are_given() {
     );
     // The numbers the text states are the ones the brief uses.
     assert!(bullet.contains(&format!("最大 {KNOWLEDGE_BRIEF_ENTRIES} 件")));
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+pub(crate) fn ide_261_extract_and_apply_single_hunk_stage_and_discard() {
+    let root = temporary_directory("ide-261-hunk");
+    let _ = run_git_capture(&root, &["init"]);
+    let _ = run_git_capture(&root, &["config", "user.email", "test@example.com"]);
+    let _ = run_git_capture(&root, &["config", "user.name", "Test"]);
+    let file_path = root.join("src/demo.txt");
+    fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+    let initial: String = (1..=12).map(|n| format!("line {n}\n")).collect();
+    fs::write(&file_path, &initial).unwrap();
+    let _ = run_git_capture(&root, &["add", "src/demo.txt"]);
+    let _ = run_git_capture(&root, &["commit", "-m", "initial"]);
+
+    let modified: String = (1..=12)
+        .map(|n| match n {
+            2 => "line 2 modified\n".to_string(),
+            11 => "line 11 modified\n".to_string(),
+            _ => format!("line {n}\n"),
+        })
+        .collect();
+    fs::write(&file_path, &modified).unwrap();
+
+    let raw_diff = git_working_tree_diff(&root, None).unwrap();
+    let files = parse_unified_diff(&raw_diff);
+    assert_eq!(files.len(), 1);
+    let diff_file = &files[0];
+    let hunk_indices: Vec<usize> = diff_file
+        .lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| (line.kind == DiffLineKind::Hunk).then_some(idx))
+        .collect();
+    assert_eq!(hunk_indices.len(), 2);
+
+    let first_patch = extract_single_hunk_patch(diff_file, hunk_indices[0]).unwrap();
+    assert!(first_patch.contains("--- a/src/demo.txt"));
+    assert!(first_patch.contains("+++ b/src/demo.txt"));
+    assert!(first_patch.contains("+line 2 modified"));
+    assert!(!first_patch.contains("+line 11 modified"));
+
+    git_stage_hunk(&root, diff_file, hunk_indices[0]).unwrap();
+    let cached = run_git_capture(&root, &["diff", "--cached"]);
+    assert!(cached.contains("+line 2 modified"), "{cached}");
+    assert!(!cached.contains("+line 11 modified"), "{cached}");
+
+    let unstaged_after_stage = run_git_capture(&root, &["diff"]);
+    let after_files = parse_unified_diff(&unstaged_after_stage);
+    assert_eq!(after_files.len(), 1);
+    let remaining_file = &after_files[0];
+    let remaining_hunk = remaining_file
+        .lines
+        .iter()
+        .position(|line| line.kind == DiffLineKind::Hunk)
+        .unwrap();
+    git_discard_hunk(&root, remaining_file, remaining_hunk).unwrap();
+
+    let unstaged = run_git_capture(&root, &["diff"]);
+    assert!(unstaged.trim().is_empty(), "{unstaged}");
+    let cached_after = run_git_capture(&root, &["diff", "--cached"]);
+    assert!(cached_after.contains("+line 2 modified"), "{cached_after}");
+    fs::remove_dir_all(root).ok();
+}
+
+fn run_git_capture(repo: &Path, args: &[&str]) -> String {
+    let output = git_command(repo).args(args).output().unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+pub(crate) fn ide_261_diff_pane_hunk_buttons_emit_stage_and_discard() {
+    let files = vec![DiffFile {
+        path: "src/lib.rs".to_string(),
+        renamed_from: None,
+        change: DiffFileChange::Modified,
+        added: 1,
+        removed: 0,
+        widest: 20,
+        note: None,
+        lines: vec![
+            DiffLine {
+                kind: DiffLineKind::Hunk,
+                old_number: None,
+                new_number: None,
+                text: "@@ -1,1 +1,1 @@".to_string(),
+                highlights: Vec::new(),
+            },
+            DiffLine {
+                kind: DiffLineKind::Added,
+                old_number: None,
+                new_number: Some(1),
+                text: "pub fn demo() {}".to_string(),
+                highlights: Vec::new(),
+            },
+        ],
+    }];
+    let ctx = egui::Context::default();
+    let mut collapsed = HashSet::new();
+    let palette = AppTheme::Dark.palette();
+    let project = Uuid::new_v4();
+    let mut annotations = DiffAnnotations::default();
+    let mut action = None;
+    let output = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 400.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                diff_pane_with_actions(
+                    ui,
+                    &files,
+                    &mut collapsed,
+                    palette,
+                    320.0,
+                    project,
+                    &mut annotations,
+                    &mut action,
+                );
+            });
+        },
+    );
+    assert!(action.is_none());
+    let texts = painted_text_rects(&output.shapes);
+    let stage_rect = texts
+        .iter()
+        .find(|(text, _)| text == "ステージ")
+        .map(|(_, rect)| *rect)
+        .expect("Stage button must be rendered on hunk row");
+    let discard_rect = texts
+        .iter()
+        .find(|(text, _)| text == "破棄")
+        .map(|(_, rect)| *rect)
+        .expect("Discard button must be rendered on hunk row");
+
+    let click_at = |ctx: &egui::Context,
+                    pos: egui::Pos2,
+                    collapsed: &mut HashSet<String>,
+                    annotations: &mut DiffAnnotations| {
+        let mut out_action = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 400.0),
+                )),
+                events: vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    diff_pane_with_actions(
+                        ui,
+                        &files,
+                        collapsed,
+                        palette,
+                        320.0,
+                        project,
+                        annotations,
+                        &mut out_action,
+                    );
+                });
+            },
+        );
+        out_action
+    };
+
+    assert_eq!(
+        click_at(&ctx, stage_rect.center(), &mut collapsed, &mut annotations),
+        Some(DiffHunkAction::Stage {
+            file_index: 0,
+            hunk_line_index: 0
+        })
+    );
+    assert_eq!(
+        click_at(
+            &ctx,
+            discard_rect.center(),
+            &mut collapsed,
+            &mut annotations
+        ),
+        Some(DiffHunkAction::Discard {
+            file_index: 0,
+            hunk_line_index: 0
+        })
+    );
+}
+
+#[test]
+pub(crate) fn ide_261_format_code_context_and_extract_terminal_error() {
+    let formatted = format_code_context_for_agent(
+        Path::new("src/git.rs"),
+        10,
+        12,
+        "fn demo() {\n    todo!()\n}",
+        Some("error[E0308]: mismatched types"),
+    );
+    assert!(formatted.contains("```src/git.rs:10-12"), "{formatted}");
+    assert!(formatted.contains("fn demo()"), "{formatted}");
+    assert!(
+        formatted.contains("error[E0308]: mismatched types"),
+        "{formatted}"
+    );
+
+    let oversized = "x".repeat(MAX_CODE_CONTEXT_SNIPPET_BYTES + 500);
+    let bounded = format_code_context_for_agent(Path::new("src/big.rs"), 1, 900, &oversized, None);
+    assert!(bounded.len() <= MAX_CODE_CONTEXT_SNIPPET_BYTES + 128);
+
+    let scrollback = "Compiling operon v0.1.0\nerror[E0382]: borrow of moved value: `x`\n  --> src/app.rs:42:9\n   |\n42 |     use(x);\n   |         ^ value used here after move\n";
+    let extracted = extract_recent_terminal_error(scrollback).unwrap();
+    assert!(extracted.contains("error[E0382]"), "{extracted}");
+    assert!(extracted.contains("src/app.rs:42:9"), "{extracted}");
+
+    assert!(extract_recent_terminal_error("Compiling operon\nFinished `dev` profile\n").is_none());
+}
+
+#[test]
+pub(crate) fn ide_261_at_mention_query_ranking_and_insertion() {
+    assert_eq!(active_at_mention_query("確認して @dif"), Some((13, "dif")));
+    assert_eq!(active_at_mention_query("@src/git"), Some((0, "src/git")));
+    assert_eq!(active_at_mention_query("user@example.com"), None);
+
+    let files = vec![
+        PathBuf::from("src/git.rs"),
+        PathBuf::from("src/files.rs"),
+        PathBuf::from("README.md"),
+    ];
+    let knowledge = vec!["Git Worktree 運用ルール".to_string()];
+    let ranked = rank_context_mentions("git", true, &files, &knowledge);
+    assert!(!ranked.is_empty());
+    assert!(ranked.len() <= MAX_AT_MENTION_SUGGESTIONS);
+    assert!(ranked.iter().any(|c| c.token == "@src/git.rs"));
+    assert!(ranked
+        .iter()
+        .any(|c| c.token == "@knowledge:Git Worktree 運用ルール"));
+
+    let diff_ranked = rank_context_mentions("dif", true, &files, &knowledge);
+    assert_eq!(diff_ranked[0].token, "@diff");
+
+    let prompt = "修正をお願いします @dif";
+    let (at_idx, _) = active_at_mention_query(prompt).unwrap();
+    let replaced = apply_context_mention(prompt, at_idx, "@src/git.rs");
+    assert_eq!(replaced, "修正をお願いします @src/git.rs ");
+}
+
+#[test]
+pub(crate) fn ide_261_external_ide_catalog_and_line_jump_args() {
+    assert!(ExternalIde::ALL.contains(&ExternalIde::Windsurf));
+    assert!(ExternalIde::ALL.contains(&ExternalIde::Antigravity));
+    assert!(ExternalIde::ALL.contains(&ExternalIde::Void));
+
+    let path = Path::new("/tmp/sample.rs");
+    let (program, args) = external_ide_command_args(ExternalIde::Windsurf, path, Some(27));
+    assert_eq!(program, "windsurf");
+    assert_eq!(
+        args,
+        vec!["-g".to_string(), "/tmp/sample.rs:27".to_string()]
+    );
+
+    let (agy_prog, agy_args) = external_ide_command_args(ExternalIde::Antigravity, path, Some(9));
+    assert_eq!(agy_prog, "agy");
+    assert_eq!(
+        agy_args,
+        vec!["-g".to_string(), "/tmp/sample.rs:9".to_string()]
+    );
+
+    let (void_prog, void_args) = external_ide_command_args(ExternalIde::Void, path, Some(3));
+    assert_eq!(void_prog, "void");
+    assert_eq!(
+        void_args,
+        vec!["-g".to_string(), "/tmp/sample.rs:3".to_string()]
+    );
+
+    let (zed_prog, zed_args) = external_ide_command_args(ExternalIde::Zed, path, Some(15));
+    assert_eq!(zed_prog, "zed");
+    assert_eq!(zed_args, vec!["/tmp/sample.rs:15".to_string()]);
+}
+
+#[test]
+pub(crate) fn ide_261_parallel_arena_agents_and_branch_names() {
+    assert!(parallel_arena_agents(&[CliProvider::Claude]).is_empty());
+    let selected = parallel_arena_agents(&[
+        CliProvider::Gemini,
+        CliProvider::Claude,
+        CliProvider::Gemini,
+    ]);
+    assert_eq!(selected, vec![CliProvider::Claude, CliProvider::Gemini]);
+    assert_eq!(
+        arena_worktree_branch_name("feature/arena", CliProvider::Claude),
+        "feature/arena-claude"
+    );
+    assert_eq!(
+        arena_worktree_branch_name("feature/arena", CliProvider::Codex),
+        "feature/arena-codex"
+    );
+    assert_eq!(
+        arena_worktree_branch_name("feature/arena", CliProvider::Gemini),
+        "feature/arena-gemini"
+    );
+}
+
+#[test]
+pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
+    let source = "pub fn render_diff_hunk() {}\npub struct ArenaLaunchConfig {\n}\n";
+    let symbols = extract_file_symbols(Path::new("src/git.rs"), source);
+    assert_eq!(symbols.len(), 2);
+    assert_eq!(symbols[0].name, "render_diff_hunk");
+    assert_eq!(symbols[0].line, 1);
+    assert_eq!(symbols[1].name, "ArenaLaunchConfig");
+    assert_eq!(symbols[1].line, 2);
+
+    let root = temporary_directory("ide-261-palette");
+    let src_dir = root.join("src");
+    fs::create_dir_all(&src_dir).unwrap();
+    let rel_file = PathBuf::from("src/git.rs");
+    fs::write(root.join(&rel_file), source).unwrap();
+
+    let mut app = test_app(root.join("store-v2.json"));
+    let project_id = Uuid::new_v4();
+    let project = Project {
+        id: project_id,
+        name: "operon".to_string(),
+        path: root.clone(),
+        added_at: 1,
+    };
+    app.store.projects.push(project.clone());
+    app.selected_project = Some(project_id);
+    app.file_cache.insert(
+        project_id,
+        FileScanSnapshot {
+            paths: vec![rel_file.clone()],
+            truncated: false,
+            unreadable_directories: 0,
+        },
+    );
+    app.open_documents.push(OpenDocument {
+        project: project_id,
+        root: root.clone(),
+        path: rel_file.clone(),
+        branch: None,
+        project_rooted: true,
+        disk: source.to_string(),
+        buffer: source.to_string(),
+        read_only: None,
+        save_error: None,
+        external_change: false,
+        image_data: None,
+        viewer: None,
+    });
+
+    app.command_palette_open = true;
+    app.command_search = "render_diff_hunk".to_string();
+    let entries = app.palette_entries();
+    let symbol_entry = entries
+        .iter()
+        .find(|entry| {
+            matches!(
+                &entry.kind,
+                PaletteKind::File {
+                    path,
+                    line: Some(1),
+                    ..
+                } if path == &rel_file
+            )
+        })
+        .cloned()
+        .expect("symbol entry should be ranked in palette");
+
+    app.activate_palette_entry(&symbol_entry.kind);
+    assert_eq!(app.project_tab, ProjectTab::Files);
+    assert_eq!(
+        app.active_document.as_ref().map(|doc| &doc.path),
+        Some(&rel_file)
+    );
+    assert_eq!(app.editor_jump_line, Some(1));
     fs::remove_dir_all(root).ok();
 }

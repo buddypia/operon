@@ -70,7 +70,7 @@ pub(crate) enum BackgroundKey {
     AiDiffReview(Uuid),
     Upstream(Uuid),
     PortScan,
-    /// Stopping one listener the person confirmed (change 261). One at a
+    /// Stopping one listener the person confirmed (change 262). One at a
     /// time: the stop buttons are disabled while it runs.
     PortStop,
     ToolStatus,
@@ -274,7 +274,7 @@ pub(crate) enum BackgroundResult {
     },
     ListeningPorts {
         /// `ports_generation` when the scan started. A stop that finished
-        /// since then makes this reading stale (change 261).
+        /// since then makes this reading stale (change 262).
         generation: u64,
         ports: Vec<AttributedPort>,
     },
@@ -690,7 +690,7 @@ pub(crate) struct OperonApp {
     pub(crate) ports_scanned_at: Option<Instant>,
     /// Bumped by every finished stop, so that a scan which started before it —
     /// and so still lists the stopped server — is dropped when it lands
-    /// instead of putting that server back for thirty seconds (change 261).
+    /// instead of putting that server back for thirty seconds (change 262).
     pub(crate) ports_generation: u64,
     /// The listener whose stop is waiting for the person's confirmation.
     pub(crate) pending_port_stop: Option<AttributedPort>,
@@ -794,6 +794,8 @@ pub(crate) struct OperonApp {
     pub(crate) cached_land_base: Option<(Uuid, String)>,
     pub(crate) cached_run_script: Option<(PathBuf, Instant, Option<SetupScript>)>,
     pub(crate) cached_prompt_templates: Option<(Option<PathBuf>, Instant, Vec<PromptTemplate>)>,
+    pub(crate) arena_mode_enabled: bool,
+    pub(crate) arena_agents: Vec<CliProvider>,
 }
 
 /// What became of one folder offered as a project.
@@ -1172,6 +1174,8 @@ impl OperonApp {
             cached_land_base: None,
             cached_run_script: None,
             cached_prompt_templates: None,
+            arena_mode_enabled: false,
+            arena_agents: Vec::new(),
         }
     }
 
@@ -8584,6 +8588,11 @@ pub(crate) enum PaletteKind {
     Action(&'static str),
     Session(Uuid),
     Project(Uuid),
+    File {
+        project: Uuid,
+        path: PathBuf,
+        line: Option<usize>,
+    },
 }
 
 /// How well a row matched, best first.
@@ -8656,6 +8665,7 @@ impl PaletteKind {
             Self::Action(_) => 0,
             Self::Session(_) => 1,
             Self::Project(_) => 2,
+            Self::File { .. } => 3,
         }
     }
 }
@@ -9323,7 +9333,7 @@ impl OperonApp {
             return;
         }
         // Every project, whose root and git worktrees are folders a server can
-        // run in whether or not a session is open there (change 261), and
+        // run in whether or not a session is open there (change 262), and
         // every folder a session is working in.
         let projects: Vec<(Uuid, PathBuf)> = self
             .store
@@ -9360,7 +9370,7 @@ impl OperonApp {
         });
     }
 
-    /// One session's ports, split by where they run (change 261): its own
+    /// One session's ports, split by where they run (change 262): its own
     /// folder, in port order so the row does not reshuffle between scans, and
     /// the rest of its project, by folder and then port.
     pub(crate) fn session_ports(&self, session: &Session) -> SessionPorts {

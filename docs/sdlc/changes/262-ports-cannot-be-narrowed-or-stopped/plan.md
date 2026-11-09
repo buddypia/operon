@@ -12,9 +12,9 @@
 | `src/config.rs` | `PORT_STOP_PROGRAM`, `PORT_STOP_CHECK_TIMEOUT_SECONDS`, `PORT_STOP_SIGNAL_TIMEOUT_SECONDS`, `PORT_STOP_POLL_MILLIS`, `PORT_STOP_WAIT_MILLIS`. |
 | `src/app.rs` | `listening_ports` type, `request_port_scan` inputs, `SessionPorts`/`session_ports`, badge, `ui_session_ports_menu`/`PortMenuAction`, `pending_port_stop`, `ui_port_stop_modal` and its call, `BackgroundKey::PortStop`, `BackgroundResult::PortStopped` and handler. |
 | `src/i18n_tables.rs` | New rows in `EN_TABLE` and `KO_TABLE`; 「稼働中のポート」 removed. |
-| `src/tests.rs` | The eleven `ports_261_` tests; existing `ports_` tests and change 077's UI test moved to the new types; `PortStop` in the background-key list. |
+| `src/tests.rs` | The eleven `ports_262_` tests; existing `ports_` tests and change 077's UI test moved to the new types; `PortStop` in the background-key list. |
 | `README.md`, `README.ja.md`, `README.ko.md` | Ports paragraph: own folder, elsewhere in the project, stop with confirmation. |
-| `docs/sdlc/changes/261-…/` | `verification.yaml`, `mutations.py`, state. |
+| `docs/sdlc/changes/262-…/` | `verification.yaml`, `mutations.py`, state. |
 
 ## Order of work
 
@@ -37,7 +37,7 @@
    scan which was in flight when a stop finished — test first, then the
    drawing.
 5. Strings in both tables; READMEs in three languages.
-6. Tidy; `make q.fast`; `cargo test --locked ports_261_`, the change-077 UI
+6. Tidy; `make q.fast`; `cargo test --locked ports_262_`, the change-077 UI
    test, the existing `ports_` tests and the background-key test.
 7. `verification.yaml`, `mutations.py` (mutate: deepest-wins, own vs
    elsewhere matching on `spellings`, the name check before signalling, the
@@ -64,7 +64,7 @@
 
 - `cargo fmt --check` — no output.
 - `cargo clippy --locked -- -D warnings` — no output past the compile lines.
-- `cargo test --locked ports_261_` — `test result: ok. 11 passed; 0 failed`.
+- `cargo test --locked ports_262_` — `test result: ok. 11 passed; 0 failed`.
 - `cargo test --locked ui_session_ports_renders_compact_popover_button_when_active` and the existing `ports_` tests — ok.
 - `make q.fast` — passes.
 - CI green on the branch head; the `verify` job re-runs `verification.yaml`.
@@ -94,12 +94,12 @@
 - Two findings were reproduced against the first commit (94f2252) and fixed,
   each kept as a regression test: a session with no worktree runs in the
   project checkout but owned nothing (`F1`,
-  `ports_261_session_without_worktree_owns_the_project_root`); and a PID that
+  `ports_262_session_without_worktree_owns_the_project_root`); and a PID that
   kept the port under a new name after SIGTERM was reported stopped (`F2`,
-  `ports_261_stop_does_not_take_a_renamed_holder_for_gone`), so a read now
+  `ports_262_stop_does_not_take_a_renamed_holder_for_gone`), so a read now
   says `Same`, `Renamed` or `Free` instead of yes or no. Requirements 3 and 7
   in `spec.md` say so and were approved again. With them the proof above
-  reads `13 passed` for `cargo test --locked ports_261_`, not eleven.
+  reads `13 passed` for `cargo test --locked ports_262_`, not eleven.
 - CI's `Control bands` step failed on the first branch run: `src/app.rs`
   reached 10 013 lines, past the `largest_module_lines` propose tier. The
   badge, menu and confirmation drawing moved to `src/app/screens.rs` beside
@@ -111,3 +111,9 @@
   as two halves; the record keeps one `mutations.py`, which is the only sweep
   file the gate admits, and at the 24 s per mutation CI measured on the first
   branch run it fits inside CI's 900 s per obligation.
+- Renumbered from 261 to 262 before landing. A parallel session opened
+  `261-agent-ide-loops-require-manual-steps` minutes apart and was about to
+  land first; `change_directory_numbers_are_unique` makes the second lander
+  move. The directory, the branch, the `ports_262_` test names and the
+  comments moved together; commits 2441799, 2354b74, 94f2252 and 9f0be9f
+  still say 261 in their messages.

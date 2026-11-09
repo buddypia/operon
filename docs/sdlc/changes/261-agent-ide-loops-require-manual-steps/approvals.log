@@ -1,0 +1,4 @@
+2026-11-09T03:32:43Z auto intent intent.md 48b662e523668622 approve Restates the user-selected six IDE/agent loop improvements within local-first and non-paused store boundaries.
+2026-11-09T03:32:43Z auto spec spec.md cdcd0c21258e95c8 approve Covers all six intent outcomes with bounded budgets, exec.rs subprocess timeouts, complete policy conformance, and named ide_261_ tests.
+2026-11-09T03:32:43Z auto screen screen.md 0634b805f829ea7a approve Places all five UI additions inside existing panes, menus, and sheets using existing semantic palette roles and Phosphor icons.
+2026-11-09T03:32:43Z auto plan plan.md e5b4e998c8f9e205 approve Matches spec.md across non-paused surfaces with test-first order of work, app.rs band protection, and mutation-backed proof of completion.

@@ -28,7 +28,7 @@ pub(crate) struct ListeningPort {
 }
 
 /// A folder a listener can be credited to: a session's worktree, one of a
-/// project's git worktrees, or a project's root (change 261).
+/// project's git worktrees, or a project's root (change 262).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PortRoot {
     /// Canonical, because that is the form `lsof` reports a working directory
@@ -217,7 +217,7 @@ fn port_root_label(project_root: Option<&Path>, path: &Path) -> String {
 /// The **deepest** containing folder wins. A worktree living inside its own
 /// project would otherwise be claimed by both, and the project — which contains
 /// everything — would claim every port on the machine that happened to be
-/// started underneath it. Since change 261 the project's git worktrees are
+/// started underneath it. Since change 262 the project's git worktrees are
 /// folders too, whether or not a session is open on them, so a session at the
 /// root no longer collects a worktree's servers by default.
 pub(crate) fn attribute_ports(
@@ -348,7 +348,7 @@ fn lsof_output(program: &str, arguments: &[&str], timeout: Duration) -> Option<S
         .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-/// What became of a request to stop a listener (change 261).
+/// What became of a request to stop a listener (change 262).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PortStopOutcome {
     /// Signalled, and a successful read then showed the port free.
@@ -499,7 +499,7 @@ pub(crate) fn stop_listening_port_with(
     }
 }
 
-/// One session's ports, split by where they run (change 261).
+/// One session's ports, split by where they run (change 262).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct SessionPorts {
     /// Credited to the folder the session works in.

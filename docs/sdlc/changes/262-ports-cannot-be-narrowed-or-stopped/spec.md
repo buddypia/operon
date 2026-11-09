@@ -10,14 +10,14 @@
    worktree, every git worktree of every project, and every project's root;
    the credit carries the folder's project and the process's working
    directory, and a listener whose directory is unknown or outside every known
-   folder is credited to none. Test: `ports_261_deepest_known_folder_is_credited`.
+   folder is credited to none. Test: `ports_262_deepest_known_folder_is_credited`.
 2. The known folders are compared by their canonical path — the form `lsof`
    reports working directories in and `git worktree list` reports worktrees
    in — and listed once per canonical path, remembering every stored spelling
    that resolved to it. Each is named for the list: empty for a project's
    root, the path relative to the project root when the folder is inside it,
    the folder's own name when it is not. Test:
-   `ports_261_known_folders_are_named_once`.
+   `ports_262_known_folders_are_named_once`.
 3. A session's ports split in two: **own** — credited to the folder the
    session works in, which is the folder its stored worktree path is a
    spelling of, or the project root when it has no worktree (it then runs in
@@ -26,30 +26,30 @@
    that project's git worktrees as own, whether or not a session is open on it;
    another project's servers appear in neither. Own is in port order,
    elsewhere in folder-name then port order. Tests:
-   `ports_261_session_splits_own_from_elsewhere`,
-   `ports_261_session_without_worktree_owns_the_project_root`.
+   `ports_262_session_splits_own_from_elsewhere`,
+   `ports_262_session_without_worktree_owns_the_project_root`.
 4. The header badge names the own ports as today (`:5173 vite` for one,
    「{n} ポート稼働中」 for more); with no own ports but some elsewhere it reads
    「プロジェクトで {n} ポート稼働中」 in `text-muted`; with neither nothing is
-   drawn. Tests: `ports_261_badge_counts_own_folder_or_names_the_project`,
+   drawn. Tests: `ports_262_badge_counts_own_folder_or_names_the_project`,
    `ui_session_ports_renders_compact_popover_button_when_active`.
 5. The menu body draws 「この作業フォルダ」 over the own rows and
    「プロジェクト内のほかの場所」 over the elsewhere rows, omits a section that is
    empty, gives each elsewhere row its folder name (「プロジェクトのルート」 for
    the root), and gives every row an open, a copy and a stop control; pressing
    stop asks for confirmation and sends nothing. Test:
-   `ports_261_menu_sections_name_folders_and_offer_stop`.
+   `ports_262_menu_sections_name_folders_and_offer_stop`.
 6. Stopping refuses PID 0, PID 1, a PID above `i32::MAX` and Operon's own PID
-   without running any program. Test: `ports_261_stop_refuses_operon_and_init`.
+   without running any program. Test: `ports_262_stop_refuses_operon_and_init`.
 7. Stopping signals only the listener the person confirmed: when the PID no
    longer listens on that port under that process name, nothing is sent and
    the process keeps running; when it does, SIGTERM is sent and the outcome is
    "stopped" once a successful read shows the port no longer held by that PID
    under any name — a PID that keeps the port under a new name has not
-   stopped (`ports_261_stop_does_not_take_a_renamed_holder_for_gone`).
-   Tests: `ports_261_stop_signals_only_the_confirmed_listener` (a real
+   stopped (`ports_262_stop_does_not_take_a_renamed_holder_for_gone`).
+   Tests: `ports_262_stop_signals_only_the_confirmed_listener` (a real
    `python3` listener, real `lsof` and `/bin/kill`) and
-   `ports_261_stop_sequence_checks_before_signalling` (injected check and
+   `ports_262_stop_sequence_checks_before_signalling` (injected check and
    signal).
 8. "Stopped" is never reported without a successful read showing the port
    free: when the listener cannot be verified before signalling (no `lsof`,
@@ -57,16 +57,16 @@
    non-zero, the outcome carries its error; when every read after the signal
    fails, the outcome is "asked, but could not confirm". The whole stop is
    bounded by a deadline. Test:
-   `ports_261_stop_never_reports_stopped_without_seeing_it_gone`.
+   `ports_262_stop_never_reports_stopped_without_seeing_it_gone`.
 9. The confirmation window names the port, process, PID and the process's
    working directory (「不明」 when unknown); 「キャンセル」 and the close box
    clear it without starting a stop. Test:
-   `ports_261_confirmation_names_pid_and_folder`.
+   `ports_262_confirmation_names_pid_and_folder`.
 10. A stop's outcome reaches the person as the notice for that outcome, and the
     ports are read again on the next frame rather than up to thirty seconds
     later. A scan that was already running when the outcome arrived is
     discarded when it lands and read again, so it cannot put a stopped server
-    back in the list. Test: `ports_261_stop_outcome_is_told_and_rescanned`.
+    back in the list. Test: `ports_262_stop_outcome_is_told_and_rescanned`.
 
 ## Behaviour
 
@@ -253,7 +253,7 @@ use. `README.md`, `README.ja.md`, `README.ko.md`: the ports paragraph.
 
 ## Acceptance
 
-- `cargo test --locked ports_261_` and
+- `cargo test --locked ports_262_` and
   `cargo test --locked ui_session_ports_renders_compact_popover_button_when_active`
   pass; the existing `ports_` tests pass against the new signatures.
 - `make q.fast` passes.

@@ -127,6 +127,19 @@ pub(crate) fn diff_counts(ui: &mut egui::Ui, added: usize, removed: usize, palet
     }
 }
 
+/// User action triggered on a single hunk header row inside the diff pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiffHunkAction {
+    Stage {
+        file_index: usize,
+        hunk_line_index: usize,
+    },
+    Discard {
+        file_index: usize,
+        hunk_line_index: usize,
+    },
+}
+
 /// Draw a parsed diff, laying out only the rows the viewport can show, and the
 /// notes a person has written against those lines.
 ///
@@ -141,6 +154,7 @@ pub(crate) fn diff_counts(ui: &mut egui::Ui, added: usize, removed: usize, palet
 /// can reach it.
 ///
 /// Returns whether the set of notes changed and needs writing down.
+#[cfg(test)]
 pub(crate) fn diff_pane(
     ui: &mut egui::Ui,
     files: &[DiffFile],
@@ -149,6 +163,30 @@ pub(crate) fn diff_pane(
     height: f32,
     project: Uuid,
     annotations: &mut DiffAnnotations,
+) -> bool {
+    let mut hunk_action = None;
+    diff_pane_with_actions(
+        ui,
+        files,
+        collapsed,
+        palette,
+        height,
+        project,
+        annotations,
+        &mut hunk_action,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_pane_with_actions(
+    ui: &mut egui::Ui,
+    files: &[DiffFile],
+    collapsed: &mut HashSet<String>,
+    palette: &Palette,
+    height: f32,
+    project: Uuid,
+    annotations: &mut DiffAnnotations,
+    hunk_action: &mut Option<DiffHunkAction>,
 ) -> bool {
     if files.is_empty() {
         ui.label(RichText::new(tr("変更はありません。")).color(palette.text_muted));
@@ -261,9 +299,9 @@ pub(crate) fn diff_pane(
                             toggled = Some(file.path.clone());
                         }
                     }
-                    DiffRow::Line(file, line) => {
-                        let path = &files[file].path;
-                        let line = &files[file].lines[line];
+                    DiffRow::Line(file_idx, line_idx) => {
+                        let path = &files[file_idx].path;
+                        let line = &files[file_idx].lines[line_idx];
                         let wash = match line.kind {
                             DiffLineKind::Added => Some(palette.diff_added_bg),
                             DiffLineKind::Removed => Some(palette.diff_removed_bg),
@@ -286,6 +324,47 @@ pub(crate) fn diff_pane(
                         let galley = ui.fonts(|fonts| fonts.layout_job(job));
                         ui.painter()
                             .galley(rect.min + egui::vec2(8.0, 0.0), galley, palette.text);
+                        if line.kind == DiffLineKind::Hunk && !path.is_empty() {
+                            let mut hunk_ui = ui.new_child(
+                                egui::UiBuilder::new()
+                                    .id_salt(("diff-hunk-actions", path, line_idx))
+                                    .max_rect(rect.shrink2(egui::vec2(6.0, 0.0)))
+                                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                            );
+                            hunk_ui.spacing_mut().item_spacing.x = 6.0;
+                            if hunk_ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(tr("破棄")).size(11.5).color(palette.danger),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text(tr("このハンクの変更を破棄します"))
+                                .clicked()
+                            {
+                                *hunk_action = Some(DiffHunkAction::Discard {
+                                    file_index: file_idx,
+                                    hunk_line_index: line_idx,
+                                });
+                            }
+                            if hunk_ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(tr("ステージ"))
+                                            .size(11.5)
+                                            .color(palette.accent),
+                                    )
+                                    .frame(false),
+                                )
+                                .on_hover_text(tr("このハンクをステージします"))
+                                .clicked()
+                            {
+                                *hunk_action = Some(DiffHunkAction::Stage {
+                                    file_index: file_idx,
+                                    hunk_line_index: line_idx,
+                                });
+                            }
+                        }
                         // Only a line that exists after the change can carry a
                         // note: a removed line has no line number on the side
                         // the agent would go looking at.

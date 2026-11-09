@@ -327,3 +327,204 @@ pub(crate) fn visit_with_limits(
     scan.paths.sort();
     scan
 }
+
+pub(crate) const MAX_AT_MENTION_SUGGESTIONS: usize = 8;
+pub(crate) const MAX_SYMBOLS_PER_FILE: usize = 64;
+pub(crate) const MAX_PALETTE_FILE_CANDIDATES: usize = 16;
+pub(crate) const MAX_PALETTE_SYMBOL_CANDIDATES: usize = 8;
+
+/// One `@` context completion suggestion in the session launch request field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextMentionCandidate {
+    pub(crate) token: String,
+    pub(crate) label: String,
+    pub(crate) detail: String,
+}
+
+/// Detect an active `@<query>` token at the end of `input` (or before trailing cursor).
+/// Returns `(byte_offset_of_at, query_slice)` when `@` is at start of input or preceded by whitespace.
+pub(crate) fn active_at_mention_query(input: &str) -> Option<(usize, &str)> {
+    let at_idx = input.rfind('@')?;
+    if at_idx > 0 {
+        let prev = input[..at_idx].chars().next_back()?;
+        if !prev.is_whitespace() {
+            return None;
+        }
+    }
+    let query = &input[at_idx + 1..];
+    if query.chars().any(char::is_whitespace) {
+        return None;
+    }
+    Some((at_idx, query))
+}
+
+/// Rank `@diff`, `@knowledge:<title>`, and `@<relative-path>` candidates for `query`.
+pub(crate) fn rank_context_mentions(
+    query: &str,
+    has_git_diff: bool,
+    files: &[PathBuf],
+    knowledge_titles: &[String],
+) -> Vec<ContextMentionCandidate> {
+    let q = query.trim().to_lowercase();
+    let mut scored: Vec<(u8, ContextMentionCandidate)> = Vec::new();
+
+    if has_git_diff && (q.is_empty() || "diff".contains(&q)) {
+        let rank = if "diff".starts_with(&q) { 0 } else { 1 };
+        scored.push((
+            rank,
+            ContextMentionCandidate {
+                token: "@diff".to_string(),
+                label: "@diff".to_string(),
+                detail: tr("現在の Git 差分").to_string(),
+            },
+        ));
+    }
+
+    for title in knowledge_titles {
+        let lower = title.to_lowercase();
+        if q.is_empty() || lower.contains(&q) || "knowledge".starts_with(&q) {
+            let rank = if lower.starts_with(&q) { 1 } else { 2 };
+            let token = format!("@knowledge:{title}");
+            scored.push((
+                rank,
+                ContextMentionCandidate {
+                    label: token.clone(),
+                    token,
+                    detail: tr("プロジェクト知識").to_string(),
+                },
+            ));
+        }
+    }
+
+    for path in files {
+        let rel = path.display().to_string();
+        let lower = rel.to_lowercase();
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if q.is_empty() || lower.contains(&q) {
+            let rank = if file_name.starts_with(&q) || lower.starts_with(&q) {
+                1
+            } else {
+                2
+            };
+            let token = format!("@{rel}");
+            scored.push((
+                rank,
+                ContextMentionCandidate {
+                    label: token.clone(),
+                    token,
+                    detail: tr("プロジェクトファイル").to_string(),
+                },
+            ));
+        }
+    }
+
+    scored.sort_by(|(la, a), (lb, b)| la.cmp(lb).then_with(|| a.token.cmp(&b.token)));
+    scored
+        .into_iter()
+        .take(MAX_AT_MENTION_SUGGESTIONS)
+        .map(|(_, c)| c)
+        .collect()
+}
+
+/// Replace the active `@...` token starting at `at_byte_index` with `replacement`.
+pub(crate) fn apply_context_mention(
+    input: &str,
+    at_byte_index: usize,
+    replacement: &str,
+) -> String {
+    if at_byte_index > input.len() || !input.is_char_boundary(at_byte_index) {
+        if input.is_empty() || input.ends_with(char::is_whitespace) {
+            return format!("{input}{replacement} ");
+        }
+        return format!("{input} {replacement} ");
+    }
+    let prefix = &input[..at_byte_index];
+    let rest = &input[at_byte_index..];
+    let token_end = rest
+        .find(char::is_whitespace)
+        .map(|idx| at_byte_index + idx)
+        .unwrap_or(input.len());
+    let suffix = &input[token_end..];
+    if suffix.starts_with(char::is_whitespace) || replacement.ends_with('\n') {
+        format!("{prefix}{replacement}{suffix}")
+    } else {
+        format!("{prefix}{replacement} {suffix}")
+    }
+}
+
+/// A top-level symbol extracted from an open source file for palette navigation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CodeSymbol {
+    pub(crate) name: String,
+    pub(crate) kind: &'static str,
+    pub(crate) line: usize,
+}
+
+fn parse_identifier_prefix(s: &str) -> Option<&str> {
+    let trimmed = s.trim_start();
+    let end = trimmed
+        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .unwrap_or(trimmed.len());
+    (end > 0).then_some(&trimmed[..end])
+}
+
+/// Extract up to `MAX_SYMBOLS_PER_FILE` function and type definitions from `text`.
+pub(crate) fn extract_file_symbols(path: &Path, text: &str) -> Vec<CodeSymbol> {
+    let _lang = editor_language(path);
+    let mut symbols = Vec::new();
+    for (idx, raw_line) in text.lines().enumerate() {
+        if symbols.len() >= MAX_SYMBOLS_PER_FILE {
+            break;
+        }
+        let line = raw_line.trim_start();
+        if line.starts_with("//") || line.starts_with('#') {
+            continue;
+        }
+        let stripped = line
+            .strip_prefix("pub(crate) ")
+            .or_else(|| line.strip_prefix("pub(super) "))
+            .or_else(|| line.strip_prefix("pub "))
+            .or_else(|| line.strip_prefix("export default "))
+            .or_else(|| line.strip_prefix("export "))
+            .unwrap_or(line);
+        let stripped = stripped.strip_prefix("async ").unwrap_or(stripped);
+        let stripped = stripped.strip_prefix("unsafe ").unwrap_or(stripped);
+        let stripped = stripped.strip_prefix("const ").unwrap_or(stripped);
+
+        let candidate = if let Some(rest) = stripped
+            .strip_prefix("fn ")
+            .or_else(|| stripped.strip_prefix("function "))
+            .or_else(|| stripped.strip_prefix("def "))
+            .or_else(|| stripped.strip_prefix("func "))
+        {
+            parse_identifier_prefix(rest).map(|name| (name, "fn"))
+        } else if let Some(rest) = stripped.strip_prefix("struct ") {
+            parse_identifier_prefix(rest).map(|name| (name, "struct"))
+        } else if let Some(rest) = stripped.strip_prefix("enum ") {
+            parse_identifier_prefix(rest).map(|name| (name, "enum"))
+        } else if let Some(rest) = stripped.strip_prefix("trait ") {
+            parse_identifier_prefix(rest).map(|name| (name, "trait"))
+        } else if let Some(rest) = stripped.strip_prefix("interface ") {
+            parse_identifier_prefix(rest).map(|name| (name, "interface"))
+        } else if let Some(rest) = stripped.strip_prefix("class ") {
+            parse_identifier_prefix(rest).map(|name| (name, "class"))
+        } else if let Some(rest) = stripped.strip_prefix("type ") {
+            parse_identifier_prefix(rest).map(|name| (name, "type"))
+        } else {
+            None
+        };
+
+        if let Some((name, kind)) = candidate {
+            symbols.push(CodeSymbol {
+                name: name.to_string(),
+                kind,
+                line: idx + 1,
+            });
+        }
+    }
+    symbols
+}

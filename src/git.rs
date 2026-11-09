@@ -2277,3 +2277,109 @@ pub(crate) fn list_prompt_templates(project_path: Option<&Path>) -> Vec<PromptTe
 
     templates
 }
+
+/// Reconstruct a standalone unified diff patch for a single hunk at `hunk_line_index`.
+pub(crate) fn extract_single_hunk_patch(file: &DiffFile, hunk_line_index: usize) -> Option<String> {
+    if file.path.is_empty() {
+        return None;
+    }
+    let hunk_header = file.lines.get(hunk_line_index)?;
+    if hunk_header.kind != DiffLineKind::Hunk {
+        return None;
+    }
+    let old_path = file.renamed_from.as_deref().unwrap_or(&file.path);
+    let new_path = &file.path;
+    let mut patch = String::new();
+    match file.change {
+        DiffFileChange::Added => {
+            patch.push_str("--- /dev/null\n");
+            patch.push_str(&format!("+++ b/{new_path}\n"));
+        }
+        DiffFileChange::Removed => {
+            patch.push_str(&format!("--- a/{old_path}\n"));
+            patch.push_str("+++ /dev/null\n");
+        }
+        DiffFileChange::Modified | DiffFileChange::Renamed => {
+            patch.push_str(&format!("--- a/{old_path}\n"));
+            patch.push_str(&format!("+++ b/{new_path}\n"));
+        }
+    }
+    patch.push_str(&hunk_header.text);
+    patch.push('\n');
+    for line in &file.lines[hunk_line_index + 1..] {
+        match line.kind {
+            DiffLineKind::Hunk => break,
+            DiffLineKind::Added => {
+                patch.push('+');
+                patch.push_str(&line.text);
+                patch.push('\n');
+            }
+            DiffLineKind::Removed => {
+                patch.push('-');
+                patch.push_str(&line.text);
+                patch.push('\n');
+            }
+            DiffLineKind::Context => {
+                patch.push(' ');
+                patch.push_str(&line.text);
+                patch.push('\n');
+            }
+            DiffLineKind::Note => {
+                if line.text.starts_with('\\') {
+                    patch.push_str(&line.text);
+                    patch.push('\n');
+                }
+            }
+        }
+    }
+    Some(patch)
+}
+
+fn apply_git_hunk_patch(worktree: &Path, patch: &str, extra_args: &[&str]) -> Result<()> {
+    let patch_path = std::env::temp_dir().join(format!("hunk-apply-{}.patch", Uuid::new_v4()));
+    {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&patch_path)?;
+        file.write_all(patch.as_bytes())?;
+    }
+    let mut cmd = git_command(worktree);
+    cmd.args(["apply", "--unidiff-zero", "--whitespace=nowarn"]);
+    cmd.args(extra_args);
+    cmd.arg(&patch_path);
+    let output_res = run_command_with_timeout(&mut cmd, Duration::from_secs(20));
+    let _ = fs::remove_file(&patch_path);
+    let output = output_res?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        anyhow::bail!("{err}");
+    }
+    Ok(())
+}
+
+/// Stage a single hunk into the git index (`git apply --cached --unidiff-zero`).
+pub(crate) fn git_stage_hunk(
+    worktree: &Path,
+    file: &DiffFile,
+    hunk_line_index: usize,
+) -> Result<()> {
+    let patch = extract_single_hunk_patch(file, hunk_line_index)
+        .ok_or_else(|| anyhow!(tr("対象ハンクが見つかりません")))?;
+    apply_git_hunk_patch(worktree, &patch, &["--cached"])
+}
+
+/// Discard a single hunk from the working tree (`git apply --reverse --unidiff-zero`).
+pub(crate) fn git_discard_hunk(
+    worktree: &Path,
+    file: &DiffFile,
+    hunk_line_index: usize,
+) -> Result<()> {
+    let patch = extract_single_hunk_patch(file, hunk_line_index)
+        .ok_or_else(|| anyhow!(tr("対象ハンクが見つかりません")))?;
+    if apply_git_hunk_patch(worktree, &patch, &["--reverse"]).is_ok() {
+        return Ok(());
+    }
+    apply_git_hunk_patch(worktree, &patch, &["--reverse", "--index"])
+}

@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 RUN_SECONDS = 1800
 CHECKS = [
-    ["cargo", "test", "--locked", "ports_261_"],
+    ["cargo", "test", "--locked", "ports_262_"],
     ["cargo", "test", "--locked", "ui_session_ports_renders_compact_popover_button_when_active"],
 ]
 PORTS = ROOT / "src/git/ports.rs"
