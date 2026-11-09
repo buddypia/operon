@@ -1,0 +1,3 @@
+2026-11-09T14:46:20Z auto intent intent.md 9432e1a6ec1b7d78 approve Independent evaluator a170327b: restates the quoted request; size figures match the tab code; adopted defaults recorded.
+2026-11-09T14:46:20Z auto spec spec.md f11d6586de148fdd approve Independent evaluator a170327b, second round: fallback no longer writes remembered options, login source named, terminal row special-cased, 116px arithmetic, DESIGN.md Controls row.
+2026-11-09T14:46:20Z auto plan plan.md 8388a14bcd166bac approve Independent evaluator a170327b, second round: risk rows for the fallback, the terminal row and the login, each with a catching test.
