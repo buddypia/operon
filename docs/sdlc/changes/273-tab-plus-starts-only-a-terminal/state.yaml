@@ -1,0 +1,29 @@
+# The state of one change. See docs/sdlc/templates/state.yaml for the field meanings.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Get evaluator verdicts on intent, spec, screen and plan, run check-readiness, then write the failing session_273_ tests. Adopted defaults (person asked, no answer): vertical menu with mark and name; tabs tightened with 14pt marks."
+
+contract:
+  three-gates: "machine pending make q.fast; cargo test --locked session_273_, session_254_, session_260_, session_267_, session_253_"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/ui/widgets.rs and src/glyphs.rs change; package from main after landing"
+  guards-verified-by-mutation: "human pending mutations.py: direct terminal on +, agent row starting a terminal, danger check skipped, missing CLI enabled, old tab margins"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
