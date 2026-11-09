@@ -54,7 +54,11 @@ file (reverted from the tree; `probe_268_user_store*` need
    Same with press and release in one frame, and after a 1.2 s hover
    (tooltips shown): closes.
 9. Synthetic CGEvent clicks into the person's Operon: not delivered (a click on
-   「ホーム」 did not switch the page either), so inconclusive.
+   「ホーム」 did not switch the page either), so inconclusive. The session runs
+   under cmux.app, which has no Accessibility grant (`agent-desktop status`:
+   `accessibility: denied`), so no input can be sent from here.
+10. Asked the person four times for the ⌘W / other-tab observation; each reply
+    was 「承認」 with no observation, and the window stayed unchanged.
 
 ## What was ruled out
 
@@ -69,6 +73,8 @@ file (reverted from the tree; `probe_268_user_store*` need
 | split panes break it | probe 7 |
 | fast click (press+release in one frame) or a shown tooltip eats it | probe 8 variants |
 | the app is hung | `sample 31483`: main thread idle in the run loop, frames flushing |
+| `WorkspaceTabs` can leave a tab in two groups, or a group outside the layout, so `close` removes a hidden copy | `probe_268_workspace_invariants_random_walk`: 20 000 walks of open/close/insert_tab/move_tab/select/retain, no violation |
+| the harness used egui's default fonts | probes 4–8 run the full `update`, which calls `apply_appearance` → `configure_macos_fonts` |
 
 ## Narrowest remaining hypothesis
 

@@ -753,3 +753,55 @@ index e0648f9..70174e4 100644
 +    for n in names { kill_tmux_session(&n); }
 +    fs::remove_dir_all(&root).ok();
 +}
+diff --git a/src/tests.rs b/src/tests.rs
+index e0648f9..0375cee 100644
+--- a/src/tests.rs
++++ b/src/tests.rs
+@@ -73150,3 +73150,47 @@ pub(crate) fn ide_261_palette_ranks_project_files_and_document_symbols() {
+     assert_eq!(app.editor_focus_line, Some(1));
+     fs::remove_dir_all(root).ok();
+ }
++
++#[test]
++fn probe_268_workspace_invariants_random_walk() {
++    let tabs: Vec<WorkspaceTab> = (0..3).map(|_| WorkspaceTab::Session(Uuid::new_v4())).collect();
++    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0));
++    let drops = [PaneDrop::Left, PaneDrop::Right, PaneDrop::Top, PaneDrop::Bottom, PaneDrop::Center];
++    let mut seed: u64 = 0x2680_0000_dead_beef;
++    let mut next = |n: usize| { seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407); ((seed >> 33) as usize) % n };
++    let check = |w: &WorkspaceTabs, trace: &[String]| -> Option<String> {
++        let leaves = w.layout.sessions();
++        for t in &tabs {
++            let n = w.groups.iter().filter(|g| g.tabs.contains(t)).count();
++            if n > 1 { return Some(format!("tab in {n} groups")); }
++        }
++        for g in &w.groups {
++            if !leaves.contains(&g.id) { return Some(format!("group not in layout: groups={} leaves={}", w.groups.len(), leaves.len())); }
++            if g.tabs.is_empty() { return Some("empty group".into()); }
++            if g.active >= g.tabs.len() { return Some("active out of range".into()); }
++        }
++        for l in &leaves { if !w.groups.iter().any(|g| g.id == *l) { return Some("leaf without group".into()); } }
++        if !w.groups.is_empty() && !w.groups.iter().any(|g| Some(g.id) == w.focused) { return Some("focused missing".into()); }
++        let _ = trace;
++        None
++    };
++    for _walk in 0..20000 {
++        let mut w = WorkspaceTabs::default();
++        let mut trace = Vec::new();
++        for _step in 0..10 {
++            let t = tabs[next(3)].clone();
++            let op = next(6);
++            match op {
++                0 => { w.open(t.clone()); trace.push(format!("open {:?}", tabs.iter().position(|x| *x == t))); }
++                1 => { w.close(&t); trace.push(format!("close {:?}", tabs.iter().position(|x| *x == t))); }
++                2 => { if !w.groups.is_empty() { let g = w.groups[next(w.groups.len())].id; let i = next(4); w.insert_tab(&t, g, i); trace.push(format!("insert {:?} g{} i{}", tabs.iter().position(|x| *x == t), 0, i)); } }
++                3 => { if !w.groups.is_empty() { let g = w.groups[next(w.groups.len())].id; let d = drops[next(5)]; w.move_tab(&t, g, d, area); trace.push(format!("move {:?} {:?}", tabs.iter().position(|x| *x == t), d)); } }
++                4 => { if !w.groups.is_empty() { let g = w.groups[next(w.groups.len())].id; w.select(g, &t); trace.push("select".into()); } }
++                _ => { let keep = t.clone(); w.retain(|x| *x != keep); trace.push(format!("retain-not {:?}", tabs.iter().position(|x| *x == t))); }
++            }
++            if let Some(v) = check(&w, &trace) {
++                panic!("violation: {v}\ntrace: {trace:#?}");
++            }
++        }
++    }
++}

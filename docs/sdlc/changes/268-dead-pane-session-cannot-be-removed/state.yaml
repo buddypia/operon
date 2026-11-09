@@ -5,13 +5,13 @@ state:
   stage: "plan"
   status: "blocked"
   attempts: "0 3"
-  questions: "6 7"
+  questions: "7 7"
   autonomy: "supervised"
   risk: "low"
   readiness: "pending"
   screen: "n/a"
 
-resume: "Need one observation from the person (⌘W on the dead tab, ✕ on another tab) or Accessibility granted to cmux.app; then follow handoff.md."
+resume: "Question ceiling reached; resume only when the person reports the ⌘W / other-tab result or grants cmux.app Accessibility, then follow handoff.md."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
