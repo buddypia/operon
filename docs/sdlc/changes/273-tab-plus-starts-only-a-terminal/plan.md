@@ -90,3 +90,15 @@
   `session_273_plus_opens_launch_menu` and the `menu-escape-passed-on` mutation.
   Other popups (the sheet's combo boxes) are left alone: the check names the
   + menus' ids rather than asking whether any popup is open.
+- The bands check found `src/app.rs` (9968 → 10111 lines) and
+  `src/app/screens.rs` (9972 → 10067) past the 10 000-line
+  `largest_module_lines` band, which asks for a change of its own. The change's
+  new code — the place helper, the launch decision and recording, the menu and
+  its Escape — moved instead into a child module, `src/app/launch_menu.rs`,
+  listed in `CLAUDE.md`; `src/app.rs` ends at 9885 lines and
+  `src/app/screens.rs` at 9995. The spec's Design names the new file; the sweep
+  points its mutations there.
+- The empirical verifier ran in this worktree rather than an isolated one: the
+  worktree guard judges the Agent tool's worktree, outside `.worktrees/`, to be
+  the trunk, and refuses a second worktree from this session. It changed no
+  file and reproduced nothing.

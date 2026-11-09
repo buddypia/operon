@@ -99,12 +99,15 @@ the 36px tabs overflowed). The menu's rows are 4px apart.
 Placement: `EXTEND`. The + and the strip are `ui_tab_workspace` in
 `src/app/screens.rs` (changes 254, 260, 267); the pane-scoped terminal launch is
 `launch_workspace_terminal` in `src/app.rs`; the agent launch is
-`launch_session` in `src/app.rs`. Route `modify`.
+`launch_session` in `src/app.rs`. Route `modify`. The new code lives in a
+child module of `src/app.rs`, `src/app/launch_menu.rs`, because `src/app.rs`
+and `src/app/screens.rs` would otherwise both pass the 10 000-line
+`largest_module_lines` band.
 
-- `src/app.rs`:
+- `src/app/launch_menu.rs`:
   - `workspace_pane_place(group) -> Option<(Project, String)>`: the project and
     folder text `launch_workspace_terminal` already derives from the pane's
-    current tab; that function now calls it.
+    current tab; that function, which stays in `src/app.rs`, now calls it.
   - `workspace_agent_launch(group, agent) -> UiResult<PaneAgentLaunch>`: the
     whole decision, with no side effect. `PaneAgentLaunch` is
     `Start(PaneAgentStart)` — project, resolved folder, agent, the built
@@ -134,15 +137,19 @@ Placement: `EXTEND`. The + and the strip are `ui_tab_workspace` in
     records the form into the remembered options and writes the file), and
     sets the sheet's folder to the pane's. Neither path calls
     `persist_recent_agent_settings`, which records the sheet's draft.
-- `src/app/screens.rs`: `WORKSPACE_LAUNCH_CHOICES`, the menu's four agent
-  values in order. `ui_workspace_launch_menu(ui, add, group)` toggles an
+  - `WORKSPACE_LAUNCH_CHOICES`, the menu's four agent values in order.
+    `ui_workspace_launch_menu(ui, add, group)` toggles an
   `egui::popup_below_widget` (`PopupCloseBehavior::CloseOnClick`, id per pane)
   holding the four rows — the terminal row labelled by `agent_short_label` and
   always enabled, each agent row by `agent_choice_copy` and enabled by
   `tools.agent_available` — and dispatches the choice after the popup closes —
-  `launch_workspace_terminal` or `launch_workspace_agent`. Both the pane + and
-  the empty-workspace + call it. Tab margins, spacings and the strip height
-  change as in Behaviour.
+  `launch_workspace_terminal` or `launch_workspace_agent`.
+  - `take_launch_menu_escape(ui)`: while one of the + menus is open, takes the
+    Escape that closes it, so no terminal sends it on to its agent.
+- `src/app/screens.rs`: both the pane + and the empty-workspace + call
+  `ui_workspace_launch_menu`; `ui_tab_workspace` calls
+  `take_launch_menu_escape` before any pane is drawn. Tab margins, spacings
+  and the strip height change as in Behaviour.
 - `src/ui/widgets.rs`: `launch_choice_button(ui, mark, label, enabled,
   disabled_reason)` — an `egui::Button::opt_image_and_text` with no stroke at
   `CONTROL_HEIGHT`, the mark (an optional texture) at `SESSION_MARK_SIZE`, the
@@ -162,7 +169,7 @@ Placement: `EXTEND`. The + and the strip are `ui_tab_workspace` in
 |---|---|---|
 | Colour — a new role means three palette rows plus a `DESIGN.md` entry, and WCAG 2.1 AA against every surface | no | No colour is added; rows use the button visuals, the popup the existing popup frame. Read `DESIGN.md` Colours to confirm. |
 | Icons — a new mark means an `ICON_*` constant in `src/glyphs.rs` and an `ICON_VOCABULARY` entry | yes | No glyph is added: the rows use the existing marks (`session_mark_texture`); the + keeps `ICON_ADD`. `DESIGN.md` lines on the tab marks' sizes (18px status, 16px CLI) change to 14px, and the Controls table gains a row for `launch_choice_button` (a CLI's mark and its name, 28px): the existing rows do not fit it — `small_icon_button` is an icon alone at 24px and `icon_text_button` takes a glyph, not a picture. |
-| Identifier SSOT — a string two places must agree on lives in `src/config.rs`, and the round trip is what gets tested | yes | No new identifier. The menu's order is one list, `WORKSPACE_LAUNCH_CHOICES` in `src/app/screens.rs`: `"terminal"` (the existing plain-terminal agent value) then `"claude"`, `"codex"`, `"gemini"`. `session_273_plus_opens_launch_menu` puts every choice but `"terminal"` through `build_agent_launch_command`, so an agent choice that is not in `AGENTS` fails the round trip; `"terminal"` is checked against `session_mark_texture`, which names it. |
+| Identifier SSOT — a string two places must agree on lives in `src/config.rs`, and the round trip is what gets tested | yes | No new identifier. The menu's order is one list, `WORKSPACE_LAUNCH_CHOICES` in `src/app/launch_menu.rs`: `"terminal"` (the existing plain-terminal agent value) then `"claude"`, `"codex"`, `"gemini"`. `session_273_plus_opens_launch_menu` puts every choice but `"terminal"` through `build_agent_launch_command`, so an agent choice that is not in `AGENTS` fails the round trip; `"terminal"` is checked against `session_mark_texture`, which names it. |
 | Durability — see `.claude/skills/durability-invariants/SKILL.md`; schema change means a `STORE_SCHEMA_VERSION` bump | yes | No shape change. The new session is pushed and persisted with the same restore-on-failure step `launch_session` uses; `recent-agent-settings.json` is read, never written, by this path. |
 | Subprocess safety — new children go through `src/exec.rs`; new launch paths through the gates in `src/agents.rs` | yes | The command is built only by `build_agent_launch_command` (which applies `is_safe_agent_option` and the typed-argument gate) and launched by the existing `launch_session_record`; the danger acknowledgement is enforced (Requirement 4). `src/agents.rs` is not edited. |
 | Documentation — user-facing docs change in all three languages together | yes | `README.md`, `README.ja.md`, `README.ko.md` describe the + as opening a plain terminal; all three change to the menu. New strings get EN and KO rows in `src/i18n_tables.rs`. |

@@ -12,73 +12,73 @@ CHECKS = [
     ["cargo", "test", "--locked", "session_254_"],
     ["cargo", "test", "--locked", "session_260_"],
 ]
-APP = ROOT / "src/app.rs"
 SCREENS = ROOT / "src/app/screens.rs"
 GLYPHS = ROOT / "src/glyphs.rs"
+LAUNCH = ROOT / "src/app/launch_menu.rs"
 MUTATIONS = {
     # R1: the + starts a terminal outright again instead of opening the menu.
     "plus-starts-terminal-directly": (
-        SCREENS,
+        LAUNCH,
         "            ui.memory_mut(|memory| memory.toggle_popup(popup));\n",
         "            self.launch_workspace_terminal(group);\n",
     ),
     # R3/R4: an agent row starts a plain terminal.
     "agent-row-starts-a-terminal": (
-        SCREENS,
+        LAUNCH,
         "Some(agent) => self.launch_workspace_agent(group, agent),",
         "Some(_agent) => self.launch_workspace_terminal(group),",
     ),
     # R3: a pin for another CLI is applied to this one.
     "pin-for-another-cli-applies": (
-        APP,
+        LAUNCH,
         "            .filter(|pin| pin.agent == agent);\n",
         "            .filter(|_| true);\n",
     ),
     # R3: the options the sheet last used for this CLI are ignored.
     "remembered-options-ignored": (
-        APP,
+        LAUNCH,
         ".or_else(|| self.recent_agent_settings.agents.get(agent).cloned())",
         ".or_else(|| None)",
     ),
     # R3: the new tab lands in whichever pane had the focus.
     "agent-tab-ignores-the-pane": (
-        APP,
+        LAUNCH,
         "        if let Some(group) = group {\n            self.workspace.focused = Some(group);\n        }\n        self.launch_progress = Some(LaunchProgress {",
         "        self.launch_progress = Some(LaunchProgress {",
     ),
     # R3: the quick launch records the sheet's draft as remembered options.
     "quick-launch-records-the-draft": (
-        APP,
+        LAUNCH,
         "        self.remember_session_account(id, start.account);\n",
         "        self.remember_session_account(id, start.account);\n        self.persist_recent_agent_settings();\n",
     ),
     # R4: the danger acknowledgement is skipped.
     "danger-check-skipped": (
-        APP,
+        LAUNCH,
         "        if !acknowledged\n            && launch_needs_acknowledgement(",
         "        if false\n            && launch_needs_acknowledgement(",
     ),
     # R4 (the claim): the sheet opens, but on the CLI the form was already on.
     "sheet-opens-on-the-wrong-cli": (
-        APP,
+        LAUNCH,
         "                    self.selected_agent = agent.to_owned();\n",
         "",
     ),
     # R4: the fallback switches CLI through select_agent, which rewrites the file.
     "fallback-records-the-form": (
-        APP,
+        LAUNCH,
         "                    self.selected_agent = agent.to_owned();\n                    self.apply_agent_launch_settings(agent);\n",
         "                    self.select_agent(agent);\n",
     ),
     # R5: a CLI this Mac does not have can be chosen.
     "missing-cli-enabled": (
-        SCREENS,
+        LAUNCH,
         "(agent_choice_copy(choice).0, tools.agent_available(choice))",
         "(agent_choice_copy(choice).0, true)",
     ),
     # R5: the terminal row is judged like an agent and comes out disabled.
     "terminal-row-disabled": (
-        SCREENS,
+        LAUNCH,
         "(agent_short_label(choice), true)",
         "(agent_short_label(choice), tools.agent_available(choice))",
     ),
@@ -108,7 +108,7 @@ MUTATIONS = {
     ),
     # F1: the Escape that closes the menu reaches the terminal as well.
     "menu-escape-passed-on": (
-        SCREENS,
+        LAUNCH,
         "        if launch_menu_open\n            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))\n",
         "        if launch_menu_open && false\n",
     ),

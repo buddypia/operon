@@ -71512,7 +71512,7 @@ pub(crate) fn session_273_plus_opens_launch_menu() {
         "the menu opens directly below the +: {rows:?}, + {add:?}"
     );
     // Each row leads with its CLI's mark, drawn from the value it launches.
-    let choices = crate::screens::WORKSPACE_LAUNCH_CHOICES;
+    let choices = crate::launch_menu::WORKSPACE_LAUNCH_CHOICES;
     assert_eq!(choices.len(), rows.len());
     for (choice, (name, text)) in choices.iter().zip(&rows) {
         let texture = session_mark_texture(&ctx, choice)
@@ -71669,7 +71669,8 @@ pub(crate) fn session_273_agent_launch_uses_pane_and_remembered_options() {
     let remembered = app.recent_agent_settings.clone();
     let project = app.store.projects[0].id;
 
-    let Ok(PaneAgentLaunch::Start(start)) = app.workspace_agent_launch(Some(right), "claude")
+    let Ok(crate::launch_menu::PaneAgentLaunch::Start(start)) =
+        app.workspace_agent_launch(Some(right), "claude")
     else {
         panic!("a plain remembered combination starts directly");
     };
@@ -71745,7 +71746,8 @@ pub(crate) fn session_273_agent_launch_uses_pane_and_remembered_options() {
         account: Some(Uuid::new_v4()),
         acknowledged: true,
     });
-    let Ok(PaneAgentLaunch::Start(start)) = app.workspace_agent_launch(Some(right), "claude")
+    let Ok(crate::launch_menu::PaneAgentLaunch::Start(start)) =
+        app.workspace_agent_launch(Some(right), "claude")
     else {
         panic!("an acknowledged pin starts directly");
     };
@@ -71756,7 +71758,7 @@ pub(crate) fn session_273_agent_launch_uses_pane_and_remembered_options() {
     }
     assert!(matches!(
         app.workspace_agent_launch(Some(right), "claude"),
-        Ok(PaneAgentLaunch::Confirm { .. })
+        Ok(crate::launch_menu::PaneAgentLaunch::Confirm { .. })
     ));
     app.recent_agent_settings.pinned = None;
 
