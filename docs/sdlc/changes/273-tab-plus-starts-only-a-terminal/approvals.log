@@ -3,3 +3,4 @@
 2026-11-09T14:46:20Z auto plan plan.md 8388a14bcd166bac approve Independent evaluator a170327b, second round: risk rows for the fallback, the terminal row and the login, each with a catching test.
 2026-11-09T15:14:11Z person screen screen.md 581399406d3241d8 approve The person replied 「この画面で実装して」 to the vertical menu and the tightened tabs with 14pt marks.
 2026-11-09T15:56:41Z auto spec spec.md cd8d33b0fefc4630 approve Independent evaluator a170327b, third round: measured 148x36 tab, no-tmux exception, Start/Confirm and check order, open_workspace_agent_session, launch_choice_button signature.
+2026-11-09T16:24:04Z auto spec spec.md 287553b1aea94bbf approve Independent evaluator a170327b, fourth round: Design names src/app/launch_menu.rs and take_launch_menu_escape, checked against 5034c7b.

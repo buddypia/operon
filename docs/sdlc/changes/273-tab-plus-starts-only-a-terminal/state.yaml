@@ -2,8 +2,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "3 7"
   autonomy: "full"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the failing session_273_ tests and the updated 254/260 tests, then glyphs and widgets, app.rs launch, screens.rs menu and tab geometry, per plan.md."
+resume: "Done. Outlived the change: src/app/screens.rs is at 9995 lines, five under the largest_module_lines propose tier, so the next change that adds to it needs the split that band asks for; and the worktree guard judges the Agent tool's isolated worktree (outside .worktrees/) to be the trunk, so empirical-verifier cannot run isolated until that guard learns it."
 
 contract:
-  three-gates: "machine pending make q.fast; cargo test --locked session_273_, session_254_, session_260_, session_267_, session_253_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/ui/widgets.rs and src/glyphs.rs change; package from main after landing"
-  guards-verified-by-mutation: "human pending mutations.py: direct terminal on +, agent row starting a terminal, danger check skipped, missing CLI enabled, old tab margins"
+  three-gates: "machine passed make q.fast; cargo test --locked session_27, session_254_, session_260_, session_253_, session_tab, every_, claude_md, harness, design_md; the full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: largest_module_lines back under propose after the move to src/app/launch_menu.rs; steering_bytes and approval_escapes at warn, unchanged by this change"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs, src/app/launch_menu.rs, src/ui/widgets.rs and src/glyphs.rs change; packaged and installed from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py 17 of 17 caught after the move to src/app/launch_menu.rs (menu, agent launch, pin and remembered options, danger sheet, missing CLI, tab geometry, Escape taken, the + naming itself)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
