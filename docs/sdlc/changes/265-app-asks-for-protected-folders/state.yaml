@@ -1,0 +1,59 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. The person saw macOS ask "Operon would like to access files in your
+#    Downloads / Desktop / Documents folder" without doing anything that needs
+#    those folders, and read it as Operon reaching for their files. The TCC log
+#    (`log show --predicate 'subsystem == "com.apple.TCC"'`, 2026-11-09
+#    17:13:54, 17:13:58, 17:15:25) names the accessing binary as /usr/bin/find
+#    with responsible_path /Applications/Operon Stable.app: an Antigravity agent
+#    launched from Operon with --dangerously-skip-permissions ran
+#    `find ~/Downloads ~/Desktop … -iname "*.pptx"` and
+#    `find ~/Documents ~/.gemini …` (conversation 40003b00 in
+#    ~/.gemini/antigravity-cli/conversations). macOS attributes every process
+#    under the tmux server Operon started to Operon, so the dialog names Operon
+#    and says nothing else: the bundle carries no folder usage descriptions.
+# 2. The same class inside Operon itself: the terminal link probe canonicalizes
+#    every absolute or ~ path that appears in agent output (resolve_candidate_path
+#    in src/ui/terminal.rs, outside-project fallback of change 087), so a line
+#    naming ~/Documents/x.pptx makes Operon's own binary stat it; and the Codex
+#    and Antigravity session scans canonicalize the cwd and workspace paths read
+#    out of those products' records (src/cli.rs), touching whatever folder a
+#    record names.
+# 3. The dangerous-launch warning says only that files can be changed without
+#    a sandbox; it does not say the agent can reach the person's own folders
+#    outside the project.
+# 4. Kept as it is: paths inside the session's folders and outside-project paths
+#    elsewhere stay clickable (change 087); registered projects inside a
+#    protected folder keep working; the agent itself is not sandboxed by Operon.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "approved"
+
+resume: "Write the failing tests named in plan.md step 1, then the fix."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  failing-test-first: "machine pending each new test fails on the unedited code"
+  release-binary: "machine pending required - src/ui/terminal.rs, src/cli.rs, src/app/screens.rs, src/i18n_tables.rs and scripts/package-macos.sh change; package from main after landing (ship skill)"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  dialog-names-the-agent: "human pending after the swap, the next folder prompt attributed to Operon shows the usage description"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
