@@ -1,0 +1,41 @@
+# Bug report (2026-11-09): in a session terminal, Shift+Enter sends the line in
+# Antigravity CLI where the person's terminal app puts a newline in the input. bug.md has the
+# person's words, the cause and the measurements.
+#
+# The first report read the other way round ("Shift + Enterで勝手に改行されて
+# 困る", and the answer "入力欄に改行→送信したい" was taken as "make it send");
+# a morning of probes looked for a newline Operon never produced. What settled
+# it was the person comparing with their terminal app, whose config sends LF for
+# Shift+Enter. Probes are under .tmp/probe (git-ignored), not committed.
+#
+# Screen n/a: src/ui is a drawing surface, but this edit changes the bytes a
+# key sends and nothing that is painted.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "1 3"
+  questions: "6 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Land after CI passes, then package from main and swap the installed app; the person confirms Shift+Enter in Antigravity."
+
+contract:
+  three-gates: "machine passed make q.fast and 5 named terminal key and IME tests; the full suite runs in CI on push (the first run caught an external product name, fixed in 7a249a8)"
+  bands: "machine passed bash scripts/check-bands.sh exit 0 on 2026-11-09"
+  release-binary: "machine passed yes - src/ui/terminal.rs changes, so bash scripts/package-macos.sh from main follows the merge"
+  installed-app: "human pending Shift+Enter in an Antigravity session leaves two lines in the input in the installed app; Enter sends"
+  guards-verified-by-mutation: "human passed the new test failed with Key(\"Enter\") for Key(\"C-j\") on the unfixed binding; mutations.py 6 of 6 caught"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -1,0 +1,2 @@
+2026-11-09T11:17:05Z auto plan plan.md 99021b22e981adfd approve Independent rust_review, second round: exact-Shift match via matches_exact keeps Ctrl+Shift+Enter and Option+Shift+Enter, the IME ownership count runs before the binding, test first.
+2026-11-09T11:52:00Z auto plan plan.md 6a995be4824acbbe approve Independent rust_review, third round: wording only, the external app name replaced as CI's naming test requires; cause, guard and test pins unchanged.
