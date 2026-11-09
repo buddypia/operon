@@ -3,11 +3,29 @@
 - **Route**: bugfix
 - **Attempts spent**: 0 of 3 (no fix attempted; the cause is not named)
 - **Written**: 2026-11-09
-- **Status**: open
+- **Status**: abandoned (2026-11-10)
 
 Stopped before the ceiling: the failure does not reproduce outside the person's
 running Operon, and the evidence that separates the remaining hypotheses can
 only be gathered at that window.
+
+## Why it was archived (2026-11-10)
+
+- The question ceiling (7 of 7) was spent without the observation that would
+  separate the hypotheses below, and the person asked for the branch to land.
+- The instance it was seen in is gone: `/Applications/Operon.app` now carries
+  `OperonSourceCommit` `4a8cbc1` (pid 94202, started 2026-11-10 02:07), and
+  change 273 rebuilt the tab strip since `0d5d02b` — 6px/2px tab margins
+  instead of 8px/4px, a 24px row with zero button padding around the ✕, and a
+  strip `CONTROL_HEIGHT` tall instead of `CONTROL_HEIGHT_SMALL + SPACE_SM`.
+  That changes the ✕'s geometry; it is not shown to remove the cause, which
+  was never named.
+- ⌘W closes the tab, so the person is not stuck.
+
+If the ✕ on a finished session's tab fails again on a build at or after
+`4a8cbc1`, start a new change from the ruled-out table below and
+`probes.patch`; the first observation to take is whether another tab's ✕ in
+the same window closes, and whether the ✕ highlights under the pointer.
 
 ## The failure, exactly
 
@@ -101,7 +119,8 @@ whether ⌘W closes 「セッション1」's tab, and whether 「セッション
 ## State of the tree
 
 - Branch `fix/268-dead-pane-session-cannot-be-removed`; only this directory
-  added, no source change.
+  added, no source change. `probes.patch` applies to `0d5d02b`, not to the
+  tab strip after change 273.
 - `src/tests.rs` restored; probes live in `probes.patch` only.
 
 ## If this becomes a lesson
