@@ -1356,10 +1356,16 @@ fn lexically_normal(path: &Path) -> PathBuf {
 
 /// Whether macOS asks before an app looks at `path`: under the home folder's
 /// Desktop, Documents or Downloads, or on a mounted volume. Compared without
-/// case, because APFS finds `~/downloads` as readily as `~/Downloads`.
+/// case, because APFS finds `~/downloads` as readily as `~/Downloads`, and
+/// without the data volume's prefix, which reaches the same home folder.
 pub(crate) fn is_in_protected_folder(path: &Path, home: Option<&Path>) -> bool {
     let folded = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
     let path = folded(path);
+    let data_volume = folded(Path::new(SYSTEM_DATA_VOLUME_ROOT));
+    let path = match path.strip_prefix(&data_volume) {
+        Ok(rest) => Path::new("/").join(rest),
+        Err(_) => path,
+    };
     let under = |root: &Path| path.starts_with(folded(root));
     under(Path::new(PROTECTED_VOLUMES_ROOT))
         || home.is_some_and(|home| {

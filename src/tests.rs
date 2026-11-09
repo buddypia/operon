@@ -73371,3 +73371,24 @@ pub(crate) fn protected_folders_265_dangerous_launch_warning_names_personal_fold
         );
     }
 }
+
+/// Change 265, found by the empirical verifier: macOS reaches the home folder
+/// through the data volume's firmlink as well, so `/System/Volumes/Data/Users/…/
+/// Desktop` is the same Desktop and is refused the same way.
+#[test]
+pub(crate) fn protected_folders_265_data_volume_spelling_is_the_same_folder() {
+    let home = temporary_directory("protected-firmlink");
+    let through_data_volume = Path::new(SYSTEM_DATA_VOLUME_ROOT)
+        .join(home.strip_prefix("/").unwrap())
+        .join("Desktop")
+        .join("f.txt");
+    assert!(is_in_protected_folder(&through_data_volume, Some(&home)));
+    assert!(!is_in_protected_folder(
+        &Path::new(SYSTEM_DATA_VOLUME_ROOT)
+            .join(home.strip_prefix("/").unwrap())
+            .join("other")
+            .join("f.txt"),
+        Some(&home)
+    ));
+    fs::remove_dir_all(home).unwrap();
+}

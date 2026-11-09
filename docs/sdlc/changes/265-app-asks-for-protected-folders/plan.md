@@ -129,3 +129,12 @@ either can look inside a protected folder nobody pointed Operon at.
   resolved; the record's path still never is. The Codex, Antigravity and
   restore tests stay green (66, then 420 across the terminal, launch, session,
   cli, worktree, restore and path filters).
+- **The data volume's spelling of the home folder** (empirical verifier, F1).
+  `/System/Volumes/Data/Users/<me>/Desktop` reaches the same Desktop through
+  the firmlink, and the refusal compared only `<home>/Desktop`. The predicate
+  now drops a leading `SYSTEM_DATA_VOLUME_ROOT` before comparing.
+  `protected_folders_265_data_volume_spelling_is_the_same_folder` failed at
+  3b50349 and passes; one mutation watches it. The verifier itself could not
+  check out the branch in its isolated worktree (the trunk-allowlist hook
+  refused `git checkout --detach`), so the lead came from its reading and the
+  reproduction was run here.

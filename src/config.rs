@@ -497,6 +497,9 @@ pub(crate) const TERMINAL_PATH_PROBE_LIMIT: usize = 64;
 pub(crate) const PROTECTED_HOME_FOLDERS: &[&str] = &["Desktop", "Documents", "Downloads"];
 /// Where removable and network volumes mount, which macOS guards the same way.
 pub(crate) const PROTECTED_VOLUMES_ROOT: &str = "/Volumes";
+/// The data volume, through which macOS also reaches the home folder: a path
+/// spelled under it names the same Desktop as the path without it.
+pub(crate) const SYSTEM_DATA_VOLUME_ROOT: &str = "/System/Volumes/Data";
 /// The file the keyboard is read from, beside the store and the sidecars rather
 /// than in a second home under a dotfile directory of its own.
 pub(crate) const KEYMAP_FILE_NAME: &str = "keybindings.json";

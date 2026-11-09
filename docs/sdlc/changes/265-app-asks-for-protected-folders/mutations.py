@@ -51,6 +51,11 @@ MUTATIONS = {
         "    under(Path::new(PROTECTED_VOLUMES_ROOT))\n        || home",
         "    home",
     ),
+    "probe-data-volume-spelling-forgotten": (
+        TERMINAL,
+        "    let path = match path.strip_prefix(&data_volume) {",
+        "    let path = match path.strip_prefix(Path::new(\"/nowhere-265\")) {",
+    ),
     "probe-desktop-forgotten": (
         CONFIG,
         '&["Desktop", "Documents", "Downloads"]',

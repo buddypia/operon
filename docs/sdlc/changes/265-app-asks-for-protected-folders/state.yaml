@@ -31,7 +31,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "in-progress"
+  status: "reviewing"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "paused"
@@ -39,14 +39,14 @@ state:
   readiness: "conditional"
   screen: "approved"
 
-resume: "Commit, have empirical-verifier try to break it, record the digest in verification.yaml, push and wait for CI."
+resume: "Wait for CI on the branch head, then merge on main with git merge --no-ff --no-edit, push, clean up the worktree, and package to dist/ only (installed app left as is until the person says)."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
   bands: "machine pending bash scripts/check-bands.sh"
   failing-test-first: "machine passed all five protected_folders_265 tests failed on the unedited code, each on its assertion (pass-through stub first)"
   release-binary: "machine pending required - src/ui/terminal.rs, src/cli.rs, src/app/screens.rs, src/i18n_tables.rs and scripts/package-macos.sh change; package from main after landing (ship skill)"
-  guards-verified-by-mutation: "human passed mutations.py 18 of 18 caught: probe refusal, its order before canonicalize, `..`, case, volumes, Desktop, project exemption and its canonical form, three record comparisons, both spellings, two bundle keys, four claim mutations"
+  guards-verified-by-mutation: "human passed mutations.py 19 of 19 caught: data-volume spelling (F1), probe refusal, its order before canonicalize, `..`, case, volumes, Desktop, project exemption and its canonical form, three record comparisons, both spellings, two bundle keys, four claim mutations"
   dialog-names-the-agent: "human pending after the swap, the next folder prompt attributed to Operon shows the usage description"
 
 sets:
