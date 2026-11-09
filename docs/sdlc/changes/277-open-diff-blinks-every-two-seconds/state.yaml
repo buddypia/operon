@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: bugfix — found while measuring the person's chosen 「差分・エディタ表示の
+# キャッシュ」: the caches it named cost microseconds, and this is what a person
+# sees instead. Cause (root-cause skill): `refresh_editor_git_views` calls
+# `invalidate_open_editor_diff` every two seconds, which removes the open
+# file's entries from `git_diff_cache` and `diff_file_cache`; until the new
+# `git diff` returns, the Diff view draws 「差分を読み込んでいます…」. Watched
+# failing: diff_277_open_diff_stays_on_screen_while_it_is_read_again and
+# diff_277_an_unchanged_diff_keeps_what_is_on_screen.
+# Risk: low (risk.yaml `drawing`: src/app.rs), full autonomy.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Outlived the change: only the open file's diff is re-read, so another file's 差分 can show an older diff until it is the open one, as before."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked diff_277_ (4), diff (26), editor_diff, stale_inflight; the full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: no tier newly reached"
+  release-binary: "machine passed required - src/app.rs changes; packaged from main with the changes that follow it"
+  guards-verified-by-mutation: "machine passed mutations.py 7 of 7 caught; empirical-verifier re-ran every obligation and found no failing test (its random-sequence test was not kept: real git reads arrive inside it at uncontrolled times)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

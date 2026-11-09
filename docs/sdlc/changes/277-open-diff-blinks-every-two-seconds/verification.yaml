@@ -1,0 +1,12 @@
+# The evidence for change 277. Format: docs/sdlc/templates/verification.yaml.
+# Route bugfix: no spec. F1 and F2 are the tests watched failing before the fix.
+digest: "7c8bb279c9d1c4f3"
+
+obligations:
+  - F1 empirical-test :: cargo test --locked diff_277_open_diff_stays_on_screen_while_it_is_read_again
+  - F2 empirical-test :: cargo test --locked diff_277_an_unchanged_diff_keeps_what_is_on_screen
+  - I1 empirical-test :: cargo test --locked diff_277_a_changed_diff_replaces_what_is_on_screen
+  - I2 empirical-test :: cargo test --locked diff_277_choosing_the_diff_view_still_starts_from_nothing
+  - I3 empirical-test :: cargo test --locked editor_diff_refreshes_after_a_second_write_with_unchanged_git_status
+  - I4 empirical-test :: cargo test --locked stale_inflight_editor_diff_result_is_replaced_by_its_new_generation
+  - I5 empirical-mutation :: python3 docs/sdlc/changes/277-open-diff-blinks-every-two-seconds/mutations.py

@@ -1606,9 +1606,13 @@ impl OperonApp {
                         continue;
                     }
                     // The parse is derived from this text, so it has to go
-                    // before the text it was derived from is replaced.
-                    self.diff_file_cache.remove(&key);
-                    self.git_diff_cache.insert(key, result);
+                    // before the text it was derived from is replaced — and
+                    // stays, with the scroll position and open notes drawn
+                    // from it, when the text is the same (change 277).
+                    if self.git_diff_cache.get(&key) != Some(&result) {
+                        self.diff_file_cache.remove(&key);
+                        self.git_diff_cache.insert(key, result);
+                    }
                 }
                 BackgroundResult::GitHistory { project_id, result } => {
                     self.background_tasks
@@ -2717,7 +2721,10 @@ impl OperonApp {
     /// Start a status refresh only while the Files view is visible. Status keeps
     /// the tree badges current, but it is not a Diff fingerprint: a second
     /// write to an already-modified path leaves `git status` text unchanged.
-    /// Therefore an open Diff is discarded and fetched again on every due poll.
+    /// Therefore an open Diff is fetched again on every due poll. What is on
+    /// screen stays there until the replacement arrives (change 277): removing
+    /// it first showed the loading line, and lost the scroll position, every
+    /// two seconds.
     pub(crate) fn refresh_editor_git_views(&mut self, project: &Project) {
         let due = self
             .last_editor_git_refresh
@@ -2725,7 +2732,7 @@ impl OperonApp {
             .is_none_or(|last| last.elapsed() >= Duration::from_secs(2));
         if due || !self.git_changes_cache.contains_key(&project.id) {
             self.request_git_changes(project);
-            if let Some(file) = self.invalidate_open_editor_diff(project.id) {
+            if let Some(file) = self.outdate_open_editor_diff(project.id) {
                 self.request_git_diff(project, Some(file));
             }
             self.last_editor_git_refresh
@@ -2865,6 +2872,16 @@ impl OperonApp {
     /// The caller immediately schedules a replacement, so the UI says loading
     /// rather than showing bytes it can no longer call current.
     pub(crate) fn invalidate_open_editor_diff(&mut self, project_id: Uuid) -> Option<String> {
+        let file = self.outdate_open_editor_diff(project_id)?;
+        let key = (project_id, Some(file.clone()));
+        self.git_diff_cache.remove(&key);
+        self.diff_file_cache.remove(&key);
+        Some(file)
+    }
+
+    /// Mark the comparison presented in the editor, if any, as one a read
+    /// already in flight may no longer answer, and leave it on screen.
+    pub(crate) fn outdate_open_editor_diff(&mut self, project_id: Uuid) -> Option<String> {
         let active = self.active_document.as_ref()?;
         if self.editor_view != EditorView::Diff || active.project != project_id {
             return None;
@@ -2876,10 +2893,7 @@ impl OperonApp {
             return None;
         }
         let file = active.path.to_string_lossy().into_owned();
-        let key = (project_id, Some(file.clone()));
-        self.advance_git_diff_generation(key.clone());
-        self.git_diff_cache.remove(&key);
-        self.diff_file_cache.remove(&key);
+        self.advance_git_diff_generation((project_id, Some(file.clone())));
         Some(file)
     }
 
