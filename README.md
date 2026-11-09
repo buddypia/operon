@@ -25,18 +25,16 @@ service. The interface speaks English, Japanese, and Korean.
 ## Screenshots
 
 The screenshots below show the Japanese interface; switch the language in
-Settings.
+Settings. The projects, sessions, and agent output in them are a demo.
 
 | | |
 | --- | --- |
-| ![A session that needs you: the agent is waiting on a permission prompt](docs/images/02-needs-you.png) | ![A Claude Code session in its own git worktree, with the live terminal and the file tree](docs/images/03-session-claude.png) |
-| **Needs you** — a waiting permission prompt is detected and surfaced first. | **Live session** — the real tmux terminal, beside the files, the conversation, and the changes. |
-| ![Working-tree diff with per-file hunks and word-level highlights](docs/images/04-diff.png) | ![The new-session sheet: agent, account, request, and where to work](docs/images/06-new-session.png) |
-| **Diff review** — the working tree diff, with commit, push, and an AI review. | **New session** (`⌘N`) — pick an agent, write the request, choose where it works. |
-
-![Search & actions palette](docs/images/05-palette.png)
-
-**Search & actions** (`⌘K`) — every action, session, and project from one box.
+| ![A Claude Code session waiting on a permission prompt, with the session sidebar and the side panel](docs/images/02-needs-you.png) | ![A Claude Code session in its own git worktree: the live terminal beside the file tree](docs/images/03-session-claude.png) |
+| **Needs you** — a waiting permission prompt is detected and the session is counted under 要対応. | **Live session** — the real tmux terminal, with the files, the conversation, and the changes beside it. |
+| ![Two agents of one project side by side in split tab groups](docs/images/07-split.png) | ![Working-tree diff with word-level highlights and per-hunk stage and discard](docs/images/04-diff.png) |
+| **Side by side** — drag a tab to an edge to watch two agents at once. | **Diff review** — every hunk can be staged or discarded on its own. |
+| ![The new-session sheet: agent, parallel run, account, request, and where to work](docs/images/06-new-session.png) | ![Search & actions palette with every action and its key](docs/images/05-palette.png) |
+| **New session** (`⌘N`) — templates, GitHub issues, and `@` context for the request. | **Search & actions** (`⌘K`) — every action, session, project, and open file's symbols. |
 
 ## Features
 
@@ -50,13 +48,16 @@ Settings.
 - One "+" and one search, both in the toolbar: **新しいセッション** (`⌘N`)
   starts a session from any page, and **検索・操作** (`⌘K`) is the only search.
   The sidebar's **履歴** opens local transcript search and the session grid.
-- Sessions that wait for you are pinned above the projects in the session
-  list, longest wait first, each with how long it has waited and what its
-  agent last said. `⌘J` opens the next one and puts the keyboard in its
-  terminal, and the toolbar's **要対応 N** does the same while one waits.
-  `⌘K` also finds a session by what its agent last said, and among equal
-  matches a waiting session comes first. The side panel (files, conversation,
-  changes) opens on the right of the terminal; `⌥⌘B` folds it and opens it.
+- The **セッション** page lists each project's live sessions in the order you
+  act on them — waiting on you first, then running, then idle — each with its
+  agent's mark and state; finished ones stay in **履歴** unless unread. There,
+  sessions that wait for you are pinned above the projects, longest wait first,
+  each with how long it has waited and what its agent last said. `⌘J` opens the
+  next one and puts the keyboard in its terminal, and the toolbar's **要対応 N**
+  does the same while one waits. `⌘K` also finds a session by what its agent
+  last said, and among equal matches a waiting session comes first. The side
+  panel (files, conversation, changes) opens on the right of the terminal;
+  `⌥⌘B` folds it and opens it.
 - Below them, the session list is arranged by hand: drag a project by its
   name to move its card, or a session's row to move it among its own
   project's sessions. The order is kept in `session-order.json`, in the same
@@ -95,7 +96,7 @@ Settings.
 
 ### Supervision
 
-- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below; drag a divider to resize. Closing a session tab leaves its agent running.
+- The session workspace keeps project selection, live-session counts, per-project launch controls and drag ordering on the left. Each project keeps its own open session/file tabs, focused tab and split layout when you switch projects; finished sessions open explicitly from History. Drag a tab to another group or an edge to work side by side or above and below, up to four panes; drag a divider to resize. Each session tab starts with its state mark, the **+** for a plain terminal sits right after the last tab, and closing a session tab (✕ or `⌘W`) leaves its agent running.
 - Inspect and message a live agent session without leaving the app.
 - A turn that finishes, or stops to ask, while you are reading another session
   leaves that session marked in the list until you open it, and the banner at
@@ -105,12 +106,14 @@ Settings.
   narrowed to exactly those. Mark a session unread again from its row menu to
   come back to it. Marks are for the session you are in and do not survive a
   restart.
-- In **履歴**, narrow the session list to what you can act on. Four toggles across its
-  header — **要対応**, **実行中**, **手すき**, **終了** — each carry a live count,
-  and turning one on leaves only those sessions, dropping the projects that have
-  none. Several can be on at once, the list says how many it is hiding, and
-  nothing is selected when the app starts, so a filter never survives a restart
-  to hide a session without explaining itself.
+- Narrow the sessions to what you can act on. Four tiles in the **セッション**
+  sidebar's header — **要対応**, **実行中**, **手すき**, **終了** — each
+  carry a live count, and a segment below them narrows by CLI (Codex, Claude
+  Code, Antigravity, others). Turning one on leaves only those sessions,
+  dropping the projects that have none; several can be on at once, the column
+  says how many it shows with a **クリア** beside it, and the same four filter
+  the list in **履歴**. Nothing is selected when the app starts, so a filter
+  never survives a restart to hide a session without explaining itself.
 - Where an agent CLI supports it, Operon registers a small status hook in that
   CLI's own settings file, so working, waiting, and finished come from the CLI
   itself rather than from reading its screen — within about a second, naming the
@@ -200,35 +203,51 @@ Settings.
   in a terminal pane left part of a file staged and part not, both actions refuse
   by name rather than flattening it, because that selection lives only in the
   index and nothing could bring it back.
-- **Land a worktree**: One action merges a completed worktree branch back into the
-  mainline locally (`git merge --no-ff`), matching how local repositories finish work.
-  Strict guardrails refuse if either tree has uncommitted changes, if zero commits
-  are ahead, or if an agent is still running. On success, an optional auto-cleanup
-  removes the worktree and deletes the merged branch with `git branch -d`.
-- **Run scripts (`.operon/run.sh`)**: If a repository defines a run script for dev
-  servers or builds, Operon surfaces a one-click Run button with an approval dialog
-  displaying preview and content digest. Approved scripts execute in an isolated tmux session.
-- **GitHub PR creation & issue import**: Create pull requests via `gh` directly from the
-  diff screen or session menu with optional AI summary drafting. In the new session sheet,
-  import open GitHub issues to automatically pre-populate the request and branch name.
-- **Checkpoints & rollback**: Capture lightweight snapshots (`refs/operon/checkpoints/`)
-  automatically per turn or manually. Review diffs since any checkpoint or roll back
-  instantly if an agent makes unwanted modifications.
-- **External editor launch & line jump**: Open any worktree, project folder, or active file
-  directly in VS Code, Cursor, Zed, Windsurf, Antigravity, Void, or Finder — jumping straight
-  to the active cursor line from the built-in editor.
-- **Per-hunk diff stage & discard**: Stage or discard individual `@@ ... @@` hunks directly from
-  the diff pane (`git apply --cached --unidiff-zero` / `git apply --reverse --unidiff-zero`)
-  without touching other hunks in the same file.
-- **`@` context mentions & parallel arena**: Insert `@diff`, `@knowledge:<title>`, or `@<file>`
-  tokens via inline `@` completion in the new session sheet, or run the same request across
-  multiple agents simultaneously in isolated worktrees (Best-of-N parallel arena).
-- **One-click code & error handoff**: Send the active editor selection (or current line context)
-  or the latest terminal error/stack trace to the running agent in one click, and jump to project
-  files or document symbols (`fn`, `struct`, `enum`, `trait`, `class`, `def`, `func`) from `⌘K`.
-- **Prompt templates**: Quickly insert reusable instructions into session prompts from
-  built-in templates (code review, CI fix, merge conflict resolution, test generation)
-  or repository-specific templates in `.operon/prompts/*.md`.
+- **Land a worktree.** One action merges a finished worktree's branch into the
+  mainline locally with `git merge --no-ff`, from the worktree tab or a session's
+  terminal menu. It refuses while either tree has uncommitted changes, while a
+  session is running or queued in that worktree or the main checkout, or when
+  the branch has nothing to merge; a conflict rolls the merge back and names
+  the files. Afterwards the worktree and the merged branch are removed
+  (`git branch -d`) unless you untick that.
+- **Run scripts (`.operon/run.sh`).** A repository that checks in a run script
+  for its dev server or build gets a 実行スクリプト item in the terminal menu.
+  Each run shows the script first and asks; the file is read again on approval
+  and must still match what you saw, and that approved copy runs in a terminal
+  of its own, which the same item then stops.
+- **Pull requests and issues through `gh`.** **PR を作成…** beside push, or in a
+  worktree session's terminal menu, opens a title, a description, and a draft
+  switch, and runs `gh pr create`; the branch is pushed with **push**, never
+  behind your back. In the new-session sheet, **GitHub Issue から取得…** lists
+  open issues, and choosing one fills the request and the session name.
+- **Checkpoints.** In a worktree session, every request you send records a
+  snapshot of the worktree under `refs/operon/checkpoints/` without touching
+  the index (with the status hooks on), and the terminal menu takes one by hand.
+  The same menu lists the latest five: copy the diff since one, or roll the
+  files back to it. A rollback restores tracked files at once and leaves files
+  created since then in place.
+- **External editors.** Open a worktree, the project folder, or the file in the
+  built-in editor in VS Code, Cursor, Zed, Windsurf, Antigravity, Void, or
+  Finder, picked from a menu each time.
+- **Stage or discard one hunk.** Every hunk header in a diff carries
+  **ステージ** and **破棄**, acting on that hunk of the project's checkout and
+  nothing else in the file. 破棄 does not ask first.
+- **`@` context and parallel runs.** Typing `@` in the request offers `@diff`,
+  `@knowledge:<title>`, and project files (once the ファイル tab has scanned),
+  inserted as text for the agent to read; Operon does not expand them. Tick
+  複数エージェントで並走 to give the same request to two or three agents, each
+  in a worktree and branch of its own, and compare what they did.
+- **Code and errors to the agent.** **エージェントに送る** in the editor sends an
+  excerpt of the open file to the newest agent running in the project, or puts
+  it in a new session's request when none is. 直近のエラーをエージェントに送る in a
+  terminal's menu finds the last error or stack trace in that pane's recent
+  output and types it into the same pane. `⌘K` also lists the selected
+  project's files and the symbols (`fn`, `struct`, `enum`, `trait`,
+  `interface`, `class`, `type`) of files open in the editor, and opens them at
+  that line.
+- **Prompt templates.** **テンプレートを挿入** in the new-session sheet adds a
+  built-in request — review this diff, fix the CI error, resolve merge
+  conflicts, add tests — or one of the repository's own `.operon/prompts/*.md`.
 - The path in a stack trace is the way to the file. Hover it in the terminal
   and it underlines; click and the editor opens at that line. Addresses a dev
   server prints open in the browser the same way. Only paths that resolve to a
@@ -321,7 +340,7 @@ Settings.
 - Meaning is judged on this Mac by [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2),
   run in-process on the GPU through llama.cpp's Metal backend. The 310 MB model
   is fetched once from a pinned Hugging Face revision, checked against its
-  SHA-256, and can be removed again from Settings › データ.
+  SHA-256, and can be removed again from Settings › データと復旧.
 - Exchanges are ranked locally first; only the few worth keeping go to an
   available CLI (Claude Code, Codex, or Antigravity) for a read-only, ephemeral
   summary — at most 30 calls a day, run outside the project's tree.
