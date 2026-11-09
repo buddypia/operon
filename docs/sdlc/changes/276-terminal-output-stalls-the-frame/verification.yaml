@@ -1,0 +1,16 @@
+# The evidence for change 276. Format: docs/sdlc/templates/verification.yaml.
+# Route refactor: no spec, so every claim is an invariant.
+digest: "b43965161a41e59a"
+
+obligations:
+  - I1 empirical-test :: cargo test --locked terminal_276_a_capture_laid_out_off_the_frame_is_shown_as_is
+  - I2 empirical-test :: cargo test --locked terminal_276_a_layout_from_another_theme_is_laid_out_again
+  - I3 empirical-test :: cargo test --locked terminal_276_unchanged_text_is_not_laid_out_again
+  - I4 empirical-test :: cargo test --locked terminal_276_bare_text_is_still_laid_out
+  - I5 empirical-test :: cargo test --locked terminal_276_a_theme_switch_keeps_rows_until_the_next_capture
+  - I6 empirical-test :: cargo test --locked terminal_276_output_is_not_copied_beside_itself
+  - I7 empirical-test :: cargo test --locked terminal_276_no_layout_for_text_the_app_does_not_hold_is_laid_out
+  - I8 empirical-test :: cargo test --locked terminal_276_a_stash_does_not_outlive_its_result
+  - I9 empirical-test :: cargo test --locked terminal_pane_render_cache
+  - I11 empirical-test :: cargo test --locked terminal_276_random_sequences_match_the_oracle
+  - I10 empirical-mutation :: python3 docs/sdlc/changes/276-terminal-output-stalls-the-frame/mutations.py

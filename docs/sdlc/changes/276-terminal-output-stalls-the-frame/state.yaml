@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: refactor — the terminal shows the same rows; where they are laid out
+# moves. No intent or spec: the person's request and the measurement are in
+# plan.md. Risk: low (risk.yaml `drawing`: src/app.rs), full autonomy;
+# screen.md records that nothing painted changes.
+
+state:
+  route: "refactor"
+  stage: "test"
+  status: "done"
+  attempts: "0 2"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Outlived the change: copying the session lists each frame (35 µs at 400 sessions) and rebuilding diff rows (60 µs at 20 000 lines) were measured and are not worth a change."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked terminal_276_ (9), terminal (108), session_255_, claude_md, harness; the full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: no tier newly reached; src/app.rs falls from 9957 to about 9915 lines"
+  release-binary: "machine passed required - src/app.rs and src/app/terminal_output.rs change; packaged from main with the changes that follow it"
+  guards-verified-by-mutation: "machine passed mutations.py 16 of 16 caught; empirical-verifier re-ran every obligation and found no failing test; rust-reviewer found nothing Important"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
