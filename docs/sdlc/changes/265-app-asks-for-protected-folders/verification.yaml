@@ -9,7 +9,7 @@
 # warning, and the translation tables. F1 is the empirical verifier's lead
 # (the data volume's firmlink spelling of the home folder), reproduced at
 # 3b50349 and fixed.
-digest: "469e07ae97d940ee"
+digest: "aaddd209ba870b20"
 
 obligations:
   - I1 empirical-test :: cargo test --locked protected_folders_265_terminal_link_probe_skips_protected_folders

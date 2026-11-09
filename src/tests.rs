@@ -70883,9 +70883,12 @@ pub(crate) fn session_254_compact_tabs() {
         texts[1].pos.x - texts[0].pos.x < 150.0,
         "short names must not reserve large empty labels"
     );
+    // Since change 267 the CLI mark sits between the state mark and the
+    // title: one mark and one gap further right, and no more.
+    let mark = SESSION_MARK_SIZE + ctx.style().spacing.item_spacing.x;
     assert!(
-        texts[0].pos.x - right < 65.0,
-        "title is left aligned beside status icon"
+        texts[0].pos.x - right < 65.0 + mark,
+        "title is left aligned beside the status icon and CLI mark"
     );
     let selected = texts[0].visual_bounding_rect();
     assert!(
@@ -73391,4 +73394,193 @@ pub(crate) fn protected_folders_265_data_volume_spelling_is_the_same_folder() {
         Some(&home)
     ));
     fs::remove_dir_all(home).unwrap();
+}
+
+// --- Change 267: session tabs show which CLI runs in them -------------------
+
+/// A session tab's title, in the central strip rather than the left column.
+fn tab_267_title(output: &egui::FullOutput, title: &str) -> egui::Rect {
+    drawn_text_rects(output, |text| text == title)
+        .into_iter()
+        .filter(|rect| rect.left() >= column_right(output))
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("central tab title")
+}
+
+/// Where `texture` is drawn between a tab's state mark and its title, on the
+/// title's row.
+fn tab_267_marks(
+    output: &egui::FullOutput,
+    texture: egui::TextureId,
+    state: egui::Rect,
+    title: egui::Rect,
+) -> Vec<egui::Rect> {
+    sidebar_251_mesh_rects(output, texture)
+        .into_iter()
+        .filter(|rect| {
+            rect.left() >= state.right() - 0.5
+                && rect.right() <= title.left() + 0.5
+                && (rect.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .collect()
+}
+
+/// The status-column fixture with its first session on Antigravity and its
+/// second a plain terminal.
+fn tab_267_fixture(root: &Path) -> (OperonApp, Uuid, Uuid) {
+    let (mut app, _populated, _empty, first, second) = status_column_fixture(root);
+    for (id, agent) in [(first, "gemini"), (second, "terminal")] {
+        if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == id) {
+            session.agent = agent.to_owned();
+        }
+    }
+    app.select_session(first);
+    (app, first, second)
+}
+
+#[test]
+fn the_terminal_mark_is_a_rounded_square_for_terminal_sessions_only() {
+    let mark = decode_png_mark(TERMINAL_MARK).expect("the terminal mark should be a decodable PNG");
+    // The vendor marks' box, so the terminal sits in the same square.
+    assert_eq!(mark.size, [128, 128]);
+    let alpha = |x: usize, y: usize| mark.pixels[y * 128 + x].a();
+    // A full-bleed plate: opaque through the middle and at each edge's
+    // midpoint, clear in the corners the rounding takes away.
+    for (x, y) in [(64, 64), (64, 1), (1, 64), (126, 64), (64, 126)] {
+        assert_eq!(alpha(x, y), 255, "({x}, {y}) should be on the plate");
+    }
+    for (x, y) in [(0, 0), (127, 0), (0, 127), (127, 127)] {
+        assert_eq!(
+            alpha(x, y),
+            0,
+            "({x}, {y}) should be outside the rounded corner"
+        );
+    }
+    let ctx = egui::Context::default();
+    let id = |agent: &str| session_mark_texture(&ctx, agent).map(|texture| texture.id());
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    for agent in ["terminal", "existing terminal"] {
+        assert_eq!(id(agent), Some(terminal), "{agent}");
+    }
+    for agent in ["claude", "codex", "gemini"] {
+        let vendor = agent_icon_texture(&ctx, agent).map(|texture| texture.id());
+        assert!(vendor.is_some(), "{agent}");
+        assert_eq!(id(agent), vendor, "{agent} keeps its vendor's mark");
+    }
+    // A custom command, an older record's binary, or nothing at all has
+    // neither a vendor nor a shell behind it.
+    for agent in ["custom", "my-agent", ""] {
+        assert_eq!(id(agent), None, "{agent}");
+    }
+}
+
+#[test]
+fn session_tabs_show_the_cli_mark_after_the_state() {
+    let root = temporary_directory("session-tab-cli-mark");
+    let (mut app, _first, second) = tab_267_fixture(&root);
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let antigravity = agent_icon_texture(&ctx, "gemini")
+        .expect("Antigravity mark")
+        .id();
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    for (title, texture, other) in [
+        ("first", antigravity, terminal),
+        ("second", terminal, antigravity),
+    ] {
+        let title_rect = tab_267_title(&output, title);
+        let state = session_tab_status_circle(&output, title_rect).expect("state mark");
+        let marks = tab_267_marks(&output, texture, state, title_rect);
+        assert_eq!(
+            marks.len(),
+            1,
+            "{title}: one mark between the state and the title"
+        );
+        let mark = marks[0];
+        assert!(
+            (mark.width() - SESSION_MARK_SIZE).abs() < 0.5
+                && (mark.height() - SESSION_MARK_SIZE).abs() < 0.5,
+            "{title}: {mark:?}"
+        );
+        assert!(
+            (mark.center().y - title_rect.center().y).abs() < 2.0,
+            "{title}: the mark is centred on the tab row"
+        );
+        assert!(
+            tab_267_marks(&output, other, state, title_rect).is_empty(),
+            "{title}: only its own CLI's mark"
+        );
+    }
+    // A command with no vendor and no shell behind it draws nothing and
+    // keeps no gap where a mark would be.
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == second) {
+        session.agent = "custom".to_owned();
+    }
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let title_rect = tab_267_title(&output, "second");
+    let state = session_tab_status_circle(&output, title_rect).expect("state mark");
+    for texture in [antigravity, terminal] {
+        assert!(tab_267_marks(&output, texture, state, title_rect).is_empty());
+    }
+    assert!(
+        title_rect.left() - state.right() < SESSION_MARK_SIZE,
+        "no space is held for a mark that is not there: {state:?} {title_rect:?}"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_tab_mark_names_its_cli_on_hover() {
+    let root = temporary_directory("session-tab-cli-hover");
+    let (mut app, _first, _second) = tab_267_fixture(&root);
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let antigravity = agent_icon_texture(&ctx, "gemini")
+        .expect("Antigravity mark")
+        .id();
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    for (title, texture, name) in [
+        ("first", antigravity, "Antigravity"),
+        ("second", terminal, tr("ターミナル")),
+    ] {
+        let away = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let title_rect = tab_267_title(&away, title);
+        let state = session_tab_status_circle(&away, title_rect).expect("state mark");
+        let mark = *tab_267_marks(&away, texture, state, title_rect)
+            .first()
+            .expect("the tab's mark");
+        // The left column may already spell the word on a row, so the
+        // hover is what adds one more.
+        let before = drawn_text_rects(&away, |text| text == name).len();
+        workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(mark.center())],
+        );
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        let hovered = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        assert!(
+            drawn_text_rects(&hovered, |text| text == name).len() > before,
+            "{title}: hovering the mark names {name}"
+        );
+        workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(egui::pos2(700.0, 500.0))],
+        );
+        workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    }
+    fs::remove_dir_all(root).ok();
 }

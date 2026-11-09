@@ -1516,6 +1516,39 @@ pub(crate) fn brand_mark_image(ctx: &egui::Context, size: f32) -> Option<egui::I
     Some(egui::Image::new((texture.id(), egui::vec2(size, size))))
 }
 
+/// The mark that says which CLI a session runs (change 267): its vendor's for
+/// the three agents, Operon's terminal mark for a plain or recovered terminal,
+/// and `None` for a custom command or an older record's binary, which have
+/// neither a vendor nor a shell behind them.
+///
+/// It sits beside `agent_icon_texture` rather than inside it so that "vendor
+/// mark" keeps meaning exactly that: the left column, the CLI filter and the
+/// launch sheet draw what they drew before, and `src/agents.rs`, the launch
+/// gates' file, is not touched for a picture.
+pub(crate) fn session_mark_texture(
+    ctx: &egui::Context,
+    agent: &str,
+) -> Option<egui::TextureHandle> {
+    match agent {
+        "terminal" | "existing terminal" => png_texture(ctx, "terminal-mark", TERMINAL_MARK),
+        _ => agent_icon_texture(ctx, agent),
+    }
+}
+
+/// A session's CLI mark at `SESSION_MARK_SIZE`, named on hover with the words
+/// the left column uses. A session without a mark draws nothing and reserves
+/// no space, so its title keeps the place it had.
+pub(crate) fn session_mark(ui: &mut egui::Ui, agent: &str) {
+    let Some(texture) = session_mark_texture(ui.ctx(), agent) else {
+        return;
+    };
+    ui.add(egui::Image::new((
+        texture.id(),
+        egui::Vec2::splat(SESSION_MARK_SIZE),
+    )))
+    .on_hover_text(agent_short_label(agent));
+}
+
 pub(crate) fn code_block(ui: &mut egui::Ui, text: &str) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.add(
