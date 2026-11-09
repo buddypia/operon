@@ -73,7 +73,7 @@ file (reverted from the tree; `probe_268_user_store*` need
    (tooltips shown): closes.
 9. Synthetic CGEvent clicks into the person's Operon: not delivered (a click on
    「ホーム」 did not switch the page either), so inconclusive. The session runs
-   under cmux.app, which has no Accessibility grant (`agent-desktop status`:
+   under a terminal app that has no Accessibility grant (`agent-desktop status`:
    `accessibility: denied`), so no input can be sent from here.
 10. Asked the person four times for the ⌘W / other-tab observation; each reply
     was 「承認」 with no observation, and the window stayed unchanged.
