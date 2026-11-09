@@ -61,6 +61,22 @@ pub(crate) fn terminal_provenance(session: &Session) -> Option<SessionOrigin> {
     }
 }
 
+/// A terminal the person typed a CLI into is a session of that CLI from here
+/// on (change 270): the mark, the label, the state reading, and the resume all
+/// read the kind, which was otherwise decided once, at creation. A session
+/// launched as a CLI keeps its kind. Whether the kind moved.
+pub(crate) fn take_cli_kind(session: &mut Session, provider: CliProvider) -> bool {
+    let Some(provenance) =
+        terminal_provenance(session).filter(|_| session.agent != provider.agent())
+    else {
+        return false;
+    };
+    session.agent = provider.agent().to_owned();
+    session.goal.clear();
+    session.origin = Some(provenance);
+    true
+}
+
 impl OperonApp {
     /// Puts back the workspace a previous run left (change 270). A project
     /// whose saved tabs cannot be drawn as saved is left to today's start, and

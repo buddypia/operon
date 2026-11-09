@@ -205,6 +205,7 @@ pub(crate) enum BackgroundResult {
         activities: Vec<(Uuid, AgentActivity)>,
         previews: Vec<(Uuid, ConversationPreview)>,
         output: Vec<(Uuid, UiResult<TerminalCapture>)>,
+        clis: Vec<(Uuid, CliProvider)>,
     },
     CliSessions {
         project_id: Uuid,
@@ -1655,8 +1656,12 @@ impl OperonApp {
                     activities,
                     previews,
                     output,
+                    clis,
                 } => {
                     self.background_tasks.remove(&BackgroundKey::SessionPoll);
+                    for (session_id, provider) in clis {
+                        self.adopt_terminal_cli(session_id, provider);
+                    }
                     self.apply_session_poll(states, activities, previews, output);
                 }
                 BackgroundResult::CliSessions {
@@ -3399,7 +3404,14 @@ impl OperonApp {
                             .background_tasks
                             .contains(&BackgroundKey::EmptySessionStart(session.id)))
             })
-            .map(|session| (session.id, session.tmux_name.clone(), session.agent.clone()))
+            .map(|session| {
+                (
+                    session.id,
+                    session.tmux_name.clone(),
+                    session.agent.clone(),
+                    terminal_provenance(session).is_some(),
+                )
+            })
             .collect::<Vec<_>>();
         if active.is_empty() {
             return;
@@ -3414,11 +3426,12 @@ impl OperonApp {
             let mut states = Vec::with_capacity(active.len());
             let mut activities = Vec::new();
             let mut previews = Vec::new();
+            let mut clis = Vec::new();
             for batch in active.chunks(16) {
                 thread::scope(|scope| {
                     let workers = batch
                         .iter()
-                        .map(|(id, name, agent)| {
+                        .map(|(id, name, agent, from_terminal)| {
                             // A plain terminal has no agent turn to finish and
                             // no conversation to quote, so its screen is never
                             // read. Every managed agent's is, whether or not
@@ -3435,14 +3448,22 @@ impl OperonApp {
                                 let preview = screen
                                     .as_deref()
                                     .map(|screen| read_conversation_preview(agent, screen));
-                                (*id, observation, activity, preview)
+                                // A terminal can become any CLI the person
+                                // types into it (change 271).
+                                let cli = (*from_terminal && observation.state == TmuxState::Alive)
+                                    .then(|| tmux_foreground_cli(name.as_str()))
+                                    .flatten();
+                                (*id, observation, activity, preview, cli)
                             })
                         })
                         .collect::<Vec<_>>();
-                    for (id, observation, activity, preview) in
+                    for (id, observation, activity, preview, cli) in
                         workers.into_iter().filter_map(|worker| worker.join().ok())
                     {
                         states.push((id, observation));
+                        if let Some(cli) = cli {
+                            clis.push((id, cli));
+                        }
                         if let Some(activity) = activity {
                             activities.push((id, activity));
                         }
@@ -3454,7 +3475,7 @@ impl OperonApp {
             }
             let output = on_screen
                 .into_iter()
-                .map(|(id, name, _)| {
+                .map(|(id, name, ..)| {
                     (
                         id,
                         tmux_capture_with_cursor(&name).map_err(|error| error.to_string()),
@@ -3466,6 +3487,7 @@ impl OperonApp {
                 activities,
                 previews,
                 output,
+                clis,
             }
         });
     }
@@ -3898,17 +3920,11 @@ impl OperonApp {
         else {
             return;
         };
-        // A terminal the person typed a CLI into is a session of that CLI
-        // from here on (change 270): the mark, the label, the state reading,
-        // and the resume all read the kind, which was otherwise decided once,
-        // at creation. A session launched as a CLI keeps its kind.
-        let takes_kind =
-            terminal_provenance(session).filter(|_| session.agent != reading.source.agent());
-        if let Some(provenance) = takes_kind {
-            session.agent = reading.source.agent().to_owned();
-            session.goal.clear();
-            session.origin = Some(provenance);
-        } else if session.native_session_id.as_deref() == Some(native_id.as_str())
+        // The kind changes even when the reported ID is the one already
+        // recorded (change 270).
+        let took_kind = take_cli_kind(session, reading.source);
+        if !took_kind
+            && session.native_session_id.as_deref() == Some(native_id.as_str())
             && (path.is_none() || session.native_session_path == path)
         {
             return;
@@ -3917,6 +3933,30 @@ impl OperonApp {
         if path.is_some() {
             session.native_session_path = path;
         }
+        if !self.persist() {
+            self.store = previous_store;
+        }
+    }
+
+    /// The CLI the session poll saw in front of a terminal (change 271): the
+    /// terminal takes its kind the moment it is seen, rather than when that
+    /// CLI's hook speaks, which for Codex is never and for Antigravity is the
+    /// first prompt. The conversation recorded under the previous kind is
+    /// another CLI's, or none; this one's arrives with its first hook event.
+    pub(crate) fn adopt_terminal_cli(&mut self, session_id: Uuid, provider: CliProvider) {
+        // Asked before the store is cloned: every poll repeats the reading.
+        let Some(index) = self.store.sessions.iter().position(|session| {
+            session.id == session_id
+                && session.agent != provider.agent()
+                && terminal_provenance(session).is_some()
+        }) else {
+            return;
+        };
+        let previous_store = self.store.clone();
+        let session = &mut self.store.sessions[index];
+        take_cli_kind(session, provider);
+        session.native_session_id = None;
+        session.native_session_path = None;
         if !self.persist() {
             self.store = previous_store;
         }

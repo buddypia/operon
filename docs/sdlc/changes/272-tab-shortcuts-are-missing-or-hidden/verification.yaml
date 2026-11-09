@@ -5,7 +5,7 @@
 # actions; I6-I9 the chords that already went through chord_pressed and
 # chord_consumed, whose matching moved to Keymap::action_for; I10 the
 # verifier's second lead, which held; I11 lesson 112's admission.
-digest: "ee089097bbac2452"
+digest: "5ddc55981eb5f7e3"
 
 obligations:
   - R1 empirical-test :: cargo test --locked shortcut_272_command_t_opens_a_terminal_like_the_plus
