@@ -1,0 +1,41 @@
+# Bug report (2026-11-09): in a session terminal, Shift+Enter sends the line in
+# Antigravity CLI where cmux puts a newline in the input. bug.md has the
+# person's words, the cause and the measurements.
+#
+# The first report read the other way round ("Shift + Enterで勝手に改行されて
+# 困る", and the answer "入力欄に改行→送信したい" was taken as "make it send");
+# a morning of probes looked for a newline Operon never produced. What settled
+# it was the person comparing with cmux, whose Ghostty config sends LF for
+# Shift+Enter. Probes are under .tmp/probe (git-ignored), not committed.
+#
+# Screen n/a: src/ui is a drawing surface, but this edit changes the bytes a
+# key sends and nothing that is painted.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "6 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Plan approved and committed; write the failing test, watch it fail, then change terminal_key_binding."
+
+contract:
+  three-gates: "machine pending make q.fast and the named terminal key tests (bash .claude/hooks/gate-commit.sh)"
+  full-ci: "machine pending CI on the branch head"
+  release-binary: "machine pending touches src/ui/terminal.rs, so bash scripts/package-macos.sh runs from the main checkout after landing"
+  installed-app: "human pending Shift+Enter in an Antigravity session leaves two lines in the input in the installed app"
+  guards-verified-by-mutation: "human pending the new test watched failing on the unfixed binding"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
