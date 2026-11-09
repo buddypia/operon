@@ -214,7 +214,7 @@ pub(crate) fn is_image(path: &Path) -> bool {
 pub(crate) fn file_scan_warning(scan: &FileScanSnapshot) -> Option<String> {
     (scan.truncated || scan.unreadable_directories > 0).then(|| {
         tf!(
-            "上限付きのプロジェクトスキャン結果を表示しています。{truncated}{unreadable}",
+            "スキャンの上限内で見つかったプロジェクトを表示しています。{truncated}{unreadable}",
             truncated = if scan.truncated {
                 tr(" 一部のファイルは省略されています。フォルダで絞り込むか、外部エディタを使ってください。")
             } else {

@@ -116,7 +116,7 @@ Settings. The projects, sessions, and agent output in them are a demo.
   come back to it. Marks are for the session you are in and do not survive a
   restart.
 - Narrow the sessions to what you can act on. Four tiles in the **セッション**
-  sidebar's header — **要対応**, **実行中**, **手すき**, **終了** — each
+  sidebar's header — **要対応**, **実行中**, **アイドル**, **終了** — each
   carry a live count, and a segment below them narrows by CLI (Codex, Claude
   Code, Antigravity, others). Turning one on leaves only those sessions,
   dropping the projects that have none; several can be on at once, the column

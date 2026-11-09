@@ -985,7 +985,7 @@ impl OperonApp {
         });
         // A project turned on before change 258 never saw the opt-in bullet.
         ui.label(
-            RichText::new(tr("Claude Code と Codex のセッション開始時に、ナレッジの題名 (最大 10 件) と検索方法をその CLI に渡しています。"))
+            RichText::new(tr("Claude Code と Codex のセッション開始時に、ナレッジの題名（最大 10 件）と検索方法をその CLI に渡しています。"))
                 .size(12.5)
                 .color(palette.text_muted),
         );

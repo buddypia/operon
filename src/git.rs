@@ -1715,7 +1715,7 @@ pub(crate) fn summarize_commit_failure(raw: &str) -> String {
             || lower.contains("test failed")
             || lower.contains("failed test")
         {
-            return tr("テストの実行に失敗しました").into();
+            return tr("テストを実行できませんでした").into();
         }
         if lower.contains("pre-commit") || lower.contains("hook") {
             return tr("コミットフック（pre-commit）の検証に失敗しました").into();

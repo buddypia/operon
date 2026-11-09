@@ -1574,3 +1574,25 @@ The person saw macOS ask for Downloads, Desktop and Documents "for Operon" witho
 egui's `consume_key` and `matches_logically` ignore an extra Shift or Alt, so a chord read first swallows every more specific chord on the same key. That is why ⌃⇧Tab stepped forward — the workspace read ⌃Tab first — and why ⌘T would have answered ⇧⌘T too (change 272). The first fix repeated it one level up: the fixed ⌃Tab was read before the keymap, so a keymap file that moved `tab.previous` onto ⌃Tab stepped forward anyway; the change's own verifier found it. **The rule:** a remappable chord is matched only through `Keymap::action_for` (via `chord_pressed` / `chord_consumed`), where the binding whose Shift and Alt match exactly wins; a fixed key is read after the keymap and only for a press no binding claims. A raw `consume_key` with modifiers is for a key no other chord can share.
 
 **Guard.** `shortcut_272_the_most_specific_chord_wins`, `shortcut_272_brackets_and_control_tab_step_through_tabs`, and `shortcut_272_a_control_tab_binding_is_the_keymaps`, each watched failing in `docs/sdlc/changes/272-tab-shortcuts-are-missing-or-hidden/mutations.py` (17 of 17 caught).
+
+## 113 — A word the person rejects is a word a test refuses
+
+Change 259 chose the idle word 「手すき」 and the person rejected it a day later
+(change 274); the same review found Korean calques (창, 신선도, 덩어리, 차이점), a
+Japanese character inside a Korean word, 「停止」 left in English and Korean rows,
+and three rows whose `\\\"` drew backslashes before a quote. None of them broke a
+test, because the table tests check shape — sorted, complete, placeholders —
+and never the words. **The rule:** a term retired by a wording review goes into
+a list a test refuses, in the language it was retired from, so a row copied
+from an old one cannot bring it back; a translation carries no Japanese script
+and no backslash; and a notice about a write the app could not confirm says
+"unconfirmed" in every language, never "failed" (durability-invariants), with
+the notices selected by meaning rather than by one phrase — the first selection
+missed a row the independent verifier then rewrote as a failure.
+
+**Guard.** `no_message_uses_a_retired_term`,
+`no_translation_carries_japanese_script_or_a_stray_backslash`, and
+`a_written_but_unconfirmed_notice_never_says_the_write_failed`, each watched
+failing in `docs/sdlc/changes/274-ui-wording-reads-machine-made/mutations.py`
+(20 of 20 caught).
+
