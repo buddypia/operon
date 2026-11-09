@@ -103,8 +103,8 @@ pub(crate) const KEYMAP_ACTIONS: &[KeymapAction] = &[
         default: "Mod+Alt+B",
     },
     // The tab keys every browser, editor, and terminal on a Mac answers to
-    // (change 272). The + in the strip is named 「空のターミナルを開く」, and
-    // ⌘T is that button, so it carries the same name.
+    // (change 272). ⌘T opens a plain terminal in the focused pane: the + menu's
+    // ターミナル row without the menu (change 273), under the name the + had.
     KeymapAction {
         id: "tab.new",
         label: "空のターミナルを開く",

@@ -67366,8 +67366,10 @@ fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Op
         .shapes
         .iter()
         .filter_map(|shape| match &shape.shape {
+            // The enclosure is 8 units on the 18-unit grid, drawn at the
+            // tab's mark size (change 273).
             egui::Shape::Circle(circle)
-                if (circle.radius - 8.0).abs() < 0.01
+                if (circle.radius - 8.0 * TAB_STATUS_MARK_SIZE / STATUS_ICON_SIZE).abs() < 0.01
                 && circle.center.x >= column_right(output)
                 && circle.center.x < title.left()
                 // Use the nearest mark: compact tabs may place both within this range.
@@ -67376,7 +67378,7 @@ fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Op
             {
                 Some(egui::Rect::from_center_size(
                     circle.center,
-                    egui::Vec2::splat(STATUS_ICON_SIZE),
+                    egui::Vec2::splat(TAB_STATUS_MARK_SIZE),
                 ))
             }
             _ => None,
@@ -71031,11 +71033,12 @@ pub(crate) fn session_254_terminal_action() {
             &ctx,
             vec![egui::Event::PointerMoved(add.center())],
         );
-        named |= !drawn_text_rects(&hover, |s| s == "空のターミナルを開く").is_empty();
+        named |= !drawn_text_rects(&hover, |s| s == "ターミナルや AI を起動").is_empty();
     }
-    assert!(named, "plus explains that it starts a plain terminal");
+    assert!(named, "plus says it starts a terminal or an agent");
     let count = app.store.sessions.len();
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    // Since change 273 the + opens a menu; ターミナル is the old action.
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     assert_eq!(app.store.sessions.len(), count);
     assert!(app
         .notice
@@ -71103,7 +71106,7 @@ pub(crate) fn session_254_terminal_context() {
         .filter(|r| r.left() > project_column_right(&app))
         .max_by(|a, b| a.left().total_cmp(&b.left()))
         .expect("right pane plus");
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     let created = app.store.sessions.last().unwrap().clone();
     assert_ne!(created.id, second);
     assert_ne!(created.id, first);
@@ -71204,9 +71207,13 @@ pub(crate) fn session_254_empty_workspace() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    let pressed = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
     assert!(app.store.sessions.is_empty());
     assert!(app.notice.is_none(), "no-project action is disabled");
+    assert!(
+        session_273_menu_rows(&pressed, add).is_empty(),
+        "a disabled + opens no menu"
+    );
     let project = Project {
         id: Uuid::new_v4(),
         name: "空のプロジェクト".into(),
@@ -71219,7 +71226,7 @@ pub(crate) fn session_254_empty_workspace() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     assert!(app.store.sessions.is_empty());
     assert!(app
         .notice
@@ -71312,7 +71319,7 @@ pub(crate) fn session_260_plus_follows_last_tab() {
     // At its new place it is still the button: the press reaches the launch,
     // which refuses here with the existing missing-tmux notice.
     let count = app.store.sessions.len();
-    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
     assert_eq!(app.store.sessions.len(), count);
     assert!(app
         .notice
@@ -71406,6 +71413,611 @@ pub(crate) fn session_260_plus_stays_clear_at_every_tab_count() {
             }
         }
     }
+    fs::remove_dir_all(root).unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Change 273: the + offers what to start, and the session tabs are compact.
+
+/// The names the + menu shows, top to bottom (Requirement 1).
+const SESSION_273_ROWS: [&str; 4] = ["ターミナル", "Claude Code", "Codex CLI", "Antigravity"];
+
+/// The rows of the menu that opened under `add`: each name's nearest text
+/// below the +, sorted top to bottom.
+fn session_273_menu_rows(
+    out: &egui::FullOutput,
+    add: egui::Rect,
+) -> Vec<(&'static str, egui::Rect)> {
+    let mut rows: Vec<_> = SESSION_273_ROWS
+        .iter()
+        .filter_map(|name| {
+            drawn_text_rects(out, |s| s == *name)
+                .into_iter()
+                .filter(|r| {
+                    r.top() >= add.bottom() - 1.0
+                        && r.top() <= add.bottom() + 6.0 * CONTROL_HEIGHT
+                        && r.right() > add.left() - 320.0
+                        && r.left() < add.right() + 320.0
+                })
+                .min_by(|a, b| a.top().total_cmp(&b.top()))
+                .map(|r| (*name, r))
+        })
+        .collect();
+    rows.sort_by(|a, b| a.1.top().total_cmp(&b.1.top()));
+    rows
+}
+
+/// Presses `add`, then the row called `name` in the menu that opens under it.
+fn session_273_choose(app: &mut OperonApp, ctx: &egui::Context, add: egui::Rect, name: &str) {
+    let out = session_253_pointer(app, ctx, add.center(), egui::PointerButton::Primary);
+    let row = session_273_menu_rows(&out, add)
+        .into_iter()
+        .find(|(row, _)| *row == name)
+        .unwrap_or_else(|| panic!("{name} in the menu under the +"))
+        .1;
+    session_253_pointer(app, ctx, row.center(), egui::PointerButton::Primary);
+}
+
+fn session_273_every_cli(app: &mut OperonApp) {
+    app.tools.claude = true;
+    app.tools.codex = true;
+    app.tools.antigravity = true;
+}
+
+#[test]
+pub(crate) fn session_273_plus_opens_launch_menu() {
+    let root = temporary_directory("session-273-menu");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.tools.tmux = false;
+    session_273_every_cli(&mut app);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    assert!(
+        session_273_menu_rows(&out, add).is_empty(),
+        "the menu is closed until the + is pressed"
+    );
+    let count = app.store.sessions.len();
+    let out = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert_eq!(
+        app.store.sessions.len(),
+        count,
+        "the + alone starts nothing"
+    );
+    assert!(
+        app.notice.is_none(),
+        "the + alone asks nothing: {:?}",
+        app.notice
+    );
+    assert!(!app.launch_sheet_open);
+    let rows = session_273_menu_rows(&out, add);
+    assert_eq!(
+        rows.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+        SESSION_273_ROWS,
+        "four rows under the +, in the order the person named them"
+    );
+    for pair in rows.windows(2) {
+        let step = pair[1].1.center().y - pair[0].1.center().y;
+        assert!(
+            step >= CONTROL_HEIGHT - 0.5,
+            "each row is a 28px control: {pair:?}"
+        );
+    }
+    assert!(
+        rows[0].1.top() - add.bottom() < CONTROL_HEIGHT,
+        "the menu opens directly below the +: {rows:?}, + {add:?}"
+    );
+    // Each row leads with its CLI's mark, drawn from the value it launches.
+    let choices = crate::launch_menu::WORKSPACE_LAUNCH_CHOICES;
+    assert_eq!(choices.len(), rows.len());
+    for (choice, (name, text)) in choices.iter().zip(&rows) {
+        let texture = session_mark_texture(&ctx, choice)
+            .unwrap_or_else(|| panic!("{choice} has a mark"))
+            .id();
+        let marks: Vec<_> = sidebar_251_mesh_rects(&out, texture)
+            .into_iter()
+            .filter(|r| {
+                r.right() <= text.left() + 0.5
+                    && r.left() >= text.left() - CONTROL_HEIGHT
+                    && (r.center().y - text.center().y).abs() < 4.0
+            })
+            .collect();
+        assert_eq!(marks.len(), 1, "{name}: its mark before its name");
+        assert!(
+            (marks[0].width() - SESSION_MARK_SIZE).abs() < 0.5,
+            "{name}: {marks:?}"
+        );
+        // The round trip: every agent row is a value the launch gate accepts.
+        if *choice != "terminal" {
+            assert!(
+                build_agent_launch_command(choice, "", "", "", "", &[], "").is_ok(),
+                "{choice} must be an agent the launch accepts"
+            );
+        }
+    }
+    // Escape closes it; pressing the + again closes it.
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        }],
+    );
+    // The menu takes that Escape for itself: a terminal drawn later in the
+    // frame would otherwise send it on and interrupt its agent's turn.
+    assert!(
+        !ctx.input(|i| i.key_pressed(egui::Key::Escape)),
+        "the Escape that closes the menu is not passed on"
+    );
+    // The frame that reads Escape still draws the menu; the next does not.
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        session_273_menu_rows(&out, add).is_empty(),
+        "Escape closes the menu"
+    );
+    session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    let out = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+    assert!(
+        session_273_menu_rows(&out, add).is_empty(),
+        "a second press closes it"
+    );
+    // ターミナル does what the + used to: here it meets the missing tmux.
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
+    assert_eq!(app.store.sessions.len(), count);
+    assert!(app
+        .notice
+        .as_deref()
+        .unwrap_or_default()
+        .contains("tmux が必要"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// A git project whose first session works in a linked worktree, split so that
+/// session sits in the right pane while the left pane has the focus.
+fn session_273_split_fixture(root: &Path) -> (OperonApp, Uuid, PathBuf) {
+    let project_path = root.join("project");
+    fs::create_dir_all(&project_path).unwrap();
+    run_fixture_git(&project_path, &["init", "-q"]);
+    run_fixture_git(
+        &project_path,
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "initial",
+        ],
+    );
+    let worktree = root.join("worktree");
+    run_fixture_git(
+        &project_path,
+        &[
+            "worktree",
+            "add",
+            "-qb",
+            "feature/agent",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let (mut app, first, second) = app_with_two_sessions(&project_path);
+    app.store.sessions[0].worktree_path = Some(worktree.clone());
+    app.select_session(first);
+    app.select_session(second);
+    app.show_session_inspector = false;
+    let group = app.workspace.groups[0].id;
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(first),
+        group,
+        PaneDrop::Right,
+        pane_area()
+    ));
+    let right = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(first)))
+        .expect("first is in its own pane")
+        .id;
+    assert_ne!(right, group);
+    app.workspace.select(group, &WorkspaceTab::Session(second));
+    app.activate_workspace_tab(&WorkspaceTab::Session(second));
+    (app, right, worktree.canonicalize().unwrap())
+}
+
+#[test]
+pub(crate) fn session_273_agent_launch_uses_pane_and_remembered_options() {
+    let root = temporary_directory("session-273-agent");
+    let (mut app, right, worktree) = session_273_split_fixture(&root);
+    app.tools.tmux = true;
+    session_273_every_cli(&mut app);
+    app.recent_agent_settings.agents.insert(
+        "claude".into(),
+        AgentLaunchSettings {
+            model: "claude-remembered".into(),
+            ..Default::default()
+        },
+    );
+    // A pin for another CLI says nothing about this one.
+    app.recent_agent_settings.pinned = Some(PinnedLaunch {
+        agent: "codex".into(),
+        settings: AgentLaunchSettings {
+            model: "codex-pinned".into(),
+            ..Default::default()
+        },
+        account: None,
+        acknowledged: false,
+    });
+    // The launch sheet's draft, which a quick launch must leave alone.
+    app.selected_agent = "codex".into();
+    app.goal_input = "下書きの依頼".into();
+    app.session_name_input = "下書きの名前".into();
+    let unrelated_project = Uuid::new_v4();
+    let unrelated = root.join("unrelated").display().to_string();
+    app.session_path_project = Some(unrelated_project);
+    app.session_path_input = unrelated.clone();
+    let remembered = app.recent_agent_settings.clone();
+    let project = app.store.projects[0].id;
+
+    let Ok(crate::launch_menu::PaneAgentLaunch::Start(start)) =
+        app.workspace_agent_launch(Some(right), "claude")
+    else {
+        panic!("a plain remembered combination starts directly");
+    };
+    assert_eq!(start.project.id, project);
+    assert_eq!(start.worktree_path, worktree, "the clicked pane's folder");
+    assert!(
+        start.command.contains("claude-remembered"),
+        "{}",
+        start.command
+    );
+    assert!(!start.command.contains("codex-pinned"));
+    assert_eq!(start.account, None, "no login without a pin for this CLI");
+
+    let count = app.store.sessions.len();
+    let id = app
+        .open_workspace_agent_session(Some(right), &start)
+        .expect("the session is recorded");
+    assert_eq!(app.store.sessions.len(), count + 1);
+    let created = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .unwrap()
+        .clone();
+    assert_eq!(created.agent, "claude");
+    assert_eq!(created.project_id, project);
+    assert_eq!(created.worktree_path, Some(worktree.clone()));
+    assert!(created.agent_command.contains("claude-remembered"));
+    assert!(
+        created.native_session_id.is_some(),
+        "Operon names the conversation, as a sheet launch does"
+    );
+    assert_eq!(created.origin, None);
+    assert!(created.depends_on.is_empty());
+    assert!(
+        !created.goal.contains("下書き"),
+        "no request text: {}",
+        created.goal
+    );
+    assert!(!created.name.contains("下書き"));
+    assert_eq!(created.status, SessionStatus::Starting);
+    let pane = app
+        .workspace
+        .groups
+        .iter()
+        .find(|g| g.tabs.contains(&WorkspaceTab::Session(id)))
+        .expect("the new session has a tab");
+    assert_eq!(pane.id, right, "the tab opens in the pane whose + was used");
+    assert!(fs::read_to_string(&app.data_file)
+        .unwrap()
+        .contains(&id.to_string()));
+    assert_eq!(app.selected_agent, "codex");
+    assert_eq!(app.goal_input, "下書きの依頼");
+    assert_eq!(app.session_name_input, "下書きの名前");
+    assert_eq!(app.session_path_project, Some(unrelated_project));
+    assert_eq!(app.session_path_input, unrelated);
+    assert_eq!(
+        app.recent_agent_settings, remembered,
+        "nothing is remembered anew"
+    );
+    assert!(!app.launch_sheet_open);
+
+    // A pin for this CLI wins and carries its consent; a login it names
+    // that no longer exists is not used.
+    app.recent_agent_settings.pinned = Some(PinnedLaunch {
+        agent: "claude".into(),
+        settings: AgentLaunchSettings {
+            model: "claude-pinned".into(),
+            mode: "bypassPermissions".into(),
+            ..Default::default()
+        },
+        account: Some(Uuid::new_v4()),
+        acknowledged: true,
+    });
+    let Ok(crate::launch_menu::PaneAgentLaunch::Start(start)) =
+        app.workspace_agent_launch(Some(right), "claude")
+    else {
+        panic!("an acknowledged pin starts directly");
+    };
+    assert!(start.command.contains("claude-pinned"), "{}", start.command);
+    assert_eq!(start.account, None);
+    if let Some(pin) = app.recent_agent_settings.pinned.as_mut() {
+        pin.acknowledged = false;
+    }
+    assert!(matches!(
+        app.workspace_agent_launch(Some(right), "claude"),
+        Ok(crate::launch_menu::PaneAgentLaunch::Confirm { .. })
+    ));
+    app.recent_agent_settings.pinned = None;
+
+    // Refusals carry the sheet's own words.
+    app.tools.tmux = false;
+    let refused = app.workspace_agent_launch(Some(right), "claude");
+    assert!(
+        matches!(&refused, Err(reason) if reason.contains("tmux が必要")),
+        "{:?}",
+        refused.as_ref().err()
+    );
+    app.tools.tmux = true;
+    app.tools.claude = false;
+    let refused = app.workspace_agent_launch(Some(right), "claude");
+    assert!(
+        matches!(&refused, Err(reason) if reason.contains("PATH 上に見つかりません")),
+        "{:?}",
+        refused.as_ref().err()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_273_agent_choice_reaches_the_launch() {
+    let root = temporary_directory("session-273-choice");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    // No tmux: whatever the choice reaches, nothing can start a real CLI.
+    app.tools.tmux = false;
+    session_273_every_cli(&mut app);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    app.goal_input = "下書きの依頼".into();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let count = app.store.sessions.len();
+    for name in ["Claude Code", "Codex CLI", "Antigravity"] {
+        app.notice = None;
+        session_273_choose(&mut app, &ctx, add, name);
+        assert_eq!(app.store.sessions.len(), count, "{name}");
+        assert!(
+            app.notice
+                .as_deref()
+                .unwrap_or_default()
+                .contains("tmux が必要"),
+            "{name}: {:?}",
+            app.notice
+        );
+        assert!(!app.launch_sheet_open, "{name}");
+        assert_eq!(app.goal_input, "下書きの依頼", "{name}");
+        let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        assert!(
+            session_273_menu_rows(&out, add).is_empty(),
+            "{name}: choosing closes the menu"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_273_dangerous_options_open_the_sheet() {
+    let root = temporary_directory("session-273-danger");
+    let (mut app, right, worktree) = session_273_split_fixture(&root);
+    // No tmux, so a launch that skipped the consent could never start a CLI:
+    // it would stop at the missing-tmux notice and this test would fail.
+    app.tools.tmux = false;
+    session_273_every_cli(&mut app);
+    app.recent_agent_settings.agents.insert(
+        "claude".into(),
+        AgentLaunchSettings {
+            model: "claude-remembered".into(),
+            mode: "bypassPermissions".into(),
+            ..Default::default()
+        },
+    );
+    app.recent_agent_settings.pinned = Some(PinnedLaunch {
+        agent: "codex".into(),
+        settings: AgentLaunchSettings {
+            model: "codex-pinned".into(),
+            ..Default::default()
+        },
+        account: None,
+        acknowledged: false,
+    });
+    save_recent_agent_settings(&app.data_file, &app.recent_agent_settings).unwrap();
+    let file = recent_agent_settings_path(&app.data_file);
+    let written = fs::read(&file).unwrap();
+    let remembered = app.recent_agent_settings.clone();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = drawn_text_rects(&out, |s| s == ICON_ADD)
+        .into_iter()
+        .filter(|r| r.left() > project_column_right(&app))
+        .max_by(|a, b| a.left().total_cmp(&b.left()))
+        .expect("right pane plus");
+    let count = app.store.sessions.len();
+    session_273_choose(&mut app, &ctx, add, "Claude Code");
+    assert_eq!(
+        app.store.sessions.len(),
+        count,
+        "nothing starts without consent"
+    );
+    assert!(app.launch_sheet_open, "the sheet asks instead");
+    assert_eq!(app.selected_agent, "claude");
+    assert_eq!(app.agent_model_input, "claude-remembered");
+    assert_eq!(app.agent_mode_input, "bypassPermissions");
+    assert!(
+        !app.launch_acknowledged(),
+        "the consent is the person's to give"
+    );
+    assert_eq!(app.agent_account_input, None);
+    assert_eq!(
+        app.workspace.focused,
+        Some(right),
+        "the pane whose + was used has the focus behind the sheet"
+    );
+    assert_eq!(app.session_path_project, Some(app.store.projects[0].id));
+    assert_eq!(
+        PathBuf::from(&app.session_path_input)
+            .canonicalize()
+            .unwrap(),
+        worktree,
+        "the sheet starts in the clicked pane's folder"
+    );
+    assert_eq!(
+        app.recent_agent_settings, remembered,
+        "nothing is remembered anew"
+    );
+    assert_eq!(
+        fs::read(&file).unwrap(),
+        written,
+        "the file is not rewritten"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn session_273_missing_cli_is_disabled() {
+    let root = temporary_directory("session-273-missing");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    // Every CLI missing: the agent rows are off, the terminal row is not.
+    app.tools = ToolStatus::default();
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let count = app.store.sessions.len();
+    for name in ["Claude Code", "Codex CLI", "Antigravity"] {
+        app.notice = None;
+        let out = session_253_pointer(&mut app, &ctx, add.center(), egui::PointerButton::Primary);
+        let row = session_273_menu_rows(&out, add)
+            .into_iter()
+            .find(|(row, _)| *row == name)
+            .unwrap_or_else(|| panic!("{name} is still listed"))
+            .1;
+        // egui shows no tooltip for a pointer that has not moved since a
+        // click, so let a tenth of a second pass before the pointer arrives.
+        for _ in 0..8 {
+            workspace_pointer_frame(&mut app, &ctx, Vec::new());
+        }
+        // One move onto the row, then still frames: egui shows a tooltip only
+        // for a pointer at rest.
+        workspace_pointer_frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(row.center())],
+        );
+        let mut explained = false;
+        for _ in 0..12 {
+            let hover = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+            explained |= !drawn_text_rects(&hover, |s| s == "未準備（設定で確認）").is_empty();
+        }
+        assert!(explained, "{name}: the hover says why it is off");
+        session_253_pointer(&mut app, &ctx, row.center(), egui::PointerButton::Primary);
+        assert_eq!(app.store.sessions.len(), count, "{name}");
+        assert!(
+            app.notice.is_none(),
+            "{name} cannot be chosen: {:?}",
+            app.notice
+        );
+        assert!(!app.launch_sheet_open, "{name}");
+    }
+    session_273_choose(&mut app, &ctx, add, "ターミナル");
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap_or_default()
+            .contains("tmux が必要"),
+        "the terminal row is never off for a missing CLI: {:?}",
+        app.notice
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// The tab frame around `title`: the tightest tab fill that contains it.
+fn session_273_tab_frame(app: &OperonApp, out: &egui::FullOutput, title: egui::Rect) -> egui::Rect {
+    let palette = app.store.theme.palette();
+    out.shapes
+        .iter()
+        .filter_map(|s| match &s.shape {
+            egui::Shape::Rect(r)
+                if (r.fill == palette.card || r.fill == palette.row_selected)
+                    && r.rect.contains_rect(title) =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.width().total_cmp(&b.width()))
+        .expect("the tab's frame")
+}
+
+#[test]
+pub(crate) fn session_273_tabs_are_compact() {
+    let root = temporary_directory("session-273-compact");
+    let (mut app, first, _) = app_with_two_sessions(&root);
+    app.select_session(first);
+    app.show_session_inspector = false;
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let add = session_254_add_rect(&app, &out);
+    let right = project_column_right(&app);
+    for name in ["first", "second"] {
+        let title = drawn_text_rects(&out, |s| s == name)
+            .into_iter()
+            .filter(|r| r.left() > right && r.top() < add.bottom())
+            .min_by(|a, b| a.top().total_cmp(&b.top()))
+            .unwrap_or_else(|| panic!("{name}'s tab title"));
+        let frame = session_273_tab_frame(&app, &out, title);
+        assert!(
+            frame.height() <= CONTROL_HEIGHT + 0.5,
+            "{name}: a tab is at most 28px tall: {frame:?}"
+        );
+        // 6 + 14 + 4 + 14 + 4 + title + 4 + 24 + 6: margins, two marks, the
+        // title's slot (at least 40px) and the close button, 4px apart — 116px
+        // for a title that fits the minimum.
+        let slot = title.width().max(40.0);
+        assert!(
+            frame.width() <= 76.5 + slot,
+            "{name}: a short tab is at most 76px plus its title: {frame:?}, title {title:?}"
+        );
+        let state = session_tab_status_circle(&out, title).expect("the state mark");
+        assert!(
+            (state.width() - TAB_STATUS_MARK_SIZE).abs() < 0.5,
+            "{name}: the state mark is drawn at 14px: {state:?}"
+        );
+    }
+    assert!((SESSION_MARK_SIZE - 14.0).abs() < f32::EPSILON);
+    assert!((TAB_STATUS_MARK_SIZE - 14.0).abs() < f32::EPSILON);
     fs::remove_dir_all(root).unwrap();
 }
 

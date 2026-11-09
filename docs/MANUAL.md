@@ -218,7 +218,8 @@ Other actions:
 ### The terminal pane
 
 Each session tab starts with its state mark; the **+** right after the last tab
-(⌘T) opens a plain terminal. ⇧⌘] and ⇧⌘[, or ⌃Tab and ⌃⇧Tab, move to the next
+asks what to start — a terminal, Claude Code, Codex CLI or Antigravity — and
+⌘T opens a plain terminal directly. ⇧⌘] and ⇧⌘[, or ⌃Tab and ⌃⇧Tab, move to the next
 and previous tab. A
 group can be split by dragging a tab to an edge of the workspace — up to four
 groups, each at least 320 × 200 points — and a divider resizes them. Each
@@ -542,7 +543,7 @@ Knowledge is stored in Operon's data folder on this Mac
 | ⌘↩ | Start the session | In the new-session sheet |
 | Esc | Close the new-session sheet | |
 | ⌘S | Save the open file | In **Files** |
-| ⌘T | Open a plain terminal | In the focused pane; the same as the tab strip's **+**. From any page |
+| ⌘T | Open a plain terminal | In the focused pane; the tab strip's **+** → Terminal without the menu. From any page |
 | ⌘W | Close the active tab | A session's agent keeps running |
 | ⇧⌘T | Reopen closed tab | Newest first; a removed session's tab is skipped |
 | ⇧⌘] / ⇧⌘[ | Next / previous tab | Wraps round within the focused pane |

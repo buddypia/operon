@@ -214,14 +214,20 @@ pub(crate) const BRAND_MARK: &[u8] = include_bytes!("../assets/operon-mark-128.p
 /// `rsvg-convert -w 1024` and a Lanczos resize to 128.
 pub(crate) const TERMINAL_MARK: &[u8] = include_bytes!("../assets/terminal-mark-128.png");
 
-/// How large a session's CLI mark is drawn beside its 12-point tab title: the
-/// size the left column already gives a vendor mark beside 12-point text.
-pub(crate) const SESSION_MARK_SIZE: f32 = 16.0;
+/// How large a session's CLI mark is drawn beside its 12-point tab title, and
+/// in the tab strip's + menu. Change 273 took it from 16 to 14 with the state
+/// mark beside it, so a tab is no taller than the 28px row it sits in.
+pub(crate) const SESSION_MARK_SIZE: f32 = 14.0;
 
 /// Generated vector vocabulary for compact session status badges. All marks
 /// share an enclosure, so they read as status indicators rather than actions.
 /// The 18-point grid uses geometry instead of a font or scaled raster asset.
 pub(crate) const STATUS_ICON_SIZE: f32 = 18.0;
+
+/// The size a session tab draws its state mark at (change 273). The geometry
+/// stays on the 18-point grid above and scales to this, so every centre keeps
+/// its proportions; 14 matches the CLI mark beside it.
+pub(crate) const TAB_STATUS_MARK_SIZE: f32 = 14.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum StatusMark {

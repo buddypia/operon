@@ -2,6 +2,7 @@ use crate::*;
 
 mod keymap;
 pub(crate) mod knowledge;
+pub(crate) mod launch_menu;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
 
@@ -4621,38 +4622,10 @@ impl OperonApp {
         self.launch_empty_session_at(project, self.session_path_project, &input);
     }
 
-    /// The plus belongs to its pane, not a possibly stale launch-sheet draft.
     pub(crate) fn launch_workspace_terminal(&mut self, group: Option<Uuid>) {
-        let tab = group
-            .and_then(|id| self.workspace.groups.iter().find(|g| g.id == id))
-            .and_then(|g| g.tabs.get(g.active))
-            .or_else(|| self.workspace.active())
-            .cloned();
-        let project_id = tab
-            .as_ref()
-            .and_then(|tab| self.workspace_tab_project(tab))
-            .or(self.workspace_project)
-            .or(self.selected_project);
-        let Some(project) = self
-            .store
-            .projects
-            .iter()
-            .find(|p| Some(p.id) == project_id)
-            .cloned()
-        else {
+        let Some((project, path)) = self.workspace_pane_place(group) else {
             self.notice = Some(tr("先にプロジェクトを選んでください。").into());
             return;
-        };
-        let path = match &tab {
-            Some(WorkspaceTab::Session(id)) => self
-                .store
-                .sessions
-                .iter()
-                .find(|s| s.id == *id)
-                .and_then(|s| s.worktree_path.as_ref())
-                .map(|path| path.display().to_string())
-                .unwrap_or_default(),
-            _ => String::new(),
         };
         if let Some(group) = group {
             self.workspace.focused = Some(group);
