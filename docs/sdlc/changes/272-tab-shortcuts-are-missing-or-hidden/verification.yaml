@@ -1,0 +1,29 @@
+# Change 272: the tab keys a Mac user brings with them, through the keymap.
+# Each Rn is the spec requirement of that number; I1 is the mutation sweep
+# (17 of 17 caught, two of them claims a person reads: the notice and the
+# manual row); F1 the empirical verifier's lead, reproduced and fixed; I2-I5 the keymap's existing guards, which now see five more
+# actions; I6-I9 the chords that already went through chord_pressed and
+# chord_consumed, whose matching moved to Keymap::action_for; I10 the
+# verifier's second lead, which held; I11 lesson 112's admission.
+digest: "5ddc55981eb5f7e3"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked shortcut_272_command_t_opens_a_terminal_like_the_plus
+  - R2 empirical-test :: cargo test --locked shortcut_272_the_most_specific_chord_wins
+  - R3 empirical-test :: cargo test --locked shortcut_272_close_is_a_keymap_action
+  - R4 empirical-test :: cargo test --locked shortcut_272_reopen_brings_back_the_last_closed_tab
+  - R5 empirical-test :: cargo test --locked shortcut_272_brackets_and_control_tab_step_through_tabs
+  - R6 empirical-test :: cargo test --locked shortcut_272_palette_rows_run_the_tab_actions
+  - R7 empirical-test :: cargo test --locked shortcut_272_every_manual_lists_every_default_chord
+  - F1 empirical-test :: cargo test --locked shortcut_272_a_control_tab_binding_is_the_keymaps
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/272-tab-shortcuts-are-missing-or-hidden/mutations.py
+  - I2 empirical-test :: cargo test --locked the_keys_section_lists_every_action
+  - I3 empirical-test :: cargo test --locked the_palette_draws_the_chord_the_handler_listens_for
+  - I4 empirical-test :: cargo test --locked every_default_chord_survives_being_written_and_read_back
+  - I5 empirical-test :: cargo test --locked no_message_spells_a_remappable_chord
+  - I6 empirical-test :: cargo test --locked page_shortcuts_do_not_reach_past_the_launch_sheet
+  - I7 empirical-test :: cargo test --locked the_next_waiting_chord_opens_the_next_session_in_the_queue
+  - I8 empirical-test :: cargo test --locked the_panel_chord_folds_and_reopens_the_side_panel
+  - I9 empirical-test :: cargo test --locked find_bar
+  - I10 empirical-test :: cargo test --locked shortcut_272_reopen_crosses_back_to_the_tabs_project
+  - I11 empirical-test :: cargo test --locked every_lesson_is_admitted_with_its_rule_and_a_guard_that_ran
