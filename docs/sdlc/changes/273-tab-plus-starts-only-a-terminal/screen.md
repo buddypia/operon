@@ -1,6 +1,6 @@
 # Screen: The tab-strip + menu and compact session tabs
 
-- **Status**: draft
+- **Status**: approved
 
 Shown to the person as previews on 2026-11-09 (list menu vs icon row; margins
 plus 14pt marks vs margins only); no answer in ten minutes, recommended options

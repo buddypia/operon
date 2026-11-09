@@ -2,16 +2,16 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "awaiting-user"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "3 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
-  screen: "pending"
+  screen: "approved"
 
-resume: "Waiting for the person to approve screen.md (evaluator a170327b escalated it: new menu and re-arranged tabs). On approval add a person screen line to approvals.log, set screen approved and status in-progress, then write the failing session_273_ tests. Intent, spec and plan are approved; readiness Go."
+resume: "Write the failing session_273_ tests and the updated 254/260 tests, then glyphs and widgets, app.rs launch, screens.rs menu and tab geometry, per plan.md."
 
 contract:
   three-gates: "machine pending make q.fast; cargo test --locked session_273_, session_254_, session_260_, session_267_, session_253_"
