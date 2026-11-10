@@ -7600,23 +7600,9 @@ impl OperonApp {
                                                 continue;
                                             };
                                             let count = members.count() + 1;
-                                            let chip = ui
-                                                .add(
-                                                    egui::Label::new(
-                                                        // Tight, so a short name stays
-                                                        // whole beside three counts.
-                                                        RichText::new(format!(
-                                                            "{}{}",
-                                                            group.icon(),
-                                                            count
-                                                        ))
-                                                        .size(12.5)
-                                                        .strong()
-                                                        .color(palette.status(group.tone())),
-                                                    )
-                                                    .selectable(false)
-                                                    .sense(egui::Sense::click()),
-                                                )
+                                            // Tight, so a short name stays whole
+                                            // beside three counts.
+                                            let chip = status_count_chip(ui, palette, group, count)
                                                 .on_hover_ui(|ui| {
                                                     ui.label(tr(group.message_id()));
                                                     ui.label(tf!("{p0} 件", p0 = count));
@@ -7725,10 +7711,7 @@ impl OperonApp {
                                                     ui.label(tr(kind.label()));
                                                 });
                                             } else {
-                                                ui.label(
-                                                    RichText::new(kind.icon())
-                                                        .color(palette.status(kind.tone())),
-                                                );
+                                                session_status_icon(ui, palette, kind);
                                                 // Legacy commands can be arbitrarily long;
                                                 // keep space for the session's title.
                                                 let width = ui.available_width().min(72.0);

@@ -223,13 +223,22 @@ pub(crate) const SESSION_MARK_SIZE: f32 = 14.0;
 /// a vendor mark has there beside 12-point text (change 283).
 pub(crate) const COLUMN_SESSION_MARK_SIZE: f32 = 16.0;
 
-/// The state dot on a session's CLI mark (change 283), as fractions of the
-/// mark: 5px across a 14px tab mark, and the dot of a session that needs the
-/// person larger, to hold its exclamation. `STATUS_DOT_RING` is the width of
-/// the ring in the surface colour that keeps the dot off the artwork.
-pub(crate) const STATUS_DOT_RATIO: f32 = 0.36;
-pub(crate) const STATUS_DOT_ATTENTION_RATIO: f32 = 0.5;
+/// The state badge on a session's CLI mark (change 283), as a fraction of the
+/// mark: about 9px across a 14px tab mark, one size for every state, large
+/// enough to hold the state's `StatusMark` glyph (change 284) — a 5px dot was
+/// told apart by colour alone. `STATUS_DOT_RING` is the width of the ring in
+/// the surface colour that keeps the badge off the artwork.
+pub(crate) const STATUS_DOT_RATIO: f32 = 0.64;
 pub(crate) const STATUS_DOT_RING: f32 = 1.5;
+
+/// The share of a badge's radius the glyph's 4-unit half body spans
+/// (change 284): enough to read at 9px, with a margin of the badge's ink
+/// around it.
+pub(crate) const STATUS_BADGE_GLYPH_RATIO: f32 = 0.6;
+
+/// How large the left column's per-project state counts draw their circled
+/// state mark beside the count (change 284), in place of a font glyph.
+pub(crate) const STATUS_COUNT_MARK_SIZE: f32 = 12.0;
 
 /// Generated vector vocabulary for compact session status badges. All marks
 /// share an enclosure, so they read as status indicators rather than actions.
@@ -257,10 +266,38 @@ pub(crate) enum StatusMark {
 }
 
 impl StatusMark {
+    /// The circled mark: the enclosure and its glyph, on the 18-unit grid
+    /// scaled to `rect`.
     pub(crate) fn paint(self, painter: &egui::Painter, rect: egui::Rect, ink: Color32) {
         let center = rect.center();
         let scale = rect.width().min(rect.height()) / STATUS_ICON_SIZE;
-        let stroke = egui::Stroke::new(1.5 * scale, ink);
+        painter.circle_stroke(center, 8.0 * scale, egui::Stroke::new(1.5 * scale, ink));
+        self.paint_glyph(painter, center, scale, 1.5 * scale, ink);
+    }
+
+    /// The glyph alone inside a filled badge of `radius` (change 284): no
+    /// enclosure, since the badge is one, and a stroke a little heavier than
+    /// the grid's so the shape survives at a few pixels.
+    pub(crate) fn paint_badge(
+        self,
+        painter: &egui::Painter,
+        center: egui::Pos2,
+        radius: f32,
+        ink: Color32,
+    ) {
+        let scale = radius * STATUS_BADGE_GLYPH_RATIO / 4.0;
+        self.paint_glyph(painter, center, scale, (2.0 * scale).max(1.0), ink);
+    }
+
+    fn paint_glyph(
+        self,
+        painter: &egui::Painter,
+        center: egui::Pos2,
+        scale: f32,
+        width: f32,
+        ink: Color32,
+    ) {
+        let stroke = egui::Stroke::new(width, ink);
         let point = |[x, y]: [f32; 2]| center + egui::vec2(x, y) * scale;
         let line = |a, b| {
             painter.line_segment([point(a), point(b)], stroke);
@@ -270,7 +307,6 @@ impl StatusMark {
                 line(edge[0], edge[1]);
             }
         };
-        painter.circle_stroke(center, 8.0 * scale, stroke);
         match self {
             Self::Progress => {
                 path(&[

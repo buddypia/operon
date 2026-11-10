@@ -66950,18 +66950,25 @@ fn workspace_project_picker_keeps_saved_order_counts_and_per_project_launch() {
                 && (r.center().y - row("q").center().y).abs() < CONTROL_HEIGHT / 2.0
         })
         .expect("project-local launch remains on its header");
-    let busy = format!("{ICON_STATUS_RUNNING}1");
-    let live_count = drawn_text_rects(&output, |text| text == busy)
-        .into_iter()
-        .find(|r| {
-            r.left() < column_right(&output)
-                && (r.center().y - row("p").center().y).abs() < CONTROL_HEIGHT
-        })
-        .expect("project count excludes finished history");
+    // The count is the group's generated mark then its number (change 284).
+    let busy = app
+        .store
+        .theme
+        .palette()
+        .status(SessionStatusGroup::Busy.tone());
+    let marks = count_284_marks(&output, row("p"));
+    assert_eq!(
+        marks.iter().map(|(_, ink)| *ink).collect::<Vec<_>>(),
+        vec![busy],
+        "project count excludes finished history"
+    );
     workspace_pointer_frame(
         &mut app,
         &ctx,
-        vec![egui::Event::PointerMoved(live_count.center())],
+        vec![egui::Event::PointerMoved(egui::pos2(
+            marks[0].0,
+            row("p").center().y,
+        ))],
     );
     let hovered = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert!(
@@ -67385,6 +67392,26 @@ fn workspace_project_column_has_one_start_per_project() {
     fs::remove_dir_all(root).unwrap();
 }
 
+/// The circled marks the left column's project row draws for its counts
+/// (change 284), as each enclosure's centre x and its ink, on `row`'s line.
+fn count_284_marks(output: &egui::FullOutput, row: egui::Rect) -> Vec<(f32, Color32)> {
+    let radius = 8.0 * STATUS_COUNT_MARK_SIZE / STATUS_ICON_SIZE;
+    output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Circle(circle)
+                if (circle.radius - radius).abs() < 0.01
+                    && circle.center.x < column_right(output)
+                    && (circle.center.y - row.center().y).abs() < CONTROL_HEIGHT / 2.0 =>
+            {
+                Some((circle.center.x, circle.stroke.color))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 #[test]
 fn workspace_project_header_counts_sessions_by_status_group() {
     let root = temporary_directory("workspace-status-counts");
@@ -67396,31 +67423,52 @@ fn workspace_project_header_counts_sessions_by_status_group() {
     let ctx = egui::Context::default();
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    let waiting = format!("{ICON_ATTENTION}1");
-    let busy = format!("{ICON_STATUS_RUNNING}1");
-    let header = column_line(&output, column_rect(&output, "p").unwrap());
-    let at = |text: &str| header.iter().position(|t| t == text);
-    assert!(
-        at(&waiting).is_some() && at(&busy).is_some(),
-        "p shows 要対応 1 and 実行中 1, finished not counted: {header:?}"
+    // Change 284: each count is the group's generated mark, then the number
+    // as text; no font glyph.
+    let palette = app.store.theme.palette();
+    let p = column_rect(&output, "p").unwrap();
+    let marks = |output: &egui::FullOutput, row: egui::Rect| {
+        let mut marks = count_284_marks(output, row);
+        marks.sort_by(|a, b| a.0.total_cmp(&b.0));
+        marks.into_iter().map(|(_, ink)| ink).collect::<Vec<_>>()
+    };
+    let (waiting, busy) = (
+        palette.status(SessionStatusGroup::NeedsYou.tone()),
+        palette.status(SessionStatusGroup::Busy.tone()),
     );
-    assert!(at(&waiting) < at(&busy), "要対応 comes first: {header:?}");
-    assert!(
-        !header.iter().any(|t| t.starts_with(ICON_STATUS_IDLE)),
-        "a group with nobody in it draws no count: {header:?}"
+    assert_eq!(
+        marks(&output, p),
+        vec![waiting, busy],
+        "p shows 要対応 then 実行中, finished and free not counted"
     );
-    let empty = column_line(&output, column_rect(&output, "q").unwrap());
+    let header = column_line(&output, p);
+    assert_eq!(
+        header.iter().filter(|t| *t == "1").count(),
+        2,
+        "each count is its number: {header:?}"
+    );
     assert!(
-        !empty.iter().any(|t| t == &waiting || t == &busy),
-        "an empty project draws no counts: {empty:?}"
+        !header.iter().any(|t| [
+            ICON_ATTENTION,
+            ICON_STATUS_RUNNING,
+            ICON_STATUS_IDLE,
+            ICON_STATUS_DONE
+        ]
+        .iter()
+        .any(|glyph| t.contains(glyph))),
+        "no font glyph: {header:?}"
+    );
+    assert!(
+        marks(&output, column_rect(&output, "q").unwrap()).is_empty(),
+        "an empty project draws no counts"
     );
     app.toggle_project_fold(populated);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    let header = column_line(&output, column_rect(&output, "p").unwrap());
-    assert!(
-        header.contains(&waiting) && header.contains(&busy),
-        "a folded project keeps its counts: {header:?}"
+    assert_eq!(
+        marks(&output, column_rect(&output, "p").unwrap()),
+        vec![waiting, busy],
+        "a folded project keeps its counts"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -67433,11 +67481,17 @@ fn workspace_project_count_click_opens_first_session_of_its_group() {
     let ctx = egui::Context::default();
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    let chip = drawn_text_rects(&output, |text| text == format!("{ICON_ATTENTION}1"))
-        .into_iter()
-        .find(|rect| rect.left() < column_right(&output))
+    let attention = app
+        .store
+        .theme
+        .palette()
+        .status(SessionStatusGroup::NeedsYou.tone());
+    let p = column_rect(&output, "p").expect("p's row");
+    let (x, _) = *count_284_marks(&output, p)
+        .iter()
+        .find(|(_, ink)| *ink == attention)
         .expect("p's 要対応 count");
-    workspace_click_position(&mut app, &ctx, chip.center());
+    workspace_click_position(&mut app, &ctx, egui::pos2(x, p.center().y));
     assert_eq!(app.selected_project, Some(populated));
     assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(second)));
     assert_eq!(app.selected_session, Some(second));
@@ -67460,7 +67514,7 @@ fn workspace_project_rows_order_by_status_and_open_on_click() {
         row_second.top() < row_first.top(),
         "the session waiting on a permission is listed first"
     );
-    // Its mark wears the waiting dot, the one that holds a shape (change 283).
+    // Its mark wears the waiting badge (changes 283 and 284).
     let claude = agent_icon_texture(&ctx, "claude")
         .expect("Claude mark")
         .id();
@@ -67481,8 +67535,8 @@ fn workspace_project_rows_order_by_status_and_open_on_click() {
         .find(|c| c.fill == attention)
         .expect("a dot in the waiting ink");
     assert!(
-        (dot.radius - COLUMN_SESSION_MARK_SIZE * STATUS_DOT_ATTENTION_RATIO / 2.0).abs() < 0.01,
-        "the waiting dot: {dot:?}"
+        (dot.radius - COLUMN_SESSION_MARK_SIZE * STATUS_DOT_RATIO / 2.0).abs() < 0.01,
+        "the waiting badge: {dot:?}"
     );
     assert!(
         column_rect(&output, "起動中のセッションはありません")
@@ -78975,19 +79029,15 @@ fn session_283_waiting_dot_keeps_a_shape() {
             .iter()
             .find(|c| c.fill == app.store.theme.palette().status(kind.tone()))
             .unwrap_or_else(|| panic!("{kind:?}: a dot in the state's ink: {circles:?}"));
-        let ratio = if needs_you {
-            STATUS_DOT_ATTENTION_RATIO
-        } else {
-            STATUS_DOT_RATIO
-        };
+        // Change 284: one size for every state, and every state holds its
+        // mark's strokes, not only the one that needs the person.
         assert!(
-            (dot.radius - SESSION_MARK_SIZE * ratio / 2.0).abs() < 0.01,
+            (dot.radius - SESSION_MARK_SIZE * STATUS_DOT_RATIO / 2.0).abs() < 0.01,
             "{kind:?}: {dot:?}"
         );
-        assert_eq!(
+        assert!(
             session_283_stem(&output, dot, surface),
-            needs_you,
-            "{kind:?}: only the state that needs the person holds an exclamation"
+            "{kind:?}: the badge holds its state's mark"
         );
     }
     fs::remove_dir_all(root).ok();
@@ -79057,12 +79107,12 @@ fn session_283_column_row_matches_its_tab() {
         circles[1].fill, palette.panel,
         "ringed in the column's fill"
     );
-    // A custom command has no mark: its glyph and its label stay.
+    // A custom command has no mark: its label stays, beside the generated
+    // state mark (change 284), which `session_284_markless_row_draws_the_generated_mark`
+    // pins.
     session_283_without_marks(&mut app);
     let output = session_283_frame(&mut app, &ctx);
-    let kind = session_283_kind(&app, second);
     let line = column_line(&output, column_rect(&output, "second").expect("row"));
-    assert!(line.iter().any(|text| text == kind.icon()), "{line:?}");
     assert!(
         line.iter().any(|text| text == agent_short_label("custom")),
         "{line:?}"
@@ -79105,5 +79155,153 @@ fn session_283_mark_names_cli_and_state_on_hover() {
         "the CLI is named"
     );
     assert!(count(&hovered, word) > word_before, "the state is named");
+    fs::remove_dir_all(root).ok();
+}
+
+/// The strokes painted in `ink` inside `dot` (change 284), relative to its
+/// centre and in units of its radius, so two states compare by shape alone.
+fn badge_284_strokes(
+    output: &egui::FullOutput,
+    dot: &egui::epaint::CircleShape,
+    ink: Color32,
+) -> Vec<[(i32, i32); 2]> {
+    let unit = |p: egui::Pos2| {
+        let v = (p - dot.center) / dot.radius;
+        ((v.x * 100.0).round() as i32, (v.y * 100.0).round() as i32)
+    };
+    let mut strokes: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::LineSegment { points, stroke }
+                if stroke.color == ink
+                    && points
+                        .iter()
+                        .all(|p| p.distance(dot.center) <= dot.radius + 0.01) =>
+            {
+                Some([unit(points[0]), unit(points[1])])
+            }
+            _ => None,
+        })
+        .collect();
+    strokes.sort();
+    strokes
+}
+
+#[test]
+fn session_284_badge_holds_the_state_mark() {
+    let root = temporary_directory("session-284-badge");
+    let (mut app, first, _second) = tab_267_fixture(&root);
+    session_283_set(
+        &mut app,
+        first,
+        SessionStatus::Active,
+        Some(AgentActivity::Idle),
+    );
+    let ctx = egui::Context::default();
+    let antigravity = agent_icon_texture(&ctx, "gemini").expect("mark").id();
+    let output = session_283_frame(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let mark = *tab_267_marks(&output, antigravity, tab_267_title(&output, "first"))
+        .first()
+        .expect("the tab's mark");
+    let circles = session_283_dot(&output, mark);
+    let (dot, ring) = (circles[0], circles[1]);
+    assert_eq!(dot.fill, palette.status(SessionStatusKind::Idle.tone()));
+    assert!(
+        (dot.radius - SESSION_MARK_SIZE * STATUS_DOT_RATIO / 2.0).abs() < 0.01,
+        "about 9px across a 14px mark: {dot:?}"
+    );
+    assert!(dot.radius * 2.0 >= 8.5, "large enough to hold a shape");
+    // Idle is the pause mark: two upright bars, in the ring's colour.
+    let strokes = badge_284_strokes(&output, &dot, ring.fill);
+    assert_eq!(strokes.len(), 2, "{strokes:?}");
+    for [a, b] in &strokes {
+        assert_eq!(a.0, b.0, "upright: {strokes:?}");
+        assert!(
+            (a.1 - b.1).abs() >= 80,
+            "spans the badge's middle: {strokes:?}"
+        );
+        assert!(a.1.abs() < 100 && b.1.abs() < 100, "inside the badge");
+    }
+    assert!(
+        strokes[0][0].0 < 0 && strokes[1][0].0 > 0,
+        "either side of centre"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_284_states_differ_in_shape() {
+    let root = temporary_directory("session-284-shapes");
+    let (mut app, first, _second) = tab_267_fixture(&root);
+    let ctx = egui::Context::default();
+    let antigravity = agent_icon_texture(&ctx, "gemini").expect("mark").id();
+    let surface = app.store.theme.palette().row_selected;
+    let mut shapes = Vec::new();
+    for (status, activity) in [
+        (SessionStatus::Active, Some(AgentActivity::Idle)),
+        (SessionStatus::Exited, None),
+        (SessionStatus::Active, Some(AgentActivity::AwaitingInput)),
+    ] {
+        session_283_set(&mut app, first, status, activity);
+        let output = session_283_frame(&mut app, &ctx);
+        let kind = session_283_kind(&app, first);
+        let mark = *tab_267_marks(&output, antigravity, tab_267_title(&output, "first"))
+            .first()
+            .expect("the tab's mark");
+        let dot = *session_283_dot(&output, mark)
+            .iter()
+            .find(|c| c.fill == app.store.theme.palette().status(kind.tone()))
+            .unwrap_or_else(|| panic!("{kind:?}: a badge"));
+        let strokes = badge_284_strokes(&output, &dot, surface);
+        assert!(!strokes.is_empty(), "{kind:?} holds a shape");
+        shapes.push((kind, strokes));
+    }
+    let kinds: Vec<_> = shapes.iter().map(|(kind, _)| *kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            SessionStatusKind::Idle,
+            SessionStatusKind::Done,
+            SessionStatusKind::Waiting
+        ]
+    );
+    for (i, (a, sa)) in shapes.iter().enumerate() {
+        for (b, sb) in &shapes[i + 1..] {
+            assert_ne!(sa, sb, "{a:?} and {b:?} differ with the colour removed");
+        }
+    }
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_284_markless_row_draws_the_generated_mark() {
+    let root = temporary_directory("session-284-markless");
+    let (mut app, _first, second) = tab_267_fixture(&root);
+    session_283_set(&mut app, second, SessionStatus::Active, None);
+    session_283_without_marks(&mut app);
+    let ctx = egui::Context::default();
+    let output = session_283_frame(&mut app, &ctx);
+    let kind = session_283_kind(&app, second);
+    let row = column_rect(&output, "second").expect("the row");
+    let line = column_line(&output, row);
+    assert!(
+        !line.iter().any(|text| text.contains(kind.icon())),
+        "no font glyph: {line:?}"
+    );
+    let ink = app.store.theme.palette().status(kind.tone());
+    let radius = 8.0 * TAB_STATUS_MARK_SIZE / STATUS_ICON_SIZE;
+    let circled = output.shapes.iter().any(|shape| match &shape.shape {
+        egui::Shape::Circle(circle) => {
+            (circle.radius - radius).abs() < 0.01
+                && circle.stroke.color == ink
+                && circle.center.x < row.left()
+                && circle.center.x < column_right(&output)
+                && (circle.center.y - row.center().y).abs() < CONTROL_HEIGHT / 2.0
+        }
+        _ => false,
+    });
+    assert!(circled, "the circled state mark leads the row: {line:?}");
     fs::remove_dir_all(root).ok();
 }
