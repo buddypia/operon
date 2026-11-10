@@ -1,0 +1,11 @@
+# The evidence for change 283. Format: docs/sdlc/templates/verification.yaml.
+digest: "d3f327b1ce79f4a5"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_283_tab_leads_with_one_mark
+  - R2 empirical-test :: cargo test --locked session_283_running_terminal_says_nothing
+  - R3 empirical-test :: cargo test --locked session_283_waiting_dot_keeps_a_shape
+  - R4 empirical-test :: cargo test --locked session_283_column_row_matches_its_tab
+  - R5 empirical-test :: cargo test --locked session_283_mark_names_cli_and_state_on_hover
+  - R6 empirical-test :: cargo test --locked session_tabs_show_the_cli_mark_after_the_state
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/283-session-icons-read-as-two-marks/mutations.py
