@@ -217,7 +217,8 @@ Other actions:
 
 ### The terminal pane
 
-Each session tab starts with its state mark; the **+** right after the last tab
+Each session tab and left-column row leads with its CLI's mark, its state a
+dot on the corner (a running terminal shows none); the **+** right after the last tab
 asks what to start — a terminal, Claude Code, Codex CLI or Antigravity — and
 ⌘T opens a plain terminal directly. ⇧⌘] and ⇧⌘[, or ⌃Tab and ⌃⇧Tab, move to the next
 and previous tab. A

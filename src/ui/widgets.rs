@@ -1535,18 +1535,81 @@ pub(crate) fn session_mark_texture(
     }
 }
 
-/// A session's CLI mark at `SESSION_MARK_SIZE`, named on hover with the words
-/// the left column uses. A session without a mark draws nothing and reserves
-/// no space, so its title keeps the place it had.
-pub(crate) fn session_mark(ui: &mut egui::Ui, agent: &str) {
+/// Whether a session's mark carries a state dot (change 283). A plain
+/// terminal is `Running` for as long as its shell lives, so a dot there would
+/// repeat one fact on every terminal; it speaks once that changes.
+pub(crate) fn session_mark_speaks(agent: &str, kind: SessionStatusKind) -> bool {
+    !(matches!(agent, "terminal" | "existing terminal") && kind == SessionStatusKind::Running)
+}
+
+/// A session's one mark (change 283): its CLI's mark, with its state as a
+/// dot on the lower right corner, ringed in `surface` — the fill the mark is
+/// drawn on — so the dot stays apart from the artwork. A session with no mark
+/// of its own keeps the circled state mark, so its state is not lost. The
+/// caller adds the hover that names the CLI and the state.
+pub(crate) fn session_badge(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    agent: &str,
+    kind: SessionStatusKind,
+    size: f32,
+    surface: Color32,
+) -> egui::Response {
     let Some(texture) = session_mark_texture(ui.ctx(), agent) else {
-        return;
+        return session_status_icon(ui, palette, kind);
     };
-    ui.add(egui::Image::new((
-        texture.id(),
-        egui::Vec2::splat(SESSION_MARK_SIZE),
-    )))
-    .on_hover_text(agent_short_label(agent));
+    // The mark's own square: the row centres it, and a column row keeps the
+    // height a 16px vendor mark gave it. The dot's ring reaches past the
+    // corner into the item spacing, which is at least 4px wherever this draws.
+    let (mark, response) = ui.allocate_exact_size(egui::Vec2::splat(size), egui::Sense::hover());
+    if ui.is_rect_visible(mark) {
+        egui::Image::new((texture.id(), egui::Vec2::splat(size))).paint_at(ui, mark);
+        if session_mark_speaks(agent, kind) {
+            paint_status_dot(ui.painter(), mark, kind, palette, surface);
+        }
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, tr(kind.label())));
+    response
+}
+
+/// The state dot on a mark: the state's ink inside a ring of `surface`. A
+/// session that needs the person gets a larger dot holding an exclamation in
+/// the surface colour, so the one state that asks for action is not told by
+/// colour alone (`DESIGN.md`, *Status is a meaning, not a colour*).
+fn paint_status_dot(
+    painter: &egui::Painter,
+    mark: egui::Rect,
+    kind: SessionStatusKind,
+    palette: &Palette,
+    surface: Color32,
+) {
+    let needs_you = kind.group() == SessionStatusGroup::NeedsYou;
+    let ratio = if needs_you {
+        STATUS_DOT_ATTENTION_RATIO
+    } else {
+        STATUS_DOT_RATIO
+    };
+    let radius = mark.width() * ratio / 2.0;
+    // Over the corner rather than inside it: the artwork keeps its face.
+    let center = mark.right_bottom() - egui::Vec2::splat(radius * 0.6);
+    painter.circle_filled(center, radius + STATUS_DOT_RING, surface);
+    painter.circle_filled(center, radius, palette.status(kind.tone()));
+    if needs_you {
+        let stroke = egui::Stroke::new(radius * 0.32, surface);
+        painter.line_segment(
+            [
+                center - egui::vec2(0.0, radius * 0.55),
+                center + egui::vec2(0.0, radius * 0.12),
+            ],
+            stroke,
+        );
+        painter.circle_filled(
+            center + egui::vec2(0.0, radius * 0.5),
+            radius * 0.17,
+            surface,
+        );
+    }
 }
 
 /// One choice in the tab strip's + menu (change 273): the mark of what it

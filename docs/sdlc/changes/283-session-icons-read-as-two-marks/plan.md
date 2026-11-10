@@ -44,3 +44,16 @@
   — every mutation caught.
 
 ## Departures from the plan
+
+- Three more tests than the plan named pinned what this change removes:
+  `only_selections_wear_the_selection_colour` (the dot's ring takes the fill
+  of the active tab and the selected row, two more `.row_selected` reads in
+  `src/app/screens.rs`), `sidebar_251_terminal_and_custom_fallbacks_remain_named`
+  (the word 「ターミナル」 in the column is now the terminal mark), and
+  `workspace_project_rows_order_by_status_and_open_on_click` (the row's leading
+  glyph is now the waiting dot). Each asserts the new form.
+- The rust reviewer noted that `session_badge` allocated a 24px-high slot, which
+  would have made a column row taller than its 16px vendor mark did; it
+  allocates the mark's own square, and the row centres it.
+- The empirical verifier could not apply the staged diff in its isolated tree
+  (the trunk hook refused `git apply`); it ran against the committed branch.

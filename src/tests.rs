@@ -7625,7 +7625,9 @@ pub(crate) fn selected_row_inks_stay_readable() {
 /// is. The counts are the guard for a borrower spelled as a field access,
 /// which is how every call site here spells it: the two selections (the
 /// session row and the pinned waiting row), the workspace's selected sidebar
-/// row and active tab, and the toolbar page. (Another,
+/// row and active tab, and the toolbar page. Change 283 adds two that paint
+/// the same selection under a mark: the state dot's ring takes the fill of
+/// the active tab and the selected row it sits on. (Another,
 /// the selected project card, stopped wearing a fill at all when the
 /// project became a heading in change 245.) A borrower reached any other
 /// way is review's to catch.
@@ -7633,7 +7635,7 @@ pub(crate) fn selected_row_inks_stay_readable() {
 pub(crate) fn only_selections_wear_the_selection_colour() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (file, expected) in [
-        ("src/app/screens.rs", 3),
+        ("src/app/screens.rs", 5),
         ("src/app/waiting_reply.rs", 1),
         ("src/ui/widgets.rs", 1),
         ("src/app/knowledge.rs", 0),
@@ -67458,8 +67460,30 @@ fn workspace_project_rows_order_by_status_and_open_on_click() {
         row_second.top() < row_first.top(),
         "the session waiting on a permission is listed first"
     );
-    let glyph = column_line(&output, row_second);
-    assert_eq!(glyph.first().map(String::as_str), Some(ICON_ATTENTION));
+    // Its mark wears the waiting dot, the one that holds a shape (change 283).
+    let claude = agent_icon_texture(&ctx, "claude")
+        .expect("Claude mark")
+        .id();
+    let mark = sidebar_251_mesh_rects(&output, claude)
+        .into_iter()
+        .find(|r| {
+            r.right() <= row_second.left() + 0.5
+                && (r.center().y - row_second.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .expect("the row's mark");
+    let attention = app
+        .store
+        .theme
+        .palette()
+        .status(SessionStatusKind::Waiting.tone());
+    let dot = *session_283_dot(&output, mark)
+        .iter()
+        .find(|c| c.fill == attention)
+        .expect("a dot in the waiting ink");
+    assert!(
+        (dot.radius - COLUMN_SESSION_MARK_SIZE * STATUS_DOT_ATTENTION_RATIO / 2.0).abs() < 0.01,
+        "the waiting dot: {dot:?}"
+    );
     assert!(
         column_rect(&output, "起動中のセッションはありません")
             .is_some_and(|rect| rect.top() > column_rect(&output, "q").unwrap().top()),
@@ -67557,6 +67581,8 @@ fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Op
 fn workspace_session_tab_shows_its_status_glyph() {
     let root = temporary_directory("workspace-tab-glyph");
     let (mut app, _populated, _empty, first, _second) = status_column_fixture(&root);
+    // Since change 283 only a session with no CLI mark draws the circle.
+    session_283_without_marks(&mut app);
     app.select_session(first);
     let ctx = egui::Context::default();
     ctx.style_mut(|style| {
@@ -69761,6 +69787,8 @@ pub(crate) fn session_tab_state_icons_are_recognizable() {
 pub(crate) fn session_tabs_show_live_state_before_title() {
     let root = temporary_directory("tab-state-before-title");
     let (mut app, _, _, first, _) = status_column_fixture(&root);
+    // Since change 283 only a session with no CLI mark draws the circle.
+    session_283_without_marks(&mut app);
     app.select_session(first);
     let ctx = egui::Context::default();
     for (status, activity, expected_kind) in [
@@ -70461,7 +70489,7 @@ fn sidebar_251_terminal_and_custom_fallbacks_remain_named() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let right = project_column_right(&app);
-    for expected in ["ターミナル", "カスタム CLI", "first", "second"] {
+    for expected in ["カスタム CLI", "first", "second"] {
         assert!(
             drawn_text_rects(&out, |s| s == expected)
                 .iter()
@@ -70469,6 +70497,16 @@ fn sidebar_251_terminal_and_custom_fallbacks_remain_named() {
             "other CLI fallback lost {expected}"
         );
     }
+    // Since change 283 a terminal is named by its mark, as in its tab.
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    assert!(
+        sidebar_251_mesh_rects(&out, terminal)
+            .iter()
+            .any(|r| r.right() < right),
+        "the terminal row leads with the terminal mark"
+    );
     fs::remove_dir_all(root).ok();
 }
 
@@ -72170,18 +72208,23 @@ pub(crate) fn session_273_tabs_are_compact() {
             frame.height() <= CONTROL_HEIGHT + 0.5,
             "{name}: a tab is at most 28px tall: {frame:?}"
         );
-        // 6 + 14 + 4 + 14 + 4 + title + 4 + 24 + 6: margins, two marks, the
-        // title's slot (at least 40px) and the close button, 4px apart — 116px
-        // for a title that fits the minimum.
+        // 6 + 14 + 4 + title + 4 + 24 + 6: margins, one mark (change 283),
+        // the title's slot (at least 40px) and the close button, 4px apart —
+        // 98px for a title that fits the minimum.
         let slot = title.width().max(40.0);
         assert!(
-            frame.width() <= 76.5 + slot,
-            "{name}: a short tab is at most 76px plus its title: {frame:?}, title {title:?}"
+            frame.width() <= 58.5 + slot,
+            "{name}: a short tab is at most 58px plus its title: {frame:?}, title {title:?}"
         );
-        let state = session_tab_status_circle(&out, title).expect("the state mark");
+        let claude = agent_icon_texture(&ctx, "claude")
+            .expect("Claude mark")
+            .id();
+        let mark = *tab_267_marks(&out, claude, title)
+            .first()
+            .expect("the tab's mark");
         assert!(
-            (state.width() - TAB_STATUS_MARK_SIZE).abs() < 0.5,
-            "{name}: the state mark is drawn at 14px: {state:?}"
+            (mark.width() - SESSION_MARK_SIZE).abs() < 0.5,
+            "{name}: the mark is drawn at 14px: {mark:?}"
         );
     }
     assert!((SESSION_MARK_SIZE - 14.0).abs() < f32::EPSILON);
@@ -74272,19 +74315,19 @@ fn tab_267_title(output: &egui::FullOutput, title: &str) -> egui::Rect {
         .expect("central tab title")
 }
 
-/// Where `texture` is drawn between a tab's state mark and its title, on the
-/// title's row.
+/// Where `texture` is drawn just before a tab's title, on the title's row —
+/// the tab's one mark since change 283.
 fn tab_267_marks(
     output: &egui::FullOutput,
     texture: egui::TextureId,
-    state: egui::Rect,
     title: egui::Rect,
 ) -> Vec<egui::Rect> {
     sidebar_251_mesh_rects(output, texture)
         .into_iter()
         .filter(|rect| {
-            rect.left() >= state.right() - 0.5
-                && rect.right() <= title.left() + 0.5
+            rect.right() <= title.left() + 0.5
+                && title.left() - rect.right() < SESSION_MARK_SIZE
+                && rect.left() >= column_right(output)
                 && (rect.center().y - title.center().y).abs() < CONTROL_HEIGHT / 2.0
         })
         .collect()
@@ -74359,12 +74402,12 @@ fn session_tabs_show_the_cli_mark_after_the_state() {
         ("second", terminal, antigravity),
     ] {
         let title_rect = tab_267_title(&output, title);
-        let state = session_tab_status_circle(&output, title_rect).expect("state mark");
-        let marks = tab_267_marks(&output, texture, state, title_rect);
-        assert_eq!(
-            marks.len(),
-            1,
-            "{title}: one mark between the state and the title"
+        let marks = tab_267_marks(&output, texture, title_rect);
+        assert_eq!(marks.len(), 1, "{title}: one mark before the title");
+        // Change 283: the CLI's mark is the tab's only mark.
+        assert!(
+            session_tab_status_circle(&output, title_rect).is_none(),
+            "{title}: no circled state mark beside the CLI's"
         );
         let mark = marks[0];
         assert!(
@@ -74377,12 +74420,12 @@ fn session_tabs_show_the_cli_mark_after_the_state() {
             "{title}: the mark is centred on the tab row"
         );
         assert!(
-            tab_267_marks(&output, other, state, title_rect).is_empty(),
+            tab_267_marks(&output, other, title_rect).is_empty(),
             "{title}: only its own CLI's mark"
         );
     }
-    // A command with no vendor and no shell behind it draws nothing and
-    // keeps no gap where a mark would be.
+    // A command with no vendor and no shell behind it draws its circled
+    // state mark instead (change 283, R6) and keeps no gap for a CLI mark.
     if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == second) {
         session.agent = "custom".to_owned();
     }
@@ -74391,7 +74434,7 @@ fn session_tabs_show_the_cli_mark_after_the_state() {
     let title_rect = tab_267_title(&output, "second");
     let state = session_tab_status_circle(&output, title_rect).expect("state mark");
     for texture in [antigravity, terminal] {
-        assert!(tab_267_marks(&output, texture, state, title_rect).is_empty());
+        assert!(tab_267_marks(&output, texture, title_rect).is_empty());
     }
     assert!(
         title_rect.left() - state.right() < SESSION_MARK_SIZE,
@@ -74422,8 +74465,7 @@ fn session_tab_mark_names_its_cli_on_hover() {
     ] {
         let away = workspace_pointer_frame(&mut app, &ctx, Vec::new());
         let title_rect = tab_267_title(&away, title);
-        let state = session_tab_status_circle(&away, title_rect).expect("state mark");
-        let mark = *tab_267_marks(&away, texture, state, title_rect)
+        let mark = *tab_267_marks(&away, texture, title_rect)
             .first()
             .expect("the tab's mark");
         // The left column may already spell the word on a row, so the
@@ -78727,4 +78769,341 @@ fn broadcast_282_f1_page_shortcuts_do_not_reach_past_the_sheet() {
     }
     assert!(leaks.is_empty(), "{leaks:?}");
     fs::remove_dir_all(&root).ok();
+}
+
+// ── Change 283: a session leads with one mark, its state a dot on it ────────
+
+/// Every session on a custom command, which has no CLI mark and so keeps the
+/// circled state mark.
+fn session_283_without_marks(app: &mut OperonApp) {
+    for session in &mut app.store.sessions {
+        session.agent = "custom".to_owned();
+    }
+}
+
+/// The filled circles painted over `mark`'s lower right corner, smallest
+/// first: the state dot, then the ring of surface around it.
+fn session_283_dot(output: &egui::FullOutput, mark: egui::Rect) -> Vec<egui::epaint::CircleShape> {
+    let mut circles: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Circle(circle)
+                if circle.fill != Color32::TRANSPARENT
+                    && circle.center.x > mark.center().x
+                    && circle.center.y > mark.center().y
+                    && mark.expand(1.0).contains(circle.center) =>
+            {
+                Some(*circle)
+            }
+            _ => None,
+        })
+        .collect();
+    circles.sort_by(|a, b| a.radius.total_cmp(&b.radius));
+    circles
+}
+
+/// The exclamation's stem: a line in `ink` inside the dot.
+fn session_283_stem(
+    output: &egui::FullOutput,
+    dot: &egui::epaint::CircleShape,
+    ink: Color32,
+) -> bool {
+    output.shapes.iter().any(|shape| match &shape.shape {
+        egui::Shape::LineSegment { points, stroke } => {
+            stroke.color == ink
+                && points
+                    .iter()
+                    .all(|p| p.distance(dot.center) <= dot.radius + 0.01)
+        }
+        _ => false,
+    })
+}
+
+fn session_283_frame(app: &mut OperonApp, ctx: &egui::Context) -> egui::FullOutput {
+    workspace_pointer_frame(app, ctx, Vec::new());
+    workspace_pointer_frame(app, ctx, Vec::new())
+}
+
+fn session_283_set(
+    app: &mut OperonApp,
+    id: Uuid,
+    status: SessionStatus,
+    activity: Option<AgentActivity>,
+) {
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == id) {
+        session.status = status;
+    }
+    app.session_activity.insert(
+        id,
+        ActivityTracker {
+            settled: activity,
+            candidate: None,
+        },
+    );
+}
+
+fn session_283_kind(app: &OperonApp, id: Uuid) -> SessionStatusKind {
+    let session = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id == id)
+        .expect("session");
+    app.session_status_kind_for(session)
+}
+
+#[test]
+fn session_283_tab_leads_with_one_mark() {
+    let root = temporary_directory("session-283-one-mark");
+    let (mut app, first, _second) = tab_267_fixture(&root);
+    session_283_set(
+        &mut app,
+        first,
+        SessionStatus::Active,
+        Some(AgentActivity::Idle),
+    );
+    let ctx = egui::Context::default();
+    let output = session_283_frame(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let antigravity = agent_icon_texture(&ctx, "gemini").expect("mark").id();
+    let title = tab_267_title(&output, "first");
+    let mark = *tab_267_marks(&output, antigravity, title)
+        .first()
+        .expect("the tab's mark");
+    assert!(
+        session_tab_status_circle(&output, title).is_none(),
+        "no circled state mark beside the CLI's"
+    );
+    let kind = session_283_kind(&app, first);
+    assert_eq!(kind, SessionStatusKind::Idle);
+    let circles = session_283_dot(&output, mark);
+    assert_eq!(circles.len(), 2, "a dot and its ring: {circles:?}");
+    let (dot, ring) = (circles[0], circles[1]);
+    assert!((dot.radius - SESSION_MARK_SIZE * STATUS_DOT_RATIO / 2.0).abs() < 0.01);
+    assert_eq!(dot.fill, palette.status(kind.tone()), "the state's ink");
+    assert!((ring.radius - dot.radius - STATUS_DOT_RING).abs() < 0.01);
+    assert_eq!(
+        ring.fill, palette.row_selected,
+        "ringed in the active tab's fill"
+    );
+    assert_eq!(dot.center, ring.center);
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_283_running_terminal_says_nothing() {
+    for agent in ["terminal", "existing terminal"] {
+        assert!(
+            !session_mark_speaks(agent, SessionStatusKind::Running),
+            "{agent}"
+        );
+        for kind in SessionStatusKind::ALL {
+            if kind != SessionStatusKind::Running {
+                assert!(session_mark_speaks(agent, kind), "{agent} {kind:?}");
+            }
+        }
+    }
+    for agent in ["claude", "codex", "gemini"] {
+        for kind in SessionStatusKind::ALL {
+            assert!(session_mark_speaks(agent, kind), "{agent} {kind:?}");
+        }
+    }
+    let root = temporary_directory("session-283-terminal");
+    let (mut app, _first, second) = tab_267_fixture(&root);
+    session_283_set(&mut app, second, SessionStatus::Active, None);
+    let ctx = egui::Context::default();
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    let output = session_283_frame(&mut app, &ctx);
+    assert_eq!(session_283_kind(&app, second), SessionStatusKind::Running);
+    let mark = *tab_267_marks(&output, terminal, tab_267_title(&output, "second"))
+        .first()
+        .expect("the terminal's mark");
+    assert!(
+        session_283_dot(&output, mark).is_empty(),
+        "a running shell says nothing"
+    );
+    for status in [SessionStatus::Exited, SessionStatus::Failed] {
+        session_283_set(&mut app, second, status, None);
+        let output = session_283_frame(&mut app, &ctx);
+        let kind = session_283_kind(&app, second);
+        let mark = *tab_267_marks(&output, terminal, tab_267_title(&output, "second"))
+            .first()
+            .expect("the terminal's mark");
+        let circles = session_283_dot(&output, mark);
+        assert_eq!(circles.len(), 2, "{kind:?} speaks");
+        assert_eq!(
+            circles[0].fill,
+            app.store.theme.palette().status(kind.tone())
+        );
+        assert_eq!(
+            circles[1].fill,
+            app.store.theme.palette().card,
+            "an inactive tab's fill"
+        );
+    }
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_283_waiting_dot_keeps_a_shape() {
+    let root = temporary_directory("session-283-waiting");
+    let (mut app, first, _second) = tab_267_fixture(&root);
+    let ctx = egui::Context::default();
+    let antigravity = agent_icon_texture(&ctx, "gemini").expect("mark").id();
+    let surface = app.store.theme.palette().row_selected;
+    for (activity, needs_you) in [
+        (AgentActivity::AwaitingInput, true),
+        (AgentActivity::Idle, false),
+        (AgentActivity::Working, false),
+    ] {
+        session_283_set(&mut app, first, SessionStatus::Active, Some(activity));
+        let output = session_283_frame(&mut app, &ctx);
+        let kind = session_283_kind(&app, first);
+        assert_eq!(
+            kind.group() == SessionStatusGroup::NeedsYou,
+            needs_you,
+            "{kind:?}"
+        );
+        let mark = *tab_267_marks(&output, antigravity, tab_267_title(&output, "first"))
+            .first()
+            .expect("the tab's mark");
+        let circles = session_283_dot(&output, mark);
+        let dot = circles
+            .iter()
+            .find(|c| c.fill == app.store.theme.palette().status(kind.tone()))
+            .unwrap_or_else(|| panic!("{kind:?}: a dot in the state's ink: {circles:?}"));
+        let ratio = if needs_you {
+            STATUS_DOT_ATTENTION_RATIO
+        } else {
+            STATUS_DOT_RATIO
+        };
+        assert!(
+            (dot.radius - SESSION_MARK_SIZE * ratio / 2.0).abs() < 0.01,
+            "{kind:?}: {dot:?}"
+        );
+        assert_eq!(
+            session_283_stem(&output, dot, surface),
+            needs_you,
+            "{kind:?}: only the state that needs the person holds an exclamation"
+        );
+    }
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_283_column_row_matches_its_tab() {
+    let root = temporary_directory("session-283-column");
+    let (mut app, first, second) = tab_267_fixture(&root);
+    session_283_set(
+        &mut app,
+        first,
+        SessionStatus::Active,
+        Some(AgentActivity::Idle),
+    );
+    session_283_set(&mut app, second, SessionStatus::Active, None);
+    let ctx = egui::Context::default();
+    let terminal = png_texture(&ctx, "terminal-mark", TERMINAL_MARK)
+        .expect("terminal mark")
+        .id();
+    let antigravity = agent_icon_texture(&ctx, "gemini").expect("mark").id();
+    let output = session_283_frame(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let row_mark = |output: &egui::FullOutput, texture, row: egui::Rect| {
+        let marks: Vec<_> = sidebar_251_mesh_rects(output, texture)
+            .into_iter()
+            .filter(|rect| {
+                rect.right() <= row.left() + 0.5
+                    && row.left() - rect.right() < COLUMN_SESSION_MARK_SIZE
+                    && (rect.center().y - row.center().y).abs() < CONTROL_HEIGHT / 2.0
+            })
+            .collect();
+        assert_eq!(marks.len(), 1, "the tab's mark leads the row: {marks:?}");
+        assert!((marks[0].width() - COLUMN_SESSION_MARK_SIZE).abs() < 0.5);
+        marks[0]
+    };
+    // The terminal: its mark, not the word, no glyph, and no dot while it runs.
+    let kind = session_283_kind(&app, second);
+    let row = column_rect(&output, "second").expect("the terminal's row");
+    let line = column_line(&output, row);
+    assert!(
+        !line
+            .iter()
+            .any(|text| text == tr("ターミナル") || text == kind.icon()),
+        "no word and no glyph beside the mark: {line:?}"
+    );
+    assert!(session_283_dot(&output, row_mark(&output, terminal, row)).is_empty());
+    // The agent, selected: its mark and its dot, ringed in the row's fill.
+    let kind = session_283_kind(&app, first);
+    let row = column_rect(&output, "first").expect("the agent's row");
+    assert!(!column_line(&output, row)
+        .iter()
+        .any(|text| text == kind.icon()));
+    let circles = session_283_dot(&output, row_mark(&output, antigravity, row));
+    assert_eq!(circles.len(), 2, "its state dot: {circles:?}");
+    assert_eq!(circles[0].fill, palette.status(kind.tone()));
+    assert_eq!(
+        circles[1].fill, palette.row_selected,
+        "ringed in the selected row's fill"
+    );
+    // Not selected, the ring is the column's own fill.
+    app.select_session(second);
+    let output = session_283_frame(&mut app, &ctx);
+    let row = column_rect(&output, "first").expect("the agent's row");
+    let circles = session_283_dot(&output, row_mark(&output, antigravity, row));
+    assert_eq!(
+        circles[1].fill, palette.panel,
+        "ringed in the column's fill"
+    );
+    // A custom command has no mark: its glyph and its label stay.
+    session_283_without_marks(&mut app);
+    let output = session_283_frame(&mut app, &ctx);
+    let kind = session_283_kind(&app, second);
+    let line = column_line(&output, column_rect(&output, "second").expect("row"));
+    assert!(line.iter().any(|text| text == kind.icon()), "{line:?}");
+    assert!(
+        line.iter().any(|text| text == agent_short_label("custom")),
+        "{line:?}"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn session_283_mark_names_cli_and_state_on_hover() {
+    let root = temporary_directory("session-283-hover");
+    let (mut app, first, _second) = tab_267_fixture(&root);
+    session_283_set(
+        &mut app,
+        first,
+        SessionStatus::Active,
+        Some(AgentActivity::Idle),
+    );
+    let ctx = egui::Context::default();
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let antigravity = agent_icon_texture(&ctx, "gemini").expect("mark").id();
+    let away = session_283_frame(&mut app, &ctx);
+    let mark = *tab_267_marks(&away, antigravity, tab_267_title(&away, "first"))
+        .first()
+        .expect("the tab's mark");
+    let word = tr(SessionStatusKind::Idle.label());
+    let count =
+        |output: &egui::FullOutput, text: &str| drawn_text_rects(output, |t| t == text).len();
+    let (name_before, word_before) = (count(&away, "Antigravity"), count(&away, word));
+    workspace_pointer_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(mark.center())],
+    );
+    let hovered = session_283_frame(&mut app, &ctx);
+    assert!(
+        count(&hovered, "Antigravity") > name_before,
+        "the CLI is named"
+    );
+    assert!(count(&hovered, word) > word_before, "the state is named");
+    fs::remove_dir_all(root).ok();
 }

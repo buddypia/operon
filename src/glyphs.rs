@@ -219,6 +219,18 @@ pub(crate) const TERMINAL_MARK: &[u8] = include_bytes!("../assets/terminal-mark-
 /// mark beside it, so a tab is no taller than the 28px row it sits in.
 pub(crate) const SESSION_MARK_SIZE: f32 = 14.0;
 
+/// How large a session row in the left column draws its CLI mark — the 16px
+/// a vendor mark has there beside 12-point text (change 283).
+pub(crate) const COLUMN_SESSION_MARK_SIZE: f32 = 16.0;
+
+/// The state dot on a session's CLI mark (change 283), as fractions of the
+/// mark: 5px across a 14px tab mark, and the dot of a session that needs the
+/// person larger, to hold its exclamation. `STATUS_DOT_RING` is the width of
+/// the ring in the surface colour that keeps the dot off the artwork.
+pub(crate) const STATUS_DOT_RATIO: f32 = 0.36;
+pub(crate) const STATUS_DOT_ATTENTION_RATIO: f32 = 0.5;
+pub(crate) const STATUS_DOT_RING: f32 = 1.5;
+
 /// Generated vector vocabulary for compact session status badges. All marks
 /// share an enclosure, so they read as status indicators rather than actions.
 /// The 18-point grid uses geometry instead of a font or scaled raster asset.

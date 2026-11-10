@@ -7084,8 +7084,11 @@ impl OperonApp {
                                                         self.store.sessions.iter().find(|s| s.id == *id)
                                                     {
                                                         let kind = self.session_status_kind_for(session);
-                                                        session_status_icon(ui, palette, kind).on_hover_ui(
+                                                        // One mark: the CLI's, its state a dot on it (change 283).
+                                                        let surface = if active { palette.row_selected } else { palette.card };
+                                                        session_badge(ui, palette, &session.agent, kind, SESSION_MARK_SIZE, surface).on_hover_ui(
                                                             |ui| {
+                                                                ui.label(agent_short_label(&session.agent));
                                                                 let view = session_status_view(
                                                                     &self.store.sessions,
                                                                     session,
@@ -7100,8 +7103,6 @@ impl OperonApp {
                                                                 ));
                                                             },
                                                         );
-                                                        // Which CLI, beside how it is (change 267).
-                                                        session_mark(ui, &session.agent);
                                                     }
                                                 }
                                                 let editing = matches!(tab, WorkspaceTab::Session(id)
@@ -7702,13 +7703,32 @@ impl OperonApp {
                                     .show(ui, |ui| {
                                         ui.set_min_width(ui.available_width());
                                         ui.horizontal(|ui| {
-                                            ui.label(
-                                                RichText::new(kind.icon())
-                                                    .color(palette.status(kind.tone())),
-                                            );
-                                            if agent_icon_asset(&session.agent).is_some() {
-                                                agent_chip(ui, &session.agent, 12.0, palette);
+                                            if session_mark_texture(ui.ctx(), &session.agent)
+                                                .is_some()
+                                            {
+                                                // The tab's mark and dot (change 283).
+                                                let surface = if self.selected_session == Some(id) {
+                                                    palette.row_selected
+                                                } else {
+                                                    palette.panel
+                                                };
+                                                session_badge(
+                                                    ui,
+                                                    palette,
+                                                    &session.agent,
+                                                    kind,
+                                                    COLUMN_SESSION_MARK_SIZE,
+                                                    surface,
+                                                )
+                                                .on_hover_ui(|ui| {
+                                                    ui.label(agent_short_label(&session.agent));
+                                                    ui.label(tr(kind.label()));
+                                                });
                                             } else {
+                                                ui.label(
+                                                    RichText::new(kind.icon())
+                                                        .color(palette.status(kind.tone())),
+                                                );
                                                 // Legacy commands can be arbitrarily long;
                                                 // keep space for the session's title.
                                                 let width = ui.available_width().min(72.0);
