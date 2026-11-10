@@ -1,0 +1,15 @@
+# The evidence for change 279. Format: docs/sdlc/templates/verification.yaml.
+digest: "9236ecc0a370bcd5"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked reply_279_running_rows_offer_a_reply_field
+  - R2 empirical-test :: cargo test --locked reply_279_reply_goes_to_the_sessions_terminal
+  - R3 empirical-test :: cargo test --locked reply_279_empty_reply_sends_nothing
+  - R4 empirical-test :: cargo test --locked reply_279_typing_then_enter_sends_and_clears
+  - R5 empirical-test :: cargo test --locked reply_279_draft_goes_when_the_session_stops_waiting
+  - R6 empirical-test :: cargo test --locked reply_279_enter_that_confirms_a_conversion_does_not_send
+  - R7 empirical-test :: cargo test --locked reply_279_keys_typed_in_the_field_stay_out_of_the_pane
+  - F1 empirical-test :: cargo test --locked reply_279_f1_draft_goes_when_the_whole_queue_empties
+  - F2 empirical-test :: cargo test --locked only_selections_wear_the_selection_colour
+  - I1 empirical-test :: cargo test --locked pinned
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/279-waiting-agent-cannot-be-answered-from-its-row/mutations.py

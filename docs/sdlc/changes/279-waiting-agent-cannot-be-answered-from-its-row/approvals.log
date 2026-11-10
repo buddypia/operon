@@ -1,0 +1,4 @@
+2026-11-09T23:59:59Z auto intent intent.md 8630c190e9dbe816 approve Independent evaluators a451540d, a8aa254a, a3c25173: restates the candidate the person chose, quoted; adds no direction.
+2026-11-09T23:59:59Z auto spec spec.md 59c693ff0d8f2738 approve Independent evaluator a3c25173, third reading: IME, key isolation and announce-only-if-queued are requirements with tests; requirement 5 holds for the last session; the tmux defect is recorded and left to change 280.
+2026-11-09T23:59:59Z auto screen screen.md 0e4284bedcdc1371 approve Independent evaluators a8aa254a and a3c25173: one field added inside an existing row, chosen by the person; matches the field the code draws.
+2026-11-09T23:59:59Z auto plan plan.md 1f03b5b241a72427 approve Independent evaluators a8aa254a and a3c25173: file list matches the diff; departures record the pruning move, the guard and change 280.
