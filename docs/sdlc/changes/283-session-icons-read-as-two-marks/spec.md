@@ -1,7 +1,7 @@
 # Spec: a session leads with one mark, its state a dot on it
 
 - **Intent**: `./intent.md`
-- **Status**: draft
+- **Status**: approved
 
 ## Requirements
 

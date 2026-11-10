@@ -7,16 +7,16 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Get intent, spec, screen and plan approved by an evaluator, then write the session_283_ tests."
+resume: "Write the session_283_ tests and the session_badge widget, then rewrite the earlier tab tests."
 
 contract:
   three-gates: "machine pending make q.fast and cargo test --locked session_283_"

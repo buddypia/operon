@@ -1,6 +1,6 @@
 # Intent: a session's tab and row read as two marks side by side
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-10
 
 ## Problem
