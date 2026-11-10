@@ -77925,3 +77925,109 @@ fn working_278_frame_keeps_the_clocks() {
     assert!(!app.working_since.contains_key(&second));
     fs::remove_dir_all(&root).ok();
 }
+
+/// What tmux shows after `text` and Enter are typed into an empty session
+/// through `tmux_send_input`, and whether the send was accepted.
+fn typed_280_delivered(text: &str) -> (Result<()>, String) {
+    let name = format!("operon-test-{}", Uuid::new_v4().simple());
+    // `cat` and not a shell: it echoes what arrives and runs none of it.
+    let mut session = tmux_command();
+    session.args(["new-session", "-d", "-s", &name, "cat"]);
+    let started = run_command_with_timeout(&mut session, Duration::from_secs(5)).unwrap();
+    assert!(started.status.success(), "{started:?}");
+    thread::sleep(Duration::from_millis(300));
+    let sent = tmux_send_input(
+        &name,
+        &[
+            TerminalInput::Text(text.to_owned()),
+            TerminalInput::Key("Enter".into()),
+        ],
+    );
+    thread::sleep(Duration::from_millis(300));
+    let shown = tmux_capture(&name).unwrap_or_default();
+    kill_tmux_session(&name);
+    (sent, shown)
+}
+
+#[test]
+fn typed_280_text_ending_in_a_semicolon_arrives_whole() {
+    if !tool_available("tmux") {
+        return;
+    }
+    for text in ["zqx-note;", r"zqy \;", "zqz;;", "zq;w", ";"] {
+        let (sent, shown) = typed_280_delivered(text);
+        assert!(sent.is_ok(), "{text}: {sent:?}");
+        // Typed once and echoed once by `cat`.
+        assert_eq!(
+            shown.lines().filter(|line| *line == text).count(),
+            2,
+            "末尾が ; の文字がそのまま届きません ({text}): {shown}"
+        );
+    }
+}
+
+#[test]
+fn typed_280_text_starting_with_a_dash_is_delivered() {
+    if !tool_available("tmux") {
+        return;
+    }
+    for text in ["-x zqy", "--", "-l"] {
+        let (sent, shown) = typed_280_delivered(text);
+        assert!(sent.is_ok(), "{text}: {sent:?}");
+        assert_eq!(
+            shown.lines().filter(|line| *line == text).count(),
+            2,
+            "{text}: {shown}"
+        );
+    }
+}
+
+#[test]
+fn typed_280_only_a_final_semicolon_is_escaped() {
+    use tmux::tmux_literal_argument;
+    assert_eq!(tmux_literal_argument("abc"), "abc");
+    assert_eq!(tmux_literal_argument("a;b"), "a;b");
+    assert_eq!(tmux_literal_argument("abc;"), r"abc\;");
+    assert_eq!(tmux_literal_argument(";"), r"\;");
+    assert_eq!(tmux_literal_argument("a;b;"), r"a;b\;");
+    assert_eq!(tmux_literal_argument(r"abc\;"), r"abc\\;");
+    assert_eq!(tmux_literal_argument(""), "");
+}
+
+#[test]
+fn typed_280_text_reaches_tmux_as_text() {
+    let typed = |text: &str| {
+        tmux_send_input_arguments(
+            "s",
+            &[
+                TerminalInput::Text(text.to_owned()),
+                TerminalInput::Key("Enter".into()),
+            ],
+        )
+    };
+    let around = |text: &str| -> Vec<String> {
+        [
+            "send-keys",
+            "-t",
+            "s",
+            "-l",
+            "--",
+            text,
+            ";",
+            "send-keys",
+            "-t",
+            "s",
+            "Enter",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    };
+    assert_eq!(typed("-x zqy"), around("-x zqy"));
+    assert_eq!(typed("a;b"), around("a;b"));
+    // Through the function that escapes, not a literal of its answer.
+    assert_eq!(
+        typed("note;"),
+        around(&tmux::tmux_literal_argument("note;"))
+    );
+    assert_ne!(typed("note;"), around("note;"));
+}

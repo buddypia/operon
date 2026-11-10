@@ -1454,6 +1454,38 @@ pub(crate) fn auto_approve_workspace_trust_prompt(name: &str) -> Result<bool> {
     Ok(false)
 }
 
+/// `text` as one tmux argument that stays text. tmux ends a command at an
+/// argument whose last character is `;` and drops that character, and reads
+/// a final `\;` as a plain `;`; a `;` anywhere else is left alone. So only
+/// a final `;` is escaped (change 280).
+pub(crate) fn tmux_literal_argument(text: &str) -> std::borrow::Cow<'_, str> {
+    match text.strip_suffix(';') {
+        Some(head) => std::borrow::Cow::Owned(format!("{head}\\;")),
+        None => std::borrow::Cow::Borrowed(text),
+    }
+}
+
+/// The arguments that type `input` into `name`, in order, as one tmux
+/// invocation.
+pub(crate) fn tmux_send_input_arguments(name: &str, input: &[TerminalInput]) -> Vec<String> {
+    let mut arguments = Vec::new();
+    for (index, event) in input.iter().enumerate() {
+        arguments.extend(["send-keys", "-t", name].map(str::to_owned));
+        match event {
+            TerminalInput::Text(text) => {
+                // `--` ends the flags: text that begins with `-` is text.
+                arguments.extend(["-l", "--"].map(str::to_owned));
+                arguments.push(tmux_literal_argument(text).into_owned());
+            }
+            TerminalInput::Key(key) => arguments.push(key.clone()),
+        }
+        if index + 1 < input.len() {
+            arguments.push(";".to_owned());
+        }
+    }
+    arguments
+}
+
 pub(crate) fn tmux_send_input(name: &str, input: &[TerminalInput]) -> Result<()> {
     if input.is_empty() {
         return Ok(());
@@ -1462,20 +1494,7 @@ pub(crate) fn tmux_send_input(name: &str, input: &[TerminalInput]) -> Result<()>
     // keys. This lets full-screen TUIs receive ordinary typing, cursor keys,
     // Enter, and control chords exactly as if the pane were attached.
     let mut command = tmux_command();
-    for (index, event) in input.iter().enumerate() {
-        command.args(["send-keys", "-t", name]);
-        match event {
-            TerminalInput::Text(text) => {
-                command.args(["-l", text]);
-            }
-            TerminalInput::Key(key) => {
-                command.arg(key);
-            }
-        }
-        if index + 1 < input.len() {
-            command.arg(";");
-        }
-    }
+    command.args(tmux_send_input_arguments(name, input));
     let submitted = run_command_with_timeout(&mut command, Duration::from_secs(5))?;
     if submitted.status.success() {
         Ok(())
