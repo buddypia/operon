@@ -1318,6 +1318,17 @@ impl SessionStatusGroup {
         }
     }
 
+    /// The group's generated mark (change 284), of the same state its `icon`
+    /// names, for the left column's counts.
+    pub(crate) fn status_mark(self) -> StatusMark {
+        match self {
+            SessionStatusGroup::NeedsYou => StatusMark::Attention,
+            SessionStatusGroup::Free => StatusMark::Pause,
+            SessionStatusGroup::Busy => StatusMark::Progress,
+            SessionStatusGroup::Finished => StatusMark::Check,
+        }
+    }
+
     pub(crate) fn tone(self) -> StatusTone {
         match self {
             SessionStatusGroup::NeedsYou => StatusTone::Attention,
@@ -1573,10 +1584,10 @@ pub(crate) fn session_badge(
     response
 }
 
-/// The state dot on a mark: the state's ink inside a ring of `surface`. A
-/// session that needs the person gets a larger dot holding an exclamation in
-/// the surface colour, so the one state that asks for action is not told by
-/// colour alone (`DESIGN.md`, *Status is a meaning, not a colour*).
+/// The state badge on a mark (change 284): the state's ink inside a ring of
+/// `surface`, holding the state's `StatusMark` glyph in the surface colour, so
+/// every state is told by its shape as well as its colour (`DESIGN.md`,
+/// *Status is a meaning, not a colour*).
 fn paint_status_dot(
     painter: &egui::Painter,
     mark: egui::Rect,
@@ -1584,32 +1595,56 @@ fn paint_status_dot(
     palette: &Palette,
     surface: Color32,
 ) {
-    let needs_you = kind.group() == SessionStatusGroup::NeedsYou;
-    let ratio = if needs_you {
-        STATUS_DOT_ATTENTION_RATIO
-    } else {
-        STATUS_DOT_RATIO
-    };
-    let radius = mark.width() * ratio / 2.0;
+    let radius = mark.width() * STATUS_DOT_RATIO / 2.0;
     // Over the corner rather than inside it: the artwork keeps its face.
     let center = mark.right_bottom() - egui::Vec2::splat(radius * 0.6);
     painter.circle_filled(center, radius + STATUS_DOT_RING, surface);
     painter.circle_filled(center, radius, palette.status(kind.tone()));
-    if needs_you {
-        let stroke = egui::Stroke::new(radius * 0.32, surface);
-        painter.line_segment(
-            [
-                center - egui::vec2(0.0, radius * 0.55),
-                center + egui::vec2(0.0, radius * 0.12),
-            ],
-            stroke,
+    kind.status_mark()
+        .paint_badge(painter, center, radius, surface);
+}
+
+/// A state group's count in the left column's project row (change 284): the
+/// group's circled mark in its tone, then the count, one click target. The
+/// mark is the generated vocabulary the tabs draw, not a font glyph.
+pub(crate) fn status_count_chip(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    group: SessionStatusGroup,
+    count: usize,
+) -> egui::Response {
+    let ink = palette.status(group.tone());
+    let galley =
+        ui.painter()
+            .layout_no_wrap(count.to_string(), egui::FontId::proportional(12.5), ink);
+    let gap = SPACE_XS / 2.0;
+    let size = egui::vec2(
+        STATUS_COUNT_MARK_SIZE + gap + galley.size().x,
+        galley.size().y.max(STATUS_COUNT_MARK_SIZE),
+    );
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let mark = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), rect.center().y - STATUS_COUNT_MARK_SIZE / 2.0),
+            egui::Vec2::splat(STATUS_COUNT_MARK_SIZE),
         );
-        painter.circle_filled(
-            center + egui::vec2(0.0, radius * 0.5),
-            radius * 0.17,
-            surface,
+        group.status_mark().paint(ui.painter(), mark, ink);
+        ui.painter().galley(
+            egui::pos2(mark.right() + gap, rect.center().y - galley.size().y / 2.0),
+            galley,
+            ink,
         );
     }
+    // A button, not a label: it opens the group's first session. Its name
+    // carries the count, as the old label's text did.
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            true,
+            tf!("{p0} {p1} 件", p0 = tr(group.message_id()), p1 = count),
+        )
+    });
+    response
 }
 
 /// One choice in the tab strip's + menu (change 273): the mark of what it

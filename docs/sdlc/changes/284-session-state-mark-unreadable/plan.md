@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-11
-- **Status**: in-progress
+- **Status**: done
 
 ## Files that change
 
@@ -42,3 +42,13 @@
   — every mutation caught.
 
 ## Departures from the plan
+
+- The badge was checked in a vector preview of the same geometry at retina
+  scale on all four CLI marks before the tests were written; every glyph read
+  at 0.64 of the mark with the glyph at 0.6 of the badge's radius, so no
+  stroke was thickened beyond the `2 × scale` the plan's step 4 allowed for.
+- The rust reviewer found the count chip's accessible name dropped the count
+  the old label's text carried. It now reads 「要対応 1 件」 through a new
+  `tf!` row, `"{p0} {p1} 件"`, so `src/i18n_tables.rs` changes too.
+- `workspace_project_picker_keeps_saved_order_counts_and_per_project_launch`
+  also found the count by its font glyph; it now finds the generated mark.

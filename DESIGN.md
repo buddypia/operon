@@ -549,13 +549,18 @@ neither led. Its tab and its row in the left column draw the CLI's mark alone,
 with the state as a dot over the mark's lower right corner: `Palette::status`
 ink, 0.36 of the mark across (`STATUS_DOT_RATIO`), inside a 1.5px ring of the
 fill it sits on (`card`, `row_selected` or `panel`) so it stays off the artwork.
-The dot of a session that needs the person is half the mark across and holds an
-exclamation in the ring's colour, so the one state that asks for action is not
-told by colour alone; the rest are named on hover, in the header line and in
-the column's four counters. A plain terminal that is simply running wears no
+Since change 284 the dot is a badge 0.64 of the mark across, about 9px on a
+tab, one size for every state, and holds the state's `StatusMark` glyph without
+its enclosure (`StatusMark::paint_badge`) in the ring's colour: a 5px dot told
+the states apart by colour alone. The glyph's half body spans 0.6 of the
+badge's radius (`STATUS_BADGE_GLYPH_RATIO`), drawn a little heavier than the
+grid's stroke so it holds at a few pixels. A plain terminal that is simply running wears no
 dot — a shell is running for as long as it exists, so the dot would say nothing
 — and wears one once it stops. A custom command has no mark and keeps the
-circled `StatusMark`.
+circled `StatusMark`, in its row in the left column too (change 284). The
+column's per-project counts draw each group's circled `StatusMark` at 12px
+(`STATUS_COUNT_MARK_SIZE`) in the group's tone before the number, not a font
+glyph, so the column and the tabs speak one vocabulary of states.
 
 Size is part of whether a mark exists. Phosphor's `dot` is three pixels of ink
 at the 12px a chip is drawn at, which is a smudge, not a state — a glyph that
@@ -777,7 +782,7 @@ and the odd one out is what gets noticed instead of the label beside it.
 A plain terminal has no vendor, so its mark is ours and borrows theirs: the same
 full-bleed squircle at 128px, a light plate holding a dark screen with a green
 `>` and a light `_` (`assets/terminal-mark.svg`). A session tab draws the CLI's
-mark — vendor or terminal — at 14px before its title, its state a dot on it,
+mark — vendor or terminal — at 14px before its title, its state a badge holding the state's mark,
 and the left column draws the same mark at 16px (change 283); a custom command
 has neither and draws its circled state mark instead. The menu under the tab strip's +
 leads each of its choices — ターミナル, Claude Code, Codex CLI, Antigravity —
