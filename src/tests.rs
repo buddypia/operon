@@ -78437,3 +78437,294 @@ fn dock_281_frame_keeps_the_badge() {
     );
     fs::remove_dir_all(&root).ok();
 }
+
+/// One project with two running sessions, both idle, shown in the workspace.
+/// The input task is marked busy so what is queued stays to be read.
+fn broadcast_282_app(label: &str) -> (PathBuf, OperonApp, Uuid, Uuid) {
+    let root = temporary_directory(label);
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    app.workspace_project = Some(app.store.sessions[0].project_id);
+    for id in [first, second] {
+        working_278_settle(&mut app, id, AgentActivity::Idle);
+        app.background_tasks
+            .insert(BackgroundKey::TerminalInput(id));
+    }
+    for session in &app.store.sessions {
+        assert_eq!(
+            app.session_status_kind_for(session),
+            SessionStatusKind::Idle,
+            "アイドルのセッションを用意できていません"
+        );
+    }
+    (root, app, first, second)
+}
+
+fn broadcast_282_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+) -> Vec<String> {
+    let output = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+            app.ui_broadcast_sheet(ctx);
+        },
+    );
+    painted_texts(&output)
+}
+
+#[test]
+fn broadcast_282_reaches_only_the_projects_idle_running_agents() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-282-targets");
+    assert_eq!(app.broadcast_targets(), vec![first, second]);
+    // The workspace's project, whatever is selected elsewhere.
+    app.selected_project = Some(Uuid::new_v4());
+    assert_eq!(app.broadcast_targets(), vec![first, second]);
+    // Working: left alone.
+    working_278_settle(&mut app, second, AgentActivity::Working);
+    assert_eq!(app.broadcast_targets(), vec![first]);
+    // Waiting on a prompt: left alone.
+    working_278_settle(&mut app, second, AgentActivity::AwaitingInput);
+    assert_eq!(app.broadcast_targets(), vec![first]);
+    // Idle in another project: not this sheet's.
+    let mut elsewhere = app.store.sessions[0].clone();
+    elsewhere.id = Uuid::new_v4();
+    elsewhere.project_id = Uuid::new_v4();
+    let elsewhere_id = elsewhere.id;
+    app.store.sessions.push(elsewhere);
+    working_278_settle(&mut app, elsewhere_id, AgentActivity::Idle);
+    assert_eq!(app.broadcast_targets(), vec![first]);
+    // Its terminal ended: nothing to type into.
+    app.store.sessions[0].status = SessionStatus::Exited;
+    let ended = app.store.sessions[0].id;
+    assert!(!app.broadcast_targets().contains(&ended));
+    // No project in view: nobody.
+    app.workspace_project = None;
+    app.selected_project = None;
+    assert!(app.broadcast_targets().is_empty());
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_282_send_types_into_every_idle_agent() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-282-send");
+    let other = {
+        let mut session = app.store.sessions[0].clone();
+        session.id = Uuid::new_v4();
+        app.store.sessions.push(session.clone());
+        session.id
+    };
+    working_278_settle(&mut app, other, AgentActivity::Working);
+    app.background_tasks
+        .insert(BackgroundKey::TerminalInput(other));
+    let selected = app.selected_session;
+    assert_eq!(app.send_broadcast("  作業をコミットして \n"), 2);
+    for id in [first, second] {
+        assert_eq!(
+            reply_279_queued(&app, id),
+            reply_279_sent("作業をコミットして")
+        );
+    }
+    assert!(
+        reply_279_queued(&app, other).is_empty(),
+        "作業中のエージェントにも送りました"
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tf!("{p0} 件のエージェントに送信しました", p0 = 2).as_str())
+    );
+    assert_eq!(app.selected_session, selected, "送信で画面が移りました");
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_282_nothing_to_say_or_nobody_idle_sends_nothing() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-282-none");
+    assert_eq!(app.send_broadcast("   "), 0);
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert_eq!(app.notice, None);
+    for id in [first, second] {
+        working_278_settle(&mut app, id, AgentActivity::Working);
+    }
+    assert_eq!(app.send_broadcast("続けて"), 0);
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert_eq!(app.notice, None, "誰にも送っていないのに通知しました");
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_282_palette_opens_the_sheet() {
+    let (root, mut app, ..) = broadcast_282_app("broadcast-282-palette");
+    let (action, label, _) = OperonApp::palette_actions()
+        .into_iter()
+        .find(|(_, label, _)| *label == tr("アイドル中のエージェントへ送信…"))
+        .expect("コマンドパレットに一括送信の行がありません");
+    assert!(!label.is_empty());
+    assert!(app.broadcast_sheet.is_none());
+    app.activate_palette_entry(&PaletteKind::Action(action));
+    assert!(
+        app.broadcast_sheet.is_some(),
+        "パレットの行を選んでもシートが開きません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-282-sheet");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    assert!(
+        broadcast_282_frame(&mut app, &ctx, Vec::new()).is_empty(),
+        "開いていないシートを描きました"
+    );
+    app.open_broadcast_sheet();
+    broadcast_282_frame(&mut app, &ctx, Vec::new());
+    let texts = broadcast_282_frame(&mut app, &ctx, Vec::new());
+    for expected in [
+        tr("アイドル中のエージェントへ送信").to_owned(),
+        tf!("{p0} · 送信先 {p1} 件", p0 = "p", p1 = 2),
+        "first".to_owned(),
+        "second".to_owned(),
+    ] {
+        assert!(
+            texts.iter().any(|text| *text == expected),
+            "シートに「{expected}」がありません: {texts:?}"
+        );
+    }
+    // The field has the keyboard as the sheet opens.
+    broadcast_282_frame(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    assert_eq!(
+        app.broadcast_sheet
+            .as_ref()
+            .map(|sheet| sheet.text.as_str()),
+        Some("yes")
+    );
+    // The Enter that confirms a conversion does not send.
+    broadcast_282_frame(
+        &mut app,
+        &ctx,
+        vec![
+            egui::Event::Ime(egui::ImeEvent::Commit("はい".into())),
+            reply_279_enter(),
+        ],
+    );
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert!(
+        app.broadcast_sheet.is_some(),
+        "変換の確定でシートが閉じました"
+    );
+    broadcast_282_frame(&mut app, &ctx, Vec::new());
+    broadcast_282_frame(&mut app, &ctx, vec![reply_279_enter()]);
+    for id in [first, second] {
+        let queued = reply_279_queued(&app, id);
+        assert!(
+            matches!(queued.as_slice(), [TerminalInput::Text(text), TerminalInput::Key(_)] if text.starts_with("yes")),
+            "Enter で全員に送られません: {queued:?}"
+        );
+    }
+    assert!(
+        app.broadcast_sheet.is_none(),
+        "送ったあともシートが残りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_282_sheet_closes_on_escape_and_waits_when_nobody_is_idle() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-282-escape");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    let escape = || egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    app.open_broadcast_sheet();
+    broadcast_282_frame(&mut app, &ctx, Vec::new());
+    broadcast_282_frame(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    broadcast_282_frame(&mut app, &ctx, vec![escape()]);
+    assert!(app.broadcast_sheet.is_none(), "Esc でシートが閉じません");
+    assert!(reply_279_queued(&app, first).is_empty(), "Esc で送りました");
+
+    // Spaces and Enter: nothing to send, and the sheet stays.
+    app.open_broadcast_sheet();
+    broadcast_282_frame(&mut app, &ctx, Vec::new());
+    broadcast_282_frame(&mut app, &ctx, vec![egui::Event::Text("  ".into())]);
+    broadcast_282_frame(&mut app, &ctx, vec![reply_279_enter()]);
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert!(
+        app.broadcast_sheet.is_some(),
+        "何も送っていないのにシートが閉じました"
+    );
+    app.broadcast_sheet = None;
+
+    for id in [first, second] {
+        working_278_settle(&mut app, id, AgentActivity::Working);
+    }
+    app.open_broadcast_sheet();
+    broadcast_282_frame(&mut app, &ctx, Vec::new());
+    let texts = broadcast_282_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == tr("アイドル中のエージェントはいません")),
+        "{texts:?}"
+    );
+    broadcast_282_frame(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    broadcast_282_frame(&mut app, &ctx, vec![reply_279_enter()]);
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert!(
+        app.broadcast_sheet.is_some(),
+        "誰にも送れないのにシートが閉じました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 282, falsification: the chords the launch sheet refuses (⌘K, ⌘2,
+/// ⌘O) throw away the target or the typed line; the broadcast sheet holds the
+/// same kind of line and must refuse them too.
+#[test]
+fn broadcast_282_f1_page_shortcuts_do_not_reach_past_the_sheet() {
+    let (root, mut app, ..) = broadcast_282_app("broadcast-282-f1");
+    app.page = Page::Sessions;
+    app.open_broadcast_sheet();
+    let mut leaks = Vec::new();
+    let context = egui::Context::default();
+    for (key, name) in [
+        (egui::Key::Num2, "⌘2"),
+        (egui::Key::K, "⌘K"),
+        (egui::Key::N, "⌘N"),
+    ] {
+        let input = egui::RawInput {
+            events: vec![key_press(key, egui::Modifiers::COMMAND)],
+            modifiers: egui::Modifiers::COMMAND,
+            ..Default::default()
+        };
+        let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+        if app.command_palette_open {
+            leaks.push(format!("{name} opens the palette over the sheet"));
+        }
+        if app.launch_sheet_open {
+            leaks.push(format!("{name} opens the launch sheet over the sheet"));
+        }
+        if app.page != Page::Sessions {
+            leaks.push(format!("{name} leaves the page behind the sheet"));
+        }
+        app.command_palette_open = false;
+        app.launch_sheet_open = false;
+        app.page = Page::Sessions;
+    }
+    assert!(leaks.is_empty(), "{leaks:?}");
+    fs::remove_dir_all(&root).ok();
+}

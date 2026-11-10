@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: feature. Risk: low — risk.yaml `drawing` (src/app.rs, src/app/) and
+# `text`; full autonomy. The sheet is a new modal, which is a person's to
+# approve: the person was shown it and chose 「コマンドパレットから開くシート」
+# (approvals.log).
+
+state:
+  route: "feature"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing."
+
+contract:
+  three-gates: "machine passed make q.fast and cargo test --locked broadcast_282_"
+  bands: "machine passed bash scripts/check-bands.sh"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs and src/app/broadcast.rs change; packaged from main with the changes before it"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/282-idle-agents-cannot-be-told-at-once/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

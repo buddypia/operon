@@ -142,7 +142,10 @@ impl OperonApp {
         // The launch sheet holds a request being typed. ⌘K opens a palette
         // that can switch project, and ⌘2 clears the project outright: either
         // would throw the request away, so neither is live while it is open.
-        if !self.launch_sheet_open && self.chord_pressed(ctx, "palette.open") {
+        // The sheet that sends to idle agents holds a line being typed too
+        // (change 282).
+        let sheet_open = self.launch_sheet_open || self.broadcast_sheet.is_some();
+        if !sheet_open && self.chord_pressed(ctx, "palette.open") {
             self.open_command_palette();
         }
         // Before the window draws, so the selection it paints is the one the
@@ -150,7 +153,7 @@ impl OperonApp {
         // moves the caret instead.
         self.handle_palette_keys(ctx);
         // Adding a project selects it, which clears the sheet's request too.
-        if !self.launch_sheet_open && self.chord_pressed(ctx, "project.add") {
+        if !sheet_open && self.chord_pressed(ctx, "project.add") {
             self.choose_project_folder();
         }
         // The shortcuts a person brings with them from every other Mac app of
@@ -160,7 +163,7 @@ impl OperonApp {
         // keeps for the app, and the pane drops every ⌘ chord rather than
         // sending it (`terminal_key_binding`). That is what lets ⌘J leave the
         // pane a person is typing in for the next one that is waiting.
-        if !self.command_palette_open && !self.launch_sheet_open {
+        if !self.command_palette_open && !sheet_open {
             if self.chord_pressed(ctx, "session.new") {
                 self.open_new_session();
             }

@@ -1,5 +1,6 @@
 use crate::*;
 
+pub(crate) mod broadcast;
 pub(crate) mod dock_badge;
 mod keymap;
 pub(crate) mod knowledge;
@@ -652,6 +653,8 @@ pub(crate) struct OperonApp {
     pub(crate) working_since: HashMap<Uuid, Instant>,
     /// The waiting count the Dock badge was last set for (change 281).
     pub(crate) dock_badge_shown: usize,
+    /// The sheet that sends one instruction to every idle agent (change 282).
+    pub(crate) broadcast_sheet: Option<broadcast::BroadcastSheet>,
     /// The reply being typed on each 要対応 row (change 279); never stored.
     pub(crate) waiting_reply_drafts: HashMap<Uuid, String>,
     /// The same sessions, longest-waiting first. Rebuilt only when someone
@@ -1159,6 +1162,7 @@ impl OperonApp {
             attention_since: HashMap::new(),
             working_since: HashMap::new(),
             dock_badge_shown: 0,
+            broadcast_sheet: None,
             waiting_reply_drafts: HashMap::new(),
             attention_order: Vec::new(),
             terminal_focus_request: None,
@@ -7656,6 +7660,7 @@ impl eframe::App for OperonApp {
         self.ui_brief_notice_toast(ctx, palette);
         self.ui_command_palette(ctx);
         self.ui_launch_sheet(ctx);
+        self.ui_broadcast_sheet(ctx);
         self.ui_restore_modal(ctx);
         self.ui_launch_modal(ctx);
         self.ui_land_worktree_modal(ctx, palette);

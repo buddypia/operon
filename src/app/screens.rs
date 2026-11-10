@@ -236,7 +236,7 @@ impl OperonApp {
     /// shortcut typed into the label any more. That was a place the application
     /// told a person which key to press and was under no obligation to be
     /// right; the chord is now read from the map the frame loop listens with.
-    pub(crate) fn palette_actions() -> [(&'static str, &'static str, &'static str); 10] {
+    pub(crate) fn palette_actions() -> [(&'static str, &'static str, &'static str); 11] {
         [
             (
                 "New session",
@@ -273,6 +273,12 @@ impl OperonApp {
                 "Reopen closed tab",
                 tr(action_label("tab.reopen")),
                 "tab.reopen",
+            ),
+            // Change 282.
+            (
+                "Send to idle agents",
+                tr("アイドル中のエージェントへ送信…"),
+                "",
             ),
         ]
     }
@@ -482,6 +488,7 @@ impl OperonApp {
             PaletteKind::Action("Add a project") => self.choose_project_folder(),
             PaletteKind::Action("Scan a workspace") => self.choose_workspace_folder(),
             PaletteKind::Action("Open the keymap file") => self.open_keymap_file(),
+            PaletteKind::Action("Send to idle agents") => self.open_broadcast_sheet(),
             PaletteKind::Action(_) => {}
             PaletteKind::Session(session_id) => self.open_session_in_terminal(*session_id),
             PaletteKind::Project(project_id) => {
