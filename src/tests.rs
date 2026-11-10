@@ -7633,7 +7633,8 @@ pub(crate) fn selected_row_inks_stay_readable() {
 pub(crate) fn only_selections_wear_the_selection_colour() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     for (file, expected) in [
-        ("src/app/screens.rs", 4),
+        ("src/app/screens.rs", 3),
+        ("src/app/waiting_reply.rs", 1),
         ("src/ui/widgets.rs", 1),
         ("src/app/knowledge.rs", 0),
     ] {
@@ -77923,5 +77924,346 @@ fn working_278_frame_keeps_the_clocks() {
         "フレームが、作業中のセッションの時計を始めませんでした"
     );
     assert!(!app.working_since.contains_key(&second));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Two running sessions, both waiting; `second` waits longest and is drawn
+/// first. The input task is marked busy so a queued reply stays to be read.
+fn reply_279_app(label: &str) -> (PathBuf, OperonApp, Uuid, Uuid) {
+    let root = temporary_directory(label);
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_both_sessions(&mut app, first, second);
+    for id in [first, second] {
+        app.background_tasks
+            .insert(BackgroundKey::TerminalInput(id));
+    }
+    (root, app, first, second)
+}
+
+/// One frame of the 要対応 section on the left and, when given, a session's
+/// terminal pane beside it.
+fn reply_279_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    pane: Option<Uuid>,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let sessions = app.store.sessions.clone();
+    ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::SidePanel::left("reply-279-rows")
+                .exact_width(300.0)
+                .show(ctx, |ui| {
+                    app.ui_pinned_sessions(ui, &sessions);
+                });
+            egui::CentralPanel::default().show(ctx, |ui| {
+                if let Some(session) = sessions.iter().find(|session| Some(session.id) == pane) {
+                    app.ui_terminal_panel(ui, session);
+                }
+            });
+        },
+    )
+}
+
+fn reply_279_click(app: &mut OperonApp, ctx: &egui::Context, pane: Option<Uuid>, at: egui::Pos2) {
+    for pressed in [true, false] {
+        reply_279_frame(
+            app,
+            ctx,
+            pane,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+    }
+    reply_279_frame(app, ctx, pane, Vec::new());
+}
+
+/// Where the reply fields' hints are drawn, top to bottom.
+fn reply_279_fields(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    pane: Option<Uuid>,
+) -> Vec<egui::Pos2> {
+    reply_279_frame(app, ctx, pane, Vec::new());
+    let mut fields: Vec<egui::Pos2> = text_positions(&reply_279_frame(app, ctx, pane, Vec::new()))
+        .into_iter()
+        .filter(|(text, _)| text == tr("返信を入力して Enter"))
+        .map(|(_, pos)| pos + egui::vec2(4.0, 4.0))
+        .collect();
+    fields.sort_by(|a, b| a.y.total_cmp(&b.y));
+    fields
+}
+
+fn reply_279_enter() -> egui::Event {
+    egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+fn reply_279_queued(app: &OperonApp, session: Uuid) -> Vec<TerminalInput> {
+    app.terminal_input_queue
+        .get(&session)
+        .map(|queue| queue.iter().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn reply_279_sent(text: &str) -> Vec<TerminalInput> {
+    vec![
+        TerminalInput::Text(text.to_owned()),
+        TerminalInput::Key("Enter".into()),
+    ]
+}
+
+#[test]
+fn reply_279_running_rows_offer_a_reply_field() {
+    let (root, mut app, first, _) = reply_279_app("reply-279-field");
+    let ctx = egui::Context::default();
+    assert_eq!(
+        reply_279_fields(&mut app, &ctx, None).len(),
+        2,
+        "ターミナルが動いている要対応の行に返信欄がありません"
+    );
+    // Its terminal ended; it still waits to be read.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == first)
+        .unwrap()
+        .status = SessionStatus::Exited;
+    app.track_attention(Instant::now());
+    assert_eq!(
+        app.attention_order.len(),
+        2,
+        "終了した行も要対応に残る前提です"
+    );
+    assert_eq!(
+        reply_279_fields(&mut app, &ctx, None).len(),
+        1,
+        "ターミナルのない行に返信欄を出しました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_reply_goes_to_the_sessions_terminal() {
+    let (root, mut app, first, second) = reply_279_app("reply-279-send");
+    app.page = Page::Sessions;
+    app.selected_session = Some(first);
+    assert!(app.send_waiting_reply(second, "  続けて \n"));
+    assert_eq!(reply_279_queued(&app, second), reply_279_sent("続けて"));
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert_eq!(app.notice.as_deref(), Some(tr("返信を送りました")));
+    assert_eq!(app.selected_session, Some(first), "返信で画面が移りました");
+    assert_eq!(app.page, Page::Sessions);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_empty_reply_sends_nothing() {
+    let (root, mut app, first, second) = reply_279_app("reply-279-empty");
+    assert!(!app.send_waiting_reply(second, "   "));
+    assert!(reply_279_queued(&app, second).is_empty());
+    assert_eq!(app.notice, None, "何も送っていないのに通知しました");
+    // Nor to a session whose terminal has ended.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == first)
+        .unwrap()
+        .status = SessionStatus::Exited;
+    assert!(!app.send_waiting_reply(first, "続けて"));
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert_eq!(app.notice, None, "送れないのに「送りました」と言いました");
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_typing_then_enter_sends_and_clears() {
+    let (root, mut app, first, second) = reply_279_app("reply-279-type");
+    app.selected_session = Some(first);
+    let ctx = egui::Context::default();
+    let fields = reply_279_fields(&mut app, &ctx, None);
+    // `second` waits longest, so its row is the first.
+    reply_279_click(&mut app, &ctx, None, fields[0]);
+    assert_eq!(
+        app.selected_session,
+        Some(first),
+        "返信欄のクリックがセッションを開きました"
+    );
+    reply_279_frame(&mut app, &ctx, None, vec![egui::Event::Text("yes".into())]);
+    assert_eq!(
+        app.waiting_reply_drafts.get(&second).map(String::as_str),
+        Some("yes")
+    );
+    assert!(
+        reply_279_queued(&app, second).is_empty(),
+        "Enter の前に送りました"
+    );
+    reply_279_frame(&mut app, &ctx, None, vec![reply_279_enter()]);
+    assert_eq!(reply_279_queued(&app, second), reply_279_sent("yes"));
+    assert!(reply_279_queued(&app, first).is_empty());
+    assert!(
+        app.waiting_reply_drafts
+            .get(&second)
+            .is_none_or(String::is_empty),
+        "送ったあとも返信欄に文字が残りました"
+    );
+    assert_eq!(app.selected_session, Some(first));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_draft_goes_when_the_session_stops_waiting() {
+    let (root, mut app, first, second) = reply_279_app("reply-279-draft");
+    let ctx = egui::Context::default();
+    let fields = reply_279_fields(&mut app, &ctx, None);
+    reply_279_click(&mut app, &ctx, None, fields[0]);
+    reply_279_frame(
+        &mut app,
+        &ctx,
+        None,
+        vec![egui::Event::Text("あとで".into())],
+    );
+    assert!(app.waiting_reply_drafts.contains_key(&second));
+    // The agent went back to work by itself.
+    app.unread_sessions.remove(&second);
+    app.track_attention(Instant::now());
+    assert_eq!(app.attention_order, vec![first]);
+    reply_279_frame(&mut app, &ctx, None, Vec::new());
+    assert!(
+        !app.waiting_reply_drafts.contains_key(&second),
+        "待ちが終わったセッションの書きかけが残りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_enter_that_confirms_a_conversion_does_not_send() {
+    use app::waiting_reply::reply_enter_sends;
+    let commit = |text: &str| egui::Event::Ime(egui::ImeEvent::Commit(text.into()));
+    assert!(reply_enter_sends(&[reply_279_enter()]));
+    assert!(!reply_enter_sends(&[commit("はい"), reply_279_enter()]));
+    assert!(!reply_enter_sends(&[reply_279_enter(), commit("はい")]));
+    // Confirm and send in one frame: the second Enter is the person's.
+    assert!(reply_enter_sends(&[
+        commit("はい"),
+        reply_279_enter(),
+        reply_279_enter()
+    ]));
+    assert!(!reply_enter_sends(&[egui::Event::Text("a".into())]));
+    // An empty commit confirmed nothing and owns no Enter.
+    assert!(reply_enter_sends(&[commit(""), reply_279_enter()]));
+
+    let (root, mut app, _, second) = reply_279_app("reply-279-ime");
+    let ctx = egui::Context::default();
+    let fields = reply_279_fields(&mut app, &ctx, None);
+    reply_279_click(&mut app, &ctx, None, fields[0]);
+    reply_279_frame(&mut app, &ctx, None, vec![egui::Event::Text("yes".into())]);
+    reply_279_frame(
+        &mut app,
+        &ctx,
+        None,
+        vec![commit("はい"), reply_279_enter()],
+    );
+    assert!(
+        reply_279_queued(&app, second).is_empty(),
+        "変換を確定する Enter で返信を送りました"
+    );
+    // Still typing: the field has the keyboard back, and the next Enter sends.
+    reply_279_frame(&mut app, &ctx, None, Vec::new());
+    reply_279_frame(&mut app, &ctx, None, vec![reply_279_enter()]);
+    let queued = reply_279_queued(&app, second);
+    assert_eq!(
+        queued.len(),
+        2,
+        "確定のあとの Enter で送れません: {queued:?}"
+    );
+    assert!(
+        matches!(&queued[0], TerminalInput::Text(text) if text.starts_with("yes")),
+        "{queued:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_keys_typed_in_the_field_stay_out_of_the_pane() {
+    let (root, mut app, first, second) = reply_279_app("reply-279-pane");
+    app.selected_session = Some(first);
+    let ctx = egui::Context::default();
+    let fields = reply_279_fields(&mut app, &ctx, Some(first));
+    // The pane has the keyboard first, as when the person was typing in it.
+    reply_279_click(&mut app, &ctx, Some(first), egui::pos2(600.0, 300.0));
+    reply_279_frame(
+        &mut app,
+        &ctx,
+        Some(first),
+        vec![egui::Event::Text("a".into())],
+    );
+    assert_eq!(
+        reply_279_queued(&app, first),
+        vec![TerminalInput::Text("a".into())],
+        "ペインがキーを受け取る前提です"
+    );
+    app.terminal_input_queue.clear();
+    reply_279_click(&mut app, &ctx, Some(first), fields[0]);
+    reply_279_frame(
+        &mut app,
+        &ctx,
+        Some(first),
+        vec![egui::Event::Text("yes".into())],
+    );
+    reply_279_frame(&mut app, &ctx, Some(first), vec![reply_279_enter()]);
+    assert_eq!(reply_279_queued(&app, second), reply_279_sent("yes"));
+    assert!(
+        reply_279_queued(&app, first).is_empty(),
+        "返信欄に打ったキーが、開いているペインにも届きました: {:?}",
+        reply_279_queued(&app, first)
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn reply_279_f1_draft_goes_when_the_whole_queue_empties() {
+    let (root, mut app, first, second) = reply_279_app("reply-279-f1");
+    let ctx = egui::Context::default();
+    let fields = reply_279_fields(&mut app, &ctx, None);
+    reply_279_click(&mut app, &ctx, None, fields[0]);
+    reply_279_frame(
+        &mut app,
+        &ctx,
+        None,
+        vec![egui::Event::Text("あとで".into())],
+    );
+    assert!(app.waiting_reply_drafts.contains_key(&second));
+    // Every agent went back to work: nothing waits.
+    app.unread_sessions.remove(&second);
+    app.unread_sessions.remove(&first);
+    app.track_attention(Instant::now());
+    assert!(app.attention_order.is_empty());
+    reply_279_frame(&mut app, &ctx, None, Vec::new());
+    assert!(
+        !app.waiting_reply_drafts.contains_key(&second),
+        "待ちが空になっても書きかけが残りました: {:?}",
+        app.waiting_reply_drafts
+    );
     fs::remove_dir_all(&root).ok();
 }

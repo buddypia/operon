@@ -277,6 +277,13 @@ has finished a turn — what the agent last said, or 許可または回答を待
 the keyboard already in its terminal; the toolbar's **要対応 N** button does the
 same while any session waits. Once answered, it returns to its project group.
 
+A waiting row whose terminal is running also has a one-line reply field. Type
+there and press Enter: the words, then Enter, are typed into that session's
+terminal, and the screen stays where it was — 「はい」 answers a question, 「2」
+picks a prompt's second option. Open the session instead when the question
+needs reading. A reply left half typed is dropped when the session stops
+waiting.
+
 A session whose agent is working says for how long once a minute has passed:
 実行中 · 12分 in the heading of its open pane and on its row in the per-project
 session list, and the same time when you hover its state on a tab or in the

@@ -21,6 +21,7 @@ alternatives; commit `plan.md` before editing source files.
     `src/app/relaunch.rs` keeps tabs across a relaunch and restarts gone sessions.
     `src/app/launch_menu.rs` holds the tab strip's + menu and its quick launch.
     `src/app/terminal_output.rs` lays captured terminal text out off the frame.
+    `src/app/waiting_reply.rs` draws the 要対応 rows and sends a reply typed on one.
     `src/app/working_time.rs` measures how long each agent's turn has run.
   - `src/tests.rs` — inline `#[cfg(test)]` suite; no other module has tests.
   - `src/cli.rs` — discovering/scanning agent-CLI sessions and shared archive.
