@@ -286,6 +286,12 @@ picks a prompt's second option. Open the session instead when the question
 needs reading. A reply left half typed is dropped when the session stops
 waiting.
 
+To tell every idle agent of the current project the same thing, open the
+command palette (⌘K) and choose アイドル中のエージェントへ送信…. The sheet names
+the sessions it will reach — those whose terminal is running and whose agent
+has finished its turn — and one line, then Enter, is typed into each. Agents
+that are working or waiting on a prompt are left alone.
+
 A session whose agent is working says for how long once a minute has passed:
 実行中 · 12分 in the heading of its open pane and on its row in the per-project
 session list, and the same time when you hover its state on a tab or in the

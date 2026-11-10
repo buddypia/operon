@@ -1,0 +1,13 @@
+# The evidence for change 282. Format: docs/sdlc/templates/verification.yaml.
+digest: "57f9b5207f5c0d2c"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked broadcast_282_reaches_only_the_projects_idle_running_agents
+  - R2 empirical-test :: cargo test --locked broadcast_282_send_types_into_every_idle_agent
+  - R3 empirical-test :: cargo test --locked broadcast_282_nothing_to_say_or_nobody_idle_sends_nothing
+  - R4 empirical-test :: cargo test --locked broadcast_282_palette_opens_the_sheet
+  - R5 empirical-test :: cargo test --locked broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter
+  - R6 empirical-test :: cargo test --locked broadcast_282_sheet_closes_on_escape_and_waits_when_nobody_is_idle
+  - R7 empirical-test :: cargo test --locked broadcast_282_f1_page_shortcuts_do_not_reach_past_the_sheet
+  - I1 empirical-test :: cargo test --locked palette
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/282-idle-agents-cannot-be-told-at-once/mutations.py
