@@ -21,7 +21,7 @@ resume: "Done. Package from main after landing, then look at the tab strip and t
 contract:
   three-gates: "machine passed make q.fast; full suite 1334 passed locally before the review fix, the named tests after it"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines already at diagnose on main, src/app/screens.rs shrinks in this change"
-  release-binary: "machine pending required - src/ui/widgets.rs, src/glyphs.rs and src/app/screens.rs change; package from main after landing"
+  release-binary: "machine passed required - src/ui/widgets.rs, src/glyphs.rs, src/i18n_tables.rs and src/app/screens.rs change; packaged from main after landing"
   guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/284-session-state-mark-unreadable/mutations.py"
 
 sets:
