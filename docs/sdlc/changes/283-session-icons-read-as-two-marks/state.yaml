@@ -7,8 +7,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -16,13 +16,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the session_283_ tests and the session_badge widget, then rewrite the earlier tab tests."
+resume: "Done. The dot is seen on screen only in the packaged app: look at the tab strip and the left column after packaging."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked session_283_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/ui/widgets.rs, src/glyphs.rs and src/app/screens.rs change"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/283-session-icons-read-as-two-marks/mutations.py"
+  three-gates: "machine passed make q.fast and cargo test --locked session_283_ (5 passed); full suite 1337 passed locally"
+  bands: "machine passed bash scripts/check-bands.sh: largest_module_lines already at diagnose on main, src/app/screens.rs +20 lines from this change (recorded, read-only); nothing at propose"
+  release-binary: "machine passed required - src/ui/widgets.rs, src/glyphs.rs and src/app/screens.rs change; packaged from main after landing"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/283-session-icons-read-as-two-marks/mutations.py: 11 of 11 caught"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
