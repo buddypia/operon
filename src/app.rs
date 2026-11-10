@@ -6,6 +6,7 @@ pub(crate) mod launch_menu;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
 pub(crate) mod terminal_output;
+pub(crate) mod waiting_reply;
 pub(crate) mod working_time;
 
 // The keyboard is data this module reads and `screens.rs` draws, so it is
@@ -648,6 +649,8 @@ pub(crate) struct OperonApp {
     pub(crate) attention_since: HashMap<Uuid, Instant>,
     /// When each working agent's current turn was first seen (change 278).
     pub(crate) working_since: HashMap<Uuid, Instant>,
+    /// The reply being typed on each 要対応 row (change 279); never stored.
+    pub(crate) waiting_reply_drafts: HashMap<Uuid, String>,
     /// The same sessions, longest-waiting first. Rebuilt only when someone
     /// joins or leaves, so the frames in between read it without sorting.
     pub(crate) attention_order: Vec<Uuid>,
@@ -1152,6 +1155,7 @@ impl OperonApp {
             hook_status: HashMap::new(),
             attention_since: HashMap::new(),
             working_since: HashMap::new(),
+            waiting_reply_drafts: HashMap::new(),
             attention_order: Vec::new(),
             terminal_focus_request: None,
             hook_launch_tokens: HashMap::new(),
@@ -6173,6 +6177,9 @@ impl OperonApp {
                 .collect();
             order.sort();
             self.attention_order = order.into_iter().map(|(_, _, id)| id).collect();
+            // A reply half typed goes with the wait it answered (change 279).
+            self.waiting_reply_drafts
+                .retain(|id, _| self.attention_since.contains_key(id));
         }
     }
 
