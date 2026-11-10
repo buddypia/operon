@@ -1,0 +1,12 @@
+# The evidence for change 280. Format: docs/sdlc/templates/verification.yaml.
+# Route bugfix: no spec. F1 and F2 were watched failing against a real tmux;
+# they pass without checking where tmux is not installed, and F3 and F4 hold
+# the same rule there.
+digest: "2fc19f2e26c38d66"
+
+obligations:
+  - F1 empirical-test :: cargo test --locked typed_280_text_ending_in_a_semicolon_arrives_whole
+  - F2 empirical-test :: cargo test --locked typed_280_text_starting_with_a_dash_is_delivered
+  - F3 empirical-test :: cargo test --locked typed_280_text_reaches_tmux_as_text
+  - F4 empirical-test :: cargo test --locked typed_280_only_a_final_semicolon_is_escaped
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/280-typed-text-ending-in-semicolon-is-cut/mutations.py

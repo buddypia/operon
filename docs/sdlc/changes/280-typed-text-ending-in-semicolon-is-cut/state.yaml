@@ -1,0 +1,43 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: bugfix — found by the verifier of change 279 (reply from a waiting
+# row), and older than it: every text typed or pasted into a terminal goes the
+# same way. Cause (root-cause skill): `tmux_send_input` passed the text as the
+# bare argument after `send-keys -l`. tmux ends a command at an argument whose
+# last character is `;` and drops that character, so 「note;」 arrived as
+# 「note」; and with no `--` before it, text beginning with `-` was read as a
+# flag and the whole send failed (`unknown flag -x`). Watched failing against
+# a real tmux 3.8: typed_280_text_ending_in_a_semicolon_arrives_whole and
+# typed_280_text_starting_with_a_dash_is_delivered.
+# Risk: medium (risk.yaml `subprocess`: src/tmux.rs), supervised: the
+# decisions are in `resume`. No new child process; the same single tmux
+# invocation with two more arguments. Nothing paints: no screen.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Decisions: only a final ; is escaped (tmux leaves any other alone); -- goes before every text; the argument list is built by tmux_send_input_arguments so it is checked where tmux is not installed, as on CI."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked typed_280_ (4); the full suite runs in CI"
+  bands: "machine passed bash scripts/check-bands.sh: no tier newly reached"
+  release-binary: "machine passed required - src/tmux.rs changes; packaged from main with the changes that follow it"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/280-typed-text-ending-in-semicolon-is-cut/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
