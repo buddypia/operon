@@ -276,6 +276,8 @@ has finished a turn — what the agent last said, or 許可または回答を待
 (waiting for a permission or an answer). Click one, or press ⌘J, to open it with
 the keyboard already in its terminal; the toolbar's **要対応 N** button does the
 same while any session waits. Once answered, it returns to its project group.
+The Dock icon carries the number of waiting sessions as a badge, so it is in
+view while another application is in front; the badge goes when nobody waits.
 
 A waiting row whose terminal is running also has a one-line reply field. Type
 there and press Enter: the words, then Enter, are typed into that session's

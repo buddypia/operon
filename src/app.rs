@@ -1,5 +1,6 @@
 use crate::*;
 
+pub(crate) mod dock_badge;
 mod keymap;
 pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
@@ -649,6 +650,8 @@ pub(crate) struct OperonApp {
     pub(crate) attention_since: HashMap<Uuid, Instant>,
     /// When each working agent's current turn was first seen (change 278).
     pub(crate) working_since: HashMap<Uuid, Instant>,
+    /// The waiting count the Dock badge was last set for (change 281).
+    pub(crate) dock_badge_shown: usize,
     /// The reply being typed on each 要対応 row (change 279); never stored.
     pub(crate) waiting_reply_drafts: HashMap<Uuid, String>,
     /// The same sessions, longest-waiting first. Rebuilt only when someone
@@ -1155,6 +1158,7 @@ impl OperonApp {
             hook_status: HashMap::new(),
             attention_since: HashMap::new(),
             working_since: HashMap::new(),
+            dock_badge_shown: 0,
             waiting_reply_drafts: HashMap::new(),
             attention_order: Vec::new(),
             terminal_focus_request: None,
@@ -7515,6 +7519,7 @@ impl eframe::App for OperonApp {
         self.start_ready_queued_sessions();
         self.track_attention(Instant::now());
         self.track_working(Instant::now());
+        self.track_dock_badge();
         self.handle_app_shortcuts(ctx);
         if self.command_palette_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.close_command_palette();

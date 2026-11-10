@@ -1,0 +1,8 @@
+# The evidence for change 281. Format: docs/sdlc/templates/verification.yaml.
+digest: "060289fa0c3b2f10"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked dock_281_badge_says_how_many_wait
+  - R2 empirical-test :: cargo test --locked dock_281_badge_changes_only_when_the_count_does
+  - R3 empirical-test :: cargo test --locked dock_281_frame_keeps_the_badge
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/281-dock-icon-does-not-say-agents-wait/mutations.py
