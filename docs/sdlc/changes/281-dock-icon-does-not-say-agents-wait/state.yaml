@@ -1,0 +1,36 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: feature (the Dock icon said nothing before). Risk: high — risk.yaml
+# `unsafe-and-path` (src/sys.rs gains an `unsafe` block), paused: the person
+# was asked before the file was edited and answered 「追加してよい」
+# (approvals.log). The rest is `drawing` (src/app.rs, src/app/). Nothing in
+# the window paints; screen.md shows the Dock icon.
+
+state:
+  route: "feature"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. The badge on a real Dock is seen only in the packaged app: look at it after packaging."
+
+contract:
+  three-gates: "machine passed make q.fast and cargo test --locked dock_281_"
+  bands: "machine passed bash scripts/check-bands.sh: unsafe_blocks 4 reaches warn (recorded, no action), as the person approved"
+  release-binary: "machine passed required - src/app.rs, src/sys.rs and src/app/dock_badge.rs change; packaged from main with the changes that follow it"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/281-dock-icon-does-not-say-agents-wait/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

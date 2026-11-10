@@ -78373,3 +78373,67 @@ fn typed_280_text_reaches_tmux_as_text() {
     );
     assert_ne!(typed("note;"), around("note;"));
 }
+
+#[test]
+fn dock_281_badge_says_how_many_wait() {
+    use app::dock_badge::dock_badge_label;
+    assert_eq!(dock_badge_label(0), None);
+    assert_eq!(dock_badge_label(1).as_deref(), Some("1"));
+    assert_eq!(dock_badge_label(12).as_deref(), Some("12"));
+}
+
+#[test]
+fn dock_281_badge_changes_only_when_the_count_does() {
+    let root = temporary_directory("dock-281-change");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    assert_eq!(
+        app.dock_badge_change(),
+        None,
+        "誰も待っていないのにバッジを触りました"
+    );
+    queue_both_sessions(&mut app, first, second);
+    assert_eq!(app.dock_badge_change(), Some(Some("2".to_owned())));
+    assert_eq!(
+        app.dock_badge_change(),
+        None,
+        "数が同じなのにもう一度設定しました"
+    );
+    app.unread_sessions.remove(&first);
+    app.track_attention(Instant::now());
+    assert_eq!(app.dock_badge_change(), Some(Some("1".to_owned())));
+    app.unread_sessions.remove(&second);
+    app.track_attention(Instant::now());
+    assert_eq!(
+        app.dock_badge_change(),
+        Some(None),
+        "待ちがなくなったのにバッジを消しません"
+    );
+    assert_eq!(app.dock_badge_change(), None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn dock_281_frame_keeps_the_badge() {
+    let root = temporary_directory("dock-281-frame");
+    let (mut app, first, second) = app_with_two_sessions(&root);
+    queue_both_sessions(&mut app, first, second);
+    app.page = Page::Sessions;
+    app.hooks_started = true;
+    app.hooks_enabled = false;
+    app.handoff_archive_sweep_started = true;
+    app.last_session_poll = Instant::now();
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    assert_eq!(app.dock_badge_shown, 0);
+    poll_275_frame(&mut app, &ctx, true);
+    assert_eq!(
+        app.dock_badge_shown,
+        app.attention_order.len(),
+        "フレームが Dock のバッジを更新しません"
+    );
+    assert!(
+        app.dock_badge_shown > 0,
+        "待っているセッションがある前提です"
+    );
+    fs::remove_dir_all(&root).ok();
+}

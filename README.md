@@ -58,7 +58,7 @@ Settings. The projects, sessions, and agent output in them are a demo.
   has been working for a minute or more says for how long — 実行中 · 12分 — in
   its pane's heading and when you hover its state. `⌘J` opens the
   next one and puts the keyboard in its terminal, and the toolbar's **要対応 N**
-  does the same while one waits. `⌘K` also finds a session by what its agent
+  does the same while one waits; the Dock icon wears the same number. `⌘K` also finds a session by what its agent
   last said, and among equal matches a waiting session comes first. The side
   panel (files, conversation, changes) opens on the right of the terminal;
   `⌥⌘B` folds it and opens it.

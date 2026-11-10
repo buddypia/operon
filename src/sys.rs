@@ -270,6 +270,49 @@ fn dispatch_macos_notification_native(action: NativeNotificationAction<'_>) -> R
     unsafe { dispatch_macos_notification_native_impl(action) }
 }
 
+/// Sets or clears (`None`) the Dock tile's badge.
+///
+/// # Safety
+/// Main thread only: `NSApplication` and its Dock tile are AppKit objects.
+unsafe fn set_dock_badge_impl(label: Option<&str>) {
+    let pool = objc_autoreleasePoolPush();
+    let msg_send_0: MsgSend0 = std::mem::transmute(objc_msgSend as *const ());
+    let msg_send_1: MsgSend1 = std::mem::transmute(objc_msgSend as *const ());
+    let cls_application = objc_getClass(c"NSApplication".as_ptr());
+    if !cls_application.is_null() {
+        let application = msg_send_0(
+            cls_application,
+            sel_registerName(c"sharedApplication".as_ptr()),
+        );
+        if !application.is_null() {
+            let tile = msg_send_0(application, sel_registerName(c"dockTile".as_ptr()));
+            if !tile.is_null() {
+                // A nil label is how AppKit is told to remove the badge.
+                let text = label.map_or(std::ptr::null_mut(), |label| to_nsstring(label));
+                msg_send_1(tile, sel_registerName(c"setBadgeLabel:".as_ptr()), text);
+            }
+        }
+    }
+    objc_autoreleasePoolPop(pool);
+}
+
+/// The number on the Dock icon, or none. Only the bundled app has a Dock tile
+/// of its own to mark, and a test binary must not start AppKit; call from the
+/// frame, which eframe runs on the main thread.
+pub(crate) fn set_dock_badge(label: Option<&str>) {
+    if !is_bundled_app() {
+        return;
+    }
+    // SAFETY: called from `OperonApp::update`, which eframe runs on the main
+    // thread, as AppKit requires; every receiver is checked for nil before it
+    // is messaged; `to_nsstring` returns an autoreleased string that the pool
+    // opened inside keeps alive until `setBadgeLabel:` has copied it; the
+    // selectors' signatures (no argument, one object argument) match the
+    // `MsgSend0` and `MsgSend1` casts, and what the cast reads back from the
+    // void `setBadgeLabel:` is discarded unread.
+    unsafe { set_dock_badge_impl(label) }
+}
+
 pub(crate) fn is_bundled_app() -> bool {
     dispatch_macos_notification_native(NativeNotificationAction::CheckBundle).unwrap_or(false)
 }
