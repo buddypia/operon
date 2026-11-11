@@ -1,5 +1,5 @@
 # The evidence for change 290. Format: docs/sdlc/templates/verification.yaml.
-digest: "b80c1108faba99b9"
+digest: "0064de46f66600f4"
 
 obligations:
   - R1 empirical-test :: cargo test --locked cursor_290_wide_and_four_byte_glyphs_span_two_cells
