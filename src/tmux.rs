@@ -328,17 +328,16 @@ pub(crate) fn launch_stored_session(
         )
         .into());
     }
-    if retrying {
-        prepare_tmux_for_retry(&session.tmux_name)?;
-    }
     if session.agent == "terminal" && session.agent_command.is_empty() {
-        start_empty_tmux_session(
+        reopen_or_start_plain_terminal(
             &session.tmux_name,
             &worktree_path,
             &session_variables(hooks, account),
-        )
-        .map_err(|error| error.to_string())?;
+        )?;
     } else {
+        if retrying {
+            prepare_tmux_for_retry(&session.tmux_name)?;
+        }
         let command = stored_launch_command(session, project_path)?;
         let executable = command.split_whitespace().next().unwrap_or_default();
         if !tool_available(executable) {
@@ -553,6 +552,80 @@ pub(crate) fn start_empty_tmux_session(
     Ok(())
 }
 
+/// Starts a plain login shell in `name` when the tmux session is gone, or
+/// respawns it inside the existing dead pane so prior output stays in
+/// scrollback and any legacy `Pane is dead (...)` overlay is cleared
+/// (change 288). Refuses a live or unreadable pane just like
+/// `prepare_tmux_for_retry`.
+pub(crate) fn reopen_or_start_plain_terminal(
+    name: &str,
+    cwd: &Path,
+    environment: &[(&'static str, String)],
+) -> UiResult<()> {
+    match tmux_observation(name).state {
+        TmuxState::Gone => {
+            start_empty_tmux_session(name, cwd, environment).map_err(|error| error.to_string())
+        }
+        TmuxState::Dead => set_tmux_session_environment(name, environment)
+            .and_then(|()| configure_tmux_session(name))
+            .and_then(|()| {
+                preserve_dead_pane_scrollback(name);
+                respawn_tmux_pane(name, cwd, PLAIN_TERMINAL_COMMAND)
+            })
+            .map_err(|error| error.to_string()),
+        TmuxState::Alive => Err(
+            tr("そのターミナルはまだ実行中です。「古いターミナルを停止」を実行してから、もう一度「再試行」を選んでください。")
+                .into(),
+        ),
+        TmuxState::Unknown => {
+            Err(tr("古いターミナルがまだ開いているか判定できませんでした。").into())
+        }
+    }
+}
+
+/// Pushes a dead pane's visible cells into tmux scrollback history before
+/// `respawn-pane -k` resets the cursor to `(0, 0)` for the login shell, so the
+/// new prompt appears below the finished run's output rather than overwriting
+/// its top lines (change 288; pair to `clear_retired_placeholder`, without
+/// `clear-history`).
+fn preserve_dead_pane_scrollback(name: &str) {
+    let mut tmux = tmux_command();
+    tmux.args(["send-keys", "-R", "-t", name]);
+    let _ = run_command_with_timeout(&mut tmux, Duration::from_secs(5));
+}
+
+const MANAGED_TMUX_ENV_KEYS: [&str; 7] = [
+    HOOK_SESSION_ENV,
+    HOOK_LAUNCH_ENV,
+    HOOK_ENDPOINT_ENV,
+    HOOK_SOCKET_ENV,
+    HOOK_EXECUTABLE_ENV,
+    CLAUDE_ACCOUNT_ENV,
+    CODEX_ACCOUNT_ENV,
+];
+
+fn set_tmux_session_environment(name: &str, environment: &[(&'static str, String)]) -> Result<()> {
+    for managed in MANAGED_TMUX_ENV_KEYS {
+        if !environment.iter().any(|(key, _)| *key == managed) {
+            let mut unset = tmux_command();
+            unset.args(["set-environment", "-u", "-t", name, managed]);
+            let cleared = run_command_with_timeout(&mut unset, Duration::from_secs(5))?;
+            if !cleared.status.success() {
+                return Err(anyhow!(String::from_utf8_lossy(&cleared.stderr).to_string()));
+            }
+        }
+    }
+    for (key, value) in environment {
+        let mut command = tmux_command();
+        command.args(["set-environment", "-t", name, key, value.as_str()]);
+        let updated = run_command_with_timeout(&mut command, Duration::from_secs(5))?;
+        if !updated.status.success() {
+            return Err(anyhow!(String::from_utf8_lossy(&updated.stderr).to_string()));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn configure_tmux_session(name: &str) -> Result<()> {
     let mut command = tmux_command();
     command.args(["set-option", "-t", name, "remain-on-exit", "on"]);
@@ -560,6 +633,16 @@ pub(crate) fn configure_tmux_session(name: &str) -> Result<()> {
     if !configured.status.success() {
         return Err(anyhow!(
             String::from_utf8_lossy(&configured.stderr).to_string()
+        ));
+    }
+    // Keep the pane open on exit so `#{pane_dead_status}` and error output
+    // survive, without painting tmux's `Pane is dead (...)` footer (change 288).
+    let mut command = tmux_command();
+    command.args(["set-option", "-q", "-t", name, "remain-on-exit-format", ""]);
+    let format_set = run_command_with_timeout(&mut command, Duration::from_secs(5))?;
+    if !format_set.status.success() {
+        return Err(anyhow!(
+            String::from_utf8_lossy(&format_set.stderr).to_string()
         ));
     }
     let mut command = tmux_command();

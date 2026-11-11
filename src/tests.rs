@@ -75295,11 +75295,12 @@ fn relaunch_270_first_look(fixture: &Relaunch270) -> Vec<(Uuid, TmuxObservation)
 }
 
 #[test]
-/// Change 270: after a restart takes the tmux server with it, every session
-/// that was running at the quit starts again in its own record and tab — a
-/// CLI reopening its conversation, a terminal opening a shell — and nothing
-/// the person ended, nothing already stopped, and nothing without a
-/// conversation to reopen.
+/// Change 270, updated in change 288: after a restart takes the tmux server
+/// with it, every session that was running at the quit starts again in its own
+/// record and tab — a CLI reopening its conversation, a terminal opening a
+/// shell — while a cleanly exited CLI (`Dead`, `Some(0)`) converts to a plain
+/// terminal shell instead of re-running its CLI, and a mid-run forced kill
+/// restores once and stops on immediate repeat failure within cooldown.
 pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone() {
     let mut fixture = relaunch_270_fixture("relaunch-270");
     let before = fixture.app.store.sessions.len();
@@ -75308,7 +75309,12 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         .app
         .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
     let app = &fixture.app;
-    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+    for id in [
+        fixture.terminal,
+        fixture.resumable,
+        fixture.crashed,
+        fixture.quit_cleanly,
+    ] {
         let session = relaunch_270_find(app, id);
         assert_eq!(session.status, SessionStatus::Starting, "{}", session.agent);
         assert!(
@@ -75326,6 +75332,15 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
     assert_eq!(
         relaunch_270_find(app, fixture.crashed).agent_command,
         CliProvider::Codex.native_resume_command(&fixture.crashed_id)
+    );
+    let quit_cleanly = relaunch_270_find(app, fixture.quit_cleanly);
+    assert_eq!(
+        quit_cleanly.agent, "terminal",
+        "自分で終了した CLI がシェルに切り替わりませんでした"
+    );
+    assert!(
+        quit_cleanly.agent_command.is_empty(),
+        "自分で終了した CLI を再開しました"
     );
     assert_eq!(app.store.sessions.len(), before, "再開で記録が増えました");
     assert_eq!(
@@ -75351,11 +75366,6 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         SessionStatus::Active
     );
     assert_eq!(
-        relaunch_270_find(app, fixture.quit_cleanly).status,
-        SessionStatus::Exited,
-        "自分で終了した CLI を再開しました"
-    );
-    assert_eq!(
         relaunch_270_find(app, fixture.no_transcript).status,
         SessionStatus::Lost
     );
@@ -75364,7 +75374,6 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         fixture.exited,
         fixture.lost_before,
         fixture.alive,
-        fixture.quit_cleanly,
         fixture.no_transcript,
     ] {
         assert!(!app
@@ -75372,8 +75381,42 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
             .contains(&BackgroundKey::SessionStart(id)));
     }
 
-    // Only the first look decides: a session that dies later in this run is
-    // not started again by itself.
+    // Change 288: a running session whose terminal disappears mid-run restores
+    // automatically once, and an immediate repeat disappearance inside
+    // `AUTO_RESTORE_COOLDOWN` settles in `Lost`.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.alive).status,
+        SessionStatus::Starting
+    );
+    assert!(fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.alive)));
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.alive),
+        Duration::from_secs(30),
+    );
+    fixture
+        .app
+        .store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == fixture.alive)
+        .unwrap()
+        .status = SessionStatus::Active;
     fixture.app.apply_session_poll(
         vec![(
             fixture.alive,
@@ -75394,7 +75437,12 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         .app
         .background_tasks
         .contains(&BackgroundKey::SessionStart(fixture.alive)));
-    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+    for id in [
+        fixture.terminal,
+        fixture.resumable,
+        fixture.crashed,
+        fixture.quit_cleanly,
+    ] {
         wait_for_background_task(
             &mut fixture.app,
             &BackgroundKey::SessionStart(id),
@@ -75633,7 +75681,7 @@ const WS_PANE_CAP: usize = PANE_MAX + 1;
 const WS1_STATES: usize = 599_549;
 const WS2_STATES: usize = 140_880;
 const WS3_STATES: usize = 656_525;
-const R6_STATES: usize = 164;
+const R6_STATES: usize = 137;
 
 fn ws_group(k: u128) -> Uuid {
     Uuid::from_u128(0x1_0000 + k)
@@ -76186,12 +76234,12 @@ const R6_OBSERVATIONS: [(TmuxState, Option<i32>); 7] = [
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct Relaunch6State {
-    /// Status index at load and whether `relaunch_kind` is `Some`.
+    /// Status index at load and whether `relaunch_kind` is `Some` now.
     load: Option<(u8, bool)>,
     status: u8,
     candidate: bool,
     looked: bool,
-    relaunched: u8,
+    cooldown: bool,
     polls: u8,
     violation: Option<String>,
 }
@@ -76233,22 +76281,19 @@ fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uui
 }
 
 #[test]
-/// Change 270, R6 (departure 6, F1 and 7): the relaunch decision of
-/// `apply_session_poll`, run for real. The model loads one session in each of
-/// the eight statuses, with and without a `relaunch_kind` (a plain terminal, a
-/// Claude session with no conversation), then takes up to three polls, each
-/// one of seven observations (every `TmuxState`; `Dead` with status 0, nonzero
-/// and none; `Gone` with and without a status) with the store write
-/// succeeding or failing (the folder made read-only around the poll). Every
-/// state of that walk, the real app rebuilt at each step from the state
-/// reached.
+/// Change 270, R6 (updated in change 288): the poll transition and relaunch
+/// decision of `apply_session_poll`, run for real across every load status,
+/// `relaunch_kind` (`"terminal"` vs `"claude"` without ID), observation, and
+/// store-write outcome (`stored` false/true) over up to three polls.
 ///
-/// The property, kept as its own ledger beside the app: a session is started
-/// again iff it was Starting/Active/Unknown at load, this poll is its first
-/// non-Unknown look whose outcome was stored (a look that changes nothing has
-/// nothing to store; a failed write leaves the look unspent), the outcome is
-/// Lost or Failed, the write succeeded, and `relaunch_kind` is `Some` — and at
-/// most once over the sequence; the real candidate set agrees with the ledger.
+/// The ledger checks:
+/// - Clean exit (`Dead`, `Some(0)`) on a pollable interactive session opens a
+///   shell in place (`kind` becomes `true`, status becomes `Starting`) when
+///   `stored`, without spending auto-restore cooldown.
+/// - Abnormal exit (`Lost` or `Failed`) launches in place iff `pollable`,
+///   `kind`, `stored`, and `(was_candidate || !cooldown)`, stamping `cooldown`
+///   so a second abnormal exit in the cooldown window does not loop.
+/// - `relaunch_candidates` keeps its look unspent on a failed store write.
 pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look() {
     use std::os::unix::fs::PermissionsExt;
     let root = temporary_directory("model-relaunch-270");
@@ -76269,7 +76314,7 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
         status: 0,
         candidate: false,
         looked: false,
-        relaunched: 0,
+        cooldown: false,
         polls: 0,
         violation: None,
     };
@@ -76300,6 +76345,9 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
                 } else {
                     app.relaunch_candidates.clear();
                 }
+                if state.cooldown {
+                    app.last_auto_restore.insert(id, Instant::now());
+                }
                 if !stored {
                     fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
                 }
@@ -76321,41 +76369,56 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
                     .contains(&BackgroundKey::SessionStart(id));
                 let candidate_now = app.relaunch_candidates.contains(&id);
                 let status_now = r6_index(&app.store.sessions[0].status);
+                let kind_now = relaunch_kind(&app.store.sessions[0]).is_some();
+                let cooldown_now = app.last_auto_restore.contains_key(&id);
                 // The ledger, from the requirement alone.
+                let pollable = R6_RUNNING.contains(&state.status);
                 let was_candidate = R6_RUNNING.contains(&loaded) && !state.looked;
-                let looks = was_candidate && state_of != TmuxState::Unknown;
-                let lost_or_failed = match (state_of, exit) {
-                    (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
-                    (TmuxState::Dead, Some(code)) => code != 0,
-                    _ => false,
-                };
-                let needs_write = match state_of {
-                    TmuxState::Alive => state.status != 1,
-                    TmuxState::Unknown => false,
-                    _ => true,
-                };
-                let expected = looks && lost_or_failed && kind && *stored;
+                let looks = pollable && was_candidate && state_of != TmuxState::Unknown;
+                let clean_exit = pollable && matches!((state_of, exit), (TmuxState::Dead, Some(0)));
+                let lost_or_failed = pollable
+                    && match (state_of, exit) {
+                        (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
+                        (TmuxState::Dead, Some(code)) => code != 0,
+                        _ => false,
+                    };
+                let needs_write = pollable
+                    && match state_of {
+                        TmuxState::Alive => state.status != 1,
+                        TmuxState::Unknown => false,
+                        _ => true,
+                    };
+                let expected_auto_restore =
+                    lost_or_failed && kind && *stored && (looks || !state.cooldown);
+                let expected_shell = clean_exit && *stored;
+                let expected = expected_auto_restore || expected_shell;
                 let looked = state.looked || (looks && (!needs_write || *stored));
-                let count = state.relaunched + u8::from(relaunched);
+                let expected_cooldown = state.cooldown || expected_auto_restore;
+                let expected_kind = kind || expected_shell;
                 let violation = if relaunched != expected {
                     Some(format!(
-                        "relaunched {relaunched}, the requirement says {expected}"
+                        "relaunched {relaunched}, the requirement says {expected} (status={}, kind={kind}, obs={observation}, stored={stored}, cooldown={})",
+                        state.status, state.cooldown
                     ))
-                } else if count > 1 {
-                    Some("relaunched twice".to_owned())
                 } else if candidate_now != (R6_RUNNING.contains(&loaded) && !looked) {
                     Some(format!(
                         "candidate {candidate_now} after a look the ledger calls spent={looked}"
                     ))
+                } else if cooldown_now != expected_cooldown {
+                    Some(format!(
+                        "cooldown {cooldown_now}, expected {expected_cooldown}"
+                    ))
+                } else if kind_now != expected_kind {
+                    Some(format!("kind {kind_now}, expected {expected_kind}"))
                 } else {
                     None
                 };
                 Some(Relaunch6State {
-                    load: state.load,
+                    load: Some((loaded, expected_kind)),
                     status: status_now,
                     candidate: candidate_now,
                     looked,
-                    relaunched: count,
+                    cooldown: expected_cooldown,
                     polls: state.polls + 1,
                     violation,
                 })
@@ -80169,4 +80232,1395 @@ fn home_287_clicking_the_mark_opens_the_session() {
     assert_eq!(app.page, Page::Sessions);
     assert_eq!(app.selected_session, Some(session.id));
     fs::remove_dir_all(root).ok();
+}
+
+// --- Change 288: keep cleanly exited panes as live shells and auto-restore forced terminations ---
+
+#[test]
+/// Change 288, R1 & R2 (tmux layer): configured sessions suppress tmux's
+/// `Pane is dead (...)` footer (`remain-on-exit-format ""`), and launching a
+/// plain terminal onto a `Dead` pane respawns the login shell in place while
+/// preserving prior scrollback (both on initial shell conversion and on retry).
+pub(crate) fn pane_288_configure_tmux_suppresses_dead_pane_banner_and_keeps_scrollback() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("pane-288-tmux");
+    let project = relaunch_270_project(&root);
+    fs::create_dir_all(&project.path).unwrap();
+    let mut session = relaunch_270_session(project.id, "gemini", SessionStatus::Active, None);
+    session.worktree_path = Some(project.path.clone());
+    let name = session.tmux_name.clone();
+
+    start_tmux_agent_session(
+        &name,
+        &project.path,
+        "printf 'scrollback-marker-288\\n'; sleep 0.1; exit 0",
+        &[],
+    )
+    .unwrap();
+    for _ in 0..100 {
+        if tmux_observation(&name).state == TmuxState::Dead {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        tmux_observation(&name),
+        TmuxObservation {
+            state: TmuxState::Dead,
+            exit_status: Some(0),
+        }
+    );
+    let dead_screen = tmux_capture(&name).unwrap();
+    assert!(
+        dead_screen.contains("scrollback-marker-288"),
+        "expected agent output in dead pane, got: {dead_screen:?}"
+    );
+    assert!(
+        !dead_screen.contains("Pane is dead"),
+        "tmux painted a dead-pane footer despite remain-on-exit-format: {dead_screen:?}"
+    );
+
+    // Converting the record to a plain terminal (`retrying = false`) respawns
+    // a login shell in the dead pane without killing the session or wiping scrollback.
+    session.agent = "terminal".into();
+    session.agent_command.clear();
+    session.origin = Some(SessionOrigin::PlainTerminal);
+    launch_stored_session(
+        &session,
+        &project.path,
+        false,
+        false,
+        None,
+        &[("OPERON_PANE_288_ENV", "kept".into())],
+    )
+    .unwrap();
+    assert_eq!(tmux_observation(&name).state, TmuxState::Alive);
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        "printf 'shell-ready-288:%s\\n' \"$OPERON_PANE_288_ENV\"",
+        "Enter",
+    ]);
+    run_command_with_timeout(&mut send, Duration::from_secs(5)).unwrap();
+    let mut live_screen = String::new();
+    for _ in 0..100 {
+        live_screen = tmux_capture(&name).unwrap_or_default();
+        if live_screen.contains("shell-ready-288:kept") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        live_screen.contains("shell-ready-288:kept"),
+        "respawned shell did not run with updated environment: {live_screen:?}"
+    );
+    assert!(
+        live_screen.contains("scrollback-marker-288"),
+        "respawning the login shell erased prior scrollback: {live_screen:?}"
+    );
+
+    // Force-killing the shell into `Dead` and retrying (`retrying = true`) also
+    // respawns in place while keeping the scrollback.
+    respawn_tmux_pane(
+        &name,
+        &project.path,
+        "printf 'before-crash-288\\n'; sleep 0.1; exit 137",
+    )
+    .unwrap();
+    for _ in 0..100 {
+        if tmux_observation(&name).state == TmuxState::Dead {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    launch_stored_session(&session, &project.path, true, false, None, &[]).unwrap();
+    assert_eq!(tmux_observation(&name).state, TmuxState::Alive);
+    let retried_screen = tmux_capture(&name).unwrap();
+    assert!(
+        retried_screen.contains("before-crash-288"),
+        "retrying a dead plain terminal erased scrollback: {retried_screen:?}"
+    );
+
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, R2: an interactive session whose process exits cleanly (`Dead`,
+/// `Some(0)`) converts in place into a plain terminal (`agent == "terminal"`)
+/// and starts a quiet shell launch, whereas cancelled sessions, setup runs,
+/// `.operon/run.sh` scripts, and dependency parents keep their terminal states.
+pub(crate) fn pane_288_clean_exit_reopens_interactive_session_as_shell() {
+    let root = temporary_directory("pane-288-clean-exit");
+    let data_file = root.join("store.json");
+    let missing = root.join("gone");
+    let project = relaunch_270_project(&root);
+    let make = |agent: &str, origin: Option<SessionOrigin>| {
+        let mut s = relaunch_270_session(project.id, agent, SessionStatus::Active, origin);
+        s.worktree_path = Some(missing.clone());
+        s.goal = "ship it".into();
+        s.agent_command = if agent == "terminal" {
+            String::new()
+        } else {
+            format!("{agent} --flag")
+        };
+        if agent != "terminal" {
+            s.native_session_id = Some(Uuid::new_v4().to_string());
+            s.native_session_path = Some(root.join("conv.jsonl"));
+        }
+        s
+    };
+
+    let cli_done = make("gemini", None);
+    let adopted_done = make("claude", Some(SessionOrigin::Adopted));
+    let cancelled = make("codex", None);
+    let setup = make("terminal", Some(SessionOrigin::PlainTerminal));
+    let mut run_script = make(RUN_SCRIPT_AGENT, None);
+    run_script.agent_command = "sh .operon/run.sh".into();
+    let parent = make("claude", None);
+    let mut child = make("codex", None);
+    child.status = SessionStatus::Queued;
+    child.depends_on = vec![parent.id];
+
+    let (cli_id, adopted_id, cancel_id, setup_id, script_id, parent_id, child_id) = (
+        cli_done.id,
+        adopted_done.id,
+        cancelled.id,
+        setup.id,
+        run_script.id,
+        parent.id,
+        child.id,
+    );
+
+    let mut store = Store::default();
+    store.notifications_enabled = true;
+    store.projects.push(project);
+    store.pending_cancellations.push(cancel_id);
+    store.sessions.extend([
+        cli_done,
+        adopted_done,
+        cancelled,
+        setup,
+        run_script,
+        parent,
+        child,
+    ]);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.relaunch_candidates.clear();
+    app.setup_sessions.insert(setup_id);
+
+    let clean = TmuxObservation {
+        state: TmuxState::Dead,
+        exit_status: Some(0),
+    };
+    app.apply_session_poll(
+        vec![
+            (cli_id, clean),
+            (adopted_id, clean),
+            (cancel_id, clean),
+            (setup_id, clean),
+            (script_id, clean),
+            (parent_id, clean),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    for (id, expected_origin) in [
+        (cli_id, SessionOrigin::PlainTerminal),
+        (adopted_id, SessionOrigin::Adopted),
+    ] {
+        let s = relaunch_270_find(&app, id);
+        assert_eq!(s.agent, "terminal");
+        assert!(s.agent_command.is_empty());
+        assert!(s.goal.is_empty());
+        assert!(s.native_session_id.is_none());
+        assert!(s.native_session_path.is_none());
+        assert_eq!(s.origin, Some(expected_origin));
+        assert_eq!(s.status, SessionStatus::Starting);
+        assert!(app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+        assert!(app.quiet_launches.contains(&id));
+    }
+
+    assert_eq!(
+        relaunch_270_find(&app, cancel_id).status,
+        SessionStatus::Cancelled
+    );
+    assert_eq!(
+        relaunch_270_find(&app, setup_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("セットアップが完了しました。"))
+    );
+    assert_eq!(
+        relaunch_270_find(&app, script_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(&app, parent_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        ready_queued_session_ids(&app.store.sessions),
+        vec![child_id]
+    );
+    for excluded in [cancel_id, setup_id, script_id, parent_id] {
+        assert!(!app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(excluded)));
+    }
+
+    for id in [cli_id, adopted_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, R3: open workspace tabs saved as `SessionStatus::Exited` by an
+/// older build re-evaluate on startup and reopen in place as plain terminals
+/// whether their old pane is `Dead` or `Gone`, while closed `Exited` sessions
+/// stay `SessionStatus::Exited` and no spurious toast or notification fires.
+pub(crate) fn pane_288_exited_open_tab_from_previous_run_reopens_as_shell() {
+    let root = temporary_directory("pane-288-legacy-exited");
+    let data_file = root.join("store.json");
+    let missing = root.join("gone");
+    let project_a = relaunch_270_project(&root);
+    let mut project_b = relaunch_270_project(&root);
+    project_b.id = Uuid::new_v4();
+
+    let make = |project_id: Uuid, agent: &str| {
+        let mut s = relaunch_270_session(project_id, agent, SessionStatus::Exited, None);
+        s.worktree_path = Some(missing.clone());
+        s.agent_command = format!("{agent} --dangerously-skip-permissions");
+        s.native_session_id = Some(Uuid::new_v4().to_string());
+        s
+    };
+    let open_dead = make(project_a.id, "gemini");
+    let closed_history = make(project_a.id, "gemini");
+    let open_other_project = make(project_b.id, "codex");
+    let (open_dead_id, closed_id, other_id) =
+        (open_dead.id, closed_history.id, open_other_project.id);
+
+    let mut tabs_a = WorkspaceTabs::default();
+    tabs_a.open(WorkspaceTab::Session(open_dead_id));
+    let mut tabs_b = WorkspaceTabs::default();
+    tabs_b.open(WorkspaceTab::Session(other_id));
+    let saved_layout = WorkspaceLayout {
+        project: Some(project_a.id),
+        workspaces: vec![
+            tabs_a.to_saved(project_a.id, Some(open_dead_id)),
+            tabs_b.to_saved(project_b.id, Some(other_id)),
+        ],
+        placed: vec![open_dead_id, closed_id, other_id],
+    };
+    save_workspace_layout(&data_file, &saved_layout).unwrap();
+
+    let mut store = Store::default();
+    store.notifications_enabled = true;
+    store.projects.extend([project_a, project_b]);
+    store
+        .sessions
+        .extend([open_dead, closed_history, open_other_project]);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    // Stored status stays `Exited` before the first poll so a pre-poll persist
+    // or directory reservation check never mistakes a finished tab for active.
+    assert_eq!(
+        relaunch_270_find(&app, open_dead_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(&app, other_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(&app, closed_id).status,
+        SessionStatus::Exited
+    );
+    assert!(app.exited_tabs_on_load.contains(&open_dead_id));
+    assert!(app.exited_tabs_on_load.contains(&other_id));
+    assert!(!app.exited_tabs_on_load.contains(&closed_id));
+
+    app.apply_session_poll(
+        vec![
+            (
+                open_dead_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+            (
+                other_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    for id in [open_dead_id, other_id] {
+        let s = relaunch_270_find(&app, id);
+        assert_eq!(s.agent, "terminal");
+        assert!(s.agent_command.is_empty());
+        assert_eq!(s.status, SessionStatus::Starting);
+        assert!(app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+    }
+    assert_eq!(
+        relaunch_270_find(&app, closed_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(app.notice, None);
+    assert!(
+        !app.background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "legacy Exited tab migration emitted a notification"
+    );
+
+    for id in [open_dead_id, other_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, R4 & R5: forced termination during an active run (`!first_look`)
+/// automatically restores a CLI with a saved transcript or a plain terminal,
+/// announces single and multiple restorations with the Japanese toast, refuses
+/// an immediate repeat crash within `AUTO_RESTORE_COOLDOWN`, and clears that
+/// cooldown when the person manually starts the session again.
+pub(crate) fn pane_288_forced_kill_mid_run_restores_cli_and_shell_with_cooldown() {
+    let mut fixture = relaunch_270_fixture("pane-288-forced-restore");
+    // All sessions are already past startup's first look.
+    fixture.app.relaunch_candidates.clear();
+    let codex_name = relaunch_270_find(&fixture.app, fixture.resumable)
+        .name
+        .clone();
+
+    // 1. Single forced kill (`SIGKILL` -> `Dead`, `None` -> `Lost`) mid-run.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.resumable,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let resumed = relaunch_270_find(&fixture.app, fixture.resumable);
+    assert_eq!(resumed.status, SessionStatus::Starting);
+    assert_eq!(
+        resumed.agent_command,
+        CliProvider::Codex.native_resume_command(&fixture.resume_id)
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "強制終了されたセッションを自動で復元しました: {name}",
+                name = codex_name
+            )
+            .as_str()
+        )
+    );
+    assert!(fixture.app.brief_notice.is_some());
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.resumable),
+        Duration::from_secs(15),
+    );
+
+    // 2. Immediate repeat crash inside `AUTO_RESTORE_COOLDOWN` settles in `Failed`
+    //    instead of looping.
+    fixture
+        .app
+        .store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == fixture.resumable)
+        .unwrap()
+        .status = SessionStatus::Active;
+    fixture.app.notice = None;
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.resumable,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(137),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.resumable).status,
+        SessionStatus::Failed
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.resumable)));
+    assert_eq!(fixture.app.notice, None);
+
+    // 3. Multiple sessions killed in one poll (`terminal` + `crashed`) show the
+    //    count toast, while `no_transcript` does not count or loop.
+    fixture.app.apply_session_poll(
+        vec![
+            (
+                fixture.terminal,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+            (
+                fixture.crashed,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                fixture.no_transcript,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "強制終了されたセッションを {count} 件自動で復元しました。",
+                count = 2
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.no_transcript).status,
+        SessionStatus::Lost
+    );
+    for id in [fixture.terminal, fixture.crashed] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+
+    // 4. Manual retry (`start_session`) clears the cooldown so a later mid-run
+    //    kill is eligible for auto-restore again.
+    fixture.app.start_session(fixture.terminal);
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(15),
+    );
+    fixture
+        .app
+        .store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == fixture.terminal)
+        .unwrap()
+        .status = SessionStatus::Active;
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.terminal,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 288, R6: when a quiet background launch (`LaunchFocus::Keep`)
+/// completes for a session whose terminal is currently on screen, Operon
+/// requests fresh terminal output right away without altering selection, page,
+/// focus, or notice; off-screen quiet launches do not spawn output captures.
+pub(crate) fn pane_288_quiet_launch_on_screen_requests_immediate_output() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let mut fixture = relaunch_270_fixture("pane-288-quiet-output");
+    let shown = fixture.terminal;
+    let hidden = fixture.alive;
+    let workdir = fixture.root.join("live-pane");
+    fs::create_dir_all(&workdir).unwrap();
+    let shown_tmux = relaunch_270_find(&fixture.app, shown).tmux_name.clone();
+    let hidden_tmux = relaunch_270_find(&fixture.app, hidden).tmux_name.clone();
+    start_tmux_agent_session(
+        &shown_tmux,
+        &workdir,
+        "printf 'quiet-shown-output-288\\n'; exec /bin/cat",
+        &[],
+    )
+    .unwrap();
+    start_tmux_agent_session(
+        &hidden_tmux,
+        &workdir,
+        "printf 'quiet-hidden-output-288\\n'; exec /bin/cat",
+        &[],
+    )
+    .unwrap();
+
+    fixture.app.page = Page::Sessions;
+    fixture.app.session_library_open = false;
+    fixture.app.workspace.open(WorkspaceTab::Session(shown));
+    fixture.app.workspace_initialized = true;
+    fixture.app.selected_session = Some(shown);
+    fixture.app.notice = Some("keep-notice".into());
+    fixture.app.terminal_focus_request = None;
+
+    for id in [shown, hidden] {
+        fixture.app.quiet_launches.insert(id);
+        fixture
+            .app
+            .background_tasks
+            .insert(BackgroundKey::SessionStart(id));
+        fixture
+            .app
+            .background_sender
+            .send(BackgroundResult::SessionStarted {
+                session_id: id,
+                result: Ok(None),
+            })
+            .unwrap();
+    }
+    fixture.app.process_background_results();
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionOutput(shown),
+        Duration::from_secs(15),
+    );
+    fixture.app.process_background_results();
+
+    let rendered = fixture
+        .app
+        .session_output
+        .get(&shown)
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        rendered.contains("quiet-shown-output-288"),
+        "visible quiet launch did not capture fresh terminal output, got: {rendered:?}"
+    );
+    assert!(
+        !fixture
+            .app
+            .background_tasks
+            .contains(&BackgroundKey::SessionOutput(hidden))
+            && !fixture.app.session_output.contains_key(&hidden),
+        "off-screen quiet launch requested terminal output unnecessarily"
+    );
+    assert_eq!(fixture.app.notice.as_deref(), Some("keep-notice"));
+    assert_eq!(fixture.app.terminal_focus_request, None);
+    for id in [shown, hidden] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::NativeSessionResolution(id),
+            Duration::from_secs(15),
+        );
+    }
+    kill_tmux_session(&shown_tmux);
+    kill_tmux_session(&hidden_tmux);
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Pane288ModelState {
+    /// `(agent_kind, cancellable_or_dependent)`:
+    /// `agent_kind`: 0 = plain terminal, 1 = resumable codex, 2 = claude without id, 3 = run-script.
+    /// `blocked`: true when a queued child depends on this session.
+    config: Option<(u8, bool)>,
+    agent_is_terminal: bool,
+    status: u8,
+    cooldown: bool,
+    steps: u8,
+    violation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Pane288ModelEvent {
+    Init(u8, bool),
+    /// `(obs_kind, stored)`:
+    /// `obs_kind`: 0 = Alive, 1 = Dead(0), 2 = Dead(1), 3 = Gone.
+    Poll(u8, bool),
+}
+
+#[test]
+/// Change 288, formal model check: walks every combination of session kind
+/// (plain terminal, resumable CLI, unresumable CLI, run script), dependency
+/// hold (`queued_dependency_count > 0` vs `0`), poll observation (`Alive`,
+/// `Dead(0)`, `Dead(1)`, `Gone`), and store-write outcome (`stored` true/false)
+/// across two consecutive live polls, verifying against the real
+/// `OperonApp::apply_session_poll` that:
+/// 1. Clean exit (`Dead(0)`) converts interactive non-dependent sessions into
+///    `agent == "terminal"` and starts a shell, while run scripts and dependency
+///    parents settle in `Exited`.
+/// 2. Forced death (`Dead(1)` / `Gone`) mid-run restores sessions with a
+///    `relaunch_kind` once and sets cooldown, refusing an immediate second
+///    automatic restore while cooldown holds.
+/// 3. Failed `persist()` rolls back all in-memory session mutations and leaves
+///    cooldown unspent.
+pub(crate) fn model_check_pane_288_poll_transitions_and_cooldown() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("model-pane-288");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let serial = std::cell::Cell::new(0usize);
+
+    let mut events = Vec::new();
+    for agent_kind in 0..4 {
+        for dependent in [false, true] {
+            events.push(Pane288ModelEvent::Init(agent_kind, dependent));
+        }
+    }
+    for obs in 0..4 {
+        for stored in [false, true] {
+            events.push(Pane288ModelEvent::Poll(obs, stored));
+        }
+    }
+
+    let initial = Pane288ModelState {
+        config: None,
+        agent_is_terminal: false,
+        status: 1, // Active
+        cooldown: false,
+        steps: 0,
+        violation: None,
+    };
+
+    let observations = [
+        TmuxObservation {
+            state: TmuxState::Alive,
+            exit_status: None,
+        },
+        TmuxObservation {
+            state: TmuxState::Dead,
+            exit_status: Some(0),
+        },
+        TmuxObservation {
+            state: TmuxState::Dead,
+            exit_status: Some(1),
+        },
+        TmuxObservation {
+            state: TmuxState::Gone,
+            exit_status: None,
+        },
+    ];
+
+    let step = |state: &Pane288ModelState, event: &Pane288ModelEvent| match (state.config, event) {
+        (None, Pane288ModelEvent::Init(agent_kind, dependent)) => Some(Pane288ModelState {
+            config: Some((*agent_kind, *dependent)),
+            agent_is_terminal: *agent_kind == 0,
+            status: 1,
+            cooldown: false,
+            steps: 0,
+            violation: None,
+        }),
+        (Some((agent_kind, dependent)), Pane288ModelEvent::Poll(obs_idx, stored))
+            if state.steps < 2 && state.violation.is_none() =>
+        {
+            serial.set(serial.get() + 1);
+            let n = serial.get();
+            let dir = root.join(format!("case-{n}"));
+            fs::create_dir_all(&dir).unwrap();
+            let project = relaunch_270_project(&dir);
+            let agent = if state.agent_is_terminal {
+                "terminal"
+            } else {
+                match agent_kind {
+                    0 => "terminal",
+                    1 => "codex",
+                    2 => "claude",
+                    _ => RUN_SCRIPT_AGENT,
+                }
+            };
+            let mut session = relaunch_270_session(
+                project.id,
+                agent,
+                r6_status(state.status),
+                (agent == "terminal").then_some(SessionOrigin::PlainTerminal),
+            );
+            session.worktree_path = Some(dir.join("gone"));
+            if agent == "codex" {
+                session.native_session_id = Some(Uuid::new_v4().to_string());
+                session.native_session_path = Some(transcript.clone());
+            } else if agent == RUN_SCRIPT_AGENT {
+                session.agent_command = "sh .operon/run.sh".into();
+            }
+            let id = session.id;
+            let mut store = Store::default();
+            store.projects.push(project.clone());
+            store.sessions.push(session);
+            if dependent {
+                let mut child =
+                    relaunch_270_session(project.id, "codex", SessionStatus::Queued, None);
+                child.depends_on = vec![id];
+                store.sessions.push(child);
+            }
+            let tools = ToolStatus {
+                tmux: true,
+                codex: true,
+                ..ToolStatus::default()
+            };
+            let mut app = OperonApp::from_state(dir.join("store.json"), store, tools, None);
+            app.relaunch_candidates.clear();
+            if state.cooldown {
+                // Seed an active cooldown via an initial forced restore before locking permissions.
+                let seed = relaunch_270_session(
+                    project.id,
+                    "terminal",
+                    SessionStatus::Active,
+                    Some(SessionOrigin::PlainTerminal),
+                );
+                let _ = seed;
+                // Record cooldown through a real forced-kill poll on a temporary unlocked store,
+                // then restore the state under test so we exercise the real cooldown map.
+                app.store.sessions[0].status = SessionStatus::Active;
+                app.apply_session_poll(
+                    vec![(
+                        id,
+                        TmuxObservation {
+                            state: TmuxState::Gone,
+                            exit_status: None,
+                        },
+                    )],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                app.background_tasks
+                    .remove(&BackgroundKey::SessionStart(id));
+                app.quiet_launches.remove(&id);
+                app.store.sessions[0].status = r6_status(state.status);
+            }
+
+            let obs = observations[usize::from(*obs_idx)];
+            if !stored {
+                fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+            }
+            app.apply_session_poll(vec![(id, obs)], Vec::new(), Vec::new(), Vec::new());
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+            let launched = app
+                .background_tasks
+                .contains(&BackgroundKey::SessionStart(id));
+            let after = &app.store.sessions[0];
+            let pollable = matches!(state.status, 0 | 1 | 7);
+            let interactive = agent != RUN_SCRIPT_AGENT;
+            let can_relaunch = agent == "terminal" || agent == "codex";
+
+            let (want_launched, want_terminal, want_cooldown) = if !pollable {
+                (false, state.agent_is_terminal, state.cooldown)
+            } else {
+                match *obs_idx {
+                    0 => (false, state.agent_is_terminal, state.cooldown),
+                    1 => {
+                        if *stored && interactive && !dependent {
+                            (true, true, state.cooldown)
+                        } else {
+                            (false, state.agent_is_terminal, state.cooldown)
+                        }
+                    }
+                    _ => {
+                        if *stored && can_relaunch && !state.cooldown {
+                            (true, state.agent_is_terminal, true)
+                        } else {
+                            (false, state.agent_is_terminal, state.cooldown)
+                        }
+                    }
+                }
+            };
+
+            // If launched (`Starting`), simulate background launch completion to `Active`
+            // so the second step tests consecutive runtime behaviour cleanly.
+            let next_status = if launched { 1 } else { r6_index(&after.status) };
+            let violation = if launched != want_launched {
+                Some(format!(
+                    "agent={agent} dep={dependent} cooldown={} obs={obs_idx} stored={stored}: launched={launched}, want={want_launched}",
+                    state.cooldown
+                ))
+            } else if (after.agent == "terminal") != want_terminal {
+                Some(format!(
+                    "agent={agent} dep={dependent} obs={obs_idx} stored={stored}: after.agent={}, want_terminal={want_terminal}",
+                    after.agent
+                ))
+            } else {
+                None
+            };
+            fs::remove_dir_all(&dir).ok();
+            Some(Pane288ModelState {
+                config: state.config,
+                agent_is_terminal: want_terminal,
+                status: next_status,
+                cooldown: want_cooldown,
+                steps: state.steps + 1,
+                violation,
+            })
+        }
+        _ => None,
+    };
+
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        step,
+        |state| state.violation.clone().map_or(Ok(()), Err),
+        100_000,
+    );
+    fs::remove_dir_all(&root).ok();
+    assert!(
+        coverage.states > 60,
+        "unexpectedly small state space: {coverage:?}"
+    );
+}
+
+#[test]
+/// Change 288, F1: an in-flight `NativeSessionResolved` (either `Ok` or `Err`)
+/// completing after a CLI session has cleanly exited into `"terminal"` must not
+/// write stale `native_session_id` back onto the terminal record or overwrite
+/// `notice` with a resolution error.
+pub(crate) fn pane_288_f1_stale_native_resolution_after_shell_conversion_is_ignored() {
+    let root = temporary_directory("pane-288-f1-native-race");
+    let data_file = root.join("store.json");
+    let missing = root.join("gone");
+    let project = relaunch_270_project(&root);
+    let mut codex = relaunch_270_session(project.id, "codex", SessionStatus::Active, None);
+    codex.worktree_path = Some(missing);
+    let id = codex.id;
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(codex);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.relaunch_candidates.clear();
+    app.background_tasks
+        .insert(BackgroundKey::NativeSessionResolution(id));
+
+    app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(15),
+    );
+    app.notice = None;
+
+    // Late `Ok` from worker thread for the exited Codex turn.
+    app.background_sender
+        .send(BackgroundResult::NativeSessionResolved {
+            session_id: id,
+            result: Ok(CliSession {
+                provider: CliProvider::Codex,
+                native_id: Uuid::new_v4().to_string(),
+                id: Uuid::new_v4().to_string(),
+                title: None,
+                last_user_message: None,
+                branch: None,
+                updated_at: 1,
+                path: root.join("stale.jsonl"),
+            }),
+        })
+        .unwrap();
+    // Late `Err` from worker thread for the exited Codex turn.
+    app.background_sender
+        .send(BackgroundResult::NativeSessionResolved {
+            session_id: id,
+            result: Err("timed out".into()),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    let after = relaunch_270_find(&app, id);
+    assert_eq!(after.agent, "terminal");
+    assert_eq!(after.native_session_id, None);
+    assert_eq!(after.native_session_path, None);
+    assert_eq!(app.notice, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F2: when a CLI session with a pre-allocated `native_session_id`
+/// crashes (`Failed`) before writing a transcript (`NativeResume::NoTranscript`),
+/// `relaunch_lost_session` returns `false`, so `"セッションが失敗しました: {name}"`
+/// must still be dispatched when notifications are enabled.
+pub(crate) fn pane_288_f2_failed_unresumable_cli_still_sends_failure_notification() {
+    let mut fixture = relaunch_270_fixture("pane-288-f2-fail-notify");
+    fixture.app.relaunch_candidates.clear();
+    fixture.app.store.notifications_enabled = true;
+    fixture.app.background_tasks.clear();
+
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.no_transcript,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.no_transcript).status,
+        SessionStatus::Failed
+    );
+    assert!(
+        fixture
+            .app
+            .background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "failure notification was suppressed even though auto-restore could not resume"
+    );
+    // Drain spawned notification task cleanly.
+    let notif_keys = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|key| matches!(key, BackgroundKey::Notification(_)))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in notif_keys {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(15));
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 288, F3: `reopen_exited_workspace_tabs_on_load` keeps `Exited` on disk
+/// if `persist()` runs before the first poll (never turning a finished CLI tab
+/// into a `relaunch_candidates` resume on a subsequent restart), does not
+/// reserve its directory as active, and leaves the parent `Exited` if a child
+/// session is queued onto it before the first poll.
+pub(crate) fn pane_288_f3_exited_tab_pre_poll_persist_and_dependency_stay_exited() {
+    let root = temporary_directory("pane-288-f3-startup-exited");
+    let data_file = root.join("store.json");
+    let transcript = root.join("claude.jsonl");
+    fs::write(&transcript, "{\"type\":\"user\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+    let mut exited_cli = relaunch_270_session(project.id, "claude", SessionStatus::Exited, None);
+    exited_cli.worktree_path = Some(root.join("gone"));
+    exited_cli.native_session_id = Some(Uuid::new_v4().to_string());
+    exited_cli.native_session_path = Some(transcript);
+    let exited_id = exited_cli.id;
+
+    let mut tabs = WorkspaceTabs::default();
+    tabs.open(WorkspaceTab::Session(exited_id));
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(exited_id))],
+            placed: vec![exited_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project.clone());
+    store.sessions.push(exited_cli);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file.clone(), store, tools.clone(), None);
+    assert!(
+        !worktree_has_reserved_session(&app.store.sessions, &root.join("gone")),
+        "Exited open tab falsely reserved its worktree before first poll"
+    );
+
+    // Persisting before the first poll writes `Exited`, so the next launch still
+    // treats it as an `Exited` open tab rather than a crashed running CLI.
+    assert!(app.persist());
+    let reloaded_store = load_store_safely(&data_file).store;
+    let mut app2 = OperonApp::from_state(data_file, reloaded_store, tools, None);
+    assert!(!app2.relaunch_candidates.contains(&exited_id));
+    assert!(app2.exited_tabs_on_load.contains(&exited_id));
+
+    // Queueing a dependent child before the first poll prevents shell conversion
+    // so the child can become ready.
+    let mut child = relaunch_270_session(project.id, "codex", SessionStatus::Queued, None);
+    child.depends_on = vec![exited_id];
+    let child_id = child.id;
+    app2.store.sessions.push(child);
+    app2.apply_session_poll(
+        vec![(
+            exited_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&app2, exited_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(relaunch_270_find(&app2, exited_id).agent, "claude");
+    assert_eq!(
+        ready_queued_session_ids(&app2.store.sessions),
+        vec![child_id]
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F4: if launching the replacement shell is refused (for example
+/// while a git worktree mutation is running), `reopen_exited_session_as_shell`
+/// rolls back the session's CLI agent, command, goal, and `native_session_id`
+/// on both memory and disk; and a deleted account folder bound to the finished
+/// CLI does not block opening a plain terminal shell.
+pub(crate) fn pane_288_f4_refused_shell_launch_preserves_cli_metadata_and_ignores_stale_account() {
+    let root = temporary_directory("pane-288-f4-rollback");
+    let data_file = root.join("store.json");
+    let project = relaunch_270_project(&root);
+    let mut claude = relaunch_270_session(project.id, "claude", SessionStatus::Exited, None);
+    claude.worktree_path = Some(root.join("gone"));
+    claude.agent_command = "claude --resume".into();
+    claude.goal = "finish audit".into();
+    let conv_id = Uuid::new_v4().to_string();
+    claude.native_session_id = Some(conv_id.clone());
+    let id = claude.id;
+
+    let mut store = Store::default();
+    store.projects.push(project.clone());
+    store.sessions.push(claude);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file.clone(), store, tools, None);
+    assert!(app.persist());
+
+    // 1. Busy worktree refuses `launch_session_record` -> full CLI metadata survives.
+    app.background_tasks
+        .insert(BackgroundKey::WorktreeMutation(project.id));
+    assert!(!app.reopen_exited_session_as_shell(id));
+    let kept = relaunch_270_find(&app, id);
+    assert_eq!(kept.agent, "claude");
+    assert_eq!(kept.goal, "finish audit");
+    assert_eq!(kept.native_session_id.as_deref(), Some(conv_id.as_str()));
+    let on_disk = load_store_safely(&data_file).store;
+    assert_eq!(on_disk.sessions[0].agent, "claude");
+    assert_eq!(
+        on_disk.sessions[0].native_session_id.as_deref(),
+        Some(conv_id.as_str())
+    );
+    app.background_tasks
+        .remove(&BackgroundKey::WorktreeMutation(project.id));
+
+    // 2. Deleted account folder bound to the former Claude session does not
+    //    prevent opening a plain login shell once worktree mutation clears.
+    let acct_dir = root.join("deleted-claude-acct");
+    fs::create_dir_all(&acct_dir).unwrap();
+    let acct_id = register_account(&mut app.accounts, "claude", "work", &acct_dir).unwrap();
+    app.accounts.remember_session(id, Some(acct_id));
+    fs::remove_dir_all(&acct_dir).unwrap();
+
+    assert!(app.reopen_exited_session_as_shell(id));
+    assert_eq!(relaunch_270_find(&app, id).agent, "terminal");
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F5: respawning a plain login shell onto a `Dead` pane unsets
+/// stale managed hook and account environment variables that are no longer
+/// present in the new launch's `environment`.
+pub(crate) fn pane_288_f5_dead_pane_respawn_unsets_removed_hook_and_account_vars() {
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("pane-288-f5-unset-env");
+    let project = relaunch_270_project(&root);
+    fs::create_dir_all(&project.path).unwrap();
+    let mut session = relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    session.worktree_path = Some(project.path.clone());
+    let name = session.tmux_name.clone();
+
+    start_tmux_agent_session(
+        &name,
+        &project.path,
+        "sleep 0.1; exit 0",
+        &[
+            (HOOK_SESSION_ENV, session.id.to_string()),
+            (HOOK_LAUNCH_ENV, "tok-1".into()),
+            (CLAUDE_ACCOUNT_ENV, "/tmp/old-acct".into()),
+        ],
+    )
+    .unwrap();
+    for _ in 0..100 {
+        if tmux_observation(&name).state == TmuxState::Dead {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    // Reopen as plain terminal with hooks & account off (`&[]`).
+    reopen_or_start_plain_terminal(&name, &project.path, &[]).unwrap();
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        "printf 'env-check-%s:<%s><%s><%s>\\n' 288 \"$OPERON_SESSION\" \"$OPERON_LAUNCH_TOKEN\" \"$CLAUDE_CONFIG_DIR\"",
+        "Enter",
+    ]);
+    run_command_with_timeout(&mut send, Duration::from_secs(5)).unwrap();
+    let mut screen = String::new();
+    for _ in 0..100 {
+        screen = tmux_capture(&name).unwrap_or_default();
+        if screen.contains("env-check-288:") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        screen.contains("env-check-288:<><><>"),
+        "stale managed hook/account env leaked into respawned shell: {screen:?}"
+    );
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F6: when the same poll both raises a persistent error banner
+/// (such as a non-zero setup completion or a resume refusal) and restores
+/// another force-killed session, the restoration toast must not clobber the
+/// persistent error banner.
+pub(crate) fn pane_288_f6_persistent_poll_error_is_not_clobbered_by_restore_toast() {
+    let mut fixture = relaunch_270_fixture("pane-288-f6-notice-priority");
+    fixture.app.relaunch_candidates.clear();
+    let setup = relaunch_270_session(
+        fixture.app.store.projects[0].id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let setup_id = setup.id;
+    fixture.app.store.sessions.push(setup);
+    fixture.app.setup_sessions.insert(setup_id);
+
+    fixture.app.apply_session_poll(
+        vec![
+            (
+                setup_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(2),
+                },
+            ),
+            (
+                fixture.terminal,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "セットアップが終了コード {p0} で終わりました。セッションを開いて確認してください。",
+                p0 = 2
+            )
+            .as_str()
+        )
+    );
+    assert!(
+        fixture.app.brief_notice.is_none(),
+        "persistent setup failure notice was turned into an auto-expiring toast"
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 288, F7: if an `exited_tabs_on_load` session is manually restarted or
+/// has its tab closed before the in-flight startup `SessionPoll` returns, the
+/// stale `Dead`/`Gone` observation drops out of `exited_tabs_on_load` without
+/// converting the restarted CLI to `"terminal"` or spawning an orphan shell for
+/// the closed tab.
+pub(crate) fn pane_288_f7_stale_exited_tab_poll_skips_restarted_or_closed_tabs() {
+    let root = temporary_directory("pane-288-f7-stale-poll");
+    let data_file = root.join("store.json");
+    let project = relaunch_270_project(&root);
+    let make = |agent: &str| {
+        let mut s = relaunch_270_session(project.id, agent, SessionStatus::Exited, None);
+        s.worktree_path = Some(root.join("gone"));
+        s.agent_command = format!("{agent} --flag");
+        s
+    };
+    let restarted = make("claude");
+    let closed = make("gemini");
+    let (restarted_id, closed_id) = (restarted.id, closed.id);
+
+    let mut tabs = WorkspaceTabs::default();
+    tabs.open(WorkspaceTab::Session(restarted_id));
+    tabs.open(WorkspaceTab::Session(closed_id));
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(restarted_id))],
+            placed: vec![restarted_id, closed_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.extend([restarted, closed]);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    assert!(app.exited_tabs_on_load.contains(&restarted_id));
+    assert!(app.exited_tabs_on_load.contains(&closed_id));
+
+    // User manually restarts `restarted` (now `Active` as `"claude"`) and closes `closed`'s tab
+    // while the startup poll is still in flight.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == restarted_id)
+        .unwrap()
+        .status = SessionStatus::Active;
+    app.close_workspace_tab(&WorkspaceTab::Session(closed_id));
+
+    app.apply_session_poll(
+        vec![
+            (
+                restarted_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+            (
+                closed_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let after_restarted = relaunch_270_find(&app, restarted_id);
+    assert_eq!(after_restarted.agent, "claude");
+    assert_eq!(after_restarted.status, SessionStatus::Active);
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(restarted_id)));
+
+    let after_closed = relaunch_270_find(&app, closed_id);
+    assert_eq!(after_closed.agent, "gemini");
+    assert_eq!(after_closed.status, SessionStatus::Exited);
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(closed_id)));
+    assert!(app.exited_tabs_on_load.is_empty());
+    fs::remove_dir_all(&root).ok();
 }

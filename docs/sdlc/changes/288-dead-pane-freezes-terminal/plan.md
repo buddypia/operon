@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-12
-- **Status**: approved
+- **Status**: done
 
 This is the plan produced in plan mode and accepted before any file was edited.
 If the implementation departs from it, update this file — an abandoned plan is
@@ -51,3 +51,6 @@ worse than no plan, because the next reader trusts it.
 - `bash scripts/check-installed-build.sh` after packaging on `main` — `/Applications/Operon.app` matches `HEAD` and reopens existing dead-pane tabs as live terminals.
 
 ## Departures from the plan
+
+- Added `preserve_dead_pane_scrollback` (`tmux send-keys -R -t <name>`) before `respawn-pane -k` in `reopen_or_start_plain_terminal` so visible cells of the dead pane are pushed into scrollback history rather than overwritten at cursor `(0, 0)` on `tmux 3.8`.
+- Hardened seven edge cases found during independent verification (`pane_288_f1_` through `pane_288_f7_`): ignoring late `NativeSessionResolved` results after shell conversion, keeping `Failed` macOS notifications when `relaunch_lost_session` returns `false`, keeping `SessionStatus::Exited` untouched in `self.store` while queued in `exited_tabs_on_load` before the first poll, atomically rolling back CLI metadata if `launch_session_record` refuses the shell launch (and ignoring stale CLI account bindings on plain terminals), unsetting removed `MANAGED_TMUX_ENV_KEYS` on dead-pane respawn, preserving persistent poll error banners ahead of restoration toasts, and dropping stale `exited_tabs_on_load` poll observations if the session was manually restarted or its tab was closed while the startup poll was in flight.

@@ -47,6 +47,17 @@ pub(crate) fn relaunch_kind(session: &Session) -> Option<RelaunchKind> {
         .map(|_| RelaunchKind::Resume(provider))
 }
 
+/// Interactive terminal and agent kinds whose pane should stay usable as a
+/// login shell when their top-level command exits cleanly with status 0
+/// (change 288). One-shot `.operon/run.sh` runs (`RUN_SCRIPT_AGENT`) and
+/// synthetic test fixtures are excluded.
+pub(crate) fn is_interactive_terminal_session(session: &Session) -> bool {
+    matches!(
+        session.agent.as_str(),
+        "terminal" | "existing terminal" | "claude" | "codex" | "gemini" | "custom"
+    )
+}
+
 /// Whether `session` began as a terminal rather than as a CLI launch, and
 /// which kind of terminal: its recorded origin, or for a record written before
 /// origins were, what its name and kind say. A terminal keeps this provenance
@@ -189,20 +200,248 @@ impl OperonApp {
         }
     }
 
+    /// Queues interactive sessions that an older build saved as `Exited` while
+    /// their workspace tab was still open so the first poll reopens them as
+    /// live login shells instead of leaving `Pane is dead` on screen
+    /// (change 288). Closed historical sessions stay `Exited`.
+    pub(crate) fn reopen_exited_workspace_tabs_on_load(&mut self) {
+        if !self.tools.tmux {
+            return;
+        }
+        let mut open_tabs = self.workspace.session_ids().collect::<HashSet<_>>();
+        for (tabs, _) in self.project_workspaces.values() {
+            open_tabs.extend(tabs.session_ids());
+        }
+        if open_tabs.is_empty() {
+            return;
+        }
+        let candidates = self
+            .store
+            .sessions
+            .iter()
+            .filter(|session| {
+                session.status == SessionStatus::Exited
+                    && open_tabs.contains(&session.id)
+                    && !self.store.pending_cancellations.contains(&session.id)
+                    && is_interactive_terminal_session(session)
+                    && queued_dependency_count(&self.store.sessions, session.id) == 0
+            })
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        self.exited_tabs_on_load.extend(candidates);
+    }
+
+    /// Converts a cleanly exited interactive session in place into a plain
+    /// login shell in the same tab and tmux session, keeping its terminal
+    /// provenance and scrollback while clearing finished CLI conversation
+    /// pointers so future retries or typed CLIs start clean (change 288).
+    /// Rolls back the whole record if launching the shell is refused or cannot
+    /// be persisted.
+    pub(crate) fn reopen_exited_session_as_shell(&mut self, session_id: Uuid) -> bool {
+        if self.session_launch_running(session_id) {
+            return false;
+        }
+        let Some(existing) = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .cloned()
+        else {
+            return false;
+        };
+        let origin = terminal_provenance(&existing).unwrap_or(SessionOrigin::PlainTerminal);
+        let previous_store = self.store.clone();
+        if let Some(stored) = self
+            .store
+            .sessions
+            .iter_mut()
+            .find(|stored| stored.id == session_id)
+        {
+            stored.agent = "terminal".into();
+            stored.agent_command.clear();
+            stored.goal.clear();
+            stored.native_session_id = None;
+            stored.native_session_path = None;
+            stored.origin = Some(origin);
+        }
+        if !self.launch_session_record(session_id, LaunchFocus::Keep) {
+            self.store = previous_store;
+            return false;
+        }
+        self.hook_status.remove(&session_id);
+        self.background_tasks
+            .remove(&BackgroundKey::NativeSessionResolution(session_id));
+        true
+    }
+
+    /// Whether enough time has passed since the last automatic restoration of
+    /// `session_id` to allow another automatic recovery without crash-looping.
+    pub(crate) fn auto_restore_ready(&self, session_id: Uuid, now: Instant) -> bool {
+        self.last_auto_restore
+            .get(&session_id)
+            .is_none_or(|last| now.saturating_duration_since(*last) >= AUTO_RESTORE_COOLDOWN)
+    }
+
+    /// Clears the automatic-restore cooldown when the person explicitly starts
+    /// or resumes a session.
+    pub(crate) fn clear_auto_restore_cooldown(&mut self, session_id: Uuid) {
+        self.last_auto_restore.remove(&session_id);
+    }
+
     /// Starts again, in place, the sessions the first look found gone that
-    /// were running when Operon last closed, and says how many it started.
-    pub(crate) fn relaunch_remembered_sessions(&mut self, ids: Vec<Uuid>) {
-        let mut started = 0;
+    /// were running when Operon last closed, and says how many it started
+    /// unless a persistent notice was raised during the same poll.
+    pub(crate) fn relaunch_remembered_sessions(
+        &mut self,
+        ids: Vec<Uuid>,
+        now: Instant,
+        persistent_notice: &mut bool,
+    ) -> HashSet<Uuid> {
+        let mut started = HashSet::new();
         for id in ids {
-            if self.relaunch_lost_session(id) {
-                started += 1;
+            let saved_notice = self.notice.take();
+            let launched = self.relaunch_lost_session(id);
+            if self.notice.is_some() {
+                self.brief_notice = None;
+                *persistent_notice = true;
+            } else {
+                self.notice = saved_notice;
+            }
+            if launched {
+                self.last_auto_restore.insert(id, now);
+                started.insert(id);
             }
         }
-        if started > 0 {
+        if !started.is_empty() && !*persistent_notice {
             self.notice_briefly(tf!(
                 "前回開いていたセッションを {count} 件再開しました。",
-                count = started
+                count = started.len()
             ));
+        }
+        started
+    }
+
+    /// Automatically restores sessions that were force-terminated or crashed
+    /// while Operon was running, stamps their cooldown, and shows a brief
+    /// Japanese toast naming the session (or the count when more than one)
+    /// unless a persistent error banner was raised during the same poll.
+    pub(crate) fn restore_forced_sessions(
+        &mut self,
+        sessions: Vec<(Uuid, String)>,
+        now: Instant,
+        persistent_notice: &mut bool,
+    ) -> HashSet<Uuid> {
+        let mut restored_ids = HashSet::new();
+        let mut restored_names = Vec::new();
+        for (id, name) in sessions {
+            let saved_notice = self.notice.take();
+            let launched = self.relaunch_lost_session(id);
+            if self.notice.is_some() {
+                self.brief_notice = None;
+                *persistent_notice = true;
+            } else {
+                self.notice = saved_notice;
+            }
+            if launched {
+                self.last_auto_restore.insert(id, now);
+                restored_ids.insert(id);
+                restored_names.push(name);
+            }
+        }
+        if !*persistent_notice {
+            match restored_names.as_slice() {
+                [] => {}
+                [name] => self.notice_briefly(tf!(
+                    "強制終了されたセッションを自動で復元しました: {name}",
+                    name = name
+                )),
+                many => self.notice_briefly(tf!(
+                    "強制終了されたセッションを {count} 件自動で復元しました。",
+                    count = many.len()
+                )),
+            }
+        }
+        restored_ids
+    }
+
+    /// Runs the post-persist side effects of `apply_session_poll`: sidecar
+    /// sync, setup banners, clean-exit shell transitions, startup relaunches,
+    /// mid-run forced restorations, and ambient notifications.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn finish_session_poll_transitions(
+        &mut self,
+        changed: bool,
+        completed: Vec<String>,
+        failed: Vec<(Uuid, String)>,
+        finished_setups: Vec<(Uuid, Option<i32>)>,
+        reopen_shells: Vec<Uuid>,
+        relaunch: Vec<Uuid>,
+        forced_restore: Vec<(Uuid, String)>,
+        now: Instant,
+    ) {
+        let mut persistent_notice = false;
+        if changed {
+            match save_cancellation_intents(&self.data_file, &self.store.pending_cancellations) {
+                Ok(WriteOutcome::Durable) => {}
+                Ok(WriteOutcome::CommittedButNotSynced(error)) => {
+                    self.store_retry_pending = true;
+                    let warning = tf!("キャンセル復旧用メタデータは書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。エラー: {error}", error = error);
+                    self.durability_warning = Some(warning);
+                }
+                Err(error) => {
+                    self.store_retry_pending = true;
+                    self.brief_notice = None;
+                    self.notice = Some(tf!("セッション状態は保存しましたが、キャンセル復旧用メタデータが保留中です。Operon が自動的に再試行します。エラー: {error}", error = error));
+                    persistent_notice = true;
+                }
+            }
+        }
+        for (id, status) in finished_setups {
+            self.setup_sessions.remove(&id);
+            self.brief_notice = None;
+            self.notice = Some(match status {
+                Some(0) => tr("セットアップが完了しました。").into(),
+                Some(code) => tf!(
+                    "セットアップが終了コード {p0} で終わりました。セッションを開いて確認してください。",
+                    p0 = code
+                ),
+                None => tr(
+                    "セットアップがどう終わったか読み取れませんでした。セッションを開いて確認してください。",
+                )
+                .into(),
+            });
+            persistent_notice = true;
+        }
+        for id in reopen_shells {
+            let saved_notice = self.notice.take();
+            self.reopen_exited_session_as_shell(id);
+            if self.notice.is_some() {
+                self.brief_notice = None;
+                persistent_notice = true;
+            } else {
+                self.notice = saved_notice;
+            }
+        }
+        let mut relaunched_ids =
+            self.relaunch_remembered_sessions(relaunch, now, &mut persistent_notice);
+        relaunched_ids.extend(self.restore_forced_sessions(
+            forced_restore,
+            now,
+            &mut persistent_notice,
+        ));
+        if changed && self.store.notifications_enabled {
+            for name in completed {
+                self.send_notification(tf!("セッションが完了しました: {name}", name = name));
+            }
+            for (id, name) in failed {
+                // A crash actually undone by auto-relaunch is not news; one
+                // whose relaunch could not proceed (no transcript, busy
+                // worktree, broken store) still notifies the person.
+                if !relaunched_ids.contains(&id) {
+                    self.send_notification(tf!("セッションが失敗しました: {name}", name = name));
+                }
+            }
         }
     }
 
