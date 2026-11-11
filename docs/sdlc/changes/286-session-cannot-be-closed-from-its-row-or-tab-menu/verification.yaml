@@ -1,0 +1,10 @@
+# The evidence for change 286. Format: docs/sdlc/templates/verification.yaml.
+digest: "190bc24d286e5896"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_286_row_menu_closes_the_tab
+  - R2 empirical-test :: cargo test --locked session_286_tab_menu_closes_the_tab
+  - R3 empirical-test :: cargo test --locked session_286_a_pinned_session_offers_no_close
+  - R4 empirical-test :: cargo test --locked session_286_closing_a_row_of_another_project_keeps_the_shown_one
+  - I1 empirical-test :: cargo test --locked session_285_
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/286-session-cannot-be-closed-from-its-row-or-tab-menu/mutations.py

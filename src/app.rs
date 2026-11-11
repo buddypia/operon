@@ -7174,14 +7174,19 @@ impl OperonApp {
             self.workspace_editor_jumps.remove(id);
         }
         if self.workspace.close(tab) {
-            self.closed_tabs.retain(|closed| closed != tab);
-            self.closed_tabs.push(tab.clone());
-            let excess = self.closed_tabs.len().saturating_sub(CLOSED_TAB_LIMIT);
-            self.closed_tabs.drain(..excess);
+            self.remember_closed_tab(tab);
         }
         if let Some(next) = self.workspace.active().cloned() {
             self.activate_workspace_tab(&next);
         }
+    }
+
+    /// Keeps a closed tab for ⇧⌘T, newest last, within `CLOSED_TAB_LIMIT`.
+    pub(crate) fn remember_closed_tab(&mut self, tab: &WorkspaceTab) {
+        self.closed_tabs.retain(|closed| closed != tab);
+        self.closed_tabs.push(tab.clone());
+        let excess = self.closed_tabs.len().saturating_sub(CLOSED_TAB_LIMIT);
+        self.closed_tabs.drain(..excess);
     }
 
     /// ⇧⌘T: the newest closed tab that can still be shown, shown again.
