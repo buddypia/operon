@@ -69,6 +69,21 @@ MUTATIONS = {
         "                    if session.status == SessionStatus::Active {\n                        // Composition text sits on the same rect the IME claims,",
         "                    if true {\n                        // Composition text sits on the same rect the IME claims,",
     ),
+    "control-and-jamo-marks-counted-as-narrow": (
+        TERMINAL,
+        "        0x0000..=0x001F\n            | 0x007F..=0x009F\n            | 0x0300..=0x036F\n            | 0x1160..=0x11FF\n",
+        "        0x0300..=0x036F\n",
+    ),
+    "watch-and-mahjong-wide-ranges-dropped": (
+        TERMINAL,
+        "            | 0x231A..=0x231B\n            | 0x2329..=0x232A\n",
+        "",
+    ),
+    "variation-selector-fed-to-shaper": (
+        TERMINAL,
+        "fn is_drawable_terminal_char(character: char) -> bool {\n    terminal_character_columns(character) > 0\n        || matches!(character as u32, 0x0300..=0x036F | 0x3099..=0x309A)\n}",
+        "fn is_drawable_terminal_char(_character: char) -> bool {\n    true\n}",
+    ),
 }
 
 sys.dont_write_bytecode = True

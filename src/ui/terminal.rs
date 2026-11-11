@@ -216,6 +216,53 @@ pub(crate) fn apply_terminal_sgr(
     }
 }
 
+/// Whether `ab_glyph` can shape `character` without substituting a `.notdef`
+/// box or standalone spacing glyph that would break the terminal's column grid.
+///
+/// `SarasaMonoJ` carries zero-advance combining glyphs for Latin (`U+0300..=0x036F`)
+/// and kana voiced marks (`U+3099..=0x309A`), whereas variation selectors,
+/// zero-width format/control codepoints, and uncomposed Hangul jungseong/jongseong
+/// have `terminal_character_columns(c) == 0` yet would render with non-zero
+/// advance in `egui`'s non-GSUB shaper.
+fn is_drawable_terminal_char(character: char) -> bool {
+    terminal_character_columns(character) > 0
+        || matches!(character as u32, 0x0300..=0x036F | 0x3099..=0x309A)
+}
+
+/// Append `text` into `job.text` verbatim (preserving copy and search byte-for-byte)
+/// while emitting `LayoutSection`s only over codepoints `is_drawable_terminal_char`
+/// accepts so zero-width selectors never drift subsequent columns or overflow a caret.
+fn append_terminal_job_text(job: &mut LayoutJob, text: &str, format: TextFormat) {
+    if text.is_empty() {
+        return;
+    }
+    if text.chars().all(is_drawable_terminal_char) {
+        job.append(text, 0.0, format);
+        return;
+    }
+    let base_offset = job.text.len();
+    job.text.push_str(text);
+    let mut run_start: Option<usize> = None;
+    for (idx, ch) in text.char_indices() {
+        if is_drawable_terminal_char(ch) {
+            run_start.get_or_insert(idx);
+        } else if let Some(start) = run_start.take() {
+            job.sections.push(egui::text::LayoutSection {
+                leading_space: 0.0,
+                byte_range: (base_offset + start)..(base_offset + idx),
+                format: format.clone(),
+            });
+        }
+    }
+    if let Some(start) = run_start {
+        job.sections.push(egui::text::LayoutSection {
+            leading_space: 0.0,
+            byte_range: (base_offset + start)..(base_offset + text.len()),
+            format,
+        });
+    }
+}
+
 pub(crate) fn append_terminal_text(
     job: &mut LayoutJob,
     text: &str,
@@ -235,9 +282,9 @@ pub(crate) fn append_terminal_text(
     } else {
         (foreground, style.background.unwrap_or(Color32::TRANSPARENT))
     };
-    job.append(
+    append_terminal_job_text(
+        job,
         text,
-        0.0,
         TextFormat {
             font_id: FontId::monospace(MONOSPACE_SIZE),
             color,
@@ -1151,17 +1198,20 @@ pub(crate) fn draw_terminal_cursor(
         ui.painter().rect_filled(caret, 0.0, palette.terminal_fg);
         if glyph.chars().any(|c| !c.is_whitespace()) {
             let mut job = LayoutJob::default();
-            job.append(
+            append_terminal_job_text(
+                &mut job,
                 glyph,
-                0.0,
                 TextFormat {
                     font_id: FontId::monospace(MONOSPACE_SIZE),
                     color: palette.terminal_bg,
                     ..Default::default()
                 },
             );
-            let galley = ui.fonts(|fonts| fonts.layout_job(job));
-            ui.painter().galley(caret.min, galley, palette.terminal_bg);
+            if !job.sections.is_empty() {
+                let galley = ui.fonts(|fonts| fonts.layout_job(job));
+                ui.painter_at(caret)
+                    .galley(caret.min, galley, palette.terminal_bg);
+            }
         }
     } else {
         ui.painter().rect_stroke(

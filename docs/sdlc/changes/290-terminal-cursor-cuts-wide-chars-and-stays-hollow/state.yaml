@@ -26,10 +26,10 @@ state:
 resume: "Done. Package from main after landing, then verify narrow (1 cell) and Japanese/4-byte (2 cells) solid focused block cursor and 1px unfocused hollow cursor across Dark and Light themes."
 
 contract:
-  three-gates: "machine passed make q.fast; cargo test --locked cursor_290_: 5 passed"
+  three-gates: "machine passed make q.fast; cargo test --locked cursor_290_: 9 passed"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; diagnose/warn metrics unchanged from main"
   release-binary: "machine passed required - src/ui/terminal.rs and src/app/screens.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/290-terminal-cursor-cuts-wide-chars-and-stays-hollow/mutations.py"
+  guards-verified-by-mutation: "machine passed 13 of 13 caught: python3 docs/sdlc/changes/290-terminal-cursor-cuts-wide-chars-and-stays-hollow/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

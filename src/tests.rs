@@ -80258,6 +80258,72 @@ pub(crate) fn cursor_290_wide_and_four_byte_glyphs_span_two_cells() {
     let line = "aあ𠮷🎉🪄🈁か\u{3099}葛\u{E0100}e\u{0301}　𠮟𛀀z";
     assert_eq!(terminal_display_columns(line), 23);
 
+    // Every zero-width and wide codepoint block specified in Change 290 must
+    // contribute its exact 0- or 2-column advance.
+    for zw in [
+        '\u{0007}',
+        '\u{0085}',
+        '\u{0301}',
+        '\u{1161}',
+        '\u{1AB0}',
+        '\u{1DC0}',
+        '\u{200D}',
+        '\u{20D0}',
+        '\u{302A}',
+        '\u{3099}',
+        '\u{FE0F}',
+        '\u{FE20}',
+        '\u{FEFF}',
+        '\u{E0100}',
+    ] {
+        let probe = format!("あ{zw}b");
+        assert_eq!(
+            terminal_display_columns(&probe),
+            3,
+            "zero-width U+{:04X} must add 0 columns",
+            zw as u32
+        );
+        assert_eq!(
+            terminal_cursor_cell(&probe, 2),
+            TerminalCursorCell {
+                column: 2,
+                columns: 1,
+                text: "b",
+            },
+            "zero-width U+{:04X} must not shift following cell",
+            zw as u32
+        );
+    }
+    for wide_ch in [
+        '\u{231A}',
+        '\u{2329}',
+        '\u{FE10}',
+        '\u{1B000}',
+        '\u{1F004}',
+        '\u{1F0CF}',
+        '\u{1F18E}',
+        '\u{1F201}',
+        '\u{1F389}',
+        '\u{1FA84}',
+        '\u{20BB7}',
+        '\u{30000}',
+    ] {
+        let probe = format!("{wide_ch}b");
+        assert_eq!(
+            terminal_display_columns(&probe),
+            3,
+            "wide U+{:04X} must occupy 2 columns",
+            wide_ch as u32
+        );
+        let span = terminal_cursor_cell(&probe, 1);
+        assert_eq!(
+            (span.column, span.columns),
+            (0, 2),
+            "trailing column of wide U+{:04X} must snap to (0, 2)",
+            wide_ch as u32
+        );
+    }
+
     let expected: &[(u16, usize, usize, &str)] = &[
         (0, 0, 1, "a"),
         (1, 1, 2, "あ"),
@@ -81056,4 +81122,725 @@ pub(crate) fn cursor_290_ime_anchor_and_galley_cache_follow_wide_caret() {
     );
 
     fs::remove_dir_all(&root).ok();
+}
+
+/// Change 290, reproduced finding F1 (`empirical-verifier`).
+///
+/// Variation selectors (`U+FE00..=U+FE0F`, `U+E0100..=U+E01EF`), zero-width
+/// format/control codepoints, and uncomposed conjoining Jamo (`U+1160..=U+11FF`)
+/// occupy `0` terminal columns, and `ab_glyph` has no GSUB/GPOS complex shaper
+/// for them — feeding them into `LayoutSection` substitutes `.notdef` or
+/// standalone glyphs that spill past `caret.max.x` and push subsequent glyphs
+/// in the row galley right of their terminal grid columns.
+#[test]
+pub(crate) fn cursor_290_variation_selector_clusters_do_not_overflow_caret_or_drift_columns() {
+    let (root, mut app, session) = ime_pane_fixture("cursor-290-vs-ivs");
+    let palette = app.store.theme.palette();
+    let ctx = egui::Context::default();
+    configure_macos_fonts(&ctx, TerminalFont::default());
+
+    let cell = {
+        let mut measured = egui::Vec2::ZERO;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                measured = terminal_cell_size(ui);
+            });
+        });
+        measured
+    };
+
+    let _ = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    app.terminal_focus_request = Some(session.id);
+    let _ = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+
+    let cases: &[(&str, u16, usize)] = &[
+        ("葛\u{E0100}z\n", 0, 2),
+        ("a\u{FE0F}z\n", 0, 1),
+        ("\u{1112}\u{1161}\u{11AB}z\n", 0, 2),
+    ];
+
+    for &(line, cluster_x, cluster_cols) in cases {
+        app.set_session_output(
+            session.id,
+            line.to_owned(),
+            Some(TerminalCursor {
+                x: cluster_x,
+                y: 0,
+                pane_rows: 1,
+            }),
+        );
+        let on_cluster = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+        let (rects, texts) = cursor_290_shapes(&on_cluster);
+
+        let (_, block) = rects
+            .iter()
+            .find(|(_, r)| {
+                r.fill == palette.terminal_fg
+                    && r.stroke.width == 0.0
+                    && (r.rect.height() - cell.y).abs() < 0.5
+            })
+            .expect("focused pane must draw solid cursor block on cluster");
+        assert!(
+            (block.rect.width() - cluster_cols as f32 * cell.x).abs() < 0.5,
+            "caret block width for {line:?} must be {cluster_cols} * cell.x"
+        );
+
+        let (_, inverted) = texts
+            .iter()
+            .find(|(_, t)| {
+                (t.pos - block.rect.min).length() < 0.5
+                    && t.galley
+                        .job
+                        .sections
+                        .first()
+                        .is_some_and(|s| s.format.color == palette.terminal_bg)
+            })
+            .expect("focused pane must draw inverted cluster glyph");
+        assert!(
+            inverted.galley.size().x <= block.rect.width() + 0.5,
+            "inverted cursor galley for {line:?} overflowed caret block: galley width {:.2} > block width {:.2}",
+            inverted.galley.size().x,
+            block.rect.width()
+        );
+
+        // Plain-text extraction for copy/search must still preserve the full UTF-8 cluster.
+        let layouts = app
+            .terminal_layouts
+            .get(&session.id)
+            .expect("layouts stored");
+        assert_eq!(terminal_plain_text(layouts), line);
+
+        let next_x = cluster_cols as u16;
+        app.set_session_output(
+            session.id,
+            line.to_owned(),
+            Some(TerminalCursor {
+                x: next_x,
+                y: 0,
+                pane_rows: 1,
+            }),
+        );
+        let on_z = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+        let (z_rects, z_texts) = cursor_290_shapes(&on_z);
+        let (_, z_block) = z_rects
+            .iter()
+            .find(|(_, r)| {
+                r.fill == palette.terminal_fg
+                    && r.stroke.width == 0.0
+                    && (r.rect.height() - cell.y).abs() < 0.5
+            })
+            .expect("focused pane must draw solid cursor block on trailing 'z'");
+        let (_, row_shape) = z_texts
+            .iter()
+            .find(|(_, t)| {
+                t.galley.text().ends_with('z')
+                    && t.galley
+                        .job
+                        .sections
+                        .first()
+                        .is_some_and(|s| s.format.color == palette.terminal_fg)
+            })
+            .expect("row galley ending in 'z' must be painted");
+        let z_glyph = row_shape
+            .galley
+            .rows
+            .first()
+            .and_then(|r| r.glyphs.iter().rfind(|g| g.chr == 'z'))
+            .expect("row galley must contain 'z' glyph");
+        let rendered_z_x = row_shape.pos.x + z_glyph.pos.x;
+        assert!(
+            (z_block.rect.min.x - rendered_z_x).abs() < 1.0,
+            "cursor at x={next_x} on {line:?} placed caret.min.x at {:.2}, but row galley drew 'z' at {:.2}",
+            z_block.rect.min.x,
+            rendered_z_x
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 290, formal verification I3 (`formal-model`).
+///
+/// Over every raw codepoint sequence of length `0..=4` drawn from a 9-codepoint
+/// alphabet interleaving bare/orphan 1–4B zero-width codepoints (`\u{0007}`,
+/// `\u{0301}`, `\u{3099}`, `\u{E0100}`), narrow 1–2B characters (`'a'`, `'é'`),
+/// and wide 3–4B characters (`'あ'`, `'　'`, `'𠮷'`), paired with `None` and
+/// every `cursor_x` in `0..=9` (`81_191` states): `terminal_display_columns`
+/// and `terminal_cursor_cell` partition `[0, W)` gaplessly and losslessly, snap
+/// lead/trailing columns idempotently, and preserve `start + width <= W`.
+#[test]
+pub(crate) fn model_check_cursor_290_raw_codepoints_partition_and_contain() {
+    const ALPHABET: [(char, usize); 9] = [
+        ('\u{0007}', 0),
+        ('\u{0301}', 0),
+        ('\u{3099}', 0),
+        ('\u{E0100}', 0),
+        ('a', 1),
+        ('é', 1),
+        ('あ', 2),
+        ('　', 2),
+        ('𠮷', 2),
+    ];
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct State {
+        codes: Vec<u8>,
+        cursor_x: Option<u8>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Event {
+        Push(u8),
+        PlaceCursor(u8),
+    }
+
+    let mut events = Vec::with_capacity(ALPHABET.len() + 10);
+    for idx in 0..ALPHABET.len() as u8 {
+        events.push(Event::Push(idx));
+    }
+    for cx in 0..=9u8 {
+        events.push(Event::PlaceCursor(cx));
+    }
+
+    let initial = State {
+        codes: Vec::new(),
+        cursor_x: None,
+    };
+
+    let step = |state: &State, event: &Event| -> Option<State> {
+        if state.cursor_x.is_some() {
+            return None;
+        }
+        match *event {
+            Event::Push(idx) if state.codes.len() < 4 => {
+                let mut codes = state.codes.clone();
+                codes.push(idx);
+                Some(State {
+                    codes,
+                    cursor_x: None,
+                })
+            }
+            Event::PlaceCursor(cx) => Some(State {
+                codes: state.codes.clone(),
+                cursor_x: Some(cx),
+            }),
+            _ => None,
+        }
+    };
+
+    let invariant = |state: &State| -> std::result::Result<(), String> {
+        let mut line = String::new();
+        let mut orphan_prefix = String::new();
+        let mut clusters: Vec<(usize, usize, String)> = Vec::new();
+        let mut total_cols = 0usize;
+
+        for &idx in &state.codes {
+            let (ch, width) = ALPHABET[usize::from(idx)];
+            line.push(ch);
+            if width == 0 {
+                if let Some(last) = clusters.last_mut() {
+                    last.2.push(ch);
+                } else {
+                    orphan_prefix.push(ch);
+                }
+            } else {
+                let mut text = String::new();
+                text.push(ch);
+                clusters.push((total_cols, width, text));
+                total_cols += width;
+            }
+        }
+
+        match state.cursor_x {
+            None => {
+                let measured = terminal_display_columns(&line);
+                if measured != total_cols {
+                    return Err(format!(
+                        "display_columns({line:?}) = {measured}, expected {total_cols}"
+                    ));
+                }
+                let mut reconstructed = orphan_prefix;
+                let mut col = 0usize;
+                while col < total_cols {
+                    let span = terminal_cursor_cell(&line, col as u16);
+                    if span.column != col || (span.columns != 1 && span.columns != 2) {
+                        return Err(format!(
+                            "partition gap/overlap at col={col} on {line:?}: got {span:?}"
+                        ));
+                    }
+                    if col + span.columns > total_cols {
+                        return Err(format!(
+                            "span {span:?} overflows total_cols={total_cols} on {line:?}"
+                        ));
+                    }
+                    let mut chars = span.text.chars();
+                    let Some(first) = chars.next() else {
+                        return Err(format!("empty span text inside line at col={col}"));
+                    };
+                    let first_w = ALPHABET
+                        .iter()
+                        .find(|&&(c, _)| c == first)
+                        .map(|&(_, w)| w)
+                        .unwrap_or(99);
+                    if first_w != span.columns {
+                        return Err(format!(
+                            "base char {first:?} ground-truth width {first_w} != {}",
+                            span.columns
+                        ));
+                    }
+                    for trailing in chars {
+                        let tw = ALPHABET
+                            .iter()
+                            .find(|&&(c, _)| c == trailing)
+                            .map(|&(_, w)| w)
+                            .unwrap_or(99);
+                        if tw != 0 {
+                            return Err(format!(
+                                "non-zero-width char {trailing:?} absorbed into {span:?}"
+                            ));
+                        }
+                    }
+                    reconstructed.push_str(span.text);
+                    col += span.columns;
+                }
+                if reconstructed != line {
+                    return Err(format!(
+                        "lossless reconstruction failed: {reconstructed:?} != {line:?}"
+                    ));
+                }
+            }
+            Some(cx) => {
+                let target = usize::from(cx);
+                let actual = terminal_cursor_cell(&line, u16::from(cx));
+                let glyph = TerminalCaretGlyph::from_str(actual.text);
+                if glyph.as_str() != actual.text {
+                    return Err(format!(
+                        "short cluster {:?} mutated by TerminalCaretGlyph: {:?}",
+                        actual.text,
+                        glyph.as_str()
+                    ));
+                }
+                if target < total_cols {
+                    let (start, width, slice) = clusters
+                        .iter()
+                        .find(|&&(s, w, _)| target >= s && target < s + w)
+                        .ok_or_else(|| format!("no cluster covering {target} on {line:?}"))?;
+                    if actual.column != *start
+                        || actual.columns != *width
+                        || actual.text != slice.as_str()
+                    {
+                        return Err(format!(
+                            "cx={target} on {line:?}: got {actual:?}, expected ({start}, {width}, {slice:?})"
+                        ));
+                    }
+                    if actual.column + actual.columns > total_cols {
+                        return Err(format!(
+                            "right-edge containment broken: {} + {} > {total_cols}",
+                            actual.column, actual.columns
+                        ));
+                    }
+                    if terminal_cursor_cell(&line, *start as u16) != actual {
+                        return Err(format!("lead-column snap not idempotent on {line:?}"));
+                    }
+                    if *width == 2 && terminal_cursor_cell(&line, (*start + 1) as u16) != actual {
+                        return Err(format!("trailing-column snap mismatch on {line:?}"));
+                    }
+                } else if actual.column != target || actual.columns != 1 || !actual.text.is_empty()
+                {
+                    return Err(format!(
+                        "past-EOL cx={target} on {line:?}: got {actual:?}, expected ({target}, 1, \"\")"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    };
+
+    let coverage = exhaustive_check(initial, &events, step, invariant, 90_000);
+    assert_eq!(coverage.states, 7_381 * 11);
+    assert_eq!(coverage.transitions, 81_190);
+}
+
+/// Change 290, formal verification I4 (`formal-model`).
+///
+/// Sweeps `27..=42` UTF-8 bytes across 1–4B base glyphs and 1–4B zero-width
+/// marks (`341` states), proving `TerminalCaretGlyph::from_str` preserves `<= 32`B
+/// clusters verbatim and clamps `> 32`B clusters at the maximal whole-codepoint
+/// UTF-8 boundary while `terminal_cursor_cell` keeps follower columns aligned.
+#[test]
+pub(crate) fn model_check_cursor_290_caret_glyph_utf8_boundary_budget() {
+    const BASES: [(char, usize); 4] = [('a', 1), ('é', 1), ('あ', 2), ('𠮷', 2)];
+    const MARKS: [char; 4] = ['\u{0007}', '\u{0301}', '\u{3099}', '\u{E0100}'];
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct State {
+        base: Option<u8>,
+        marks: Vec<u8>,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Event {
+        PickBase(u8),
+        PushMark(u8),
+    }
+
+    let events = [
+        Event::PickBase(0),
+        Event::PickBase(1),
+        Event::PickBase(2),
+        Event::PickBase(3),
+        Event::PushMark(0),
+        Event::PushMark(1),
+        Event::PushMark(2),
+        Event::PushMark(3),
+    ];
+
+    let initial = State {
+        base: None,
+        marks: Vec::new(),
+    };
+
+    let step = |state: &State, event: &Event| -> Option<State> {
+        match (state.base, *event) {
+            (None, Event::PickBase(b)) => Some(State {
+                base: Some(b),
+                marks: Vec::new(),
+            }),
+            (Some(b), Event::PushMark(m)) if state.marks.len() < 3 => {
+                let mut marks = state.marks.clone();
+                marks.push(m);
+                Some(State {
+                    base: Some(b),
+                    marks,
+                })
+            }
+            _ => None,
+        }
+    };
+
+    let invariant = |state: &State| -> std::result::Result<(), String> {
+        let Some(base_idx) = state.base else {
+            return Ok(());
+        };
+        let (base_ch, base_width) = BASES[usize::from(base_idx)];
+        let mut cluster = String::new();
+        cluster.push(base_ch);
+        for _ in 0..6 {
+            cluster.push('\u{E0100}');
+        }
+        cluster.push('\u{0301}');
+        for &m in &state.marks {
+            cluster.push(MARKS[usize::from(m)]);
+        }
+
+        let line = format!("{cluster}z");
+        let cell = terminal_cursor_cell(&line, 0);
+        if cell.column != 0 || cell.columns != base_width || cell.text != cluster {
+            return Err(format!(
+                "cluster slice mismatch (len={}): got {:?}, expected (0, {base_width}, len={})",
+                cluster.len(),
+                (cell.column, cell.columns, cell.text.len()),
+                cluster.len()
+            ));
+        }
+        let next_cell = terminal_cursor_cell(&line, base_width as u16);
+        if next_cell
+            != (TerminalCursorCell {
+                column: base_width,
+                columns: 1,
+                text: "z",
+            })
+        {
+            return Err(format!(
+                "follower cell drifted after long cluster: {next_cell:?}"
+            ));
+        }
+
+        let clamped = TerminalCaretGlyph::from_str(cell.text);
+        let text = clamped.as_str();
+        if text.len() > 32 || !cluster.starts_with(text) {
+            return Err(format!(
+                "invalid clamped prefix len={} on cluster len={}",
+                text.len(),
+                cluster.len()
+            ));
+        }
+        if cluster.len() <= 32 {
+            if text != cluster {
+                return Err(format!(
+                    "cluster of {} bytes truncated early to {} bytes",
+                    cluster.len(),
+                    text.len()
+                ));
+            }
+        } else {
+            let next_ch = cluster[text.len()..]
+                .chars()
+                .next()
+                .ok_or_else(|| "missing remainder char".to_owned())?;
+            if text.len() + next_ch.len_utf8() <= 32 {
+                return Err(format!(
+                    "non-maximal UTF-8 clamp: stopped at {} bytes when next char is {} bytes",
+                    text.len(),
+                    next_ch.len_utf8()
+                ));
+            }
+        }
+        Ok(())
+    };
+
+    let coverage = exhaustive_check(initial, &events, step, invariant, 500);
+    assert_eq!(coverage.states, 341);
+    assert_eq!(coverage.transitions, 340);
+}
+
+/// Change 290, formal verification I5 (`formal-model`).
+///
+/// Exhaustively checks real `terminal_rows` + `draw_terminal_cursor` geometry and
+/// painted shapes across `pane_cols` in `1..=4` × `6` lines × `cursor_x` in `0..=4`
+/// × `focused` in `{false, true}` (`389` states, `240` leaf renders).
+#[test]
+pub(crate) fn model_check_cursor_290_viewport_edge_and_focus_paint() {
+    const LINES: [&str; 6] = [
+        "",
+        "\u{0301}\u{E0100}",
+        "a é",
+        "あ𠮷",
+        "a𠮷b",
+        "　か\u{3099}",
+    ];
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    enum State {
+        Root,
+        Cols(u8),
+        Line(u8, u8),
+        Cursor(u8, u8, u8),
+        Leaf {
+            pane_cols: u8,
+            line_idx: u8,
+            cursor_x: u8,
+            focused: bool,
+        },
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Event {
+        Cols(u8),
+        Line(u8),
+        Cursor(u8),
+        Focus(bool),
+    }
+
+    let mut events = Vec::new();
+    for cols in 1..=4u8 {
+        events.push(Event::Cols(cols));
+    }
+    for line_idx in 0..LINES.len() as u8 {
+        events.push(Event::Line(line_idx));
+    }
+    for cx in 0..=4u8 {
+        events.push(Event::Cursor(cx));
+    }
+    events.push(Event::Focus(false));
+    events.push(Event::Focus(true));
+
+    let ctx = egui::Context::default();
+    configure_macos_fonts(&ctx, TerminalFont::default());
+    let palette = AppTheme::Light.palette();
+    let laid_out: Vec<Vec<LayoutJob>> = LINES
+        .iter()
+        .map(|line| terminal_line_layouts(&format!("{line}\n"), palette))
+        .collect();
+
+    let step = |state: &State, event: &Event| -> Option<State> {
+        match (*state, *event) {
+            (State::Root, Event::Cols(c)) => Some(State::Cols(c)),
+            (State::Cols(c), Event::Line(l)) => Some(State::Line(c, l)),
+            (State::Line(c, l), Event::Cursor(x)) => Some(State::Cursor(c, l, x)),
+            (State::Cursor(c, l, x), Event::Focus(f)) => Some(State::Leaf {
+                pane_cols: c,
+                line_idx: l,
+                cursor_x: x,
+                focused: f,
+            }),
+            _ => None,
+        }
+    };
+
+    let invariant = |state: &State| -> std::result::Result<(), String> {
+        let State::Leaf {
+            pane_cols,
+            line_idx,
+            cursor_x,
+            focused,
+        } = *state
+        else {
+            return Ok(());
+        };
+        let raw_line = LINES[usize::from(line_idx)];
+        let span = terminal_cursor_cell(raw_line, u16::from(cursor_x));
+        let fits = span.column + span.columns <= usize::from(pane_cols);
+
+        let mut captured_caret = None;
+        let mut captured_glyph = TerminalCaretGlyph::default();
+        let mut cell = egui::Vec2::ZERO;
+        let mut left = 0.0f32;
+
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(600.0, 400.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    cell = terminal_cell_size(ui);
+                    let width = f32::from(pane_cols) * cell.x;
+                    ui.allocate_ui(egui::vec2(width, cell.y * 4.0), |ui| {
+                        ui.set_max_width(width);
+                        let viewport = egui::vec2(ui.available_width(), cell.y * 4.0);
+                        left = ui.min_rect().left();
+                        let search = TerminalSearchOverlay {
+                            matches: &[],
+                            current: None,
+                            scroll_to: None,
+                            palette,
+                        };
+                        let mut links = TerminalLinkOverlay {
+                            resolved: &HashMap::new(),
+                            unresolved: &mut Vec::new(),
+                            palette,
+                        };
+                        let res = terminal_rows(
+                            ui,
+                            &laid_out[usize::from(line_idx)],
+                            viewport,
+                            cell.y,
+                            search,
+                            &mut links,
+                            Some(TerminalCursor {
+                                x: u16::from(cursor_x),
+                                y: 0,
+                                pane_rows: 1,
+                            }),
+                            None,
+                        );
+                        captured_caret = res.caret;
+                        captured_glyph = res.caret_glyph;
+                        if let Some(caret) = res.caret {
+                            draw_terminal_cursor(
+                                ui,
+                                caret,
+                                res.caret_glyph.as_str(),
+                                focused,
+                                palette,
+                            );
+                        }
+                    });
+                });
+            },
+        );
+
+        if !fits {
+            if captured_caret.is_some() || !captured_glyph.as_str().is_empty() {
+                return Err(format!(
+                    "overflowing cursor accepted: cols={pane_cols}, line={raw_line:?}, cx={cursor_x} -> {captured_caret:?}"
+                ));
+            }
+            return Ok(());
+        }
+
+        let caret = captured_caret.ok_or_else(|| {
+            format!("fitting cursor rejected: cols={pane_cols}, line={raw_line:?}, cx={cursor_x}")
+        })?;
+        let expected_left = left + span.column as f32 * cell.x;
+        let expected_width = span.columns as f32 * cell.x;
+        if (caret.min.x - expected_left).abs() > 0.05
+            || (caret.width() - expected_width).abs() > 0.05
+            || caret.max.x > left + f32::from(pane_cols) * cell.x + 0.05
+        {
+            return Err(format!(
+                "caret geometry wrong: {caret:?} vs left={expected_left} width={expected_width}"
+            ));
+        }
+
+        let (rects, texts) = cursor_290_shapes(&output);
+        let solid: Vec<&(usize, egui::epaint::RectShape)> = rects
+            .iter()
+            .filter(|(_, r)| {
+                r.fill == palette.terminal_fg
+                    && r.stroke.width == 0.0
+                    && (r.rect.min - caret.min).length() < 0.05
+                    && (r.rect.width() - caret.width()).abs() < 0.05
+            })
+            .collect();
+        let hollow: Vec<&(usize, egui::epaint::RectShape)> = rects
+            .iter()
+            .filter(|(_, r)| {
+                r.fill == Color32::TRANSPARENT
+                    && r.stroke == egui::Stroke::new(1.0, palette.terminal_fg)
+                    && r.stroke_kind == egui::StrokeKind::Inside
+                    && (r.rect.min - caret.min).length() < 0.05
+                    && (r.rect.width() - caret.width()).abs() < 0.05
+            })
+            .collect();
+        let inverted: Vec<&(usize, egui::epaint::TextShape)> = texts
+            .iter()
+            .filter(|(_, t)| {
+                (t.pos - caret.min).length() < 0.05
+                    && t.galley
+                        .job
+                        .sections
+                        .first()
+                        .is_some_and(|s| s.format.color == palette.terminal_bg)
+            })
+            .collect();
+
+        if focused {
+            if solid.len() != 1 || !hollow.is_empty() {
+                return Err(format!(
+                    "focused paint mismatch: solid={} hollow={}",
+                    solid.len(),
+                    hollow.len()
+                ));
+            }
+            let has_ink = span.text.chars().any(|c| !c.is_whitespace());
+            if has_ink {
+                if inverted.len() != 1 || inverted[0].0 <= solid[0].0 {
+                    return Err(format!(
+                        "focused inverted glyph missing or under block on {:?}",
+                        span.text
+                    ));
+                }
+                if (inverted[0].1.galley.size().x - expected_width).abs() > 0.5 {
+                    return Err(format!(
+                        "inverted glyph advance {} != {expected_width} for {:?}",
+                        inverted[0].1.galley.size().x,
+                        span.text
+                    ));
+                }
+            } else if !inverted.is_empty() {
+                return Err(format!(
+                    "whitespace/empty cell {:?} painted inverted glyph",
+                    span.text
+                ));
+            }
+        } else if !solid.is_empty() || hollow.len() != 1 || !inverted.is_empty() {
+            return Err(format!(
+                "unfocused paint mismatch: solid={} hollow={} inverted={}",
+                solid.len(),
+                hollow.len(),
+                inverted.len()
+            ));
+        }
+
+        Ok(())
+    };
+
+    let coverage = exhaustive_check(State::Root, &events, step, invariant, 500);
+    assert_eq!(coverage.states, 389);
+    assert_eq!(coverage.transitions, 388);
 }
