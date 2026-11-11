@@ -1,5 +1,5 @@
 # The evidence for change 286. Format: docs/sdlc/templates/verification.yaml.
-digest: "6f45b047e6a1fd8f"
+digest: "74c4c60d31bd64fa"
 
 obligations:
   - R1 empirical-test :: cargo test --locked session_286_row_menu_closes_the_tab

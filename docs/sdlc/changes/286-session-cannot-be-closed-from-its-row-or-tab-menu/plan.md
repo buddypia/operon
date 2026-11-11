@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-11
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -43,4 +43,4 @@
 
 ## Departures from the plan
 
-None yet.
+- The empirical verifier could not write tests in its isolated tree (the worktree guard read it as the trunk), so it re-ran R1-R4 and I1 only. Its one concern — a closed tab of a project not shown staying the selected session on return — is now asserted in the R4 test.

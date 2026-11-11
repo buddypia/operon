@@ -80009,6 +80009,11 @@ fn session_286_closing_a_row_of_another_project_keeps_the_shown_one() {
     );
     assert!(app.store.sessions.iter().any(|s| s.id == away_id));
     app.select_workspace_project(other);
+    assert_ne!(
+        app.selected_session,
+        Some(away_id),
+        "back in its project, the closed session is not the one shown"
+    );
     assert!(
         !session_285_tab_ids(&app).contains(&away_id),
         "closed in its own project"

@@ -8,7 +8,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -16,12 +16,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have the empirical verifier try to break the branch head, then close and land."
+resume: "Done. Package from main after landing, then right-click a session row and a tab name: 閉じる closes both, and a pinned one has no such entry."
 
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked session_28: 23 passed"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose as on main"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs and src/app/session_order.rs change; package from main after landing"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs and src/app/session_order.rs change; package from main after landing"
   guards-verified-by-mutation: "machine passed 8 of 8 caught: python3 docs/sdlc/changes/286-session-cannot-be-closed-from-its-row-or-tab-menu/mutations.py"
 
 sets:
