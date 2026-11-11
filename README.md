@@ -65,9 +65,13 @@ Settings. The projects, sessions, and agent output in them are a demo.
   `⌥⌘B` folds it and opens it.
 - Below them, the session list is arranged by hand: drag a project by its
   name to move its card, or a session's row to move it among its own
-  project's sessions. The order is kept in `session-order.json`, in the same
-  folder as the local index, and a project or session added later appears at
-  the top.
+  project's sessions. On the session page the left column lists exactly each
+  project's open tabs, in the tabs' order: a row and its tab move together,
+  close together, and a session that ends stays in both until it is closed.
+  Right-click a row or a tab to pin it: a pinned session stays first in both
+  and cannot be closed until it is unpinned. The order and the pins are kept
+  in `session-order.json`, in the same folder as the local index, and a
+  project or session added later appears at the top, after the pinned ones.
 - Quitting and reopening Operon puts the workspace back: every project's
   session tabs, splits, and front tab, kept in `workspace-layout.json` beside
   the local index, with a tab you closed left closed (file tabs are not

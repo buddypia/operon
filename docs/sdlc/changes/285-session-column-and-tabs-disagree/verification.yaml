@@ -1,0 +1,17 @@
+# The evidence for change 285. Format: docs/sdlc/templates/verification.yaml.
+digest: "926dc891991ee679"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_285_column_lists_exactly_the_tabs
+  - R2 empirical-test :: cargo test --locked session_285_a_new_session_in_another_project_gets_a_tab_and_a_row
+  - R3 empirical-test :: cargo test --locked session_285_rows_and_tabs_share_one_order
+  - R4 empirical-test :: cargo test --locked session_285_dragging_a_row_reorders_its_tabs
+  - R5 empirical-test :: cargo test --locked session_285_dragging_a_tab_reorders_the_rows
+  - R6 empirical-test :: cargo test --locked session_285_pin
+  - R7 empirical-test :: cargo test --locked session_285_a_pinned_tab_does_not_close
+  - I1 empirical-test :: cargo test --locked session_285_arrange_keeps_documents_and_the_front_tab
+  - I2 empirical-test :: cargo test --locked sidebar_25
+  - I3 empirical-test :: cargo test --locked workspace_project_
+  - I5 empirical-test :: cargo test --locked session_285_a_project_round_trip_keeps_rows_and_tabs_equal
+  - I6 empirical-test :: cargo test --locked session_285_reopen_and_a_split_group_keep_one_order
+  - I4 empirical-mutation :: python3 docs/sdlc/changes/285-session-column-and-tabs-disagree/mutations.py

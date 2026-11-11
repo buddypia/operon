@@ -119,6 +119,11 @@ pub(crate) struct SessionArrangement {
     /// written before the field existed unfolds everything.
     #[serde(default)]
     pub(crate) folded: Vec<Uuid>,
+    /// Sessions pinned on the session page (change 285): first in the column
+    /// and in their tab group, and not closed until unpinned. A file written
+    /// before the field existed pins nothing.
+    #[serde(default)]
+    pub(crate) pinned: Vec<Uuid>,
 }
 
 pub(crate) fn session_arrangement_path(data_file: &Path) -> PathBuf {
@@ -265,6 +270,54 @@ pub(crate) fn sort_column_sessions<S: std::borrow::Borrow<Session>>(
     arrange_by(&arrangement.sessions, sessions, |session| {
         session.borrow().id
     });
+}
+
+/// Where a session stands in the session page's one order (change 285): the
+/// column's rows and every tab group's session tabs sort by this key alone.
+/// Pinned first; then as the column arranges them — what the arrangement does
+/// not list ahead of what it lists, newest first among those, then in its
+/// order. A lookup, not a sort of its own, so it allocates nothing.
+pub(crate) fn workspace_session_rank(
+    session: &Session,
+    arrangement: &SessionArrangement,
+) -> (bool, bool, usize, Reverse<u64>) {
+    let listed = arrangement.sessions.iter().position(|id| *id == session.id);
+    (
+        !arrangement.pinned.contains(&session.id),
+        listed.is_some(),
+        listed.unwrap_or(0),
+        Reverse(if listed.is_some() {
+            0
+        } else {
+            session.created_at
+        }),
+    )
+}
+
+/// Sessions in the session page's one order: `workspace_session_rank`.
+pub(crate) fn sort_workspace_sessions<S: std::borrow::Borrow<Session>>(
+    sessions: &mut [S],
+    arrangement: &SessionArrangement,
+) {
+    sessions.sort_by_key(|session| workspace_session_rank(session.borrow(), arrangement));
+}
+
+/// Writes `sequence`'s members of `order` into the slots they hold there, in
+/// `sequence`'s order; every other slot keeps its id, and an id of `sequence`
+/// that `order` does not hold is passed over. How a tab dropped among its
+/// group's tabs becomes the order the column draws (change 285).
+pub(crate) fn follow(order: &mut [Uuid], sequence: &[Uuid]) {
+    let members = sequence
+        .iter()
+        .copied()
+        .filter(|id| order.contains(id))
+        .collect::<Vec<_>>();
+    let mut members = members.into_iter();
+    for slot in order.iter_mut().filter(|slot| sequence.contains(&**slot)) {
+        if let Some(next) = members.next() {
+            *slot = next;
+        }
+    }
 }
 
 /// Whether a release at `slot` among the `visible` rows puts `moved`
@@ -1139,6 +1192,60 @@ impl WorkspaceTabs {
                 group.tabs.get(group.active).cloned()
             })
             .collect()
+    }
+
+    /// Every session tab, group by group.
+    pub(crate) fn session_ids(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.groups
+            .iter()
+            .flat_map(|group| group.tabs.iter())
+            .filter_map(|tab| match tab {
+                WorkspaceTab::Session(id) => Some(*id),
+                WorkspaceTab::Document(_) => None,
+            })
+    }
+
+    /// Puts each group's session tabs in `key`'s order among the slots
+    /// session tabs already hold, so a document tab stays where it is and the
+    /// front tab stays in front (change 285). An insertion sort over those
+    /// slots: it allocates nothing, and a group holds tens of tabs at most.
+    pub(crate) fn arrange<K: Ord>(&mut self, key: impl Fn(Uuid) -> K) {
+        let session = |tab: &WorkspaceTab| match tab {
+            WorkspaceTab::Session(id) => Some(*id),
+            WorkspaceTab::Document(_) => None,
+        };
+        for group in &mut self.groups {
+            let front = group.tabs.get(group.active).cloned();
+            let mut moved = false;
+            for at in 0..group.tabs.len() {
+                let mut right = at;
+                while let Some(current) = session(&group.tabs[right]) {
+                    // The nearest session tab to its left, past documents.
+                    let Some(left) = (0..right)
+                        .rev()
+                        .find(|i| session(&group.tabs[*i]).is_some())
+                    else {
+                        break;
+                    };
+                    let Some(left_id) = session(&group.tabs[left]) else {
+                        break;
+                    };
+                    if key(left_id) <= key(current) {
+                        break;
+                    }
+                    group.tabs.swap(left, right);
+                    right = left;
+                    moved = true;
+                }
+            }
+            if moved {
+                if let Some(at) =
+                    front.and_then(|front| group.tabs.iter().position(|tab| *tab == front))
+                {
+                    group.active = at;
+                }
+            }
+        }
     }
 
     pub(crate) fn rects(&self, area: egui::Rect) -> PaneRects {
