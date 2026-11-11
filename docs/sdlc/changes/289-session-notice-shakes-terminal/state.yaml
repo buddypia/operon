@@ -1,0 +1,42 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (notices, the durability warning, and the bottom-right toast on
+# the Sessions page exist; non-brief notices and the durability warning move out
+# of the CentralPanel flow into the bottom-right overlay on Page::Sessions so
+# the terminal workspace never shifts vertically).
+# Risk: low — risk.yaml `drawing` (src/app.rs); full autonomy; screen yes.
+#
+# Decided without asking: on Page::Sessions both non-brief `notice` and
+# `durability_warning` draw in the bottom-right floating Area rather than the
+# CentralPanel column, while non-brief notices keep their manual close button
+# (no auto-expiry) and `durability_warning` keeps no close button; other pages
+# keep their existing top banners.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the four session_notice_289_* tests in src/tests.rs, watch them fail against the current CentralPanel banner, then update src/app.rs."
+
+contract:
+  three-gates: "machine pending make q.fast and cargo test --locked session_notice_289_"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/app.rs changes; package and swap from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/289-session-notice-shakes-terminal/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
