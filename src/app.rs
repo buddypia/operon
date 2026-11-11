@@ -7,6 +7,7 @@ pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
+pub(crate) mod session_order;
 pub(crate) mod terminal_output;
 pub(crate) mod waiting_reply;
 pub(crate) mod working_time;
@@ -783,7 +784,9 @@ pub(crate) struct OperonApp {
     pub(crate) workspace_initialized: bool,
     /// Runtime tab layouts and terminal context belong to the selected project.
     pub(crate) workspace_project: Option<Uuid>,
-    pub(crate) workspace_project_drag: Option<Uuid>,
+    /// A project heading or a session row being dragged in the session
+    /// page's column (change 285 added the rows).
+    pub(crate) workspace_column_drag: Option<ColumnDrag>,
     pub(crate) project_workspaces: HashMap<Uuid, (WorkspaceTabs, Option<Uuid>)>,
     /// A tab closed by the person stays closed when that project is revisited.
     pub(crate) workspace_seen_sessions: HashSet<Uuid>,
@@ -1206,7 +1209,7 @@ impl OperonApp {
             closed_tabs: Vec::new(),
             workspace_initialized: false,
             workspace_project: None,
-            workspace_project_drag: None,
+            workspace_column_drag: None,
             project_workspaces: HashMap::new(),
             workspace_seen_sessions: HashSet::new(),
             saved_workspace_layout: None,
@@ -6119,9 +6122,11 @@ impl OperonApp {
 
     /// The sidebar's tile counts: what each group would show if it were chosen
     /// alone with the current CLI choice, so a number never promises rows the
-    /// column will not draw.
+    /// column will not draw — and the column draws only tabs (change 285).
     pub(crate) fn status_group_counts_for_chosen_agents(&self) -> [usize; 4] {
-        self.status_group_counts_where(|session| self.session_matches_agent_filter(session))
+        self.status_group_counts_where(|session| {
+            self.session_matches_agent_filter(session) && self.session_has_a_tab(session.id)
+        })
     }
 
     fn status_group_counts_where(&self, keep: impl Fn(&Session) -> bool) -> [usize; 4] {
@@ -7024,68 +7029,6 @@ impl OperonApp {
         }
     }
 
-    /// Add newly available live sessions once. Preserve every group's active
-    /// tab, focused file, and intentional closes across project switches.
-    pub(crate) fn sync_workspace_live_sessions(&mut self) {
-        let Some(project) = self.workspace_project else {
-            return;
-        };
-        self.project_workspaces
-            .retain(|id, _| self.store.projects.iter().any(|p| p.id == *id));
-        self.workspace_seen_sessions
-            .retain(|id| self.store.sessions.iter().any(|s| s.id == *id));
-        for group in &self.workspace.groups {
-            for tab in &group.tabs {
-                if let WorkspaceTab::Session(id) = tab {
-                    self.workspace_seen_sessions.insert(*id);
-                }
-            }
-        }
-        let focus = self.workspace.focused.zip(self.workspace.active().cloned());
-        let mut sessions = self
-            .store
-            .sessions
-            .iter()
-            .filter(|session| {
-                session.project_id == project
-                    && matches!(
-                        session.status,
-                        SessionStatus::Starting | SessionStatus::Active | SessionStatus::Unknown
-                    )
-            })
-            .collect::<Vec<_>>();
-        sort_column_sessions(&mut sessions, &self.session_arrangement);
-        let preferred = self
-            .selected_session
-            .filter(|id| sessions.iter().any(|s| s.id == *id))
-            .or_else(|| sessions.first().map(|session| session.id));
-        let new = sessions
-            .iter()
-            .filter_map(|session| {
-                self.workspace_seen_sessions
-                    .insert(session.id)
-                    .then_some(session.id)
-            })
-            .collect::<Vec<_>>();
-        for id in new {
-            self.workspace.open(WorkspaceTab::Session(id));
-        }
-        if let Some((group, tab)) = focus {
-            self.workspace.select(group, &tab);
-        } else if let Some(id) = preferred {
-            // Select only a present tab: a closed live session is not reopened.
-            if let Some(group) = self
-                .workspace
-                .groups
-                .iter()
-                .find(|g| g.tabs.contains(&WorkspaceTab::Session(id)))
-                .map(|g| g.id)
-            {
-                self.workspace.select(group, &WorkspaceTab::Session(id));
-            }
-        }
-    }
-
     /// The one place terminal context changes, also used when switching to an
     /// empty project. Merely restoring a file must not mark its session read.
     fn set_terminal_session_context(&mut self, session_id: Option<Uuid>) {
@@ -7208,6 +7151,16 @@ impl OperonApp {
     }
 
     pub(crate) fn close_workspace_tab(&mut self, tab: &WorkspaceTab) {
+        // Every close a person asks for comes through here; a move between
+        // groups and a deleted session's tab do not (change 285).
+        if let WorkspaceTab::Session(id) = tab {
+            if self.is_session_pinned(*id) {
+                self.notice_briefly(tr(
+                    "ピン留め中のセッションは閉じられません。ピン留めを外してから閉じてください。",
+                ));
+                return;
+            }
+        }
         if let WorkspaceTab::Document(id) = tab {
             if self
                 .document_index(id)

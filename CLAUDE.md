@@ -21,6 +21,7 @@ alternatives; commit `plan.md` before editing source files.
     `src/app/dock_badge.rs` badges the Dock icon.
     `src/app/broadcast.rs` messages idle agents.
     `src/app/relaunch.rs` keeps tabs across a relaunch and restarts gone sessions.
+    `src/app/session_order.rs` keeps the column and the tabs one list, and pins.
     `src/app/launch_menu.rs` holds the tab strip's + menu and its quick launch.
     `src/app/terminal_output.rs` lays terminal text out off the frame.
     `src/app/waiting_reply.rs` draws the 要対応 rows and replies.

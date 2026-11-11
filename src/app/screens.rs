@@ -7138,12 +7138,22 @@ impl OperonApp {
                                                 }
                                                 if let WorkspaceTab::Session(id) = tab {
                                                     let mut rename = label.double_clicked();
+                                                    let pinned = self.is_session_pinned(*id);
+                                                    let mut toggle_pin = false;
                                                     label.context_menu(|ui| {
                                                         if quiet_button(ui, palette, tr("名前を変更")).clicked() {
                                                             rename = true;
                                                             ui.close_menu();
                                                         }
+                                                        let pin = if pinned { tr("ピン留めを外す") } else { tr("ピン留め") };
+                                                        if quiet_button(ui, palette, pin).clicked() {
+                                                            toggle_pin = true;
+                                                            ui.close_menu();
+                                                        }
                                                     });
+                                                    if toggle_pin {
+                                                        self.toggle_session_pin(*id);
+                                                    }
                                                     if rename {
                                                         if let Some(session) = self.store.sessions.iter().find(|s|s.id==*id).cloned() {
                                                             self.begin_session_rename(&session);
@@ -7169,6 +7179,7 @@ impl OperonApp {
                                                     if let Some(moved) = self.workspace_drag.take() {
                                                         if self.workspace.insert_tab(&moved, *group, index)
                                                         {
+                                                            self.follow_tab_drop(*group);
                                                             self.activate_workspace_tab(&moved);
                                                         }
                                                     }
@@ -7180,7 +7191,20 @@ impl OperonApp {
                                                             .color(palette.accent_text),
                                                     );
                                                 }
-                                                if small_icon_button(
+                                                // A pinned session cannot be closed: its pin
+                                                // stands where the × would (change 285).
+                                                if matches!(tab, WorkspaceTab::Session(id) if self.is_session_pinned(*id)) {
+                                                    ui.add_sized(
+                                                        egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL),
+                                                        egui::Label::new(
+                                                            RichText::new(ICON_PIN)
+                                                                .size(11.5)
+                                                                .color(palette.text_muted),
+                                                        )
+                                                        .selectable(false),
+                                                    )
+                                                    .on_hover_text(tr("ピン留め中"));
+                                                } else if small_icon_button(
                                                     ui,
                                                     palette,
                                                     ICON_CLOSE,
@@ -7481,20 +7505,21 @@ impl OperonApp {
                 }
             });
         });
-        if self.workspace_project_drag.is_some()
+        if self.workspace_column_drag.is_some()
             && ui.input(|i| {
                 i.key_pressed(egui::Key::Escape)
                     || (!i.pointer.primary_down() && !i.pointer.primary_released())
             })
         {
-            self.workspace_project_drag = None;
+            self.workspace_column_drag = None;
         }
-        let drag = self.workspace_project_drag.map(ColumnDrag::Project);
+        let drag = self.workspace_column_drag;
         let pointer = ui.input(|i| i.pointer.latest_pos());
         let mut projects = self.store.projects.clone();
         sort_column_projects(&mut projects, &self.session_arrangement);
         let mut open = None;
         let mut fold = None;
+        let mut pin = None;
         if projects.is_empty() {
             ui.label(RichText::new(tr("プロジェクトがありません")).weak());
         }
@@ -7503,30 +7528,23 @@ impl OperonApp {
             .show(ui, |ui| {
                 self.ui_sidebar_session_filters(ui);
                 let filtering = self.has_session_filters();
-                // Every session someone may act on, once per frame: what needs the
-                // person first, then what is moving, then what is free, each in the
-                // column's own order. Finished sessions stay in 履歴 unless unread.
-                let mut ordered = self.store.sessions.iter().collect::<Vec<_>>();
-                sort_column_sessions(&mut ordered, &self.session_arrangement);
-                let mut live = ordered
-                    .into_iter()
+                // Every project's tabs, once per frame, in the order the tabs
+                // are put in (change 285): the column and the tab strip are one
+                // list. Only the column's own filters hide a row.
+                let live = projects
+                    .iter()
+                    .flat_map(|project| self.project_tab_sessions(project.id))
                     .filter(|session| self.session_matches_filters(session))
-                    .filter_map(|session| {
+                    .map(|session| {
                         let kind = self.session_status_kind_for(session);
                         let group = if self.is_session_unread(session.id) {
                             SessionStatusGroup::NeedsYou
                         } else {
                             kind.group()
                         };
-                        (filtering || group != SessionStatusGroup::Finished).then_some((
-                            session.project_id,
-                            group,
-                            kind,
-                            session.id,
-                        ))
+                        (session.project_id, group, kind, session.id)
                     })
                     .collect::<Vec<_>>();
-                live.sort_by_key(|(_, group, _, _)| group.index());
                 if filtering && live.is_empty() && !projects.is_empty() {
                     ui.label(RichText::new(tr("一致するセッションはありません。")).weak());
                 }
@@ -7550,6 +7568,15 @@ impl OperonApp {
                     }
                 }
                 let mut targets = ColumnTargets::default();
+                // The rows a dragged session can land among: its project's,
+                // of its own pin state.
+                let mut session_targets = ColumnTargets::default();
+                let dragged_session = match drag {
+                    Some(ColumnDrag::Session { project, session }) => {
+                        Some((project, self.is_session_pinned(session)))
+                    }
+                    _ => None,
+                };
                 for project in projects {
                     if filtering && !live.iter().any(|(owner, ..)| *owner == project.id) {
                         continue;
@@ -7650,7 +7677,8 @@ impl OperonApp {
                                                         .set_cursor_icon(egui::CursorIcon::Grab);
                                                 }
                                                 if response.drag_started() {
-                                                    self.workspace_project_drag = Some(project.id);
+                                                    self.workspace_column_drag =
+                                                        Some(ColumnDrag::Project(project.id));
                                                 }
                                             },
                                         );
@@ -7678,6 +7706,7 @@ impl OperonApp {
                                         .map(|turn| turn.prompt.as_str()),
                                 );
                                 let mut rename_finished = None;
+                                let pinned = self.is_session_pinned(id);
                                 let row = egui::Frame::new()
                                     .fill(if self.selected_session == Some(id) {
                                         palette.row_selected
@@ -7733,6 +7762,14 @@ impl OperonApp {
                                                     },
                                                 );
                                             }
+                                            if pinned {
+                                                ui.label(
+                                                    RichText::new(ICON_PIN)
+                                                        .size(11.5)
+                                                        .color(palette.text_muted),
+                                                )
+                                                .on_hover_text(tr("ピン留め中"));
+                                            }
                                             if self.renaming_session == Some(id)
                                                 && !self.rename_in_workspace_tab
                                             {
@@ -7783,7 +7820,7 @@ impl OperonApp {
                                         {
                                             egui::Sense::hover()
                                         } else {
-                                            egui::Sense::click()
+                                            egui::Sense::click_and_drag()
                                         },
                                     )
                                     .on_hover_ui(|ui| {
@@ -7800,17 +7837,40 @@ impl OperonApp {
                                             id,
                                             Instant::now(),
                                         ));
+                                        ui.label(tr("ドラッグで並べ替え"));
                                     });
-                                if row.hovered() {
+                                if row.hovered() && drag.is_none() {
                                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
+                                if row.drag_started() {
+                                    self.workspace_column_drag = Some(ColumnDrag::Session {
+                                        project: project.id,
+                                        session: id,
+                                    });
+                                }
+                                if dragged_session == Some((project.id, pinned)) {
+                                    session_targets.push(id, row.rect);
+                                }
                                 let mut rename = row.double_clicked();
+                                let mut toggle_pin = false;
                                 row.context_menu(|ui| {
                                     if quiet_button(ui, palette, tr("名前を変更")).clicked() {
                                         rename = true;
                                         ui.close_menu();
                                     }
+                                    let pin = if pinned {
+                                        tr("ピン留めを外す")
+                                    } else {
+                                        tr("ピン留め")
+                                    };
+                                    if quiet_button(ui, palette, pin).clicked() {
+                                        toggle_pin = true;
+                                        ui.close_menu();
+                                    }
                                 });
+                                if toggle_pin {
+                                    pin = Some(id);
+                                }
                                 let rename_candidate = rename.then(|| session.clone());
                                 match rename_finished {
                                     Some(true) => self.commit_session_rename(),
@@ -7825,7 +7885,7 @@ impl OperonApp {
                             }
                             if !any {
                                 ui.label(
-                                    RichText::new(tr("起動中のセッションはありません"))
+                                    RichText::new(tr("開いているセッションはありません"))
                                         .small()
                                         .weak(),
                                 );
@@ -7834,18 +7894,27 @@ impl OperonApp {
                     targets.push(project.id, card.response.rect);
                     ui.add_space(SPACE_SM);
                 }
-                if let Some(drag @ ColumnDrag::Project(_)) = drag {
+                if let Some(drag) = drag {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    let (targets, gap) = match drag {
+                        ColumnDrag::Project(_) => (&targets, SPACE_SM),
+                        ColumnDrag::Session { .. } => {
+                            (&session_targets, ui.spacing().item_spacing.y)
+                        }
+                    };
                     let slot =
                         targets.slot(drag.moved(), pointer.filter(|pos| view.contains(*pos)));
-                    self.ui_column_drop(ui, drag, &targets, slot, view.x_range(), SPACE_SM);
+                    self.ui_column_drop(ui, drag, targets, slot, view.x_range(), gap);
                 }
             });
         if ui.input(|i| i.pointer.primary_released()) {
-            self.workspace_project_drag = None;
+            self.workspace_column_drag = None;
         }
         if let Some(project) = fold {
             self.toggle_project_fold(project);
+        }
+        if let Some(session) = pin {
+            self.toggle_session_pin(session);
         }
         if let Some(id) = open {
             self.open_waiting_session(id);
@@ -8265,21 +8334,7 @@ impl OperonApp {
                 arrangement.sessions.extend(order);
             }
         }
-        // Only what the store still holds, so the file is bounded by it.
-        let (projects, sessions) = (&self.store.projects, &self.store.sessions);
-        arrangement
-            .projects
-            .retain(|id| projects.iter().any(|project| project.id == *id));
-        arrangement
-            .sessions
-            .retain(|id| sessions.iter().any(|session| session.id == *id));
-        arrangement
-            .folded
-            .retain(|id| projects.iter().any(|project| project.id == *id));
-        self.session_arrangement = arrangement;
-        if let Err(error) = save_session_arrangement(&self.data_file, &self.session_arrangement) {
-            self.notice = Some(tf!("並び順を保存できませんでした: {error}", error = error));
-        }
+        self.commit_session_arrangement(arrangement);
     }
 }
 

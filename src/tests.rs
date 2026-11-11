@@ -58775,6 +58775,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
         projects: vec![projects[2].id, projects[0].id],
         sessions: Vec::new(),
         folded: Vec::new(),
+        pinned: Vec::new(),
     };
     sort_column_projects(&mut projects, &arrangement);
     assert_eq!(
@@ -58797,6 +58798,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
         projects: Vec::new(),
         sessions: vec![one.id, three.id],
         folded: Vec::new(),
+        pinned: Vec::new(),
     };
     sort_column_sessions(&mut sessions, &arrangement);
     assert_eq!(ids(&sessions), [two.id, one.id, three.id]);
@@ -58818,6 +58820,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
         projects: vec![column.beta, column.alpha],
         sessions: vec![column.second, column.first, column.third],
         folded: Vec::new(),
+        pinned: Vec::new(),
     };
     let texts = column_181_settled(&mut column.app, &context, 700.0);
     assert_eq!(
@@ -59133,6 +59136,7 @@ pub(crate) fn test_change_181_arrangement_file_is_bounded_and_fails_towards_defa
         projects: vec![Uuid::new_v4()],
         sessions: vec![Uuid::new_v4(), Uuid::new_v4()],
         folded: vec![Uuid::new_v4()],
+        pinned: Vec::new(),
     };
     save_session_arrangement(&data_file, &arrangement).unwrap();
     assert_eq!(load_session_arrangement(&data_file), arrangement);
@@ -67046,7 +67050,8 @@ fn workspace_project_picker_initializes_only_live_sessions_and_keeps_focus() {
         "unknown-but-live session remains available"
     );
     assert!(!tabs.contains(&WorkspaceTab::Session(archived)));
-    assert!(!tabs.contains(&WorkspaceTab::Session(queued_id)));
+    // Change 285: a queued session has a tab, as it has a row.
+    assert!(tabs.contains(&WorkspaceTab::Session(queued_id)));
     assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(live)));
     workspace_choose_project(&mut app, &ctx, "p");
     assert_eq!(
@@ -67499,20 +67504,28 @@ fn workspace_project_count_click_opens_first_session_of_its_group() {
 }
 
 #[test]
-fn workspace_project_rows_order_by_status_and_open_on_click() {
+fn workspace_project_rows_keep_the_tab_order_and_open_on_click() {
     let root = temporary_directory("workspace-status-rows");
     let (mut app, _populated, _empty, first, second) = status_column_fixture(&root);
+    // The newer of the two, so the one order lists it first.
+    app.store.sessions[0].created_at += 10;
     app.select_session(second);
     let ctx = egui::Context::default();
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert_eq!(
+        session_285_rows(&output, &["first", "second"]),
+        session_285_tabs(&output, &["first", "second"]),
+    );
     let (row_first, row_second) = (
         column_rect(&output, "first").expect("first row"),
         column_rect(&output, "second").expect("second row"),
     );
+    // Change 285: rows keep the tabs' order whatever their state; the
+    // waiting one is no longer lifted first.
     assert!(
-        row_second.top() < row_first.top(),
-        "the session waiting on a permission is listed first"
+        row_first.top() < row_second.top(),
+        "the rows keep the tabs' order"
     );
     // Its mark wears the waiting badge (changes 283 and 284).
     let claude = agent_icon_texture(&ctx, "claude")
@@ -67539,9 +67552,9 @@ fn workspace_project_rows_order_by_status_and_open_on_click() {
         "the waiting badge: {dot:?}"
     );
     assert!(
-        column_rect(&output, "起動中のセッションはありません")
+        column_rect(&output, "開いているセッションはありません")
             .is_some_and(|rect| rect.top() > column_rect(&output, "q").unwrap().top()),
-        "the empty project says it has nothing running"
+        "the empty project says it has nothing open"
     );
     workspace_click_position(&mut app, &ctx, row_first.center());
     assert_eq!(app.workspace.active(), Some(&WorkspaceTab::Session(first)));
@@ -69629,7 +69642,7 @@ pub(crate) fn session_column_project_heading_keeps_its_operations() {
     for needle in [
         "toggle_project_fold",
         "open_project_session_setup(project.id)",
-        "workspace_project_drag = Some(project.id)",
+        "Some(ColumnDrag::Project(project.id))",
         "targets.push(project.id,",
         "select_workspace_project(project.id)",
     ] {
@@ -70210,7 +70223,12 @@ fn sidebar_251_filters_drive_real_rows() {
     finished.id = Uuid::new_v4();
     finished.name = "finished-third".into();
     finished.status = SessionStatus::Exited;
+    let finished_id = finished.id;
     app.store.sessions.push(finished);
+    // Change 285: the column lists the tabs, so the finished one is opened
+    // from history to have a row at all.
+    app.select_session(finished_id);
+    app.select_session(first);
     let ctx = egui::Context::default();
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
@@ -70224,7 +70242,7 @@ fn sidebar_251_filters_drive_real_rows() {
     // own 「すべて」 gave way to one 「クリア」 shown only while filtering.
     assert!(rows(&out, "要対応"), "status tiles absent");
     assert!(rows(&out, "first") && rows(&out, "second"));
-    assert!(!rows(&out, "finished-third"));
+    assert!(rows(&out, "finished-third"), "a finished tab keeps its row");
     let active = app.workspace.active().cloned();
     let selected = app.selected_session;
     let target =
@@ -70242,7 +70260,7 @@ fn sidebar_251_filters_drive_real_rows() {
     let out = sidebar_251_click(&mut app, &ctx, target(&out, "クリア"));
     assert!(!app.has_session_filters());
     assert!(rows(&out, "first") && rows(&out, "second"));
-    assert!(!rows(&out, "finished-third"));
+    assert!(rows(&out, "finished-third"));
     let out = sidebar_251_click(&mut app, &ctx, target(&out, ICON_MORE));
     assert!(rows(&out, "一致するセッションはありません。"));
     assert!(!rows(&out, "first") && !rows(&out, "second"));
@@ -70607,7 +70625,12 @@ fn sidebar_252_in_column(output: &egui::FullOutput, right: f32, label: &str) -> 
 
 #[test]
 fn sidebar_252_status_tiles_count_and_toggle() {
-    let (root, mut app, _) = sidebar_252_fixture("sidebar-252-tiles");
+    let (root, mut app, first) = sidebar_252_fixture("sidebar-252-tiles");
+    // Change 285: tiles count the column's rows, which are the tabs; the
+    // finished one is opened from history to be one.
+    let finished = app.store.sessions[2].id;
+    app.select_session(finished);
+    app.select_session(first);
     let ctx = egui::Context::default();
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
@@ -79304,4 +79327,420 @@ fn session_284_markless_row_draws_the_generated_mark() {
     });
     assert!(circled, "the circled state mark leads the row: {line:?}");
     fs::remove_dir_all(root).ok();
+}
+
+/// Change 285's fixture: project p with sessions named `names`, each Active,
+/// the first the oldest, created an hour apart, on the session page.
+#[cfg(test)]
+fn session_285_app(root: &Path, names: &[&str]) -> (OperonApp, Uuid, Vec<Uuid>) {
+    let (mut app, _first, _second) = app_with_two_sessions(root);
+    let project = app.store.projects[0].id;
+    let template = app.store.sessions[0].clone();
+    app.store.sessions.clear();
+    let ids = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let mut session = template.clone();
+            session.id = Uuid::new_v4();
+            session.tmux_name = managed_tmux_name(session.id);
+            session.name = (*name).to_owned();
+            session.created_at = 1_000 + index as u64 * 3600;
+            let id = session.id;
+            app.store.sessions.push(session);
+            id
+        })
+        .collect::<Vec<_>>();
+    app.session_library_open = false;
+    app.show_session_inspector = false;
+    (app, project, ids)
+}
+
+/// Two frames, so the column draws what the first frame's sync opened.
+#[cfg(test)]
+fn session_285_frame(app: &mut OperonApp, ctx: &egui::Context) -> egui::FullOutput {
+    workspace_pointer_frame(app, ctx, Vec::new());
+    workspace_pointer_frame(app, ctx, Vec::new())
+}
+
+/// The column's session titles among `names`, top to bottom.
+#[cfg(test)]
+fn session_285_rows(output: &egui::FullOutput, names: &[&str]) -> Vec<String> {
+    let mut rows = names
+        .iter()
+        .filter_map(|name| column_rect(output, name).map(|rect| (rect.top(), (*name).to_owned())))
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    rows.into_iter().map(|(_, name)| name).collect()
+}
+
+/// The tab titles among `names`, left to right: right of the column.
+#[cfg(test)]
+fn session_285_tabs(output: &egui::FullOutput, names: &[&str]) -> Vec<String> {
+    let right = column_right(output);
+    let mut tabs = names
+        .iter()
+        .filter_map(|name| {
+            drawn_text_rects(output, |text| text == *name)
+                .into_iter()
+                .filter(|rect| rect.left() > right)
+                .min_by(|a, b| a.top().total_cmp(&b.top()))
+                .map(|rect| (rect.left(), (*name).to_owned()))
+        })
+        .collect::<Vec<_>>();
+    tabs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    tabs.into_iter().map(|(_, name)| name).collect()
+}
+
+/// The session tabs every group holds, in order, as ids.
+#[cfg(test)]
+fn session_285_tab_ids(app: &OperonApp) -> Vec<Uuid> {
+    app.workspace.session_ids().collect()
+}
+
+#[cfg(test)]
+fn session_285_click(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    pos: egui::Pos2,
+    button: egui::PointerButton,
+) {
+    for pressed in [true, false] {
+        workspace_pointer_frame(
+            app,
+            ctx,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+    }
+}
+
+#[test]
+fn session_285_column_lists_exactly_the_tabs() {
+    let root = temporary_directory("session-285-membership");
+    let names = ["live", "closed", "ended", "history"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let (live, closed, ended, history) = (ids[0], ids[1], ids[2], ids[3]);
+    app.store.sessions[3].status = SessionStatus::Exited;
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    // A tab closed: no row. A session that ends: tab and row stay. A
+    // finished session opened from history: a tab and a row.
+    app.close_workspace_tab(&WorkspaceTab::Session(closed));
+    app.store.sessions[2].status = SessionStatus::Exited;
+    app.select_session(history);
+    let output = session_285_frame(&mut app, &ctx);
+    let mut tabs = session_285_tab_ids(&app);
+    tabs.sort();
+    let mut expected = vec![live, ended, history];
+    expected.sort();
+    assert_eq!(tabs, expected, "the tabs");
+    let mut rows = session_285_rows(&output, &names);
+    rows.sort();
+    assert_eq!(
+        rows,
+        vec!["ended", "history", "live"],
+        "the column lists exactly the tabs"
+    );
+    assert_eq!(
+        app.status_group_counts_for_chosen_agents()
+            .iter()
+            .sum::<usize>(),
+        3,
+        "the filter tiles count the same rows"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_a_new_session_in_another_project_gets_a_tab_and_a_row() {
+    let root = temporary_directory("session-285-other-project");
+    let (mut app, _project, _ids) = session_285_app(&root, &["here"]);
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        path: root.join("other"),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    let mut newcomer = app.store.sessions[0].clone();
+    newcomer.id = Uuid::new_v4();
+    newcomer.project_id = other;
+    newcomer.name = "newcomer".into();
+    newcomer.status = SessionStatus::Queued;
+    let newcomer_id = newcomer.id;
+    app.store.sessions.push(newcomer);
+    let output = session_285_frame(&mut app, &ctx);
+    assert!(
+        column_rect(&output, "newcomer").is_some(),
+        "a session started in a project not shown has a row at once"
+    );
+    assert_ne!(app.workspace_project, Some(other));
+    app.select_workspace_project(other);
+    assert!(
+        session_285_tab_ids(&app).contains(&newcomer_id),
+        "and its tab waits in its own project"
+    );
+    // Closed there, it is not opened again.
+    app.close_workspace_tab(&WorkspaceTab::Session(newcomer_id));
+    let output = session_285_frame(&mut app, &ctx);
+    assert!(!session_285_tab_ids(&app).contains(&newcomer_id));
+    assert!(column_rect(&output, "newcomer").is_none());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_rows_and_tabs_share_one_order() {
+    let root = temporary_directory("session-285-one-order");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    // The oldest waits on the person: the column used to list it first.
+    app.session_activity.insert(
+        ids[0],
+        ActivityTracker {
+            settled: Some(AgentActivity::AwaitingInput),
+            candidate: None,
+        },
+    );
+    let ctx = egui::Context::default();
+    let output = session_285_frame(&mut app, &ctx);
+    let newest_first = vec!["newest", "middle", "oldest"];
+    assert_eq!(session_285_rows(&output, &names), newest_first, "rows");
+    assert_eq!(session_285_tabs(&output, &names), newest_first, "tabs");
+    // An arranged order moves both.
+    app.session_arrangement.sessions = vec![ids[1], ids[0], ids[2]];
+    let front = app.workspace.active().cloned();
+    let output = session_285_frame(&mut app, &ctx);
+    let arranged = vec!["middle", "oldest", "newest"];
+    assert_eq!(session_285_rows(&output, &names), arranged, "rows");
+    assert_eq!(session_285_tabs(&output, &names), arranged, "tabs");
+    assert_eq!(
+        app.workspace.active().cloned(),
+        front,
+        "the front tab stays"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_arrange_keeps_documents_and_the_front_tab() {
+    let (a, b, c) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let document = WorkspaceTab::Document(DocumentId {
+        project: Uuid::new_v4(),
+        root: PathBuf::from("/r"),
+        path: PathBuf::from("/r/f.md"),
+    });
+    let mut tabs = WorkspaceTabs::default();
+    for tab in [
+        WorkspaceTab::Session(c),
+        document.clone(),
+        WorkspaceTab::Session(a),
+        WorkspaceTab::Session(b),
+    ] {
+        tabs.open(tab);
+    }
+    tabs.open(WorkspaceTab::Session(a));
+    let rank = |id: Uuid| [a, b, c].iter().position(|candidate| *candidate == id);
+    tabs.arrange(rank);
+    assert_eq!(
+        tabs.groups[0].tabs,
+        vec![
+            WorkspaceTab::Session(a),
+            document,
+            WorkspaceTab::Session(b),
+            WorkspaceTab::Session(c),
+        ],
+        "sessions sorted among their own slots; the document keeps its place"
+    );
+    assert_eq!(tabs.active(), Some(&WorkspaceTab::Session(a)));
+}
+
+#[test]
+fn session_285_dragging_a_row_reorders_its_tabs() {
+    let root = temporary_directory("session-285-row-drag");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    let output = session_285_frame(&mut app, &ctx);
+    let from = column_rect(&output, "oldest").unwrap().center();
+    let to = column_rect(&output, "newest").unwrap().left_top() - egui::vec2(0.0, 3.0);
+    workspace_drag_positions(&mut app, &ctx, from, to);
+    let moved = vec!["oldest", "newest", "middle"];
+    let output = session_285_frame(&mut app, &ctx);
+    assert_eq!(session_285_rows(&output, &names), moved, "rows");
+    assert_eq!(session_285_tabs(&output, &names), moved, "tabs follow");
+    assert_eq!(
+        load_session_arrangement(&app.data_file).sessions,
+        vec![ids[0], ids[2], ids[1]],
+        "the order file holds the move"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_dragging_a_tab_reorders_the_rows() {
+    let root = temporary_directory("session-285-tab-drag");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    let output = session_285_frame(&mut app, &ctx);
+    let tab = |output: &egui::FullOutput, name: &str| {
+        let right = column_right(output);
+        drawn_text_rects(output, |text| text == name)
+            .into_iter()
+            .find(|rect| rect.left() > right)
+            .unwrap()
+    };
+    let from = tab(&output, "oldest").center();
+    let to = tab(&output, "newest").center();
+    workspace_drag_positions(&mut app, &ctx, from, to);
+    let moved = vec!["oldest", "newest", "middle"];
+    let output = session_285_frame(&mut app, &ctx);
+    assert_eq!(session_285_tabs(&output, &names), moved, "the drop holds");
+    assert_eq!(session_285_rows(&output, &names), moved, "rows follow");
+    assert_eq!(
+        load_session_arrangement(&app.data_file).sessions,
+        vec![ids[0], ids[2], ids[1]]
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_pin_from_row_or_tab_moves_it_first_in_both() {
+    let root = temporary_directory("session-285-pin");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    // From the row.
+    let output = session_285_frame(&mut app, &ctx);
+    let row = column_rect(&output, "oldest").unwrap().center();
+    session_285_click(&mut app, &ctx, row, egui::PointerButton::Secondary);
+    let menu = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let entry = drawn_text_rect(&menu, |text| text == "ピン留め").expect("the row offers ピン留め");
+    session_285_click(&mut app, &ctx, entry.center(), egui::PointerButton::Primary);
+    assert!(app.is_session_pinned(ids[0]));
+    let output = session_285_frame(&mut app, &ctx);
+    let pinned_first = vec!["oldest", "newest", "middle"];
+    assert_eq!(session_285_rows(&output, &names), pinned_first, "rows");
+    assert_eq!(session_285_tabs(&output, &names), pinned_first, "tabs");
+    let oldest = column_rect(&output, "oldest").unwrap();
+    assert!(
+        column_line(&output, oldest).iter().any(|t| t == ICON_PIN),
+        "the row shows its pin"
+    );
+    // From the tab: 「ピン留めを外す」 on the pinned one.
+    let right = column_right(&output);
+    let tab = drawn_text_rects(&output, |text| text == "oldest")
+        .into_iter()
+        .find(|rect| rect.left() > right)
+        .unwrap();
+    session_285_click(&mut app, &ctx, tab.center(), egui::PointerButton::Secondary);
+    let menu = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let entry = drawn_text_rect(&menu, |text| text == "ピン留めを外す")
+        .expect("the tab offers ピン留めを外す");
+    session_285_click(&mut app, &ctx, entry.center(), egui::PointerButton::Primary);
+    assert!(!app.is_session_pinned(ids[0]));
+    let output = session_285_frame(&mut app, &ctx);
+    assert_eq!(
+        session_285_tabs(&output, &names),
+        vec!["newest", "middle", "oldest"],
+        "unpinned, it goes back to its place"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_pins_survive_a_relaunch() {
+    let root = temporary_directory("session-285-pin-relaunch");
+    let (mut app, _project, ids) = session_285_app(&root, &["one", "two"]);
+    app.toggle_session_pin(ids[1]);
+    let reopened = OperonApp::from_state(
+        app.data_file.clone(),
+        app.store.clone(),
+        ToolStatus::default(),
+        None,
+    );
+    assert!(reopened.is_session_pinned(ids[1]), "the pin is read back");
+    // A file written before pins existed reads as nothing pinned.
+    fs::write(
+        session_arrangement_path(&app.data_file),
+        format!("{{\"projects\":[],\"sessions\":[\"{}\"]}}\n", ids[0]),
+    )
+    .unwrap();
+    let old = load_session_arrangement(&app.data_file);
+    assert_eq!(old.sessions, vec![ids[0]]);
+    assert!(old.pinned.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_a_pinned_tab_does_not_close() {
+    let root = temporary_directory("session-285-pinned-close");
+    let names = ["kept", "plain"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    app.toggle_session_pin(ids[0]);
+    let output = session_285_frame(&mut app, &ctx);
+    let right = column_right(&output);
+    let closes = drawn_text_rects(&output, |text| text == ICON_CLOSE)
+        .into_iter()
+        .filter(|rect| rect.left() > right)
+        .count();
+    assert_eq!(closes, 1, "only the unpinned tab has a close button");
+    app.close_workspace_tab(&WorkspaceTab::Session(ids[0]));
+    assert!(
+        session_285_tab_ids(&app).contains(&ids[0]),
+        "⌘W leaves it open"
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("ピン留め中のセッションは閉じられません。ピン留めを外してから閉じてください。")
+    );
+    app.close_pane(ids[0]);
+    assert!(
+        session_285_tab_ids(&app).contains(&ids[0]),
+        "画面から外す too"
+    );
+    // Deleted, it goes — tab, row, and pin — in a project not shown as well.
+    app.store.sessions.retain(|s| s.id != ids[0]);
+    let output = session_285_frame(&mut app, &ctx);
+    assert!(!session_285_tab_ids(&app).contains(&ids[0]));
+    assert!(column_rect(&output, "kept").is_none());
+    assert!(!app.is_session_pinned(ids[0]));
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        path: root.join("other"),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    let mut away = app.store.sessions[0].clone();
+    away.id = Uuid::new_v4();
+    away.project_id = other;
+    away.name = "away".into();
+    let away_id = away.id;
+    app.store.sessions.push(away);
+    let output = session_285_frame(&mut app, &ctx);
+    assert!(column_rect(&output, "away").is_some());
+    app.store.sessions.retain(|s| s.id != away_id);
+    let output = session_285_frame(&mut app, &ctx);
+    assert!(
+        column_rect(&output, "away").is_none(),
+        "no row outlives its session"
+    );
+    assert!(
+        !app.session_has_a_tab(away_id),
+        "nor a tab in a project not shown"
+    );
+    fs::remove_dir_all(root).unwrap();
 }

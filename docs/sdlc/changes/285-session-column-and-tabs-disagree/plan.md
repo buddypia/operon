@@ -60,4 +60,27 @@
 
 ## Departures from the plan
 
-None yet.
+- **Order of work.** The code was written before the tests rather than after
+  each one was watched failing. What stands in for that: every guard was
+  watched failing through the mutation sweep (17 of 17 caught), each mutation
+  aimed at the claim its test makes.
+- **The filter tiles.** The column's status tiles counted every stored
+  session, so after this change they promised rows the column no longer
+  draws — the same mismatch the person reported, one level up.
+  `status_group_counts_for_chosen_agents` now counts only sessions with a tab
+  (`session_has_a_tab`, `src/app.rs`). `sidebar_251_filters_drive_real_rows`
+  and `sidebar_252_status_tiles_count_and_toggle` open their finished session
+  from history so it has a row; R1's test asserts the tiles' total.
+- **One more test.** `session_285_arrange_keeps_documents_and_the_front_tab`
+  pins `WorkspaceTabs::arrange` alone (documents keep their slots, the front
+  tab stays), which the drawn tests cannot reach without a document buffer.
+- **`commit_session_arrangement`** was taken out of `finish_column_drag` in
+  `src/app/screens.rs` so the row drag, the tab drop, and the pin toggle write
+  the order file through one function; it also prunes pins.
+- **String tables.** The new rows sit in id order, and the long notice is one
+  line: `every_message_row_is_one_the_code_shows` reads only one-line rows.
+- **A module of its own.** The new methods put `src/app.rs` past the
+  `largest_module_lines` band (10,094 > 10,000). The tab sync, the column's
+  source, the pin toggle, the tab-drop follow, `session_has_a_tab`, and
+  `commit_session_arrangement` live in `src/app/session_order.rs`, mapped in
+  `CLAUDE.md`; `src/app.rs` ends at 9,901 lines, below where it started.
