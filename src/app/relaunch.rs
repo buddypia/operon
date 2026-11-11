@@ -283,10 +283,44 @@ impl OperonApp {
             .is_none_or(|last| now.saturating_duration_since(*last) >= AUTO_RESTORE_COOLDOWN)
     }
 
+    /// Records an automatic restore timestamp for `session_id` after pruning
+    /// removed sessions so `last_auto_restore` stays bounded by `store.sessions`.
+    pub(crate) fn record_auto_restore(&mut self, session_id: Uuid, now: Instant) {
+        let sessions = &self.store.sessions;
+        self.last_auto_restore
+            .retain(|known, _| sessions.iter().any(|session| session.id == *known));
+        self.last_auto_restore.insert(session_id, now);
+    }
+
     /// Clears the automatic-restore cooldown when the person explicitly starts
     /// or resumes a session.
     pub(crate) fn clear_auto_restore_cooldown(&mut self, session_id: Uuid) {
         self.last_auto_restore.remove(&session_id);
+    }
+
+    /// Handles automatic restore after `BackgroundResult::TerminalResized`
+    /// observed `TmuxState::Gone` and persisted `SessionStatus::Lost`
+    /// (change 291).
+    pub(crate) fn auto_restore_after_resize_gone(&mut self, session_id: Uuid, now: Instant) {
+        let first_look = self.relaunch_candidates.remove(&session_id);
+        if !self.tools.tmux || self.setup_sessions.contains(&session_id) {
+            return;
+        }
+        let Some(name) = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id && relaunch_kind(session).is_some())
+            .map(|session| session.name.clone())
+        else {
+            return;
+        };
+        let mut persistent_notice = self.store_retry_pending;
+        if first_look {
+            self.relaunch_remembered_sessions(vec![session_id], now, &mut persistent_notice);
+        } else if self.auto_restore_ready(session_id, now) {
+            self.restore_forced_sessions(vec![(session_id, name)], now, &mut persistent_notice);
+        }
     }
 
     /// Starts again, in place, the sessions the first look found gone that
@@ -309,11 +343,11 @@ impl OperonApp {
                 self.notice = saved_notice;
             }
             if launched {
-                self.last_auto_restore.insert(id, now);
+                self.record_auto_restore(id, now);
                 started.insert(id);
             }
         }
-        if !started.is_empty() && !*persistent_notice {
+        if !started.is_empty() && !*persistent_notice && !self.store_retry_pending {
             self.notice_briefly(tf!(
                 "前回開いていたセッションを {count} 件再開しました。",
                 count = started.len()
@@ -344,12 +378,12 @@ impl OperonApp {
                 self.notice = saved_notice;
             }
             if launched {
-                self.last_auto_restore.insert(id, now);
+                self.record_auto_restore(id, now);
                 restored_ids.insert(id);
                 restored_names.push(name);
             }
         }
-        if !*persistent_notice {
+        if !*persistent_notice && !self.store_retry_pending {
             match restored_names.as_slice() {
                 [] => {}
                 [name] => self.notice_briefly(tf!(
@@ -365,13 +399,16 @@ impl OperonApp {
         restored_ids
     }
 
-    /// Runs the post-persist side effects of `apply_session_poll`: sidecar
-    /// sync, setup banners, clean-exit shell transitions, startup relaunches,
-    /// mid-run forced restorations, and ambient notifications.
+    /// Runs the post-persist side effects of `apply_session_poll`: closing
+    /// finished unpinned tabs, sidecar sync, setup banners, clean-exit shell
+    /// transitions, startup relaunches, mid-run forced restorations, and
+    /// ambient notifications.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn finish_session_poll_transitions(
         &mut self,
         changed: bool,
+        exited_ids: Vec<Uuid>,
+        completed_cancellations: Vec<Uuid>,
         completed: Vec<String>,
         failed: Vec<(Uuid, String)>,
         finished_setups: Vec<(Uuid, Option<i32>)>,
@@ -380,7 +417,13 @@ impl OperonApp {
         forced_restore: Vec<(Uuid, String)>,
         now: Instant,
     ) {
-        let mut persistent_notice = false;
+        for id in exited_ids {
+            self.close_finished_session_tab(id);
+        }
+        for id in completed_cancellations {
+            self.clear_cancelled_unread_and_close_tab(id);
+        }
+        let mut persistent_notice = self.store_retry_pending;
         if changed {
             match save_cancellation_intents(&self.data_file, &self.store.pending_cancellations) {
                 Ok(WriteOutcome::Durable) => {}

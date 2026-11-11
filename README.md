@@ -20,7 +20,7 @@ control.
 Everything runs locally. Operon has no telemetry, no accounts, and no cloud
 service. The interface speaks English, Japanese, and Korean.
 
-![Operon home: sessions waiting on you, running, idle, and finished across every project](docs/images/01-home.png)
+![Operon home: sessions waiting on you, running, and idle across every project](docs/images/01-home.png)
 
 ## Screenshots
 
@@ -66,8 +66,10 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Below them, the session list is arranged by hand: drag a project by its
   name to move its card, or a session's row to move it among its own
   project's sessions. On the session page the left column lists exactly each
-  project's open tabs, in the tabs' order: a row and its tab move together,
-  close together, and a session that ends stays in both until it is closed.
+  project's open tabs, in the tabs' order: a row and its tab move together and
+  close together; an unpinned session that is stopped or finishes a script run
+  closes its tab and moves to **履歴**, while an unrecovered crash stays open so
+  its output can be read.
   Right-click a row or a tab to pin it: a pinned session stays first in both
   and cannot be closed until it is unpinned. The order and the pins are kept
   in `session-order.json`, in the same folder as the local index, and a
@@ -123,17 +125,18 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - A turn that finishes, or stops to ask, while you are reading another session
   leaves that session marked in the list until you open it, and the banner at
   the top of the home screen lists the sessions that want you, or says none do — the ones waiting
-  for an answer, the ones stopped on a prerequisite that failed, and the ones
+  for an answer, the ones that exited abnormally without an automatic restore,
+  the ones stopped on a prerequisite that failed, and the ones
   you have not read, counted once each. It opens the session list already
   narrowed to exactly those. Mark a session unread again from its row menu to
   come back to it. Marks are for the session you are in and do not survive a
   restart.
-- Narrow the sessions to what you can act on. Four tiles in the **セッション**
-  sidebar's header — **要対応**, **実行中**, **アイドル**, **終了** — each
+- Narrow the sessions to what you can act on. Three tiles in the **セッション**
+  sidebar's header — **要対応**, **実行中**, **アイドル** — each
   carry a live count, and a segment below them narrows by CLI (Codex, Claude
   Code, Antigravity, others). Turning one on leaves only those sessions,
   dropping the projects that have none; several can be on at once, the column
-  says how many it shows with a **クリア** beside it, and the same four filter
+  says how many it shows with a **クリア** beside it, and the same three filter
   the list in **履歴**. Nothing is selected when the app starts, so a filter
   never survives a restart to hide a session without explaining itself.
 - Where an agent CLI supports it, Operon registers a small status hook in that

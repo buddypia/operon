@@ -1182,13 +1182,18 @@ impl SessionStatusKind {
         }
     }
 
-    /// The word a person reads for this state: its group's, a message id.
-    /// Fourteen states used to have fourteen English tokens beside four
-    /// Japanese chip words, so one session had two names depending on where it
-    /// was read. The state is still told apart by its colour and by the hint,
-    /// which says which of the fourteen it is.
+    /// The word a person reads for this state: its group's word for live or
+    /// actionable states, or its own exit word for clean exit and explicit stop
+    /// now that the fourth `終了` filter group is retired (change 291).
     pub(crate) fn label(self) -> &'static str {
-        self.group().message_id()
+        match self {
+            SessionStatusKind::Done => "正常終了",
+            SessionStatusKind::Stopped => "停止済み",
+            _ => self
+                .group()
+                .expect("every live or failed state belongs to one of the three status groups")
+                .message_id(),
+        }
     }
 
     pub(crate) fn tone(self) -> StatusTone {
@@ -1210,33 +1215,29 @@ impl SessionStatusKind {
         }
     }
 
-    /// Which of the four things a person can do about this session. The match
-    /// is exhaustive on purpose: a new state does not compile until someone
-    /// says what a reader is supposed to do with it.
-    pub(crate) fn group(self) -> SessionStatusGroup {
+    /// Which of the three actionable status groups this state belongs to, or
+    /// `None` once the session exited cleanly or was stopped by hand (change
+    /// 291). Exhaustive so a new state cannot compile without choosing.
+    pub(crate) fn group(self) -> Option<SessionStatusGroup> {
         match self {
-            // Stopped on a question, or stopped for good on a prerequisite
-            // that will not arrive. Either way nothing moves until a person
-            // does something.
-            SessionStatusKind::Waiting | SessionStatusKind::Blocked => SessionStatusGroup::NeedsYou,
-            // Live, with nothing to do. The one this filter exists for.
-            SessionStatusKind::Idle => SessionStatusGroup::Free,
-            // In flight, including the not-yet-started: a queued session is
-            // going to run without anyone's help, so it is no more actionable
-            // than one that is mid-turn.
+            // Stopped on a question, blocked on a failed prerequisite, or ended
+            // unexpectedly without automatic recovery.
+            SessionStatusKind::Waiting
+            | SessionStatusKind::Blocked
+            | SessionStatusKind::Failed
+            | SessionStatusKind::Lost => Some(SessionStatusGroup::NeedsYou),
+            // Live, with nothing to do.
+            SessionStatusKind::Idle => Some(SessionStatusGroup::Free),
+            // In flight, including queued and stopping states.
             SessionStatusKind::Starting
             | SessionStatusKind::Working
             | SessionStatusKind::Running
             | SessionStatusKind::Ready
             | SessionStatusKind::Queued
             | SessionStatusKind::Stopping
-            | SessionStatusKind::Checking => SessionStatusGroup::Busy,
-            // The terminal is gone. Its output may still be worth reading, but
-            // no instruction can be given to it.
-            SessionStatusKind::Done
-            | SessionStatusKind::Failed
-            | SessionStatusKind::Stopped
-            | SessionStatusKind::Lost => SessionStatusGroup::Finished,
+            | SessionStatusKind::Checking => Some(SessionStatusGroup::Busy),
+            // Cleanly exited or explicitly cancelled: retired to History (`すべて`).
+            SessionStatusKind::Done | SessionStatusKind::Stopped => None,
         }
     }
 }
@@ -1264,34 +1265,31 @@ pub(crate) fn session_status_icon(
     response
 }
 
-/// The four answers to "what can I do with this session right now", which is
-/// the question the session list is filtered by. Fourteen states is the right
-/// number to *report* and the wrong number to *choose between*.
+/// The three answers to "what can I do with this session right now" (change
+/// 291): respond/inspect (`NeedsYou`), let it run (`Busy`), or hand it work
+/// (`Free`). Completed and stopped sessions move to History (`すべて`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SessionStatusGroup {
     NeedsYou,
     Free,
     Busy,
-    Finished,
 }
 
 impl SessionStatusGroup {
     /// In the order the chips and the Home tiles are drawn, most actionable
-    /// first: what needs you, what is moving, what is free, what is over.
-    pub(crate) const GROUPS: [SessionStatusGroup; 4] = [
+    /// first: what needs you, what is moving, what is free.
+    pub(crate) const GROUPS: [SessionStatusGroup; 3] = [
         SessionStatusGroup::NeedsYou,
         SessionStatusGroup::Busy,
         SessionStatusGroup::Free,
-        SessionStatusGroup::Finished,
     ];
 
-    /// Its slot in the `[bool; 4]` of selected groups.
+    /// Its slot in the `[bool; 3]` of selected groups.
     pub(crate) fn index(self) -> usize {
         match self {
             SessionStatusGroup::NeedsYou => 0,
             SessionStatusGroup::Busy => 1,
             SessionStatusGroup::Free => 2,
-            SessionStatusGroup::Finished => 3,
         }
     }
 
@@ -1302,7 +1300,6 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => "要対応",
             SessionStatusGroup::Free => "アイドル",
             SessionStatusGroup::Busy => "実行中",
-            SessionStatusGroup::Finished => "終了",
         }
     }
 
@@ -1314,7 +1311,6 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => ICON_ATTENTION,
             SessionStatusGroup::Free => ICON_STATUS_IDLE,
             SessionStatusGroup::Busy => ICON_STATUS_RUNNING,
-            SessionStatusGroup::Finished => ICON_STATUS_DONE,
         }
     }
 
@@ -1325,7 +1321,6 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => StatusMark::Attention,
             SessionStatusGroup::Free => StatusMark::Pause,
             SessionStatusGroup::Busy => StatusMark::Progress,
-            SessionStatusGroup::Finished => StatusMark::Check,
         }
     }
 
@@ -1334,17 +1329,15 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => StatusTone::Attention,
             SessionStatusGroup::Free => StatusTone::Idle,
             SessionStatusGroup::Busy => StatusTone::Running,
-            SessionStatusGroup::Finished => StatusTone::Neutral,
         }
     }
 
     /// What the chip says on hover: which states it will show.
     pub(crate) fn hint_id(self) -> &'static str {
         match self {
-            SessionStatusGroup::NeedsYou => "回答待ち・前提が壊れて止まっているセッション",
-            SessionStatusGroup::Free => "ターンを終え、次の依頼を出せるセッション",
-            SessionStatusGroup::Busy => "実行中・起動中・順番待ちのセッション",
-            SessionStatusGroup::Finished => "ターミナルが終了したセッション",
+            Self::NeedsYou => "回答待ち・異常終了・前提が壊れて止まっているセッション",
+            Self::Free => "ターンを終え、次の依頼を出せるセッション",
+            Self::Busy => "実行中・起動中・順番待ちのセッション",
         }
     }
 }
@@ -1422,7 +1415,7 @@ pub(crate) fn session_status_view(
         },
         SessionStatusKind::Ready => tr("前提が完了しました").to_owned(),
         SessionStatusKind::Queued => tr("前提の完了待ち").to_owned(),
-        SessionStatusKind::Done => tr("正常終了").to_owned(),
+        SessionStatusKind::Done => tr("ターミナルは正常に終了しました").to_owned(),
         SessionStatusKind::Failed => tr("異常終了。出力を確認してください").to_owned(),
         SessionStatusKind::Stopped => tr("停止操作による終了").to_owned(),
         SessionStatusKind::Lost => tr("ターミナルが残っておらず、結果を確認できません").to_owned(),

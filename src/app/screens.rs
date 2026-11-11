@@ -748,18 +748,12 @@ impl OperonApp {
         // One tile per group, in the chips' order, named with the chips' words:
         // Home and the session list describe a session the same way.
         let mut go = None;
-        ui.columns(4, |columns| {
+        ui.columns(SessionStatusGroup::GROUPS.len(), |columns| {
             for (column, group) in columns.iter_mut().zip(SessionStatusGroup::GROUPS) {
-                let icon = match group {
-                    SessionStatusGroup::NeedsYou => ICON_ATTENTION,
-                    SessionStatusGroup::Busy => ICON_STATUS_RUNNING,
-                    SessionStatusGroup::Free => ICON_STATUS_IDLE,
-                    SessionStatusGroup::Finished => ICON_STATUS_DONE,
-                };
                 let tile = metric_tile(
                     column,
                     palette,
-                    icon,
+                    group.icon(),
                     tr(group.message_id()),
                     group_counts[group.index()],
                     palette.status(group.tone()),
@@ -5384,10 +5378,10 @@ impl OperonApp {
             })
             .cloned()
             .collect::<Vec<_>>();
-        // One pass over the sessions for all four numbers. `status_view` would
+        // One pass over the sessions for all three numbers. `status_view` would
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
-        let mut group_counts = [0usize; 4];
+        let mut group_counts = [0usize; 3];
         for session in &sessions {
             let kind = self.session_status_kind_for(session);
             for group in SessionStatusGroup::GROUPS {
@@ -7389,24 +7383,28 @@ impl OperonApp {
         }
     }
 
-    /// The sidebar's filters (change 252): the four status groups as counted
-    /// tiles, two per row where two fit, then the CLI marks in one segment,
-    /// and — only while something is filtered — how many sessions show and
-    /// the one action that clears both dimensions.
+    /// The sidebar's filters (change 252, updated in change 291): the three
+    /// actionable status groups as counted tiles (3 across when wide, 2 + 1
+    /// full-width at default width, 1 stacked when narrow), then the CLI marks
+    /// in one segment, and — only while something is filtered — how many
+    /// sessions show and the one action that clears both dimensions.
     fn ui_sidebar_session_filters(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         let counts = self.status_group_counts_for_chosen_agents();
         let gap = SPACE_XS;
-        let columns = if ui.available_width() >= 2.0 * STATUS_TILE_MIN_W + gap {
+        let available = ui.available_width();
+        let columns = if available >= 3.0 * STATUS_TILE_MIN_W + 2.0 * gap {
+            3
+        } else if available >= 2.0 * STATUS_TILE_MIN_W + gap {
             2
         } else {
             1
         };
-        let width = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
         let mut toggled = None;
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
             for row in SessionStatusGroup::GROUPS.chunks(columns) {
+                let row_width = (available - gap * (row.len() - 1) as f32) / row.len() as f32;
                 ui.horizontal(|ui| {
                     for &group in row {
                         let tile = status_filter_tile(
@@ -7415,7 +7413,7 @@ impl OperonApp {
                             group,
                             counts[group.index()],
                             self.status_filter[group.index()],
-                            width,
+                            row_width,
                         )
                         .on_hover_ui(|ui| {
                             ui.label(tr(group.hint_id()));
@@ -7552,7 +7550,7 @@ impl OperonApp {
                     .map(|session| {
                         let kind = self.session_status_kind_for(session);
                         let group = if self.is_session_unread(session.id) {
-                            SessionStatusGroup::NeedsYou
+                            Some(SessionStatusGroup::NeedsYou)
                         } else {
                             kind.group()
                         };
@@ -7635,7 +7633,7 @@ impl OperonApp {
                                         ] {
                                             let mut members =
                                                 live.iter().filter(|(owner, member, _, _)| {
-                                                    *owner == project.id && *member == group
+                                                    *owner == project.id && *member == Some(group)
                                                 });
                                             let Some(&(_, _, _, first)) = members.next() else {
                                                 continue;

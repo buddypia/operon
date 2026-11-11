@@ -98,7 +98,8 @@ pub(crate) const NOTICE_TOAST_SECONDS: u64 = 4;
 /// Minimum pause between two automatic restorations of the same session, so a
 /// command or directory that crashes straight away settles in `Failed` or
 /// `Lost` instead of restarting in a loop (change 288).
-pub(crate) const AUTO_RESTORE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15);
+pub(crate) const AUTO_RESTORE_COOLDOWN: std::time::Duration =
+    std::time::Duration::from_secs(AUTO_RESTORE_COOLDOWN_SECONDS);
 /// The most paths the session file filter lists at once. A filter that
 /// matches more is asking to be narrowed, and a draw of every match would be
 /// the tree again without its folding.
@@ -685,3 +686,7 @@ pub(crate) const KNOWLEDGE_MAP_DIMMED_OPACITY: f32 = 0.15;
 pub(crate) const KNOWLEDGE_MAP_LABEL_ZOOM: f32 = 1.8;
 /// The directory under the app data directory that holds the model file.
 pub(crate) const EMBEDDING_MODEL_DIRECTORY_NAME: &str = "models";
+/// Minimum interval between automatic mid-run or startup restores of the same
+/// session so an immediate crash loop stops and leaves the error output readable
+/// in its tab (change 291).
+pub(crate) const AUTO_RESTORE_COOLDOWN_SECONDS: u64 = 15;

@@ -135,6 +135,76 @@ impl OperonApp {
         }
     }
 
+    /// Closes an unpinned session tab automatically when the session finishes
+    /// cleanly or is explicitly stopped, moving it to History without flashing
+    /// a refusal banner on pinned tabs or clearing unseen neighbour unread
+    /// marks while off-screen (change 291).
+    pub(crate) fn close_finished_session_tab(&mut self, id: Uuid) {
+        if self.is_session_pinned(id) {
+            return;
+        }
+        let tab = WorkspaceTab::Session(id);
+        if self
+            .workspace
+            .groups
+            .iter()
+            .any(|group| group.tabs.contains(&tab))
+        {
+            if self.workspace.close(&tab) {
+                self.remember_closed_tab(&tab);
+            }
+            if self.page == Page::Sessions && !self.session_library_open {
+                if let Some(next) = self.workspace.active().cloned() {
+                    self.activate_workspace_tab(&next);
+                }
+                if self.selected_session == Some(id) {
+                    self.set_terminal_session_context(None);
+                }
+            } else {
+                match self.workspace.active().cloned() {
+                    Some(WorkspaceTab::Session(next_id)) => {
+                        self.set_terminal_session_context(Some(next_id));
+                    }
+                    _ => {
+                        if self.selected_session == Some(id) {
+                            self.set_terminal_session_context(None);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+        let mut closed = false;
+        for (tabs, selected) in self.project_workspaces.values_mut() {
+            if tabs.close(&tab) {
+                closed = true;
+                if *selected == Some(id) {
+                    *selected = match tabs.active() {
+                        Some(WorkspaceTab::Session(next_id)) => Some(*next_id),
+                        _ => None,
+                    };
+                }
+            }
+        }
+        if closed {
+            self.remember_closed_tab(&tab);
+            if self.selected_session == Some(id) {
+                self.set_terminal_session_context(None);
+            }
+        }
+    }
+
+    /// Explicit cancellation clears unread marks before closing the unpinned
+    /// tab so a session stopped by the person does not linger under 要対応
+    /// (change 291).
+    pub(crate) fn clear_cancelled_unread_and_close_tab(&mut self, id: Uuid) {
+        self.unread_sessions.remove(&id);
+        if self.unread_hold == Some(id) {
+            self.unread_hold = None;
+        }
+        self.close_finished_session_tab(id);
+    }
+
     /// The session page column's rows for `project` (change 285): exactly
     /// its session tabs, every group's, in the order the tabs are put in.
     pub(crate) fn project_tab_sessions(&self, project: Uuid) -> Vec<&Session> {

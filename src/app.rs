@@ -442,7 +442,7 @@ pub(crate) struct OperonApp {
     ///
     /// Deliberately not in the store: a filter that survived a restart would
     /// open the app on a list with sessions missing and no memory of why.
-    pub(crate) status_filter: [bool; 4],
+    pub(crate) status_filter: [bool; 3],
     pub(crate) agent_filter: [bool; 4],
     pub(crate) git_selected_file: Option<String>,
     pub(crate) selected_file: Option<PathBuf>,
@@ -804,7 +804,7 @@ pub(crate) struct OperonApp {
     /// completion leaves the selection, the page, and the notice alone.
     pub(crate) quiet_launches: HashSet<Uuid>,
     /// Last automatic restoration timestamp per session, bounding repeat crash
-    /// recoveries by `AUTO_RESTORE_COOLDOWN` (change 288).
+    /// recoveries by `AUTO_RESTORE_COOLDOWN` (changes 288 and 291).
     pub(crate) last_auto_restore: HashMap<Uuid, Instant>,
     /// Open workspace tabs that an older build saved as `SessionStatus::Exited`
     /// and queued for shell conversion on the first poll (change 288).
@@ -1055,7 +1055,7 @@ impl OperonApp {
             session_view: SessionView::List,
             session_library_open: false,
             pending_history_open: None,
-            status_filter: [false; 4],
+            status_filter: [false; 3],
             agent_filter: [false; 4],
             git_selected_file: None,
             selected_file: None,
@@ -1985,6 +1985,8 @@ impl OperonApp {
                             );
                             if remove_requested {
                                 self.remove_session_record(session_id);
+                            } else {
+                                self.clear_cancelled_unread_and_close_tab(session_id);
                             }
                         }
                         Err(error) => {
@@ -2013,6 +2015,8 @@ impl OperonApp {
                                 );
                                 if remove_requested {
                                     self.remove_session_record(session_id);
+                                } else {
+                                    self.clear_cancelled_unread_and_close_tab(session_id);
                                 }
                                 continue;
                             }
@@ -2191,7 +2195,9 @@ impl OperonApp {
                                             session.id == session_id
                                                 && matches!(
                                                     session.status,
-                                                    SessionStatus::Active | SessionStatus::Starting
+                                                    SessionStatus::Active
+                                                        | SessionStatus::Starting
+                                                        | SessionStatus::Unknown
                                                 )
                                         })
                                     {
@@ -2201,12 +2207,17 @@ impl OperonApp {
                                         tr("セッションをキャンセルしました。"),
                                         tr("tmux セッションはキャンセルされました"),
                                     );
+                                    if !self.remove_after_close.contains(&session_id) {
+                                        self.clear_cancelled_unread_and_close_tab(session_id);
+                                    }
                                 } else if let Some(session) =
                                     self.store.sessions.iter_mut().find(|session| {
                                         session.id == session_id
                                             && matches!(
                                                 session.status,
-                                                SessionStatus::Active | SessionStatus::Starting
+                                                SessionStatus::Active
+                                                    | SessionStatus::Starting
+                                                    | SessionStatus::Unknown
                                             )
                                     })
                                 {
@@ -2219,6 +2230,11 @@ impl OperonApp {
                                     if !self.persist() {
                                         self.store_retry_pending = true;
                                         self.notice = Some(tr("tmux が見つからないためセッションを停止扱いにしましたが、保存できませんでした。Operon が自動的に再試行します。").into());
+                                    } else {
+                                        self.auto_restore_after_resize_gone(
+                                            session_id,
+                                            Instant::now(),
+                                        );
                                     }
                                 }
                             } else {
@@ -3610,11 +3626,12 @@ impl OperonApp {
         output: Vec<(Uuid, UiResult<TerminalCapture>)>,
     ) {
         self.apply_session_previews(previews);
+        let poll_now = Instant::now();
         let mut previous_store = None;
         let mut changed = false;
         let mut completed = Vec::new();
+        let mut exited_ids = Vec::new();
         let mut failed = Vec::new();
-        let poll_now = Instant::now();
         let mut completed_cancellations = Vec::new();
         let mut finished_setups: Vec<(Uuid, Option<i32>)> = Vec::new();
         let mut reopen_shells = Vec::new();
@@ -3676,7 +3693,7 @@ impl OperonApp {
             // Startup's first look announces remembered sessions together; a
             // forced kill or crash later in the run restores automatically
             // within `AUTO_RESTORE_COOLDOWN`, and a clean exit opens a shell in
-            // place rather than freezing the pane (changes 270 and 288).
+            // place or closes unpinned non-interactive tabs (changes 270, 288, 291).
             let first_look =
                 observation.state != TmuxState::Unknown && self.relaunch_candidates.contains(&id);
             if first_look {
@@ -3707,11 +3724,15 @@ impl OperonApp {
             if let Some(next) = next {
                 previous_store.get_or_insert_with(|| self.store.clone());
                 let session = &mut self.store.sessions[idx];
-                if next == SessionStatus::Exited
-                    && (!reopen_shell
-                        || !matches!(session.agent.as_str(), "terminal" | "existing terminal"))
-                {
-                    completed.push(session.name.clone());
+                if next == SessionStatus::Exited {
+                    if !reopen_shell
+                        || !matches!(session.agent.as_str(), "terminal" | "existing terminal")
+                    {
+                        completed.push(session.name.clone());
+                    }
+                    if !reopen_shell && !self.setup_sessions.contains(&id) {
+                        exited_ids.push(id);
+                    }
                 } else if next == SessionStatus::Failed {
                     failed.push((id, session.name.clone()));
                 } else if next == SessionStatus::Cancelled {
@@ -3751,6 +3772,8 @@ impl OperonApp {
         }
         self.finish_session_poll_transitions(
             changed,
+            exited_ids,
+            completed_cancellations,
             completed,
             failed,
             finished_setups,
@@ -4249,6 +4272,7 @@ impl OperonApp {
             self.store = previous_store;
             return;
         }
+        self.clear_cancelled_unread_and_close_tab(session_id);
         self.notice = Some(tr("キュー内のセッションをキャンセルしました。").into());
     }
 
@@ -6156,7 +6180,7 @@ impl OperonApp {
     /// The same question asked of a kind already in hand. Deciding the kind
     /// means walking the dependency list of a queued session, so a caller that
     /// asks about several groups computes it once and comes here.
-    fn kind_in_status_group(
+    pub(crate) fn kind_in_status_group(
         &self,
         kind: SessionStatusKind,
         session: &Session,
@@ -6165,34 +6189,35 @@ impl OperonApp {
         if group == SessionStatusGroup::NeedsYou && self.is_session_unread(session.id) {
             return true;
         }
-        kind.group() == group
+        if matches!(kind, SessionStatusKind::Failed | SessionStatusKind::Lost) {
+            return group == SessionStatusGroup::NeedsYou && self.session_has_a_tab(session.id);
+        }
+        kind.group() == Some(group)
     }
 
     /// How many sessions are in each group right now, indexed by
     /// `SessionStatusGroup::index`. One pass, no allocation.
-    pub(crate) fn status_group_counts(&self) -> [usize; 4] {
+    pub(crate) fn status_group_counts(&self) -> [usize; 3] {
         self.status_group_counts_where(|_| true)
     }
 
     /// The sidebar's tile counts: what each group would show if it were chosen
     /// alone with the current CLI choice, so a number never promises rows the
     /// column will not draw — and the column draws only tabs (change 285).
-    pub(crate) fn status_group_counts_for_chosen_agents(&self) -> [usize; 4] {
+    pub(crate) fn status_group_counts_for_chosen_agents(&self) -> [usize; 3] {
         self.status_group_counts_where(|session| {
             self.session_matches_agent_filter(session) && self.session_has_a_tab(session.id)
         })
     }
 
-    fn status_group_counts_where(&self, keep: impl Fn(&Session) -> bool) -> [usize; 4] {
-        let mut counts = [0usize; 4];
+    fn status_group_counts_where(&self, keep: impl Fn(&Session) -> bool) -> [usize; 3] {
+        let mut counts = [0usize; 3];
         for session in self.store.sessions.iter().filter(|session| keep(session)) {
-            let group = self.session_status_kind_for(session).group();
-            counts[group.index()] += 1;
-            // The unread overlay, kept in step with `attention_count`: a
-            // session already counted under 要対応 by its state is not counted
-            // twice.
-            if group != SessionStatusGroup::NeedsYou && self.is_session_unread(session.id) {
-                counts[SessionStatusGroup::NeedsYou.index()] += 1;
+            let kind = self.session_status_kind_for(session);
+            for group in SessionStatusGroup::GROUPS {
+                if self.kind_in_status_group(kind, session, group) {
+                    counts[group.index()] += 1;
+                }
             }
         }
         counts
@@ -6378,7 +6403,7 @@ impl OperonApp {
     }
 
     pub(crate) fn clear_status_filter(&mut self) {
-        self.status_filter = [false; 4];
+        self.status_filter = [false; 3];
         self.forget_pending_session_close();
     }
 
