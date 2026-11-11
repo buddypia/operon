@@ -1335,11 +1335,9 @@ impl SessionStatusGroup {
     /// What the chip says on hover: which states it will show.
     pub(crate) fn hint_id(self) -> &'static str {
         match self {
-            SessionStatusGroup::NeedsYou => {
-                "回答待ち・異常終了・前提が壊れて止まっているセッション"
-            }
-            SessionStatusGroup::Free => "ターンを終え、次の依頼を出せるセッション",
-            SessionStatusGroup::Busy => "実行中・起動中・順番待ちのセッション",
+            Self::NeedsYou => "回答待ち・異常終了・前提が壊れて止まっているセッション",
+            Self::Free => "ターンを終え、次の依頼を出せるセッション",
+            Self::Busy => "実行中・起動中・順番待ちのセッション",
         }
     }
 }
