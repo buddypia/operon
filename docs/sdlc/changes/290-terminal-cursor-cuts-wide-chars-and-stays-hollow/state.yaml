@@ -14,8 +14,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -23,13 +23,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the failing cursor_290_ and model_check_cursor_290_ tests in src/tests.rs, then implement the cursor sizing and block/outline rendering."
+resume: "Done. Package from main after landing, then verify narrow (1 cell) and Japanese/4-byte (2 cells) solid focused block cursor and 1px unfocused hollow cursor across Dark and Light themes."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked cursor_290_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/ui/terminal.rs and src/app/screens.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/290-terminal-cursor-cuts-wide-chars-and-stays-hollow/mutations.py"
+  three-gates: "machine passed make q.fast; cargo test --locked cursor_290_: 5 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; diagnose/warn metrics unchanged from main"
+  release-binary: "machine passed required - src/ui/terminal.rs and src/app/screens.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/290-terminal-cursor-cuts-wide-chars-and-stays-hollow/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

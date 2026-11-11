@@ -80170,3 +80170,890 @@ fn home_287_clicking_the_mark_opens_the_session() {
     assert_eq!(app.selected_session, Some(session.id));
     fs::remove_dir_all(root).ok();
 }
+
+fn cursor_290_collect_shapes(
+    shape: &egui::epaint::Shape,
+    rects: &mut Vec<(usize, egui::epaint::RectShape)>,
+    texts: &mut Vec<(usize, egui::epaint::TextShape)>,
+    order: &mut usize,
+) {
+    match shape {
+        egui::epaint::Shape::Rect(rect) => {
+            let idx = *order;
+            *order += 1;
+            rects.push((idx, rect.clone()));
+        }
+        egui::epaint::Shape::Text(text) => {
+            let idx = *order;
+            *order += 1;
+            texts.push((idx, text.clone()));
+        }
+        egui::epaint::Shape::Vec(children) => {
+            for child in children {
+                cursor_290_collect_shapes(child, rects, texts, order);
+            }
+        }
+        _ => {
+            *order += 1;
+        }
+    }
+}
+
+type Cursor290Shapes = (
+    Vec<(usize, egui::epaint::RectShape)>,
+    Vec<(usize, egui::epaint::TextShape)>,
+);
+
+fn cursor_290_shapes(output: &egui::FullOutput) -> Cursor290Shapes {
+    let mut rects = Vec::new();
+    let mut texts = Vec::new();
+    let mut order = 0usize;
+    for clipped in &output.shapes {
+        cursor_290_collect_shapes(&clipped.shape, &mut rects, &mut texts, &mut order);
+    }
+    (rects, texts)
+}
+
+/// Change 290, requirement 1. Narrow ASCII and empty cells keep a `1 * cell.x`
+/// caret, while three-byte Japanese characters, four-byte UTF-8 CJK extensions
+/// and emoji, NFD combining sequences, and four-byte variation selectors expand
+/// the caret to `2 * cell.x` anchored at the cluster's lead display column —
+/// snapping a trailing-column coordinate back to the lead column and returning
+/// `None` when the widened caret would poke past the pane's right inner edge.
+#[test]
+pub(crate) fn cursor_290_wide_and_four_byte_glyphs_span_two_cells() {
+    assert_eq!(
+        terminal_cursor_cell("", 0),
+        TerminalCursorCell {
+            column: 0,
+            columns: 1,
+            text: "",
+        }
+    );
+    assert_eq!(
+        terminal_cursor_cell("", 5),
+        TerminalCursorCell {
+            column: 5,
+            columns: 1,
+            text: "",
+        }
+    );
+    assert_eq!(
+        terminal_cursor_cell("\u{0301}\u{FE0F}", 0),
+        TerminalCursorCell {
+            column: 0,
+            columns: 1,
+            text: "",
+        }
+    );
+    assert_eq!(
+        terminal_cursor_cell("\u{0301}あ", 1),
+        TerminalCursorCell {
+            column: 0,
+            columns: 2,
+            text: "あ",
+        }
+    );
+
+    let line = "aあ𠮷🎉🪄🈁か\u{3099}葛\u{E0100}e\u{0301}　𠮟𛀀z";
+    assert_eq!(terminal_display_columns(line), 23);
+
+    let expected: &[(u16, usize, usize, &str)] = &[
+        (0, 0, 1, "a"),
+        (1, 1, 2, "あ"),
+        (2, 1, 2, "あ"),
+        (3, 3, 2, "𠮷"),
+        (4, 3, 2, "𠮷"),
+        (5, 5, 2, "🎉"),
+        (6, 5, 2, "🎉"),
+        (7, 7, 2, "🪄"),
+        (8, 7, 2, "🪄"),
+        (9, 9, 2, "🈁"),
+        (10, 9, 2, "🈁"),
+        (11, 11, 2, "か\u{3099}"),
+        (12, 11, 2, "か\u{3099}"),
+        (13, 13, 2, "葛\u{E0100}"),
+        (14, 13, 2, "葛\u{E0100}"),
+        (15, 15, 1, "e\u{0301}"),
+        (16, 16, 2, "　"),
+        (17, 16, 2, "　"),
+        (18, 18, 2, "𠮟"),
+        (19, 18, 2, "𠮟"),
+        (20, 20, 2, "𛀀"),
+        (21, 20, 2, "𛀀"),
+        (22, 22, 1, "z"),
+        (23, 23, 1, ""),
+        (40, 40, 1, ""),
+    ];
+    for &(cursor_x, col, cols, slice) in expected {
+        assert_eq!(
+            terminal_cursor_cell(line, cursor_x),
+            TerminalCursorCell {
+                column: col,
+                columns: cols,
+                text: slice,
+            },
+            "cursor_x={cursor_x} on {line:?}"
+        );
+    }
+
+    // Pathological cluster (> 32 UTF-8 bytes) clamps cleanly at a char boundary.
+    let mut pathological = String::from("葛");
+    for _ in 0..12 {
+        pathological.push('\u{E0100}');
+    }
+    assert!(pathological.len() > 32);
+    let span = terminal_cursor_cell(&pathological, 0);
+    assert_eq!((span.column, span.columns), (0, 2));
+    let clamped = TerminalCaretGlyph::from_str(span.text);
+    assert_eq!(clamped.as_str().len(), 31);
+    assert!(clamped.as_str().starts_with('葛'));
+
+    // Measure actual `terminal_rows` geometry and right-edge overflow clamping.
+    let ctx = egui::Context::default();
+    configure_macos_fonts(&ctx, TerminalFont::default());
+    let palette = AppTheme::Dark.palette();
+    let sample_lines = terminal_line_layouts("aあ𠮷🎉か\u{3099}葛\u{E0100}\n", palette);
+
+    let probe_row = |lines: &[LayoutJob], x: u16, columns_wide: Option<f32>| {
+        let mut out = (
+            None,
+            TerminalCaretGlyph::default(),
+            egui::Vec2::ZERO,
+            0.0f32,
+        );
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let cell = terminal_cell_size(ui);
+                    let width =
+                        columns_wide.map_or_else(|| ui.available_width(), |cols| cols * cell.x);
+                    ui.allocate_ui(egui::vec2(width, cell.y * 8.0), |ui| {
+                        ui.set_max_width(width);
+                        let viewport = egui::vec2(ui.available_width(), cell.y * 8.0);
+                        let left = ui.min_rect().left();
+                        let search = TerminalSearchOverlay {
+                            matches: &[],
+                            current: None,
+                            scroll_to: None,
+                            palette,
+                        };
+                        let mut links = TerminalLinkOverlay {
+                            resolved: &HashMap::new(),
+                            unresolved: &mut Vec::new(),
+                            palette,
+                        };
+                        let res = terminal_rows(
+                            ui,
+                            lines,
+                            viewport,
+                            cell.y,
+                            search,
+                            &mut links,
+                            Some(TerminalCursor {
+                                x,
+                                y: 0,
+                                pane_rows: 1,
+                            }),
+                            None,
+                        );
+                        out = (res.caret, res.caret_glyph, cell, left);
+                    });
+                });
+            },
+        );
+        out
+    };
+
+    let (caret_ascii, glyph_ascii, cell, left) = probe_row(&sample_lines, 0, None);
+    let caret_ascii = caret_ascii.expect("ASCII caret visible");
+    assert!((caret_ascii.min.x - left).abs() < 0.05);
+    assert!((caret_ascii.width() - cell.x).abs() < 0.05);
+    assert_eq!(glyph_ascii.as_str(), "a");
+
+    let (caret_jp_lead, glyph_jp_lead, _, _) = probe_row(&sample_lines, 1, None);
+    let (caret_jp_trail, glyph_jp_trail, _, _) = probe_row(&sample_lines, 2, None);
+    let caret_jp_lead = caret_jp_lead.expect("Japanese lead caret visible");
+    assert_eq!(
+        caret_jp_lead,
+        caret_jp_trail.expect("Japanese trailing snaps to lead")
+    );
+    assert!((caret_jp_lead.min.x - (left + cell.x)).abs() < 0.05);
+    assert!((caret_jp_lead.width() - 2.0 * cell.x).abs() < 0.05);
+    assert_eq!(glyph_jp_lead.as_str(), "あ");
+    assert_eq!(glyph_jp_trail.as_str(), "あ");
+
+    let (caret_ext_lead, glyph_ext, _, _) = probe_row(&sample_lines, 3, None);
+    let (caret_ext_trail, _, _, _) = probe_row(&sample_lines, 4, None);
+    let caret_ext_lead = caret_ext_lead.expect("4-byte CJK caret visible");
+    assert_eq!(
+        caret_ext_lead,
+        caret_ext_trail.expect("4-byte trailing snaps to lead")
+    );
+    assert!((caret_ext_lead.min.x - (left + 3.0 * cell.x)).abs() < 0.05);
+    assert!((caret_ext_lead.width() - 2.0 * cell.x).abs() < 0.05);
+    assert_eq!(glyph_ext.as_str(), "𠮷");
+
+    let (caret_nfd, glyph_nfd, _, _) = probe_row(&sample_lines, 7, None);
+    assert!((caret_nfd.expect("NFD caret").width() - 2.0 * cell.x).abs() < 0.05);
+    assert_eq!(glyph_nfd.as_str(), "か\u{3099}");
+
+    let (caret_ivs, glyph_ivs, _, _) = probe_row(&sample_lines, 9, None);
+    assert!((caret_ivs.expect("IVS caret").width() - 2.0 * cell.x).abs() < 0.05);
+    assert_eq!(glyph_ivs.as_str(), "葛\u{E0100}");
+
+    // Right-edge overflow: in a 10-column pane, column 9 fits a 1-cell glyph
+    // (`9 + 1 <= 10`) and rejects a 2-cell glyph (`9 + 2 = 11 > 10`).
+    let narrow_at_edge = terminal_line_layouts("123456789a\n", palette);
+    let wide_at_edge = terminal_line_layouts("123456789𠮷\n", palette);
+    let (fits, _, _, _) = probe_row(&narrow_at_edge, 9, Some(10.0));
+    let (overflows, _, _, _) = probe_row(&wide_at_edge, 9, Some(10.0));
+    assert!(
+        fits.is_some(),
+        "1-cell glyph in column 9 of 10-column pane must fit"
+    );
+    assert!(
+        overflows.is_none(),
+        "2-cell glyph starting at column 9 of 10-column pane would poke past inner_right"
+    );
+}
+
+/// Change 290, requirement 1 / invariant I1 (`formal-model`).
+///
+/// Invariant (stated independently of `terminal_character_columns`): over every
+/// line of `0..=3` grapheme clusters drawn from an 8-cluster alphabet covering
+/// ASCII graphic, ASCII space, narrow + combining mark, 3-byte Japanese kana,
+/// 4-byte UTF-8 CJK Ext B, 4-byte emoji, macOS NFD voiced kana, and Kanji +
+/// 4-byte IVS, paired with every `cursor_x` in `0..=7`:
+/// 1. `terminal_display_columns(&line)` equals the sum of the clusters' ground-truth widths.
+/// 2. When `cursor_x` lies inside the ground-truth line width, `terminal_cursor_cell`
+///    returns the unique cluster interval `[start, start + width)` containing `cursor_x`
+///    with `columns == width` (`1` or `2`) and `text` equal to that cluster's exact slice.
+/// 3. When `cursor_x` is at or past the ground-truth line width, `terminal_cursor_cell`
+///    returns `(cursor_x, 1, "")`.
+///
+/// Bound: `tokens.len() <= 3` over 8 symbols (`1 + 8 + 64 + 512 = 585` lines) ×
+/// `cursor_x in 0..=7` (`8` cursor columns) = `4_680` reachable states.
+#[test]
+pub(crate) fn model_check_cursor_290_cell_span_partitions_every_line() {
+    const CLUSTERS: [(&str, usize); 8] = [
+        ("a", 1),
+        (" ", 1),
+        ("e\u{0301}", 1),
+        ("あ", 2),
+        ("𠮷", 2),
+        ("🎉", 2),
+        ("か\u{3099}", 2),
+        ("葛\u{E0100}", 2),
+    ];
+
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct State {
+        tokens: Vec<u8>,
+        cursor_x: u8,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Event {
+        Append(u8),
+        StepCursor,
+    }
+
+    let mut events = Vec::with_capacity(CLUSTERS.len() + 1);
+    for idx in 0..CLUSTERS.len() as u8 {
+        events.push(Event::Append(idx));
+    }
+    events.push(Event::StepCursor);
+
+    let initial = State {
+        tokens: Vec::new(),
+        cursor_x: 0,
+    };
+
+    let step = |state: &State, event: &Event| -> Option<State> {
+        match *event {
+            Event::Append(idx) if state.cursor_x == 0 && state.tokens.len() < 3 => {
+                let mut tokens = state.tokens.clone();
+                tokens.push(idx);
+                Some(State {
+                    tokens,
+                    cursor_x: 0,
+                })
+            }
+            Event::StepCursor if state.cursor_x < 7 => Some(State {
+                tokens: state.tokens.clone(),
+                cursor_x: state.cursor_x + 1,
+            }),
+            _ => None,
+        }
+    };
+
+    let invariant = |state: &State| -> std::result::Result<(), String> {
+        let mut line = String::new();
+        let mut intervals: Vec<(usize, usize, &str)> = Vec::with_capacity(state.tokens.len());
+        let mut total_cols = 0usize;
+        for &idx in &state.tokens {
+            let (slice, width) = CLUSTERS[usize::from(idx)];
+            line.push_str(slice);
+            intervals.push((total_cols, width, slice));
+            total_cols += width;
+        }
+        let measured = terminal_display_columns(&line);
+        if measured != total_cols {
+            return Err(format!(
+                "display columns mismatch for {line:?}: got {measured}, expected {total_cols}"
+            ));
+        }
+
+        let target = usize::from(state.cursor_x);
+        let actual = terminal_cursor_cell(&line, u16::from(state.cursor_x));
+        if actual.columns != 1 && actual.columns != 2 {
+            return Err(format!("invalid cell width {} on {line:?}", actual.columns));
+        }
+        if target < total_cols {
+            let &(start, width, slice) = intervals
+                .iter()
+                .find(|&&(start, width, _)| target >= start && target < start + width)
+                .ok_or_else(|| format!("missing ground-truth interval at {target}"))?;
+            if actual.column != start || actual.columns != width || actual.text != slice {
+                return Err(format!(
+                    "cursor_x={target} on {line:?}: got {actual:?}, expected col={start} width={width} text={slice:?}"
+                ));
+            }
+        } else if actual.column != target || actual.columns != 1 || !actual.text.is_empty() {
+            return Err(format!(
+                "past-EOL cursor_x={target} on {line:?}: got {actual:?}, expected ({target}, 1, \"\")"
+            ));
+        }
+        Ok(())
+    };
+
+    let coverage = exhaustive_check(initial, &events, step, invariant, 6_000);
+    assert_eq!(coverage.states, 585 * 8);
+}
+
+/// Change 290, requirement 2. Across Dark, Light, and HighContrast, a focused
+/// active terminal pane with no IME preedit paints a solid `palette.terminal_fg`
+/// block (never hardcoded white — dark ink on Light, light ink on Dark and
+/// HighContrast, >= 13.1:1 contrast on all three) and redraws non-whitespace
+/// clusters on top at `caret.min` in `palette.terminal_bg`, while whitespace and
+/// empty cells paint the solid block alone and active IME preedit suppresses the
+/// block cursor.
+#[test]
+pub(crate) fn cursor_290_focused_pane_draws_filled_theme_block_with_inverted_glyph() {
+    assert_ne!(
+        AppTheme::Light.palette().terminal_fg,
+        Color32::WHITE,
+        "Light theme cursor fill must be dark ink, never literal white"
+    );
+
+    for theme in AppTheme::all() {
+        let palette = theme.palette();
+        assert!(
+            contrast_ratio(palette.terminal_fg, palette.terminal_bg) >= 13.1,
+            "{} terminal_fg/terminal_bg contrast fell below 13.1:1",
+            theme.label()
+        );
+
+        let (root, mut app, session) = ime_pane_fixture("cursor-290-focused");
+        app.store.theme = theme;
+        let ctx = egui::Context::default();
+        configure_macos_fonts(&ctx, TerminalFont::default());
+        ctx.set_visuals(theme.visuals());
+
+        let cell = {
+            let mut measured = egui::Vec2::ZERO;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    measured = terminal_cell_size(ui);
+                });
+            });
+            measured
+        };
+
+        // Prime and focus the terminal pane.
+        let _ = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+        app.terminal_focus_request = Some(session.id);
+        let _ = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+
+        let cases: &[(&str, u16, usize, Option<&str>)] = &[
+            ("aあ𠮷か\u{3099} 　\n", 0, 1, Some("a")),
+            ("aあ𠮷か\u{3099} 　\n", 1, 2, Some("あ")),
+            ("aあ𠮷か\u{3099} 　\n", 3, 2, Some("𠮷")),
+            ("aあ𠮷か\u{3099} 　\n", 5, 2, Some("か\u{3099}")),
+            ("aあ𠮷か\u{3099} 　\n", 7, 1, None),
+            ("aあ𠮷か\u{3099} 　\n", 8, 2, None),
+            ("aあ𠮷か\u{3099} 　\n", 10, 1, None),
+        ];
+
+        for &(text, x, expected_cols, expected_inverted) in cases {
+            app.set_session_output(
+                session.id,
+                text.to_owned(),
+                Some(TerminalCursor {
+                    x,
+                    y: 0,
+                    pane_rows: 1,
+                }),
+            );
+            let output = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+            let (rects, texts) = cursor_290_shapes(&output);
+
+            let cursor_blocks: Vec<&(usize, egui::epaint::RectShape)> = rects
+                .iter()
+                .filter(|(_, r)| {
+                    r.fill == palette.terminal_fg
+                        && r.stroke.width == 0.0
+                        && r.corner_radius == egui::CornerRadius::ZERO
+                        && (r.rect.height() - cell.y).abs() < 0.5
+                })
+                .collect();
+            assert_eq!(
+                cursor_blocks.len(),
+                1,
+                "{} at x={x}: expected exactly 1 solid terminal_fg cursor block, saw {}",
+                theme.label(),
+                cursor_blocks.len()
+            );
+            let (block_order, block) = cursor_blocks[0];
+            assert!(
+                (block.rect.width() - expected_cols as f32 * cell.x).abs() < 0.5,
+                "{} at x={x}: expected width {} * cell.x ({}), got {}",
+                theme.label(),
+                expected_cols,
+                expected_cols as f32 * cell.x,
+                block.rect.width()
+            );
+
+            // Focused pane must not paint the unfocused hollow outline over the caret.
+            let hollow_at_caret = rects.iter().any(|(_, r)| {
+                (r.rect.min - block.rect.min).length() < 0.5
+                    && r.fill == Color32::TRANSPARENT
+                    && r.stroke.width > 0.0
+            });
+            assert!(
+                !hollow_at_caret,
+                "{} at x={x}: focused cursor should be solid, not hollow-stroked",
+                theme.label()
+            );
+
+            let inverted_texts: Vec<&(usize, egui::epaint::TextShape)> = texts
+                .iter()
+                .filter(|(_, t)| {
+                    (t.pos - block.rect.min).length() < 0.5
+                        && t.galley
+                            .job
+                            .sections
+                            .first()
+                            .is_some_and(|s| s.format.color == palette.terminal_bg)
+                })
+                .collect();
+
+            match expected_inverted {
+                Some(expected_glyph) => {
+                    assert_eq!(
+                        inverted_texts.len(),
+                        1,
+                        "{} at x={x}: expected inverted glyph {expected_glyph:?} in terminal_bg",
+                        theme.label()
+                    );
+                    let (text_order, inverted) = inverted_texts[0];
+                    assert!(
+                        text_order > block_order,
+                        "{} at x={x}: inverted glyph must be painted AFTER the solid block",
+                        theme.label()
+                    );
+                    assert_eq!(inverted.galley.text(), expected_glyph);
+                    assert!(
+                        (inverted.galley.size().x - expected_cols as f32 * cell.x).abs() < 0.5,
+                        "{} at x={x}: Sarasa glyph advance {} must match {} cell(s)",
+                        theme.label(),
+                        inverted.galley.size().x,
+                        expected_cols
+                    );
+                }
+                None => {
+                    assert!(
+                        inverted_texts.is_empty(),
+                        "{} at x={x}: whitespace/empty cell must not paint an inverted glyph",
+                        theme.label()
+                    );
+                }
+            }
+        }
+
+        // Active IME preedit suppresses the block cursor in favour of `draw_terminal_preedit`.
+        app.set_session_output(
+            session.id,
+            "あ\n".into(),
+            Some(TerminalCursor {
+                x: 0,
+                y: 0,
+                pane_rows: 1,
+            }),
+        );
+        let _ = ime_pane_pass(
+            &ctx,
+            &mut app,
+            &session,
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit("かん".into()))],
+        );
+        assert_eq!(
+            app.terminal_preedits.get(&session.id).map(String::as_str),
+            Some("かん")
+        );
+        let preedit_output = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+        let (preedit_rects, _) = cursor_290_shapes(&preedit_output);
+        let cursor_during_preedit = preedit_rects.iter().any(|(_, r)| {
+            (r.fill == palette.terminal_fg && (r.rect.height() - cell.y).abs() < 0.5)
+                || (r.fill == Color32::TRANSPARENT
+                    && r.stroke == egui::Stroke::new(1.0, palette.terminal_fg)
+                    && (r.rect.height() - cell.y).abs() < 0.5)
+        });
+        assert!(
+            !cursor_during_preedit,
+            "{}: active IME preedit must suppress the cursor block/outline",
+            theme.label()
+        );
+
+        fs::remove_dir_all(&root).ok();
+    }
+}
+
+/// Change 290, requirement 3. An active pane without keyboard focus (including
+/// the inactive side of a split workspace) draws a `1.0`px inside-stroked
+/// `palette.terminal_fg` outline of `1 * cell.x` or `2 * cell.x` with no fill
+/// and no inverted glyph; `Exited` and `Failed` sessions draw no cursor at all.
+#[test]
+pub(crate) fn cursor_290_unfocused_pane_draws_hollow_outline_and_inactive_session_draws_none() {
+    let (root, mut app, mut session) = ime_pane_fixture("cursor-290-unfocused");
+    let palette = app.store.theme.palette();
+    let pane_id = egui::Id::new(("terminal-pane", session.id));
+    let ctx = egui::Context::default();
+    configure_macos_fonts(&ctx, TerminalFont::default());
+
+    let cell = {
+        let mut measured = egui::Vec2::ZERO;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                measured = terminal_cell_size(ui);
+            });
+        });
+        measured
+    };
+
+    // Unfocused active pane on narrow ('a', x=0) and wide 4-byte ('𠮷', x=1).
+    for (x, expected_cols) in [(0u16, 1usize), (1u16, 2usize)] {
+        ctx.memory_mut(|memory| memory.surrender_focus(pane_id));
+        app.set_session_output(
+            session.id,
+            "a𠮷\n".into(),
+            Some(TerminalCursor {
+                x,
+                y: 0,
+                pane_rows: 1,
+            }),
+        );
+        let output = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+        assert_ne!(ctx.memory(|memory| memory.focused()), Some(pane_id));
+        let (rects, texts) = cursor_290_shapes(&output);
+
+        let filled = rects
+            .iter()
+            .any(|(_, r)| r.fill == palette.terminal_fg && (r.rect.height() - cell.y).abs() < 0.5);
+        assert!(
+            !filled,
+            "unfocused pane at x={x} must not draw a filled block"
+        );
+
+        let outlines: Vec<&egui::epaint::RectShape> = rects
+            .iter()
+            .map(|(_, r)| r)
+            .filter(|r| {
+                r.fill == Color32::TRANSPARENT
+                    && r.stroke == egui::Stroke::new(1.0, palette.terminal_fg)
+                    && r.stroke_kind == egui::StrokeKind::Inside
+                    && r.corner_radius == egui::CornerRadius::ZERO
+                    && (r.rect.height() - cell.y).abs() < 0.5
+            })
+            .collect();
+        assert_eq!(
+            outlines.len(),
+            1,
+            "unfocused active pane at x={x} must draw one 1px hollow cursor outline"
+        );
+        assert!(
+            (outlines[0].rect.width() - expected_cols as f32 * cell.x).abs() < 0.5,
+            "unfocused cursor outline at x={x} must span {expected_cols} cell(s)"
+        );
+
+        let inverted = texts.iter().any(|(_, t)| {
+            (t.pos - outlines[0].rect.min).length() < 0.5
+                && t.galley
+                    .job
+                    .sections
+                    .first()
+                    .is_some_and(|s| s.format.color == palette.terminal_bg)
+        });
+        assert!(
+            !inverted,
+            "unfocused hollow outline at x={x} must leave row text un-inverted"
+        );
+    }
+
+    // Split workspace: focused pane draws solid block, sibling unfocused pane draws 1px outline.
+    app.store.projects.push(Project {
+        id: session.project_id,
+        path: root.clone(),
+        name: "cursor-290-split".into(),
+        added_at: now(),
+    });
+    let mut sibling = test_session(session.project_id, SessionStatus::Active);
+    sibling.tmux_name = format!("operon-test-{}", Uuid::new_v4());
+    app.store.sessions.push(sibling.clone());
+    app.workspace_project = Some(session.project_id);
+    app.workspace_initialized = true;
+    app.set_session_output(
+        session.id,
+        "𠮷\n".into(),
+        Some(TerminalCursor {
+            x: 0,
+            y: 0,
+            pane_rows: 1,
+        }),
+    );
+    app.set_session_output(
+        sibling.id,
+        "あ\n".into(),
+        Some(TerminalCursor {
+            x: 0,
+            y: 0,
+            pane_rows: 1,
+        }),
+    );
+    let g_left = app.workspace.open(WorkspaceTab::Session(session.id));
+    app.workspace.open(WorkspaceTab::Session(sibling.id));
+    assert!(app.workspace.move_tab(
+        &WorkspaceTab::Session(sibling.id),
+        g_left,
+        PaneDrop::Right,
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 700.0)),
+    ));
+    app.activate_workspace_tab(&WorkspaceTab::Session(session.id));
+    app.terminal_focus_request = Some(session.id);
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+        },
+    );
+    let split_out = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 700.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
+        },
+    );
+    let (split_rects, _) = cursor_290_shapes(&split_out);
+    let solid_wide_count = split_rects
+        .iter()
+        .filter(|(_, r)| {
+            r.fill == palette.terminal_fg
+                && (r.rect.width() - 2.0 * cell.x).abs() < 0.5
+                && (r.rect.height() - cell.y).abs() < 0.5
+        })
+        .count();
+    let hollow_wide_count = split_rects
+        .iter()
+        .filter(|(_, r)| {
+            r.fill == Color32::TRANSPARENT
+                && r.stroke == egui::Stroke::new(1.0, palette.terminal_fg)
+                && (r.rect.width() - 2.0 * cell.x).abs() < 0.5
+                && (r.rect.height() - cell.y).abs() < 0.5
+        })
+        .count();
+    assert_eq!(
+        solid_wide_count, 1,
+        "focused split pane must paint solid 2-cell block"
+    );
+    assert_eq!(
+        hollow_wide_count, 1,
+        "unfocused split sibling must paint hollow 2-cell outline"
+    );
+
+    // Non-active sessions (`Exited` and `Failed`) draw neither solid nor hollow cursor.
+    for inactive_status in [SessionStatus::Exited, SessionStatus::Failed] {
+        session.status = inactive_status.clone();
+        if let Some(stored) = app.store.sessions.iter_mut().find(|s| s.id == session.id) {
+            stored.status = inactive_status.clone();
+        }
+        for want_focus in [false, true] {
+            if want_focus {
+                ctx.memory_mut(|memory| memory.request_focus(pane_id));
+            } else {
+                ctx.memory_mut(|memory| memory.surrender_focus(pane_id));
+            }
+            let inactive_out = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+            let (inactive_rects, _) = cursor_290_shapes(&inactive_out);
+            let any_cursor = inactive_rects.iter().any(|(_, r)| {
+                (r.fill == palette.terminal_fg && (r.rect.height() - cell.y).abs() < 0.5)
+                    || (r.fill == Color32::TRANSPARENT
+                        && r.stroke == egui::Stroke::new(1.0, palette.terminal_fg)
+                        && (r.rect.height() - cell.y).abs() < 0.5)
+            });
+            assert!(
+                !any_cursor,
+                "inactive session ({inactive_status:?}, focus={want_focus}) must draw no cursor"
+            );
+        }
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 290, requirement 4. When a focused pane's cursor sits on a visible
+/// two-column glyph, the claimed `IMEOutput` (`rect` and `cursor_rect`) matches
+/// the two-column caret rectangle (and falls back to the clamped 1-cell anchor
+/// when scrolled out of view), while moving the cursor across narrow and wide
+/// glyphs or toggling focus triggers zero rebuilds in `TerminalPaneRenderCache`.
+#[test]
+pub(crate) fn cursor_290_ime_anchor_and_galley_cache_follow_wide_caret() {
+    let (root, mut app, session) = ime_pane_fixture("cursor-290-ime-cache");
+    let pane_id = egui::Id::new(("terminal-pane", session.id));
+    let ctx = egui::Context::default();
+    configure_macos_fonts(&ctx, TerminalFont::default());
+
+    let cell = {
+        let mut measured = egui::Vec2::ZERO;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                measured = terminal_cell_size(ui);
+            });
+        });
+        measured
+    };
+
+    app.set_session_output(
+        session.id,
+        "a𠮷b\n".into(),
+        Some(TerminalCursor {
+            x: 0,
+            y: 0,
+            pane_rows: 1,
+        }),
+    );
+    app.terminal_focus_request = Some(session.id);
+    let _ = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    let out_narrow = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    assert_eq!(app.terminal_pane_render_cache.session_builds(session.id), 1);
+    let ime_narrow = out_narrow
+        .platform_output
+        .ime
+        .expect("focused pane claims IME on narrow glyph");
+    assert_eq!(ime_narrow.rect, ime_narrow.cursor_rect);
+    assert!((ime_narrow.rect.width() - cell.x).abs() < 0.5);
+
+    // Move onto 4-byte wide glyph lead column (x=1) with unchanged output text.
+    app.set_session_output(
+        session.id,
+        "a𠮷b\n".into(),
+        Some(TerminalCursor {
+            x: 1,
+            y: 0,
+            pane_rows: 1,
+        }),
+    );
+    let out_wide_lead = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    assert_eq!(
+        app.terminal_pane_render_cache.session_builds(session.id),
+        1,
+        "moving cursor onto wide glyph must not rebuild row galleys"
+    );
+    let ime_wide_lead = out_wide_lead
+        .platform_output
+        .ime
+        .expect("focused pane claims IME on wide glyph");
+    assert_eq!(ime_wide_lead.rect, ime_wide_lead.cursor_rect);
+    assert!((ime_wide_lead.rect.width() - 2.0 * cell.x).abs() < 0.5);
+
+    // Trailing column (x=2) snaps to lead column and keeps 2-cell IME rect + zero rebuilds.
+    app.set_session_output(
+        session.id,
+        "a𠮷b\n".into(),
+        Some(TerminalCursor {
+            x: 2,
+            y: 0,
+            pane_rows: 1,
+        }),
+    );
+    let out_wide_trail = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    assert_eq!(app.terminal_pane_render_cache.session_builds(session.id), 1);
+    let ime_wide_trail = out_wide_trail
+        .platform_output
+        .ime
+        .expect("focused pane claims IME on trailing column");
+    assert_eq!(ime_wide_trail.rect, ime_wide_lead.rect);
+
+    // Focus toggle off and back on causes zero galley cache rebuilds.
+    ctx.memory_mut(|memory| memory.surrender_focus(pane_id));
+    let out_unfocused = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    assert!(out_unfocused.platform_output.ime.is_none());
+    assert_eq!(app.terminal_pane_render_cache.session_builds(session.id), 1);
+
+    app.terminal_focus_request = Some(session.id);
+    let _ = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    let out_refocused = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    assert_eq!(app.terminal_pane_render_cache.session_builds(session.id), 1);
+    let ime_refocused = out_refocused
+        .platform_output
+        .ime
+        .expect("refocused pane re-claims wide IME anchor");
+    assert!((ime_refocused.rect.width() - 2.0 * cell.x).abs() < 0.5);
+
+    // Scrolled-away wide cursor falls back to the 1-cell clamped anchor inside the pane.
+    let mut tall = String::new();
+    for idx in 0..59 {
+        tall.push_str(&format!("line {idx:02}\n"));
+    }
+    tall.push_str("𠮷\n");
+    app.set_session_output(
+        session.id,
+        tall,
+        Some(TerminalCursor {
+            x: 0,
+            y: 39,
+            pane_rows: 40,
+        }),
+    );
+    app.terminal_search.entry(session.id).or_default().scroll_to = Some(0);
+    let out_scrolled = ime_pane_pass(&ctx, &mut app, &session, Vec::new());
+    let ime_scrolled = out_scrolled
+        .platform_output
+        .ime
+        .expect("focused scrolled-away pane still claims fallback IME anchor");
+    assert!(
+        (ime_scrolled.rect.width() - cell.x).abs() < 0.5,
+        "scrolled-away caret must use 1-cell clamped fallback, got width {}",
+        ime_scrolled.rect.width()
+    );
+
+    fs::remove_dir_all(&root).ok();
+}

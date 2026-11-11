@@ -1,0 +1,10 @@
+# The evidence for change 290. Format: docs/sdlc/templates/verification.yaml.
+digest: "2285a9f1d1882ba9"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked cursor_290_wide_and_four_byte_glyphs_span_two_cells
+  - R2 empirical-test :: cargo test --locked cursor_290_focused_pane_draws_filled_theme_block_with_inverted_glyph
+  - R3 empirical-test :: cargo test --locked cursor_290_unfocused_pane_draws_hollow_outline_and_inactive_session_draws_none
+  - R4 empirical-test :: cargo test --locked cursor_290_ime_anchor_and_galley_cache_follow_wide_caret
+  - I1 formal-model :: cargo test --locked model_check_cursor_290_cell_span_partitions_every_line
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/290-terminal-cursor-cuts-wide-chars-and-stays-hollow/mutations.py

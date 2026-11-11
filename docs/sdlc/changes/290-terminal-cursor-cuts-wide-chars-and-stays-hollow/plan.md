@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-12
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -39,3 +39,5 @@
 - In the packaged app: focused cursor is a solid `terminal_fg` block with inverted `terminal_bg` glyph (`1` cell on ASCII, `2` cells on Japanese / 4-byte glyphs; light on Dark, dark ink on Light), and unfocused cursor is a `1`px hollow outline of the same width.
 
 ## Departures from the plan
+
+None.

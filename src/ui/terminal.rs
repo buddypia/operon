@@ -621,22 +621,26 @@ pub(crate) fn terminal_rows(
     let pane_width = ui.available_width();
     let mut under_pointer = None;
     let mut caret = None;
+    let mut caret_glyph = TerminalCaretGlyph::default();
     area.show_rows(ui, row_height, lines.len(), |ui, rows| {
         let first = rows.start;
         let top = ui.cursor().top();
         // The caret is a row of this buffer now, so it anchors exactly where a
         // highlighted match anchors — and `show_rows` only ever shows rows that
         // are visible, so a caret the person scrolled away reports none.
-        let computed_caret = if let Some(Some((row, column))) = caret_row {
+        let (computed_caret, computed_glyph) = if let Some(Some((row, column))) = caret_row {
             // A caret scrolled above the viewport has its row before the band's
             // start (egui's end-of-content clamp can put a full-screen TUI's
             // cursor there): offset_rows must abort rather than underflow.
-            let rect = row.checked_sub(first).map(|offset_rows| {
-                egui::Rect::from_min_size(
-                    egui::pos2(ui.min_rect().left() + column as f32 * cell.x, top),
-                    cell,
+            let placed = rows.contains(&row).then(|| {
+                let offset_rows = row - first;
+                let span = terminal_cursor_cell(&lines[row].text, column);
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(ui.min_rect().left() + span.column as f32 * cell.x, top),
+                    egui::vec2(span.columns as f32 * cell.x, cell.y),
                 )
-                .translate(egui::vec2(0.0, offset_rows as f32 * row_height))
+                .translate(egui::vec2(0.0, offset_rows as f32 * row_height));
+                (rect, TerminalCaretGlyph::from_str(span.text))
             });
             // The box belongs on a cell the viewer can see, all of it. egui
             // serves one spare row past the viewport's bottom (`show_rows`
@@ -650,7 +654,7 @@ pub(crate) fn terminal_rows(
             // painting past the frame. The tolerance is sub-pixel slack for
             // float noise between the two measurements: half a pixel, about a
             // sixteenth of a cell.
-            if let Some(rect) = rect {
+            if let Some((rect, glyph)) = placed {
                 let clip = ui.clip_rect();
                 let inner_right = ui.min_rect().left() + pane_width;
                 let slack = 0.5;
@@ -659,15 +663,15 @@ pub(crate) fn terminal_rows(
                     && rect.min.x >= clip.min.x
                     && rect.max.x <= inner_right + slack
                 {
-                    Some(rect)
+                    (Some(rect), glyph)
                 } else {
-                    None
+                    (None, TerminalCaretGlyph::default())
                 }
             } else {
-                None
+                (None, TerminalCaretGlyph::default())
             }
         } else {
-            None
+            (None, TerminalCaretGlyph::default())
         };
 
         let cached_galleys_storage = context.map(|ctx| {
@@ -695,6 +699,7 @@ pub(crate) fn terminal_rows(
         // Placed for this frame's pane, never cached: the pane moves and
         // resizes without its rows changing.
         caret = computed_caret;
+        caret_glyph = computed_glyph;
 
         for (offset, line) in lines[rows.clone()].iter().enumerate() {
             let line_idx = first + offset;
@@ -750,6 +755,7 @@ pub(crate) fn terminal_rows(
     TerminalRowsResult {
         hovered: under_pointer,
         caret,
+        caret_glyph,
     }
 }
 
@@ -760,6 +766,85 @@ pub(crate) struct TerminalRowsResult {
     /// the rows this frame drew. Scrolled away is nothing — a box that floats
     /// past the pane's edge is worse than no box.
     pub(crate) caret: Option<egui::Rect>,
+    /// The character cluster under `caret`, bounded on the stack so row drawing
+    /// never allocates per frame.
+    pub(crate) caret_glyph: TerminalCaretGlyph,
+}
+
+/// The display-column span and cluster slice under a terminal cursor column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TerminalCursorCell<'a> {
+    pub(crate) column: usize,
+    pub(crate) columns: usize,
+    pub(crate) text: &'a str,
+}
+
+/// The character cluster under the terminal caret, stored inline so `terminal_rows`
+/// never allocates on the per-frame draw pass.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct TerminalCaretGlyph {
+    bytes: [u8; 32],
+    len: u8,
+}
+
+impl TerminalCaretGlyph {
+    pub(crate) fn from_str(text: &str) -> Self {
+        let mut end = text.len().min(32);
+        while end > 0 && !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let mut bytes = [0u8; 32];
+        bytes[..end].copy_from_slice(&text.as_bytes()[..end]);
+        Self {
+            bytes,
+            len: end as u8,
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or("")
+    }
+}
+
+/// Resolve the display-column span and borrowed cluster slice under `cursor_x`.
+///
+/// Base characters absorb any trailing zero-width combining or variation-selector
+/// codepoints (`terminal_character_columns(c) == 0`). When `cursor_x` falls on
+/// either column of a two-column glyph, `column` snaps to its lead column and
+/// `columns` reports `2`; past the end of `line` (or on an empty line), returns
+/// a single empty cell at `cursor_x`.
+pub(crate) fn terminal_cursor_cell(line: &str, cursor_x: u16) -> TerminalCursorCell<'_> {
+    let target = usize::from(cursor_x);
+    let mut col = 0usize;
+    let mut iter = line.char_indices().peekable();
+    while let Some((byte_start, ch)) = iter.next() {
+        let width = terminal_character_columns(ch);
+        if width == 0 {
+            continue;
+        }
+        let mut byte_end = byte_start + ch.len_utf8();
+        while let Some(&(next_byte, next_ch)) = iter.peek() {
+            if terminal_character_columns(next_ch) == 0 {
+                byte_end = next_byte + next_ch.len_utf8();
+                iter.next();
+            } else {
+                break;
+            }
+        }
+        if target < col + width {
+            return TerminalCursorCell {
+                column: col,
+                columns: width,
+                text: &line[byte_start..byte_end],
+            };
+        }
+        col += width;
+    }
+    TerminalCursorCell {
+        column: target,
+        columns: 1,
+        text: "",
+    }
 }
 
 /// Dirty-checking key for a pane's laid-out rows: exactly the inputs of a
@@ -935,8 +1020,30 @@ pub(crate) fn terminal_display_columns(text: &str) -> usize {
 
 fn terminal_character_columns(character: char) -> usize {
     let code = character as u32;
-    let wide = matches!(code,
+    if matches!(
+        code,
+        0x0000..=0x001F
+            | 0x007F..=0x009F
+            | 0x0300..=0x036F
+            | 0x1160..=0x11FF
+            | 0x1AB0..=0x1AFF
+            | 0x1DC0..=0x1DFF
+            | 0x200B..=0x200D
+            | 0x20D0..=0x20FF
+            | 0x302A..=0x302D
+            | 0x3099..=0x309A
+            | 0xFE00..=0xFE0F
+            | 0xFE20..=0xFE2F
+            | 0xFEFF
+            | 0xE0100..=0xE01EF
+    ) {
+        return 0;
+    }
+    let wide = matches!(
+        code,
         0x1100..=0x115F
+            | 0x231A..=0x231B
+            | 0x2329..=0x232A
             | 0x2E80..=0x303E
             | 0x3041..=0x33FF
             | 0x3400..=0x4DBF
@@ -944,12 +1051,20 @@ fn terminal_character_columns(character: char) -> usize {
             | 0xA000..=0xA4CF
             | 0xAC00..=0xD7A3
             | 0xF900..=0xFAFF
+            | 0xFE10..=0xFE19
             | 0xFE30..=0xFE6F
             | 0xFF00..=0xFF60
             | 0xFFE0..=0xFFE6
+            | 0x1B000..=0x1B16F
+            | 0x1F004
+            | 0x1F0CF
+            | 0x1F18E
+            | 0x1F200..=0x1F2FF
             | 0x1F300..=0x1F9FF
+            | 0x1FA00..=0x1FAFF
             | 0x20000..=0x2FFFD
-            | 0x30000..=0x3FFFD);
+            | 0x30000..=0x3FFFD
+    );
     if wide {
         2
     } else {
@@ -1025,14 +1140,37 @@ pub(crate) fn terminal_cell_size(ui: &egui::Ui) -> egui::Vec2 {
     ui.fonts(|fonts| egui::vec2(fonts.glyph_width(&font, ' '), fonts.row_height(&font)))
 }
 
-pub(crate) fn draw_terminal_cursor(ui: &egui::Ui, caret: egui::Rect, palette: &Palette) {
-    let stroke_color = palette.terminal_fg.gamma_multiply(0.6);
-    ui.painter().rect_stroke(
-        caret,
-        0.0,
-        egui::Stroke::new(1.5, stroke_color),
-        egui::StrokeKind::Inside,
-    );
+pub(crate) fn draw_terminal_cursor(
+    ui: &egui::Ui,
+    caret: egui::Rect,
+    glyph: &str,
+    focused: bool,
+    palette: &Palette,
+) {
+    if focused {
+        ui.painter().rect_filled(caret, 0.0, palette.terminal_fg);
+        if glyph.chars().any(|c| !c.is_whitespace()) {
+            let mut job = LayoutJob::default();
+            job.append(
+                glyph,
+                0.0,
+                TextFormat {
+                    font_id: FontId::monospace(MONOSPACE_SIZE),
+                    color: palette.terminal_bg,
+                    ..Default::default()
+                },
+            );
+            let galley = ui.fonts(|fonts| fonts.layout_job(job));
+            ui.painter().galley(caret.min, galley, palette.terminal_bg);
+        }
+    } else {
+        ui.painter().rect_stroke(
+            caret,
+            0.0,
+            egui::Stroke::new(1.0, palette.terminal_fg),
+            egui::StrokeKind::Inside,
+        );
+    }
 }
 
 pub(crate) fn draw_terminal_preedit(
