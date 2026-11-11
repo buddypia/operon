@@ -1,0 +1,41 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (the terminal cursor already draws; its cell width on wide
+# characters and its focused/unfocused block treatment change). Risk: low —
+# it paints in `src/ui/terminal.rs` and `src/app/screens.rs` (`drawing` in
+# `docs/sdlc/risk.yaml`); full autonomy, `screen: yes`.
+#
+# Decided without asking: focused panes paint a solid `palette.terminal_fg`
+# block with the underlying glyph redrawn in `palette.terminal_bg` (light
+# block on Dark/HighContrast, dark ink block on Light — never hardcoded
+# white), while unfocused active panes paint a 1px hollow `palette.terminal_fg`
+# outline so split panes and unfocused terminals remain distinguishable.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the failing cursor_290_ and model_check_cursor_290_ tests in src/tests.rs, then implement the cursor sizing and block/outline rendering."
+
+contract:
+  three-gates: "machine pending make q.fast and cargo test --locked cursor_290_"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/ui/terminal.rs and src/app/screens.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/290-terminal-cursor-cuts-wide-chars-and-stays-hollow/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
