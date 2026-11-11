@@ -95,6 +95,10 @@ pub(crate) const EVIDENCE_BASED_FAILURE_SCHEMA_VERSION: u32 = 5;
 /// How long a success toast stays before it leaves on its own. Failures are
 /// banners and stay until closed.
 pub(crate) const NOTICE_TOAST_SECONDS: u64 = 4;
+/// Minimum pause between two automatic restorations of the same session, so a
+/// command or directory that crashes straight away settles in `Failed` or
+/// `Lost` instead of restarting in a loop (change 288).
+pub(crate) const AUTO_RESTORE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(15);
 /// The most paths the session file filter lists at once. A filter that
 /// matches more is asking to be narrowed, and a draw of every match would be
 /// the tree again without its folding.
