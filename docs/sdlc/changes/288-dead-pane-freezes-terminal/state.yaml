@@ -1,0 +1,35 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: feature (new user-visible terminal continuation on clean exit and
+# mid-run automatic session restoration on forced termination). Risk: medium —
+# touches `src/tmux.rs` (`subprocess`, supervised) and `src/app.rs` (`drawing`,
+# screen yes), and stays off every `paused` surface.
+
+state:
+  route: "feature"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write failing tests for R1-R6 in src/tests.rs, then implement the change across src/config.rs, src/tmux.rs, src/app/relaunch.rs, src/app.rs, src/i18n_tables.rs, and READMEs."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/config.rs, src/tmux.rs, src/app.rs, src/app/relaunch.rs, and src/i18n_tables.rs change; package and replace /Applications/Operon.app from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/288-dead-pane-freezes-terminal/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
