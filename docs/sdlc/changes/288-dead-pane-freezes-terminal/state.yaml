@@ -23,7 +23,7 @@ contract:
   three-gates: "machine passed cargo fmt --check && cargo clippy --locked -- -D warnings; cargo test --locked pane_288_: 13 passed"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9954"
   release-binary: "machine passed required - src/config.rs, src/tmux.rs, src/app.rs, src/app/relaunch.rs, and src/i18n_tables.rs change; package and replace /Applications/Operon.app from main after landing"
-  guards-verified-by-mutation: "machine passed 17 of 17 caught: python3 docs/sdlc/changes/288-dead-pane-freezes-terminal/mutations.py"
+  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/288-dead-pane-freezes-terminal/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
