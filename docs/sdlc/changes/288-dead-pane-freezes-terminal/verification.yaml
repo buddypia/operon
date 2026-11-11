@@ -1,5 +1,5 @@
 # The evidence for change 288. Format: docs/sdlc/templates/verification.yaml.
-digest: "deb3ebdaeed9c0d5"
+digest: "cc23e98ff5c66fe6"
 
 obligations:
   - R1 empirical-test :: cargo test --locked pane_288_configure_tmux_suppresses_dead_pane_banner_and_keeps_scrollback
