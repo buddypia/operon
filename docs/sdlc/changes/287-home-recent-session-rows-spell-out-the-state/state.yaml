@@ -1,0 +1,38 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (the Home session row exists; its state word goes to the
+# hover). Risk: low — it paints (risk.yaml `drawing`); full autonomy. The
+# person asked for the word's removal in the request quoted in intent.md, so
+# the screen is that request drawn, judged by the evaluator.
+#
+# Decided without asking: the 要対応 list on Home and a project's session list
+# are drawn by the same row and change with it (spec.md, Behaviour).
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing, then rest the pointer on a Home row's state mark: the word shows there and nowhere in the row."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked home_287_: 3 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose as on main"
+  release-binary: "machine passed required - src/app/screens.rs changes; package from main after landing"
+  guards-verified-by-mutation: "machine passed 5 of 5 caught: python3 docs/sdlc/changes/287-home-recent-session-rows-spell-out-the-state/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

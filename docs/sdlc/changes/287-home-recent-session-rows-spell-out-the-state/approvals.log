@@ -1,0 +1,4 @@
+2026-11-11T14:55:03Z auto intent intent.md afa4e00486461c30 approve Independent evaluator a81769877b2ccb4f2: restates the person's quoted request; outcome and scope match it.
+2026-11-11T14:55:03Z auto spec spec.md 8fc2f09aefe9ba45 approve Independent evaluator a81769877b2ccb4f2: after one revise (a test that clicks the mark itself, the hover precedent corrected), Design matches the code.
+2026-11-11T14:55:03Z auto screen screen.md 4e4df9190e0601de approve Independent evaluator a81769877b2ccb4f2: the word moves to hover inside the existing row, as the person asked; nothing added or re-arranged.
+2026-11-11T14:55:03Z auto plan plan.md 5a51f62827e43b1a approve Independent evaluator a81769877b2ccb4f2: after one revise, the mark-click test is in files, order, risks and proof.

@@ -8140,7 +8140,7 @@ pub(crate) fn tapping_a_session_row_opens_its_terminal() {
         });
     };
     let _ = context.run(egui::RawInput::default(), &mut pass);
-    // The status column, which carries a label and nothing clickable.
+    // The row's leading edge, which carries nothing clickable.
     let target = card_rect.get().left_top() + egui::vec2(40.0, 24.0);
     click_at(&context, target, &mut pass);
 
@@ -80019,4 +80019,154 @@ fn session_286_closing_a_row_of_another_project_keeps_the_shown_one() {
         "closed in its own project"
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+/// One session for each word a state can go by, and more than one state
+/// under a word (change 287).
+const HOME_287_STATES: [(SessionStatus, Option<AgentActivity>); 9] = [
+    (SessionStatus::Active, Some(AgentActivity::Idle)),
+    (SessionStatus::Active, Some(AgentActivity::Working)),
+    (SessionStatus::Active, Some(AgentActivity::AwaitingInput)),
+    (SessionStatus::Active, None),
+    (SessionStatus::Starting, None),
+    (SessionStatus::Queued, None),
+    (SessionStatus::Exited, None),
+    (SessionStatus::Failed, None),
+    (SessionStatus::Lost, None),
+];
+
+/// A session in the given state and the app that draws its Home row.
+fn home_287_fixture(
+    label: &str,
+    status: SessionStatus,
+    activity: Option<AgentActivity>,
+) -> (PathBuf, OperonApp, Session) {
+    let root = temporary_directory(label);
+    let session = test_session(Uuid::new_v4(), status.clone());
+    let mut store = Store::default();
+    store.sessions.push(session.clone());
+    let mut app =
+        OperonApp::from_state(root.join("store.json"), store, ToolStatus::default(), None);
+    app.page = Page::Home;
+    app.selected_session = None;
+    session_283_set(&mut app, session.id, status, activity);
+    (root, app, session)
+}
+
+fn home_287_input(events: Vec<egui::Event>) -> egui::RawInput {
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events,
+        ..Default::default()
+    }
+}
+
+/// The row with the pointer at `pointer`, settled over two frames so a
+/// tooltip the first one asks for is drawn.
+fn home_287_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    session: &Session,
+    pointer: Option<egui::Pos2>,
+) -> egui::FullOutput {
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let mut pass = |ctx: &egui::Context| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            app.home_session_row(ui, session, "recent");
+        });
+    };
+    let events = pointer
+        .map(|at| vec![egui::Event::PointerMoved(at)])
+        .unwrap_or_default();
+    let _ = ctx.run(home_287_input(events), &mut pass);
+    ctx.run(home_287_input(Vec::new()), &mut pass)
+}
+
+fn home_287_count(output: &egui::FullOutput, text: &str) -> usize {
+    drawn_text_rects(output, |drawn| drawn.contains(text)).len()
+}
+
+/// Where the row's state indicator is: the leftmost point on the row's
+/// centre line whose hover explains the state.
+fn home_287_indicator(app: &mut OperonApp, ctx: &egui::Context, session: &Session) -> egui::Pos2 {
+    let away = home_287_frame(app, ctx, session, None);
+    let line = drawn_text_rect(&away, |text| text == ICON_MORE)
+        .expect("the row's menu")
+        .center()
+        .y;
+    let hint = app.status_view(session).hint;
+    (0..80)
+        .map(|step| egui::pos2(step as f32 * 2.0, line))
+        .find(|at| home_287_count(&home_287_frame(app, ctx, session, Some(*at)), &hint) > 0)
+        .unwrap_or_else(|| panic!("no point on the row's leading edge says: {hint}"))
+}
+
+/// The row says its state with a mark; the word is not drawn beside it.
+#[test]
+fn home_287_row_draws_no_state_word() {
+    for (status, activity) in HOME_287_STATES {
+        let (root, mut app, session) = home_287_fixture("home-287-no-word", status, activity);
+        let ctx = egui::Context::default();
+        let away = home_287_frame(&mut app, &ctx, &session, None);
+        let word = app.status_view(&session).label;
+        assert_eq!(
+            home_287_count(&away, &word),
+            0,
+            "the row spells out {word} with the pointer away"
+        );
+        fs::remove_dir_all(root).ok();
+    }
+}
+
+/// Resting the pointer on the mark is what names the state.
+#[test]
+fn home_287_state_word_appears_on_hover() {
+    let mut words = Vec::new();
+    for (status, activity) in HOME_287_STATES {
+        let (root, mut app, session) = home_287_fixture("home-287-hover", status, activity);
+        let ctx = egui::Context::default();
+        let word = app.status_view(&session).label;
+        let mark = home_287_indicator(&mut app, &ctx, &session);
+        let hovered = home_287_frame(&mut app, &ctx, &session, Some(mark));
+        assert!(
+            home_287_count(&hovered, &word) > 0,
+            "hovering the mark does not name the state {word}"
+        );
+        words.push(word);
+        fs::remove_dir_all(root).ok();
+    }
+    for group in SessionStatusGroup::GROUPS {
+        assert!(
+            words.iter().any(|word| word == tr(group.message_id())),
+            "no session here goes by {}",
+            group.message_id()
+        );
+    }
+}
+
+/// The mark listens for the pointer and nothing else: a click on it is a
+/// click on the row.
+#[test]
+fn home_287_clicking_the_mark_opens_the_session() {
+    let (root, mut app, session) = home_287_fixture(
+        "home-287-click",
+        SessionStatus::Active,
+        Some(AgentActivity::Idle),
+    );
+    let ctx = egui::Context::default();
+    let mark = home_287_indicator(&mut app, &ctx, &session);
+    click_at(&ctx, mark, |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            app.home_session_row(ui, &session, "recent");
+        });
+    });
+    assert_eq!(app.page, Page::Sessions);
+    assert_eq!(app.selected_session, Some(session.id));
+    fs::remove_dir_all(root).ok();
 }

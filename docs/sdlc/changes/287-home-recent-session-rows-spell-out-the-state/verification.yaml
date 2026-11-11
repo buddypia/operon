@@ -1,0 +1,8 @@
+# The evidence for change 287. Format: docs/sdlc/templates/verification.yaml.
+digest: "09693b801f11f67d"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked home_287_row_draws_no_state_word
+  - R2 empirical-test :: cargo test --locked home_287_state_word_appears_on_hover
+  - R3 empirical-test :: cargo test --locked home_287_clicking_the_mark_opens_the_session
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/287-home-recent-session-rows-spell-out-the-state/mutations.py
