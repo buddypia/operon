@@ -8,7 +8,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "3 7"
   autonomy: "full"
@@ -16,12 +16,12 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have empirical-verifier try to falsify the change, fix what it reproduces, then close and land."
+resume: "Done. Package from main after landing, then check the session page: rows equal tabs, pin from a row and a tab, drag a row."
 
 contract:
   three-gates: "machine passed make q.fast; full suite 1343 passed, 6 ignored"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose as on main, src/app.rs shrinks to 9901"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/ui/session_tree.rs and src/i18n_tables.rs change; package from main after landing"
+  release-binary: "machine passed required - src/app.rs, src/app/session_order.rs, src/app/screens.rs, src/ui/session_tree.rs and src/i18n_tables.rs change; packaged from main after landing"
   guards-verified-by-mutation: "machine passed 17 of 17 caught: python3 docs/sdlc/changes/285-session-column-and-tabs-disagree/mutations.py"
 
 sets:

@@ -79744,3 +79744,102 @@ fn session_285_a_pinned_tab_does_not_close() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+#[cfg(test)]
+fn session_285_other_project(app: &mut OperonApp, root: &Path, name: &str) -> (Uuid, Uuid) {
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        path: root.join(format!("other-{name}")),
+        name: format!("q-{name}"),
+        added_at: now(),
+    });
+    let mut s = app.store.sessions[0].clone();
+    s.id = Uuid::new_v4();
+    s.tmux_name = managed_tmux_name(s.id);
+    s.project_id = other;
+    s.name = name.into();
+    s.created_at = 50_000;
+    let id = s.id;
+    app.store.sessions.push(s);
+    (other, id)
+}
+
+#[test]
+fn session_285_a_project_round_trip_keeps_rows_and_tabs_equal() {
+    let root = temporary_directory("session-285-probe-roundtrip");
+    let (mut app, p, ids) = session_285_app(&root, &["a", "b", "c"]);
+    let (q, away) = session_285_other_project(&mut app, &root, "away");
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    app.select_workspace_project(p);
+    session_285_frame(&mut app, &ctx);
+    app.toggle_session_pin(ids[0]);
+    app.close_workspace_tab(&WorkspaceTab::Session(ids[1]));
+    app.select_workspace_project(q);
+    session_285_frame(&mut app, &ctx);
+    app.select_workspace_project(p);
+    session_285_frame(&mut app, &ctx);
+    let rows: Vec<Uuid> = app.project_tab_sessions(p).iter().map(|s| s.id).collect();
+    assert_eq!(rows, session_285_tab_ids(&app), "p rows == p tabs");
+    assert!(!rows.contains(&ids[1]), "closed tab stays closed");
+    assert_eq!(rows[0], ids[0], "pinned first");
+    let q_rows: Vec<Uuid> = app.project_tab_sessions(q).iter().map(|s| s.id).collect();
+    assert_eq!(q_rows, vec![away]);
+    // Pinned in the other project: closing from there is refused too.
+    app.toggle_session_pin(away);
+    app.select_workspace_project(q);
+    session_285_frame(&mut app, &ctx);
+    app.close_workspace_tab(&WorkspaceTab::Session(away));
+    assert!(app.session_has_a_tab(away));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_285_reopen_and_a_split_group_keep_one_order() {
+    let root = temporary_directory("session-285-probe-split");
+    let (mut app, p, ids) = session_285_app(&root, &["a", "b", "c", "d"]);
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    // close b, reopen it with shift-cmd-T: tab and row agree.
+    app.close_workspace_tab(&WorkspaceTab::Session(ids[1]));
+    app.reopen_closed_tab();
+    session_285_frame(&mut app, &ctx);
+    let rows: Vec<Uuid> = app.project_tab_sessions(p).iter().map(|s| s.id).collect();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows, session_285_tab_ids(&app));
+    // Move c into its own group, pin d, then compare group by group.
+    let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(2000.0, 1200.0));
+    let target = app.workspace.groups[0].id;
+    let moved = app.workspace.move_tab(
+        &WorkspaceTab::Session(ids[2]),
+        target,
+        PaneDrop::Right,
+        area,
+    );
+    assert!(moved);
+    app.toggle_session_pin(ids[3]);
+    session_285_frame(&mut app, &ctx);
+    let rows: Vec<Uuid> = app.project_tab_sessions(p).iter().map(|s| s.id).collect();
+    let tabs: Vec<Uuid> = session_285_tab_ids(&app);
+    let mut sorted_tabs = tabs.clone();
+    sorted_tabs.sort_by_key(|id| rows.iter().position(|r| r == id));
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0], ids[3]);
+    for g in &app.workspace.groups {
+        let g_ids: Vec<Uuid> = g
+            .tabs
+            .iter()
+            .filter_map(|t| match t {
+                WorkspaceTab::Session(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        let mut expect = g_ids.clone();
+        expect.sort_by_key(|id| rows.iter().position(|r| r == id));
+        assert_eq!(g_ids, expect, "group follows column order");
+    }
+    // The pane drop must not have closed the pinned tab.
+    assert!(app.session_has_a_tab(ids[3]));
+    fs::remove_dir_all(root).unwrap();
+}

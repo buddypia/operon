@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-11
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -84,3 +84,8 @@
   source, the pin toggle, the tab-drop follow, `session_has_a_tab`, and
   `commit_session_arrangement` live in `src/app/session_order.rs`, mapped in
   `CLAUDE.md`; `src/app.rs` ends at 9,901 lines, below where it started.
+- **Two tests from the verifier.** `empirical-verifier` reproduced nothing;
+  two of its probes stay as tests, a project round trip with a pin and a
+  closed tab, and ⇧⌘T plus a split group
+  (`session_285_a_project_round_trip_keeps_rows_and_tabs_equal`,
+  `session_285_reopen_and_a_split_group_keep_one_order`).
