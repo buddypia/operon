@@ -1,0 +1,11 @@
+# The evidence for change 291. Format: docs/sdlc/templates/verification.yaml.
+digest: "ed1a1f52452a7f68"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked status_291_groups_are_three_and_done_stopped_avoid_finished_word
+  - R2 empirical-test :: cargo test --locked status_291_midrun_crash_auto_restores_in_same_tab_with_toast
+  - R3 empirical-test :: cargo test --locked status_291_auto_restore_cooldown_stops_crash_loop_until_manual_retry
+  - R4 empirical-test :: cargo test --locked status_291_unrestorable_failure_stays_in_needs_you_only_while_tab_open_or_unread
+  - R5 empirical-test :: cargo test --locked status_291_clean_exit_and_stop_close_unpinned_tab_but_keep_pinned_and_history_open
+  - I1 formal-model :: cargo test --locked model_check_a_session_is_relaunched_only_at_its_first_stored_look
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/291-finished-status-blurs-with-idle/mutations.py

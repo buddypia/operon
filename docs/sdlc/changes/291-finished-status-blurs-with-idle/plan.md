@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-12
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -70,4 +70,4 @@
 
 ## Departures from the plan
 
-None yet.
+- Independent audit caught that `notice_briefly` in `relaunch_interrupted_sessions` (and setup completion in `apply_session_poll`) could overwrite an active `store_retry_pending` durability warning or an earlier batch failure notice; gated both on `!self.store_retry_pending` (and `!saw_error_notice`), added a `NoTranscript` declined-restore claim check, and expanded `mutations.py` to 12 mutations.

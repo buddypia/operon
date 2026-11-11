@@ -12,8 +12,8 @@
 
 state:
   route: "modify"
-  stage: "design"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -21,13 +21,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Stage 1-2 artifacts approved; enter stage 3 (build) starting with the five status_291_* requirement tests in src/tests.rs."
+resume: "Done. Package from main after landing, then verify Home and the session sidebar show only 要対応・実行中・アイドル, mid-run crashes auto-restore in place, and clean exits move unpinned tabs to History."
 
 contract:
-  three-gates: "machine pending make q.fast"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/app/relaunch.rs, src/app/session_order.rs, src/app/screens.rs, src/ui/widgets.rs, src/config.rs, and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/291-finished-status-blurs-with-idle/mutations.py"
+  three-gates: "machine passed make q.fast; cargo test --locked status_291_: 5 passed; model_check_a_session_is_relaunched_only_at_its_first_stored_look: 1 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9938 at diagnose as on main"
+  release-binary: "machine passed required - src/app.rs, src/app/relaunch.rs, src/app/session_order.rs, src/app/screens.rs, src/ui/widgets.rs, src/config.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/291-finished-status-blurs-with-idle/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
