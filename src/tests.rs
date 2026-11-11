@@ -32952,30 +32952,37 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
     );
 
     // `index()` is the position in `GROUPS`, because it indexes the app's
-    // `[bool; 4]` and a mismatch would toggle the wrong chip.
+    // `[bool; 3]` and a mismatch would toggle the wrong chip.
     for (position, group) in SessionStatusGroup::GROUPS.iter().enumerate() {
         assert_eq!(group.index(), position, "{group:?} indexes the wrong slot");
     }
 
-    // The states the intent names, pinned: these are the two groups a person
-    // reaches for when they have work in hand.
+    // The states the intent names, pinned: these are the actionable groups a
+    // person reaches for when they have work in hand; clean exits and explicit
+    // stops have no live group (`None`).
     assert_eq!(
         SessionStatusKind::Idle.group(),
-        SessionStatusGroup::Free,
-        "an idle agent is the one thing 手すき is for"
+        Some(SessionStatusGroup::Free),
+        "an idle agent is the one thing アイドル is for"
     );
     assert_eq!(
         SessionStatusKind::Waiting.group(),
-        SessionStatusGroup::NeedsYou
+        Some(SessionStatusGroup::NeedsYou)
     );
     assert_eq!(
         SessionStatusKind::Blocked.group(),
-        SessionStatusGroup::NeedsYou
+        Some(SessionStatusGroup::NeedsYou)
     );
     assert_eq!(
-        SessionStatusKind::Done.group(),
-        SessionStatusGroup::Finished
+        SessionStatusKind::Failed.group(),
+        Some(SessionStatusGroup::NeedsYou)
     );
+    assert_eq!(
+        SessionStatusKind::Lost.group(),
+        Some(SessionStatusGroup::NeedsYou)
+    );
+    assert_eq!(SessionStatusKind::Done.group(), None);
+    assert_eq!(SessionStatusKind::Stopped.group(), None);
 }
 
 #[test]
@@ -33016,7 +33023,7 @@ pub(crate) fn every_status_group_has_a_message_id() {
 pub(crate) fn the_status_filter_shows_everything_when_nothing_is_selected() {
     let root = temporary_directory("status-filter-default");
     let (mut app, first, second) = app_with_two_sessions(&root);
-    assert_eq!(app.status_filter, [false; 4]);
+    assert_eq!(app.status_filter, [false; 3]);
 
     // One session in each of the four groups, in turn: none of them is hidden.
     let busy = app.store.sessions[0].clone();
@@ -33073,26 +33080,24 @@ pub(crate) fn an_unread_session_is_counted_as_needing_a_person() {
     assert_eq!(
         app.session_status_kind_for(&app.store.sessions[index])
             .group(),
-        SessionStatusGroup::Finished
+        None
     );
 
-    // 要対応 reaches it, and 空き does not.
-    app.status_filter = [false; 4];
+    // 要対応 reaches it via the unread overlay, while 実行中 and アイドル do not.
+    app.status_filter = [false; 3];
     app.status_filter[SessionStatusGroup::NeedsYou.index()] = true;
     assert!(app.session_matches_status_filter(&app.store.sessions[index]));
 
-    app.status_filter = [false; 4];
+    app.status_filter = [false; 3];
     app.status_filter[SessionStatusGroup::Free.index()] = true;
     assert!(!app.session_matches_status_filter(&app.store.sessions[index]));
 
-    // 終了 reaches it too — the overlap is the point, and the counts say so.
-    app.status_filter = [false; 4];
-    app.status_filter[SessionStatusGroup::Finished.index()] = true;
-    assert!(app.session_matches_status_filter(&app.store.sessions[index]));
+    app.status_filter = [false; 3];
+    app.status_filter[SessionStatusGroup::Busy.index()] = true;
+    assert!(!app.session_matches_status_filter(&app.store.sessions[index]));
 
     let counts = app.status_group_counts();
     assert_eq!(counts[SessionStatusGroup::NeedsYou.index()], 1);
-    assert_eq!(counts[SessionStatusGroup::Finished.index()], 1);
     // The toolbar badge and the chip are the same predicate, so they agree.
     assert_eq!(
         app.attention_count(),
@@ -33124,22 +33129,22 @@ pub(crate) fn narrowing_the_list_forgets_a_pending_removal_confirmation() {
     assert_eq!(app.pending_session_close, None);
 
     // Clearing from the no-match message.
-    app.status_filter = [true; 4];
+    app.status_filter = [true; 3];
     app.pending_session_close = Some(first);
     app.clear_status_filter();
-    assert_eq!(app.status_filter, [false; 4]);
+    assert_eq!(app.status_filter, [false; 3]);
     assert_eq!(app.pending_session_close, None);
 
     // And the home screen's banner, which is the same narrowing by another
     // route: it lands on the session list with 要対応 on and nothing else.
     app.page = Page::Home;
-    app.status_filter = [true; 4];
+    app.status_filter = [true; 3];
     app.pending_session_close = Some(first);
     app.show_sessions_needing_you();
     assert_eq!(app.page, Page::Sessions);
     assert_eq!(
         app.status_filter,
-        [true, false, false, false],
+        [true, false, false],
         "the banner counts 要対応, so it shows 要対応 and nothing else"
     );
     assert_eq!(app.pending_session_close, None);
@@ -47766,8 +47771,8 @@ pub(crate) fn the_filtered_session_list_says_how_many_it_hides() {
             .any(|text| text.contains("件を非表示中")),
         "フィルタなしで「非表示中」と出ています"
     );
-    // 終了 keeps the finished one and hides the running one.
-    app.status_filter[SessionStatusGroup::Finished.index()] = true;
+    // 実行中 keeps the running one and hides the finished one.
+    app.status_filter[SessionStatusGroup::Busy.index()] = true;
     let texts = session_tabs_texts(&mut app);
     assert!(
         texts.iter().any(|text| text == "1 件を非表示中"),
@@ -48111,7 +48116,19 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
 #[test]
 pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
     for kind in SessionStatusKind::ALL {
-        assert_eq!(kind.label(), kind.group().message_id(), "{kind:?}");
+        if let Some(group) = kind.group() {
+            assert_eq!(kind.label(), group.message_id(), "{kind:?}");
+        } else {
+            assert!(
+                matches!(
+                    (kind, kind.label()),
+                    (SessionStatusKind::Done, "正常終了")
+                        | (SessionStatusKind::Stopped, "停止済み")
+                ),
+                "{kind:?}: {}",
+                kind.label()
+            );
+        }
         assert!(
             !kind.label().is_ascii(),
             "{kind:?} is drawn as an English token"
@@ -48130,6 +48147,8 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         .map(|group| group.message_id())
         .collect();
     ids.extend([
+        "正常終了",
+        "停止済み",
         "新しいセッション",
         "新しいセッション  {chord}",
         "検索・操作",
@@ -48204,7 +48223,7 @@ pub(crate) fn a_group_tile_filters_the_session_list_to_that_group() {
 
     click_at(&context, label.center(), &mut pass);
     assert_eq!(app.page, Page::Sessions);
-    let mut only_busy = [false; 4];
+    let mut only_busy = [false; 3];
     only_busy[SessionStatusGroup::Busy.index()] = true;
     assert_eq!(app.status_filter, only_busy);
     fs::remove_dir_all(&root).ok();
@@ -51975,7 +51994,7 @@ pub(crate) fn chips_that_exclude_needs_you_hide_the_pinned_section() {
     let root = temporary_directory("pinned-chips");
     let (mut app, first, second) = app_with_two_sessions(&root);
     queue_first_only(&mut app, first);
-    app.status_filter = [false; 4];
+    app.status_filter = [false; 3];
     app.status_filter[SessionStatusGroup::Busy.index()] = true;
     let texts = pinned_layout(&mut app, second);
     let project = text_y(&texts, "p").expect("the project group should be drawn");
@@ -61899,27 +61918,27 @@ pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
 pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
     let readme = fs::read_to_string("README.md").unwrap();
     assert!(
-        readme.contains("header — **要対応**, **実行中**, **アイドル**, **終了** —"),
-        "README.md must name the idle filter アイドル"
+        readme.contains("header — **要対応**, **実行中**, **アイドル** —"),
+        "README.md must name the three status filters including アイドル"
     );
 
     let readme_ja = fs::read_to_string("README.ja.md").unwrap();
     assert!(
-        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・アイドル・終了で一覧"),
+        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・アイドルで一覧"),
         "README.ja.md hero caption must name アイドル"
     );
     assert!(
-        readme_ja.contains("**要対応**・**実行中**・**アイドル**・**終了** の 4 つのトグル"),
+        readme_ja.contains("**要対応**・**実行中**・**アイドル** の 3 つのトグル"),
         "README.ja.md filter toggles must name アイドル"
     );
 
     let readme_ko = fs::read_to_string("README.ko.md").unwrap();
     assert!(
-        readme_ko.contains("모든 프로젝트의 세션을 확인 필요·실행 중·유휴·종료로 한눈에"),
+        readme_ko.contains("모든 프로젝트의 세션을 확인 필요·실행 중·유휴로 한눈에"),
         "README.ko.md hero caption must name 확인 필요 and 유휴"
     );
     assert!(
-        readme_ko.contains("**확인 필요**·**실행 중**·**유휴**·**종료** 네 개의 토글"),
+        readme_ko.contains("**확인 필요**·**실행 중**·**유휴** 세 개의 토글"),
         "README.ko.md filter toggles must name 확인 필요 and 유휴"
     );
 
@@ -61929,7 +61948,7 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         "docs/MANUAL.ja.md state table must name アイドル as a finished turn"
     );
     assert!(
-        manual_ja.contains("**要対応**・**実行中**・**アイドル**・**終了** の 4 つのトグル"),
+        manual_ja.contains("**要対応**・**実行中**・**アイドル** の 3 つのトグル"),
         "docs/MANUAL.ja.md filter toggles must name アイドル"
     );
     assert!(
@@ -61947,7 +61966,7 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         "docs/MANUAL.ko.md state table must name 유휴 as a finished turn"
     );
     assert!(
-        manual_ko.contains("**확인 필요**, **실행 중**, **유휴**, **종료** 네 개의 토글 칩"),
+        manual_ko.contains("**확인 필요**, **실행 중**, **유휴** 세 개의 토글 칩"),
         "docs/MANUAL.ko.md filter toggles must name 확인 필요 and 유휴"
     );
     assert!(
@@ -70248,15 +70267,15 @@ fn sidebar_251_filters_drive_real_rows() {
     let target =
         |out: &egui::FullOutput, label: &str| sidebar_252_top(out, right, label).unwrap().center();
     let out = sidebar_251_click(&mut app, &ctx, target(&out, "要対応"));
-    assert_eq!(app.status_filter, [true, false, false, false]);
+    assert_eq!(app.status_filter, [true, false, false]);
     assert!(rows(&out, "first"));
     assert!(!rows(&out, "second") && !rows(&out, "finished-third"));
-    let out = sidebar_251_click(&mut app, &ctx, target(&out, "終了"));
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "実行中"));
     assert!(
-        rows(&out, "first") && rows(&out, "finished-third"),
+        rows(&out, "first") && rows(&out, "second"),
         "status choices form a union"
     );
-    assert!(!rows(&out, "second"));
+    assert!(!rows(&out, "finished-third"));
     let out = sidebar_251_click(&mut app, &ctx, target(&out, "クリア"));
     assert!(!app.has_session_filters());
     assert!(rows(&out, "first") && rows(&out, "second"));
@@ -70306,7 +70325,7 @@ fn sidebar_251_filter_combinations() {
     // to the Other choice.
     for agent_bits in 0..16 {
         app.agent_filter = std::array::from_fn(|i| agent_bits & (1 << i) != 0);
-        for status_bits in 0..16 {
+        for status_bits in 0..8 {
             app.status_filter = std::array::from_fn(|i| status_bits & (1 << i) != 0);
             for (agent, slot) in [
                 ("codex", 0),
@@ -70322,9 +70341,12 @@ fn sidebar_251_filter_combinations() {
                     if ended {
                         session.status = SessionStatus::Exited;
                     }
-                    let group_slot = if ended { 3 } else { 0 };
                     let agent_match = agent_bits == 0 || agent_bits & (1 << slot) != 0;
-                    let status_match = status_bits == 0 || status_bits & (1 << group_slot) != 0;
+                    let status_match = if ended {
+                        status_bits == 0
+                    } else {
+                        status_bits == 0 || status_bits & 1 != 0
+                    };
                     assert_eq!(
                         app.session_matches_filters(&session),
                         agent_match && status_match,
@@ -70342,7 +70364,7 @@ fn sidebar_251_filter_combinations() {
     assert_eq!(app.pending_session_close, None);
     app.show_status_group(SessionStatusGroup::Busy);
     assert_eq!(app.agent_filter, [false; 4]);
-    assert_eq!(app.status_filter, [false, true, false, false]);
+    assert_eq!(app.status_filter, [false, true, false]);
     app.clear_session_filters();
     assert!(!app.has_session_filters());
     // A stale waiting hook must not keep promising a permission prompt.
@@ -70447,7 +70469,7 @@ fn sidebar_251_marks_and_accessible_filters() {
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert_eq!(app.selected_session, selected_before);
     assert_eq!(app.workspace.active().cloned(), active_before);
-    for label in ["要対応", "実行中", "アイドル", "終了"] {
+    for label in ["要対応", "実行中", "アイドル"] {
         for rect in drawn_text_rects(&output, |text| text == label) {
             assert!(
                 rect.right() < right,
@@ -70635,7 +70657,7 @@ fn sidebar_252_status_tiles_count_and_toggle() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let right = project_column_right(&app);
-    for gone in ["CLI", "ステータス", "すべて", "承認・回答待ち"] {
+    for gone in ["CLI", "ステータス", "すべて", "承認・回答待ち", "終了"] {
         assert!(
             !sidebar_252_in_column(&out, right, gone),
             "{gone} must not be drawn in the sidebar filters"
@@ -70644,23 +70666,21 @@ fn sidebar_252_status_tiles_count_and_toggle() {
     let tiles = sidebar_252_tiles(&out, right);
     assert!(
         (tiles[0].center().y - tiles[1].center().y).abs() < 1.0
-            && (tiles[2].center().y - tiles[3].center().y).abs() < 1.0
             && tiles[2].top() > tiles[0].bottom()
             && tiles[1].left() > tiles[0].right(),
-        "four tiles, two per row, at the default width: {tiles:?}"
+        "three tiles (two on row 1, one full-width on row 2) at the default width: {tiles:?}"
     );
-    let mut expected = [0usize; 4];
+    let mut expected = [0usize; 3];
     for session in &app.store.sessions {
-        expected[app.session_status_kind_for(session).group().index()] += 1;
+        if let Some(group) = app.session_status_kind_for(session).group() {
+            expected[group.index()] += 1;
+        }
     }
     assert_eq!(expected[SessionStatusGroup::NeedsYou.index()], 1);
-    assert_eq!(expected[SessionStatusGroup::Finished.index()], 1);
+    assert_eq!(expected[SessionStatusGroup::Busy.index()], 1);
+    assert_eq!(expected[SessionStatusGroup::Free.index()], 0);
     for (slot, tile) in tiles.iter().enumerate() {
-        let end = if slot % 2 == 0 {
-            tiles[slot + 1].left()
-        } else {
-            right
-        };
+        let end = if slot == 0 { tiles[1].left() } else { right };
         let count = expected[slot].to_string();
         assert!(
             drawn_text_rects(&out, |text| text == count)
@@ -70674,21 +70694,23 @@ fn sidebar_252_status_tiles_count_and_toggle() {
         );
     }
     let out = sidebar_251_click(&mut app, &ctx, tiles[0].center());
-    assert_eq!(app.status_filter, [true, false, false, false]);
+    assert_eq!(app.status_filter, [true, false, false]);
     assert!(sidebar_252_in_column(&out, right, "first"));
     assert!(!sidebar_252_in_column(&out, right, "second"));
     let tiles = sidebar_252_tiles(&out, right);
-    let out = sidebar_251_click(&mut app, &ctx, tiles[3].center());
+    let out = sidebar_251_click(&mut app, &ctx, tiles[1].center());
     assert!(
         sidebar_252_in_column(&out, right, "first")
-            && sidebar_252_in_column(&out, right, "finished-third"),
+            && sidebar_252_in_column(&out, right, "second")
+            && !sidebar_252_in_column(&out, right, "finished-third"),
         "status tiles form a union"
     );
     let tiles = sidebar_252_tiles(&out, right);
     sidebar_251_click(&mut app, &ctx, tiles[0].center());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    assert_eq!(app.status_filter, [false, false, false, true]);
+    assert_eq!(app.status_filter, [false, true, false]);
     assert!(!sidebar_252_in_column(&out, right, "first"));
+    assert!(sidebar_252_in_column(&out, right, "second"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -70710,11 +70732,7 @@ fn sidebar_252_counts_follow_cli_and_clear_only_while_filtering() {
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let tiles = sidebar_252_tiles(&out, right);
     for (slot, tile) in tiles.iter().enumerate() {
-        let end = if slot % 2 == 0 {
-            tiles[slot + 1].left()
-        } else {
-            right
-        };
+        let end = if slot == 0 { tiles[1].left() } else { right };
         assert!(
             drawn_text_rects(&out, |text| text == "0").iter().any(|r| {
                 (r.center().y - tile.center().y).abs() < 1.0
@@ -70818,7 +70836,7 @@ fn sidebar_252_tiles_fit_narrow_column() {
                 .filter(|r| r.left() < right),
         );
     }
-    assert!(controls.len() >= 4 + 2 + 3);
+    assert!(controls.len() >= 3 + 2 + 3);
     for rect in controls {
         assert!(
             rect.right() <= right,
@@ -75372,8 +75390,41 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
             .contains(&BackgroundKey::SessionStart(id)));
     }
 
-    // Only the first look decides: a session that dies later in this run is
-    // not started again by itself.
+    // Change 291: a restorable session that dies later mid-run auto-restores in
+    // place once, and a repeat disappearance inside the 15s cooldown stays Lost.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.alive).status,
+        SessionStatus::Starting
+    );
+    assert!(fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.alive)));
+    for id in [
+        fixture.terminal,
+        fixture.resumable,
+        fixture.crashed,
+        fixture.alive,
+    ] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+    }
+    relaunch_270_find_mut(&mut fixture.app, fixture.alive).status = SessionStatus::Active;
     fixture.app.apply_session_poll(
         vec![(
             fixture.alive,
@@ -75394,13 +75445,6 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         .app
         .background_tasks
         .contains(&BackgroundKey::SessionStart(fixture.alive)));
-    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
-        wait_for_background_task(
-            &mut fixture.app,
-            &BackgroundKey::SessionStart(id),
-            Duration::from_secs(30),
-        );
-    }
     fs::remove_dir_all(&fixture.root).ok();
 }
 
@@ -75633,7 +75677,7 @@ const WS_PANE_CAP: usize = PANE_MAX + 1;
 const WS1_STATES: usize = 599_549;
 const WS2_STATES: usize = 140_880;
 const WS3_STATES: usize = 656_525;
-const R6_STATES: usize = 164;
+const R6_STATES: usize = 214;
 
 fn ws_group(k: u128) -> Uuid {
     Uuid::from_u128(0x1_0000 + k)
@@ -76191,7 +76235,7 @@ struct Relaunch6State {
     status: u8,
     candidate: bool,
     looked: bool,
-    relaunched: u8,
+    cooling_down: bool,
     polls: u8,
     violation: Option<String>,
 }
@@ -76200,6 +76244,8 @@ struct Relaunch6State {
 enum Relaunch6Event {
     Load(u8, bool),
     Poll(u8, bool),
+    CooldownExpired,
+    ManualStart,
 }
 
 fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uuid) {
@@ -76233,22 +76279,10 @@ fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uui
 }
 
 #[test]
-/// Change 270, R6 (departure 6, F1 and 7): the relaunch decision of
-/// `apply_session_poll`, run for real. The model loads one session in each of
-/// the eight statuses, with and without a `relaunch_kind` (a plain terminal, a
-/// Claude session with no conversation), then takes up to three polls, each
-/// one of seven observations (every `TmuxState`; `Dead` with status 0, nonzero
-/// and none; `Gone` with and without a status) with the store write
-/// succeeding or failing (the folder made read-only around the poll). Every
-/// state of that walk, the real app rebuilt at each step from the state
-/// reached.
-///
-/// The property, kept as its own ledger beside the app: a session is started
-/// again iff it was Starting/Active/Unknown at load, this poll is its first
-/// non-Unknown look whose outcome was stored (a look that changes nothing has
-/// nothing to store; a failed write leaves the look unspent), the outcome is
-/// Lost or Failed, the write succeeded, and `relaunch_kind` is `Some` — and at
-/// most once over the sequence; the real candidate set agrees with the ledger.
+/// Change 270 / 291: the relaunch decision of `apply_session_poll`, run for
+/// real across startup first-look recovery, mid-run crash recovery, the 15s
+/// per-session cooldown, cooldown expiry, manual retry reset, and failed store
+/// writes.
 pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look() {
     use std::os::unix::fs::PermissionsExt;
     let root = temporary_directory("model-relaunch-270");
@@ -76264,12 +76298,14 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
             events.push(Relaunch6Event::Poll(observation, stored));
         }
     }
+    events.push(Relaunch6Event::CooldownExpired);
+    events.push(Relaunch6Event::ManualStart);
     let initial = Relaunch6State {
         load: None,
         status: 0,
         candidate: false,
         looked: false,
-        relaunched: 0,
+        cooling_down: false,
         polls: 0,
         violation: None,
     };
@@ -76300,6 +76336,9 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
                 } else {
                     app.relaunch_candidates.clear();
                 }
+                if state.cooling_down {
+                    app.last_auto_restore.insert(id, Instant::now());
+                }
                 if !stored {
                     fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
                 }
@@ -76320,29 +76359,55 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
                     .background_tasks
                     .contains(&BackgroundKey::SessionStart(id));
                 let candidate_now = app.relaunch_candidates.contains(&id);
+                let cooling_now = app.last_auto_restore.contains_key(&id);
                 let status_now = r6_index(&app.store.sessions[0].status);
+                let notice_now = app.notice.clone();
                 // The ledger, from the requirement alone.
+                let polled = R6_RUNNING.contains(&state.status);
                 let was_candidate = R6_RUNNING.contains(&loaded) && !state.looked;
-                let looks = was_candidate && state_of != TmuxState::Unknown;
-                let lost_or_failed = match (state_of, exit) {
-                    (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
-                    (TmuxState::Dead, Some(code)) => code != 0,
-                    _ => false,
-                };
-                let needs_write = match state_of {
-                    TmuxState::Alive => state.status != 1,
-                    TmuxState::Unknown => false,
-                    _ => true,
-                };
-                let expected = looks && lost_or_failed && kind && *stored;
-                let looked = state.looked || (looks && (!needs_write || *stored));
-                let count = state.relaunched + u8::from(relaunched);
+                let first_look = polled && was_candidate && state_of != TmuxState::Unknown;
+                let lost_or_failed = polled
+                    && match (state_of, exit) {
+                        (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
+                        (TmuxState::Dead, Some(code)) => code != 0,
+                        _ => false,
+                    };
+                let needs_write = polled
+                    && match state_of {
+                        TmuxState::Alive => state.status != 1,
+                        TmuxState::Unknown => false,
+                        _ => true,
+                    };
+                let expected = lost_or_failed && kind && !state.cooling_down && *stored;
+                let looked = state.looked || (first_look && (!needs_write || *stored));
+                let expected_cooling = state.cooling_down || expected;
+                let expected_toast = expected.then_some(if first_look {
+                    "前回開いていたセッションを 1 件再開しました。"
+                } else {
+                    "強制終了されたセッションを 1 件自動で復元しました。"
+                });
                 let violation = if relaunched != expected {
                     Some(format!(
                         "relaunched {relaunched}, the requirement says {expected}"
                     ))
-                } else if count > 1 {
-                    Some("relaunched twice".to_owned())
+                } else if cooling_now != expected_cooling {
+                    Some(format!(
+                        "cooling_down {cooling_now}, expected {expected_cooling}"
+                    ))
+                } else if expected && notice_now.as_deref() != expected_toast {
+                    Some(format!(
+                        "toast {:?}, expected {:?}",
+                        notice_now, expected_toast
+                    ))
+                } else if !expected
+                    && notice_now.as_deref().is_some_and(|n| {
+                        n.contains("再開しました") || n.contains("自動で復元しました")
+                    })
+                {
+                    Some(format!(
+                        "lying restore toast {:?} when expected=false",
+                        notice_now
+                    ))
                 } else if candidate_now != (R6_RUNNING.contains(&loaded) && !looked) {
                     Some(format!(
                         "candidate {candidate_now} after a look the ledger calls spent={looked}"
@@ -76355,9 +76420,51 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
                     status: status_now,
                     candidate: candidate_now,
                     looked,
-                    relaunched: count,
+                    cooling_down: cooling_now,
                     polls: state.polls + 1,
                     violation,
+                })
+            }
+            (Some((_, kind)), Relaunch6Event::CooldownExpired)
+                if state.polls < 3 && state.violation.is_none() && state.cooling_down =>
+            {
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                app.last_auto_restore.insert(
+                    id,
+                    Instant::now() - Duration::from_secs(AUTO_RESTORE_COOLDOWN_SECONDS),
+                );
+                let violation = (!app.auto_restore_ready(id, Instant::now()))
+                    .then(|| "cooldown did not expire after AUTO_RESTORE_COOLDOWN_SECONDS".into());
+                Some(Relaunch6State {
+                    cooling_down: false,
+                    polls: state.polls + 1,
+                    violation,
+                    ..state.clone()
+                })
+            }
+            (Some((_, kind)), Relaunch6Event::ManualStart)
+                if state.polls < 3
+                    && state.violation.is_none()
+                    && matches!(state.status, 4 | 6) =>
+            {
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                if state.cooling_down {
+                    app.last_auto_restore.insert(id, Instant::now());
+                }
+                app.start_session(id);
+                let violation = if app.last_auto_restore.contains_key(&id) {
+                    Some("manual start_session did not clear cooldown".into())
+                } else if app.store.sessions[0].status != SessionStatus::Starting {
+                    Some("manual start_session did not start session".into())
+                } else {
+                    None
+                };
+                Some(Relaunch6State {
+                    status: 0,
+                    cooling_down: false,
+                    polls: state.polls + 1,
+                    violation,
+                    ..state.clone()
                 })
             }
             _ => None,
@@ -79040,7 +79147,7 @@ fn session_283_waiting_dot_keeps_a_shape() {
         let output = session_283_frame(&mut app, &ctx);
         let kind = session_283_kind(&app, first);
         assert_eq!(
-            kind.group() == SessionStatusGroup::NeedsYou,
+            kind.group() == Some(SessionStatusGroup::NeedsYou),
             needs_you,
             "{kind:?}"
         );
@@ -79453,8 +79560,8 @@ fn session_285_column_lists_exactly_the_tabs() {
         app.status_group_counts_for_chosen_agents()
             .iter()
             .sum::<usize>(),
-        3,
-        "the filter tiles count the same rows"
+        1,
+        "the three actionable filter tiles count only live/attention tabs"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -80168,5 +80275,788 @@ fn home_287_clicking_the_mark_opens_the_session() {
     });
     assert_eq!(app.page, Page::Sessions);
     assert_eq!(app.selected_session, Some(session.id));
+    fs::remove_dir_all(root).ok();
+}
+
+// ── Change 291: retire 終了, mid-run auto-restore, and clean-exit tab close ──
+
+#[test]
+fn status_291_groups_are_three_and_done_stopped_avoid_finished_word() {
+    assert_eq!(
+        SessionStatusGroup::GROUPS,
+        [
+            SessionStatusGroup::NeedsYou,
+            SessionStatusGroup::Busy,
+            SessionStatusGroup::Free,
+        ]
+    );
+    assert_eq!(SessionStatusKind::Done.group(), None);
+    assert_eq!(SessionStatusKind::Stopped.group(), None);
+    assert_eq!(
+        SessionStatusKind::Failed.group(),
+        Some(SessionStatusGroup::NeedsYou)
+    );
+    assert_eq!(
+        SessionStatusKind::Lost.group(),
+        Some(SessionStatusGroup::NeedsYou)
+    );
+    assert_eq!(SessionStatusKind::Done.label(), "正常終了");
+    assert_eq!(SessionStatusKind::Stopped.label(), "停止済み");
+    assert_eq!(
+        SessionStatusGroup::NeedsYou.hint_id(),
+        "回答待ち・異常終了・前提が壊れて止まっているセッション"
+    );
+
+    let done_session = test_session(Uuid::new_v4(), SessionStatus::Exited);
+    let done_view = session_status_view(
+        std::slice::from_ref(&done_session),
+        &done_session,
+        false,
+        None,
+    );
+    assert_eq!(done_view.label, tr("正常終了"));
+    assert_eq!(done_view.hint, tr("ターミナルは正常に終了しました"));
+
+    let stopped_session = test_session(Uuid::new_v4(), SessionStatus::Cancelled);
+    let stopped_view = session_status_view(
+        std::slice::from_ref(&stopped_session),
+        &stopped_session,
+        false,
+        None,
+    );
+    assert_eq!(stopped_view.label, tr("停止済み"));
+    assert_eq!(stopped_view.hint, tr("停止操作による終了"));
+
+    // Home draws only the three actionable tiles and never 終了.
+    let (root, mut app, _) = sidebar_252_fixture("status-291-groups-ui");
+    app.page = Page::Home;
+    let ctx = egui::Context::default();
+    let home = draw_home(&mut app, &ctx);
+    for group in SessionStatusGroup::GROUPS {
+        assert!(
+            drawn_text_rect(&home, |text| {
+                text == format!("{}  {}", group.icon(), tr(group.message_id()))
+            })
+            .is_some(),
+            "Home is missing {:?} tile",
+            group
+        );
+    }
+    assert!(
+        drawn_text_rect(&home, |text| text.contains("終了")
+            && !text.contains("正常終了"))
+        .is_none(),
+        "Home still draws a 終了 tile"
+    );
+
+    // History chip bar draws すべて plus the three group chips and never 終了.
+    let history_texts = session_tabs_texts(&mut app);
+    assert!(history_texts.iter().any(|t| t.starts_with("すべて ")));
+    for word in ["要対応", "実行中", "アイドル"] {
+        assert!(
+            history_texts
+                .iter()
+                .any(|t| t == word || t.starts_with(&format!("{word} "))),
+            "History chip bar missing {word}: {history_texts:?}"
+        );
+    }
+    assert!(
+        !history_texts
+            .iter()
+            .any(|t| t == "終了" || t.starts_with("終了 ")),
+        "History chip bar still draws 終了: {history_texts:?}"
+    );
+
+    // Session sidebar responsive geometry across wide (3-col), default 268px (2+1 full-width), and narrow 180px (1-col).
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+
+    // 1) Wide sidebar (400px -> 3 equal tiles on 1 row)
+    app.dock.sizes[DockEdge::Left.index()] = 400.0;
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let wide_out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let wide_right = project_column_right(&app);
+    let wide_tiles = sidebar_252_tiles(&wide_out, wide_right);
+    assert_eq!(wide_tiles.len(), 3);
+    assert!(
+        (wide_tiles[0].center().y - wide_tiles[1].center().y).abs() < 1.0
+            && (wide_tiles[1].center().y - wide_tiles[2].center().y).abs() < 1.0
+            && wide_tiles[1].left() > wide_tiles[0].right()
+            && wide_tiles[2].left() > wide_tiles[1].right(),
+        "wide sidebar should place all 3 tiles on one row: {wide_tiles:?}"
+    );
+
+    // 2) Default 268px sidebar -> row 1 has 2 tiles, row 2 has アイドル spanning the full row width (count near right edge)
+    app.dock.sizes[DockEdge::Left.index()] = 268.0;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let mid_out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let mid_right = project_column_right(&app);
+    assert!(!sidebar_252_in_column(&mid_out, mid_right, "終了"));
+    let mid_tiles = sidebar_252_tiles(&mid_out, mid_right);
+    assert!(
+        (mid_tiles[0].center().y - mid_tiles[1].center().y).abs() < 1.0
+            && mid_tiles[2].top() > mid_tiles[0].bottom(),
+        "default 268px sidebar should draw 2 tiles on row 1 and 1 tile on row 2: {mid_tiles:?}"
+    );
+    let idle_count_right = drawn_text_rects(&mid_out, |text| text == "0")
+        .into_iter()
+        .filter(|r| (r.center().y - mid_tiles[2].center().y).abs() < 2.0 && r.right() < mid_right)
+        .map(|r| r.right())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        idle_count_right > (mid_tiles[1].left() + mid_right) * 0.5,
+        "row 2 アイドル tile must span the full column width rather than leaving a half-row hole (idle_count_right={idle_count_right}, col_mid={}, right={mid_right})",
+        (mid_tiles[1].left() + mid_right) * 0.5
+    );
+
+    // 3) Narrow 180px minimum sidebar -> 3 stacked rows
+    app.dock.sizes[DockEdge::Left.index()] = SIDEBAR_MIN_W;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let narrow_out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let narrow_right = project_column_right(&app);
+    let narrow_tiles = sidebar_252_tiles(&narrow_out, narrow_right);
+    assert!(
+        narrow_tiles[1].top() > narrow_tiles[0].bottom()
+            && narrow_tiles[2].top() > narrow_tiles[1].bottom(),
+        "minimum-width sidebar should stack 3 tiles vertically: {narrow_tiles:?}"
+    );
+
+    fs::remove_dir_all(root).ok();
+}
+
+fn relaunch_270_find_mut(app: &mut OperonApp, id: Uuid) -> &mut Session {
+    app.store.sessions.iter_mut().find(|s| s.id == id).unwrap()
+}
+
+#[test]
+fn status_291_midrun_crash_auto_restores_in_same_tab_with_toast() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = relaunch_270_fixture("status-291-midrun-restore");
+    // Simulate mid-run: startup first-look candidates are already spent.
+    fixture.app.relaunch_candidates.clear();
+    fixture.app.store.notifications_enabled = true;
+    fixture.app.page = Page::Sessions;
+    fixture.app.workspace_project = Some(fixture.app.store.projects[0].id);
+    fixture
+        .app
+        .workspace
+        .open(WorkspaceTab::Session(fixture.resumable));
+    fixture
+        .app
+        .workspace
+        .open(WorkspaceTab::Session(fixture.terminal));
+    fixture.app.selected_session = Some(fixture.alive);
+
+    // Mid-run crash of both a CLI with saved conversation (`Failed`) and a plain terminal (`Lost`).
+    fixture.app.apply_session_poll(
+        vec![
+            (
+                fixture.resumable,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                fixture.terminal,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.resumable).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    assert!(fixture.app.session_has_a_tab(fixture.resumable));
+    assert!(fixture.app.session_has_a_tab(fixture.terminal));
+    assert_eq!(
+        fixture.app.selected_session,
+        Some(fixture.alive),
+        "mid-run auto-restore uses LaunchFocus::Keep without stealing focus"
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some("強制終了されたセッションを 2 件自動で復元しました。")
+    );
+    assert!(
+        !fixture
+            .app
+            .background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "transient crash undone by auto-restore must not send a failure notification"
+    );
+
+    for id in [fixture.resumable, fixture.terminal] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+    }
+
+    // Setup sessions must never auto-restore when they exit non-zero.
+    let setup_id = fixture.crashed;
+    fixture.app.setup_sessions.insert(setup_id);
+    fixture.app.apply_session_poll(
+        vec![(
+            setup_id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(2),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, setup_id).status,
+        SessionStatus::Failed
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(setup_id)));
+
+    // Drain any notification task spawned for setup_id.
+    let notif_keys: Vec<_> = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|k| matches!(k, BackgroundKey::Notification(_)))
+        .cloned()
+        .collect();
+    for key in notif_keys {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(10));
+    }
+
+    // TerminalResized observing TmuxState::Gone on an Unknown session:
+    // 1) When persist() fails (read-only directory), keep candidate & store_retry_pending notice and do NOT relaunch.
+    let resize_id = fixture.alive;
+    relaunch_270_find_mut(&mut fixture.app, resize_id).status = SessionStatus::Unknown;
+    fixture.app.relaunch_candidates.insert(resize_id);
+    let size = (80, 24);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::TerminalResize(resize_id));
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o555)).unwrap();
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id: resize_id,
+            size,
+            result: Err("can't find session: gone".into()),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(fixture.app.store_retry_pending);
+    assert!(
+        fixture
+            .app
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("保存できませんでした")),
+        "store-retry notice must not be clobbered on failed persist: {:?}",
+        fixture.app.notice
+    );
+    assert!(
+        fixture.app.relaunch_candidates.contains(&resize_id),
+        "failed persist must leave relaunch_candidates unspent"
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(resize_id)));
+
+    // 2) When persist() succeeds mid-run on an Unknown session, TerminalResized Gone auto-restores in place.
+    fixture.app.store_retry_pending = false;
+    fixture.app.relaunch_candidates.remove(&resize_id);
+    relaunch_270_find_mut(&mut fixture.app, resize_id).status = SessionStatus::Unknown;
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::TerminalResize(resize_id));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id: resize_id,
+            size,
+            result: Err("no server running on /private/tmp/tmux".into()),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+
+    assert_eq!(
+        relaunch_270_find(&fixture.app, resize_id).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some("強制終了されたセッションを 1 件自動で復元しました。")
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(resize_id),
+        Duration::from_secs(30),
+    );
+
+    // 3) Declined restore (`NoTranscript`) must NOT emit a lying "自動で復元しました" toast.
+    fixture.app.notice = None;
+    fixture.app.brief_notice = None;
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.no_transcript,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.no_transcript).status,
+        SessionStatus::Failed
+    );
+    assert_eq!(
+        fixture.app.notice, None,
+        "declined mid-run restore must never claim a session was restored"
+    );
+    let notif_keys: Vec<_> = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|k| matches!(k, BackgroundKey::Notification(_)))
+        .cloned()
+        .collect();
+    for key in notif_keys {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(10));
+    }
+
+    // 4) An active `store_retry_pending` durability warning in `notice` must not be
+    //    clobbered by `notice_briefly` when another session auto-restores.
+    fixture.app.clear_auto_restore_cooldown(fixture.terminal);
+    relaunch_270_find_mut(&mut fixture.app, fixture.terminal).status = SessionStatus::Active;
+    fixture.app.store_retry_pending = true;
+    fixture.app.brief_notice = None;
+    fixture.app.notice = Some("キャンセル復旧用メタデータが保留中です。".into());
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.terminal,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some("キャンセル復旧用メタデータが保留中です。"),
+        "transient restore toast must not overwrite an active store_retry_pending notice"
+    );
+    assert!(!notice_is_brief(
+        &fixture.app.notice,
+        &fixture.app.brief_notice
+    ));
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(30),
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+fn status_291_auto_restore_cooldown_stops_crash_loop_until_manual_retry() {
+    let mut fixture = relaunch_270_fixture("status-291-cooldown");
+    fixture.app.relaunch_candidates.clear();
+    let id = fixture.terminal;
+    fixture.app.workspace.open(WorkspaceTab::Session(id));
+
+    // First crash -> auto-restores and records cooldown timestamp.
+    fixture.app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(id)));
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+
+    // Simulate launch having come up Active, then crashing again immediately (< 15s).
+    relaunch_270_find_mut(&mut fixture.app, id).status = SessionStatus::Active;
+    fixture.app.notice = None;
+    fixture.app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, id).status,
+        SessionStatus::Failed,
+        "repeat crash inside 15s cooldown must stay Failed instead of looping"
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(id)));
+    assert_eq!(
+        fixture.app.notice, None,
+        "cooldown-suppressed crash must not emit a restore toast"
+    );
+    assert!(
+        fixture.app.session_has_a_tab(id),
+        "failed session keeps its tab open so error output can be read"
+    );
+
+    // Once AUTO_RESTORE_COOLDOWN_SECONDS elapses, automatic restore works again.
+    fixture.app.last_auto_restore.insert(
+        id,
+        Instant::now() - Duration::from_secs(AUTO_RESTORE_COOLDOWN_SECONDS),
+    );
+    relaunch_270_find_mut(&mut fixture.app, id).status = SessionStatus::Active;
+    fixture.app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, id).status,
+        SessionStatus::Starting,
+        "crash after cooldown window elapses auto-restores again"
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+
+    // Manual retry (`start_session` and `resume_managed_native_session`) clears the cooldown immediately.
+    assert!(fixture.app.last_auto_restore.contains_key(&id));
+    fixture.app.start_session(id);
+    assert!(
+        !fixture.app.last_auto_restore.contains_key(&id),
+        "manual start_session clears auto-restore cooldown"
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+
+    let resumable_id = fixture.resumable;
+    relaunch_270_find_mut(&mut fixture.app, resumable_id).status = SessionStatus::Failed;
+    fixture
+        .app
+        .last_auto_restore
+        .insert(resumable_id, Instant::now());
+    fixture.app.resume_managed_native_session(resumable_id);
+    assert!(
+        !fixture.app.last_auto_restore.contains_key(&resumable_id),
+        "manual resume_managed_native_session clears auto-restore cooldown"
+    );
+    let spawned: Vec<_> = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|k| matches!(k, BackgroundKey::SessionStart(_)))
+        .cloned()
+        .collect();
+    for key in spawned {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(30));
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+fn status_291_unrestorable_failure_stays_in_needs_you_only_while_tab_open_or_unread() {
+    let root = temporary_directory("status-291-unrestorable-needs-you");
+    let (mut app, open_failed, historical_lost) = app_with_two_sessions(&root);
+    app.relaunch_candidates.clear();
+    let project = app.store.projects[0].id;
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+    app.workspace_project = Some(project);
+    app.workspace.open(WorkspaceTab::Session(open_failed));
+    app.select_session(open_failed);
+
+    // `historical_lost` has no tab and is already read; `open_failed` crashes with no native_session_id.
+    app.store.sessions[1].status = SessionStatus::Lost;
+    assert!(!app.session_has_a_tab(historical_lost));
+    assert!(!app.is_session_unread(historical_lost));
+
+    app.apply_session_poll(
+        vec![(
+            open_failed,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Failed);
+    assert!(app.session_has_a_tab(open_failed));
+
+    // Only the open-tab failure counts under 要対応; the closed historical Lost session does not.
+    let counts = app.status_group_counts();
+    assert_eq!(counts[SessionStatusGroup::NeedsYou.index()], 1);
+    assert_eq!(app.attention_count(), 1);
+    app.track_attention(Instant::now());
+    assert_eq!(app.attention_order, vec![open_failed]);
+
+    // Closing the failed session's tab (when already read) retires it from 要対応 while keeping it in History (`すべて`).
+    app.select_session(open_failed);
+    assert!(!app.is_session_unread(open_failed));
+    app.close_session_tab(open_failed);
+    assert!(!app.session_has_a_tab(open_failed));
+    assert_eq!(
+        app.status_group_counts()[SessionStatusGroup::NeedsYou.index()],
+        0
+    );
+    assert_eq!(app.attention_count(), 0);
+    app.track_attention(Instant::now());
+    assert!(app.attention_order.is_empty());
+
+    // If an unrestorable failure finished off-screen and is still unread, it stays in 要対応 until read.
+    app.unread_sessions.insert(open_failed);
+    assert_eq!(
+        app.status_group_counts()[SessionStatusGroup::NeedsYou.index()],
+        1
+    );
+    app.unread_sessions.remove(&open_failed);
+
+    // Both closed failures remain visible in History when `すべて` is active (`status_filter == [false; 3]`).
+    app.clear_status_filter();
+    assert!(app.session_matches_status_filter(&app.store.sessions[0]));
+    assert!(app.session_matches_status_filter(&app.store.sessions[1]));
+
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn status_291_clean_exit_and_stop_close_unpinned_tab_but_keep_pinned_and_history_open() {
+    let root = temporary_directory("status-291-clean-exit-close");
+    let names = ["clean", "neighbour", "pinned", "stopped", "queued"];
+    let (mut app, project, ids) = session_285_app(&root, &names);
+    let (clean, neighbour, pinned, stopped, queued) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
+    app.relaunch_candidates.clear();
+    app.store.sessions[4].status = SessionStatus::Queued;
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+
+    // Pin `pinned` so clean exit leaves it open without a refusal notice.
+    app.toggle_session_pin(pinned);
+    app.notice = None;
+
+    // 1) Off-screen clean exit (`Page::Home`) closes unpinned `clean`, records it in `closed_tabs`,
+    //    keeps `clean`'s unread mark, and preserves unseen `neighbour`'s unread mark!
+    app.page = Page::Home;
+    app.unread_sessions.insert(clean);
+    app.unread_sessions.insert(neighbour);
+    app.unread_hold = Some(neighbour);
+    app.apply_session_poll(
+        vec![
+            (
+                clean,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+            (
+                pinned,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(
+        !app.session_has_a_tab(clean),
+        "unpinned clean exit closes its tab"
+    );
+    assert!(
+        app.closed_tabs.contains(&WorkspaceTab::Session(clean)),
+        "auto-closed tab is remembered for ⇧⌘T"
+    );
+    assert!(
+        app.is_session_unread(clean),
+        "clean exit off-screen keeps its unread mark until viewed"
+    );
+    assert!(
+        app.is_session_unread(neighbour),
+        "off-screen auto-close must not clear an unseen neighbour tab's unread mark"
+    );
+    assert!(
+        app.session_has_a_tab(pinned),
+        "pinned session tab stays open on clean exit"
+    );
+    assert_eq!(
+        app.notice, None,
+        "pinned auto-close skip must not flash the manual-close refusal notice"
+    );
+
+    // 2) Explicit cancellation (`SessionStopped` and `cancel_queued_session`) closes unpinned tab AND clears unread/hold.
+    app.unread_sessions.insert(stopped);
+    app.unread_hold = Some(stopped);
+    app.background_tasks
+        .insert(BackgroundKey::SessionStop(stopped));
+    app.background_sender
+        .send(BackgroundResult::SessionStopped {
+            session_id: stopped,
+            result: Ok(()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(!app.session_has_a_tab(stopped));
+    assert!(
+        !app.is_session_unread(stopped) && app.unread_hold != Some(stopped),
+        "explicit stop clears unread_sessions and unread_hold so stopped session leaves 要対応"
+    );
+
+    app.workspace.open(WorkspaceTab::Session(queued));
+    app.unread_sessions.insert(queued);
+    app.cancel_queued_session(queued);
+    assert!(!app.session_has_a_tab(queued));
+    assert!(!app.is_session_unread(queued));
+
+    // 3) Visible workspace where only a Document tab remains clears `selected_session` to None.
+    app.toggle_session_pin(pinned);
+    app.close_workspace_tab(&WorkspaceTab::Session(pinned));
+    let doc = DocumentId {
+        project,
+        root: root.clone(),
+        path: root.join("README.md"),
+    };
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+    app.workspace.open(WorkspaceTab::Document(doc));
+    app.workspace.open(WorkspaceTab::Session(neighbour));
+    app.select_session(neighbour);
+    assert_eq!(app.selected_session, Some(neighbour));
+    app.apply_session_poll(
+        vec![(
+            neighbour,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(!app.session_has_a_tab(neighbour));
+    assert_eq!(
+        app.selected_session, None,
+        "when only a Document tab remains active, selected_session must clear"
+    );
+
+    // 4) Background project workspace tab closes and clears its stored `selected` session ID.
+    let other_project = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other_project,
+        path: root.join("other"),
+        name: "other".into(),
+        added_at: 2_000,
+    });
+    let mut away = test_session(other_project, SessionStatus::Active);
+    let away_id = away.id;
+    away.name = "away".into();
+    app.store.sessions.push(away);
+    let mut away_tabs = WorkspaceTabs::default();
+    away_tabs.open(WorkspaceTab::Session(away_id));
+    app.project_workspaces
+        .insert(other_project, (away_tabs, Some(away_id)));
+    app.apply_session_poll(
+        vec![(
+            away_id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(!app.session_has_a_tab(away_id));
+    assert_eq!(
+        app.project_workspaces
+            .get(&other_project)
+            .and_then(|(_, sel)| *sel),
+        None,
+        "closing a background project's selected session clears its stored selection"
+    );
+
+    // 5) Opening a past completed session manually from History keeps its tab open.
+    app.select_session(clean);
+    assert!(app.session_has_a_tab(clean));
+    app.apply_session_poll(Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    assert!(
+        app.session_has_a_tab(clean),
+        "manually opened past session stays open in its tab"
+    );
+
     fs::remove_dir_all(root).ok();
 }

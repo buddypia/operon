@@ -189,20 +189,107 @@ impl OperonApp {
         }
     }
 
-    /// Starts again, in place, the sessions the first look found gone that
-    /// were running when Operon last closed, and says how many it started.
-    pub(crate) fn relaunch_remembered_sessions(&mut self, ids: Vec<Uuid>) {
-        let mut started = 0;
-        for id in ids {
+    /// Whether `id` is outside the per-session automatic-restore cooldown
+    /// window (`AUTO_RESTORE_COOLDOWN_SECONDS`).
+    pub(crate) fn auto_restore_ready(&self, id: Uuid, now: Instant) -> bool {
+        self.last_auto_restore.get(&id).is_none_or(|last| {
+            now.saturating_duration_since(*last)
+                >= Duration::from_secs(AUTO_RESTORE_COOLDOWN_SECONDS)
+        })
+    }
+
+    /// Records an automatic restore timestamp for `id` after pruning removed
+    /// sessions so `last_auto_restore` stays bounded by `store.sessions`.
+    pub(crate) fn record_auto_restore(&mut self, id: Uuid, now: Instant) {
+        let sessions = &self.store.sessions;
+        self.last_auto_restore
+            .retain(|known, _| sessions.iter().any(|session| session.id == *known));
+        self.last_auto_restore.insert(id, now);
+    }
+
+    /// Clears the automatic-restore cooldown when a person manually retries or
+    /// resumes `id`.
+    pub(crate) fn clear_auto_restore_cooldown(&mut self, id: Uuid) {
+        self.last_auto_restore.remove(&id);
+    }
+
+    /// Restores interrupted sessions in place at startup (`startup_ids`) and
+    /// mid-run (`midrun_ids`), announces whichever group started, and returns
+    /// the names of `Failed` sessions whose automatic restore declined so
+    /// failure notifications still fire for them (change 291).
+    pub(crate) fn relaunch_interrupted_sessions(
+        &mut self,
+        startup_ids: Vec<(Uuid, Option<String>)>,
+        midrun_ids: Vec<(Uuid, Option<String>)>,
+        now: Instant,
+    ) -> Vec<String> {
+        let mut declined_failures = Vec::new();
+        let mut saw_error_notice = false;
+        let mut startup_started = 0usize;
+        for (id, failed_name) in startup_ids {
+            let before = self.notice.clone();
             if self.relaunch_lost_session(id) {
-                started += 1;
+                self.record_auto_restore(id, now);
+                startup_started += 1;
+            } else {
+                if self.notice != before && !notice_is_brief(&self.notice, &self.brief_notice) {
+                    saw_error_notice = true;
+                }
+                if let Some(name) = failed_name {
+                    declined_failures.push(name);
+                }
             }
         }
-        if started > 0 {
-            self.notice_briefly(tf!(
-                "前回開いていたセッションを {count} 件再開しました。",
-                count = started
-            ));
+        let mut midrun_started = 0usize;
+        for (id, failed_name) in midrun_ids {
+            let before = self.notice.clone();
+            if self.relaunch_lost_session(id) {
+                self.record_auto_restore(id, now);
+                midrun_started += 1;
+            } else {
+                if self.notice != before && !notice_is_brief(&self.notice, &self.brief_notice) {
+                    saw_error_notice = true;
+                }
+                if let Some(name) = failed_name {
+                    declined_failures.push(name);
+                }
+            }
+        }
+        if !self.store_retry_pending && !saw_error_notice {
+            if midrun_started > 0 {
+                self.notice_briefly(tf!(
+                    "強制終了されたセッションを {count} 件自動で復元しました。",
+                    count = midrun_started
+                ));
+            } else if startup_started > 0 {
+                self.notice_briefly(tf!(
+                    "前回開いていたセッションを {count} 件再開しました。",
+                    count = startup_started
+                ));
+            }
+        }
+        declined_failures
+    }
+
+    /// Handles automatic restore after `BackgroundResult::TerminalResized`
+    /// observed `TmuxState::Gone` and persisted `SessionStatus::Lost`.
+    pub(crate) fn auto_restore_after_resize_gone(&mut self, session_id: Uuid, now: Instant) {
+        let first_look = self.relaunch_candidates.remove(&session_id);
+        let eligible = !self.setup_sessions.contains(&session_id)
+            && self
+                .store
+                .sessions
+                .iter()
+                .find(|session| session.id == session_id)
+                .is_some_and(|session| relaunch_kind(session).is_some())
+            && self.auto_restore_ready(session_id, now);
+        if !eligible {
+            return;
+        }
+        if first_look {
+            let _ = self.relaunch_interrupted_sessions(vec![(session_id, None)], Vec::new(), now);
+        } else {
+            let _ = self.relaunch_interrupted_sessions(Vec::new(), vec![(session_id, None)], now);
         }
     }
 

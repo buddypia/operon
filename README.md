@@ -20,7 +20,7 @@ control.
 Everything runs locally. Operon has no telemetry, no accounts, and no cloud
 service. The interface speaks English, Japanese, and Korean.
 
-![Operon home: sessions waiting on you, running, idle, and finished across every project](docs/images/01-home.png)
+![Operon home: sessions waiting on you, running, and idle across every project](docs/images/01-home.png)
 
 ## Screenshots
 
@@ -66,8 +66,10 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Below them, the session list is arranged by hand: drag a project by its
   name to move its card, or a session's row to move it among its own
   project's sessions. On the session page the left column lists exactly each
-  project's open tabs, in the tabs' order: a row and its tab move together,
-  close together, and a session that ends stays in both until it is closed.
+  project's open tabs, in the tabs' order: a row and its tab move together and
+  close together; an unpinned session that exits cleanly or is stopped closes
+  its tab and moves to **履歴**, while an unrecovered crash stays open so its
+  output can be read.
   Right-click a row or a tab to pin it: a pinned session stays first in both
   and cannot be closed until it is unpinned. The order and the pins are kept
   in `session-order.json`, in the same folder as the local index, and a
@@ -75,11 +77,13 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Quitting and reopening Operon puts the workspace back: every project's
   session tabs, splits, and front tab, kept in `workspace-layout.json` beside
   the local index, with a tab you closed left closed (file tabs are not
-  reopened). A session that was running when Operon quit and whose terminal
-  is gone at the next start — the Mac restarted, the tmux server died — starts
-  again in its own tab by itself: a CLI reopens its saved conversation, a
-  terminal opens a shell in its folder. One whose CLI you exited is left as it
-  is. A terminal you type `claude`, `codex`, or `agy` into becomes a session of
+  reopened). A running session whose terminal disappears or crashes — whether
+  at the next start after the Mac restarted or mid-run when a process was
+  force-quit — starts again in its own tab by itself (with a per-session
+  cooldown against immediate crash loops): a CLI reopens its saved
+  conversation, a terminal opens a shell in its folder. One whose CLI you
+  exited cleanly is closed to **履歴** (or kept in place if pinned). A terminal
+  you type `claude`, `codex`, or `agy` into becomes a session of
   that CLI from its first report, and shows and reopens as one.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
@@ -119,17 +123,18 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - A turn that finishes, or stops to ask, while you are reading another session
   leaves that session marked in the list until you open it, and the banner at
   the top of the home screen lists the sessions that want you, or says none do — the ones waiting
-  for an answer, the ones stopped on a prerequisite that failed, and the ones
+  for an answer, the ones that exited abnormally without an automatic restore,
+  the ones stopped on a prerequisite that failed, and the ones
   you have not read, counted once each. It opens the session list already
   narrowed to exactly those. Mark a session unread again from its row menu to
   come back to it. Marks are for the session you are in and do not survive a
   restart.
-- Narrow the sessions to what you can act on. Four tiles in the **セッション**
-  sidebar's header — **要対応**, **実行中**, **アイドル**, **終了** — each
+- Narrow the sessions to what you can act on. Three tiles in the **セッション**
+  sidebar's header — **要対応**, **実行中**, **アイドル** — each
   carry a live count, and a segment below them narrows by CLI (Codex, Claude
   Code, Antigravity, others). Turning one on leaves only those sessions,
   dropping the projects that have none; several can be on at once, the column
-  says how many it shows with a **クリア** beside it, and the same four filter
+  says how many it shows with a **クリア** beside it, and the same three filter
   the list in **履歴**. Nothing is selected when the app starts, so a filter
   never survives a restart to hide a session without explaining itself.
 - Where an agent CLI supports it, Operon registers a small status hook in that

@@ -681,3 +681,7 @@ pub(crate) const KNOWLEDGE_MAP_DIMMED_OPACITY: f32 = 0.15;
 pub(crate) const KNOWLEDGE_MAP_LABEL_ZOOM: f32 = 1.8;
 /// The directory under the app data directory that holds the model file.
 pub(crate) const EMBEDDING_MODEL_DIRECTORY_NAME: &str = "models";
+/// Minimum interval between automatic mid-run or startup restores of the same
+/// session so an immediate crash loop stops and leaves the error output readable
+/// in its tab (change 291).
+pub(crate) const AUTO_RESTORE_COOLDOWN_SECONDS: u64 = 15;
