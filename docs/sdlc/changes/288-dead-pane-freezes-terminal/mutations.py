@@ -16,47 +16,45 @@ TMUX = ROOT / "src/tmux.rs"
 MUTATIONS = {
     "dead-pane-banner-format-not-cleared": (
         TMUX,
-        '    command.args(["set-option", "-q", "-t", name, "remain-on-exit-format", ""]);',
-        '    command.args(["set-option", "-q", "-t", name, "remain-on-exit", "on"]);',
+        '        TmuxStep::required(["set-option", "-q", "-t", name, "remain-on-exit-format", ""]),',
+        '        TmuxStep::required(["set-option", "-q", "-t", name, "remain-on-exit", "on"]),',
     ),
     "dead-pane-scrollback-not-pushed-to-history": (
         TMUX,
-        "                preserve_dead_pane_scrollback(name);\n                respawn_tmux_pane(name, cwd, PLAIN_TERMINAL_COMMAND)",
-        "                respawn_tmux_pane(name, cwd, PLAIN_TERMINAL_COMMAND)",
+        '    steps.push(TmuxStep::best_effort(["send-keys", "-R", "-t", name]));',
+        '    if false {\n        steps.push(TmuxStep::best_effort(["send-keys", "-R", "-t", name]));\n    }',
     ),
     "dead-pane-killed-instead-of-respawned": (
         TMUX,
-        "        TmuxState::Dead => set_tmux_session_environment(name, environment)\n"
-        "            .and_then(|()| configure_tmux_session(name))\n"
-        "            .and_then(|()| {\n"
-        "                preserve_dead_pane_scrollback(name);\n"
-        "                respawn_tmux_pane(name, cwd, PLAIN_TERMINAL_COMMAND)\n"
-        "            })\n"
-        "            .map_err(|error| error.to_string()),",
+        "        TmuxState::Dead => Ok(PlainTerminalAction::RespawnDead(dead_pane_reopen_steps(\n"
+        "            name,\n"
+        "            cwd,\n"
+        "            environment,\n"
+        "        ))),",
         "        TmuxState::Dead => {\n"
-        "            kill_tmux_session(name);\n"
-        "            start_empty_tmux_session(name, cwd, environment).map_err(|error| error.to_string())\n"
+        "            let _ = (name, cwd, environment);\n"
+        "            Ok(PlainTerminalAction::StartNew)\n"
         "        }",
     ),
     "dead-pane-env-not-updated-before-respawn": (
         TMUX,
-        "        TmuxState::Dead => set_tmux_session_environment(name, environment)\n            .and_then(|()| configure_tmux_session(name))",
-        "        TmuxState::Dead => configure_tmux_session(name)",
+        "    let mut steps = tmux_session_environment_steps(name, environment);",
+        "    let mut steps = if false {\n        tmux_session_environment_steps(name, environment)\n    } else {\n        Vec::new()\n    };",
     ),
     "exited-open-tabs-not-reopened-on-load": (
         RELAUNCH,
         "    pub(crate) fn reopen_exited_workspace_tabs_on_load(&mut self) {\n        if !self.tools.tmux {\n            return;\n        }",
-        "    pub(crate) fn reopen_exited_workspace_tabs_on_load(&mut self) {\n        if self.tools.tmux || !self.tools.tmux {\n            return;\n        }",
+        "    pub(crate) fn reopen_exited_workspace_tabs_on_load(&mut self) {\n        if self.tools.tmux {\n            return;\n        }",
     ),
     "closed-exited-history-also-reopened-on-load": (
         RELAUNCH,
         "                session.status == SessionStatus::Exited\n                    && open_tabs.contains(&session.id)",
-        "                session.status == SessionStatus::Exited",
+        "                session.status == SessionStatus::Exited\n                    && (open_tabs.contains(&session.id) || true)",
     ),
     "clean-exit-keeps-stale-native-session-id": (
         RELAUNCH,
         "            stored.native_session_id = None;\n            stored.native_session_path = None;",
-        "            let _ = &stored.native_session_id;",
+        "            let _ = (&stored.native_session_id, &stored.native_session_path);",
     ),
     "run-script-converted-to-shell-on-exit": (
         RELAUNCH,
@@ -71,12 +69,12 @@ MUTATIONS = {
     "mid-run-forced-kill-not-restored": (
         APP,
         "            let forced_restoring =\n                !first_look && can_auto_restore && self.auto_restore_ready(id, poll_now);",
-        "            let forced_restoring = false;",
+        "            let forced_restoring =\n                false && !first_look && can_auto_restore && self.auto_restore_ready(id, poll_now);",
     ),
     "auto-restore-cooldown-not-enforced": (
         APP,
         "            let forced_restoring =\n                !first_look && can_auto_restore && self.auto_restore_ready(id, poll_now);",
-        "            let forced_restoring = !first_look && can_auto_restore;",
+        "            let forced_restoring =\n                !first_look && can_auto_restore && (self.auto_restore_ready(id, poll_now) || true);",
     ),
     "manual-start-does-not-clear-cooldown": (
         APP,
@@ -96,7 +94,7 @@ MUTATIONS = {
     "stale-managed-env-not-unset-on-respawn": (
         TMUX,
         "    for managed in MANAGED_TMUX_ENV_KEYS {",
-        "    for managed in ([] as [&str; 0]) {",
+        "    for managed in MANAGED_TMUX_ENV_KEYS.into_iter().take(0) {",
     ),
     "quiet-launch-on-screen-skips-output-refresh": (
         APP,

@@ -80242,6 +80242,103 @@ fn home_287_clicking_the_mark_opens_the_session() {
 /// plain terminal onto a `Dead` pane respawns the login shell in place while
 /// preserving prior scrollback (both on initial shell conversion and on retry).
 pub(crate) fn pane_288_configure_tmux_suppresses_dead_pane_banner_and_keeps_scrollback() {
+    let sample_name = "operon-pane288a";
+    let sample_cwd = Path::new("/tmp/pane-288-cwd");
+    let config_steps = configure_tmux_session_steps(sample_name);
+    assert_eq!(
+        config_steps,
+        vec![
+            TmuxStep {
+                args: ["set-option", "-t", sample_name, "remain-on-exit", "on"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                required: true,
+            },
+            TmuxStep {
+                args: [
+                    "set-option",
+                    "-q",
+                    "-t",
+                    sample_name,
+                    "remain-on-exit-format",
+                    "",
+                ]
+                .into_iter()
+                .map(std::ffi::OsString::from)
+                .collect(),
+                required: true,
+            },
+            TmuxStep {
+                args: ["set-option", "-t", sample_name, "history-limit", "50000"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                required: true,
+            },
+        ]
+    );
+    assert_eq!(
+        plain_terminal_action(TmuxState::Gone, sample_name, sample_cwd, &[]),
+        Ok(PlainTerminalAction::StartNew)
+    );
+    let dead_env = [("OPERON_PANE_288_ENV", "kept".to_owned())];
+    let dead_steps = dead_pane_reopen_steps(sample_name, sample_cwd, &dead_env);
+    assert_eq!(
+        plain_terminal_action(TmuxState::Dead, sample_name, sample_cwd, &dead_env),
+        Ok(PlainTerminalAction::RespawnDead(dead_steps.clone()))
+    );
+    let env_pos = dead_steps
+        .iter()
+        .position(|step| {
+            step.required
+                && step.args
+                    == [
+                        "set-environment",
+                        "-t",
+                        sample_name,
+                        "OPERON_PANE_288_ENV",
+                        "kept",
+                    ]
+                    .map(std::ffi::OsString::from)
+        })
+        .expect("dead-pane reopen must set updated session environment");
+    let banner_pos = dead_steps
+        .iter()
+        .position(|step| {
+            step.required
+                && step.args
+                    == [
+                        "set-option",
+                        "-q",
+                        "-t",
+                        sample_name,
+                        "remain-on-exit-format",
+                        "",
+                    ]
+                    .map(std::ffi::OsString::from)
+        })
+        .expect("dead-pane reopen must clear remain-on-exit-format");
+    let reset_pos = dead_steps
+        .iter()
+        .position(|step| {
+            !step.required
+                && step.args == ["send-keys", "-R", "-t", sample_name].map(std::ffi::OsString::from)
+        })
+        .expect("dead-pane reopen must push visible cells into scrollback via send-keys -R");
+    let respawn_pos = dead_steps
+        .iter()
+        .position(|step| {
+            step.required
+                && step.args.first().and_then(|arg| arg.to_str()) == Some("respawn-pane")
+                && step.args.get(1).and_then(|arg| arg.to_str()) == Some("-k")
+        })
+        .expect("dead-pane reopen must respawn the pane in place");
+    assert!(
+        env_pos < banner_pos && banner_pos < reset_pos && reset_pos < respawn_pos,
+        "unexpected dead-pane reopen step order: env={env_pos}, banner={banner_pos}, reset={reset_pos}, respawn={respawn_pos}"
+    );
+
     if !tool_available("tmux") {
         return;
     }
@@ -80796,30 +80893,30 @@ pub(crate) fn pane_288_forced_kill_mid_run_restores_cli_and_shell_with_cooldown(
 /// requests fresh terminal output right away without altering selection, page,
 /// focus, or notice; off-screen quiet launches do not spawn output captures.
 pub(crate) fn pane_288_quiet_launch_on_screen_requests_immediate_output() {
-    if !tool_available("tmux") {
-        return;
-    }
+    let has_tmux = tool_available("tmux");
     let mut fixture = relaunch_270_fixture("pane-288-quiet-output");
     let shown = fixture.terminal;
     let hidden = fixture.alive;
-    let workdir = fixture.root.join("live-pane");
-    fs::create_dir_all(&workdir).unwrap();
     let shown_tmux = relaunch_270_find(&fixture.app, shown).tmux_name.clone();
     let hidden_tmux = relaunch_270_find(&fixture.app, hidden).tmux_name.clone();
-    start_tmux_agent_session(
-        &shown_tmux,
-        &workdir,
-        "printf 'quiet-shown-output-288\\n'; exec /bin/cat",
-        &[],
-    )
-    .unwrap();
-    start_tmux_agent_session(
-        &hidden_tmux,
-        &workdir,
-        "printf 'quiet-hidden-output-288\\n'; exec /bin/cat",
-        &[],
-    )
-    .unwrap();
+    if has_tmux {
+        let workdir = fixture.root.join("live-pane");
+        fs::create_dir_all(&workdir).unwrap();
+        start_tmux_agent_session(
+            &shown_tmux,
+            &workdir,
+            "printf 'quiet-shown-output-288\\n'; exec /bin/cat",
+            &[],
+        )
+        .unwrap();
+        start_tmux_agent_session(
+            &hidden_tmux,
+            &workdir,
+            "printf 'quiet-hidden-output-288\\n'; exec /bin/cat",
+            &[],
+        )
+        .unwrap();
+    }
 
     fixture.app.page = Page::Sessions;
     fixture.app.session_library_open = false;
@@ -80829,21 +80926,50 @@ pub(crate) fn pane_288_quiet_launch_on_screen_requests_immediate_output() {
     fixture.app.notice = Some("keep-notice".into());
     fixture.app.terminal_focus_request = None;
 
-    for id in [shown, hidden] {
-        fixture.app.quiet_launches.insert(id);
-        fixture
-            .app
-            .background_tasks
-            .insert(BackgroundKey::SessionStart(id));
-        fixture
-            .app
-            .background_sender
-            .send(BackgroundResult::SessionStarted {
-                session_id: id,
-                result: Ok(None),
-            })
-            .unwrap();
-    }
+    // 1. Off-screen quiet launch (`hidden`) must not request `SessionOutput`.
+    fixture.app.quiet_launches.insert(hidden);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::SessionStart(hidden));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: hidden,
+            result: Ok(None),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionOutput(hidden),
+        Duration::from_secs(15),
+    );
+    fixture.app.process_background_results();
+    assert!(
+        !fixture.app.session_output.contains_key(&hidden)
+            && fixture.app.notice.as_deref() == Some("keep-notice"),
+        "off-screen quiet launch requested terminal output unnecessarily: output={:?}, notice={:?}",
+        fixture.app.session_output.get(&hidden),
+        fixture.app.notice
+    );
+
+    // 2. On-screen quiet launch (`shown`) requests immediate `SessionOutput`
+    //    without altering focus, page, or selection.
+    fixture.app.quiet_launches.insert(shown);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::SessionStart(shown));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: shown,
+            result: Ok(None),
+        })
+        .unwrap();
     fixture.app.process_background_results();
     wait_for_background_task(
         &mut fixture.app,
@@ -80852,26 +80978,31 @@ pub(crate) fn pane_288_quiet_launch_on_screen_requests_immediate_output() {
     );
     fixture.app.process_background_results();
 
-    let rendered = fixture
-        .app
-        .session_output
-        .get(&shown)
-        .cloned()
-        .unwrap_or_default();
-    assert!(
-        rendered.contains("quiet-shown-output-288"),
-        "visible quiet launch did not capture fresh terminal output, got: {rendered:?}"
-    );
-    assert!(
-        !fixture
+    if has_tmux {
+        let rendered = fixture
             .app
-            .background_tasks
-            .contains(&BackgroundKey::SessionOutput(hidden))
-            && !fixture.app.session_output.contains_key(&hidden),
-        "off-screen quiet launch requested terminal output unnecessarily"
-    );
-    assert_eq!(fixture.app.notice.as_deref(), Some("keep-notice"));
+            .session_output
+            .get(&shown)
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            rendered.contains("quiet-shown-output-288"),
+            "visible quiet launch did not capture fresh terminal output, got: {rendered:?}"
+        );
+        assert_eq!(fixture.app.notice.as_deref(), Some("keep-notice"));
+    } else {
+        assert!(
+            fixture
+                .app
+                .notice
+                .as_deref()
+                .is_some_and(|n| n != "keep-notice"),
+            "visible quiet launch did not run SessionOutput capture when tmux is absent"
+        );
+    }
     assert_eq!(fixture.app.terminal_focus_request, None);
+    assert_eq!(fixture.app.selected_session, Some(shown));
+    assert_eq!(fixture.app.page, Page::Sessions);
     for id in [shown, hidden] {
         wait_for_background_task(
             &mut fixture.app,
@@ -80879,8 +81010,10 @@ pub(crate) fn pane_288_quiet_launch_on_screen_requests_immediate_output() {
             Duration::from_secs(15),
         );
     }
-    kill_tmux_session(&shown_tmux);
-    kill_tmux_session(&hidden_tmux);
+    if has_tmux {
+        kill_tmux_session(&shown_tmux);
+        kill_tmux_session(&hidden_tmux);
+    }
     fs::remove_dir_all(&fixture.root).ok();
 }
 
@@ -81411,6 +81544,61 @@ pub(crate) fn pane_288_f4_refused_shell_launch_preserves_cli_metadata_and_ignore
 /// stale managed hook and account environment variables that are no longer
 /// present in the new launch's `environment`.
 pub(crate) fn pane_288_f5_dead_pane_respawn_unsets_removed_hook_and_account_vars() {
+    let sample_name = "operon-pane288f5";
+    let env_steps = tmux_session_environment_steps(
+        sample_name,
+        &[(CLAUDE_ACCOUNT_ENV, "/tmp/new-acct".to_owned())],
+    );
+    for removed in [
+        HOOK_SESSION_ENV,
+        HOOK_LAUNCH_ENV,
+        HOOK_ENDPOINT_ENV,
+        HOOK_SOCKET_ENV,
+        HOOK_EXECUTABLE_ENV,
+        CODEX_ACCOUNT_ENV,
+    ] {
+        assert!(
+            env_steps.contains(&TmuxStep {
+                args: ["set-environment", "-u", "-t", sample_name, removed]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                required: true,
+            }),
+            "missing `set-environment -u` for removed managed var {removed}"
+        );
+    }
+    assert!(
+        !env_steps.iter().any(|step| {
+            step.args
+                == [
+                    "set-environment",
+                    "-u",
+                    "-t",
+                    sample_name,
+                    CLAUDE_ACCOUNT_ENV,
+                ]
+                .map(std::ffi::OsString::from)
+        }),
+        "must not unset managed var that is present in the new environment"
+    );
+    assert!(
+        env_steps.contains(&TmuxStep {
+            args: [
+                "set-environment",
+                "-t",
+                sample_name,
+                CLAUDE_ACCOUNT_ENV,
+                "/tmp/new-acct",
+            ]
+            .into_iter()
+            .map(std::ffi::OsString::from)
+            .collect(),
+            required: true,
+        }),
+        "missing `set-environment` for present managed var"
+    );
+
     if !tool_available("tmux") {
         return;
     }
