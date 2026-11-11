@@ -1,0 +1,8 @@
+2026-11-11T17:05:00Z auto intent intent.md d6d5d151da5478a3 approve Verbatim three-turn user request and explicit confirmation on option B are accurately quoted with observable outcomes and accurate schema constraints.
+2026-11-11T17:05:00Z auto spec spec.md eab6000b9271cab1 revise Specify TerminalResized Gone persistence guard, off-screen neighbour unread preservation in close_finished_session_tab, and Cancelled unread clearing.
+2026-11-11T17:05:00Z auto screen screen.md ebe31448db049854 revise Align sidebar CLI toggle strip with ui_sidebar_agent_segment and add empty, loading, error, and too-long states.
+2026-11-11T17:05:00Z auto plan plan.md 5d9e1ac0cf9e25d3 revise Remove orphaned i18n rows, keep plan path checks clean before Step 5, and update pinned 4-group and model-check tests in place.
+2026-11-11T17:20:03Z auto spec spec.md ed5076c7311e9ea2 approve All Round 1 findings resolved: TerminalResized Gone skips relaunch on failed persist, close_finished_session_tab preserves off-screen unread and cleans selection, and Cancelled clears unread.
+2026-11-11T17:20:03Z auto screen screen.md a0687d5f1e681b6f approve Sidebar CLI toggle strip matches ui_sidebar_agent_segment and empty, loading, error, and too-long states are specified across 344px, 268px, and 180px widths.
+2026-11-11T17:20:03Z auto plan plan.md a53b3cc93c42aa8c approve Orphaned i18n row removal, in-place test updates, path-check hygiene, and all Round 2 spec edge cases are covered.
+2026-11-11T17:20:04Z person screen screen.md a0687d5f1e681b6f approve The person chose 「進めて」 on option B: retire 終了 to three groups, auto-restore forced terminations in place, surface unrestorable failures in 要対応, and close clean exits to History.

@@ -1,0 +1,39 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (the status groups, sidebar/Home filter tiles, and session
+# auto-restore exist; Finished is retired, live crashes auto-restore with a
+# cooldown, unrecoverable exits surface under NeedsYou, and clean exits/stops
+# close unpinned tabs to History).
+# Risk: low — touches drawing (`src/app.rs`, `src/app/*.rs`, `src/ui/widgets.rs`),
+# `src/config.rs`, text (`src/i18n_tables.rs`), tests, and three-language docs;
+# full autonomy; screen required and judged against the person's explicit choice
+# ("進めて" on option B) quoted in intent.md.
+
+state:
+  route: "modify"
+  stage: "design"
+  status: "ready"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Stage 1-2 artifacts approved; enter stage 3 (build) starting with the five status_291_* requirement tests in src/tests.rs."
+
+contract:
+  three-gates: "machine pending make q.fast"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/app.rs, src/app/relaunch.rs, src/app/session_order.rs, src/app/screens.rs, src/ui/widgets.rs, src/config.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/291-finished-status-blurs-with-idle/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
