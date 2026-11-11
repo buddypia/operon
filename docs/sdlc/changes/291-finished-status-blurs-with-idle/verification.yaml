@@ -1,5 +1,5 @@
 # The evidence for change 291. Format: docs/sdlc/templates/verification.yaml.
-digest: "0e6c059b106aace9"
+digest: "9282bd9ca13a2bb3"
 
 obligations:
   - R1 empirical-test :: cargo test --locked status_291_groups_are_three_and_done_stopped_avoid_finished_word

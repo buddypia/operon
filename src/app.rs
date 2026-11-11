@@ -803,8 +803,12 @@ pub(crate) struct OperonApp {
     /// Launches started without bringing their session forward. Their
     /// completion leaves the selection, the page, and the notice alone.
     pub(crate) quiet_launches: HashSet<Uuid>,
-    /// Last automatic restore timestamp per session (`AUTO_RESTORE_COOLDOWN_SECONDS`).
+    /// Last automatic restoration timestamp per session, bounding repeat crash
+    /// recoveries by `AUTO_RESTORE_COOLDOWN` (changes 288 and 291).
     pub(crate) last_auto_restore: HashMap<Uuid, Instant>,
+    /// Open workspace tabs that an older build saved as `SessionStatus::Exited`
+    /// and queued for shell conversion on the first poll (change 288).
+    pub(crate) exited_tabs_on_load: HashSet<Uuid>,
     pub(crate) workspace_drag: Option<WorkspaceTab>,
     pub(crate) workspace_editor_views: HashMap<DocumentId, EditorView>,
     /// One syntax/preview cache per visible group, bounded by PANE_MAX.
@@ -1219,6 +1223,7 @@ impl OperonApp {
             relaunch_candidates: HashSet::new(),
             quiet_launches: HashSet::new(),
             last_auto_restore: HashMap::new(),
+            exited_tabs_on_load: HashSet::new(),
             workspace_drag: None,
             workspace_editor_views: HashMap::new(),
             workspace_editor_caches: HashMap::new(),
@@ -1259,6 +1264,7 @@ impl OperonApp {
             .collect();
         let layout = load_workspace_layout(&app.data_file);
         app.restore_workspace_layout(&layout);
+        app.reopen_exited_workspace_tabs_on_load();
         app.saved_workspace_layout = app.workspace_layout_snapshot();
         app
     }
@@ -1856,6 +1862,9 @@ impl OperonApp {
                             if quiet && self.notice.as_deref() == Some(success) {
                                 self.notice = shown;
                             }
+                            if quiet && self.is_session_on_screen(session_id) {
+                                self.request_session_output(session_id);
+                            }
                             self.request_native_session_resolution(session_id);
                         }
                         Err(error) => {
@@ -2086,6 +2095,18 @@ impl OperonApp {
                         .remove(&BackgroundKey::NativeSessionResolution(session_id));
                     match result {
                         Ok(native) => {
+                            let Some(current_provider) = self
+                                .store
+                                .sessions
+                                .iter()
+                                .find(|session| session.id == session_id)
+                                .and_then(|session| cli_provider_for_agent(&session.agent))
+                            else {
+                                continue;
+                            };
+                            if current_provider != native.provider {
+                                continue;
+                            }
                             let previous_store = self.store.clone();
                             if let Some(session) = self
                                 .store
@@ -2116,6 +2137,12 @@ impl OperonApp {
                             }
                         }
                         Err(error) => {
+                            if !self.store.sessions.iter().any(|session| {
+                                session.id == session_id
+                                    && cli_provider_for_agent(&session.agent).is_some()
+                            }) {
+                                continue;
+                            }
                             self.notice = Some(tf!("新しいネイティブセッションをまだ特定できません: {error}。「ローカル CLI セッションを検出」から ID を指定して再開してください。", error = error));
                         }
                     }
@@ -3490,6 +3517,7 @@ impl OperonApp {
             .filter(|session| {
                 session.status == SessionStatus::Active
                     || session.status == SessionStatus::Unknown
+                    || self.exited_tabs_on_load.contains(&session.id)
                     || (session.status == SessionStatus::Starting
                         && !self
                             .background_tasks
@@ -3606,20 +3634,55 @@ impl OperonApp {
         let mut failed = Vec::new();
         let mut completed_cancellations = Vec::new();
         let mut finished_setups: Vec<(Uuid, Option<i32>)> = Vec::new();
-        let mut startup_relaunch = Vec::new();
-        let mut midrun_relaunch = Vec::new();
+        let mut reopen_shells = Vec::new();
+        let mut relaunch = Vec::new();
+        let mut forced_restore = Vec::new();
         let mut looked = Vec::new();
+        let mut exited_looked = Vec::new();
         for (id, observation) in states {
             let cancellation_pending = self.cancellation_pending(id);
             let Some(idx) = self.store.sessions.iter().position(|session| {
                 session.id == id
-                    && matches!(
+                    && (matches!(
                         session.status,
                         SessionStatus::Starting | SessionStatus::Active | SessionStatus::Unknown
-                    )
+                    ) || (session.status == SessionStatus::Exited
+                        && self.exited_tabs_on_load.contains(&id)))
             }) else {
                 continue;
             };
+            if self.exited_tabs_on_load.contains(&id) {
+                if self.store.sessions[idx].status != SessionStatus::Exited
+                    || !self.session_has_a_tab(id)
+                {
+                    exited_looked.push(id);
+                    continue;
+                }
+                if observation.state == TmuxState::Unknown {
+                    continue;
+                }
+                exited_looked.push(id);
+                if cancellation_pending
+                    && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
+                {
+                    previous_store.get_or_insert_with(|| self.store.clone());
+                    completed_cancellations.push(id);
+                    self.store.sessions[idx].status = SessionStatus::Cancelled;
+                    changed = true;
+                } else if observation.state == TmuxState::Alive {
+                    previous_store.get_or_insert_with(|| self.store.clone());
+                    self.store.sessions[idx].status = SessionStatus::Active;
+                    changed = true;
+                } else if !cancellation_pending
+                    && self.tools.tmux
+                    && !self.setup_sessions.contains(&id)
+                    && is_interactive_terminal_session(&self.store.sessions[idx])
+                    && queued_dependency_count(&self.store.sessions, id) == 0
+                {
+                    reopen_shells.push(id);
+                }
+                continue;
+            }
             let next = if cancellation_pending
                 && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
             {
@@ -3627,32 +3690,51 @@ impl OperonApp {
             } else {
                 session_status_after_observation(&self.store.sessions[idx].status, observation)
             };
+            // Startup's first look announces remembered sessions together; a
+            // forced kill or crash later in the run restores automatically
+            // within `AUTO_RESTORE_COOLDOWN`, and a clean exit opens a shell in
+            // place or closes unpinned non-interactive tabs (changes 270, 288, 291).
             let first_look =
                 observation.state != TmuxState::Unknown && self.relaunch_candidates.contains(&id);
             if first_look {
                 looked.push(id);
             }
-            let auto_restoring = matches!(next, Some(SessionStatus::Lost | SessionStatus::Failed))
+            let reopen_shell = !cancellation_pending
+                && self.tools.tmux
                 && !self.setup_sessions.contains(&id)
-                && relaunch_kind(&self.store.sessions[idx]).is_some()
-                && self.auto_restore_ready(id, poll_now);
-            if auto_restoring {
-                let failed_name = (next == Some(SessionStatus::Failed))
-                    .then(|| self.store.sessions[idx].name.clone());
-                if first_look {
-                    startup_relaunch.push((id, failed_name));
-                } else {
-                    midrun_relaunch.push((id, failed_name));
-                }
+                && next == Some(SessionStatus::Exited)
+                && is_interactive_terminal_session(&self.store.sessions[idx])
+                && queued_dependency_count(&self.store.sessions, id) == 0;
+            if reopen_shell {
+                reopen_shells.push(id);
+            }
+            let can_auto_restore = !cancellation_pending
+                && self.tools.tmux
+                && !self.setup_sessions.contains(&id)
+                && matches!(next, Some(SessionStatus::Lost | SessionStatus::Failed))
+                && relaunch_kind(&self.store.sessions[idx]).is_some();
+            let startup_relaunching = first_look && can_auto_restore;
+            let forced_restoring =
+                !first_look && can_auto_restore && self.auto_restore_ready(id, poll_now);
+            if startup_relaunching {
+                relaunch.push(id);
+            } else if forced_restoring {
+                forced_restore.push((id, self.store.sessions[idx].name.clone()));
             }
             if let Some(next) = next {
                 previous_store.get_or_insert_with(|| self.store.clone());
                 let session = &mut self.store.sessions[idx];
                 if next == SessionStatus::Exited {
-                    completed.push(session.name.clone());
-                    exited_ids.push(id);
-                } else if next == SessionStatus::Failed && !auto_restoring {
-                    failed.push(session.name.clone());
+                    if !reopen_shell
+                        || !matches!(session.agent.as_str(), "terminal" | "existing terminal")
+                    {
+                        completed.push(session.name.clone());
+                    }
+                    if !reopen_shell && !self.setup_sessions.contains(&id) {
+                        exited_ids.push(id);
+                    }
+                } else if next == SessionStatus::Failed {
+                    failed.push((id, session.name.clone()));
                 } else if next == SessionStatus::Cancelled {
                     completed_cancellations.push(id);
                 }
@@ -3685,55 +3767,21 @@ impl OperonApp {
         for id in looked {
             self.relaunch_candidates.remove(&id);
         }
-        if changed {
-            match save_cancellation_intents(&self.data_file, &self.store.pending_cancellations) {
-                Ok(WriteOutcome::Durable) => {}
-                Ok(WriteOutcome::CommittedButNotSynced(error)) => {
-                    self.store_retry_pending = true;
-                    let warning = tf!("キャンセル復旧用メタデータは書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。エラー: {error}", error = error);
-                    self.durability_warning = Some(warning);
-                }
-                Err(error) => {
-                    self.store_retry_pending = true;
-                    self.notice = Some(tf!("セッション状態は保存しましたが、キャンセル復旧用メタデータが保留中です。Operon が自動的に再試行します。エラー: {error}", error = error));
-                }
-            }
+        for id in exited_looked {
+            self.exited_tabs_on_load.remove(&id);
         }
-        for id in exited_ids {
-            self.close_finished_session_tab(id);
-        }
-        for &id in &completed_cancellations {
-            self.clear_cancelled_unread_and_close_tab(id);
-        }
-        failed.extend(self.relaunch_interrupted_sessions(
-            startup_relaunch,
-            midrun_relaunch,
+        self.finish_session_poll_transitions(
+            changed,
+            exited_ids,
+            completed_cancellations,
+            completed,
+            failed,
+            finished_setups,
+            reopen_shells,
+            relaunch,
+            forced_restore,
             poll_now,
-        ));
-        if changed && self.store.notifications_enabled {
-            for name in completed {
-                self.send_notification(tf!("セッションが完了しました: {name}", name = name));
-            }
-            for name in failed {
-                self.send_notification(tf!("セッションが失敗しました: {name}", name = name));
-            }
-        }
-        for (id, status) in finished_setups {
-            self.setup_sessions.remove(&id);
-            if !self.store_retry_pending {
-                self.notice = Some(match status {
-                    Some(0) => tr("セットアップが完了しました。").into(),
-                    Some(code) => tf!(
-                        "セットアップが終了コード {p0} で終わりました。セッションを開いて確認してください。",
-                        p0 = code
-                    ),
-                    None => tr(
-                        "セットアップがどう終わったか読み取れませんでした。セッションを開いて確認してください。",
-                    )
-                    .into(),
-                });
-            }
-        }
+        );
         self.apply_session_activities(activities);
     }
 
@@ -6595,6 +6643,16 @@ impl OperonApp {
             .find(|project| project.id == session.project_id)
             .map(|project| project.path.clone())
             .unwrap_or_default();
+        // Which login this session runs under. Checked before persisting or
+        // asking tmux for a window: plain terminals do not take an account, and
+        // a removed account folder must refuse before mutating `Starting` on disk.
+        let account = agent_supports_accounts(&session.agent)
+            .then(|| self.accounts.account_of_session(session_id))
+            .flatten();
+        if let Err(reason) = account_ready_to_launch(&self.accounts, account) {
+            self.notice = Some(reason);
+            return false;
+        }
         let previous_status = session.status.clone();
         let previous_launched_at = session.launched_at;
         let retrying = can_retry_session(&previous_status);
@@ -6629,23 +6687,6 @@ impl OperonApp {
         // the process that held the previous one, and the events still in
         // flight from that process must not land on the new turn.
         let hooks = self.mint_hook_environment(session_id);
-        // Which login this session runs under. Checked before tmux is asked for
-        // a window: a window that opens, fails on its first line, and dies
-        // leaves a session record behind for a run that never started.
-        let account = self.accounts.account_of_session(session_id);
-        if let Err(reason) = account_ready_to_launch(&self.accounts, account) {
-            if let Some(stored) = self
-                .store
-                .sessions
-                .iter_mut()
-                .find(|stored| stored.id == session_id)
-            {
-                stored.status = previous_status;
-                stored.launched_at = previous_launched_at;
-            }
-            self.notice = Some(reason);
-            return false;
-        }
         let account = account_variables(&self.accounts, account);
         if focus == LaunchFocus::Keep {
             self.quiet_launches.insert(session_id);

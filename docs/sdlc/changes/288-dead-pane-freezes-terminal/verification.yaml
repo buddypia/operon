@@ -1,0 +1,21 @@
+# The evidence for change 288. Format: docs/sdlc/templates/verification.yaml.
+digest: "cc23e98ff5c66fe6"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked pane_288_configure_tmux_suppresses_dead_pane_banner_and_keeps_scrollback
+  - R2 empirical-test :: cargo test --locked pane_288_clean_exit_reopens_interactive_session_as_shell
+  - R3 empirical-test :: cargo test --locked pane_288_exited_open_tab_from_previous_run_reopens_as_shell
+  - R4 empirical-test :: cargo test --locked pane_288_forced_kill_mid_run_restores_cli_and_shell_with_cooldown
+  - R5 empirical-test :: cargo test --locked pane_288_forced_kill_mid_run_restores_cli_and_shell_with_cooldown
+  - R6 empirical-test :: cargo test --locked pane_288_quiet_launch_on_screen_requests_immediate_output
+  - F1 empirical-test :: cargo test --locked pane_288_f1_stale_native_resolution_after_shell_conversion_is_ignored
+  - F2 empirical-test :: cargo test --locked pane_288_f2_failed_unresumable_cli_still_sends_failure_notification
+  - F3 empirical-test :: cargo test --locked pane_288_f3_exited_tab_pre_poll_persist_and_dependency_stay_exited
+  - F4 empirical-test :: cargo test --locked pane_288_f4_refused_shell_launch_preserves_cli_metadata_and_ignores_stale_account
+  - F5 empirical-test :: cargo test --locked pane_288_f5_dead_pane_respawn_unsets_removed_hook_and_account_vars
+  - F6 empirical-test :: cargo test --locked pane_288_f6_persistent_poll_error_is_not_clobbered_by_restore_toast
+  - F7 empirical-test :: cargo test --locked pane_288_f7_stale_exited_tab_poll_skips_restarted_or_closed_tabs
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/288-dead-pane-freezes-terminal/mutations.py
+  - I2 formal-model :: cargo test --locked model_check_pane_288_poll_transitions_and_cooldown
+  - I3 formal-model :: cargo test --locked model_check_a_session_is_relaunched_only_at_its_first_stored_look
+  - I4 empirical-test :: cargo test --locked every_message_the_code_shows_has_a_row_in_every_table

@@ -31,8 +31,8 @@ MUTATIONS = {
     ),
     "midrun-crash-never-auto-restores": (
         APP,
-        "                    midrun_relaunch.push((id, failed_name));",
-        "                    let _ = (id, failed_name);",
+        "            } else if forced_restoring {\n                forced_restore.push((id, self.store.sessions[idx].name.clone()));",
+        "            } else if false && forced_restoring {\n                forced_restore.push((id, self.store.sessions[idx].name.clone()));",
     ),
     "midrun-restore-toast-says-startup-reopen": (
         RELAUNCH,
@@ -41,18 +41,18 @@ MUTATIONS = {
     ),
     "declined-restore-still-claims-session-restored": (
         RELAUNCH,
-        "            if self.relaunch_lost_session(id) {\n                self.record_auto_restore(id, now);\n                midrun_started += 1;\n            } else {",
-        "            midrun_started += 1;\n            if self.relaunch_lost_session(id) {\n                self.record_auto_restore(id, now);\n            } else {",
+        "            if launched {\n                self.record_auto_restore(id, now);\n                restored_ids.insert(id);\n                restored_names.push(name);\n            }",
+        "            restored_names.push(name);\n            if launched {\n                self.record_auto_restore(id, now);\n                restored_ids.insert(id);\n            }",
     ),
     "auto-restore-toast-clobbers-durability-notice": (
         RELAUNCH,
-        "        if !self.store_retry_pending && !saw_error_notice {",
+        "        if !*persistent_notice && !self.store_retry_pending {",
         "        if true {",
     ),
     "cooldown-allows-immediate-crash-loop": (
         RELAUNCH,
-        "                >= Duration::from_secs(AUTO_RESTORE_COOLDOWN_SECONDS)",
-        "                >= Duration::ZERO",
+        "            .is_none_or(|last| now.saturating_duration_since(*last) >= AUTO_RESTORE_COOLDOWN)",
+        "            .is_none_or(|last| now.saturating_duration_since(*last) >= Duration::ZERO)",
     ),
     "closed-historical-failure-sticks-in-needs-you": (
         APP,
@@ -60,9 +60,9 @@ MUTATIONS = {
         "            return group == SessionStatusGroup::NeedsYou;",
     ),
     "clean-exit-leaves-unpinned-tab-open": (
-        APP,
-        "            self.close_finished_session_tab(id);",
-        "            let _ = id;",
+        RELAUNCH,
+        "        for id in exited_ids {\n            self.close_finished_session_tab(id);\n        }",
+        "        for id in exited_ids {\n            let _ = id;\n        }",
     ),
     "pinned-session-closes-on-clean-exit": (
         ORDER,

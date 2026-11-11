@@ -67,9 +67,9 @@ Settings. The projects, sessions, and agent output in them are a demo.
   name to move its card, or a session's row to move it among its own
   project's sessions. On the session page the left column lists exactly each
   project's open tabs, in the tabs' order: a row and its tab move together and
-  close together; an unpinned session that exits cleanly or is stopped closes
-  its tab and moves to **履歴**, while an unrecovered crash stays open so its
-  output can be read.
+  close together; an unpinned session that is stopped or finishes a script run
+  closes its tab and moves to **履歴**, while an unrecovered crash stays open so
+  its output can be read.
   Right-click a row or a tab to pin it: a pinned session stays first in both
   and cannot be closed until it is unpinned. The order and the pins are kept
   in `session-order.json`, in the same folder as the local index, and a
@@ -77,14 +77,16 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Quitting and reopening Operon puts the workspace back: every project's
   session tabs, splits, and front tab, kept in `workspace-layout.json` beside
   the local index, with a tab you closed left closed (file tabs are not
-  reopened). A running session whose terminal disappears or crashes — whether
-  at the next start after the Mac restarted or mid-run when a process was
-  force-quit — starts again in its own tab by itself (with a per-session
-  cooldown against immediate crash loops): a CLI reopens its saved
-  conversation, a terminal opens a shell in its folder. One whose CLI you
-  exited cleanly is closed to **履歴** (or kept in place if pinned). A terminal
-  you type `claude`, `codex`, or `agy` into becomes a session of
-  that CLI from its first report, and shows and reopens as one.
+  reopened). A session that was running when Operon quit and whose terminal
+  is gone at the next start — the Mac restarted, the tmux server died — or one
+  that is force-killed or crashes while Operon is running starts again in its
+  own tab by itself (with a 15-second cooldown if it crashes right away): a CLI
+  reopens its saved conversation, a terminal opens a shell in its folder. When
+  an interactive CLI exits cleanly (status 0), the pane opens a login shell in
+  the same folder with the prior scrollback kept above the prompt instead of
+  freezing on `Pane is dead`. A terminal you type `claude`, `codex`, or `agy`
+  into becomes a session of that CLI from its first report, and shows and
+  reopens as one.
 - **新しいセッション** opens a sheet over the page you are on: the agent, the
   request, and where to work, with everything else folded under 詳しい設定.
   The launch button sits at its bottom right, and `⌘↩` presses it. A project's
