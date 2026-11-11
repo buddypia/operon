@@ -921,7 +921,11 @@ impl OperonApp {
         let mut removal_requested = false;
         let row = clickable_card(ui, palette, ("home-row", list, session.id), true, |ui| {
             ui.horizontal(|ui| {
-                status_chip(ui, &status, 13.5, palette);
+                // The state is a mark; its word is in the hover (change 287).
+                session_status_icon(ui, palette, status.kind).on_hover_ui(|ui| {
+                    ui.label(&status.label);
+                    ui.label(&status.hint);
+                });
                 // Right to left first, so the action and the menu keep their
                 // place and the title takes whatever width is left.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

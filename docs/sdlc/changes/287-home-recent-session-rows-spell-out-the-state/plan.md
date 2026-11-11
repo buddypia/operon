@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-11
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -41,3 +41,12 @@
   on the mark shows the word.
 
 ## Departures from the plan
+
+- `home_287_clicking_the_mark_opens_the_session` passed against the old row
+  too: it finds the indicator by the hint on hover, which the old chip also
+  had, and a click on the chip opened the session. It was watched failing by
+  mutation instead (`the-mark-takes-the-rows-click`).
+- The tests draw nine sessions, one or more under each of the four words,
+  rather than the one idle session the plan implied; the independent
+  verifier could not write in its own tree (the worktree guard judged it as
+  trunk), so the cases it proposed were written here.
