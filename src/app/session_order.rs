@@ -109,6 +109,32 @@ impl OperonApp {
         }
     }
 
+    /// 「閉じる」 on a row or a tab (change 286): closes the session's tab
+    /// wherever it is. A tab of a project not shown closes in that project's
+    /// workspace, and the shown project stays; a pinned one stays open.
+    pub(crate) fn close_session_tab(&mut self, id: Uuid) {
+        let tab = WorkspaceTab::Session(id);
+        if self
+            .workspace
+            .groups
+            .iter()
+            .any(|group| group.tabs.contains(&tab))
+        {
+            self.close_workspace_tab(&tab);
+            return;
+        }
+        if self.is_session_pinned(id) {
+            return;
+        }
+        let mut closed = false;
+        for (tabs, _) in self.project_workspaces.values_mut() {
+            closed |= tabs.close(&tab);
+        }
+        if closed {
+            self.remember_closed_tab(&tab);
+        }
+    }
+
     /// The session page column's rows for `project` (change 285): exactly
     /// its session tabs, every group's, in the order the tabs are put in.
     pub(crate) fn project_tab_sessions(&self, project: Uuid) -> Vec<&Session> {

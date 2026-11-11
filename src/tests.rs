@@ -79843,3 +79843,175 @@ fn session_285_reopen_and_a_split_group_keep_one_order() {
     assert!(app.session_has_a_tab(ids[3]));
     fs::remove_dir_all(root).unwrap();
 }
+
+/// Right-clicks `at`, then chooses 「閉じる」 from the menu that opened there.
+/// False when the menu offers no such entry.
+#[cfg(test)]
+fn session_286_choose_close(app: &mut OperonApp, ctx: &egui::Context, at: egui::Pos2) -> bool {
+    session_285_click(app, ctx, at, egui::PointerButton::Secondary);
+    let menu = workspace_pointer_frame(app, ctx, Vec::new());
+    assert!(
+        drawn_text_rect(&menu, |text| text == "名前を変更").is_some(),
+        "the right click opens the menu"
+    );
+    // The menu's own entry: the one nearest the click, not a 閉じる elsewhere.
+    let entry = drawn_text_rects(&menu, |text| text == "閉じる")
+        .into_iter()
+        .min_by(|a, b| a.center().distance(at).total_cmp(&b.center().distance(at)));
+    let Some(entry) = entry else {
+        // Dismiss the menu so the next gesture starts clean.
+        workspace_pointer_frame(
+            app,
+            ctx,
+            vec![key_press(egui::Key::Escape, egui::Modifiers::default())],
+        );
+        return false;
+    };
+    session_285_click(app, ctx, entry.center(), egui::PointerButton::Primary);
+    true
+}
+
+#[test]
+fn session_286_row_menu_closes_the_tab() {
+    let root = temporary_directory("session-286-row-close");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    let output = session_285_frame(&mut app, &ctx);
+    let status = app.store.sessions[1].status.clone();
+    let row = column_rect(&output, "middle").unwrap().center();
+    assert!(
+        session_286_choose_close(&mut app, &ctx, row),
+        "the row offers 閉じる"
+    );
+    let output = session_285_frame(&mut app, &ctx);
+    let left = vec!["newest", "oldest"];
+    assert_eq!(session_285_rows(&output, &names), left, "the row is gone");
+    assert_eq!(session_285_tabs(&output, &names), left, "and its tab");
+    assert!(!app.session_has_a_tab(ids[1]));
+    let kept = app.store.sessions.iter().find(|s| s.id == ids[1]);
+    assert_eq!(
+        kept.map(|s| s.status.clone()),
+        Some(status),
+        "the session itself is untouched"
+    );
+    app.reopen_closed_tab();
+    assert!(app.session_has_a_tab(ids[1]), "⇧⌘T brings it back");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_286_tab_menu_closes_the_tab() {
+    let root = temporary_directory("session-286-tab-close");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    let output = session_285_frame(&mut app, &ctx);
+    let right = column_right(&output);
+    let tab = drawn_text_rects(&output, |text| text == "middle")
+        .into_iter()
+        .filter(|rect| rect.left() > right)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap()
+        .center();
+    assert!(
+        session_286_choose_close(&mut app, &ctx, tab),
+        "the tab offers 閉じる"
+    );
+    let output = session_285_frame(&mut app, &ctx);
+    let left = vec!["newest", "oldest"];
+    assert_eq!(session_285_tabs(&output, &names), left, "the tab is gone");
+    assert_eq!(session_285_rows(&output, &names), left, "and its row");
+    assert!(!app.session_has_a_tab(ids[1]));
+    assert!(app.store.sessions.iter().any(|s| s.id == ids[1]));
+    app.reopen_closed_tab();
+    assert!(app.session_has_a_tab(ids[1]), "⇧⌘T brings it back");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_286_a_pinned_session_offers_no_close() {
+    let root = temporary_directory("session-286-pinned");
+    let names = ["kept", "plain"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    app.toggle_session_pin(ids[0]);
+    let output = session_285_frame(&mut app, &ctx);
+    let row = column_rect(&output, "kept").unwrap().center();
+    assert!(
+        !session_286_choose_close(&mut app, &ctx, row),
+        "no 閉じる on a pinned row"
+    );
+    let output = session_285_frame(&mut app, &ctx);
+    let right = column_right(&output);
+    let tab = drawn_text_rects(&output, |text| text == "kept")
+        .into_iter()
+        .filter(|rect| rect.left() > right)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .unwrap()
+        .center();
+    assert!(
+        !session_286_choose_close(&mut app, &ctx, tab),
+        "no 閉じる on a pinned tab"
+    );
+    assert!(app.session_has_a_tab(ids[0]));
+    assert!(app.session_has_a_tab(ids[1]));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn session_286_closing_a_row_of_another_project_keeps_the_shown_one() {
+    let root = temporary_directory("session-286-other-project");
+    let (mut app, project, ids) = session_285_app(&root, &["here"]);
+    let other = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other,
+        path: root.join("other"),
+        name: "q".to_owned(),
+        added_at: now(),
+    });
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+    let mut away = app.store.sessions[0].clone();
+    away.id = Uuid::new_v4();
+    away.project_id = other;
+    away.name = "away".into();
+    away.status = SessionStatus::Queued;
+    let away_id = away.id;
+    app.store.sessions.push(away);
+    let output = session_285_frame(&mut app, &ctx);
+    assert_eq!(app.workspace_project, Some(project));
+    // Pinned, it stays open there too, whoever asks.
+    app.toggle_session_pin(away_id);
+    app.close_session_tab(away_id);
+    assert!(
+        app.session_has_a_tab(away_id),
+        "a pinned tab of another project stays"
+    );
+    app.toggle_session_pin(away_id);
+    let row = column_rect(&output, "away").unwrap().center();
+    assert!(
+        session_286_choose_close(&mut app, &ctx, row),
+        "the row offers 閉じる"
+    );
+    let output = session_285_frame(&mut app, &ctx);
+    assert!(column_rect(&output, "away").is_none(), "its row is gone");
+    assert_eq!(
+        app.workspace_project,
+        Some(project),
+        "the shown project stays"
+    );
+    assert_eq!(
+        session_285_tab_ids(&app),
+        vec![ids[0]],
+        "its tabs untouched"
+    );
+    assert!(app.store.sessions.iter().any(|s| s.id == away_id));
+    app.select_workspace_project(other);
+    assert!(
+        !session_285_tab_ids(&app).contains(&away_id),
+        "closed in its own project"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

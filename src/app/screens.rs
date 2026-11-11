@@ -7140,6 +7140,7 @@ impl OperonApp {
                                                     let mut rename = label.double_clicked();
                                                     let pinned = self.is_session_pinned(*id);
                                                     let mut toggle_pin = false;
+                                                    let mut close_from_menu = false;
                                                     label.context_menu(|ui| {
                                                         if quiet_button(ui, palette, tr("名前を変更")).clicked() {
                                                             rename = true;
@@ -7150,7 +7151,15 @@ impl OperonApp {
                                                             toggle_pin = true;
                                                             ui.close_menu();
                                                         }
+                                                        // As the ×: not on a pinned tab (change 286).
+                                                        if !pinned && quiet_button(ui, palette, tr("閉じる")).clicked() {
+                                                            close_from_menu = true;
+                                                            ui.close_menu();
+                                                        }
                                                     });
+                                                    if close_from_menu {
+                                                        close = Some(tab.clone());
+                                                    }
                                                     if toggle_pin {
                                                         self.toggle_session_pin(*id);
                                                     }
@@ -7520,6 +7529,7 @@ impl OperonApp {
         let mut open = None;
         let mut fold = None;
         let mut pin = None;
+        let mut close = None;
         if projects.is_empty() {
             ui.label(RichText::new(tr("プロジェクトがありません")).weak());
         }
@@ -7853,6 +7863,7 @@ impl OperonApp {
                                 }
                                 let mut rename = row.double_clicked();
                                 let mut toggle_pin = false;
+                                let mut close_row = false;
                                 row.context_menu(|ui| {
                                     if quiet_button(ui, palette, tr("名前を変更")).clicked() {
                                         rename = true;
@@ -7867,9 +7878,18 @@ impl OperonApp {
                                         toggle_pin = true;
                                         ui.close_menu();
                                     }
+                                    // As the tab's ×: not on a pinned session (change 286).
+                                    if !pinned && quiet_button(ui, palette, tr("閉じる")).clicked()
+                                    {
+                                        close_row = true;
+                                        ui.close_menu();
+                                    }
                                 });
                                 if toggle_pin {
                                     pin = Some(id);
+                                }
+                                if close_row {
+                                    close = Some(id);
                                 }
                                 let rename_candidate = rename.then(|| session.clone());
                                 match rename_finished {
@@ -7915,6 +7935,9 @@ impl OperonApp {
         }
         if let Some(session) = pin {
             self.toggle_session_pin(session);
+        }
+        if let Some(session) = close {
+            self.close_session_tab(session);
         }
         if let Some(id) = open {
             self.open_waiting_session(id);
