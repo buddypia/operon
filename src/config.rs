@@ -223,6 +223,21 @@ pub(crate) const TERMINAL_ECHO_WINDOW: std::time::Duration = std::time::Duration
 /// been sized is told at once.
 pub(crate) const TERMINAL_RESIZE_SETTLE: std::time::Duration =
     std::time::Duration::from_millis(150);
+/// Frame-coalescing budgets for `tmux -C` PTY output notifications (change 292):
+/// active bursts collapse to ~60 Hz while Operon has the focus, and ~4 Hz when
+/// another window has it.
+pub(crate) const TERMINAL_STREAM_FRAME_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(16);
+pub(crate) const TERMINAL_STREAM_UNFOCUSED_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(250);
+/// Upper bound on row-level `egui::Galley` entries cached across terminal panes
+/// and negative path probe timestamps retained during TUI streaming (change 292).
+pub(crate) const MAX_CACHED_TERMINAL_ROW_GALLEYS: usize = 2_048;
+/// Retention window for negative path probes on unchanged terminal rows so
+/// hovering non-file dotted tokens while a TUI streams does not re-probe or
+/// trigger extra repaints every frame (change 292).
+pub(crate) const TERMINAL_NEGATIVE_PATH_TTL: std::time::Duration =
+    std::time::Duration::from_secs(2);
 /// Claude Code's local store, and the two directories inside it Operon reads.
 ///
 /// Spelled once for the reason `MANAGED_TMUX_PREFIX` is: five call sites built a

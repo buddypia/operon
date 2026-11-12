@@ -6443,6 +6443,7 @@ impl OperonApp {
                         } else {
                             self.resolved_paths = HashMap::new();
                         }
+                        self.negative_path_probed_at.clear();
                         self.resolved_paths_session = Some(session_id);
                         self.resolved_paths_generation += 1;
                     }
@@ -6495,6 +6496,11 @@ impl OperonApp {
                         &no_paths
                     };
                     let theme = self.store.theme;
+                    let line_ids = if self.terminal_layouts.contains_key(&session_id) {
+                        self.terminal_line_ids.get(&session_id).map(Vec::as_slice)
+                    } else {
+                        None
+                    };
                     let cache = &mut self.terminal_pane_render_cache;
 
                     let (terminal_rect, (hovered_target, unresolved, caret)) = {
@@ -6527,6 +6533,7 @@ impl OperonApp {
                                             session_id,
                                             output_generation: generation,
                                             theme,
+                                            line_ids,
                                             cache,
                                         };
                                         let hovered = terminal_rows(
@@ -6782,6 +6789,7 @@ impl OperonApp {
             .map(|session| session.id);
         if self.selected_session != session_id {
             self.resolved_paths.clear();
+            self.negative_path_probed_at.clear();
             self.resolved_paths_generation += 1;
             self.unresolved_paths.clear();
             self.resolved_paths_session = session_id;
@@ -6799,7 +6807,7 @@ impl OperonApp {
     }
 
     /// The central workspace shares one navigation model for sessions and files.
-    fn ui_tab_workspace(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn ui_tab_workspace(&mut self, ui: &mut egui::Ui) {
         self.take_launch_menu_escape(ui);
         if !self.session_library_open
             || ui.input(|input| input.pointer.any_pressed() || input.key_pressed(egui::Key::Escape))
@@ -7112,21 +7120,35 @@ impl OperonApp {
                                                         None => {}
                                                     }
                                                 } else {
-                                                let title_width = ui.fonts(|fonts| fonts.layout_no_wrap(
-                                                    title.clone(), egui::FontId::proportional(12.0), palette.text,
-                                                ).size().x).clamp(40.0, 132.0);
+                                                let title_color = if active {
+                                                    palette.text_strong
+                                                } else {
+                                                    palette.text
+                                                };
+                                                let title_galley = ui.fonts(|fonts| {
+                                                    fonts.layout_no_wrap(
+                                                        title.clone(),
+                                                        egui::FontId::proportional(12.0),
+                                                        title_color,
+                                                    )
+                                                });
+                                                let raw_width = title_galley.size().x;
+                                                let title_width = raw_width.clamp(40.0, 132.0);
+                                                let title_widget: egui::WidgetText =
+                                                    if raw_width <= 132.0 {
+                                                        title_galley.into()
+                                                    } else {
+                                                        RichText::new(&title)
+                                                            .size(12.0)
+                                                            .color(title_color)
+                                                            .into()
+                                                    };
                                                 let mut label = ui.add_sized(
                                                     egui::vec2(title_width, CONTROL_HEIGHT_SMALL),
-                                                    egui::Label::new(
-                                                        RichText::new(&title).size(12.0).color(if active {
-                                                            palette.text_strong
-                                                        } else {
-                                                            palette.text
-                                                        }),
-                                                    )
-                                                    .truncate()
-                                                    .halign(egui::Align::Min)
-                                                    .sense(egui::Sense::click_and_drag()),
+                                                    egui::Label::new(title_widget)
+                                                        .truncate()
+                                                        .halign(egui::Align::Min)
+                                                        .sense(egui::Sense::click_and_drag()),
                                                 );
                                                 // A truncated label already shows its
                                                 // full text on hover; add only what it
@@ -7500,7 +7522,7 @@ impl OperonApp {
         );
     }
 
-    fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         // One start per project, on its own header: the toolbar holds the
         // column-wide one (change 237).
@@ -7526,13 +7548,16 @@ impl OperonApp {
         }
         let drag = self.workspace_column_drag;
         let pointer = ui.input(|i| i.pointer.latest_pos());
-        let mut projects = self.store.projects.clone();
-        sort_column_projects(&mut projects, &self.session_arrangement);
+        let project_ids: Vec<Uuid> = {
+            let mut refs: Vec<&Project> = self.store.projects.iter().collect();
+            sort_column_projects(&mut refs, &self.session_arrangement);
+            refs.into_iter().map(|project| project.id).collect()
+        };
         let mut open = None;
         let mut fold = None;
         let mut pin = None;
         let mut close = None;
-        if projects.is_empty() {
+        if project_ids.is_empty() {
             ui.label(RichText::new(tr("プロジェクトがありません")).weak());
         }
         egui::ScrollArea::vertical()
@@ -7543,9 +7568,9 @@ impl OperonApp {
                 // Every project's tabs, once per frame, in the order the tabs
                 // are put in (change 285): the column and the tab strip are one
                 // list. Only the column's own filters hide a row.
-                let live = projects
+                let live = project_ids
                     .iter()
-                    .flat_map(|project| self.project_tab_sessions(project.id))
+                    .flat_map(|&project_id| self.project_tab_sessions(project_id))
                     .filter(|session| self.session_matches_filters(session))
                     .map(|session| {
                         let kind = self.session_status_kind_for(session);
@@ -7557,7 +7582,7 @@ impl OperonApp {
                         (session.project_id, group, kind, session.id)
                     })
                     .collect::<Vec<_>>();
-                if filtering && live.is_empty() && !projects.is_empty() {
+                if filtering && live.is_empty() && !project_ids.is_empty() {
                     ui.label(RichText::new(tr("一致するセッションはありません。")).weak());
                 }
                 let view = ui.clip_rect();
@@ -7589,12 +7614,20 @@ impl OperonApp {
                     }
                     _ => None,
                 };
-                for project in projects {
-                    if filtering && !live.iter().any(|(owner, ..)| *owner == project.id) {
+                for &project_id in &project_ids {
+                    if filtering && !live.iter().any(|(owner, ..)| *owner == project_id) {
                         continue;
                     }
-                    let folded = self.session_arrangement.folded.contains(&project.id);
-                    let selected = self.selected_project == Some(project.id);
+                    let Some(proj_idx) = self
+                        .store
+                        .projects
+                        .iter()
+                        .position(|candidate| candidate.id == project_id)
+                    else {
+                        continue;
+                    };
+                    let folded = self.session_arrangement.folded.contains(&project_id);
+                    let selected = self.selected_project == Some(project_id);
                     // A heading, not a card (change 245): the project groups
                     // its sessions here, and is a destination only on the
                     // Projects page, so no fill makes it look like one.
@@ -7609,7 +7642,7 @@ impl OperonApp {
                                     (ICON_DISCLOSURE_OPEN, tr("折りたたむ"))
                                 };
                                 if small_icon_button(ui, palette, icon, tip).clicked() {
-                                    fold = Some(project.id);
+                                    fold = Some(project_id);
                                 }
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
@@ -7622,6 +7655,7 @@ impl OperonApp {
                                         )
                                         .clicked()
                                         {
+                                            let project = &self.store.projects[proj_idx];
                                             self.open_project_session_setup(project.id);
                                         }
                                         // Drawn right to left, so 要対応
@@ -7633,7 +7667,7 @@ impl OperonApp {
                                         ] {
                                             let mut members =
                                                 live.iter().filter(|(owner, member, _, _)| {
-                                                    *owner == project.id && *member == Some(group)
+                                                    *owner == project_id && *member == Some(group)
                                                 });
                                             let Some(&(_, _, _, first)) = members.next() else {
                                                 continue;
@@ -7658,6 +7692,7 @@ impl OperonApp {
                                         ui.with_layout(
                                             egui::Layout::left_to_right(egui::Align::Center),
                                             |ui| {
+                                                let project = &self.store.projects[proj_idx];
                                                 let response = ui
                                                     .add(
                                                         egui::Label::new(if selected {
@@ -7689,6 +7724,7 @@ impl OperonApp {
                                                         .set_cursor_icon(egui::CursorIcon::Grab);
                                                 }
                                                 if response.drag_started() {
+                                                    let project = &self.store.projects[proj_idx];
                                                     self.workspace_column_drag =
                                                         Some(ColumnDrag::Project(project.id));
                                                 }
@@ -7703,7 +7739,7 @@ impl OperonApp {
                             }
                             let mut any = false;
                             for &(_, _, kind, id) in
-                                live.iter().filter(|(owner, ..)| *owner == project.id)
+                                live.iter().filter(|(owner, ..)| *owner == project_id)
                             {
                                 let Some(session) = self.store.sessions.iter().find(|s| s.id == id)
                                 else {
@@ -7856,11 +7892,11 @@ impl OperonApp {
                                 }
                                 if row.drag_started() {
                                     self.workspace_column_drag = Some(ColumnDrag::Session {
-                                        project: project.id,
+                                        project: project_id,
                                         session: id,
                                     });
                                 }
-                                if dragged_session == Some((project.id, pinned)) {
+                                if dragged_session == Some((project_id, pinned)) {
                                     session_targets.push(id, row.rect);
                                 }
                                 let mut rename = row.double_clicked();
@@ -7913,6 +7949,7 @@ impl OperonApp {
                                 );
                             }
                         });
+                    let project = &self.store.projects[proj_idx];
                     targets.push(project.id, card.response.rect);
                     ui.add_space(SPACE_SM);
                 }

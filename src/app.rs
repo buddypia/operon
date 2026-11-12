@@ -17,6 +17,9 @@ pub(crate) mod working_time;
 pub(crate) use keymap::*;
 pub(crate) use knowledge::*;
 pub(crate) use relaunch::*;
+pub(crate) use terminal_output::TerminalStreamManager;
+#[cfg(test)]
+pub(crate) use terminal_output::{stream_coalesce_delay, terminal_echo_poll_wait};
 
 pub(crate) type UiResult<T> = std::result::Result<T, String>;
 
@@ -506,6 +509,11 @@ pub(crate) struct OperonApp {
     /// Rows a capture thread laid out, held from the moment its result is
     /// read until the handler that read it returns (change 276).
     pub(crate) terminal_prelaid: HashMap<Uuid, terminal_output::LaidOutTerminal>,
+    pub(crate) terminal_prelaid_incremental: HashMap<Uuid, terminal_output::PrelaidIncremental>,
+    pub(crate) terminal_incremental_layouts: HashMap<Uuid, Arc<IncrementalTerminalLayout>>,
+    pub(crate) terminal_line_ids: HashMap<Uuid, Vec<u64>>,
+    pub(crate) terminal_streams: TerminalStreamManager,
+    pub(crate) negative_path_probed_at: HashMap<String, Instant>,
     /// The fingerprint of each terminal's text whose rows a capture thread
     /// laid out, which lets the next capture skip an unchanged one.
     pub(crate) terminal_output_fingerprints: HashMap<Uuid, u64>,
@@ -1100,6 +1108,11 @@ impl OperonApp {
             terminal_resize_applied: HashMap::new(),
             terminal_fallback_layouts: HashMap::new(),
             terminal_prelaid: HashMap::new(),
+            terminal_prelaid_incremental: HashMap::new(),
+            terminal_incremental_layouts: HashMap::new(),
+            terminal_line_ids: HashMap::new(),
+            terminal_streams: TerminalStreamManager::default(),
+            negative_path_probed_at: HashMap::new(),
             terminal_output_fingerprints: HashMap::new(),
             terminal_pane_render_cache: TerminalPaneRenderCache::default(),
             terminal_output_generations: HashMap::new(),
@@ -1478,8 +1491,11 @@ impl OperonApp {
             // capture is laid out again whatever its text (change 276).
             self.terminal_fallback_layouts
                 .extend(self.terminal_layouts.drain());
+            self.terminal_incremental_layouts.clear();
+            self.terminal_line_ids.clear();
             self.terminal_output_fingerprints.clear();
             self.terminal_pane_render_cache.clear();
+            self.terminal_streams.notify_theme_changed(self.store.theme);
         }
         if self.applied_terminal_font != Some(self.store.terminal_font) {
             configure_macos_fonts(ctx, self.store.terminal_font);
@@ -1718,6 +1734,7 @@ impl OperonApp {
                     // A capture the poll skipped must not lend its rows to a
                     // later one.
                     self.terminal_prelaid.clear();
+                    self.terminal_prelaid_incremental.clear();
                 }
                 BackgroundResult::CliSessions {
                     project_id,
@@ -2152,7 +2169,9 @@ impl OperonApp {
                         .remove(&BackgroundKey::TerminalInput(session_id));
                     match result {
                         Ok(()) => {
-                            self.request_session_output(session_id);
+                            if !self.terminal_streams.is_watching(session_id) {
+                                self.request_session_output(session_id);
+                            }
                         }
                         Err(error) => {
                             self.notice = Some(tf!(
@@ -2175,7 +2194,9 @@ impl OperonApp {
                     match result {
                         Ok(()) => {
                             self.terminal_resize_applied.insert(session_id, size);
-                            if !self.is_layout_dragging() {
+                            if !self.is_layout_dragging()
+                                && !self.terminal_streams.is_watching(session_id)
+                            {
                                 self.request_session_output(session_id);
                             }
                         }
@@ -3538,10 +3559,15 @@ impl OperonApp {
         if active.is_empty() {
             return;
         }
-        // Every terminal on screen, at most `PANE_MAX` (change 226).
+        // Every terminal on screen not already streamed by a live `tmux -C`
+        // watcher, at most `PANE_MAX` (changes 226, 292).
         let on_screen = self
             .terminals_on_screen()
             .into_iter()
+            .filter(|shown| {
+                !self.terminal_streams.is_watching(*shown)
+                    || !self.terminal_layouts.contains_key(shown)
+            })
             .filter_map(|shown| active.iter().find(|(id, ..)| *id == shown))
             .map(|(id, name, ..)| {
                 let known = self.terminal_output_fingerprints.get(id).copied();
@@ -4579,12 +4605,17 @@ impl OperonApp {
         if selected_removed {
             self.selected_session = None;
             self.resolved_paths.clear();
+            self.negative_path_probed_at.clear();
             self.resolved_paths_generation += 1;
             self.unresolved_paths.clear();
             self.resolved_paths_session = None;
             self.terminal_path_menu = None;
         }
         self.terminal_path_caches
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.terminal_incremental_layouts
+            .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
+        self.terminal_line_ids
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
         self.terminal_fallback_layouts
             .retain(|session_id, _| self.store.sessions.iter().any(|s| s.id == *session_id));
@@ -6985,6 +7016,8 @@ impl OperonApp {
         }
         self.session_output.remove(&session_id);
         self.terminal_layouts.remove(&session_id);
+        self.terminal_incremental_layouts.remove(&session_id);
+        self.terminal_line_ids.remove(&session_id);
         self.terminal_fallback_layouts.remove(&session_id);
         self.terminal_output_fingerprints.remove(&session_id);
         self.terminal_path_caches.remove(&session_id);
@@ -7004,6 +7037,7 @@ impl OperonApp {
         if self.selected_session == Some(session_id) {
             self.selected_session = None;
             self.resolved_paths.clear();
+            self.negative_path_probed_at.clear();
             self.resolved_paths_generation += 1;
             self.unresolved_paths.clear();
             self.resolved_paths_session = None;
@@ -7137,6 +7171,7 @@ impl OperonApp {
                 self.resolved_paths = HashMap::new();
             }
 
+            self.negative_path_probed_at.clear();
             self.resolved_paths_generation += 1;
             self.unresolved_paths.clear();
             self.resolved_paths_session = session_id;
@@ -7368,159 +7403,6 @@ impl OperonApp {
         self.last_terminal_input = Some(Instant::now());
         self.flush_terminal_input(session_id);
     }
-
-    /// Re-read the pane while its echo may still be on the way, and say how
-    /// long until the next look; `None` once nobody has typed for
-    /// `TERMINAL_ECHO_WINDOW`, or while a capture is in flight — its completion
-    /// wakes the frame that calls this again.
-    pub(crate) fn poll_terminal_echo(
-        &mut self,
-        session_id: Uuid,
-        now: Instant,
-    ) -> Option<Duration> {
-        let last_poll = self
-            .last_output_poll
-            .filter(|(polled, _)| *polled == session_id)
-            .map(|(_, at)| at);
-        let wait = terminal_echo_poll_wait(self.last_terminal_input, last_poll, now)?;
-        if !wait.is_zero() {
-            return Some(wait);
-        }
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::SessionOutput(session_id))
-        {
-            return None;
-        }
-        self.last_output_poll = Some((session_id, now));
-        self.request_session_output(session_id);
-        Some(TERMINAL_ECHO_POLL)
-    }
-
-    pub(crate) fn flush_terminal_input(&mut self, session_id: Uuid) {
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::TerminalInput(session_id))
-        {
-            return;
-        }
-        let input = self
-            .terminal_input_queue
-            .get_mut(&session_id)
-            .map(|queue| queue.drain(..).collect::<Vec<_>>())
-            .unwrap_or_default();
-        if input.is_empty() {
-            return;
-        }
-        let Some(tmux_name) = self
-            .store
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id && session.status == SessionStatus::Active)
-            .map(|session| session.tmux_name.clone())
-        else {
-            return;
-        };
-        self.spawn_background(BackgroundKey::TerminalInput(session_id), move || {
-            BackgroundResult::TerminalInputSent {
-                session_id,
-                result: tmux_send_input(&tmux_name, &input).map_err(|error| error.to_string()),
-            }
-        });
-    }
-
-    pub(crate) fn is_layout_dragging(&self) -> bool {
-        self.workspace_divider_drag || self.workspace_drag.is_some()
-    }
-
-    pub(crate) fn finish_layout_drag(&mut self) {
-        for session_id in self.terminals_on_screen() {
-            if let Some(&requested) = self.terminal_resize_requested.get(&session_id) {
-                if self.terminal_resize_applied.get(&session_id) != Some(&requested) {
-                    // Letting go of the divider is the size settling.
-                    self.terminal_resize_changed_at.remove(&session_id);
-                    self.flush_terminal_resize(session_id);
-                } else {
-                    self.request_session_output(session_id);
-                }
-            }
-        }
-    }
-
-    /// Ask for a pane's grid to become `size`. A pane that has been sized
-    /// before is told only once its grid has held still for
-    /// `TERMINAL_RESIZE_SETTLE`: every size tmux hears makes the agent redraw
-    /// its whole screen, and one window drag passes through dozens. Returns how
-    /// long until a waiting size is due, so the frame can wake for it.
-    pub(crate) fn request_terminal_resize(
-        &mut self,
-        session_id: Uuid,
-        size: (u16, u16),
-    ) -> Option<Duration> {
-        if self.terminal_resize_requested.get(&session_id) != Some(&size) {
-            self.terminal_resize_requested.insert(session_id, size);
-            self.terminal_resize_changed_at
-                .insert(session_id, Instant::now());
-        }
-        self.flush_terminal_resize(session_id)
-    }
-
-    /// Send the requested size when it is settled and nothing is in flight.
-    /// `Some(wait)` when the size is still settling; `None` when it was sent,
-    /// is already applied, or has to wait for the resize in flight, whose
-    /// completion calls this again.
-    pub(crate) fn flush_terminal_resize(&mut self, session_id: Uuid) -> Option<Duration> {
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::TerminalResize(session_id))
-        {
-            return None;
-        }
-        let size = self.terminal_resize_requested.get(&session_id).copied()?;
-        let applied = self.terminal_resize_applied.get(&session_id).copied();
-        if applied == Some(size) {
-            return None;
-        }
-        // A pane never sized is told at once: until then the agent draws for
-        // whatever grid tmux started it with.
-        if applied.is_some() {
-            if let Some(changed) = self.terminal_resize_changed_at.get(&session_id) {
-                let held = changed.elapsed();
-                if held < TERMINAL_RESIZE_SETTLE {
-                    return Some(TERMINAL_RESIZE_SETTLE - held);
-                }
-            }
-        }
-        let tmux_name = self
-            .store
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id && session.status == SessionStatus::Active)
-            .map(|session| session.tmux_name.clone())?;
-        self.spawn_background(BackgroundKey::TerminalResize(session_id), move || {
-            BackgroundResult::TerminalResized {
-                session_id,
-                size,
-                result: tmux_resize(&tmux_name, size).map_err(|error| error.to_string()),
-            }
-        });
-        None
-    }
-}
-
-/// How long until the pane should next read tmux for an echo: zero when it is
-/// due, `None` when the last keystroke is `TERMINAL_ECHO_WINDOW` old.
-pub(crate) fn terminal_echo_poll_wait(
-    last_input: Option<Instant>,
-    last_poll: Option<Instant>,
-    now: Instant,
-) -> Option<Duration> {
-    if now.saturating_duration_since(last_input?) >= TERMINAL_ECHO_WINDOW {
-        return None;
-    }
-    Some(last_poll.map_or(Duration::ZERO, |polled| {
-        TERMINAL_ECHO_POLL.saturating_sub(now.saturating_duration_since(polled))
-    }))
 }
 
 impl eframe::App for OperonApp {
@@ -7528,6 +7410,7 @@ impl eframe::App for OperonApp {
     /// for the next 「モデルを取得」 to resume. The workspace's tabs are
     /// written one last time so the next start finds them (change 270).
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.terminal_streams.shutdown_all();
         self.save_workspace_layout_if_changed();
         self.stop_model_download_for_exit();
         release_shared_embedder();
@@ -7540,7 +7423,10 @@ impl eframe::App for OperonApp {
         if let Ok(mut visible) = self.visible_sessions.write() {
             *visible = self.terminals_on_screen().into_iter().collect();
         }
+        let focused = ctx.input(|input| input.focused);
         self.apply_appearance(ctx);
+        self.sync_terminal_streams(focused);
+        self.drain_terminal_streams();
         let palette = self.store.theme.palette();
         self.ensure_hooks_started(ctx);
         self.ensure_handoff_archive_sweep_started();
@@ -7568,7 +7454,7 @@ impl eframe::App for OperonApp {
             self.save_workspace_layout_if_changed();
             self.last_session_refresh = Instant::now();
         }
-        self.poll_sessions_when_due(ctx.input(|input| input.focused), Instant::now());
+        self.poll_sessions_when_due(focused, Instant::now());
         ctx.request_repaint_after(Duration::from_secs(2));
         // A toast leaves on time even when nothing else would wake the frame.
         if let Some(remaining) = self.expire_brief_notice(Instant::now()) {
@@ -7698,6 +7584,10 @@ impl eframe::App for OperonApp {
         self.ui_create_pr_modal(ctx, palette);
         self.ui_run_script_modal(ctx, palette);
         self.ui_port_stop_modal(ctx, palette);
+        if let Ok(mut visible) = self.visible_sessions.write() {
+            *visible = self.terminals_on_screen().into_iter().collect();
+        }
+        self.sync_terminal_streams(focused);
     }
 }
 
@@ -9686,6 +9576,7 @@ impl OperonApp {
                     self.resolved_paths = cached.clone();
                 }
             }
+            self.negative_path_probed_at.clear();
             self.resolved_paths_generation += 1;
         }
         self.resolved_paths_session = self.selected_session;
@@ -9693,6 +9584,7 @@ impl OperonApp {
             return;
         }
         let candidates = std::mem::take(&mut self.unresolved_paths);
+        let probed_at = Instant::now();
         let Some((project_path, worktree_path)) = self
             .selected_session
             .and_then(|id| self.store.sessions.iter().find(|session| session.id == id))
@@ -9709,6 +9601,11 @@ impl OperonApp {
             // asking about the same names on every frame.
             for candidate in candidates {
                 self.resolved_paths.insert(candidate.clone(), None);
+                if self.negative_path_probed_at.len() >= MAX_CACHED_TERMINAL_ROW_GALLEYS {
+                    self.negative_path_probed_at.clear();
+                }
+                self.negative_path_probed_at
+                    .insert(candidate.clone(), probed_at);
                 if let Some(session_id) = self.selected_session {
                     self.terminal_path_caches
                         .entry(session_id)
@@ -9722,6 +9619,15 @@ impl OperonApp {
         for candidate in candidates {
             let resolved =
                 resolve_terminal_session_path(worktree_path.as_deref(), &project_path, &candidate);
+            if resolved.is_some() {
+                self.negative_path_probed_at.remove(&candidate);
+            } else {
+                if self.negative_path_probed_at.len() >= MAX_CACHED_TERMINAL_ROW_GALLEYS {
+                    self.negative_path_probed_at.clear();
+                }
+                self.negative_path_probed_at
+                    .insert(candidate.clone(), probed_at);
+            }
             self.resolved_paths
                 .insert(candidate.clone(), resolved.clone());
             if let Some(session_id) = self.selected_session {
@@ -9816,6 +9722,7 @@ impl OperonApp {
                     self.resolved_paths = cached.clone();
                 }
             }
+            self.negative_path_probed_at.clear();
             self.resolved_paths_generation += 1;
         }
         self.resolved_paths_session = self.selected_session;
@@ -9828,6 +9735,7 @@ impl OperonApp {
                     let fresh =
                         resolve_terminal_session_path(worktree.as_deref(), &project.path, path);
                     if fresh.is_some() {
+                        self.negative_path_probed_at.remove(path);
                         self.resolved_paths.insert(path.to_owned(), fresh.clone());
                         if let Some(session_id) = self.selected_session {
                             self.terminal_path_caches
@@ -9845,6 +9753,7 @@ impl OperonApp {
             None => {
                 let fresh = resolve_terminal_session_path(worktree.as_deref(), &project.path, path);
                 if fresh.is_some() {
+                    self.negative_path_probed_at.remove(path);
                     self.resolved_paths.insert(path.to_owned(), fresh.clone());
                     if let Some(session_id) = self.selected_session {
                         self.terminal_path_caches

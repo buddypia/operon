@@ -170,3 +170,66 @@ pub(crate) fn read_stream_limited(
     }
     (bytes, truncated)
 }
+
+pub(crate) struct StreamingChild {
+    child: Option<std::process::Child>,
+    stdin: Option<std::process::ChildStdin>,
+    stdout: Option<std::process::ChildStdout>,
+}
+
+impl StreamingChild {
+    pub(crate) fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
+        self.stdout.take()
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        let _ = self.stdin.take();
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        let deadline = Instant::now() + Duration::from_millis(25);
+        loop {
+            match child.try_wait() {
+                Ok(Some(_)) | Err(_) => return,
+                Ok(None) => {
+                    let now = Instant::now();
+                    if now < deadline {
+                        let pause = thread::sleep;
+                        pause(Duration::from_millis(2).min(deadline - now));
+                    } else {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Drop for StreamingChild {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+pub(crate) fn spawn_piped_streaming(command: &mut Command) -> Result<StreamingChild> {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for pointer in INHERITED_REPOSITORY_POINTERS {
+        command.env_remove(pointer);
+    }
+    let mut child = command.spawn()?;
+    let mut streaming = StreamingChild {
+        stdin: child.stdin.take(),
+        stdout: child.stdout.take(),
+        child: Some(child),
+    };
+    if streaming.stdout.is_none() {
+        streaming.shutdown();
+        return Err(anyhow!(tr("コマンドの標準出力の取得")));
+    }
+    Ok(streaming)
+}
