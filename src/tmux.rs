@@ -885,6 +885,115 @@ pub(crate) fn tmux_capture_with_cursor(name: &str) -> Result<TerminalCapture> {
     Ok(parse_tmux_capture_with_cursor(&raw))
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ControlLineState {
+    prefix: [u8; 20],
+    len: u8,
+    decided: bool,
+    attached: bool,
+    had_activity_in_chunk: bool,
+}
+
+impl ControlLineState {
+    pub(crate) fn is_attached(&self) -> bool {
+        self.attached
+    }
+
+    pub(crate) fn had_activity_in_last_chunk(&self) -> bool {
+        self.had_activity_in_chunk
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ControlChunkSignal {
+    None,
+    Activity,
+    Exited,
+}
+
+fn is_control_candidate_prefix(prefix: &[u8]) -> bool {
+    const CANDIDATES: [&[u8]; 6] = [
+        b"%output ",
+        b"%extended-output ",
+        b"%layout-change ",
+        b"%session-changed ",
+        b"%exit ",
+        b"%exit\r",
+    ];
+    CANDIDATES
+        .iter()
+        .any(|candidate| candidate.starts_with(prefix))
+}
+
+pub(crate) fn tmux_control_chunk_has_activity(
+    carry: &mut ControlLineState,
+    chunk: &[u8],
+) -> ControlChunkSignal {
+    let mut saw_activity = false;
+    let mut saw_exit = false;
+    for &byte in chunk {
+        if byte == b'\n' {
+            if !carry.decided {
+                let raw = &carry.prefix[..usize::from(carry.len)];
+                let trimmed = raw.strip_suffix(b"\r").unwrap_or(raw);
+                if trimmed == b"%exit" {
+                    saw_exit = true;
+                }
+            }
+            carry.len = 0;
+            carry.decided = false;
+            continue;
+        }
+        if carry.decided {
+            continue;
+        }
+        let next_idx = usize::from(carry.len);
+        if next_idx < carry.prefix.len() {
+            carry.prefix[next_idx] = byte;
+            carry.len += 1;
+        }
+        let current = &carry.prefix[..usize::from(carry.len)];
+        if current == b"%output "
+            || current == b"%extended-output "
+            || current == b"%layout-change "
+        {
+            carry.attached = true;
+            saw_activity = true;
+            carry.decided = true;
+        } else if current == b"%session-changed " {
+            carry.attached = true;
+            carry.decided = true;
+        } else if current == b"%exit " || current == b"%exit\r" {
+            saw_exit = true;
+            carry.decided = true;
+        } else if !is_control_candidate_prefix(current) {
+            carry.decided = true;
+        }
+    }
+    carry.had_activity_in_chunk = saw_activity;
+    if saw_exit {
+        ControlChunkSignal::Exited
+    } else if saw_activity {
+        ControlChunkSignal::Activity
+    } else {
+        ControlChunkSignal::None
+    }
+}
+
+pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 6]> {
+    if !is_safe_tmux_name(name) {
+        return Err(anyhow!(tf!("管理ターミナル名が不正です")));
+    }
+    Ok(["-C", "attach-session", "-t", name, "-f", "ignore-size"])
+}
+
+pub(crate) fn tmux_spawn_output_watcher(name: &str) -> Result<StreamingChild> {
+    let args = tmux_output_watcher_args(name)?;
+    let mut command = tmux_command();
+    command.args(args);
+    spawn_piped_streaming(&mut command)
+}
+
 /// Scrollback and all, escapes kept, cursor position dropped.
 ///
 /// `#[cfg(test)]` since change 053, and the reason is worth keeping: the only

@@ -1,0 +1,13 @@
+# The evidence for change 292. Format: docs/sdlc/templates/verification.yaml.
+digest: "af17ea12d5c2e10c"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_echo_polls
+  - R2 empirical-test :: cargo test --locked tui_perf_292_unchanged_capture_skips_repaint_and_cursor_only_preserves_galleys
+  - R3 empirical-test :: cargo test --locked tui_perf_292_incremental_ansi_layout_reparses_only_dirty_lines_and_matches_full_parse
+  - R4 empirical-test :: cargo test --locked tui_perf_292_row_galley_cache_shapes_only_dirty_or_newly_visible_rows
+  - R5 empirical-test :: cargo test --locked tui_perf_292_hovering_non_file_token_during_streaming_does_not_reprobe_or_repaint
+  - R6 empirical-test :: cargo test --locked tui_perf_292_session_workspace_steady_frame_and_module_budget
+  - F1 empirical-test :: cargo test --locked tui_perf_292_f1_stream_folding_baseline_attach_font_key_and_split_switch
+  - I1 formal-model :: cargo test --locked model_check_tui_292_incremental_ansi_and_coalescer_equivalence
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/292-terminal-tui-rerenders-and-stalls/mutations.py

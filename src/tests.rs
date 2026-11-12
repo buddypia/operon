@@ -65024,6 +65024,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
                                 session_id,
                                 output_generation: 1,
                                 theme: AppTheme::Dark,
+                                line_ids: None,
                                 cache: &mut cache,
                             }),
                         )
@@ -82685,4 +82686,1485 @@ fn status_291_clean_exit_and_stop_close_unpinned_tab_but_keep_pinned_and_history
     );
 
     fs::remove_dir_all(root).ok();
+}
+
+// --- Change 292: Event-driven, damage-tracked terminal TUI pipeline ----------
+
+#[test]
+pub(crate) fn tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_echo_polls() {
+    assert!(tmux_output_watcher_args("not-managed").is_err());
+    assert!(tmux_output_watcher_args("operon-bad;rm").is_err());
+    let valid_id = Uuid::new_v4();
+    let valid_name = managed_tmux_name(valid_id);
+    assert_eq!(
+        tmux_output_watcher_args(&valid_name).unwrap(),
+        [
+            "-C",
+            "attach-session",
+            "-t",
+            valid_name.as_str(),
+            "-f",
+            "ignore-size",
+        ]
+    );
+
+    // StreamingChild strips inherited repository pointers and reaps cleanly on shutdown.
+    let mut env_probe = Command::new("/bin/sh");
+    env_probe
+        .env("GIT_DIR", "/tmp/leaked-git-dir")
+        .args(["-c", "printf '%s\\n' \"${GIT_DIR:-clean}\"; cat"]);
+    let mut child = spawn_piped_streaming(&mut env_probe).unwrap();
+    let mut stdout = child.take_stdout().unwrap();
+    let mut line_buf = [0_u8; 32];
+    let n = stdout.read(&mut line_buf).unwrap();
+    assert_eq!(&line_buf[..n], b"clean\n");
+    child.shutdown();
+
+    // O(1) control-mode chunk scanner across arbitrary 1-byte splits.
+    let mut carry = ControlLineState::default();
+    assert!(!carry.is_attached());
+    for &b in b"%begin 1 2 0\n%end 1 2 0\n" {
+        assert_eq!(
+            tmux_control_chunk_has_activity(&mut carry, &[b]),
+            ControlChunkSignal::None
+        );
+    }
+    assert!(!carry.is_attached());
+
+    let mut saw_attach_only = ControlChunkSignal::None;
+    for &b in b"%session-changed $1 s\n" {
+        let sig = tmux_control_chunk_has_activity(&mut carry, &[b]);
+        if sig != ControlChunkSignal::None {
+            saw_attach_only = sig;
+        }
+    }
+    assert_eq!(saw_attach_only, ControlChunkSignal::None);
+    assert!(carry.is_attached());
+
+    for sample in [
+        &b"%output %0 hello\n"[..],
+        &b"%extended-output %0 5 : hi\n"[..],
+        &b"%layout-change @0 abc\n"[..],
+    ] {
+        let mut saw_act = false;
+        for &b in sample {
+            if tmux_control_chunk_has_activity(&mut carry, &[b]) == ControlChunkSignal::Activity {
+                saw_act = true;
+            }
+        }
+        assert!(saw_act, "expected Activity for {sample:?}");
+    }
+
+    let combined = tmux_control_chunk_has_activity(&mut carry, b"%output %0 tail\n%exit\n");
+    assert_eq!(combined, ControlChunkSignal::Exited);
+    assert!(carry.had_activity_in_last_chunk());
+
+    // Frame-budget coalescing delay (16ms focused, 250ms unfocused).
+    let base = Instant::now();
+    assert_eq!(
+        stream_coalesce_delay(None, base, TERMINAL_STREAM_FRAME_BUDGET),
+        Duration::ZERO
+    );
+    assert_eq!(
+        stream_coalesce_delay(
+            Some(base),
+            base + Duration::from_millis(6),
+            TERMINAL_STREAM_FRAME_BUDGET
+        ),
+        Duration::from_millis(10)
+    );
+    assert_eq!(
+        stream_coalesce_delay(
+            Some(base),
+            base + TERMINAL_STREAM_FRAME_BUDGET,
+            TERMINAL_STREAM_FRAME_BUDGET
+        ),
+        Duration::ZERO
+    );
+    assert_eq!(
+        stream_coalesce_delay(
+            Some(base),
+            base + Duration::from_millis(50),
+            TERMINAL_STREAM_UNFOCUSED_BUDGET
+        ),
+        Duration::from_millis(200)
+    );
+
+    // Respawn cooldown on missing session + fallback polling when watcher is not live,
+    // and suppression of blind echo polling / post-send-keys capture when watcher IS live.
+    let root = temporary_directory("tui-292-stream");
+    let mut app = test_app(root.join("store.json"));
+    app.tools.tmux = true;
+    app.page = Page::Sessions;
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "p292".into(),
+        path: root.clone(),
+        added_at: 1,
+    });
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    let session_id = session.id;
+    session.tmux_name = managed_tmux_name(session_id);
+    let missing_tmux = session.tmux_name.clone();
+    app.store.sessions.push(session);
+    app.workspace.open(WorkspaceTab::Session(session_id));
+    app.select_session(session_id);
+
+    app.sync_terminal_streams(true);
+    let spawns_after_first = app.terminal_streams.total_spawns();
+    assert_eq!(spawns_after_first, 1);
+    for _ in 0..400 {
+        if !app.terminal_streams.has_active_entry(session_id) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        !app.terminal_streams.has_active_entry(session_id),
+        "failed attach on missing session must terminate reader cleanly"
+    );
+    app.sync_terminal_streams(true);
+    app.sync_terminal_streams(true);
+    assert_eq!(
+        app.terminal_streams.total_spawns(),
+        1,
+        "SESSION_POLL_INTERVAL cooldown must prevent fork-storming tmux -C on a missing session"
+    );
+    assert!(!app.terminal_streams.is_watching(session_id));
+    assert_eq!(app.terminal_streams.active_watcher_count(), 0);
+
+    // When watcher is NOT live, fallback echo poll still schedules SessionOutput.
+    let typed_at = Instant::now();
+    app.last_terminal_input = Some(typed_at);
+    assert_eq!(
+        app.poll_terminal_echo(session_id, typed_at),
+        Some(TERMINAL_ECHO_POLL)
+    );
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(session_id)));
+    app.background_tasks
+        .remove(&BackgroundKey::SessionOutput(session_id));
+
+    // When a live watcher IS attached, blind 33ms echo polling, post-send-keys
+    // speculative capture, and drag-end duplicate capture are all suppressed.
+    let mut cat_cmd = Command::new("/bin/cat");
+    let mock_child = spawn_piped_streaming(&mut cat_cmd).unwrap();
+    app.terminal_streams
+        .insert_live_watcher_for_test(session_id, missing_tmux, mock_child);
+    assert!(app.terminal_streams.is_watching(session_id));
+    assert_eq!(app.terminal_streams.active_watcher_count(), 1);
+    assert_eq!(
+        app.poll_terminal_echo(session_id, typed_at + Duration::from_millis(40)),
+        None,
+        "live watcher must suppress blind 33ms echo polling"
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(session_id)));
+
+    app.background_sender
+        .send(BackgroundResult::TerminalInputSent {
+            session_id,
+            result: Ok(()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(session_id)),
+        "live watcher must suppress speculative post-send-keys SessionOutput capture"
+    );
+
+    app.terminal_resize_requested.insert(session_id, (80, 24));
+    app.terminal_resize_applied.insert(session_id, (80, 24));
+    app.finish_layout_drag();
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(session_id)),
+        "live watcher must suppress duplicate drag-end capture when size already matches"
+    );
+
+    app.terminal_streams.shutdown_all();
+    assert!(!app.terminal_streams.is_watching(session_id));
+    assert_eq!(app.terminal_streams.active_watcher_count(), 0);
+
+    if tool_available("tmux") {
+        app.tools.tmux = true;
+        let mut live_session = test_session(Uuid::new_v4(), SessionStatus::Active);
+        live_session.project_id = project_id;
+        let live_id = live_session.id;
+        live_session.tmux_name = managed_tmux_name(live_id);
+        let live_name = live_session.tmux_name.clone();
+        start_tmux_agent_session(
+            &live_name,
+            &root,
+            "printf 'READY-292\\n'; exec /bin/sh",
+            &[],
+        )
+        .unwrap();
+        for _ in 0..50 {
+            if tmux_capture(&live_name)
+                .unwrap_or_default()
+                .contains("READY-292")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.store.sessions.push(live_session);
+        app.workspace.open(WorkspaceTab::Session(live_id));
+        app.select_session(live_id);
+
+        app.sync_terminal_streams(true);
+        for _ in 0..100 {
+            if app.terminal_streams.is_watching(live_id) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            app.terminal_streams.is_watching(live_id),
+            "watcher must attach and report live on an active tmux session"
+        );
+        assert_eq!(app.terminal_streams.active_watcher_count(), 1);
+
+        // Emit a rapid 20-line burst via tmux_send_input while watcher is attached:
+        // verifies input is accepted (not rejected as read-only) and burst is coalesced.
+        tmux_resize(&live_name, (91, 27)).unwrap();
+        tmux_send_input(
+            &live_name,
+            &[
+                TerminalInput::Text(
+                    "i=0; while [ $i -lt 20 ]; do printf 'burst-292-%02d\\n' $i; i=$((i+1)); done"
+                        .into(),
+                ),
+                TerminalInput::Key("Enter".into()),
+            ],
+        )
+        .expect("tmux_send_input must succeed while control watcher is attached");
+
+        let mut delivered = false;
+        for _ in 0..150 {
+            app.drain_terminal_streams();
+            if app
+                .session_output
+                .get(&live_id)
+                .is_some_and(|out| out.contains("burst-292-19"))
+            {
+                delivered = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(delivered, "coalesced stream must deliver latest TUI burst");
+        let captures_after_burst = app.terminal_streams.total_captures();
+        assert!(
+            captures_after_burst >= 1 && captures_after_burst < 15,
+            "expected burst coalescing (< 15 captures for 20 lines), got {captures_after_burst}"
+        );
+
+        // Settle any trailing echo, then verify zero captures while idle.
+        thread::sleep(Duration::from_millis(60));
+        app.drain_terminal_streams();
+        let idle_baseline = app.terminal_streams.total_captures();
+        thread::sleep(Duration::from_millis(180));
+        assert_eq!(
+            app.terminal_streams.total_captures(),
+            idle_baseline,
+            "idle pane must trigger zero captures"
+        );
+
+        // Closing the tab detaches the read-only control client immediately.
+        app.close_workspace_tab(&WorkspaceTab::Session(live_id));
+        app.sync_terminal_streams(true);
+        assert!(!app.terminal_streams.is_watching(live_id));
+        let mut clients_out = String::new();
+        for _ in 0..50 {
+            let mut list_clients = tmux_command();
+            list_clients.args(["list-clients", "-t", &live_name]);
+            clients_out = run_command_with_timeout(&mut list_clients, Duration::from_secs(5))
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            if clients_out.trim().is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let _ = tmux_command()
+            .args(["kill-session", "-t", &live_name])
+            .output();
+        assert!(
+            clients_out.trim().is_empty(),
+            "detached watcher left an attached tmux client: {clients_out:?}"
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn tui_perf_292_unchanged_capture_skips_repaint_and_cursor_only_preserves_galleys() {
+    let root = temporary_directory("tui-292-unchanged-cursor");
+    let mut app = test_app(root.join("store.json"));
+    let ctx = egui::Context::default();
+    let repaints = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let repaints_cb = Arc::clone(&repaints);
+    ctx.set_request_repaint_callback(move |_| {
+        repaints_cb.fetch_add(1, Ordering::Relaxed);
+    });
+    app.repaint = Some(ctx.clone());
+    app.page = Page::Sessions;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "p292-c".into(),
+        path: root.clone(),
+        added_at: 1,
+    });
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    let session_id = session.id;
+    app.store.sessions.push(session.clone());
+    app.workspace.open(WorkspaceTab::Session(session_id));
+    app.select_session(session_id);
+
+    let mut worker_inc = None;
+    let mut last_delivered = None;
+    let initial_cursor = Some(TerminalCursor {
+        x: 0,
+        y: 1,
+        pane_rows: 24,
+    });
+    let first_update = app::terminal_output::classify_captured_snapshot(
+        session_id,
+        TerminalCapture {
+            output: "\u{1b}[32mready\u{1b}[0m\nprompt> ".into(),
+            cursor: initial_cursor,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .expect("initial snapshot must emit Full update");
+    app.terminal_streams
+        .send_stream_update_for_test(first_update);
+    app.drain_terminal_streams();
+
+    let gen_initial = app.terminal_output_generations[&session_id];
+    assert_eq!(gen_initial, 1);
+    assert_eq!(
+        app.terminal_cursors.get(&session_id).copied(),
+        initial_cursor
+    );
+
+    // Render frame 1 to populate TerminalPaneRenderCache row galleys.
+    let render_pane = |app: &mut OperonApp| {
+        let s = session.clone();
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.ui_terminal_pane(ui, &s, false);
+                });
+            },
+        );
+    };
+    render_pane(&mut app);
+    let initial_row_builds = app.terminal_pane_render_cache.row_galley_builds();
+    assert_eq!(initial_row_builds, 2);
+
+    // 1) Identical (theme, output, cursor) snapshot produces None -> zero channel traffic, zero repaint.
+    let repaints_before_dup = repaints.load(Ordering::Relaxed);
+    let dup_update = app::terminal_output::classify_captured_snapshot(
+        session_id,
+        TerminalCapture {
+            output: "\u{1b}[32mready\u{1b}[0m\nprompt> ".into(),
+            cursor: initial_cursor,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    );
+    assert!(
+        dup_update.is_none(),
+        "unchanged snapshot must be dropped before waking UI"
+    );
+    assert_eq!(repaints.load(Ordering::Relaxed), repaints_before_dup);
+
+    // 2) Cursor-only movement under same theme and output -> CursorOnly update:
+    //    updates cursor without bumping output_generation or rebuilding row galleys.
+    let moved_cursor = Some(TerminalCursor {
+        x: 8,
+        y: 1,
+        pane_rows: 24,
+    });
+    let cursor_update = app::terminal_output::classify_captured_snapshot(
+        session_id,
+        TerminalCapture {
+            output: "\u{1b}[32mready\u{1b}[0m\nprompt> ".into(),
+            cursor: moved_cursor,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .expect("cursor-only delta must emit CursorOnly");
+    assert!(matches!(
+        cursor_update,
+        app::terminal_output::StreamedTerminalUpdate::CursorOnly { .. }
+    ));
+    app.terminal_streams
+        .send_stream_update_for_test(cursor_update);
+    app.drain_terminal_streams();
+
+    assert_eq!(app.terminal_cursors.get(&session_id).copied(), moved_cursor);
+    assert_eq!(
+        app.terminal_output_generations[&session_id], gen_initial,
+        "cursor-only movement must not increment output_generation"
+    );
+    render_pane(&mut app);
+    assert_eq!(
+        app.terminal_pane_render_cache.row_galley_builds(),
+        initial_row_builds,
+        "cursor-only movement must reuse existing row galleys without re-shaping"
+    );
+
+    if tool_available("tmux") {
+        app.tools.tmux = true;
+        let mut live_session = test_session(Uuid::new_v4(), SessionStatus::Active);
+        live_session.project_id = project_id;
+        let live_id = live_session.id;
+        live_session.tmux_name = managed_tmux_name(live_id);
+        let live_name = live_session.tmux_name.clone();
+        start_tmux_agent_session(&live_name, &root, "printf 'abcde'; sleep 30", &[]).unwrap();
+        for _ in 0..50 {
+            if tmux_capture(&live_name)
+                .unwrap_or_default()
+                .contains("abcde")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.store.sessions.push(live_session);
+        app.workspace.open(WorkspaceTab::Session(live_id));
+        app.select_session(live_id);
+        if let Ok(mut visible) = app.visible_sessions.write() {
+            visible.insert(live_id);
+        }
+        app.sync_terminal_streams(true);
+        for _ in 0..100 {
+            if app.terminal_streams.is_watching(live_id) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        // Initial attach baseline capture (and optional resize) delivers once, then stays silent.
+        tmux_resize(&live_name, (82, 24)).unwrap();
+        for _ in 0..100 {
+            app.drain_terminal_streams();
+            if app.terminal_layouts.contains_key(&live_id) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        thread::sleep(Duration::from_millis(45));
+        app.drain_terminal_streams();
+        let deliveries_before = app.terminal_streams.total_deliveries();
+        assert!(deliveries_before >= 1);
+        thread::sleep(Duration::from_millis(120));
+        assert_eq!(
+            app.terminal_streams.total_deliveries(),
+            deliveries_before,
+            "unchanged live tmux pane must not deliver redundant updates"
+        );
+        app.terminal_streams.shutdown_all();
+        let _ = tmux_command()
+            .args(["kill-session", "-t", &live_name])
+            .output();
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn tui_perf_292_incremental_ansi_layout_reparses_only_dirty_lines_and_matches_full_parse(
+) {
+    let mut lines: Vec<String> = (0..1200)
+        .map(|idx| format!("\u{1b}[3{}mline-{idx:04}\u{1b}[0m plain-{idx}\r", idx % 7))
+        .collect();
+    let initial_text = lines.join("\n");
+
+    let (inc0, jobs0, ids0) =
+        terminal_line_layouts_incremental(&initial_text, AppTheme::Dark, None);
+    assert_eq!(inc0.parsed_lines(), 1200);
+    assert_eq!(
+        jobs0,
+        terminal_line_layouts(&initial_text, AppTheme::Dark.palette())
+    );
+
+    // (a) Single-line in-place TUI status bar update re-parses only 1 line.
+    lines[600] = "\u{1b}[1;33mstatus: 42% [====>   ]\u{1b}[0m\r".into();
+    let edited_text = lines.join("\n");
+    let (mut inc1, jobs1, ids1) =
+        terminal_line_layouts_incremental(&edited_text, AppTheme::Dark, Some(&inc0));
+    assert_eq!(
+        inc1.parsed_lines(),
+        1,
+        "in-place 1-line TUI update must re-parse only the 1 changed line"
+    );
+    assert_eq!(inc1.take_dirty_lines(), vec![600]);
+    assert_eq!(ids1[0..600], ids0[0..600]);
+    assert_ne!(ids1[600], ids0[600]);
+    assert_eq!(ids1[601..], ids0[601..]);
+    assert_eq!(
+        jobs1,
+        terminal_line_layouts(&edited_text, AppTheme::Dark.palette())
+    );
+
+    // (b) Scrollback shift at capacity: 3 lines scroll off the top, 3 new lines append at bottom.
+    lines.drain(0..3);
+    for extra in 0..3 {
+        lines.push(format!("\u{1b}[36mappended-{extra}\u{1b}[0m"));
+    }
+    let shifted_text = lines.join("\n");
+    let (inc2, jobs2, ids2) =
+        terminal_line_layouts_incremental(&shifted_text, AppTheme::Dark, Some(&inc1));
+    assert_eq!(
+        inc2.parsed_lines(),
+        3,
+        "scrollback shift of 3 lines must reuse all 1197 surviving lines and parse only 3"
+    );
+    assert_eq!(ids2[..1197], ids1[3..1200]);
+    assert_eq!(
+        jobs2,
+        terminal_line_layouts(&shifted_text, AppTheme::Dark.palette())
+    );
+
+    // (c) Multi-line unclosed SGR colour change cascades only until style converges again.
+    lines[500] = "\u{1b}[31munclosed-red-start".into();
+    lines[501] = "still-red-1".into();
+    lines[502] = "still-red-2".into();
+    lines[503] = "closing-red\u{1b}[0m".into();
+    let cascade_text = lines.join("\n");
+    let (inc3, jobs3, _) =
+        terminal_line_layouts_incremental(&cascade_text, AppTheme::Dark, Some(&inc2));
+    assert_eq!(
+        inc3.parsed_lines(),
+        4,
+        "multi-line SGR change that resets on line 503 must re-parse lines 500..=503 only"
+    );
+    assert_eq!(
+        jobs3,
+        terminal_line_layouts(&cascade_text, AppTheme::Dark.palette())
+    );
+
+    // (d) Theme switch invalidates cached theme colours and matches full parse in every theme.
+    for theme in [AppTheme::Light, AppTheme::HighContrast, AppTheme::Dark] {
+        let (inc_theme, jobs_theme, _) =
+            terminal_line_layouts_incremental(&cascade_text, theme, Some(&inc3));
+        assert_eq!(
+            jobs_theme,
+            terminal_line_layouts(&cascade_text, theme.palette()),
+            "incremental layout must match full layout under {theme:?}"
+        );
+        if theme != AppTheme::Dark {
+            assert_eq!(inc_theme.parsed_lines(), lines.len());
+        }
+    }
+}
+
+#[test]
+pub(crate) fn tui_perf_292_row_galley_cache_shapes_only_dirty_or_newly_visible_rows() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+
+    let mut raw_lines: Vec<String> = (0..100).map(|i| format!("row-content-{i:03}")).collect();
+    let text0 = raw_lines.join("\n");
+    let (inc0, jobs0, ids0) = terminal_line_layouts_incremental(&text0, AppTheme::Dark, None);
+
+    let session_id = Uuid::new_v4();
+    let mut cache = TerminalPaneRenderCache::default();
+    let ppp = ctx.pixels_per_point().to_bits();
+
+    // Frame 1: initial visible window 0..30 shapes 30 galleys.
+    let key1 = TerminalPaneKey {
+        session_id,
+        visible_rows: (0, 30),
+        output_generation: 1,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key1, &jobs0, Some(&ids0));
+    assert_eq!(cache.builds(), 1);
+    assert_eq!(cache.hits(), 0);
+    assert_eq!(cache.row_galley_builds(), 30);
+    assert_eq!(cache.row_galley_hits(), 0);
+
+    // Frame 2: unchanged key hits pane slice directly with zero row shaping.
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key1, &jobs0, Some(&ids0));
+    assert_eq!(cache.builds(), 1);
+    assert_eq!(cache.hits(), 1);
+    assert_eq!(cache.row_galley_builds(), 30);
+
+    // Frame 3: 1 line inside visible window changes -> 29 row hits, only 1 row shaped!
+    raw_lines[12] = "row-content-012-updated".into();
+    let text1 = raw_lines.join("\n");
+    let (_inc1, jobs1, ids1) =
+        terminal_line_layouts_incremental(&text1, AppTheme::Dark, Some(&inc0));
+    let key2 = TerminalPaneKey {
+        session_id,
+        visible_rows: (0, 30),
+        output_generation: 2,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key2, &jobs1, Some(&ids1));
+    assert_eq!(cache.builds(), 2);
+    assert_eq!(cache.row_galley_hits(), 29);
+    assert_eq!(
+        cache.row_galley_builds(),
+        31,
+        "updating 1 of 30 visible rows must call fonts.layout_job only once"
+    );
+
+    // Frame 4: scrolling down by 2 rows (2..32) reuses 28 rows and shapes only 2 newly visible rows.
+    let key3 = TerminalPaneKey {
+        session_id,
+        visible_rows: (2, 32),
+        output_generation: 2,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key3, &jobs1, Some(&ids1));
+    assert_eq!(cache.builds(), 3);
+    assert_eq!(cache.row_galley_hits(), 29 + 28);
+    assert_eq!(
+        cache.row_galley_builds(),
+        33,
+        "scrolling by 2 rows must shape only the 2 newly visible rows"
+    );
+
+    // Bounded capacity check (`MAX_CACHED_TERMINAL_ROW_GALLEYS`) and `clear()` reset.
+    let huge_text: String = (0..(MAX_CACHED_TERMINAL_ROW_GALLEYS + 64))
+        .map(|i| format!("huge-{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (_, huge_jobs, huge_ids) =
+        terminal_line_layouts_incremental(&huge_text, AppTheme::Dark, None);
+    let key_huge = TerminalPaneKey {
+        session_id,
+        visible_rows: (0, MAX_CACHED_TERMINAL_ROW_GALLEYS),
+        output_generation: 3,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key_huge, &huge_jobs, Some(&huge_ids));
+    let key_overflow = TerminalPaneKey {
+        session_id,
+        visible_rows: (64, MAX_CACHED_TERMINAL_ROW_GALLEYS + 64),
+        output_generation: 4,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key_overflow, &huge_jobs, Some(&huge_ids));
+
+    cache.clear();
+    let builds_before_after_clear = cache.row_galley_builds();
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key3, &jobs1, Some(&ids1));
+    assert_eq!(
+        cache.row_galley_builds() - builds_before_after_clear,
+        30,
+        "clear() must evict row_galleys so subsequent render shapes fresh galleys"
+    );
+}
+
+#[test]
+pub(crate) fn tui_perf_292_hovering_non_file_token_during_streaming_does_not_reprobe_or_repaint() {
+    let root = temporary_directory("tui-292-hover-ttl");
+    let project_path = root.join("project");
+    fs::create_dir_all(project_path.join("src")).unwrap();
+
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "hover-proj".into(),
+        path: project_path.clone(),
+        added_at: 0,
+    });
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    session.worktree_path = Some(project_path.clone());
+    let session_id = session.id;
+    app.store.sessions.push(session);
+    app.page = Page::Sessions;
+    app.select_session(session_id);
+
+    app.set_session_output(
+        session_id,
+        "status.ok\nstream-line-1\nstream-line-2\n".into(),
+        None,
+    );
+
+    // Initial hover probe over non-file dotted token `status.ok` caches None + timestamp.
+    app.unresolved_paths.push("status.ok".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("status.ok"), Some(&None));
+    assert!(app.negative_path_probed_at.contains_key("status.ok"));
+
+    // Streaming updates on lines 1..5 keep static line 0 (`status.ok`) untouched:
+    // negative cache entry stays intact within TERMINAL_NEGATIVE_PATH_TTL.
+    for tick in 0..5 {
+        app.set_session_output(
+            session_id,
+            format!("status.ok\nstream-tick-{tick}\nprogress-{tick}\n"),
+            None,
+        );
+        assert_eq!(
+            app.resolved_paths.get("status.ok"),
+            Some(&None),
+            "static-line negative token must stay cached during streaming tick {tick}"
+        );
+    }
+
+    // Hovering pointer directly over row 0 (`status.ok`) during render produces
+    // zero unresolved path pushes and zero extra request_repaint calls.
+    let ctx = egui::Context::default();
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+
+    let palette = AppTheme::Dark.palette();
+    let lines = app.terminal_layouts.get(&session_id).unwrap().clone();
+    let line_ids = app.terminal_line_ids.get(&session_id).unwrap().clone();
+    let mut cache = TerminalPaneRenderCache::default();
+    let mut unresolved = Vec::new();
+    let matches = [TerminalMatch {
+        line: 1,
+        column: 0,
+        columns: 6,
+    }];
+
+    // Move pointer over row 0 (`status.ok`), let ScrollArea settle, then measure steady frame.
+    let hover_pt = egui::pos2(16.0, 14.0);
+    let mut steady_delay = Duration::ZERO;
+    let mut probe_when_uncached = Vec::new();
+    let empty_resolved: HashMap<String, Option<PathBuf>> = HashMap::new();
+    for frame in 0..4 {
+        let events = if frame == 0 {
+            vec![egui::Event::PointerMoved(hover_pt)]
+        } else {
+            Vec::new()
+        };
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::Frame::NONE.show(ui, |ui| {
+                        let cell = terminal_cell_size(ui);
+                        let viewport = egui::vec2(600.0, cell.y * 10.0);
+                        let search = TerminalSearchOverlay {
+                            matches: &matches,
+                            current: Some(0),
+                            scroll_to: None,
+                            palette: &palette,
+                        };
+                        let mut link_overlay = if frame == 0 {
+                            TerminalLinkOverlay {
+                                resolved: &empty_resolved,
+                                unresolved: &mut probe_when_uncached,
+                                palette: &palette,
+                            }
+                        } else {
+                            TerminalLinkOverlay {
+                                resolved: &app.resolved_paths,
+                                unresolved: &mut unresolved,
+                                palette: &palette,
+                            }
+                        };
+                        let _ = terminal_rows(
+                            ui,
+                            &lines,
+                            viewport,
+                            cell.y,
+                            search,
+                            &mut link_overlay,
+                            None,
+                            Some(TerminalPaneContext {
+                                session_id,
+                                output_generation: 1,
+                                theme: AppTheme::Dark,
+                                line_ids: Some(&line_ids),
+                                cache: &mut cache,
+                            }),
+                        );
+                    });
+                });
+            },
+        );
+        if frame == 3 {
+            steady_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        }
+    }
+    assert_eq!(
+        probe_when_uncached,
+        vec!["status.ok".to_string()],
+        "hover_pt must geometrically hit row 0 token `status.ok`"
+    );
+    assert!(
+        unresolved.is_empty(),
+        "cached negative token must not re-enter unresolved_paths: {unresolved:?}"
+    );
+    assert_eq!(
+        steady_delay,
+        Duration::MAX,
+        "hovering cached negative token must not request an immediate repaint"
+    );
+
+    // Dynamic file printed on a newly changed/dirty line evicts immediately even within 2s!
+    app.unresolved_paths.push("src/live_gen.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("src/live_gen.rs"), Some(&None));
+    let created = project_path.join("src/live_gen.rs");
+    fs::write(&created, "pub fn ok() {}\n").unwrap();
+    app.set_session_output(
+        session_id,
+        "status.ok\nwrote src/live_gen.rs\n".into(),
+        None,
+    );
+    assert!(
+        !app.resolved_paths.contains_key("src/live_gen.rs"),
+        "dirty line mentioning src/live_gen.rs must evict negative cache immediately"
+    );
+    app.unresolved_paths.push("src/live_gen.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("src/live_gen.rs"),
+        Some(&Some(created.canonicalize().unwrap()))
+    );
+
+    // Once TERMINAL_NEGATIVE_PATH_TTL elapses, static-line negative entries also evict cleanly.
+    app.negative_path_probed_at.insert(
+        "status.ok".into(),
+        Instant::now()
+            .checked_sub(TERMINAL_NEGATIVE_PATH_TTL + Duration::from_millis(50))
+            .unwrap(),
+    );
+    app.set_session_output(session_id, "status.ok\nafter-ttl\n".into(), None);
+    assert!(
+        !app.resolved_paths.contains_key("status.ok"),
+        "expired negative entry must evict after TERMINAL_NEGATIVE_PATH_TTL"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn tui_perf_292_session_workspace_steady_frame_and_module_budget() {
+    let root = temporary_directory("tui-292-workspace");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+
+    let p1 = Uuid::new_v4();
+    let p2 = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: p1,
+        name: "alpha-project".into(),
+        path: root.join("alpha"),
+        added_at: 1,
+    });
+    app.store.projects.push(Project {
+        id: p2,
+        name: "beta-project".into(),
+        path: root.join("beta"),
+        added_at: 2,
+    });
+
+    let mut s_short = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s_short.project_id = p1;
+    s_short.name = "cli".into();
+    let s_short_id = s_short.id;
+    let mut s_long = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s_long.project_id = p1;
+    s_long.name =
+        "very-long-interactive-tui-session-title-that-truncates-with-ellipsis-in-tab-bar".into();
+    let s_long_id = s_long.id;
+    app.store.sessions.push(s_short);
+    app.store.sessions.push(s_long);
+
+    app.workspace.open(WorkspaceTab::Session(s_short_id));
+    app.workspace.open(WorkspaceTab::Session(s_long_id));
+    app.select_session(s_short_id);
+    app.set_session_output(
+        s_short_id,
+        (0..40)
+            .map(|i| format!("tui-line-{i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(TerminalCursor {
+            x: 3,
+            y: 10,
+            pane_rows: 24,
+        }),
+    );
+
+    let ctx = egui::Context::default();
+    let run_workspace_frame = |app: &mut OperonApp| {
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::SidePanel::left("tui-292-projects")
+                    .exact_width(240.0)
+                    .show(ctx, |ui| {
+                        app.ui_workspace_projects(ui);
+                    });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.ui_tab_workspace(ui);
+                });
+            },
+        );
+    };
+
+    run_workspace_frame(&mut app);
+    run_workspace_frame(&mut app);
+    let builds_steady = app.terminal_pane_render_cache.row_galley_builds();
+    let hits_before = app.terminal_pane_render_cache.hits();
+    run_workspace_frame(&mut app);
+    assert!(
+        app.terminal_pane_render_cache.hits() > hits_before,
+        "steady workspace frame must hit TerminalPaneRenderCache"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.row_galley_builds(),
+        builds_steady,
+        "steady workspace frame must shape zero new terminal row galleys"
+    );
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app_rs_lines = fs::read_to_string(manifest_dir.join("src/app.rs"))
+        .unwrap()
+        .lines()
+        .count();
+    let screens_rs_lines = fs::read_to_string(manifest_dir.join("src/app/screens.rs"))
+        .unwrap()
+        .lines()
+        .count();
+    assert!(
+        app_rs_lines < 9979,
+        "src/app.rs ({app_rs_lines} lines) must shrink below 9979 lines"
+    );
+    assert!(
+        screens_rs_lines < 10000,
+        "src/app/screens.rs ({screens_rs_lines} lines) must stay below 10000 lines"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn model_check_tui_292_incremental_ansi_and_coalescer_equivalence() {
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct ModelState {
+        lines: [u8; 3],
+        theme: u8,
+        scroll_epoch: u8,
+        last_capture_ms: Option<u16>,
+        now_ms: u16,
+        focused: bool,
+        split_at: u8,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ModelEvent {
+        SetLine0(u8),
+        SetLine1(u8),
+        ScrollAppend(u8),
+        FlipTheme,
+        ToggleFocus,
+        CaptureNow,
+        Advance8ms,
+        Advance16ms,
+        StepSplit,
+    }
+
+    fn token_text(code: u8, epoch: u8) -> String {
+        match code {
+            0 => format!("plain-{epoch}"),
+            1 => format!("\u{1b}[31mopen-red-{epoch}"),
+            2 => format!("reset-{epoch}\u{1b}[0m\r"),
+            _ => format!("\u{1b}[1;32mbright-{epoch}\u{1b}[0m"),
+        }
+    }
+
+    let initial = ModelState {
+        lines: [0, 0, 2],
+        theme: 0,
+        scroll_epoch: 0,
+        last_capture_ms: None,
+        now_ms: 0,
+        focused: true,
+        split_at: 1,
+    };
+
+    let events = [
+        ModelEvent::SetLine0(1),
+        ModelEvent::SetLine0(2),
+        ModelEvent::SetLine1(3),
+        ModelEvent::ScrollAppend(1),
+        ModelEvent::FlipTheme,
+        ModelEvent::ToggleFocus,
+        ModelEvent::CaptureNow,
+        ModelEvent::Advance8ms,
+        ModelEvent::Advance16ms,
+        ModelEvent::StepSplit,
+    ];
+
+    let base_instant = Instant::now();
+    let sample_stream = b"%session-changed $1 s\n%output %0 hi\n%exit\n";
+
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| {
+            let mut next = state.clone();
+            match *event {
+                ModelEvent::SetLine0(v) => {
+                    if next.lines[0] == v {
+                        return None;
+                    }
+                    next.lines[0] = v;
+                }
+                ModelEvent::SetLine1(v) => {
+                    if next.lines[1] == v {
+                        return None;
+                    }
+                    next.lines[1] = v;
+                }
+                ModelEvent::ScrollAppend(v) => {
+                    if next.scroll_epoch >= 1 {
+                        return None;
+                    }
+                    next.lines = [next.lines[1], next.lines[2], v];
+                    next.scroll_epoch += 1;
+                }
+                ModelEvent::FlipTheme => {
+                    next.theme = (next.theme + 1) % 2;
+                }
+                ModelEvent::ToggleFocus => {
+                    next.focused = !next.focused;
+                }
+                ModelEvent::CaptureNow => {
+                    if next.last_capture_ms == Some(next.now_ms) {
+                        return None;
+                    }
+                    next.last_capture_ms = Some(next.now_ms);
+                }
+                ModelEvent::Advance8ms => {
+                    if next.now_ms >= 24 {
+                        return None;
+                    }
+                    next.now_ms += 8;
+                }
+                ModelEvent::Advance16ms => {
+                    if next.now_ms >= 24 {
+                        return None;
+                    }
+                    next.now_ms += 16;
+                }
+                ModelEvent::StepSplit => {
+                    if usize::from(next.split_at) + 7 >= sample_stream.len() {
+                        return None;
+                    }
+                    next.split_at += 7;
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            let theme = app_theme_from_code(state.theme);
+            let prev_doc = [token_text(0, 0), token_text(0, 0), token_text(2, 0)].join("\n");
+            let cur_doc = [
+                token_text(state.lines[0], state.scroll_epoch),
+                token_text(state.lines[1], state.scroll_epoch),
+                token_text(state.lines[2], state.scroll_epoch),
+            ]
+            .join("\n");
+
+            let (inc_base, _, _) =
+                terminal_line_layouts_incremental(&prev_doc, AppTheme::Dark, None);
+            let (inc_cur, jobs_inc, ids_cur) =
+                terminal_line_layouts_incremental(&cur_doc, theme, Some(&inc_base));
+            let jobs_full = terminal_line_layouts(&cur_doc, theme.palette());
+            if jobs_inc != jobs_full {
+                return Err(format!(
+                    "incremental jobs diverged from full parse for {state:?}"
+                ));
+            }
+
+            // Re-running on identical (cur_doc, theme) must parse 0 lines and keep line_ids.
+            let (mut inc_same, jobs_same, ids_same) =
+                terminal_line_layouts_incremental(&cur_doc, theme, Some(&inc_cur));
+            if inc_same.parsed_lines() != 0
+                || !inc_same.take_dirty_lines().is_empty()
+                || ids_same != ids_cur
+                || jobs_same != jobs_full
+            {
+                return Err(format!(
+                    "unchanged incremental pass was not zero-work for {state:?}"
+                ));
+            }
+
+            // Coalesce budget invariant.
+            let budget = if state.focused {
+                TERMINAL_STREAM_FRAME_BUDGET
+            } else {
+                TERMINAL_STREAM_UNFOCUSED_BUDGET
+            };
+            let now = base_instant + Duration::from_millis(u64::from(state.now_ms));
+            let last = state
+                .last_capture_ms
+                .map(|ms| base_instant + Duration::from_millis(u64::from(ms)));
+            let delay = stream_coalesce_delay(last, now, budget);
+            if let Some(last_at) = last {
+                let elapsed = now.saturating_duration_since(last_at);
+                if elapsed >= budget && !delay.is_zero() {
+                    return Err("expected zero coalesce delay once budget elapsed".into());
+                }
+                if elapsed < budget && elapsed + delay != budget {
+                    return Err("coalesce delay violated frame budget".into());
+                }
+            } else if !delay.is_zero() {
+                return Err("first capture must have zero coalesce delay".into());
+            }
+
+            // Control-mode arbitrary split framing invariant.
+            let split = usize::from(state.split_at).min(sample_stream.len());
+            let mut carry = ControlLineState::default();
+            let s1 = tmux_control_chunk_has_activity(&mut carry, &sample_stream[..split]);
+            let s2 = tmux_control_chunk_has_activity(&mut carry, &sample_stream[split..]);
+            if !carry.is_attached() {
+                return Err("split control stream lost attachment state".into());
+            }
+            if s1 != ControlChunkSignal::Exited && s2 != ControlChunkSignal::Exited {
+                return Err("split control stream missed %exit".into());
+            }
+            Ok(())
+        },
+        50_000,
+    );
+    assert!(
+        coverage.states > 500,
+        "expected rich state exploration, got {}",
+        coverage.states
+    );
+}
+
+#[test]
+pub(crate) fn tui_perf_292_f1_stream_folding_baseline_attach_font_key_and_split_switch() {
+    let root = temporary_directory("tui-292-f1");
+    let project_path = root.join("proj");
+    fs::create_dir_all(project_path.join("src")).unwrap();
+
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "p292-f1".into(),
+        path: project_path.clone(),
+        added_at: 1,
+    });
+
+    let mut s1 = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s1.project_id = project_id;
+    s1.worktree_path = Some(project_path.clone());
+    let s1_id = s1.id;
+    let mut s2 = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s2.project_id = project_id;
+    s2.worktree_path = Some(project_path.clone());
+    app.store.sessions.push(s1.clone());
+    app.store.sessions.push(s2.clone());
+    app.select_session(s1_id);
+
+    // (a) Synchronous set_session_output followed by standalone CursorOnly updates cursor.
+    let c0 = Some(TerminalCursor {
+        x: 0,
+        y: 0,
+        pane_rows: 24,
+    });
+    let c1 = Some(TerminalCursor {
+        x: 5,
+        y: 0,
+        pane_rows: 24,
+    });
+    app.set_session_output(s1_id, "sync-seeded\n".into(), c0);
+    assert!(!app.terminal_output_fingerprints.contains_key(&s1_id));
+    app.terminal_streams.send_stream_update_for_test(
+        app::terminal_output::StreamedTerminalUpdate::CursorOnly {
+            session_id: s1_id,
+            theme: app.store.theme,
+            fingerprint: app::terminal_output::terminal_output_fingerprint("sync-seeded\n"),
+            cursor: c1,
+        },
+    );
+    app.drain_terminal_streams();
+    assert_eq!(
+        app.terminal_cursors.get(&s1_id).copied(),
+        c1,
+        "CursorOnly must update cursor even when seeded from synchronous set_session_output"
+    );
+
+    // (b) [Full, CursorOnly] queued in the same UI frame folds without dropping Full.
+    let mut worker_inc = None;
+    let mut last_delivered = None;
+    let u_full = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "frame-folded-text\n".into(),
+            cursor: c0,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    let c2 = Some(TerminalCursor {
+        x: 12,
+        y: 0,
+        pane_rows: 24,
+    });
+    let u_cur = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "frame-folded-text\n".into(),
+            cursor: c2,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    app.terminal_streams.send_stream_update_for_test(u_full);
+    app.terminal_streams.send_stream_update_for_test(u_cur);
+    app.drain_terminal_streams();
+    assert_eq!(
+        app.session_output.get(&s1_id).map(String::as_str),
+        Some("frame-folded-text\n"),
+        "[Full, CursorOnly] in one frame must deliver Full text"
+    );
+    assert_eq!(app.terminal_cursors.get(&s1_id).copied(), c2);
+
+    // (c) [Full #1, Full #2] queued in one frame still evicts negative path from Full #1.
+    app.unresolved_paths.push("src/folded_new.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("src/folded_new.rs"), Some(&None));
+    fs::write(project_path.join("src/folded_new.rs"), "pub fn f() {}\n").unwrap();
+    let f1 = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "created src/folded_new.rs\nstep 1\n".into(),
+            cursor: c2,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    let f2 = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "created src/folded_new.rs\nstep 2\n".into(),
+            cursor: c2,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    app.terminal_streams.send_stream_update_for_test(f1);
+    app.terminal_streams.send_stream_update_for_test(f2);
+    app.drain_terminal_streams();
+    assert!(
+        !app.resolved_paths.contains_key("src/folded_new.rs"),
+        "folded consecutive Full updates must not lose dirty-line negative path eviction"
+    );
+
+    // (d) Removed session's in-flight stream update is discarded without resurrecting state.
+    let ghost_id = Uuid::new_v4();
+    let mut ghost_inc = None;
+    let mut ghost_last = None;
+    let ghost_full = app::terminal_output::classify_captured_snapshot(
+        ghost_id,
+        TerminalCapture {
+            output: "ghost-output\n".into(),
+            cursor: c0,
+        },
+        app.store.theme,
+        &mut ghost_inc,
+        &mut ghost_last,
+    )
+    .unwrap();
+    app.terminal_streams.send_stream_update_for_test(ghost_full);
+    app.drain_terminal_streams();
+    assert!(!app.session_output.contains_key(&ghost_id));
+    assert!(!app.terminal_layouts.contains_key(&ghost_id));
+
+    // (e) TerminalRowGalleyKey includes font_size_bits so font size changes reshape rows.
+    let ctx = egui::Context::default();
+    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let mut job_12 = LayoutJob::default();
+    job_12.append(
+        "hello",
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::monospace(12.0),
+            ..Default::default()
+        },
+    );
+    let mut job_18 = LayoutJob::default();
+    job_18.append(
+        "hello",
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::monospace(18.0),
+            ..Default::default()
+        },
+    );
+    let mut row_cache = TerminalPaneRenderCache::default();
+    let ppp = ctx.pixels_per_point().to_bits();
+    let _ = row_cache.get_or_render_rows(
+        &ctx,
+        s1_id,
+        &TerminalPaneKey {
+            session_id: s1_id,
+            visible_rows: (0, 1),
+            output_generation: 1,
+            theme: AppTheme::Dark,
+            pixels_per_point_bits: ppp,
+        },
+        &[job_12],
+        Some(&[42]),
+    );
+    assert_eq!(row_cache.row_galley_builds(), 1);
+    let g18 = row_cache.get_or_render_rows(
+        &ctx,
+        s1_id,
+        &TerminalPaneKey {
+            session_id: s1_id,
+            visible_rows: (0, 1),
+            output_generation: 2,
+            theme: AppTheme::Dark,
+            pixels_per_point_bits: ppp,
+        },
+        &[job_18],
+        Some(&[42]),
+    );
+    let height_18 = g18[0].as_ref().unwrap().rect.height();
+    assert_eq!(
+        row_cache.row_galley_builds(),
+        2,
+        "changing font_size on the same line_id must miss row_galleys and shape a new Galley"
+    );
+    assert!(height_18 > 14.0);
+
+    // (f) Split-pane focus switch in ui_terminal_pane clears negative_path_probed_at.
+    app.negative_path_probed_at
+        .insert("stale.tok".into(), Instant::now());
+    app.workspace.open(WorkspaceTab::Session(s2.id));
+    let s2_clone = s2.clone();
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 500.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.ui_terminal_pane(ui, &s2_clone, true);
+            });
+        },
+    );
+    assert!(
+        app.negative_path_probed_at.is_empty(),
+        "focusing another pane in ui_terminal_pane must clear negative_path_probed_at"
+    );
+
+    // (g) Re-attaching to a session whose output changed while off-screen catches up immediately.
+    if tool_available("tmux") {
+        app.tools.tmux = true;
+        let mut live_b = test_session(Uuid::new_v4(), SessionStatus::Active);
+        live_b.project_id = project_id;
+        let live_b_id = live_b.id;
+        live_b.tmux_name = managed_tmux_name(live_b_id);
+        let live_b_name = live_b.tmux_name.clone();
+        start_tmux_agent_session(
+            &live_b_name,
+            &root,
+            "printf 'DONE-OFFSCREEN-292\\n'; sleep 30",
+            &[],
+        )
+        .unwrap();
+        for _ in 0..50 {
+            if tmux_capture(&live_b_name)
+                .unwrap_or_default()
+                .contains("DONE-OFFSCREEN-292")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.store.sessions.push(live_b);
+        // Seed stale cached output before attaching watcher (simulates off-screen output while detached).
+        app.set_session_output(live_b_id, "Building...\n".into(), None);
+        app.workspace.open(WorkspaceTab::Session(live_b_id));
+        app.select_session(live_b_id);
+        app.sync_terminal_streams(true);
+        let mut caught_up = false;
+        for _ in 0..100 {
+            app.drain_terminal_streams();
+            if app
+                .session_output
+                .get(&live_b_id)
+                .is_some_and(|out| out.contains("DONE-OFFSCREEN-292"))
+            {
+                caught_up = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.terminal_streams.shutdown_all();
+        let _ = tmux_command()
+            .args(["kill-session", "-t", &live_b_name])
+            .output();
+        assert!(
+            caught_up,
+            "attaching watcher to pane with stale cached output must catch up immediately"
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
 }
