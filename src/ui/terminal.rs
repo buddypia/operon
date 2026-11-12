@@ -306,6 +306,229 @@ pub(crate) fn terminal_line_layouts(output: &str, palette: &Palette) -> Vec<Layo
         .collect()
 }
 
+static NEXT_TERMINAL_LINE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_terminal_line_id() -> u64 {
+    NEXT_TERMINAL_LINE_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+fn clean_terminal_line(raw_line: &str) -> Cow<'_, str> {
+    if !raw_line.contains('\r') {
+        Cow::Borrowed(raw_line)
+    } else if let Some(stripped) = raw_line.strip_suffix('\r') {
+        if !stripped.contains('\r') {
+            Cow::Borrowed(stripped)
+        } else {
+            Cow::Owned(stripped.replace('\r', ""))
+        }
+    } else {
+        Cow::Owned(raw_line.replace('\r', ""))
+    }
+}
+
+fn hash_clean_line(line: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for &byte in line.as_bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    hash
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CachedTerminalLine {
+    pub(crate) line_id: u64,
+    pub(crate) style_in: TerminalTextStyle,
+    pub(crate) style_out: TerminalTextStyle,
+    pub(crate) raw_hash: u64,
+    pub(crate) raw: Box<str>,
+    pub(crate) job: LayoutJob,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct IncrementalTerminalLayout {
+    pub(crate) theme: AppTheme,
+    pub(crate) lines: Vec<CachedTerminalLine>,
+    #[cfg(test)]
+    parsed_lines: usize,
+    dirty_lines: Vec<usize>,
+}
+
+pub(crate) fn app_theme_code(theme: AppTheme) -> u8 {
+    match theme {
+        AppTheme::Dark => 0,
+        AppTheme::Light => 1,
+        AppTheme::HighContrast => 2,
+    }
+}
+
+pub(crate) fn app_theme_from_code(code: u8) -> AppTheme {
+    match code {
+        1 => AppTheme::Light,
+        2 => AppTheme::HighContrast,
+        _ => AppTheme::Dark,
+    }
+}
+
+impl IncrementalTerminalLayout {
+    #[cfg(test)]
+    pub(crate) fn parsed_lines(&self) -> usize {
+        self.parsed_lines
+    }
+
+    pub(crate) fn take_dirty_lines(&mut self) -> Vec<usize> {
+        let mut out = std::mem::take(&mut self.dirty_lines);
+        out.shrink_to_fit();
+        out
+    }
+}
+
+/// Incremental line-level ANSI layout (change 292).
+/// Strips `\r` per line without allocating a whole-buffer copy and reuses
+/// cached `LayoutJob`s and monotonic `line_id`s whenever `(theme, style_in, raw)`
+/// matches across in-place TUI updates or scrollback shifts.
+pub(crate) fn terminal_line_layouts_incremental(
+    output: &str,
+    theme: AppTheme,
+    previous: Option<&IncrementalTerminalLayout>,
+) -> (IncrementalTerminalLayout, Vec<LayoutJob>, Vec<u64>) {
+    let palette = theme.palette();
+    let prev_lines = previous
+        .filter(|prev| prev.theme == theme)
+        .map(|prev| prev.lines.as_slice());
+
+    let cleaned: Vec<(Cow<'_, str>, u64)> = output
+        .split('\n')
+        .map(|raw_line| {
+            let clean = clean_terminal_line(raw_line);
+            let hash = hash_clean_line(&clean);
+            (clean, hash)
+        })
+        .collect();
+
+    let mut shift: usize = 0;
+    if let Some(prev) = prev_lines {
+        if let Some((anchor_idx, (anchor_str, anchor_hash))) = cleaned
+            .iter()
+            .take(32)
+            .enumerate()
+            .find(|(_, (line, _))| !line.is_empty())
+            .or_else(|| cleaned.first().map(|entry| (0, entry)))
+        {
+            if !prev.get(anchor_idx).is_some_and(|entry| {
+                entry.raw_hash == *anchor_hash && entry.raw.as_ref() == anchor_str.as_ref()
+            }) {
+                let search_end = prev.len().min(anchor_idx.saturating_add(1024));
+                for (cand, entry) in prev
+                    .iter()
+                    .enumerate()
+                    .take(search_end)
+                    .skip(anchor_idx + 1)
+                {
+                    if entry.raw_hash == *anchor_hash && entry.raw.as_ref() == anchor_str.as_ref() {
+                        shift = cand - anchor_idx;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut next_lines = Vec::with_capacity(cleaned.len());
+    let mut jobs = Vec::with_capacity(cleaned.len());
+    let mut line_ids = Vec::with_capacity(cleaned.len());
+    let mut dirty_lines = Vec::new();
+    #[cfg(test)]
+    let mut parsed_lines = 0;
+    let mut style = TerminalTextStyle::default();
+    let mut running_offset = shift as isize;
+
+    for (idx, (clean_line, raw_hash)) in cleaned.into_iter().enumerate() {
+        let same_shifted_slot = prev_lines
+            .and_then(|prev| prev.get(idx.saturating_add(shift)))
+            .is_some_and(|entry| {
+                entry.raw_hash == raw_hash && entry.raw.as_ref() == clean_line.as_ref()
+            });
+
+        let matched = prev_lines.and_then(|prev| {
+            let matches_entry = |entry: &CachedTerminalLine| {
+                entry.style_in == style
+                    && entry.raw_hash == raw_hash
+                    && entry.raw.as_ref() == clean_line.as_ref()
+            };
+            let shifted_idx = idx.checked_add_signed(running_offset);
+            if let Some(cand) = shifted_idx {
+                if let Some(entry) = prev.get(cand).filter(|e| matches_entry(e)) {
+                    return Some((cand, entry));
+                }
+            }
+            if running_offset != 0 {
+                if let Some(entry) = prev.get(idx).filter(|e| matches_entry(e)) {
+                    return Some((idx, entry));
+                }
+            }
+            let base = shifted_idx.unwrap_or(idx);
+            for delta in 1..=8_usize {
+                if let Some(cand) = base.checked_add(delta) {
+                    if let Some(entry) = prev.get(cand).filter(|e| matches_entry(e)) {
+                        return Some((cand, entry));
+                    }
+                }
+                if let Some(cand) = base.checked_sub(delta) {
+                    if let Some(entry) = prev.get(cand).filter(|e| matches_entry(e)) {
+                        return Some((cand, entry));
+                    }
+                }
+            }
+            None
+        });
+
+        if let Some((matched_idx, entry)) = matched {
+            running_offset = matched_idx as isize - idx as isize;
+            if !same_shifted_slot {
+                dirty_lines.push(idx);
+            }
+            style = entry.style_out;
+            line_ids.push(entry.line_id);
+            jobs.push(entry.job.clone());
+            next_lines.push(entry.clone());
+        } else {
+            let style_in = style;
+            let mut job = LayoutJob::default();
+            let style_out = append_terminal_line(&mut job, &clean_line, style_in, palette);
+            style = style_out;
+            let line_id = next_terminal_line_id();
+            #[cfg(test)]
+            {
+                parsed_lines += 1;
+            }
+            dirty_lines.push(idx);
+            line_ids.push(line_id);
+            jobs.push(job.clone());
+            next_lines.push(CachedTerminalLine {
+                line_id,
+                style_in,
+                style_out,
+                raw_hash,
+                raw: clean_line.into_owned().into_boxed_str(),
+                job,
+            });
+        }
+    }
+
+    (
+        IncrementalTerminalLayout {
+            theme,
+            lines: next_lines,
+            #[cfg(test)]
+            parsed_lines,
+            dirty_lines,
+        },
+        jobs,
+        line_ids,
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TerminalPreeditUpdate {
     Unchanged,
@@ -670,58 +893,59 @@ pub(crate) fn terminal_rows(
             None
         };
 
+        let egui_ctx = ui.ctx().clone();
+        let pixels_per_point_bits = egui_ctx.pixels_per_point().to_bits();
         let cached_galleys_storage = context.map(|ctx| {
             let key = TerminalPaneKey {
                 session_id: ctx.session_id,
                 visible_rows: (rows.start, rows.end),
                 output_generation: ctx.output_generation,
                 theme: ctx.theme,
+                pixels_per_point_bits,
             };
-            let ctx_fonts = ui.ctx().clone();
-            ctx.cache.get_or_render(ctx.session_id, &key, || {
-                rows.clone()
-                    .map(|idx| {
-                        let line = &lines[idx];
-                        if line.is_empty() {
-                            None
-                        } else {
-                            Some(ctx_fonts.fonts(|fonts| fonts.layout_job(line.clone())))
-                        }
-                    })
-                    .collect()
-            })
+            ctx.cache
+                .get_or_render_rows(&egui_ctx, ctx.session_id, &key, lines, ctx.line_ids)
         });
 
         // Placed for this frame's pane, never cached: the pane moves and
         // resizes without its rows changing.
         caret = computed_caret;
+        let hover_pos = ui.input(|input| input.pointer.hover_pos());
 
         for (offset, line) in lines[rows.clone()].iter().enumerate() {
             let line_idx = first + offset;
             let y = top + offset as f32 * row_height;
             let row_pos = egui::pos2(ui.min_rect().left(), y);
-            let row_rect =
-                egui::Rect::from_min_size(row_pos, egui::vec2(ui.min_rect().width(), row_height));
+            let row_rect = egui::Rect::from_min_size(
+                row_pos,
+                egui::vec2(ui.min_rect().width().max(pane_width), row_height),
+            );
 
             // Only the rows the viewport asked for, so the cost of a search is
             // the size of the pane and never the size of the scrollback.
-            for (index, found) in search.matches.iter().enumerate() {
-                if found.line != line_idx {
-                    continue;
+            if !search.matches.is_empty() {
+                let start_match = search
+                    .matches
+                    .partition_point(|found| found.line < line_idx);
+                for (rel_idx, found) in search.matches[start_match..].iter().enumerate() {
+                    if found.line != line_idx {
+                        break;
+                    }
+                    let index = start_match + rel_idx;
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(ui.min_rect().left() + found.column as f32 * cell.x, y),
+                        egui::vec2(found.columns as f32 * cell.x, row_height),
+                    );
+                    ui.painter().rect_filled(
+                        rect,
+                        1.0,
+                        if search.current == Some(index) {
+                            search.palette.selection_border
+                        } else {
+                            search.palette.selection
+                        },
+                    );
                 }
-                let rect = egui::Rect::from_min_size(
-                    egui::pos2(ui.min_rect().left() + found.column as f32 * cell.x, y),
-                    egui::vec2(found.columns as f32 * cell.x, row_height),
-                );
-                ui.painter().rect_filled(
-                    rect,
-                    1.0,
-                    if search.current == Some(index) {
-                        search.palette.selection_border
-                    } else {
-                        search.palette.selection
-                    },
-                );
             }
 
             if let Some(galleys) = cached_galleys_storage {
@@ -738,10 +962,11 @@ pub(crate) fn terminal_rows(
                 ui.add(egui::Label::new(line.clone()).wrap_mode(egui::TextWrapMode::Extend));
             }
 
-            if !line.is_empty() {
-                // Only the rows on screen are read for paths and links, so the
-                // cost is the pane rather than the scrollback.
-                if let Some(kind) = terminal_row_links(ui, &line.text, row_rect, cell, links) {
+            if !line.is_empty() && hover_pos.is_some_and(|position| row_rect.contains(position)) {
+                // Only the hovered row on screen is read for paths and links.
+                if let Some(kind) =
+                    terminal_row_links_at_pointer(ui, hover_pos, &line.text, row_rect, cell, links)
+                {
                     under_pointer = Some(kind);
                 }
             }
@@ -776,6 +1001,16 @@ pub(crate) struct TerminalPaneKey {
     pub(crate) output_generation: u64,
     /// Active theme (Dark/Light).
     pub(crate) theme: AppTheme,
+    /// DPI scale factor bits (`pixels_per_point`).
+    pub(crate) pixels_per_point_bits: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+struct TerminalRowGalleyKey {
+    line_id: u64,
+    font_size_bits: u32,
+    theme_code: u8,
+    pixels_per_point_bits: u32,
 }
 
 /// Cached rendered representation of one terminal pane.
@@ -787,28 +1022,37 @@ pub(crate) struct CachedTerminalPane {
 }
 
 /// Retained galley & dirty-checked rendering cache for terminal panes.
-/// Eliminates per-frame LayoutJob cloning and egui::Label allocations on unchanged frames.
+/// Eliminates per-frame LayoutJob cloning and egui::Label allocations on unchanged frames,
+/// and reuses row-level galleys across scrolling and partial TUI updates (change 292).
 #[derive(Default)]
 pub(crate) struct TerminalPaneRenderCache {
     /// Memoized pane layouts keyed by session ID.
     entries: HashMap<Uuid, CachedTerminalPane>,
+    /// Row-level shaped galleys keyed by `(line_id, theme, pixels_per_point)`.
+    row_galleys: HashMap<TerminalRowGalleyKey, Arc<egui::Galley>>,
     /// Per-session count of builds (cache misses).
     session_builds: HashMap<Uuid, usize>,
-    /// Total number of cache misses (galley shape builds).
+    /// Total number of cache misses (pane-level rebuilds).
     builds: usize,
-    /// Total number of cache hits (reused galleys).
+    /// Total number of cache hits (reused pane slices).
     hits: usize,
+    /// Total number of individual row `fonts.layout_job` calls.
+    row_galley_builds: usize,
+    /// Total number of individual row galley hits during pane misses.
+    row_galley_hits: usize,
 }
 
 impl TerminalPaneRenderCache {
-    /// Query the cache. If `key` matches the existing entry for `session_id`,
-    /// returns the cached galleys without invoking `render_fn`.
-    /// On a miss or dirty key, invokes `render_fn`, stores the result, and increments `builds`.
-    pub(crate) fn get_or_render(
+    /// Query the cache. On a pane-key hit, returns cached visible galleys immediately.
+    /// On a miss, reuses any matching row galleys from `row_galleys` and locks
+    /// `egui_ctx.fonts` at most once to shape only dirty or newly visible non-empty rows.
+    pub(crate) fn get_or_render_rows(
         &mut self,
+        egui_ctx: &egui::Context,
         session_id: Uuid,
         key: &TerminalPaneKey,
-        render_fn: impl FnOnce() -> Vec<Option<Arc<egui::Galley>>>,
+        lines: &[LayoutJob],
+        line_ids: Option<&[u64]>,
     ) -> &[Option<Arc<egui::Galley>>] {
         let is_hit = self
             .entries
@@ -817,7 +1061,69 @@ impl TerminalPaneRenderCache {
         if is_hit {
             self.hits += 1;
         } else {
-            let galleys = render_fn();
+            let end = key.visible_rows.1.min(lines.len());
+            let start = key.visible_rows.0.min(end);
+            let range = start..end;
+            let mut galleys = Vec::with_capacity(range.len());
+            let mut missing_indices: Vec<(usize, usize, Option<TerminalRowGalleyKey>)> = Vec::new();
+
+            for (slot, row_idx) in range.enumerate() {
+                let line = &lines[row_idx];
+                if line.is_empty() {
+                    galleys.push(None);
+                    continue;
+                }
+                let font_size_bits = line
+                    .sections
+                    .first()
+                    .map_or(0, |section| section.format.font_id.size.to_bits());
+                let row_key = line_ids
+                    .and_then(|ids| ids.get(row_idx).copied())
+                    .filter(|&id| id != 0)
+                    .map(|line_id| TerminalRowGalleyKey {
+                        line_id,
+                        font_size_bits,
+                        theme_code: app_theme_code(key.theme),
+                        pixels_per_point_bits: key.pixels_per_point_bits,
+                    });
+                if let Some(rk) = row_key {
+                    if let Some(cached) = self.row_galleys.get(&rk) {
+                        self.row_galley_hits += 1;
+                        galleys.push(Some(Arc::clone(cached)));
+                        continue;
+                    }
+                }
+                galleys.push(None);
+                missing_indices.push((slot, row_idx, row_key));
+            }
+
+            if !missing_indices.is_empty() {
+                let shaped: Vec<Arc<egui::Galley>> = egui_ctx.fonts(|fonts| {
+                    missing_indices
+                        .iter()
+                        .map(|&(_, row_idx, _)| fonts.layout_job(lines[row_idx].clone()))
+                        .collect()
+                });
+                self.row_galley_builds += shaped.len();
+                let cacheable_new = missing_indices
+                    .iter()
+                    .filter(|(_, _, rk)| rk.is_some())
+                    .count();
+                if cacheable_new > 0
+                    && self.row_galleys.len() + cacheable_new > MAX_CACHED_TERMINAL_ROW_GALLEYS
+                {
+                    self.row_galleys.clear();
+                }
+                for ((slot, _, row_key), galley) in missing_indices.into_iter().zip(shaped) {
+                    if let Some(rk) = row_key {
+                        if self.row_galleys.len() < MAX_CACHED_TERMINAL_ROW_GALLEYS {
+                            self.row_galleys.insert(rk, Arc::clone(&galley));
+                        }
+                    }
+                    galleys[slot] = Some(galley);
+                }
+            }
+
             self.entries.insert(
                 session_id,
                 CachedTerminalPane {
@@ -850,6 +1156,18 @@ impl TerminalPaneRenderCache {
         self.hits
     }
 
+    /// Number of individual row `fonts.layout_job` calls across all misses.
+    #[cfg(test)]
+    pub(crate) fn row_galley_builds(&self) -> usize {
+        self.row_galley_builds
+    }
+
+    /// Number of individual row galley cache hits during pane misses.
+    #[cfg(test)]
+    pub(crate) fn row_galley_hits(&self) -> usize {
+        self.row_galley_hits
+    }
+
     /// Evict a specific session (e.g. when closed or deleted).
     pub(crate) fn remove(&mut self, session_id: &Uuid) -> Option<CachedTerminalPane> {
         self.session_builds.remove(session_id);
@@ -859,6 +1177,7 @@ impl TerminalPaneRenderCache {
     /// Clear all cached entries (e.g. on theme or font change).
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
+        self.row_galleys.clear();
         self.session_builds.clear();
     }
 
@@ -875,6 +1194,7 @@ pub(crate) struct TerminalPaneContext<'a> {
     pub(crate) session_id: Uuid,
     pub(crate) output_generation: u64,
     pub(crate) theme: AppTheme,
+    pub(crate) line_ids: Option<&'a [u64]>,
     pub(crate) cache: &'a mut TerminalPaneRenderCache,
 }
 
@@ -1453,8 +1773,21 @@ pub(crate) struct TerminalLinkOverlay<'a> {
 /// Returns the target under the pointer so the caller can decide what a click
 /// means: the pane owns focus and typing, and stealing every click would take
 /// the keyboard away from an agent that is being talked to.
+#[cfg(test)]
 pub(crate) fn terminal_row_links(
     ui: &egui::Ui,
+    text: &str,
+    rect: egui::Rect,
+    cell: egui::Vec2,
+    overlay: &mut TerminalLinkOverlay<'_>,
+) -> Option<TerminalTargetKind> {
+    let hover_pos = ui.input(|input| input.pointer.hover_pos());
+    terminal_row_links_at_pointer(ui, hover_pos, text, rect, cell, overlay)
+}
+
+fn terminal_row_links_at_pointer(
+    ui: &egui::Ui,
+    hover_pos: Option<egui::Pos2>,
     text: &str,
     rect: egui::Rect,
     cell: egui::Vec2,
@@ -1463,9 +1796,7 @@ pub(crate) fn terminal_row_links(
     // Only the row under the pointer is read. The underline is drawn on hover
     // and nowhere else, so reading every visible row on every frame bought
     // nothing (change 208); a path is probed the first time it is hovered.
-    let pointer = ui
-        .input(|input| input.pointer.hover_pos())
-        .filter(|position| rect.contains(*position))?;
+    let pointer = hover_pos.filter(|position| rect.contains(*position))?;
     let mut under_pointer = None;
     for target in terminal_targets(text) {
         let openable = match &target.kind {

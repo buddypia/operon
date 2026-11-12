@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (the session terminal pane, tmux capture/input path, and pane
+# galley cache exist; this replaces blind polling and whole-pane/whole-buffer
+# rebuilds with event-driven tmux control-mode notifications, 16ms frame-budget
+# coalesced atomic captures, incremental line-level ANSI layout, row-level
+# dirty Galley caching, and zero-repaint unchanged snapshots).
+# Risk: medium — touches subprocess (`src/exec.rs`, `src/tmux.rs`) and drawing
+# (`src/app.rs`, `src/app/terminal_output.rs`, `src/app/screens.rs`,
+# `src/ui/terminal.rs`), `src/config.rs`, and `src/tests.rs`; supervised
+# autonomy; screen required because `drawing` carries `screen: yes`.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing, then verify typing and running interactive TUIs in Page::Sessions respond at 60Hz with zero idle captures or repaints."
+
+contract:
+  three-gates: "machine passed cargo fmt --check; cargo clippy --locked -- -D warnings; cargo test --locked tui_perf_292_: 7 passed; model_check_tui_292_incremental_ansi_and_coalescer_equivalence: 1 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9936, src/app.rs 9888, unsafe_blocks 4 as on main"
+  release-binary: "machine passed required - src/exec.rs, src/tmux.rs, src/config.rs, src/ui/terminal.rs, src/app/terminal_output.rs, src/app/screens.rs, and src/app.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/292-terminal-tui-rerenders-and-stalls/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
