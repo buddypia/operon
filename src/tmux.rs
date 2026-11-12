@@ -980,11 +980,11 @@ pub(crate) fn tmux_control_chunk_has_activity(
     }
 }
 
-pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 6]> {
+pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 5]> {
     if !is_safe_tmux_name(name) {
         return Err(anyhow!(tf!("管理ターミナル名が不正です")));
     }
-    Ok(["-C", "attach-session", "-t", name, "-f", "ignore-size"])
+    Ok(["-C", "attach-session", "-t", name, "-fignore-size"])
 }
 
 pub(crate) fn tmux_spawn_output_watcher(name: &str) -> Result<StreamingChild> {

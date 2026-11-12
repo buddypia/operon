@@ -34,13 +34,13 @@ APP_TERM = ROOT / "src/app/terminal_output.rs"
 MUTATIONS = {
     "watcher-rejects-unsafe-tmux-name-bypassed": (
         TMUX,
-        "pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 6]> {\n    if !is_safe_tmux_name(name) {",
-        "pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 6]> {\n    if false && !is_safe_tmux_name(name) {",
+        "pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 5]> {\n    if !is_safe_tmux_name(name) {",
+        "pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 5]> {\n    if false && !is_safe_tmux_name(name) {",
     ),
     "watcher-blocks-send-keys-with-read-only-flag": (
         TMUX,
-        '    Ok(["-C", "attach-session", "-t", name, "-f", "ignore-size"])',
-        '    Ok(["-C", "attach-session", "-t", name, "-f", "read-only,ignore-size"])',
+        '    Ok(["-C", "attach-session", "-t", name, "-fignore-size"])',
+        '    Ok(["-C", "attach-session", "-t", name, "-fread-only,ignore-size"])',
     ),
     "streaming-child-leaks-inherited-git-dir": (
         EXEC,

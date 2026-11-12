@@ -7557,8 +7557,6 @@ impl OperonApp {
         let mut fold = None;
         let mut pin = None;
         let mut close = None;
-        let mut setup_project = None;
-        let mut select_project = None;
         if project_ids.is_empty() {
             ui.label(RichText::new(tr("プロジェクトがありません")).weak());
         }
@@ -7637,7 +7635,6 @@ impl OperonApp {
                         .inner_margin(egui::Margin::same(SPACE_SM as i8))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
-                            let project = &self.store.projects[proj_idx];
                             ui.horizontal(|ui| {
                                 let (icon, tip) = if folded {
                                     (ICON_DISCLOSURE_CLOSED, tr("展開する"))
@@ -7658,7 +7655,8 @@ impl OperonApp {
                                         )
                                         .clicked()
                                         {
-                                            setup_project = Some(project_id);
+                                            let project = &self.store.projects[proj_idx];
+                                            self.open_project_session_setup(project.id);
                                         }
                                         // Drawn right to left, so 要対応
                                         // lands leftmost, nearest the name.
@@ -7694,6 +7692,7 @@ impl OperonApp {
                                         ui.with_layout(
                                             egui::Layout::left_to_right(egui::Align::Center),
                                             |ui| {
+                                                let project = &self.store.projects[proj_idx];
                                                 let response = ui
                                                     .add(
                                                         egui::Label::new(if selected {
@@ -7718,15 +7717,16 @@ impl OperonApp {
                                                         ui.label(tr("ドラッグで並べ替え"));
                                                     });
                                                 if response.clicked() {
-                                                    select_project = Some(project_id);
+                                                    self.select_workspace_project(project.id);
                                                 }
                                                 if response.hovered() && drag.is_none() {
                                                     ui.ctx()
                                                         .set_cursor_icon(egui::CursorIcon::Grab);
                                                 }
                                                 if response.drag_started() {
+                                                    let project = &self.store.projects[proj_idx];
                                                     self.workspace_column_drag =
-                                                        Some(ColumnDrag::Project(project_id));
+                                                        Some(ColumnDrag::Project(project.id));
                                                 }
                                             },
                                         );
@@ -7949,7 +7949,8 @@ impl OperonApp {
                                 );
                             }
                         });
-                    targets.push(project_id, card.response.rect);
+                    let project = &self.store.projects[proj_idx];
+                    targets.push(project.id, card.response.rect);
                     ui.add_space(SPACE_SM);
                 }
                 if let Some(drag) = drag {
@@ -7967,12 +7968,6 @@ impl OperonApp {
             });
         if ui.input(|i| i.pointer.primary_released()) {
             self.workspace_column_drag = None;
-        }
-        if let Some(project) = setup_project {
-            self.open_project_session_setup(project);
-        }
-        if let Some(project) = select_project {
-            self.select_workspace_project(project);
         }
         if let Some(project) = fold {
             self.toggle_project_fold(project);

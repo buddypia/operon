@@ -82703,8 +82703,7 @@ pub(crate) fn tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_
             "attach-session",
             "-t",
             valid_name.as_str(),
-            "-f",
-            "ignore-size",
+            "-fignore-size",
         ]
     );
 

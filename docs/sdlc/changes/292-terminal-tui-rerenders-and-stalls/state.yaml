@@ -26,7 +26,7 @@ resume: "Done. Package from main after landing, then verify typing and running i
 
 contract:
   three-gates: "machine passed cargo fmt --check; cargo clippy --locked -- -D warnings; cargo test --locked tui_perf_292_: 7 passed; model_check_tui_292_incremental_ansi_and_coalescer_equivalence: 1 passed"
-  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9941, src/app.rs 9888, unsafe_blocks 4 as on main"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9936, src/app.rs 9888, unsafe_blocks 4 as on main"
   release-binary: "machine passed required - src/exec.rs, src/tmux.rs, src/config.rs, src/ui/terminal.rs, src/app/terminal_output.rs, src/app/screens.rs, and src/app.rs change; package from main after landing"
   guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/292-terminal-tui-rerenders-and-stalls/mutations.py"
 

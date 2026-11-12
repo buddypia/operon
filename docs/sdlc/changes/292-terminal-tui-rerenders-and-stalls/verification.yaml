@@ -1,5 +1,5 @@
 # The evidence for change 292. Format: docs/sdlc/templates/verification.yaml.
-digest: "af17ea12d5c2e10c"
+digest: "1d6e72bd6e905b56"
 
 obligations:
   - R1 empirical-test :: cargo test --locked tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_echo_polls
