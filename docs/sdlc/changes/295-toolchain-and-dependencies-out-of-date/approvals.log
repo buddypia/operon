@@ -1,0 +1,5 @@
+2026-11-13T13:16:51Z person intent intent.md a0de178e0cb79a23 approve the person set the scope: update Rust and every version, egui 0.37 included ("egui 0.37 まで一気にやる")
+2026-11-13T13:16:51Z person dependencies plan.md 069af1be5f4f4d11 approve the person approved the new transitive crate set, the egui 0.36 duplicate via egui-phosphor, glow kept and system font fallback off ("この構成で進める")
+2026-11-13T13:16:51Z auto spec spec.md 14eb060c22e19b5f approve today-claims verified (old toolchain test reads only ci.yml and Cargo.toml; add_to_fonts and the font chain); new crates listed and person-approved
+2026-11-13T13:16:51Z auto screen screen.md 57c2c1c52cf18938 approve no layout change claimed; fixed size and theme, menus, popup and tooltip covered; residual differences go to the person
+2026-11-13T13:16:51Z auto plan plan.md 069af1be5f4f4d11 approve covers every requirement in an order the commit gate admits; each risk has a catcher; the only remaining finding was this ledger's absence
