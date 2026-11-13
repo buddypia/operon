@@ -3,7 +3,7 @@
 # R2 has no test of its own: "newest" is a fact about crates.io on one day, not
 # an invariant. Its evidence is that the store and the
 # knowledge base work on the new versions (R2's filter and I3).
-digest: "e63a6185dbbd11ab"
+digest: "83956e62c2db9b42"
 
 obligations:
   - R1 empirical-test :: cargo test --locked every_toolchain_pin_names_one_version

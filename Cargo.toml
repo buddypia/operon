@@ -23,8 +23,8 @@ libc = "0.2"
 # bump and the two struct fields it added; go back to the crates.io release once
 # one vendors a llama.cpp that has `gemma-embedding2`.
 llama-cpp-2 = { git = "https://github.com/buddypia/llama-cpp-rs", rev = "48eedeb3c5b21ceafc06b4fae953a0d332d1e037", default-features = false, features = ["metal"] }
-rfd = "0.15"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rfd = "0.18"
+rusqlite = { version = "0.42", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
@@ -56,4 +56,4 @@ ab_glyph = "0.2"
 # scalar written against a key Codex declares as a table, so every Codex session
 # on the machine failed to load its configuration. The parser is here to read
 # back what the line editor wrote; the shipped binary still never parses TOML.
-toml = "0.8"
+toml = "1"
