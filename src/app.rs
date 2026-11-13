@@ -7406,10 +7406,11 @@ impl eframe::App for OperonApp {
         release_shared_embedder();
     }
 
-    /// Everything that reads input and moves state without drawing. eframe
-    /// calls this before every `ui`, and also while the window is hidden, which
-    /// is what keeps hooks, attention and the Dock badge current then (0.31's
-    /// single `update` was split in two by egui 0.37, change 295).
+    /// Everything that moves state without drawing. eframe calls this before
+    /// every `ui`, and also while the window is hidden, which is what keeps
+    /// hooks, attention and the Dock badge current then (0.31's single
+    /// `update` was split in two by egui 0.37, change 295). Input is not read
+    /// here: a hidden call sees the last shown frame's events again.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.repaint.is_none() {
             self.repaint = Some(ctx.clone());
@@ -7426,7 +7427,6 @@ impl eframe::App for OperonApp {
         self.drain_hook_events();
         self.persist_diff_comments();
         self.request_port_scan();
-        self.handle_terminal_search_keys(ctx);
         self.resolve_terminal_paths();
         self.process_background_results();
         self.tick_knowledge();
@@ -7434,14 +7434,6 @@ impl eframe::App for OperonApp {
         self.track_attention(Instant::now());
         self.track_working(Instant::now());
         self.track_dock_badge();
-        self.handle_app_shortcuts(ctx);
-        if self.command_palette_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.close_command_palette();
-        }
-        let dropped = ctx.input(|input| input.raw.dropped_files.clone());
-        if !dropped.is_empty() {
-            self.route_dropped_folders(dropped);
-        }
         if self.last_session_refresh.elapsed() >= SESSION_POLL_INTERVAL {
             self.retry_pending_store();
             self.save_workspace_layout_if_changed();
@@ -7459,6 +7451,17 @@ impl eframe::App for OperonApp {
         let ctx = &root.ctx().clone();
         let focused = ctx.input(|input| input.focused);
         let palette = self.store.theme.palette();
+        // This pass's keys and drops, read once: only a shown frame has input
+        // of its own, so they belong here rather than in `logic`.
+        self.handle_terminal_search_keys(ctx);
+        self.handle_app_shortcuts(ctx);
+        if self.command_palette_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.close_command_palette();
+        }
+        let dropped = ctx.input(|input| input.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            self.route_dropped_folders(dropped);
+        }
         self.ui_topbar(root);
         // A delayed history click belongs to the page where it was made.
         if self.page != Page::Sessions {

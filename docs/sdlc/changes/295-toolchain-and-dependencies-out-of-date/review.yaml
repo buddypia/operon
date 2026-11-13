@@ -1,0 +1,28 @@
+# The review record for change 295. Format: docs/sdlc/templates/review.yaml.
+#
+# rust-reviewer read the whole branch against main (Rust 1.100.0 pin, the
+# dependency bumps, and the eframe/egui 0.37 migration) against the egui,
+# eframe and epaint 0.37.0 sources. Round 1 found one Important: `logic` also
+# runs while the window is hidden, on the last shown frame's input, and read
+# shortcuts, the palette's Escape and dropped files there, so a chord could fire
+# again on every hidden call. Round 2 confirmed the fix: those reads moved to
+# the top of `ui`, `a_hidden_frame_does_not_replay_the_last_shortcut` holds it,
+# and the sweep's `logic-reads-the-shortcuts` mutation is caught. Round 1's
+# first nit (a click into a composing terminal pane dropped the composition,
+# because 0.37's request_focus interrupts the IME) and third (the caret slack
+# comment) were fixed and confirmed in round 2; the reviewer re-read the diff
+# after cargo fmt reflowed one assert in the new test. Three nits stay open.
+digest: "2624f7456cfa4cfe"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/2 · `Id::unique` in per-frame helpers (src/ui/widgets.rs png_texture, document_image_texture, area and splitter ids) also runs `id_source::insert_root` under debug_assertions, formatting the source with Debug each frame; release builds are unaffected
+    person: "開発用ビルドだけ描画がわずかに重くなります。配布するアプリには影響がなく、対応は不要です。"
+  - rust-reviewer/4 · `ButtonTextAtButtonSize` relies on egui's `experimental` theme API (`egui::theme`, `widget_style`); treat it as an upgrade-time hazard
+    person: "egui を次に上げるとき、ボタン文字の大きさを保つ仕組みが作り直しになる可能性があります。今は対応不要です。"
+  - rust-reviewer/5 · egui-phosphor 0.14 builds a second egui (0.36); remove the duplicate once a release targets egui 0.37
+    person: "ビルド時間が少し延びるだけで、動作には影響しません。アイコン用ライブラリの新版が出たら上げます。今は対応不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 3"

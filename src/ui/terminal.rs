@@ -871,9 +871,9 @@ pub(crate) fn terminal_rows(
             // painting past the frame. The tolerance is sub-pixel slack for
             // float noise between the two measurements: half a pixel, about a
             // sixteenth of a cell. egui 0.37 rounds the scroll offset to a whole
-            // pixel while the clip keeps the panel's edge, so the same slack
-            // applies vertically; the spare row is a whole cell past it
-            // (change 295).
+            // pixel while the clip keeps the panel's edge, so the same
+            // sub-pixel slack applies vertically; it does not reach the spare
+            // row, which is a whole cell past the edge (change 295).
             if let Some(rect) = rect {
                 let clip = ui.clip_rect();
                 let inner_right = ui.min_rect().left() + pane_width;

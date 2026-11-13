@@ -52317,6 +52317,53 @@ pub(crate) fn the_panel_chord_folds_and_reopens_the_side_panel() {
 }
 
 #[test]
+/// A hidden window still runs `logic`, between shown frames, and reads the
+/// last shown frame's input there: the chord a person pressed must fold the
+/// panel once, not again on every hidden call (change 295).
+pub(crate) fn a_hidden_frame_does_not_replay_the_last_shortcut() {
+    use eframe::App;
+    let root = temporary_directory("hidden-replay");
+    let mut app = test_app(root.join("store-v2.json"));
+    let chord = app
+        .keymap
+        .chord_for("panel.toggle")
+        .expect("panel.toggle should have a default chord");
+    let ctx = egui::Context::default();
+    let mut frame = eframe::Frame::_new_kittest();
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 820.0),
+        )),
+        events: vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(app.show_session_inspector);
+    let _ = ctx.run_ui(raw, |root| app_frame(&mut app, root, &mut frame));
+    assert!(
+        !app.show_session_inspector,
+        "the shown frame folds the panel"
+    );
+    // eframe's hidden path: `logic` with no pass, the input still the last one.
+    app.logic(&ctx, &mut frame);
+    app.logic(&ctx, &mut frame);
+    assert!(
+        !app.show_session_inspector,
+        "a hidden call must not press the chord again"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 /// Requirement 7: one hairline between the session header and the terminal
 /// frame, not a spacer, a rule, and a second spacer.
 pub(crate) fn the_terminal_starts_directly_under_the_session_header() {

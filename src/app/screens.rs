@@ -6597,9 +6597,15 @@ impl OperonApp {
                             self.open_terminal_path_menu(session_id, &kind, pointer);
                         }
                     }
+                    // Only a pane that lacks the keyboard asks for it: egui
+                    // 0.37's `request_focus` interrupts the IME, and a click
+                    // into the pane already composing would drop the
+                    // half-typed text (change 295).
+                    let has_focus = terminal_response.has_focus();
                     if terminal_response.clicked()
                         && !has_open_modifier
                         && session.status == SessionStatus::Active
+                        && !has_focus
                     {
                         terminal_response.request_focus();
                     }
@@ -6607,7 +6613,7 @@ impl OperonApp {
                     // follows, once, so the reply can be typed straight away.
                     if self.terminal_focus_request == Some(session_id) {
                         self.terminal_focus_request = None;
-                        if session.status == SessionStatus::Active {
+                        if session.status == SessionStatus::Active && !has_focus {
                             terminal_response.request_focus();
                         }
                     }

@@ -20,6 +20,7 @@ TESTS = [
     "a_caret_below_the_last_fully_visible_row_reports_none",
     "history_title_single_click_opens_after_the_double_click_window",
     "a_banner_keeps_a_long_path_inside_its_frame",
+    "a_hidden_frame_does_not_replay_the_last_shortcut",
 ]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
@@ -89,6 +90,13 @@ MUTATIONS = {
         ROOT / "src/ui/widgets.rs",
         "            ui.horizontal_top(|ui| {\n                ui.spacing_mut().item_spacing.x = SPACE_SM;\n                ui.label(RichText::new(icon).size(15.0).color(tone));\n                ui.horizontal_wrapped(|ui| {\n                    ui.spacing_mut().item_spacing.x = SPACE_SM;\n                    add_contents(ui);\n                });\n            });",
         "            ui.horizontal_wrapped(|ui| {\n                ui.spacing_mut().item_spacing.x = SPACE_SM;\n                ui.label(RichText::new(icon).size(15.0).color(tone));\n                add_contents(ui);\n            });",
+    ),
+    # R4: `logic` also runs while the window is hidden, on the last shown
+    # frame's input; a chord read there fires again on every hidden call.
+    "logic-reads-the-shortcuts": (
+        ROOT / "src/app.rs",
+        "        self.track_dock_badge();\n        if self.last_session_refresh",
+        "        self.track_dock_badge();\n        self.handle_app_shortcuts(ctx);\n        if self.last_session_refresh",
     ),
 }
 

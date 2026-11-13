@@ -9,7 +9,7 @@
 # I6-I9 are R4 where egui 0.37 changed what a person sees or does, each held by
 # a test the mutation sweep watched failing: button text size, the banner's
 # long path, a history title's first click, and a fully visible terminal caret.
-digest: "d80eb7f8a0f4ec53"
+digest: "2624f7456cfa4cfe"
 
 obligations:
   - R1 empirical-test :: cargo test --locked every_toolchain_pin_names_one_version
