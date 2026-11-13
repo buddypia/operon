@@ -47,3 +47,16 @@
 - In the app: 新しいセッション → 「＋ 新しいプロジェクト…」 → pick → the sheet shows it.
 
 ## Departures from the plan
+
+- 「フォルダを選択…」 already had rows (`Choose a folder…`, `폴더 선택…`); nine
+  rows were added per table, not ten, and the tables stay sorted by message id.
+- `mutations.py` (16 mutations) was not in the file list; the contract named it.
+- From the craft review: a drop goes to the sheet only while it shows (not
+  under a progress modal, `launch_sheet_shows`, also used by `ui_launch_sheet`);
+  dropping the folder the sheet already shows keeps the form; a multi-folder
+  drop counts only new projects and leaves a save failure's notice; a list
+  closed without a choice clears its filter; Esc with the list open closes the
+  list, not the sheet. Pinned by
+  `launch_294_several_dropped_folders_and_a_dismissed_filter`.
+- Not checked by eye: a second Operon cannot run beside the installed one (they
+  share the session store's lock), so the screen is checked after packaging.

@@ -23,6 +23,7 @@ alternatives; commit `plan.md` before editing source files.
     `src/app/relaunch.rs` keeps tabs across a relaunch and restarts gone sessions.
     `src/app/session_order.rs` keeps the column and the tabs one list, and pins.
     `src/app/launch_menu.rs` holds the tab strip's + menu and its quick launch.
+    `src/app/launch_projects.rs` adds and picks the launch sheet's project.
     `src/app/terminal_output.rs` lays terminal text out off the frame.
     `src/app/terminal_paths.rs` opens terminal paths.
     `src/app/waiting_reply.rs` draws the 要対応 rows and replies.
@@ -36,17 +37,15 @@ alternatives; commit `plan.md` before editing source files.
     `src/agents/settings.rs` holds remembered launch options in
     `recent-agent-settings.json`.
   - `src/tmux.rs` — tmux session lifecycle (create, respawn, stop, retry).
-    `src/tmux/hooks.rs` manages CLI status hook scripts, settings registration,
-    socket listener, and state machine.
+    `src/tmux/hooks.rs` manages CLI status hooks, their socket, and states.
   - `src/git.rs` — git status, diffs, branches, worktrees.
     `src/git/setup.rs` handles `.operon/setup.sh` digests, previews, and
     approvals. `src/git/comments.rs` handles diff review notes.
     `src/git/ports.rs` maps listening sockets via `lsof` to worktrees.
   - `src/knowledge.rs` — per-project knowledge base: SQLite store, ranking,
-    judge, freshness, search, and the `Operon knowledge search` CLI.
-    `src/knowledge/embed.rs` holds the EmbeddingGemma 2 model files, download,
-    and in-process Metal runtime. `src/knowledge/map.rs` computes the 2D map:
-    neighbours, groups, layout, hulls.
+    search, and the `Operon knowledge search` CLI.
+    `src/knowledge/embed.rs` holds the EmbeddingGemma 2 model and Metal runtime.
+    `src/knowledge/map.rs` computes the 2D map: neighbours, groups, layout, hulls.
   - `src/theme.rs` — `Palette` and the three `*_PALETTE` tables.
   - `src/store.rs` — local index: atomic writes, `flock`, migration.
   - `src/models.rs` — persisted types.
