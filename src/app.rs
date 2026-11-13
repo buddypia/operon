@@ -9628,13 +9628,14 @@ impl OperonApp {
         for candidate in candidates {
             let scan =
                 self.terminal_session_scan(project.id, &project.path, worktree_path.as_deref());
-            scan_needed |= scan.is_none() && !candidate.contains('/');
+            let scan_missing = scan.is_none();
             let resolved = resolve_terminal_path_with_scan(
                 worktree_path.as_deref(),
                 &project.path,
                 scan,
                 &candidate,
             );
+            scan_needed |= resolved.is_none() && scan_missing && !candidate.contains('/');
             if resolved.is_some() {
                 self.negative_path_probed_at.remove(&candidate);
             } else {

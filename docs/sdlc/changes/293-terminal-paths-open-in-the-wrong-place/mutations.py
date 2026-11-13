@@ -72,6 +72,18 @@ MUTATIONS = {
         ".filter(|candidate| candidate.starts_with(&root) && candidate.is_file())",
         ".filter(|candidate| candidate.is_file())",
     ),
+    # F1: a name that resolved at the root still asks for a scan.
+    "resolved-name-still-requests-a-scan": (
+        APP,
+        "            scan_needed |= resolved.is_none() && scan_missing && !candidate.contains('/');",
+        "            scan_needed |= scan_missing && !candidate.contains('/');",
+    ),
+    # F2: a truncated scan is taken as proof that a name is unique.
+    "truncated-scan-proves-uniqueness": (
+        FILES,
+        "    if scan.truncated {\n        return None;\n    }",
+        "    if false {\n        return None;\n    }",
+    ),
     # R6: Escape does not close the menu.
     "escape-keeps-the-menu-open": (
         PATHS,

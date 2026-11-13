@@ -545,8 +545,12 @@ pub(crate) fn extract_file_symbols(path: &Path, text: &str) -> Vec<CodeSymbol> {
 
 /// The one scanned file whose name is `name`, as the scan spells it (relative
 /// to the scanned root). None when no file or more than one has that name: a
-/// guess between two is how the wrong file gets opened.
+/// guess between two is how the wrong file gets opened. A truncated scan
+/// proves nothing about uniqueness — the second file may be past the cut.
 pub(crate) fn unique_scanned_file<'a>(scan: &'a FileScanSnapshot, name: &str) -> Option<&'a Path> {
+    if scan.truncated {
+        return None;
+    }
     let mut matches = scan
         .paths
         .iter()

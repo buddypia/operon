@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-13
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -45,3 +45,11 @@
 
 ## Departures from the plan
 
+- Review (rust-reviewer): a bare name resolved through the scan now also has to
+  stay inside the root, like every other resolution, so a symlink out of it is
+  never underlined (`terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved`).
+- Empirical verifier, reproduced and fixed: F1 — the drain asked for a project
+  scan even when the bare name had already resolved at the root; it now asks
+  only after a miss. F2 — a truncated scan was taken as proof that a name was
+  unique; a truncated scan now resolves no bare name. Both are tests and
+  mutations in this change.

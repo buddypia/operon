@@ -84426,3 +84426,36 @@ pub(crate) fn terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved
     );
     fs::remove_dir_all(&root).ok();
 }
+
+/// Found by the empirical verifier: a bare name that resolves directly at the
+/// root must not start a scan of the whole project.
+#[test]
+pub(crate) fn terminal_293_bare_name_at_the_root_does_not_request_a_scan() {
+    let (root, project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-root-no-scan");
+    fs::write(project_path.join("README.md"), "x").unwrap();
+    app.unresolved_paths.push("README.md".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("README.md").cloned().flatten(),
+        Some(project_path.join("README.md"))
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::Files(project.id)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Found by the empirical verifier: a truncated scan cannot say a name is the
+/// only one of its kind.
+#[test]
+pub(crate) fn terminal_293_truncated_scan_does_not_prove_a_name_unique() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-truncated");
+    let mut scan = list_files(&project_path, FILE_TREE_LIMIT);
+    scan.truncated = true;
+    app.file_cache.insert(project.id, scan);
+    app.unresolved_paths.push("lib.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("lib.rs").cloned(), Some(None));
+    fs::remove_dir_all(&root).ok();
+}

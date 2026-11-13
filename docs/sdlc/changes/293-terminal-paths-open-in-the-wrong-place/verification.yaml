@@ -1,5 +1,5 @@
 # The evidence for change 293. Format: docs/sdlc/templates/verification.yaml.
-digest: "723f3df9e3952822"
+digest: "506601657b758980"
 
 obligations:
   - R1 empirical-test :: cargo test --locked terminal_293_cmd_and_option_click_open_a_path_inside_operon
@@ -12,4 +12,6 @@ obligations:
   - R5 empirical-test :: cargo test --locked terminal_293_probe_requests_the_scan_a_bare_name_needs
   - I4 empirical-test :: cargo test --locked terminal_293_bare_name_missed_before_the_scan_resolves_after_it
   - R6 empirical-test :: cargo test --locked terminal_293_menu_closes_on_escape_or_outside_click
+  - F1 empirical-test :: cargo test --locked terminal_293_bare_name_at_the_root_does_not_request_a_scan
+  - F2 empirical-test :: cargo test --locked terminal_293_truncated_scan_does_not_prove_a_name_unique
   - I1 empirical-mutation :: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py

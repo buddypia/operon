@@ -10,7 +10,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -18,13 +18,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have empirical-verifier try to falsify R1-R6 on the branch head, fix and record what it reproduces, then close and land."
+resume: "Done. Package from main after landing, then check in the app that ⌘-click on a terminal path opens a tab and right-click shows the four choices at the pointer."
 
 contract:
-  three-gates: "machine passed make q.fast; cargo test --locked terminal: 120 passed; terminal_293_: 9 passed"
+  three-gates: "machine passed make q.fast; cargo test --locked terminal: 120 passed; terminal_293_: 12 passed; run-obligations: 11 held at 8e45ad4"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7981 and largest_module_lines 9918 at diagnose as on main"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/files.rs, and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs, src/files.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
