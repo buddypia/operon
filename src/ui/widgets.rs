@@ -33,6 +33,9 @@ pub(crate) fn apply_interface_metrics(ctx: &egui::Context) {
         // The disclosure triangles in the project tree and the settings page
         // are not buttons, so they do not get a button's frame or its rule.
         style.visuals.collapsing_header_frame = false;
+        // egui 0.37 raised the default from 1/12s to 0.2s; the app keeps 0.31's
+        // pace for disclosures and scroll jumps (change 295).
+        style.animation_time = 1.0 / 12.0;
         style.visuals.indent_has_left_vline = false;
         // The scale `DESIGN.md` documents. egui only carries five slots, so the
         // rest of the scale is named at the call site through `RichText::size`.
@@ -57,6 +60,27 @@ pub(crate) fn apply_interface_metrics(ctx: &egui::Context) {
         ]
         .into();
     });
+    ctx.add_widget_theme::<egui::widget_style::ButtonStyle>(ButtonTextAtButtonSize);
+}
+
+/// egui's own look for every button, except the size of its text. egui 0.37's
+/// default button theme sets a plain label in `TextStyle::Body`, so every
+/// button would grow from the 13.5px `DESIGN.md` gives `Button` to the 14px of
+/// `Body`. The theme API is behind egui's `experimental` feature, the only way
+/// to put this in one place rather than on each call site (change 295).
+struct ButtonTextAtButtonSize;
+
+impl egui::theme::StyleProvider<egui::widget_style::ButtonStyle> for ButtonTextAtButtonSize {
+    fn style(
+        &mut self,
+        args: &egui::widget_style::StyleArgs<'_>,
+    ) -> egui::widget_style::ButtonStyle {
+        let mut style: egui::widget_style::ButtonStyle = egui::theme::DefaultStyle.style(args);
+        let text = &mut style.atom_layout.text_style;
+        *text =
+            egui::widget_style::TextVisuals::new(args.style, egui::TextStyle::Button, text.color);
+        style
+    }
 }
 
 /// The surface a group of related things sits on. One radius, one hairline, one
@@ -87,7 +111,7 @@ pub(crate) fn card_frame(palette: &Palette) -> egui::Frame {
 pub(crate) fn clickable_card<R>(
     ui: &mut egui::Ui,
     palette: &Palette,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl egui::AsIdSalt,
     clickable: bool,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
@@ -423,7 +447,7 @@ pub(crate) fn status_filter_tile(
         job.wrap = egui::text::TextWrapping::truncate_at_width(
             (count_at.x - SPACE_XS - word_left).max(0.0),
         );
-        let word = ui.fonts(|fonts| fonts.layout_job(job));
+        let word = ui.fonts_mut(|fonts| fonts.layout_job(job));
         painter.galley(
             egui::pos2(word_left, rect.center().y - word.size().y / 2.0),
             word,
@@ -432,7 +456,7 @@ pub(crate) fn status_filter_tile(
         painter.galley(count_at, count, count_ink);
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, label)
     });
     paint_button_focus(ui, &response, palette);
     response
@@ -498,7 +522,7 @@ pub(crate) fn agent_filter_toggle(
         }
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, label)
     });
     paint_button_focus(ui, &response, palette);
     response.on_hover_text(label)
@@ -900,10 +924,18 @@ pub(crate) fn banner(
         .stroke(egui::Stroke::new(1.0_f32, tone))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
+            // The mark in a column of its own and the message wrapping beside
+            // it, starting a row of its own. A label that starts partway along
+            // a wrapping row is laid out with a first-row indent, and egui
+            // 0.37 keeps subtracting that indent after the first break: a long
+            // path on a later row was drawn outside the frame (change 295).
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = SPACE_SM;
                 ui.label(RichText::new(icon).size(15.0).color(tone));
-                add_contents(ui);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = SPACE_SM;
+                    add_contents(ui);
+                });
             });
         });
 }
@@ -995,12 +1027,26 @@ pub(crate) fn theme_swatches(ui: &mut egui::Ui, palette: &Palette) {
     });
 }
 
-pub(crate) fn dropped_project_folders(dropped: &[egui::DroppedFile]) -> (Vec<PathBuf>, usize) {
+/// A menu behind a custom button: egui 0.31's `menu::menu_custom_button`, on
+/// 0.37's `MenuButton`, returning the button's response as the old one did.
+pub(crate) fn menu_custom_button<R>(
+    ui: &mut egui::Ui,
+    button: egui::Button<'_>,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::Response {
+    egui::menu::MenuButton::from_button(button)
+        .ui(ui, add_contents)
+        .0
+}
+
+pub(crate) fn dropped_project_folders(
+    dropped: &[egui::DroppedFileHandle],
+) -> (Vec<PathBuf>, usize) {
     let folders = dropped
         .iter()
-        .filter_map(|file| file.path.as_ref())
+        .map(|file| file.path())
         .filter(|path| path.is_dir())
-        .cloned()
+        .map(Path::to_path_buf)
         .collect::<Vec<_>>();
     let rejected = dropped.len().saturating_sub(folders.len());
     (folders, rejected)
@@ -1260,8 +1306,7 @@ pub(crate) fn session_status_icon(
             palette.status(kind.tone()),
         );
     }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, tr(kind.label())));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr(kind.label())));
     response
 }
 
@@ -1459,7 +1504,7 @@ pub(crate) fn png_texture(
     name: &'static str,
     bytes: &'static [u8],
 ) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new(("png-mark", name));
+    let id = egui::Id::unique(("png-mark", name));
     if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
@@ -1488,7 +1533,7 @@ pub(crate) fn document_image_texture(
     doc_id: &DocumentId,
     bytes: &[u8],
 ) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new(("doc-image-texture", doc_id, bytes.len()));
+    let id = egui::Id::unique(("doc-image-texture", doc_id, bytes.len()));
     if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
@@ -1572,8 +1617,7 @@ pub(crate) fn session_badge(
             paint_status_dot(ui.painter(), mark, kind, palette, surface);
         }
     }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, tr(kind.label())));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr(kind.label())));
     response
 }
 
@@ -1632,7 +1676,7 @@ pub(crate) fn status_count_chip(
     // carries the count, as the old label's text did.
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
+            egui::Role::Button,
             true,
             tf!("{p0} {p1} 件", p0 = tr(group.message_id()), p1 = count),
         )

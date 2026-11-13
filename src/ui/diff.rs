@@ -236,7 +236,7 @@ pub(crate) fn diff_pane_with_actions(
                         let open = !collapsed.contains(&file.path);
                         let response = ui.interact(
                             rect,
-                            ui.id().with(("diff-file-row", &file.path)),
+                            ui.scope_id().with(("diff-file-row", &file.path)),
                             egui::Sense::click(),
                         );
                         ui.painter().rect_filled(
@@ -321,7 +321,7 @@ pub(crate) fn diff_pane_with_actions(
                             );
                         }
                         let job = diff_line_layout(line, cell.x, palette);
-                        let galley = ui.fonts(|fonts| fonts.layout_job(job));
+                        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                         ui.painter()
                             .galley(rect.min + egui::vec2(8.0, 0.0), galley, palette.text);
                         if line.kind == DiffLineKind::Hunk && !path.is_empty() {
@@ -373,7 +373,7 @@ pub(crate) fn diff_pane_with_actions(
                         if let Some(number) = line.new_number {
                             let response = ui.interact(
                                 rect,
-                                ui.id().with(("diff-line", path, number)),
+                                ui.scope_id().with(("diff-line", path, number)),
                                 egui::Sense::click(),
                             );
                             if response.hovered()

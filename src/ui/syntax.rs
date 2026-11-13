@@ -396,12 +396,13 @@ fn append_slice(into: &mut LayoutJob, job: &LayoutJob, range: std::ops::Range<us
     into.text
         .push_str(job.text.get(range.clone()).unwrap_or(""));
     for section in &job.sections {
-        let start = section.byte_range.start.max(range.start);
-        let end = section.byte_range.end.min(range.end);
+        let start = section.byte_range.start.0.max(range.start);
+        let end = section.byte_range.end.0.min(range.end);
         if start < end {
             into.sections.push(egui::text::LayoutSection {
                 leading_space: 0.0,
-                byte_range: offset + start - range.start..offset + end - range.start,
+                byte_range: egui::text::ByteIndex(offset + start - range.start)
+                    ..egui::text::ByteIndex(offset + end - range.start),
                 format: section.format.clone(),
             });
         }
@@ -441,7 +442,10 @@ pub(crate) fn syntax_layout(text: &str, language: EditorLanguage, palette: &Pale
             );
             layout.sections.push(egui::text::LayoutSection {
                 leading_space: 0.0,
-                byte_range: range_in(text, range),
+                byte_range: {
+                    let bytes = range_in(text, range);
+                    egui::text::ByteIndex(bytes.start)..egui::text::ByteIndex(bytes.end)
+                },
                 format: TextFormat {
                     font_id: FontId::monospace(MONOSPACE_SIZE),
                     color: colour,

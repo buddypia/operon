@@ -79,8 +79,8 @@ impl OperonApp {
             return;
         };
         let palette = self.store.theme.palette();
-        let screen = ctx.screen_rect();
-        egui::Area::new(egui::Id::new("broadcast-sheet-scrim"))
+        let screen = ctx.content_rect();
+        egui::Area::new(egui::Id::unique("broadcast-sheet-scrim"))
             .order(egui::Order::Middle)
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
@@ -100,7 +100,7 @@ impl OperonApp {
         let mut close = false;
         let mut send = false;
         const WIDTH: f32 = 460.0;
-        egui::Area::new(egui::Id::new("broadcast-sheet"))
+        egui::Area::new(egui::Id::unique("broadcast-sheet"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(
                 screen.center().x - WIDTH / 2.0 - SPACE_LG,

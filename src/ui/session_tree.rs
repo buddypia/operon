@@ -1689,7 +1689,7 @@ impl OperonApp {
                             self.show_session_inspector = false;
                         }
                         // Drawn as `icon_button` draws the fold button beside it.
-                        let placement = egui::menu::menu_custom_button(
+                        let placement = menu_custom_button(
                             ui,
                             egui::Button::new(RichText::new(ICON_RESTORE).size(16.0))
                                 .stroke(egui::Stroke::NONE)
@@ -1700,12 +1700,11 @@ impl OperonApp {
                                     let moves = after.move_views(edge, to);
                                     if dock_menu_entry(ui, to, moves, self.dock_fits(&after)) {
                                         self.dock_views_to(edge, to);
-                                        ui.close_menu();
+                                        ui.close();
                                     }
                                 }
                             },
                         )
-                        .response
                         .on_hover_text(tr("パネルの配置を変更"));
                         paint_button_focus(ui, &placement, palette);
                     });
@@ -1754,7 +1753,7 @@ impl OperonApp {
                 let moves = after.move_panel(panel, to);
                 if dock_menu_entry(ui, to, moves, self.dock_fits(&after)) {
                     self.dock_panel_to(panel, to);
-                    ui.close_menu();
+                    ui.close();
                 }
             }
         });

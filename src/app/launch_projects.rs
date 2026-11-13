@@ -151,7 +151,7 @@ impl OperonApp {
 
     /// Dropped folders: the sheet's while it shows, the projects page's
     /// otherwise.
-    pub(crate) fn route_dropped_folders(&mut self, dropped: Vec<egui::DroppedFile>) {
+    pub(crate) fn route_dropped_folders(&mut self, dropped: Vec<egui::DroppedFileHandle>) {
         if !self.launch_sheet_shows() {
             self.add_dropped_folders(dropped);
             return;
@@ -281,7 +281,7 @@ impl OperonApp {
                     pick = Some(LaunchProjectPick::NewFolder);
                 }
                 if pick.is_some() {
-                    ui.memory_mut(|memory| memory.close_popup());
+                    egui::Popup::close_all(ui);
                 }
             });
         // A list closed without a choice does not reopen narrowed.

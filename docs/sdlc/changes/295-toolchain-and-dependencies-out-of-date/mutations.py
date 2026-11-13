@@ -15,6 +15,11 @@ TESTS = [
     "knowledge_map_joins_only_near_meanings",
     "knowledge_map_groups_related_entries_and_is_deterministic",
     "launch_294_recent_projects_come_first",
+    "the_icon_face_is_registered_under_the_name_the_font_chain_names",
+    "only_a_nonzero_change_count_is_emphasised",
+    "a_caret_below_the_last_fully_visible_row_reports_none",
+    "history_title_single_click_opens_after_the_double_click_window",
+    "a_banner_keeps_a_long_path_inside_its_frame",
 ]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
@@ -51,6 +56,39 @@ MUTATIONS = {
         ROOT / "src/app/launch_projects.rs",
         "choices.sort_by_key(|choice| std::cmp::Reverse((choice.0, choice.1)));",
         "choices.sort_by_key(|choice| (choice.0, choice.1));",
+    ),
+    # R3: egui-phosphor's own `add_to_fonts` is no longer called, so the icon
+    # face must still be registered under the name the font chain asks for.
+    "icon-face-registered-under-another-name": (
+        ROOT / "src/main.rs",
+        "        ICON_FACE.to_owned(),\n        egui::FontData::from_static",
+        "        \"phosphor-regular\".to_owned(),\n        egui::FontData::from_static",
+    ),
+    # R4: egui 0.37's default button theme sets a label in Body, 14px.
+    "buttons-keep-egui-default-text-size": (
+        ROOT / "src/ui/widgets.rs",
+        "    ctx.add_widget_theme::<egui::widget_style::ButtonStyle>(ButtonTextAtButtonSize);",
+        "",
+    ),
+    # R4: the scroll offset egui 0.37 rounds to a pixel hides a fully visible caret.
+    "caret-without-vertical-slack": (
+        ROOT / "src/ui/terminal.rs",
+        "                if rect.min.y >= clip.min.y - slack\n                    && rect.max.y <= clip.max.y + slack",
+        "                if rect.min.y >= clip.min.y\n                    && rect.max.y <= clip.max.y",
+    ),
+    # R4: a title whose `Id` counts the corner's widgets loses its click the
+    # frame hovering swaps the time for the close button.
+    "history-title-id-counts-the-corner": (
+        ROOT / "src/app/screens.rs",
+        '.scope_id(ui.scope_id().with("session-row-title"))',
+        '.id_salt("session-row-title")',
+    ),
+    # R4: a message that starts partway along the mark's wrapping row gets a
+    # first-row indent egui 0.37 subtracts again after the first break.
+    "banner-message-shares-the-marks-row": (
+        ROOT / "src/ui/widgets.rs",
+        "            ui.horizontal_top(|ui| {\n                ui.spacing_mut().item_spacing.x = SPACE_SM;\n                ui.label(RichText::new(icon).size(15.0).color(tone));\n                ui.horizontal_wrapped(|ui| {\n                    ui.spacing_mut().item_spacing.x = SPACE_SM;\n                    add_contents(ui);\n                });\n            });",
+        "            ui.horizontal_wrapped(|ui| {\n                ui.spacing_mut().item_spacing.x = SPACE_SM;\n                ui.label(RichText::new(icon).size(15.0).color(tone));\n                add_contents(ui);\n            });",
     ),
 }
 

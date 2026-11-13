@@ -4402,7 +4402,7 @@ impl OperonApp {
         }
     }
 
-    pub(crate) fn add_dropped_folders(&mut self, dropped: Vec<egui::DroppedFile>) {
+    pub(crate) fn add_dropped_folders(&mut self, dropped: Vec<egui::DroppedFileHandle>) {
         let (folders, rejected_count) = dropped_project_folders(&dropped);
         if folders.is_empty() {
             self.notice = Some(tr("Finder からフォルダをドロップすると追加できます。").into());
@@ -7406,7 +7406,11 @@ impl eframe::App for OperonApp {
         release_shared_embedder();
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    /// Everything that reads input and moves state without drawing. eframe
+    /// calls this before every `ui`, and also while the window is hidden, which
+    /// is what keeps hooks, attention and the Dock badge current then (0.31's
+    /// single `update` was split in two by egui 0.37, change 295).
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.repaint.is_none() {
             self.repaint = Some(ctx.clone());
         }
@@ -7417,7 +7421,6 @@ impl eframe::App for OperonApp {
         self.apply_appearance(ctx);
         self.sync_terminal_streams(focused);
         self.drain_terminal_streams();
-        let palette = self.store.theme.palette();
         self.ensure_hooks_started(ctx);
         self.ensure_handoff_archive_sweep_started();
         self.drain_hook_events();
@@ -7450,12 +7453,18 @@ impl eframe::App for OperonApp {
         if let Some(remaining) = self.expire_brief_notice(Instant::now()) {
             ctx.request_repaint_after(remaining);
         }
-        self.ui_topbar(ctx);
+    }
+
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = &root.ctx().clone();
+        let focused = ctx.input(|input| input.focused);
+        let palette = self.store.theme.palette();
+        self.ui_topbar(root);
         // A delayed history click belongs to the page where it was made.
         if self.page != Page::Sessions {
             self.pending_history_open = None;
         }
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(root, |ui| {
             ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
             // Two screens hold something that is as wide as it is and take the
             // whole window edge to edge: the session workspace, which is a
@@ -7550,10 +7559,10 @@ impl eframe::App for OperonApp {
             });
         });
         if ctx.input(|input| !input.raw.hovered_files.is_empty()) {
-            let rect = ctx.screen_rect().shrink(14.0);
+            let rect = ctx.content_rect().shrink(14.0);
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
-                egui::Id::new("folder-drop-overlay"),
+                egui::Id::unique("folder-drop-overlay"),
             ));
             painter.rect_filled(rect, 8.0, palette.scrim);
             painter.text(
@@ -7597,7 +7606,7 @@ impl OperonApp {
             return;
         };
         let mut dismissed = false;
-        egui::Area::new(egui::Id::new("brief-notice-toast"))
+        egui::Area::new(egui::Id::unique("brief-notice-toast"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-SPACE_LG, -SPACE_LG))
             .interactable(true)
@@ -7607,7 +7616,7 @@ impl OperonApp {
                     .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
                     .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
                     .inner_margin(egui::Margin::symmetric(12, 8))
-                    .shadow(ctx.style().visuals.popup_shadow)
+                    .shadow(ctx.global_style().visuals.popup_shadow)
                     .show(ui, |ui| {
                         ui.set_max_width(420.0);
                         ui.horizontal(|ui| {
@@ -8435,12 +8444,12 @@ impl OperonApp {
             return;
         };
         let palette = self.store.theme.palette();
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         let mut dismissed = false;
         // The veil, sensing clicks so the page behind it is genuinely out of
         // reach. Unlike the palette's, a click on it does not close anything:
         // a stray click should not end a wait a person meant to sit through.
-        egui::Area::new(egui::Id::new("restore-scrim"))
+        egui::Area::new(egui::Id::unique("restore-scrim"))
             .order(egui::Order::Middle)
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
@@ -8450,7 +8459,7 @@ impl OperonApp {
         if !self.command_palette_open && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             dismissed = true;
         }
-        egui::Area::new(egui::Id::new("restore-modal"))
+        egui::Area::new(egui::Id::unique("restore-modal"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(
                 screen.center().x - 260.0,
@@ -8538,13 +8547,13 @@ impl OperonApp {
             return;
         }
         let palette = self.store.theme.palette();
-        let screen = ctx.screen_rect();
+        let screen = ctx.content_rect();
         let mut close_modal = false;
         let mut dismiss_to_background = false;
         let mut retry_session = false;
         let mut open_settings = false;
 
-        egui::Area::new(egui::Id::new("launch-scrim"))
+        egui::Area::new(egui::Id::unique("launch-scrim"))
             .order(egui::Order::Middle)
             .fixed_pos(screen.min)
             .show(ctx, |ui| {
@@ -8560,7 +8569,7 @@ impl OperonApp {
             }
         }
 
-        egui::Area::new(egui::Id::new("launch-modal"))
+        egui::Area::new(egui::Id::unique("launch-modal"))
             .order(egui::Order::Foreground)
             .fixed_pos(egui::pos2(
                 screen.center().x - 260.0,

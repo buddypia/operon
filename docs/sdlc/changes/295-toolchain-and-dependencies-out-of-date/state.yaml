@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Plan step 4: capture before screenshots from this commit, then bump eframe 0.37 and egui-phosphor 0.14."
+resume: "Review the egui 0.37 commit with rust-reviewer, then push the branch and wait for CI."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -71,13 +71,13 @@ resume: "Plan step 4: capture before screenshots from this commit, then bump efr
 # is what says whether the bundle on this machine is behind.
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh"
   release-binary: "machine pending yes: src/main.rs, src/app and src/ui change; ends with bash scripts/package-macos.sh and the ship swap"
-  toolchain-pins: "machine pending cargo test --locked every_toolchain_pin_names_one_version"
-  icon-face: "machine pending cargo test --locked the_icon_face_is_registered_under_the_name_the_font_chain_names every_icon_resolves_from_the_bundled_icon_font"
+  toolchain-pins: "machine passed cargo test --locked every_toolchain_pin_names_one_version"
+  icon-face: "machine passed cargo test --locked the_icon_face_is_registered_under_the_name_the_font_chain_names every_icon_resolves_from_the_bundled_icon_font"
   full-suite: "machine pending CI cargo test --locked on the branch head"
   screens-match: "human pending before/after screenshots in screen.md match"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed each new guard watched failing: mutations.py, 10 of 10 caught"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

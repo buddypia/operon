@@ -63,4 +63,49 @@
 
 ## Departures from the plan
 
-Filled in during implementation.
+- **egui-phosphor is registered by hand.** 0.14 is built against egui 0.36, so
+  its `add_to_fonts` takes the other egui's `FontDefinitions`. `src/main.rs`
+  inserts `Variant::Regular.font_bytes()` under `ICON_FACE` itself, and
+  `the_icon_face_is_registered_under_the_name_the_font_chain_names` checks the
+  name the font chain asks for is the one registered. The duplicate egui stays
+  until egui-phosphor targets 0.37, as approved.
+- **`App::update` became `logic` + `ui`.** eframe 0.37 calls `logic(&Context)`
+  once per frame and then `ui(&mut Ui)`. Everything that does not draw moved to
+  `logic`; panels now show on the root `Ui`. The source-shape check in
+  `the_app_sweeps_expired_handoff_archives_once_at_startup` reads `fn logic`.
+- **Menus.** `menu_custom_button` in `src/ui/widgets.rs` wraps 0.37's
+  `MenuButton::from_button(..).ui(..).0`, so the four call sites keep one shape;
+  the tab strip's `+` menu is an `egui::Popup` anchored to its button.
+- **Button text keeps `TextStyle::Button`.** 0.37's default button theme sets a
+  plain label in `TextStyle::Body` (14 px, not 13.5). `apply_interface_metrics`
+  registers `ButtonTextAtButtonSize`, which takes egui's own button style and
+  changes only the font. The theme API is behind egui's `experimental` feature,
+  so `Cargo.toml` names `egui` directly for that one feature — eframe's own
+  egui, no new crate in `Cargo.lock`.
+- **Animation pace.** 0.37 raised `animation_time` from 1/12 s to 0.2 s; the
+  app sets 1/12 s back.
+- **Three draw fixes 0.37 needed.**
+  - The terminal caret's containment check got the half-pixel slack vertically
+    too: 0.37 rounds the scroll offset to a whole pixel, which pushed a fully
+    visible caret a third of a pixel past the clip and hid it.
+  - The history row's title sits in a scope keyed by the row, so its `Id` no
+    longer counts the corner's widgets; hovering swaps the time for ✕, and 0.37
+    forgets a press on a widget whose `Id` moved before the release.
+  - The notice banner wraps its message in a column beside the mark: a label
+    that starts partway along a wrapping row gets a first-row indent that 0.37
+    subtracts again on a later row with nowhere to break, which put a long path
+    outside the frame.
+- **Tests.** `Context::run` became `run_ui`/`run_pass`; a `CentralPanel` shows
+  on the root `Ui`. A test-only `TestDroppedFile` implements 0.37's
+  `DroppedFile` trait. The test profile turns off epaint's debug assertions:
+  0.37 asserts every frame's texture upload reached a renderer, and the suite
+  runs frames with no renderer by design. Tests that clicked typed coordinates
+  in the toolbar now read where the frame drew the tab: the headless default
+  fonts lay CJK out at new widths under 0.37.
+  `repaint_loop_idle_interval_is_not_polling_100ms` warms up one more frame:
+  0.37 asks for one more pass to style a button it had not seen.
+- **Screenshots at 1280×820**, the default window, not 1440×900 —
+  `screen.md` has the comparison.
+- **Disk.** The test build ran the disk out of space once; the branch's own
+  `target/` output for `operon` and a scratch probe target were cleaned and
+  rebuilt.

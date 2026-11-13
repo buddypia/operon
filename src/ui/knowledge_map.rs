@@ -438,9 +438,9 @@ pub(crate) fn draw_knowledge_map(
     }
 
     let placement = labels.get_or_place(LabelKey::new(map, view, rect), || {
-        let fonts = ui.fonts(|fonts| fonts.clone());
+        let painter = ui.painter();
         place_labels(map, entries, view, rect, &|text: &str| {
-            fonts
+            painter
                 .layout_no_wrap(
                     text.to_owned(),
                     egui::FontId::proportional(12.0),

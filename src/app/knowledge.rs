@@ -936,11 +936,11 @@ impl OperonApp {
                 ui.menu_button(tr("収集を止める ▾"), |ui| {
                     if ui.button(tr("収集を止める (ナレッジは残す)")).clicked() {
                         self.edit_knowledge(project.id, KnowledgeEdit::Disable);
-                        ui.close_menu();
+                        ui.close();
                     }
                     if ui.button(tr("ナレッジを削除…")).clicked() {
                         self.knowledge.confirm_clear = Some(project.id);
-                        ui.close_menu();
+                        ui.close();
                     }
                 });
                 if secondary_button(ui, tr("今すぐ更新")).clicked() {
