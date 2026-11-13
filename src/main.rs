@@ -174,11 +174,7 @@ fn configure_macos_fonts(ctx: &egui::Context, terminal_font: TerminalFont) {
             .insert(name.to_owned(), egui::FontData::from_static(data).into());
     }
 
-    // The icon vocabulary's own face. `add_to_fonts` also splices it into the
-    // proportional family, which `proportional_ui_font_chain` then replaces
-    // wholesale — that chain is what decides the order, and it names `phosphor`
-    // itself.
-    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+    add_icon_face(&mut fonts);
 
     if let Some(fonts_in_family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
         fonts_in_family.insert(0, terminal_font.fallback_font_name().to_owned());
@@ -224,6 +220,21 @@ fn configure_macos_fonts(ctx: &egui::Context, terminal_font: TerminalFont) {
     ctx.set_fonts(fonts);
 }
 
+/// The name the icon face is registered under and the font chain asks for.
+pub(crate) const ICON_FACE: &str = "phosphor";
+
+/// The icon vocabulary's own face. Only the bytes are registered here:
+/// `proportional_ui_font_chain` decides the order and names the face itself.
+/// egui-phosphor's `add_to_fonts` is not used because the release targets an
+/// older egui than the app's, so its `FontDefinitions` is another type
+/// (change 295).
+pub(crate) fn add_icon_face(fonts: &mut egui::FontDefinitions) {
+    fonts.font_data.insert(
+        ICON_FACE.to_owned(),
+        egui::FontData::from_static(egui_phosphor::Variant::Regular.font_bytes()).into(),
+    );
+}
+
 /// Text first, icons second. Phosphor only claims private-use codepoints, so it
 /// can never take a letter away from Sarasa; putting it ahead of Apple Symbols
 /// keeps every icon on one stroke weight instead of letting the system face
@@ -231,7 +242,7 @@ fn configure_macos_fonts(ctx: &egui::Context, terminal_font: TerminalFont) {
 fn proportional_ui_font_chain() -> Vec<String> {
     vec![
         "sarasa-ui-j".to_owned(),
-        "phosphor".to_owned(),
+        ICON_FACE.to_owned(),
         "macos-symbols".to_owned(),
     ]
 }

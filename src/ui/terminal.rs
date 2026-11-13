@@ -1,4 +1,3 @@
-use crate::prelude::*;
 use crate::*;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -561,15 +560,14 @@ pub(crate) fn terminal_input_events(
         let mut preedit_update = TerminalPreeditUpdate::Unchanged;
         for event in &input.events {
             match event {
-                egui::Event::Ime(egui::ImeEvent::Preedit(text)) => {
+                egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => {
                     if text.is_empty() {
                         preedit_update = TerminalPreeditUpdate::Clear;
                     } else {
                         preedit_update = TerminalPreeditUpdate::Set(text.clone());
                     }
                 }
-                egui::Event::Ime(egui::ImeEvent::Commit(_))
-                | egui::Event::Ime(egui::ImeEvent::Disabled) => {
+                egui::Event::Ime(egui::ImeEvent::Commit(_)) => {
                     preedit_update = TerminalPreeditUpdate::Clear;
                 }
                 _ => {}
@@ -640,8 +638,8 @@ pub(crate) fn find_bar_step(events: &[egui::Event], composing: bool) -> (Option<
     let mut step = None;
     for event in events {
         match event {
-            egui::Event::Ime(egui::ImeEvent::Preedit(text)) => composing = !text.is_empty(),
-            egui::Event::Ime(egui::ImeEvent::Commit(_) | egui::ImeEvent::Disabled) => {
+            egui::Event::Ime(egui::ImeEvent::Preedit { text, .. }) => composing = !text.is_empty(),
+            egui::Event::Ime(egui::ImeEvent::Commit(_)) => {
                 composing = false;
             }
             egui::Event::Key {
@@ -779,7 +777,7 @@ pub(crate) fn terminal_control_key(key: egui::Key) -> Option<&'static str> {
 /// diff pane place their gutters with it.
 pub(crate) fn monospace_cell_size(ui: &egui::Ui) -> egui::Vec2 {
     let font = FontId::monospace(MONOSPACE_SIZE);
-    ui.fonts(|fonts| egui::vec2(fonts.glyph_width(&font, ' '), fonts.row_height(&font)))
+    ui.fonts_mut(|fonts| egui::vec2(fonts.glyph_width(&font, ' '), fonts.row_height(&font)))
 }
 
 pub(crate) fn terminal_grid_size(viewport: egui::Vec2, cell: egui::Vec2) -> (u16, u16) {
@@ -872,13 +870,16 @@ pub(crate) fn terminal_rows(
             // outer ui, is what stops a capture from before a resize from
             // painting past the frame. The tolerance is sub-pixel slack for
             // float noise between the two measurements: half a pixel, about a
-            // sixteenth of a cell.
+            // sixteenth of a cell. egui 0.37 rounds the scroll offset to a whole
+            // pixel while the clip keeps the panel's edge, so the same
+            // sub-pixel slack applies vertically; it does not reach the spare
+            // row, which is a whole cell past the edge (change 295).
             if let Some(rect) = rect {
                 let clip = ui.clip_rect();
                 let inner_right = ui.min_rect().left() + pane_width;
                 let slack = 0.5;
-                if rect.min.y >= clip.min.y
-                    && rect.max.y <= clip.max.y
+                if rect.min.y >= clip.min.y - slack
+                    && rect.max.y <= clip.max.y + slack
                     && rect.min.x >= clip.min.x
                     && rect.max.x <= inner_right + slack
                 {
@@ -1098,7 +1099,7 @@ impl TerminalPaneRenderCache {
             }
 
             if !missing_indices.is_empty() {
-                let shaped: Vec<Arc<egui::Galley>> = egui_ctx.fonts(|fonts| {
+                let shaped: Vec<Arc<egui::Galley>> = egui_ctx.fonts_mut(|fonts| {
                     missing_indices
                         .iter()
                         .map(|&(_, row_idx, _)| fonts.layout_job(lines[row_idx].clone()))
@@ -1342,7 +1343,7 @@ pub(crate) fn terminal_plain_text(lines: &[LayoutJob]) -> String {
 /// character occupies precisely two columns.
 pub(crate) fn terminal_cell_size(ui: &egui::Ui) -> egui::Vec2 {
     let font = FontId::monospace(15.0);
-    ui.fonts(|fonts| egui::vec2(fonts.glyph_width(&font, ' '), fonts.row_height(&font)))
+    ui.fonts_mut(|fonts| egui::vec2(fonts.glyph_width(&font, ' '), fonts.row_height(&font)))
 }
 
 pub(crate) fn draw_terminal_cursor(ui: &egui::Ui, caret: egui::Rect, palette: &Palette) {
@@ -1350,7 +1351,7 @@ pub(crate) fn draw_terminal_cursor(ui: &egui::Ui, caret: egui::Rect, palette: &P
     ui.painter().rect_stroke(
         caret,
         0.0,
-        egui::Stroke::new(1.5, stroke_color),
+        egui::Stroke::new(1.5_f32, stroke_color),
         egui::StrokeKind::Inside,
     );
 }
@@ -1386,7 +1387,7 @@ pub(crate) fn draw_terminal_preedit(
             egui::pos2(pos.x, underline_y),
             egui::pos2(pos.x + width, underline_y),
         ],
-        egui::Stroke::new(2.0, palette.accent_text),
+        egui::Stroke::new(2.0_f32, palette.accent_text),
     );
 }
 
@@ -1829,7 +1830,7 @@ fn terminal_row_links_at_pointer(
             ui.painter().hline(
                 span.x_range(),
                 span.bottom() - 1.0,
-                egui::Stroke::new(1.0, overlay.palette.accent_text),
+                egui::Stroke::new(1.0_f32, overlay.palette.accent_text),
             );
             under_pointer = Some(target.kind.clone());
         }

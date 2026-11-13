@@ -63,7 +63,7 @@ alternatives; commit `plan.md` before editing source files.
   Tool-output match patterns (`can't find session`, `do you trust this folder`)
   stay as emitted. Reach users via `tr("…")` or `tf!("…{name}", name = value)` —
   never `format!` — with rows in every table in `src/i18n_tables.rs`.
-- `eframe`/`egui` 0.31 immediate-mode GUI on macOS.
+- `eframe`/`egui` 0.37 immediate-mode GUI on macOS.
 - Persisted agent kind `"gemini"` launches **Antigravity's `agy`** binary; UI
   labels and `README.md` say "Antigravity".
 

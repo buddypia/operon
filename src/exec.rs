@@ -153,10 +153,7 @@ pub(crate) fn read_stream_limited(
     let mut bytes = Vec::with_capacity(limit.min(64 * 1024));
     let mut buffer = [0_u8; 16 * 1024];
     let mut truncated = false;
-    loop {
-        let Ok(count) = reader.read(&mut buffer) else {
-            break;
-        };
+    while let Ok(count) = reader.read(&mut buffer) {
         if count == 0 {
             break;
         }

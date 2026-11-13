@@ -12,9 +12,9 @@ restore. The axis that matters most is the one a non-drawing codebase lacks:
 
 ## The draw path runs sixty times a second
 
-`eframe`/`egui` 0.31 rebuilds the whole UI each frame. Anything inside
-`OperonApp::update`, the drawing run in `src/app/screens.rs`, or the widgets they
-call in `src/ui/` runs at frame rate, so
+`eframe`/`egui` 0.37 rebuilds the whole UI each frame. Anything inside
+`OperonApp::logic` and `OperonApp::ui`, the drawing run in
+`src/app/screens.rs`, or the widgets they call in `src/ui/` runs at frame rate, so
 work that is merely wasteful elsewhere is a stutter here:
 
 - No `Command::new`, no `fs::read`, no `std::fs` metadata call, and no directory
@@ -78,8 +78,8 @@ Only when the borrow checker was fought rather than satisfied:
 
 ## Before writing egui, rfd, or directories API calls
 
-Check the pinned version's docs with context7 first. `eframe`/`egui` 0.31,
-`rfd` 0.15, and `directories` 6.0 all changed APIs across recent minor
+Check the pinned version's docs with context7 first. `eframe`/`egui` 0.37,
+`rfd` 0.18, and `directories` 6.0 all changed APIs across recent minor
 releases; write from the docs, not from recall.
 
 ---

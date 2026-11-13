@@ -236,7 +236,7 @@ pub(crate) fn diff_pane_with_actions(
                         let open = !collapsed.contains(&file.path);
                         let response = ui.interact(
                             rect,
-                            ui.id().with(("diff-file-row", &file.path)),
+                            ui.scope_id().with(("diff-file-row", &file.path)),
                             egui::Sense::click(),
                         );
                         ui.painter().rect_filled(
@@ -255,7 +255,7 @@ pub(crate) fn diff_pane_with_actions(
                         ui.painter().hline(
                             rect.x_range(),
                             rect.top(),
-                            egui::Stroke::new(1.0, palette.border_subtle),
+                            egui::Stroke::new(1.0_f32, palette.border_subtle),
                         );
                         let mut row = ui.new_child(
                             egui::UiBuilder::new()
@@ -317,11 +317,11 @@ pub(crate) fn diff_pane_with_actions(
                             ui.painter().hline(
                                 rect.x_range(),
                                 rect.top(),
-                                egui::Stroke::new(1.0, palette.border_subtle),
+                                egui::Stroke::new(1.0_f32, palette.border_subtle),
                             );
                         }
                         let job = diff_line_layout(line, cell.x, palette);
-                        let galley = ui.fonts(|fonts| fonts.layout_job(job));
+                        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                         ui.painter()
                             .galley(rect.min + egui::vec2(8.0, 0.0), galley, palette.text);
                         if line.kind == DiffLineKind::Hunk && !path.is_empty() {
@@ -338,7 +338,7 @@ pub(crate) fn diff_pane_with_actions(
                                         RichText::new(tr("破棄")).size(11.5).color(palette.danger),
                                     )
                                     .fill(palette.raised)
-                                    .stroke(egui::Stroke::new(1.0, palette.border_subtle)),
+                                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
                                 )
                                 .on_hover_text(tr("このハンクの変更を破棄します"))
                                 .clicked()
@@ -356,7 +356,7 @@ pub(crate) fn diff_pane_with_actions(
                                             .color(palette.accent),
                                     )
                                     .fill(palette.raised)
-                                    .stroke(egui::Stroke::new(1.0, palette.border_subtle)),
+                                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
                                 )
                                 .on_hover_text(tr("このハンクをステージします"))
                                 .clicked()
@@ -373,7 +373,7 @@ pub(crate) fn diff_pane_with_actions(
                         if let Some(number) = line.new_number {
                             let response = ui.interact(
                                 rect,
-                                ui.id().with(("diff-line", path, number)),
+                                ui.scope_id().with(("diff-line", path, number)),
                                 egui::Sense::click(),
                             );
                             if response.hovered()
