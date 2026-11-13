@@ -22,7 +22,7 @@ resume: "Have empirical-verifier try to falsify R1-R6 on the branch head, fix an
 
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked terminal: 120 passed; terminal_293_: 9 passed"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7981 and largest_module_lines 9918 at diagnose as on main"
   release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/files.rs, and src/i18n_tables.rs change; package from main after landing"
   guards-verified-by-mutation: "machine passed 9 of 9 caught: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py"
 

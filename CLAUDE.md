@@ -24,7 +24,7 @@ alternatives; commit `plan.md` before editing source files.
     `src/app/session_order.rs` keeps the column and the tabs one list, and pins.
     `src/app/launch_menu.rs` holds the tab strip's + menu and its quick launch.
     `src/app/terminal_output.rs` lays terminal text out off the frame.
-    `src/app/terminal_paths.rs` resolves terminal paths and draws their menu.
+    `src/app/terminal_paths.rs` opens terminal paths.
     `src/app/waiting_reply.rs` draws the 要対応 rows and replies.
     `src/app/working_time.rs` times agent turns.
   - `src/tests.rs` — inline `#[cfg(test)]` suite; no other module has tests.
