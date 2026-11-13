@@ -1,5 +1,5 @@
 # The evidence for change 293. Format: docs/sdlc/templates/verification.yaml.
-digest: "506601657b758980"
+digest: "92f5f133b6dffd2e"
 
 obligations:
   - R1 empirical-test :: cargo test --locked terminal_293_cmd_and_option_click_open_a_path_inside_operon
