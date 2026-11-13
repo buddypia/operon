@@ -1,0 +1,17 @@
+# The evidence for change 293. Format: docs/sdlc/templates/verification.yaml.
+digest: "92f5f133b6dffd2e"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked terminal_293_cmd_and_option_click_open_a_path_inside_operon
+  - R2 empirical-test :: cargo test --locked terminal_293_path_menu_lists_four_choices_in_order
+  - I2 empirical-test :: cargo test --locked terminal_293_secondary_click_opens_the_menu_at_the_pointer
+  - R3 empirical-test :: cargo test --locked terminal_293_menu_open_in_operon_opens_a_document
+  - R4 empirical-test :: cargo test --locked terminal_293_bare_name_resolves_to_the_only_file_with_that_name
+  - I3 empirical-test :: cargo test --locked terminal_293_bare_name_with_two_matches_stays_unresolved
+  - I5 empirical-test :: cargo test --locked terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved
+  - R5 empirical-test :: cargo test --locked terminal_293_probe_requests_the_scan_a_bare_name_needs
+  - I4 empirical-test :: cargo test --locked terminal_293_bare_name_missed_before_the_scan_resolves_after_it
+  - R6 empirical-test :: cargo test --locked terminal_293_menu_closes_on_escape_or_outside_click
+  - F1 empirical-test :: cargo test --locked terminal_293_bare_name_at_the_root_does_not_request_a_scan
+  - F2 empirical-test :: cargo test --locked terminal_293_truncated_scan_does_not_prove_a_name_unique
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py

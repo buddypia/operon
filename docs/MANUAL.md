@@ -239,9 +239,11 @@ Releasing in the middle or on the panel's own edge, or pressing Escape, cancels.
 An edge the window is too small to show the panel on is outlined in amber and
 refuses it; widen the window to use it.
 
-Paths in terminal output are links: hold **⌥** and click to open the file in the
-built-in editor at that line, or **⌘** and click to open it externally. Only
-paths that resolve to a file inside the session's own folder are offered.
+Paths in terminal output are links: hold **⌘** or **⌥** and click to open the
+file in the built-in editor at that line. Right-click one for a menu: Open in
+Operon, Open in default app, Show in Finder, Copy path. Only paths that resolve
+to a file inside the session's own folder are offered; a bare file name such as
+`slides.pptx` counts when exactly one file in that folder has that name.
 Addresses printed by a dev server open in the browser the same way. A plain
 click only focuses the pane, so the agent never loses the keyboard by accident.
 
@@ -570,7 +572,7 @@ Knowledge is stored in Operon's data folder on this Mac
 | ⇧⌘T | Reopen closed tab | Newest first; a removed session's tab is skipped |
 | ⇧⌘] / ⇧⌘[ | Next / previous tab | Wraps round within the focused pane |
 | ⌃Tab / ⌃⇧Tab | Next / previous tab | |
-| ⌥ + click / ⌘ + click | Open a path or URL in terminal output | In the editor / externally |
+| ⌘ + click / ⌥ + click | Open a path or URL in terminal output | Paths in the editor, URLs in the browser; right-click a path for more |
 
 ⌘↩, Esc, ⌘S, ⌃Tab, ⌃⇧Tab, and the clicks are fixed; the others can be changed.
 To change a shortcut, open **Settings → Key bindings** and press

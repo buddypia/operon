@@ -84167,3 +84167,295 @@ pub(crate) fn tui_perf_292_f1_stream_folding_baseline_attach_font_key_and_split_
 
     fs::remove_dir_all(&root).ok();
 }
+
+/// Change 293: one project, one session on it (no worktree), selected on the
+/// Sessions page, with the files dist/Operon_LT_10min.pptx and src/lib.rs on disk.
+fn terminal_293_fixture(tag: &str) -> (PathBuf, PathBuf, OperonApp, Project, Uuid) {
+    let root = temporary_directory(tag);
+    let project_path = root.join("project");
+    fs::create_dir_all(project_path.join("dist")).unwrap();
+    fs::create_dir_all(project_path.join("src")).unwrap();
+    fs::write(project_path.join("dist/Operon_LT_10min.pptx"), b"pk").unwrap();
+    fs::write(project_path.join("src/lib.rs"), "fn main() {}\n").unwrap();
+    let project_path = project_path.canonicalize().unwrap();
+    let mut app = test_app(root.join("store.json"));
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "proj".into(),
+        path: project_path.clone(),
+        added_at: 0,
+    };
+    app.store.projects.push(project.clone());
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project.id;
+    session.worktree_path = None;
+    app.store.sessions.push(session.clone());
+    app.selected_session = Some(session.id);
+    app.page = Page::Sessions;
+    (root, project_path, app, project, session.id)
+}
+
+#[test]
+pub(crate) fn terminal_293_cmd_and_option_click_open_a_path_inside_operon() {
+    let (root, project_path, mut app, _project, _session) = terminal_293_fixture("t293-cmd-click");
+    let target = TerminalTargetKind::Path {
+        path: "src/lib.rs".into(),
+        line: None,
+    };
+    let plain = egui::Modifiers::NONE;
+    app.open_clicked_terminal_target(&plain, target.clone());
+    assert_eq!(
+        app.active_document, None,
+        "a plain click only focuses the pane"
+    );
+
+    for modifiers in [egui::Modifiers::COMMAND, egui::Modifiers::ALT] {
+        app.active_document = None;
+        app.notice = None;
+        app.open_clicked_terminal_target(&modifiers, target.clone());
+        let opened = app
+            .active_document
+            .as_ref()
+            .map(|document| document.path.clone());
+        assert_eq!(
+            opened,
+            Some(PathBuf::from("src/lib.rs")),
+            "{modifiers:?}-click must open the file as a tab inside Operon"
+        );
+        assert_ne!(
+            app.notice,
+            Some(format!("{}…", tr("ファイルを開く"))),
+            "{modifiers:?}-click must not hand the file to the default app"
+        );
+    }
+    let _ = project_path;
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_path_menu_lists_four_choices_in_order() {
+    assert_eq!(
+        TERMINAL_PATH_MENU,
+        [
+            TerminalPathMenuChoice::OpenInOperon,
+            TerminalPathMenuChoice::OpenWithDefaultApp,
+            TerminalPathMenuChoice::RevealInFinder,
+            TerminalPathMenuChoice::CopyPath,
+        ]
+    );
+    let labels: Vec<&str> = TERMINAL_PATH_MENU
+        .iter()
+        .map(|choice| choice.label())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            tr("Operon で開く"),
+            tr("既定のアプリで開く"),
+            tr("Finder で表示"),
+            tr("パスをコピー"),
+        ]
+    );
+}
+
+#[test]
+pub(crate) fn terminal_293_secondary_click_opens_the_menu_at_the_pointer() {
+    let (root, project_path, mut app, _project, session_id) = terminal_293_fixture("t293-menu-at");
+    let pointer = Some(egui::pos2(120.0, 340.0));
+    app.open_terminal_path_menu(
+        session_id,
+        &TerminalTargetKind::Path {
+            path: "src/lib.rs".into(),
+            line: None,
+        },
+        pointer,
+    );
+    assert_eq!(
+        app.terminal_path_menu,
+        Some((session_id, project_path.join("src/lib.rs")))
+    );
+    assert_eq!(app.terminal_path_menu_at, pointer);
+
+    // A URL has no path menu.
+    app.terminal_path_menu = None;
+    app.terminal_path_menu_at = None;
+    app.open_terminal_path_menu(
+        session_id,
+        &TerminalTargetKind::Url("https://example.com".into()),
+        pointer,
+    );
+    assert_eq!(app.terminal_path_menu, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_menu_open_in_operon_opens_a_document() {
+    let (root, project_path, mut app, _project, _session) = terminal_293_fixture("t293-menu-open");
+    let ctx = egui::Context::default();
+    app.apply_terminal_path_menu_choice(
+        &ctx,
+        TerminalPathMenuChoice::OpenInOperon,
+        project_path.join("src/lib.rs"),
+    );
+    assert_eq!(
+        app.active_document
+            .as_ref()
+            .map(|document| document.path.clone()),
+        Some(PathBuf::from("src/lib.rs"))
+    );
+
+    app.apply_terminal_path_menu_choice(
+        &ctx,
+        TerminalPathMenuChoice::CopyPath,
+        project_path.join("src/lib.rs"),
+    );
+    assert_eq!(app.notice, Some(tr("パスをコピーしました。").into()));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_resolves_to_the_only_file_with_that_name() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-bare-one");
+    app.file_cache
+        .insert(project.id, list_files(&project_path, FILE_TREE_LIMIT));
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths
+            .get("Operon_LT_10min.pptx")
+            .cloned()
+            .flatten(),
+        Some(project_path.join("dist/Operon_LT_10min.pptx"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_with_two_matches_stays_unresolved() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-bare-two");
+    fs::create_dir_all(project_path.join("docs")).unwrap();
+    fs::write(project_path.join("docs/Operon_LT_10min.pptx"), b"pk").unwrap();
+    app.file_cache
+        .insert(project.id, list_files(&project_path, FILE_TREE_LIMIT));
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("Operon_LT_10min.pptx").cloned(),
+        Some(None),
+        "two files of that name: neither is guessed"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_probe_requests_the_scan_a_bare_name_needs() {
+    let (root, _project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-scan-request");
+    assert!(!app.file_cache.contains_key(&project.id));
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::Files(project.id)),
+        "a bare name that missed with no scan must ask for one"
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::Files(project.id),
+        Duration::from_secs(10),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_missed_before_the_scan_resolves_after_it() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-scan-lands");
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("Operon_LT_10min.pptx").cloned(),
+        Some(None)
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::Files(project.id),
+        Duration::from_secs(10),
+    );
+    assert_eq!(
+        app.resolved_paths.get("Operon_LT_10min.pptx"),
+        None,
+        "the scan landing must forget the miss so the next hover asks again"
+    );
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths
+            .get("Operon_LT_10min.pptx")
+            .cloned()
+            .flatten(),
+        Some(project_path.join("dist/Operon_LT_10min.pptx"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_menu_closes_on_escape_or_outside_click() {
+    assert!(!terminal_path_menu_closes(false, false, false));
+    assert!(terminal_path_menu_closes(true, false, false));
+    assert!(terminal_path_menu_closes(false, true, false));
+    assert!(terminal_path_menu_closes(false, false, true));
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved() {
+    let (root, project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-bare-symlink");
+    let outside = root.join("outside-notes.md");
+    fs::write(&outside, "# away\n").unwrap();
+    std::os::unix::fs::symlink(&outside, project_path.join("dist/notes.md")).unwrap();
+    // The scan skips symlinks itself; a stale or foreign scan may not.
+    let mut scan = list_files(&project_path, FILE_TREE_LIMIT);
+    scan.paths.push(PathBuf::from("dist/notes.md"));
+    app.file_cache.insert(project.id, scan);
+    app.unresolved_paths.push("notes.md".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("notes.md").cloned(),
+        Some(None),
+        "a link out of the root is not underlined: the click would refuse it"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Found by the empirical verifier: a bare name that resolves directly at the
+/// root must not start a scan of the whole project.
+#[test]
+pub(crate) fn terminal_293_bare_name_at_the_root_does_not_request_a_scan() {
+    let (root, project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-root-no-scan");
+    fs::write(project_path.join("README.md"), "x").unwrap();
+    app.unresolved_paths.push("README.md".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("README.md").cloned().flatten(),
+        Some(project_path.join("README.md"))
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::Files(project.id)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Found by the empirical verifier: a truncated scan cannot say a name is the
+/// only one of its kind.
+#[test]
+pub(crate) fn terminal_293_truncated_scan_does_not_prove_a_name_unique() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-truncated");
+    let mut scan = list_files(&project_path, FILE_TREE_LIMIT);
+    scan.truncated = true;
+    app.file_cache.insert(project.id, scan);
+    app.unresolved_paths.push("lib.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("lib.rs").cloned(), Some(None));
+    fs::remove_dir_all(&root).ok();
+}
