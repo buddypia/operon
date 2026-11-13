@@ -1,5 +1,5 @@
 # The evidence for change 293. Format: docs/sdlc/templates/verification.yaml.
-digest: "1f6979a8910878b5"
+digest: "723f3df9e3952822"
 
 obligations:
   - R1 empirical-test :: cargo test --locked terminal_293_cmd_and_option_click_open_a_path_inside_operon
@@ -8,6 +8,7 @@ obligations:
   - R3 empirical-test :: cargo test --locked terminal_293_menu_open_in_operon_opens_a_document
   - R4 empirical-test :: cargo test --locked terminal_293_bare_name_resolves_to_the_only_file_with_that_name
   - I3 empirical-test :: cargo test --locked terminal_293_bare_name_with_two_matches_stays_unresolved
+  - I5 empirical-test :: cargo test --locked terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved
   - R5 empirical-test :: cargo test --locked terminal_293_probe_requests_the_scan_a_bare_name_needs
   - I4 empirical-test :: cargo test --locked terminal_293_bare_name_missed_before_the_scan_resolves_after_it
   - R6 empirical-test :: cargo test --locked terminal_293_menu_closes_on_escape_or_outside_click

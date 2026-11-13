@@ -9845,7 +9845,8 @@ impl OperonApp {
         Some((project, root, relative, resolved))
     }
 
-    /// Do what an Option (⌥) click on an openable thing means: opens in the built-in editor.
+    /// Open a target inside Operon: ⌘- or ⌥-click, or the path menu's 「Operon で開く」.
+    /// A URL still goes to the browser.
     pub(crate) fn open_terminal_target(&mut self, kind: TerminalTargetKind) {
         match kind {
             TerminalTargetKind::Url(url) => {

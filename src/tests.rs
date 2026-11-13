@@ -84405,3 +84405,24 @@ pub(crate) fn terminal_293_menu_closes_on_escape_or_outside_click() {
     assert!(terminal_path_menu_closes(false, true, false));
     assert!(terminal_path_menu_closes(false, false, true));
 }
+
+#[test]
+pub(crate) fn terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved() {
+    let (root, project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-bare-symlink");
+    let outside = root.join("outside-notes.md");
+    fs::write(&outside, "# away\n").unwrap();
+    std::os::unix::fs::symlink(&outside, project_path.join("dist/notes.md")).unwrap();
+    // The scan skips symlinks itself; a stale or foreign scan may not.
+    let mut scan = list_files(&project_path, FILE_TREE_LIMIT);
+    scan.paths.push(PathBuf::from("dist/notes.md"));
+    app.file_cache.insert(project.id, scan);
+    app.unresolved_paths.push("notes.md".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("notes.md").cloned(),
+        Some(None),
+        "a link out of the root is not underlined: the click would refuse it"
+    );
+    fs::remove_dir_all(&root).ok();
+}

@@ -66,6 +66,12 @@ MUTATIONS = {
         "                    self.file_cache.insert(project_id, scan);\n                    self.forget_terminal_path_misses();",
         "                    self.file_cache.insert(project_id, scan);",
     ),
+    # R4: a symlink out of the root is underlined although the click refuses it.
+    "bare-name-follows-a-link-out-of-the-root": (
+        PATHS,
+        ".filter(|candidate| candidate.starts_with(&root) && candidate.is_file())",
+        ".filter(|candidate| candidate.is_file())",
+    ),
     # R6: Escape does not close the menu.
     "escape-keeps-the-menu-open": (
         PATHS,

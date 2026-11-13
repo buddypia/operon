@@ -66,11 +66,14 @@ pub(crate) fn resolve_terminal_path_with_scan(
     let relative = unique_scanned_file(scan?, path)?;
     let root = worktree.unwrap_or(project_root);
     // The scan may be older than the file system; only a file still there
-    // counts. Canonical, like every other resolution, so one file is one tab.
+    // counts. Canonical, like every other resolution, so one file is one tab,
+    // and inside the root: a symlink out of it is not underlined, because the
+    // click would refuse it.
+    let root = root.canonicalize().ok()?;
     root.join(relative)
         .canonicalize()
         .ok()
-        .filter(|candidate| candidate.is_file())
+        .filter(|candidate| candidate.starts_with(&root) && candidate.is_file())
 }
 
 impl OperonApp {
