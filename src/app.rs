@@ -7604,7 +7604,7 @@ impl OperonApp {
             .show(ctx, |ui| {
                 egui::Frame::default()
                     .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
                     .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
                     .inner_margin(egui::Margin::symmetric(12, 8))
                     .shadow(ctx.style().visuals.popup_shadow)
@@ -8459,7 +8459,7 @@ impl OperonApp {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0, palette.border))
+                    .stroke(egui::Stroke::new(1.0_f32, palette.border))
                     .corner_radius(egui::CornerRadius::same(RADIUS_WINDOW))
                     .inner_margin(egui::Margin::same(18))
                     .shadow(ui.style().visuals.popup_shadow)
@@ -8569,7 +8569,7 @@ impl OperonApp {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0, palette.border))
+                    .stroke(egui::Stroke::new(1.0_f32, palette.border))
                     .corner_radius(egui::CornerRadius::same(RADIUS_WINDOW))
                     .inner_margin(egui::Margin::same(18))
                     .shadow(ui.style().visuals.popup_shadow)

@@ -1134,7 +1134,7 @@ impl OperonApp {
                 rect,
                 6.0,
                 palette.inset,
-                egui::Stroke::new(1.0, palette.border_subtle),
+                egui::Stroke::new(1.0_f32, palette.border_subtle),
                 egui::StrokeKind::Inside,
             );
             if error.is_none() {

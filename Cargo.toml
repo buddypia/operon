@@ -2,11 +2,10 @@
 name = "operon"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.100.0"
 description = "A local-first macOS cockpit for AI coding agents"
 license = "MIT"
 repository = "https://github.com/buddypia/operon"
-homepage = "https://github.com/buddypia/operon"
 readme = "README.md"
 keywords = ["macos", "ai", "coding-agent", "tmux", "gui"]
 categories = ["development-tools", "command-line-utilities", "gui"]

@@ -1,4 +1,3 @@
-use crate::prelude::*;
 use crate::*;
 use std::{str::FromStr, sync::OnceLock};
 use syntect::{
@@ -148,7 +147,7 @@ pub(crate) fn viewer_rows(text: &str) -> ViewerRows {
         let Ok(start) = u32::try_from(start) else {
             return false;
         };
-        if rows.starts.len() % VIEWER_CHUNK_ROWS == 0 {
+        if rows.starts.len().is_multiple_of(VIEWER_CHUNK_ROWS) {
             rows.chunk_lines.push(line);
         }
         rows.starts.push(start);
@@ -448,7 +447,7 @@ pub(crate) fn syntax_layout(text: &str, language: EditorLanguage, palette: &Pale
                     color: colour,
                     italics: style.font_style.contains(FontStyle::ITALIC),
                     underline: if style.font_style.contains(FontStyle::UNDERLINE) {
-                        egui::Stroke::new(1.0, colour)
+                        egui::Stroke::new(1.0_f32, colour)
                     } else {
                         egui::Stroke::NONE
                     },

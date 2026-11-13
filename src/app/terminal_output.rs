@@ -383,10 +383,7 @@ impl TerminalStreamManager {
             let mut buf = [0_u8; 8192];
             let mut carry = ControlLineState::default();
             let mut attached = false;
-            loop {
-                let Ok(count) = stdout.read(&mut buf) else {
-                    break;
-                };
+            while let Ok(count) = stdout.read(&mut buf) {
                 if count == 0 {
                     break;
                 }

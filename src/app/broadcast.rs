@@ -109,7 +109,7 @@ impl OperonApp {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0, palette.border))
+                    .stroke(egui::Stroke::new(1.0_f32, palette.border))
                     .corner_radius(egui::CornerRadius::same(RADIUS_WINDOW))
                     .inner_margin(egui::Margin::same(SPACE_LG as i8))
                     .shadow(ui.style().visuals.popup_shadow)

@@ -7660,7 +7660,7 @@ pub(crate) fn keyboard_focus_on_a_custom_row_is_a_strong_outline_or_nothing() {
         let palette = theme.palette();
         assert_eq!(
             focus_stroke(true, palette),
-            Some(egui::Stroke::new(1.0, palette.border_strong)),
+            Some(egui::Stroke::new(1.0_f32, palette.border_strong)),
             "{}",
             theme.label(),
         );
@@ -7717,7 +7717,7 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
                     .iter()
                     .filter_map(|clipped| match &clipped.shape {
                         egui::Shape::Rect(rect)
-                            if rect.stroke == egui::Stroke::new(1.0, palette.border_strong) =>
+                            if rect.stroke == egui::Stroke::new(1.0_f32, palette.border_strong) =>
                         {
                             Some(rect.corner_radius)
                         }
@@ -7751,7 +7751,7 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
             );
             assert_eq!(
                 last_outline_by_pass[1],
-                Some(egui::Stroke::new(1.0, palette.border_strong)),
+                Some(egui::Stroke::new(1.0_f32, palette.border_strong)),
                 "{name} in {} must paint the ring last when focused",
                 theme.label(),
             );
@@ -7821,7 +7821,7 @@ pub(crate) fn progress_footers_use_secondary_button_affordance() {
         let palette = theme.palette();
         let context = egui::Context::default();
         context.set_visuals(theme.visuals());
-        let stroke = egui::Stroke::new(1.0, palette.border_subtle);
+        let stroke = egui::Stroke::new(1.0_f32, palette.border_subtle);
         let cases: [(&str, fn(&mut egui::Ui, &Palette)); 2] = [
             ("launch", |ui, p| {
                 let _ = launch_progress_footer(ui, p, 5);
@@ -16945,7 +16945,7 @@ fn find_word_boundary_match(haystack: &str, needle_ascii_lower: &str) -> Option<
                 haystack[..i]
                     .chars()
                     .next_back()
-                    .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             };
 
             let right_bounded = if i + needle_len == haystack_bytes.len() {
@@ -16954,7 +16954,7 @@ fn find_word_boundary_match(haystack: &str, needle_ascii_lower: &str) -> Option<
                 haystack[i + needle_len..]
                     .chars()
                     .next()
-                    .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             };
 
             if left_bounded && right_bounded {
@@ -28637,7 +28637,7 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     assert_eq!(lines.len(), 61);
     let cursor = TerminalCursor {
         x: 2,
@@ -28666,12 +28666,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 matches: &[],
                 current: None,
                 scroll_to: Some(25),
-                palette: &palette,
+                palette: palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette: palette,
             };
             let visible = ui.clip_rect();
             outcomes.push(Paned {
@@ -28697,12 +28697,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 matches: &[],
                 current: None,
                 scroll_to: Some(10),
-                palette: &palette,
+                palette: palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette: palette,
             };
             let visible = ui.clip_rect();
             outcomes.push(Paned {
@@ -28753,7 +28753,7 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     let cursor = TerminalCursor {
         x: 2,
         y: 20,
@@ -28774,12 +28774,12 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
                     matches: &[],
                     current: None,
                     scroll_to: Some(scroll_to),
-                    palette: &palette,
+                    palette: palette,
                 };
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
                     unresolved: &mut Vec::new(),
-                    palette: &palette,
+                    palette: palette,
                 };
                 outcomes.push(Paned {
                     caret: terminal_rows(
@@ -28825,7 +28825,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     // A real screen: headless defaults give the panel a placeholder width of
     // 10_000px, and 400 columns then still fit inside the pane.
     let input = egui::RawInput {
@@ -28848,7 +28848,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
                     unresolved: &mut Vec::new(),
-                    palette: &palette,
+                    palette: palette,
                 };
                 let search = TerminalSearchOverlay {
                     matches: &[],
@@ -28857,7 +28857,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
                     // probe's point here is the horizontal bound, not the
                     // vertical one.
                     scroll_to: Some(18),
-                    palette: &palette,
+                    palette: palette,
                 };
                 let caret = terminal_rows(
                     ui,
@@ -28901,7 +28901,7 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     // A caret in the top grid rows (y=2 -> content row 60-40+2=23) against a
     // jump to the very bottom: the served band's top clamps to
     // total_rows - 36 = 25 rows — past the caret — which is also where egui's
@@ -28919,12 +28919,12 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
                 matches: &[],
                 current: None,
                 scroll_to: Some(55),
-                palette: &palette,
+                palette: palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette: palette,
             };
             let caret = terminal_rows(
                 ui,
@@ -34510,7 +34510,7 @@ fn rust_function_body(name: &str) -> Option<String> {
             let close = format!("{}}}", " ".repeat(indent));
             let from = source.find(line).unwrap();
             let body = &source[from..];
-            let to = body.find(&format!("\n{close}")).map_or(body.len(), |at| at);
+            let to = body.find(&format!("\n{close}")).unwrap_or(body.len());
             return Some(body[..to].to_owned());
         }
     }
@@ -52984,47 +52984,80 @@ pub(crate) fn the_prune_workflow_runs_the_script_on_every_push_to_main() {
 }
 
 #[test]
-/// Cargo.toml must declare `rust-version` under `[package]` matching the CI toolchain
-/// pinned in `.github/workflows/ci.yml`.
+/// Every place that names the Rust toolchain names the same version (change 295).
 ///
-/// Without this manifest key, `cargo update` resolves packages that require newer
-/// rustc versions (e.g. uuid 1.27.0 requiring Rust 1.89.0), which breaks the build
-/// on the project's pinned toolchain (1.88.0).
-pub(crate) fn cargo_manifest_declares_msrv_matching_ci() {
+/// `rust-toolchain.toml` decides what a local `cargo` runs, `Cargo.toml`'s
+/// `rust-version` decides what `cargo update` may resolve (change 141: without
+/// it, uuid 1.27.0 needed a compiler newer than the pin), and every
+/// `toolchain:` line under `.github/workflows/` decides what CI runs. The test
+/// this replaces read only `ci.yml` and the manifest, so a bump that missed
+/// `harness.yml`, `scheduled-scan.yml` or `rust-toolchain.toml` passed — and
+/// left CI and a local build on two compilers. `@stable` jobs name no
+/// `toolchain:` line and are not pins.
+pub(crate) fn every_toolchain_pin_names_one_version() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml should exist");
-    let ci_yml = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect(".github/workflows/ci.yml should exist");
+    let values_of = |text: &str, key: &str, separator: char| -> Vec<String> {
+        text.lines()
+            .filter_map(|line| {
+                let (name, value) = line.trim().split_once(separator)?;
+                (name.trim() == key).then(|| value.trim().trim_matches('"').to_owned())
+            })
+            .collect()
+    };
+    let read = |relative: &str| {
+        fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("{relative}: {error}"))
+    };
 
-    let manifest_msrv = cargo_toml
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("rust-version") {
-                let (_, val) = trimmed.split_once('=')?;
-                Some(val.trim().trim_matches('"').to_string())
-            } else {
-                None
-            }
-        })
-        .expect("Cargo.toml must declare rust-version under [package]");
+    let mut pins: Vec<(String, String)> = Vec::new();
+    for version in values_of(&read("rust-toolchain.toml"), "channel", '=') {
+        pins.push(("rust-toolchain.toml channel".to_owned(), version));
+    }
+    for version in values_of(&read("Cargo.toml"), "rust-version", '=') {
+        pins.push(("Cargo.toml rust-version".to_owned(), version));
+    }
+    let mut workflows = fs::read_dir(root.join(".github/workflows"))
+        .expect(".github/workflows should exist")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|extension| extension == "yml"))
+        .collect::<Vec<_>>();
+    workflows.sort();
+    for path in workflows {
+        let text = fs::read_to_string(&path).expect("a workflow file should be readable");
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        for version in values_of(&text, "toolchain", ':') {
+            pins.push((format!(".github/workflows/{name} toolchain"), version));
+        }
+    }
 
-    let ci_toolchain = ci_yml
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("toolchain:") {
-                let (_, val) = trimmed.split_once(':')?;
-                Some(val.trim().to_string())
-            } else {
-                None
-            }
-        })
-        .expect("ci.yml must declare a toolchain");
-
-    assert_eq!(
-        manifest_msrv, ci_toolchain,
-        "Cargo.toml rust-version ({manifest_msrv}) does not match ci.yml toolchain ({ci_toolchain})"
+    let sources = pins
+        .iter()
+        .map(|(source, _)| source.as_str())
+        .collect::<Vec<_>>();
+    for required in ["rust-toolchain.toml channel", "Cargo.toml rust-version"] {
+        assert!(
+            sources.contains(&required),
+            "{required} is missing: {pins:?}"
+        );
+    }
+    assert!(
+        sources
+            .iter()
+            .any(|source| source.ends_with("/ci.yml toolchain")),
+        "ci.yml no longer pins a toolchain: {pins:?}"
+    );
+    let (first_source, first) = &pins[0];
+    let disagreeing = pins
+        .iter()
+        .filter(|(_, version)| version != first)
+        .collect::<Vec<_>>();
+    assert!(
+        disagreeing.is_empty(),
+        "toolchain pins disagree with {first_source} = {first}: {disagreeing:?}"
     );
 }
 
@@ -58316,7 +58349,7 @@ pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
         before.iter().any(|text| text == tr("グループ")),
         "{before:?}"
     );
-    assert!(!before.iter().any(|text| *text == entry.body));
+    assert!(!before.contains(&entry.body));
     // Chosen on the map: a reference, like opening the row.
     app.open_knowledge_entry(project.id, entry.id);
     assert_eq!(app.knowledge.open_entry, Some((project.id, entry.id)));
@@ -58324,14 +58357,11 @@ pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
         .background_tasks
         .contains(&BackgroundKey::KnowledgeEdit(project.id)));
     let on_map = knowledge_tab_texts(&mut app, &project);
-    assert!(on_map.iter().any(|text| *text == entry.body), "{on_map:?}");
+    assert!(on_map.contains(&entry.body), "{on_map:?}");
     // The list shows the same entry open.
     app.knowledge.layout_mode = KnowledgeLayoutMode::List;
     let in_list = knowledge_tab_texts(&mut app, &project);
-    assert!(
-        in_list.iter().any(|text| *text == entry.body),
-        "{in_list:?}"
-    );
+    assert!(in_list.contains(&entry.body), "{in_list:?}");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -60098,7 +60128,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
                         &mut TerminalLinkOverlay {
                             resolved,
                             unresolved: &mut unresolved,
-                            palette: &palette,
+                            palette: palette,
                         },
                     );
                 });
@@ -64966,7 +64996,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
     for index in 0..5 {
         output.push_str(&format!("row {index}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     let cursor = TerminalCursor {
         x: 2,
         y: 4,
@@ -65000,12 +65030,12 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
                         matches: &[],
                         current: None,
                         scroll_to: None,
-                        palette: &palette,
+                        palette: palette,
                     };
                     let mut links = TerminalLinkOverlay {
                         resolved: &HashMap::new(),
                         unresolved: &mut Vec::new(),
-                        palette: &palette,
+                        palette: palette,
                     };
                     carets.push(
                         terminal_rows(
@@ -68414,7 +68444,7 @@ fn store_oracle() -> StoreOracle {
         let generation = loaded
             .notice
             .is_none()
-            .then(|| loaded.store.pending_cancellations.len() as u8);
+            .then_some(loaded.store.pending_cancellations.len() as u8);
         let kept = fs::read_dir(&root)
             .unwrap()
             .filter_map(|entry| fs::read(entry.ok()?.path()).ok())
@@ -78115,7 +78145,7 @@ fn working_278_column_and_tab_hovers_say_how_long() {
             .next()
     });
     assert!(
-        row.iter().any(|text| *text == timed),
+        row.contains(&timed),
         "セッション列の行のホバーが作業時間を言いません: {row:?}"
     );
     // The tab's state mark is painted, not text: it sits left of the tab's
@@ -78139,7 +78169,7 @@ fn working_278_column_and_tab_hovers_say_how_long() {
         })
         .expect("the tab's state mark answers a hover");
     assert!(
-        tab.iter().any(|text| *text == timed),
+        tab.contains(&timed),
         "タブのホバーが作業時間を言いません: {tab:?}"
     );
     fs::remove_dir_all(&root).ok();
@@ -78863,7 +78893,7 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
         "second".to_owned(),
     ] {
         assert!(
-            texts.iter().any(|text| *text == expected),
+            texts.contains(&expected),
             "シートに「{expected}」がありません: {texts:?}"
         );
     }
@@ -82957,7 +82987,7 @@ pub(crate) fn tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_
         assert!(delivered, "coalesced stream must deliver latest TUI burst");
         let captures_after_burst = app.terminal_streams.total_captures();
         assert!(
-            captures_after_burst >= 1 && captures_after_burst < 15,
+            (1..15).contains(&captures_after_burst),
             "expected burst coalescing (< 15 captures for 20 lines), got {captures_after_burst}"
         );
 
@@ -83478,19 +83508,19 @@ pub(crate) fn tui_perf_292_hovering_non_file_token_during_streaming_does_not_rep
                             matches: &matches,
                             current: Some(0),
                             scroll_to: None,
-                            palette: &palette,
+                            palette: palette,
                         };
                         let mut link_overlay = if frame == 0 {
                             TerminalLinkOverlay {
                                 resolved: &empty_resolved,
                                 unresolved: &mut probe_when_uncached,
-                                palette: &palette,
+                                palette: palette,
                             }
                         } else {
                             TerminalLinkOverlay {
                                 resolved: &app.resolved_paths,
                                 unresolved: &mut unresolved,
-                                palette: &palette,
+                                palette: palette,
                             }
                         };
                         let _ = terminal_rows(

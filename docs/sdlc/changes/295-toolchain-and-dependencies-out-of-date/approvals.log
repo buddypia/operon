@@ -3,3 +3,5 @@
 2026-11-13T13:16:51Z auto spec spec.md 14eb060c22e19b5f approve today-claims verified (old toolchain test reads only ci.yml and Cargo.toml; add_to_fonts and the font chain); new crates listed and person-approved
 2026-11-13T13:16:51Z auto screen screen.md 57c2c1c52cf18938 approve no layout change claimed; fixed size and theme, menus, popup and tooltip covered; residual differences go to the person
 2026-11-13T13:16:51Z auto plan plan.md 069af1be5f4f4d11 approve covers every requirement in an order the commit gate admits; each risk has a catcher; the only remaining finding was this ledger's absence
+2026-11-13T13:40:00Z person plan plan.md e1ce2e1f51c59452 approve the person approved the respelt workflow paths, content unchanged ("承認する")
+2026-11-13T13:40:00Z person dependencies plan.md e1ce2e1f51c59452 approve same dependency approval carried to the respelt plan ("承認する")

@@ -255,7 +255,7 @@ pub(crate) fn diff_pane_with_actions(
                         ui.painter().hline(
                             rect.x_range(),
                             rect.top(),
-                            egui::Stroke::new(1.0, palette.border_subtle),
+                            egui::Stroke::new(1.0_f32, palette.border_subtle),
                         );
                         let mut row = ui.new_child(
                             egui::UiBuilder::new()
@@ -317,7 +317,7 @@ pub(crate) fn diff_pane_with_actions(
                             ui.painter().hline(
                                 rect.x_range(),
                                 rect.top(),
-                                egui::Stroke::new(1.0, palette.border_subtle),
+                                egui::Stroke::new(1.0_f32, palette.border_subtle),
                             );
                         }
                         let job = diff_line_layout(line, cell.x, palette);
@@ -338,7 +338,7 @@ pub(crate) fn diff_pane_with_actions(
                                         RichText::new(tr("破棄")).size(11.5).color(palette.danger),
                                     )
                                     .fill(palette.raised)
-                                    .stroke(egui::Stroke::new(1.0, palette.border_subtle)),
+                                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
                                 )
                                 .on_hover_text(tr("このハンクの変更を破棄します"))
                                 .clicked()
@@ -356,7 +356,7 @@ pub(crate) fn diff_pane_with_actions(
                                             .color(palette.accent),
                                     )
                                     .fill(palette.raised)
-                                    .stroke(egui::Stroke::new(1.0, palette.border_subtle)),
+                                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
                                 )
                                 .on_hover_text(tr("このハンクをステージします"))
                                 .clicked()

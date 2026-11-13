@@ -1,0 +1,16 @@
+# The evidence for change 295. Format: docs/sdlc/templates/verification.yaml.
+#
+# R2 has no test of its own: "newest" is a fact about crates.io on one day, not
+# an invariant. Its evidence is that the store and the
+# knowledge base work on the new versions (R2's filter and I3).
+digest: "e63a6185dbbd11ab"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked every_toolchain_pin_names_one_version
+  - R2 empirical-test :: cargo test --locked knowledge_
+  - R3 empirical-test :: cargo test --locked every_icon_resolves_from_the_bundled_icon_font
+  - R4 empirical-test :: cargo test --locked session
+  - I4 empirical-test :: cargo test --locked terminal_
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/295-toolchain-and-dependencies-out-of-date/mutations.py
+  - I2 empirical-test :: cargo test --locked output_limited_command_behaves_as_before
+  - I3 empirical-test :: cargo test --locked saves_the_local_store_atomically_and_loads_it_back

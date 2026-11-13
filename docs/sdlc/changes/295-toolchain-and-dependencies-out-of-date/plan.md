@@ -8,7 +8,7 @@
 
 | File | Change |
 |---|---|
-| `rust-toolchain.toml`, `Cargo.toml`, `.github/workflows/{ci,harness,scheduled-scan}.yml` | toolchain `1.100.0` |
+| `rust-toolchain.toml`, `Cargo.toml`, `.github/workflows/ci.yml`, `.github/workflows/harness.yml`, `.github/workflows/scheduled-scan.yml` | toolchain `1.100.0` |
 | `Cargo.toml`, `Cargo.lock` | eframe 0.37, egui-phosphor 0.14, rfd 0.18, rusqlite 0.42, toml 1; `cargo update` for the rest |
 | `src/main.rs` | Phosphor face registered from `font_bytes()`; window/native options on the 0.37 API |
 | `src/app.rs`, `src/app/*.rs`, `src/ui/*.rs` | egui 0.37 call sites; new clippy findings |

@@ -65,7 +65,7 @@ pub(crate) fn apply_interface_metrics(ctx: &egui::Context) {
 pub(crate) fn card_frame(palette: &Palette) -> egui::Frame {
     egui::Frame::new()
         .fill(palette.raised)
-        .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+        .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
         .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
         .inner_margin(egui::Margin::same(14))
 }
@@ -101,7 +101,7 @@ pub(crate) fn clickable_card<R>(
             let hovered = clickable && ui.response().hovered();
             card_frame(palette)
                 .stroke(egui::Stroke::new(
-                    1.0,
+                    1.0_f32,
                     if hovered {
                         palette.border
                     } else {
@@ -147,7 +147,7 @@ pub(crate) fn clickable_card<R>(
 /// A pure decision so the contrast test can pin the ink and a unit test can
 /// pin both arms: `Some` while focused, `None` otherwise.
 pub(crate) fn focus_stroke(has_focus: bool, palette: &Palette) -> Option<egui::Stroke> {
-    has_focus.then(|| egui::Stroke::new(1.0, palette.border_strong))
+    has_focus.then(|| egui::Stroke::new(1.0_f32, palette.border_strong))
 }
 
 /// The keyboard focus mark on a button: the same 1px ring at `RADIUS_CONTROL`
@@ -213,7 +213,7 @@ pub(crate) fn hairline(ui: &mut egui::Ui, palette: &Palette) {
 pub(crate) fn paint_splitter_h(ui: &egui::Ui, rect: egui::Rect, palette: &Palette, active: bool) {
     let center_y = rect.center().y;
     let line_stroke = egui::Stroke::new(
-        1.0,
+        1.0_f32,
         if active {
             palette.accent
         } else {
@@ -243,7 +243,7 @@ pub(crate) fn paint_splitter_h(ui: &egui::Ui, rect: egui::Rect, palette: &Palett
 pub(crate) fn paint_splitter_v(ui: &egui::Ui, rect: egui::Rect, palette: &Palette, active: bool) {
     let center_x = rect.center().x;
     let line_stroke = egui::Stroke::new(
-        1.0,
+        1.0_f32,
         if active {
             palette.accent
         } else {
@@ -385,7 +385,7 @@ pub(crate) fn status_filter_tile(
             rect,
             egui::CornerRadius::same(RADIUS_CONTROL),
             fill,
-            egui::Stroke::new(1.0, edge),
+            egui::Stroke::new(1.0_f32, edge),
             egui::StrokeKind::Inside,
         );
         // The glyph the sidebar's rows and project counts already use for the
@@ -462,7 +462,7 @@ pub(crate) fn agent_filter_toggle(
                 rect,
                 corner,
                 palette.control_active,
-                egui::Stroke::new(1.0, palette.border),
+                egui::Stroke::new(1.0_f32, palette.border),
                 egui::StrokeKind::Inside,
             );
         } else if response.hovered() {
@@ -620,7 +620,7 @@ pub(crate) fn nav_tab(
                 egui::pos2(rect.left(), rect.bottom() - 1.0),
                 egui::pos2(rect.right(), rect.bottom() - 1.0),
             ],
-            egui::Stroke::new(2.0, palette.accent),
+            egui::Stroke::new(2.0_f32, palette.accent),
         );
     }
     paint_button_focus(ui, &response, palette);
@@ -692,7 +692,7 @@ pub(crate) fn tab_item_with_count(
         let y = rect.bottom() + 2.5;
         ui.painter().line_segment(
             [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            egui::Stroke::new(2.0, palette.accent),
+            egui::Stroke::new(2.0_f32, palette.accent),
         );
     }
     response
@@ -776,12 +776,12 @@ pub(crate) fn verb_button(
             let visuals = ui.visuals_mut();
             visuals.widgets.hovered.weak_bg_fill = wash;
             visuals.widgets.hovered.bg_fill = wash;
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, palette.danger);
-            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, palette.danger);
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, palette.danger);
+            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5_f32, palette.danger);
             visuals.widgets.active.weak_bg_fill = pressed;
             visuals.widgets.active.bg_fill = pressed;
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, palette.danger);
-            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, palette.danger);
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, palette.danger);
+            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5_f32, palette.danger);
         }
         let response = ui.add(
             egui::Button::new(
@@ -897,7 +897,7 @@ pub(crate) fn banner(
 ) {
     card_frame(palette)
         .inner_margin(egui::Margin::symmetric(12, 10))
-        .stroke(egui::Stroke::new(1.0, tone))
+        .stroke(egui::Stroke::new(1.0_f32, tone))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
@@ -987,7 +987,7 @@ pub(crate) fn theme_swatches(ui: &mut egui::Ui, palette: &Palette) {
                 rect,
                 2.0,
                 colour,
-                egui::Stroke::new(1.0, palette.border_subtle),
+                egui::Stroke::new(1.0_f32, palette.border_subtle),
                 egui::StrokeKind::Inside,
             );
             response.on_hover_text(name);

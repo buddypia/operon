@@ -1637,7 +1637,7 @@ impl OperonApp {
         };
         egui::Frame::default()
             .fill(palette.raised)
-            .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+            .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
             .inner_margin(egui::Margin::same(8))
             .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
             .show(ui, |ui| {

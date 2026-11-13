@@ -1,4 +1,3 @@
-use crate::prelude::*;
 use crate::*;
 
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
@@ -1350,7 +1349,7 @@ pub(crate) fn draw_terminal_cursor(ui: &egui::Ui, caret: egui::Rect, palette: &P
     ui.painter().rect_stroke(
         caret,
         0.0,
-        egui::Stroke::new(1.5, stroke_color),
+        egui::Stroke::new(1.5_f32, stroke_color),
         egui::StrokeKind::Inside,
     );
 }
@@ -1386,7 +1385,7 @@ pub(crate) fn draw_terminal_preedit(
             egui::pos2(pos.x, underline_y),
             egui::pos2(pos.x + width, underline_y),
         ],
-        egui::Stroke::new(2.0, palette.accent_text),
+        egui::Stroke::new(2.0_f32, palette.accent_text),
     );
 }
 
@@ -1829,7 +1828,7 @@ fn terminal_row_links_at_pointer(
             ui.painter().hline(
                 span.x_range(),
                 span.bottom() - 1.0,
-                egui::Stroke::new(1.0, overlay.palette.accent_text),
+                egui::Stroke::new(1.0_f32, overlay.palette.accent_text),
             );
             under_pointer = Some(target.kind.clone());
         }

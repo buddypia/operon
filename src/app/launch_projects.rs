@@ -61,7 +61,7 @@ pub(crate) fn launch_project_choices(
         .collect();
     // `Some` sorts above `None`, so used projects lead; a stable sort keeps
     // the store's order between equals.
-    choices.sort_by(|a, b| (b.0, b.1).cmp(&(a.0, a.1)));
+    choices.sort_by_key(|choice| std::cmp::Reverse((choice.0, choice.1)));
     choices
         .into_iter()
         .map(|(_, _, id, name)| (id, name))

@@ -689,7 +689,7 @@ impl OperonApp {
             // thing twice (change 246).
             card_frame(palette)
                 .fill(palette.card)
-                .stroke(egui::Stroke::new(1.0, palette.warning))
+                .stroke(egui::Stroke::new(1.0_f32, palette.warning))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {
@@ -1220,7 +1220,7 @@ impl OperonApp {
                 for project in projects {
                     if self.pending_project_removal == Some(project.id) {
                         card_frame(palette)
-                            .stroke(egui::Stroke::new(1.0, palette.danger))
+                            .stroke(egui::Stroke::new(1.0_f32, palette.danger))
                             .show(ui, |ui| {
                                 ui.set_min_width(ui.available_width());
                                 ui.label(
@@ -1447,7 +1447,7 @@ impl OperonApp {
         }
         if self.pending_project_removal == Some(project.id) {
             card_frame(palette)
-                .stroke(egui::Stroke::new(1.0, palette.danger))
+                .stroke(egui::Stroke::new(1.0_f32, palette.danger))
                 .show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.label(
@@ -1861,9 +1861,12 @@ impl OperonApp {
         let (title, _) = agent_choice_copy(agent);
         let accent = palette.agent_accent(agent);
         let (fill, stroke) = if selected {
-            (accent.gamma_multiply(0.18), egui::Stroke::new(1.5, accent))
+            (
+                accent.gamma_multiply(0.18),
+                egui::Stroke::new(1.5_f32, accent),
+            )
         } else {
-            (palette.card, egui::Stroke::new(1.0, palette.border))
+            (palette.card, egui::Stroke::new(1.0_f32, palette.border))
         };
         let (dot, dot_color, dot_hint) = if available {
             (ICON_AVAILABLE, palette.success, tr("この Mac で使用可能"))
@@ -2705,7 +2708,7 @@ impl OperonApp {
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0, palette.border))
+                    .stroke(egui::Stroke::new(1.0_f32, palette.border))
                     .corner_radius(egui::CornerRadius::same(RADIUS_WINDOW))
                     .inner_margin(egui::Margin::same(18))
                     .shadow(ui.style().visuals.popup_shadow)
@@ -4059,7 +4062,7 @@ impl OperonApp {
                 ui.vertical_centered(|ui| {
                     egui::Frame::default()
                         .fill(palette.raised)
-                        .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+                        .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
                         .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
                         .inner_margin(egui::Margin::same(12))
                         .show(ui, |ui| {
@@ -4126,7 +4129,7 @@ impl OperonApp {
         let cache = &mut self.editor_text_layout_cache.viewer;
         egui::Frame::new()
             .fill(palette.inset)
-            .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+            .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
             .inner_margin(egui::Margin::same(4))
             .show(ui, |ui| {
                 // Rows sit directly on one another; `show_rows` counts this
@@ -4207,7 +4210,7 @@ impl OperonApp {
             jump_line.map(|line| (line.saturating_sub(1) as f32 * cell.y - height / 3.0).max(0.0));
         egui::Frame::new()
             .fill(palette.inset)
-            .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+            .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
             .inner_margin(egui::Margin::same(4))
             .show(ui, |ui| {
                 let mut area = egui::ScrollArea::both()
@@ -4305,7 +4308,7 @@ impl OperonApp {
                         egui::Frame::new()
                             .fill(if active { palette.raised } else { palette.card })
                             .stroke(egui::Stroke::new(
-                                1.0,
+                                1.0_f32,
                                 if active {
                                     palette.accent
                                 } else {
@@ -5577,7 +5580,7 @@ impl OperonApp {
                         ui.painter().hline(
                             rule.x_range(),
                             rule.center().y,
-                            egui::Stroke::new(1.0, palette.border_subtle),
+                            egui::Stroke::new(1.0_f32, palette.border_subtle),
                         );
                         ui.add_space(SPACE_XS);
                     }
@@ -5767,7 +5770,7 @@ impl OperonApp {
                                     ui.painter().circle_stroke(
                                         dot.center(),
                                         4.0,
-                                        egui::Stroke::new(1.0, palette.selected_ink()),
+                                        egui::Stroke::new(1.0_f32, palette.selected_ink()),
                                     );
                                 }
                                 if renaming {
@@ -6482,7 +6485,7 @@ impl OperonApp {
                     let (terminal_rect, (hovered_target, unresolved, caret)) = {
                         let border = if split {
                             egui::Stroke::new(
-                                2.0,
+                                2.0_f32,
                                 if focused {
                                     palette.accent
                                 } else {
@@ -6490,7 +6493,7 @@ impl OperonApp {
                                 },
                             )
                         } else {
-                            egui::Stroke::new(1.0, palette.terminal_border)
+                            egui::Stroke::new(1.0_f32, palette.terminal_border)
                         };
                         let terminal = egui::Frame::default()
                             .fill(palette.terminal_bg)
@@ -7221,7 +7224,7 @@ impl OperonApp {
                                                 egui::pos2(rect.left(), rect.bottom() - 1.0),
                                                 egui::pos2(rect.right(), rect.bottom() - 1.0),
                                             ],
-                                            egui::Stroke::new(2.0, palette.accent),
+                                            egui::Stroke::new(2.0_f32, palette.accent),
                                         );
                                     }
                                 }
@@ -7454,7 +7457,7 @@ impl OperonApp {
         let narrowed = self.agent_filter.iter().any(|selected| *selected);
         let mut toggled = None;
         egui::Frame::NONE
-            .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+            .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
             .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
             .inner_margin(egui::Margin::same(2))
             .show(ui, |ui| {
@@ -7825,7 +7828,7 @@ impl OperonApp {
                                             egui::pos2(x, row.rect.top() + 2.0),
                                             egui::pos2(x, row.rect.bottom() - 2.0),
                                         ],
-                                        egui::Stroke::new(2.0, palette.accent),
+                                        egui::Stroke::new(2.0_f32, palette.accent),
                                     );
                                 }
                                 let row = ui
@@ -8256,17 +8259,17 @@ impl OperonApp {
             let (fill, stroke) = if refused {
                 (
                     palette.raised.gamma_multiply(0.04),
-                    egui::Stroke::new(if under { 2.0 } else { 1.0 }, palette.warning),
+                    egui::Stroke::new(if under { 2.0 } else { 1.0_f32 }, palette.warning),
                 )
             } else if under {
                 (
                     palette.accent.gamma_multiply(0.12),
-                    egui::Stroke::new(2.0, palette.accent),
+                    egui::Stroke::new(2.0_f32, palette.accent),
                 )
             } else {
                 (
                     palette.raised.gamma_multiply(0.04),
-                    egui::Stroke::new(1.0, palette.border_subtle),
+                    egui::Stroke::new(1.0_f32, palette.border_subtle),
                 )
             };
             painter.rect(
@@ -8319,7 +8322,7 @@ impl OperonApp {
         if let Some(y) = slot_line_y(&targets.rects, slot, gap) {
             let palette = self.store.theme.palette();
             ui.painter()
-                .hline(span, y, egui::Stroke::new(2.0, palette.accent));
+                .hline(span, y, egui::Stroke::new(2.0_f32, palette.accent));
         }
         if ui.input(|i| i.pointer.primary_released()) {
             self.finish_column_drag(drag, &targets.ids, slot);
@@ -8568,9 +8571,9 @@ impl OperonApp {
                         palette.panel
                     };
                     let card_stroke = if is_latest && !turn.completed {
-                        egui::Stroke::new(1.0, palette.accent)
+                        egui::Stroke::new(1.0_f32, palette.accent)
                     } else {
-                        egui::Stroke::new(1.0, palette.border_subtle)
+                        egui::Stroke::new(1.0_f32, palette.border_subtle)
                     };
 
                     let mut jump_target = None;
