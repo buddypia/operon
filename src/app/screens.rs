@@ -6599,19 +6599,12 @@ impl OperonApp {
                         if has_open_modifier {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                         }
-                        if terminal_response.clicked() && has_open_modifier {
-                            if is_terminal_cmd_modifier(&modifiers) {
-                                self.open_terminal_target_external(kind.clone());
-                            } else {
-                                self.open_terminal_target(kind.clone());
-                            }
+                        if terminal_response.clicked() {
+                            self.open_clicked_terminal_target(&modifiers, kind.clone());
                         }
                         if terminal_response.secondary_clicked() {
-                            if let TerminalTargetKind::Path { path, .. } = &kind {
-                                if let Some(resolved) = self.resolve_session_terminal_file(path) {
-                                    self.terminal_path_menu = Some((session_id, resolved));
-                                }
-                            }
+                            let pointer = ui.input(|input| input.pointer.interact_pos());
+                            self.open_terminal_path_menu(session_id, &kind, pointer);
                         }
                     }
                     if terminal_response.clicked()
@@ -9317,48 +9310,6 @@ impl OperonApp {
             }
         });
         Some(inner.response.rect)
-    }
-}
-
-/// The two things a right-click on a path offers beyond opening it.
-impl OperonApp {
-    pub(crate) fn ui_terminal_path_menu(&mut self, ui: &mut egui::Ui, session_id: Uuid) {
-        let Some((owner, path)) = self.terminal_path_menu.clone() else {
-            return;
-        };
-        if owner != session_id {
-            return;
-        }
-        let mut dismissed = false;
-        egui::Window::new(tr("パスの操作"))
-            .collapsible(false)
-            .resizable(false)
-            .title_bar(false)
-            .show(ui.ctx(), |ui| {
-                ui.label(
-                    RichText::new(path.display().to_string())
-                        .size(12.0)
-                        .color(self.store.theme.palette().text_muted),
-                );
-                if ui.button(tr("パスをコピー")).clicked() {
-                    ui.ctx().copy_text(path.display().to_string());
-                    self.notice = Some(tr("パスをコピーしました。").into());
-                    dismissed = true;
-                }
-                if ui.button(tr("Finder で表示")).clicked() {
-                    let reveal = path.clone();
-                    self.request_system_action(tr("Finder で表示"), move || {
-                        reveal_path(&reveal)
-                    });
-                    dismissed = true;
-                }
-                if ui.button(tr("閉じる")).clicked() {
-                    dismissed = true;
-                }
-            });
-        if dismissed || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            self.terminal_path_menu = None;
-        }
     }
 }
 

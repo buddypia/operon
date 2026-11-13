@@ -9,6 +9,7 @@ pub(crate) mod relaunch;
 pub(crate) mod screens;
 pub(crate) mod session_order;
 pub(crate) mod terminal_output;
+pub(crate) mod terminal_paths;
 pub(crate) mod waiting_reply;
 pub(crate) mod working_time;
 
@@ -20,6 +21,7 @@ pub(crate) use relaunch::*;
 pub(crate) use terminal_output::TerminalStreamManager;
 #[cfg(test)]
 pub(crate) use terminal_output::{stream_coalesce_delay, terminal_echo_poll_wait};
+pub(crate) use terminal_paths::*;
 
 pub(crate) type UiResult<T> = std::result::Result<T, String>;
 
@@ -766,6 +768,9 @@ pub(crate) struct OperonApp {
     pub(crate) hunk_staged_files: HashMap<Uuid, HashSet<String>>,
     /// A right-click on a resolved path, and which session it came from.
     pub(crate) terminal_path_menu: Option<(Uuid, PathBuf)>,
+    /// Where the pointer was when `terminal_path_menu` was opened: the menu is
+    /// drawn there, beside the path it is about.
+    pub(crate) terminal_path_menu_at: Option<egui::Pos2>,
     /// User prompt turns recorded per session for navigation.
     pub(crate) session_prompt_turns: HashMap<Uuid, Vec<PromptTurn>>,
     /// Whether the views about the selected session are open, wherever they
@@ -1218,6 +1223,7 @@ impl OperonApp {
             editor_focus_line: None,
             hunk_staged_files: HashMap::new(),
             terminal_path_menu: None,
+            terminal_path_menu_at: None,
             session_prompt_turns: HashMap::new(),
             show_session_inspector: true,
             dock: DockLayout::default(),
@@ -1677,6 +1683,7 @@ impl OperonApp {
                     self.background_tasks
                         .remove(&BackgroundKey::Files(project_id));
                     self.file_cache.insert(project_id, scan);
+                    self.forget_terminal_path_misses();
                     self.file_tree_cache = None;
                     self.session_file_tree_cache = None;
                     self.session_filter_results = None;
@@ -1685,6 +1692,7 @@ impl OperonApp {
                     self.background_tasks
                         .remove(&BackgroundKey::WorktreeFiles(root.clone()));
                     self.session_file_cache.insert(root, scan);
+                    self.forget_terminal_path_misses();
                     self.session_file_tree_cache = None;
                     self.session_filter_results = None;
                 }
@@ -9585,7 +9593,7 @@ impl OperonApp {
         }
         let candidates = std::mem::take(&mut self.unresolved_paths);
         let probed_at = Instant::now();
-        let Some((project_path, worktree_path)) = self
+        let Some((project, worktree_path)) = self
             .selected_session
             .and_then(|id| self.store.sessions.iter().find(|session| session.id == id))
             .and_then(|session| {
@@ -9594,7 +9602,7 @@ impl OperonApp {
                     .projects
                     .iter()
                     .find(|candidate| candidate.id == session.project_id)?;
-                Some((project.path.clone(), session.worktree_path.clone()))
+                Some((project.clone(), session.worktree_path.clone()))
             })
         else {
             // Nothing to resolve against. Recording the miss stops the pane
@@ -9616,9 +9624,17 @@ impl OperonApp {
             }
             return;
         };
+        let mut scan_needed = false;
         for candidate in candidates {
-            let resolved =
-                resolve_terminal_session_path(worktree_path.as_deref(), &project_path, &candidate);
+            let scan =
+                self.terminal_session_scan(project.id, &project.path, worktree_path.as_deref());
+            scan_needed |= scan.is_none() && !candidate.contains('/');
+            let resolved = resolve_terminal_path_with_scan(
+                worktree_path.as_deref(),
+                &project.path,
+                scan,
+                &candidate,
+            );
             if resolved.is_some() {
                 self.negative_path_probed_at.remove(&candidate);
             } else {
@@ -9637,6 +9653,11 @@ impl OperonApp {
                     .insert(candidate, resolved);
             }
             self.resolved_paths_generation += 1;
+        }
+        // A bare name can only mean a file once the folder has been read; when
+        // it lands, `forget_terminal_path_misses` lets the name be asked again.
+        if scan_needed {
+            self.request_terminal_session_scan(&project, worktree_path.as_deref());
         }
     }
 
@@ -9732,8 +9753,12 @@ impl OperonApp {
                 if r.is_file() {
                     Some(r)
                 } else {
-                    let fresh =
-                        resolve_terminal_session_path(worktree.as_deref(), &project.path, path);
+                    let fresh = resolve_terminal_path_with_scan(
+                        worktree.as_deref(),
+                        &project.path,
+                        self.terminal_session_scan(project.id, &project.path, worktree.as_deref()),
+                        path,
+                    );
                     if fresh.is_some() {
                         self.negative_path_probed_at.remove(path);
                         self.resolved_paths.insert(path.to_owned(), fresh.clone());
@@ -9751,7 +9776,12 @@ impl OperonApp {
                 }
             }
             None => {
-                let fresh = resolve_terminal_session_path(worktree.as_deref(), &project.path, path);
+                let fresh = resolve_terminal_path_with_scan(
+                    worktree.as_deref(),
+                    &project.path,
+                    self.terminal_session_scan(project.id, &project.path, worktree.as_deref()),
+                    path,
+                );
                 if fresh.is_some() {
                     self.negative_path_probed_at.remove(path);
                     self.resolved_paths.insert(path.to_owned(), fresh.clone());

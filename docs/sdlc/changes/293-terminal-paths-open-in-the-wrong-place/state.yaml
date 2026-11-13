@@ -9,8 +9,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -18,13 +18,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Build R1-R6 test-first per plan.md, then make q.fast and cargo test --locked terminal_293_."
+resume: "Have empirical-verifier try to falsify R1-R6 on the branch head, fix and record what it reproduces, then close and land."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed make q.fast; cargo test --locked terminal: 120 passed; terminal_293_: 9 passed"
   bands: "machine pending bash scripts/check-bands.sh"
   release-binary: "machine pending required - src/app.rs, src/app/screens.rs, src/files.rs, and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py"
+  guards-verified-by-mutation: "machine passed 9 of 9 caught: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

@@ -542,3 +542,15 @@ pub(crate) fn extract_file_symbols(path: &Path, text: &str) -> Vec<CodeSymbol> {
     }
     symbols
 }
+
+/// The one scanned file whose name is `name`, as the scan spells it (relative
+/// to the scanned root). None when no file or more than one has that name: a
+/// guess between two is how the wrong file gets opened.
+pub(crate) fn unique_scanned_file<'a>(scan: &'a FileScanSnapshot, name: &str) -> Option<&'a Path> {
+    let mut matches = scan
+        .paths
+        .iter()
+        .filter(|path| path.file_name().is_some_and(|file| file == name));
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first.as_path())
+}
