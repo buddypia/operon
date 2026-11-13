@@ -9,8 +9,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -18,13 +18,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the launch_294_ tests and watch them fail, then build src/app/launch_projects.rs."
+resume: "Done. Package from main after landing, then check in the app that 新しいセッション → ＋ 新しいプロジェクト… adds a folder and the sheet shows it without leaving the page."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast; cargo test --locked launch_294_: 9 passed; related groups 308 passed; run-obligations: 11 held at 568fbcf"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7963 and largest_module_lines 9906, both below main"
   release-binary: "machine pending required - src/app.rs, src/app/ and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/294-new-session-cannot-add-a-project/mutations.py"
+  guards-verified-by-mutation: "machine passed 16 of 16 caught: python3 docs/sdlc/changes/294-new-session-cannot-add-a-project/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
