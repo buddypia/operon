@@ -2,6 +2,25 @@ use crate::i18n_tables::{catalog_keys, translation_for, EN_TABLE, KO_TABLE};
 use crate::prelude::*;
 use crate::*;
 
+/// A file a person dropped on the window, as eframe hands it over: egui 0.37
+/// made `DroppedFile` a trait the integration implements (change 295).
+#[derive(Debug)]
+struct TestDroppedFile(PathBuf);
+
+impl egui::DroppedFile for TestDroppedFile {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        fs::read(&self.0).map_err(|error| error.to_string())
+    }
+}
+
+fn dropped_file(path: PathBuf) -> egui::DroppedFileHandle {
+    Arc::new(TestDroppedFile(path))
+}
+
 #[cfg(test)]
 /// How many 10ms polls a test waits for a child process to signal that it
 /// reached a checkpoint.
@@ -1699,10 +1718,11 @@ pub(crate) fn the_app_sweeps_expired_handoff_archives_once_at_startup() {
         .contains(&BackgroundKey::HandoffArchiveSweep));
     assert!(later.is_file());
 
-    // And the frame is what starts it.
+    // And the frame is what starts it: egui 0.37's `App::logic`, which runs
+    // once per frame before the drawing.
     let app_source = include_str!("app.rs");
     let update = app_source
-        .split("fn update(&mut self, ctx: &egui::Context")
+        .split("fn logic(&mut self, ctx: &egui::Context")
         .nth(1)
         .unwrap();
     let update = &update[..update.find("\n    }\n").unwrap()];
@@ -4760,7 +4780,7 @@ pub(crate) fn the_restore_footer_never_paints_status_under_its_action() {
             )),
             ..Default::default()
         };
-        let _ = context.run(input, |context| {
+        let _ = context.run_ui(input, |context| {
             egui::CentralPanel::default().show(context, |ui| {
                 ui.set_width(width);
                 ui.set_max_width(width);
@@ -4856,7 +4876,7 @@ pub(crate) fn the_launch_footer_never_paints_status_under_its_action() {
             )),
             ..Default::default()
         };
-        let _ = context.run(input, |context| {
+        let _ = context.run_ui(input, |context| {
             egui::CentralPanel::default().show(context, |ui| {
                 ui.set_width(width);
                 ui.set_max_width(width);
@@ -4924,7 +4944,7 @@ pub(crate) fn the_launch_modal_renders_folder_and_handles_error_state() {
         )),
         ..Default::default()
     };
-    let _ = context.run(input, |ctx| {
+    let _ = context.run_ui(input, |ctx| {
         app.ui_launch_modal(ctx);
     });
     assert!(app.launch_progress.is_some());
@@ -5372,16 +5392,7 @@ pub(crate) fn accepts_only_finder_folders_from_a_drop() {
     fs::create_dir_all(&root).unwrap();
     let file = root.join("ticket.txt");
     fs::write(&file, "not a project folder").unwrap();
-    let dropped = vec![
-        egui::DroppedFile {
-            path: Some(root.clone()),
-            ..Default::default()
-        },
-        egui::DroppedFile {
-            path: Some(file),
-            ..Default::default()
-        },
-    ];
+    let dropped = vec![dropped_file(root.clone()), dropped_file(file)];
     let (folders, rejected) = dropped_project_folders(&dropped);
     assert_eq!(folders, vec![root.clone()]);
     assert_eq!(rejected, 1);
@@ -5457,7 +5468,7 @@ pub(crate) fn renders_terminal_background_colors_and_half_block_banners() {
     let row3_blocks: Vec<&egui::text::LayoutSection> = lines[2]
         .sections
         .iter()
-        .filter(|s| lines[2].text[s.byte_range.clone()].contains('▀'))
+        .filter(|s| lines[2].text[s.byte_range.start.0..s.byte_range.end.0].contains('▀'))
         .collect();
     assert_eq!(row3_blocks.len(), 8);
 
@@ -7660,7 +7671,7 @@ pub(crate) fn keyboard_focus_on_a_custom_row_is_a_strong_outline_or_nothing() {
         let palette = theme.palette();
         assert_eq!(
             focus_stroke(true, palette),
-            Some(egui::Stroke::new(1.0, palette.border_strong)),
+            Some(egui::Stroke::new(1.0_f32, palette.border_strong)),
             "{}",
             theme.label(),
         );
@@ -7703,10 +7714,10 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
             let mut rings_by_pass = Vec::new();
             let mut last_outline_by_pass = Vec::new();
             for pass in 0..2 {
-                let output = context.run(egui::RawInput::default(), |ctx| {
+                let output = context.run_ui(egui::RawInput::default(), |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         if let (1, Some(id)) = (pass, button_id) {
-                            ctx.memory_mut(|memory| memory.request_focus(id));
+                            ui.memory_mut(|memory| memory.request_focus(id));
                         }
                         let response = draw(ui, palette);
                         button_id = Some(response.id);
@@ -7717,7 +7728,7 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
                     .iter()
                     .filter_map(|clipped| match &clipped.shape {
                         egui::Shape::Rect(rect)
-                            if rect.stroke == egui::Stroke::new(1.0, palette.border_strong) =>
+                            if rect.stroke == egui::Stroke::new(1.0_f32, palette.border_strong) =>
                         {
                             Some(rect.corner_radius)
                         }
@@ -7751,7 +7762,7 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
             );
             assert_eq!(
                 last_outline_by_pass[1],
-                Some(egui::Stroke::new(1.0, palette.border_strong)),
+                Some(egui::Stroke::new(1.0_f32, palette.border_strong)),
                 "{name} in {} must paint the ring last when focused",
                 theme.label(),
             );
@@ -7785,7 +7796,7 @@ pub(crate) fn quiet_button_renders_with_link_color_for_affordance() {
         let palette = theme.palette();
         let context = egui::Context::default();
         context.set_visuals(theme.visuals());
-        let output = context.run(egui::RawInput::default(), |ctx| {
+        let output = context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 quiet_button(ui, palette, "すべて表示");
             });
@@ -7821,7 +7832,7 @@ pub(crate) fn progress_footers_use_secondary_button_affordance() {
         let palette = theme.palette();
         let context = egui::Context::default();
         context.set_visuals(theme.visuals());
-        let stroke = egui::Stroke::new(1.0, palette.border_subtle);
+        let stroke = egui::Stroke::new(1.0_f32, palette.border_subtle);
         let cases: [(&str, fn(&mut egui::Ui, &Palette)); 2] = [
             ("launch", |ui, p| {
                 let _ = launch_progress_footer(ui, p, 5);
@@ -7831,7 +7842,7 @@ pub(crate) fn progress_footers_use_secondary_button_affordance() {
             }),
         ];
         for (name, draw) in cases {
-            let output = context.run(egui::RawInput::default(), |ctx| {
+            let output = context.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     draw(ui, palette);
                 });
@@ -8051,8 +8062,8 @@ pub(crate) fn click_at(
             },
         ]
     };
-    let _ = context.run(input(button(true)), &mut pass);
-    let _ = context.run(input(button(false)), &mut pass);
+    let _ = context.run_pass(input(button(true)), &mut pass);
+    let _ = context.run_pass(input(button(false)), &mut pass);
 }
 
 /// A card that opens the thing it describes has to lose to the controls
@@ -8070,7 +8081,7 @@ pub(crate) fn a_clickable_card_yields_to_the_controls_drawn_on_it() {
         let card_clicks = std::cell::Cell::new(0);
         let button_clicks = std::cell::Cell::new(0);
         let mut pass = |context: &egui::Context| {
-            egui::CentralPanel::default().show(context, |ui| {
+            central_panel(context, |ui| {
                 let row = clickable_card(ui, &DARK_PALETTE, "row", true, |ui| {
                     ui.horizontal(|ui| {
                         label_rect.set(ui.label("セッション名").rect);
@@ -8087,7 +8098,7 @@ pub(crate) fn a_clickable_card_yields_to_the_controls_drawn_on_it() {
                 }
             });
         };
-        let _ = context.run(egui::RawInput::default(), &mut pass);
+        let _ = context.run_pass(egui::RawInput::default(), &mut pass);
         let target = match aim {
             // The far end of the row, where nothing but the card is drawn.
             "surface" => card_rect.get().right_center() - egui::vec2(20.0, 0.0),
@@ -8133,13 +8144,13 @@ pub(crate) fn tapping_a_session_row_opens_its_terminal() {
     let context = egui::Context::default();
     let card_rect = std::cell::Cell::new(egui::Rect::NOTHING);
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             let before = ui.next_widget_position();
             app.home_session_row(ui, &session, "card-migration");
             card_rect.set(egui::Rect::from_min_max(before, ui.min_rect().max));
         });
     };
-    let _ = context.run(egui::RawInput::default(), &mut pass);
+    let _ = context.run_pass(egui::RawInput::default(), &mut pass);
     // The row's leading edge, which carries nothing clickable.
     let target = card_rect.get().left_top() + egui::vec2(40.0, 24.0);
     click_at(&context, target, &mut pass);
@@ -8271,6 +8282,32 @@ pub(crate) fn bundled_ui_font_has_english_japanese_and_korean_glyphs() {
         assert_ne!(font.glyph_id(character).0, 0, "missing {character}");
     }
 }
+#[test]
+/// The icon face is registered under the very name the proportional chain
+/// asks for, and it is Phosphor's regular face (change 295). egui-phosphor's
+/// own `add_to_fonts` cannot take this egui's `FontDefinitions` any more, so
+/// startup registers the bytes itself; if the name drifted from the chain's,
+/// every icon would fall through to Apple Symbols or tofu with nothing failing.
+pub(crate) fn the_icon_face_is_registered_under_the_name_the_font_chain_names() {
+    let mut fonts = egui::FontDefinitions::default();
+    add_icon_face(&mut fonts);
+    assert!(
+        proportional_ui_font_chain()
+            .iter()
+            .any(|name| name == ICON_FACE),
+        "the chain does not name the icon face {ICON_FACE}"
+    );
+    let face = fonts
+        .font_data
+        .get(ICON_FACE)
+        .expect("the icon face should be registered under ICON_FACE");
+    assert_eq!(
+        (*face.font).as_ref(),
+        egui_phosphor::Variant::Regular.font_bytes(),
+        "the icon face is not Phosphor Regular"
+    );
+}
+
 #[test]
 pub(crate) fn ui_text_uses_one_cjk_aware_face_before_symbol_fallback() {
     assert_eq!(
@@ -10410,7 +10447,7 @@ pub(crate) fn a_marked_row_is_painted_with_its_emphasis_band() {
             let at = job.text.find(needle).expect("the word is in the row");
             job.sections
                 .iter()
-                .find(|section| section.byte_range.start <= at && section.byte_range.end > at)
+                .find(|section| section.byte_range.start.0 <= at && section.byte_range.end.0 > at)
                 .map(|section| section.format.background)
         };
         assert_eq!(background_at(word), Some(expected), "{word}");
@@ -10538,7 +10575,7 @@ pub(crate) fn the_editor_draws_every_view_without_a_window() {
             app.editor_view = view;
             app.active_document = Some(project_document(&project, path));
             context.begin_pass(egui::RawInput::default());
-            egui::CentralPanel::default().show(&context, |ui| {
+            central_panel(&context, |ui| {
                 app.ui_files(ui, &project);
             });
             let output = context.end_pass();
@@ -10551,7 +10588,7 @@ pub(crate) fn the_editor_draws_every_view_without_a_window() {
         app.active_document = None;
         app.editor_view = EditorView::Edit;
         context.begin_pass(egui::RawInput::default());
-        egui::CentralPanel::default().show(&context, |ui| {
+        central_panel(&context, |ui| {
             app.ui_files(ui, &project);
             app.git_view = GitView::Diff;
             app.ui_git(ui, &project);
@@ -11181,10 +11218,10 @@ pub(crate) fn viewer_rows_keep_the_colours_of_their_language() {
         let mut covered = 0;
         for section in &layout.job.sections {
             assert_eq!(
-                section.byte_range.start, covered,
+                section.byte_range.start.0, covered,
                 "row {row}: sections are contiguous"
             );
-            covered = section.byte_range.end;
+            covered = section.byte_range.end.0;
         }
         assert_eq!(
             covered,
@@ -11198,7 +11235,7 @@ pub(crate) fn viewer_rows_keep_the_colours_of_their_language() {
             .job
             .sections
             .iter()
-            .filter(|section| section.byte_range.start >= gutter_len)
+            .filter(|section| section.byte_range.start.0 >= gutter_len)
             .map(|section| section.format.color)
             .collect::<Vec<_>>()
     };
@@ -11417,7 +11454,8 @@ pub(crate) fn syntax_layout_carries_markup_grammar_across_lines() {
         .sections
         .iter()
         .find(|section| {
-            section.byte_range.start <= comment_offset && section.byte_range.end > comment_offset
+            section.byte_range.start.0 <= comment_offset
+                && section.byte_range.end.0 > comment_offset
         })
         .map(|section| section.format.color);
     assert_eq!(comment_colour, Some(palette.text_muted));
@@ -11427,7 +11465,8 @@ pub(crate) fn syntax_layout_carries_markup_grammar_across_lines() {
         .sections
         .iter()
         .find(|section| {
-            section.byte_range.start <= keyword_offset && section.byte_range.end > keyword_offset
+            section.byte_range.start.0 <= keyword_offset
+                && section.byte_range.end.0 > keyword_offset
         })
         .map(|section| section.format.color);
     assert_eq!(keyword_colour, Some(palette.accent_text));
@@ -16945,7 +16984,7 @@ fn find_word_boundary_match(haystack: &str, needle_ascii_lower: &str) -> Option<
                 haystack[..i]
                     .chars()
                     .next_back()
-                    .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             };
 
             let right_bounded = if i + needle_len == haystack_bytes.len() {
@@ -16954,7 +16993,7 @@ fn find_word_boundary_match(haystack: &str, needle_ascii_lower: &str) -> Option<
                 haystack[i + needle_len..]
                     .chars()
                     .next()
-                    .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             };
 
             if left_bounded && right_bounded {
@@ -28637,7 +28676,7 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     assert_eq!(lines.len(), 61);
     let cursor = TerminalCursor {
         x: 2,
@@ -28657,7 +28696,7 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
     // bottom-clamped pane shows the caret's rows. Stick-to-bottom is not
     // what this probes: `scroll_to: Some(_)` keeps it off, and the pane
     // anchors the caret to a row of the buffer either way.
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             // Viewport as tall as the pane grid's visible window in the bug.
@@ -28666,12 +28705,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 matches: &[],
                 current: None,
                 scroll_to: Some(25),
-                palette: &palette,
+                palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette,
             };
             let visible = ui.clip_rect();
             outcomes.push(Paned {
@@ -28697,12 +28736,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 matches: &[],
                 current: None,
                 scroll_to: Some(10),
-                palette: &palette,
+                palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette,
             };
             let visible = ui.clip_rect();
             outcomes.push(Paned {
@@ -28753,7 +28792,7 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     let cursor = TerminalCursor {
         x: 2,
         y: 20,
@@ -28765,7 +28804,7 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
         pane: egui::Rect,
     }
     let mut outcomes = Vec::new();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
@@ -28774,12 +28813,12 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
                     matches: &[],
                     current: None,
                     scroll_to: Some(scroll_to),
-                    palette: &palette,
+                    palette,
                 };
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
                     unresolved: &mut Vec::new(),
-                    palette: &palette,
+                    palette,
                 };
                 outcomes.push(Paned {
                     caret: terminal_rows(
@@ -28800,8 +28839,10 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
     });
     assert_eq!(outcomes.len(), 3);
     let caret = &outcomes[0].caret;
+    // Half a pixel of slack, as the pane allows: egui 0.37 rounds the scroll
+    // offset to a whole pixel, which can push the rows a third of one down.
     assert!(
-        caret.is_some_and(|rect| rect.max.y <= outcomes[0].pane.max.y),
+        caret.is_some_and(|rect| rect.max.y <= outcomes[0].pane.max.y + 0.5),
         "a fully visible caret must fit inside the pane: {caret:?}"
     );
     assert!(
@@ -28825,7 +28866,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     // A real screen: headless defaults give the panel a placeholder width of
     // 10_000px, and 400 columns then still fit inside the pane.
     let input = egui::RawInput {
@@ -28841,14 +28882,14 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
             y: 20,
             pane_rows: 40,
         };
-        let _ = ctx.run(input.clone(), |ctx| {
+        let _ = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let cell = terminal_cell_size(ui);
                 let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
                     unresolved: &mut Vec::new(),
-                    palette: &palette,
+                    palette,
                 };
                 let search = TerminalSearchOverlay {
                     matches: &[],
@@ -28857,7 +28898,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
                     // probe's point here is the horizontal bound, not the
                     // vertical one.
                     scroll_to: Some(18),
-                    palette: &palette,
+                    palette,
                 };
                 let caret = terminal_rows(
                     ui,
@@ -28901,7 +28942,7 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     // A caret in the top grid rows (y=2 -> content row 60-40+2=23) against a
     // jump to the very bottom: the served band's top clamps to
     // total_rows - 36 = 25 rows — past the caret — which is also where egui's
@@ -28911,7 +28952,7 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
         y: 2,
         pane_rows: 40,
     };
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
@@ -28919,12 +28960,12 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
                 matches: &[],
                 current: None,
                 scroll_to: Some(55),
-                palette: &palette,
+                palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette,
             };
             let caret = terminal_rows(
                 ui,
@@ -29042,8 +29083,10 @@ pub(crate) fn terminal_input_events_handles_ime_preedit_and_commit_enter_suppres
     // 2. Preedit composition: setting preedit string and suppressing Backspace during composition
     ctx.input_mut(|i| {
         i.events.clear();
-        i.events
-            .push(egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into())));
+        i.events.push(egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        }));
         i.events.push(egui::Event::Key {
             key: egui::Key::Backspace,
             physical_key: None,
@@ -33295,19 +33338,19 @@ pub(crate) fn the_palette_selection_is_clamped_when_the_results_shrink() {
     let ctx = egui::Context::default();
 
     app.command_search = String::new();
-    let _ = ctx.run(Default::default(), |_| app.handle_palette_keys(&ctx));
+    let _ = ctx.run_ui(Default::default(), |_| app.handle_palette_keys(&ctx));
     let (entries, _) = app.palette_visible_entries();
     app.command_selection = entries.len() - 1;
 
     // A query that matches one row must pull the selection back into range.
     app.command_search = "ログ".to_owned();
-    let _ = ctx.run(Default::default(), |_| app.handle_palette_keys(&ctx));
+    let _ = ctx.run_ui(Default::default(), |_| app.handle_palette_keys(&ctx));
     let (entries, _) = app.palette_visible_entries();
     assert!(app.command_selection < entries.len());
 
     // And a query that matches nothing leaves it somewhere safe.
     app.command_search = "まったく一致しない語".to_owned();
-    let _ = ctx.run(Default::default(), |_| app.handle_palette_keys(&ctx));
+    let _ = ctx.run_ui(Default::default(), |_| app.handle_palette_keys(&ctx));
     assert_eq!(app.command_selection, 0);
     fs::remove_dir_all(&root).ok();
 }
@@ -34510,7 +34553,7 @@ fn rust_function_body(name: &str) -> Option<String> {
             let close = format!("{}}}", " ".repeat(indent));
             let from = source.find(line).unwrap();
             let body = &source[from..];
-            let to = body.find(&format!("\n{close}")).map_or(body.len(), |at| at);
+            let to = body.find(&format!("\n{close}")).unwrap_or(body.len());
             return Some(body[..to].to_owned());
         }
     }
@@ -39530,8 +39573,8 @@ fn editor_text_tops(app: &mut OperonApp, project: &Project) -> (Vec<(String, f32
     let context = egui::Context::default();
     let mut line = 0.0;
     let mut draw = || {
-        context.run(Default::default(), |ctx| {
-            line = ctx.fonts(|fonts| fonts.row_height(&FontId::monospace(MONOSPACE_SIZE)));
+        context.run_ui(Default::default(), |ctx| {
+            line = ctx.fonts_mut(|fonts| fonts.row_height(&FontId::monospace(MONOSPACE_SIZE)));
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_editor(ui, project, app.store.theme.palette(), 600.0);
             });
@@ -39557,7 +39600,7 @@ fn editor_view_labels(app: &mut OperonApp, project: &Project) -> Vec<String> {
     // Twice: the first frame lays the widgets out, the second is the one whose
     // shapes are the finished screen.
     let mut draw = || {
-        context.run(Default::default(), |ctx| {
+        context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_editor(ui, project, app.store.theme.palette(), 600.0);
             });
@@ -39745,7 +39788,7 @@ fn sheet_labels(app: &mut OperonApp, project: &Project) -> Vec<String> {
     app.selected_project = Some(project.id);
     let mut draw = || {
         app.launch_sheet_open = true;
-        context.run(Default::default(), |ctx| {
+        context.run_ui(Default::default(), |ctx| {
             app.ui_launch_sheet(ctx);
         })
     };
@@ -39901,7 +39944,7 @@ pub(crate) fn the_launch_screen_offers_every_mode_and_switch_the_agent_has() {
         app.selected_agent = agent.into();
         let context = egui::Context::default();
         let mut draw = || {
-            context.run(Default::default(), |ctx| {
+            context.run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     app.ui_launch_options(ui, palette);
                 });
@@ -40100,16 +40143,16 @@ pub(crate) fn the_card_shows_the_command_the_restart_will_run() {
 
     let context = egui::Context::default();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             app.home_session_row(ui, &session, "card-migration");
         });
     };
-    let _ = context.run(Default::default(), &mut draw);
-    let output = context.run(Default::default(), &mut draw);
+    let _ = context.run_pass(Default::default(), &mut draw);
+    let output = context.run_pass(Default::default(), &mut draw);
     let menu = drawn_text_rect(&output, |text| text == ICON_MORE)
         .expect("Home row exposes session details");
     click_at(&context, menu.center(), &mut draw);
-    let labels: Vec<String> = text_positions(&context.run(Default::default(), &mut draw))
+    let labels: Vec<String> = text_positions(&context.run_pass(Default::default(), &mut draw))
         .into_iter()
         .map(|(text, _)| text)
         .collect();
@@ -40608,7 +40651,7 @@ pub(crate) fn the_project_list_offers_inline_deletion_and_confirmation() {
 
     let context = egui::Context::default();
     let draw = |app: &mut OperonApp| {
-        let output = context.run(Default::default(), |ctx| {
+        let output = context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_projects(ui);
             });
@@ -41122,7 +41165,7 @@ fn ime_pane_pass(
     session: &Session,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    context.run(
+    context.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -41153,12 +41196,12 @@ fn ime_pane_pass(
 #[test]
 pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
     let (root, mut app, session) = ime_pane_fixture("ime-abandoned");
-    let pane = egui::Id::new(("terminal-pane", session.id));
+    let pane = egui::Id::unique(("terminal-pane", session.id));
     let context = egui::Context::default();
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -41169,7 +41212,10 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
         &context,
         &mut app,
         &session,
-        vec![egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into()))],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        })],
     );
     assert_eq!(
         app.terminal_preedits.get(&session.id).map(String::as_str),
@@ -41179,12 +41225,7 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
 
     // The keyboard goes elsewhere, and the IME ends its composition there.
     context.memory_mut(|memory| memory.surrender_focus(pane));
-    let left = ime_pane_pass(
-        &context,
-        &mut app,
-        &session,
-        vec![egui::Event::Ime(egui::ImeEvent::Disabled)],
-    );
+    let left = ime_pane_pass(&context, &mut app, &session, Vec::new());
     assert_eq!(
         app.terminal_preedits.get(&session.id),
         None,
@@ -41197,7 +41238,7 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
 
     // Back to the pane: Backspace is Backspace again.
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -41234,7 +41275,7 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
 #[test]
 pub(crate) fn a_conversion_does_not_survive_a_trip_to_another_screen() {
     let (root, mut app, session) = ime_pane_fixture("ime-screen");
-    let pane = egui::Id::new(("terminal-pane", session.id));
+    let pane = egui::Id::unique(("terminal-pane", session.id));
     let context = egui::Context::default();
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     app.terminal_focus_request = Some(session.id);
@@ -41244,13 +41285,16 @@ pub(crate) fn a_conversion_does_not_survive_a_trip_to_another_screen() {
         &context,
         &mut app,
         &session,
-        vec![egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into()))],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        })],
     );
     assert!(app.terminal_preedits.contains_key(&session.id));
 
     // Another screen: the pane is not drawn, and egui lets its focus go.
     for _ in 0..2 {
-        let _ = context.run(Default::default(), |context| {
+        let _ = context.run_ui(Default::default(), |context| {
             egui::CentralPanel::default().show(context, |_| {});
         });
     }
@@ -41284,7 +41328,7 @@ pub(crate) fn a_focused_terminal_pane_claims_the_ime_without_redrawing_every_fra
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -41364,7 +41408,7 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
 
     let context = egui::Context::default();
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     };
@@ -41378,8 +41422,8 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
     // Two passes before the click: a scroll area only learns its content is too
     // large after it has laid it out once, and that is the frame the stolen
     // drag widget appears in.
-    let _ = context.run(screen.clone(), &mut pass);
-    let _ = context.run(screen, &mut pass);
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    let _ = context.run_pass(screen, &mut pass);
 
     click_at(&context, egui::pos2(500.0, 300.0), &mut pass);
     fs::remove_dir_all(&root).ok();
@@ -41388,7 +41432,7 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
     // same pane, and a click that landed there would leave the bug in place.
     assert_eq!(
         context.memory(|memory| memory.focused()),
-        Some(egui::Id::new(("terminal-pane", session.id))),
+        Some(egui::Id::unique(("terminal-pane", session.id))),
         "a click on a terminal that has filled up did not give the pane the keyboard"
     );
 }
@@ -43947,7 +43991,7 @@ fn render_workspace_output(
         ..Default::default()
     };
     // Pass 1: register widget IDs and layout sizing
-    let _ = context.run(screen.clone(), |ctx| {
+    let _ = context.run_ui(screen.clone(), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -43955,7 +43999,7 @@ fn render_workspace_output(
             });
     });
     // Pass 2: resolve immediate-mode layout and extract output shapes
-    context.run(screen, |ctx| {
+    context.run_ui(screen, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -44793,7 +44837,7 @@ pub(crate) fn test_session_file_tree_icon_clicks_toggle_and_open() {
 
     // 1. Initial pass without clicks
     let mut actions = Vec::new();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             file_tree_rows(
                 ui,
@@ -45031,7 +45075,7 @@ pub(crate) fn test_sidebar_tab_drag_escape_cancellation() {
         pressed: true,
         modifiers: egui::Modifiers::NONE,
     };
-    let _ = context.run(frame(vec![held, escape]), |ctx| {
+    let _ = context.run_ui(frame(vec![held, escape]), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| fixture.app.ui_terminal_workspace(ui));
@@ -45709,10 +45753,12 @@ pub(crate) fn test_dock_drag_by_pointer_events() {
             events,
             ..Default::default()
         };
-        text_positions(&context.run(input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        text_positions(&context.run_pass(input, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }))
     };
     let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
@@ -45844,7 +45890,7 @@ pub(crate) fn test_in_editor_image_preview_document_state() {
 
     // 4. Render ui_editor without panics
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             fixture.app.ui_editor(
                 ui,
@@ -45874,7 +45920,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -45902,7 +45948,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output1 = ctx.run(raw_input, |ctx| {
+    let output1 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     // First click should not maximize
@@ -45930,7 +45976,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output2 = ctx.run(raw_input, |ctx| {
+    let output2 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds2 = &output2.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -45963,7 +46009,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -45987,7 +46033,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output4 = ctx.run(raw_input, |ctx| {
+    let output4 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds4 = &output4.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46014,7 +46060,7 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46034,7 +46080,7 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46047,7 +46093,7 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
     ));
     raw_input.time = Some(0.15);
     raw_input.events = vec![egui::Event::PointerMoved(moved_pos)];
-    let output2 = ctx.run(raw_input, |ctx| {
+    let output2 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46075,7 +46121,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46095,7 +46141,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46108,7 +46154,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
     raw_input.events = vec![egui::Event::PointerMoved(
         traffic_pos + egui::vec2(15.0, 0.0),
     )];
-    let output_drag = ctx.run(raw_input, |ctx| {
+    let output_drag = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds = &output_drag.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46138,7 +46184,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let mut raw_input = egui::RawInput::default();
@@ -46161,7 +46207,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output_dbl = ctx.run(raw_input, |ctx| {
+    let output_dbl = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds = &output_dbl.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46171,9 +46217,12 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
     );
     assert!(!app.window_maximized);
 
-    // 2. Nav tab interaction: clicking on "プロジェクト" nav tab (located around x = 300.0)
+    // 2. Nav tab interaction: clicking on the "プロジェクト" nav tab, found
+    // where the last frame drew it rather than at a typed coordinate.
     app.page = Page::Home;
-    let nav_pos = egui::pos2(300.0, 26.0); // Projects tab position
+    let nav_pos = drawn_text_rect(&output_dbl, |text| text.ends_with("プロジェクト"))
+        .expect("the projects tab is drawn")
+        .center();
     let mut raw_input = egui::RawInput::default();
     raw_input.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
@@ -46195,7 +46244,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output_nav = ctx.run(raw_input, |ctx| {
+    let output_nav = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     // Click was handled by nav tab, switching page to Projects
@@ -46224,7 +46273,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(2.5);
-    let rendered = ctx.run(raw_input, |ctx| {
+    let rendered = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46248,7 +46297,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let mut raw_input = egui::RawInput::default();
@@ -46260,7 +46309,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
     raw_input.events = vec![egui::Event::PointerMoved(
         rate_limit_pos + egui::vec2(10.0, 0.0),
     )];
-    let output_rl = ctx.run(raw_input, |ctx| {
+    let output_rl = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds_rl = &output_rl.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46324,7 +46373,7 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
         ));
         raw_input.time = Some(time);
         raw_input.events = events;
-        ctx.run(raw_input, |ctx| {
+        ctx.run_ui(raw_input, |ctx| {
             app.ui_topbar(ctx);
         })
     };
@@ -46463,8 +46512,10 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
         "Drag on Brand button must not StartDrag"
     );
 
-    // 2. Sessions nav tab (~410.0, 26.0)
-    let sessions_pos = egui::pos2(410.0, 26.0);
+    // 2. Sessions nav tab
+    let sessions_pos = drawn_text_rect(&layout, |text| text.ends_with("セッション"))
+        .expect("the sessions tab is drawn")
+        .center();
     let click_sessions = render_frame(
         &mut app,
         4.0,
@@ -46731,7 +46782,7 @@ pub(crate) fn test_titlebar_none_position_failsafe() {
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let output = ctx.run(raw_input, |ctx| {
+    let output = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46755,7 +46806,7 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
         ));
         raw_input.time = Some(time);
         raw_input.events = events;
-        ctx.run(raw_input, |ctx| {
+        ctx.run_ui(raw_input, |ctx| {
             app.ui_topbar(ctx);
         })
     };
@@ -46839,11 +46890,16 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
             out
         };
 
-    // Warm up
-    let _ = render_frame(&mut app, 0.0, 1280.0, vec![]);
+    // Warm up, and read where the nav tabs landed.
+    let layout = render_frame(&mut app, 0.0, 1280.0, vec![]);
+    let tab_at = |label: &str| {
+        drawn_text_rect(&layout, |text| text.ends_with(label))
+            .expect("the nav tab is drawn")
+            .center()
+    };
 
-    // 1. Home nav tab (~230.0, 26.0)
-    let home_pos = egui::pos2(230.0, 26.0);
+    // 1. Home nav tab
+    let home_pos = tab_at("ホーム");
     app.page = Page::Settings;
     let click_home = render_frame(
         &mut app,
@@ -46885,8 +46941,8 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
         "Home tab must not StartDrag"
     );
 
-    // 2. Projects nav tab (~320.0, 26.0)
-    let proj_pos = egui::pos2(320.0, 26.0);
+    // 2. Projects nav tab
+    let proj_pos = tab_at("プロジェクト");
     let click_proj = render_frame(
         &mut app,
         4.0,
@@ -47025,7 +47081,7 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
         .entry(egui::ViewportId::ROOT)
         .or_default()
         .maximized = Some(true);
-    let _ = ctx.run(raw_max, |ctx| {
+    let _ = ctx.run_ui(raw_max, |ctx| {
         app.ui_topbar(ctx);
     });
     assert!(
@@ -47141,7 +47197,7 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
     let ctx = egui::Context::default();
     let palette = app.store.theme.palette();
     let draw = |app: &mut OperonApp| {
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_session_ports(ui, palette, &session);
             });
@@ -47384,7 +47440,7 @@ pub(crate) fn ports_262_badge_counts_own_folder_or_names_the_project() {
     let palette = app.store.theme.palette();
     let ctx = egui::Context::default();
     let draw = |app: &mut OperonApp, session: &Session| {
-        let output = ctx.run(screen_262(Vec::new()), |ctx| {
+        let output = ctx.run_ui(screen_262(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.horizontal(|ui| app.ui_session_ports(ui, palette, session));
             });
@@ -47448,7 +47504,7 @@ pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
     let ctx = egui::Context::default();
     let menu = |ports: &SessionPorts, stopping: bool, events: Vec<egui::Event>| {
         let mut action = None;
-        let output = ctx.run(screen_262(events), |ctx| {
+        let output = ctx.run_ui(screen_262(events), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 action = crate::screens::session_ports_menu(ui, palette, ports, stopping);
             });
@@ -47538,7 +47594,7 @@ pub(crate) fn ports_262_confirmation_names_pid_and_folder() {
         root: None,
     };
     let draw = |app: &mut OperonApp, events: Vec<egui::Event>| {
-        let output = ctx.run(screen_262(events), |ctx| {
+        let output = ctx.run_ui(screen_262(events), |ctx| {
             app.ui_port_stop_modal(ctx, palette);
         });
         frame_texts_262(&output)
@@ -47736,7 +47792,7 @@ fn session_tabs_texts(app: &mut OperonApp) -> Vec<String> {
     let ctx = egui::Context::default();
     let mut texts = Vec::new();
     for _ in 0..2 {
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -48196,12 +48252,12 @@ pub(crate) fn a_group_tile_filters_the_session_list_to_that_group() {
         ..Default::default()
     };
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     };
-    let _ = context.run(screen.clone(), &mut pass);
-    let drawn = context.run(screen, &mut pass);
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    let drawn = context.run_pass(screen, &mut pass);
     let label = drawn_text_rect(&drawn, |text| {
         text == format!("{ICON_STATUS_RUNNING}  {}", tr("実行中"))
     })
@@ -48239,12 +48295,12 @@ fn draw_home(app: &mut OperonApp, context: &egui::Context) -> egui::FullOutput {
         ..Default::default()
     };
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     };
-    let _ = context.run(screen.clone(), &mut pass);
-    context.run(screen, &mut pass)
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    context.run_pass(screen, &mut pass)
 }
 
 fn home_app(label: &str, store: Store) -> (OperonApp, PathBuf) {
@@ -48352,7 +48408,7 @@ pub(crate) fn a_recent_session_is_one_line_with_its_details_behind_the_menu() {
     }
 
     click_at(&context, open.center(), |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     });
@@ -48444,7 +48500,7 @@ pub(crate) fn starting_from_a_project_on_home_opens_that_projects_launch_form() 
         })
         .unwrap();
     click_at(&context, button.center(), |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     });
@@ -48468,11 +48524,10 @@ fn sheet_frame(
             egui::Pos2::ZERO,
             egui::vec2(900.0, 600.0),
         )),
-        events,
-        modifiers,
+        events: [vec![egui::Event::ModifiersChanged(modifiers)], events].concat(),
         ..Default::default()
     };
-    context.run(input, |ctx| app.ui_launch_sheet(ctx))
+    context.run_ui(input, |ctx| app.ui_launch_sheet(ctx))
 }
 
 fn key_press(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -48633,7 +48688,7 @@ pub(crate) fn cmd_enter_and_the_button_share_one_readiness() {
 pub(crate) fn opening_the_sheet_takes_focus_from_the_terminal() {
     let (mut app, project, root) = launch_screen_fixture("sheet-focus");
     let context = egui::Context::default();
-    let stand_in = egui::Id::new("terminal-pane-stand-in");
+    let stand_in = egui::Id::unique("terminal-pane-stand-in");
     context.memory_mut(|memory| memory.request_focus(stand_in));
     app.open_project_session_setup(project.id);
     let _ = sheet_frame(&mut app, &context, Vec::new(), egui::Modifiers::NONE);
@@ -48672,7 +48727,7 @@ pub(crate) fn the_worktree_tabs_new_session_opens_the_sheet_there() {
     app.project_tab = ProjectTab::Worktrees;
     let context = egui::Context::default();
     let mut pass = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| app.ui_worktrees(ui, &project));
         });
     };
@@ -48683,8 +48738,8 @@ pub(crate) fn the_worktree_tabs_new_session_opens_the_sheet_there() {
         )),
         ..Default::default()
     };
-    let _ = context.run(screen.clone(), &mut pass);
-    let drawn = context.run(screen, &mut pass);
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    let drawn = context.run_pass(screen, &mut pass);
     let label = format!("{ICON_ADD}  {}", tr("この場所で新規セッション"));
     let buttons = drawn_text_rects(&drawn, |text| text == label);
     let feature = drawn_text_rect(&drawn, |text| text.contains("feature/x")).expect("listed");
@@ -48769,7 +48824,7 @@ pub(crate) fn the_overview_tab_summarises_the_project() {
     );
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(Default::default(), |ctx| {
+        context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_overview(ui, &project));
         })
     };
@@ -48796,7 +48851,7 @@ pub(crate) fn cli_restore_is_in_history_not_in_the_overview() {
     let labels = |app: &mut OperonApp, history: bool| {
         let context = egui::Context::default();
         let mut draw = || {
-            context.run(Default::default(), |ctx| {
+            context.run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if history {
                         app.ui_history_cli_section(ui);
@@ -48865,7 +48920,7 @@ pub(crate) fn the_history_card_offers_the_destination_model_and_effort() {
     let width = 880.0;
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -48946,11 +49001,13 @@ pub(crate) fn page_shortcuts_do_not_reach_past_the_launch_sheet() {
         (egui::Key::O, "⌘O"),
     ] {
         let input = egui::RawInput {
-            events: vec![key_press(key, egui::Modifiers::COMMAND)],
-            modifiers: egui::Modifiers::COMMAND,
+            events: vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                key_press(key, egui::Modifiers::COMMAND),
+            ],
             ..Default::default()
         };
-        let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+        let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
         assert_eq!(
             app.selected_project,
             Some(project.id),
@@ -48974,11 +49031,13 @@ pub(crate) fn page_shortcuts_do_not_reach_past_the_launch_sheet() {
     // Closed, the same chord still does what it always did.
     app.launch_sheet_open = false;
     let input = egui::RawInput {
-        events: vec![key_press(egui::Key::Num2, egui::Modifiers::COMMAND)],
-        modifiers: egui::Modifiers::COMMAND,
+        events: vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+            key_press(egui::Key::Num2, egui::Modifiers::COMMAND),
+        ],
         ..Default::default()
     };
-    let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+    let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
     assert_eq!(app.page, Page::Projects, "⌘2 still goes to Projects");
     fs::remove_dir_all(&root).ok();
 }
@@ -49100,7 +49159,7 @@ pub(crate) fn the_tab_row_draws_its_counts() {
     app.page = Page::Projects;
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -49131,7 +49190,7 @@ pub(crate) fn agent_settings_shows_skills_and_rules() {
     app.skill_cache.insert(project.id, Default::default());
     app.rule_cache.insert(project.id, Default::default());
     let context = egui::Context::default();
-    let drawn = context.run(Default::default(), |ctx| {
+    let drawn = context.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| app.ui_agent_settings(ui, &project));
     });
     let has = |text: &str| drawn_text_rect(&drawn, |drawn| drawn == text).is_some();
@@ -49150,8 +49209,10 @@ pub(crate) fn only_a_nonzero_change_count_is_emphasised() {
         // The app's sizes, where Body and Button differ; egui's defaults are
         // equal and would hide a tab drawn at the wrong one.
         apply_interface_metrics(&context);
-        let button = egui::TextStyle::Button.resolve(&context.style()).size;
-        let drawn = context.run(Default::default(), |ctx| {
+        let button = egui::TextStyle::Button
+            .resolve(&context.global_style())
+            .size;
+        let drawn = context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 tab_item_with_count(ui, palette, "変更", count, emphasise, false);
             });
@@ -49262,7 +49323,7 @@ fn settings_texts(app: &mut OperonApp, section: SettingsSection) -> Vec<String> 
     app.settings_section = section;
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -51789,15 +51850,17 @@ pub(crate) fn the_next_waiting_chord_opens_the_next_session_in_the_queue() {
     let ctx = egui::Context::default();
     let press = |app: &mut OperonApp| {
         let mut raw = egui::RawInput::default();
-        raw.modifiers = chord.modifiers;
-        raw.events = vec![egui::Event::Key {
-            key: chord.key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: chord.modifiers,
-        }];
-        let _ = ctx.run(raw, |ctx| app.handle_app_shortcuts(ctx));
+        raw.events = vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ];
+        let _ = ctx.run_ui(raw, |ctx| app.handle_app_shortcuts(ctx));
     };
 
     press(&mut app);
@@ -51845,7 +51908,7 @@ pub(crate) fn opening_the_next_waiting_session_focuses_its_terminal() {
         ..Default::default()
     };
     app.selected_session = Some(session.id);
-    let _ = context.run(screen, |ctx| {
+    let _ = context.run_ui(screen, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -51854,7 +51917,7 @@ pub(crate) fn opening_the_next_waiting_session_focuses_its_terminal() {
     });
     assert_eq!(
         context.memory(|memory| memory.focused()),
-        Some(egui::Id::new(("terminal-pane", second))),
+        Some(egui::Id::unique(("terminal-pane", second))),
         "the pane of the opened session should hold the keyboard"
     );
     assert_eq!(
@@ -52080,7 +52143,7 @@ pub(crate) fn the_title_bar_offers_the_next_waiting_session_while_one_waits() {
         ));
         raw.time = Some(time);
         raw.events = events;
-        ctx.run(raw, |ctx| app.ui_topbar(ctx))
+        ctx.run_ui(raw, |ctx| app.ui_topbar(ctx))
     };
     let press = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
         pos,
@@ -52233,21 +52296,70 @@ pub(crate) fn the_panel_chord_folds_and_reopens_the_side_panel() {
     let ctx = egui::Context::default();
     let press = |app: &mut OperonApp| {
         let mut raw = egui::RawInput::default();
-        raw.modifiers = chord.modifiers;
-        raw.events = vec![egui::Event::Key {
-            key: chord.key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: chord.modifiers,
-        }];
-        let _ = ctx.run(raw, |ctx| app.handle_app_shortcuts(ctx));
+        raw.events = vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ];
+        let _ = ctx.run_ui(raw, |ctx| app.handle_app_shortcuts(ctx));
     };
     assert!(app.show_session_inspector);
     press(&mut app);
     assert!(!app.show_session_inspector);
     press(&mut app);
     assert!(app.show_session_inspector);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A hidden window still runs `logic`, between shown frames, and reads the
+/// last shown frame's input there: the chord a person pressed must fold the
+/// panel once, not again on every hidden call (change 295).
+pub(crate) fn a_hidden_frame_does_not_replay_the_last_shortcut() {
+    use eframe::App;
+    let root = temporary_directory("hidden-replay");
+    let mut app = test_app(root.join("store-v2.json"));
+    let chord = app
+        .keymap
+        .chord_for("panel.toggle")
+        .expect("panel.toggle should have a default chord");
+    let ctx = egui::Context::default();
+    let mut frame = eframe::Frame::_new_kittest();
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 820.0),
+        )),
+        events: vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(app.show_session_inspector);
+    let _ = ctx.run_ui(raw, |root| app_frame(&mut app, root, &mut frame));
+    assert!(
+        !app.show_session_inspector,
+        "the shown frame folds the panel"
+    );
+    // eframe's hidden path: `logic` with no pass, the input still the last one.
+    app.logic(&ctx, &mut frame);
+    app.logic(&ctx, &mut frame);
+    assert!(
+        !app.show_session_inspector,
+        "a hidden call must not press the chord again"
+    );
     fs::remove_dir_all(&root).ok();
 }
 
@@ -52321,10 +52433,12 @@ pub(crate) fn clicking_a_pinned_rows_title_opens_the_session() {
             egui::vec2(1280.0, 800.0),
         ));
         raw.events = events;
-        ctx.run(raw, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.run_pass(raw, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         })
     };
     let _ = render(&mut app, vec![]);
@@ -52406,12 +52520,14 @@ fn workspace_texts_at_click_size(
         ..Default::default()
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    text_positions(&context.run(input, &mut draw))
+    let _ = context.run_pass(input.clone(), &mut draw);
+    text_positions(&context.run_pass(input, &mut draw))
 }
 
 // --- Change 166: one ＋ per project header starts a session ----------------
@@ -52458,9 +52574,11 @@ fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
         panic!("{name} の見出しに＋が描かれていません: {row:?}");
     };
     click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     });
     row.iter().map(|(text, _)| text.clone()).collect()
 }
@@ -52470,7 +52588,7 @@ fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
 /// does only there.
 fn header_add_hover_texts(app: &mut OperonApp, name: &str) -> Vec<String> {
     let context = egui::Context::default();
-    context.style_mut(|style| {
+    context.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -52491,13 +52609,15 @@ fn header_add_hover_texts(app: &mut OperonApp, name: &str) -> Vec<String> {
         ..Default::default()
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    let _ = context.run(input.clone(), &mut draw);
-    text_positions(&context.run(input, &mut draw))
+    let _ = context.run_pass(input.clone(), &mut draw);
+    let _ = context.run_pass(input.clone(), &mut draw);
+    text_positions(&context.run_pass(input, &mut draw))
         .into_iter()
         .map(|(text, _)| text)
         .collect()
@@ -52737,12 +52857,14 @@ pub(crate) fn the_session_grid_keeps_every_card_inside_its_view() {
         ..Default::default()
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    let output = context.run(input, &mut draw);
+    let _ = context.run_pass(input.clone(), &mut draw);
+    let output = context.run_pass(input, &mut draw);
     // The history is right of the session column; its own "p" header is the
     // rightmost one painted.
     let history_left = drawn_text_rects(&output, |text| text == "p")
@@ -52983,48 +53105,100 @@ pub(crate) fn the_prune_workflow_runs_the_script_on_every_push_to_main() {
     }
 }
 
+/// One eframe frame of the app: `logic`, then `ui` on the root `Ui`, in the
+/// order eframe 0.37 calls them (change 295 split 0.31's `update` in two).
+fn app_frame(app: &mut OperonApp, root: &mut egui::Ui, frame: &mut eframe::Frame) {
+    use eframe::App;
+    let ctx = root.ctx().clone();
+    app.logic(&ctx, frame);
+    app.ui(root, frame);
+}
+
+/// The page under test, inside a central panel on the pass's root `Ui`: what
+/// `egui::CentralPanel::default().show(ctx, …)` was before egui 0.37 moved
+/// panels from the `Context` onto a `Ui` (change 295).
+fn central_panel<R>(
+    ctx: &egui::Context,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    ctx.root_ui(|root| egui::CentralPanel::default().show(root, add_contents))
+}
+
 #[test]
-/// Cargo.toml must declare `rust-version` under `[package]` matching the CI toolchain
-/// pinned in `.github/workflows/ci.yml`.
+/// Every place that names the Rust toolchain names the same version (change 295).
 ///
-/// Without this manifest key, `cargo update` resolves packages that require newer
-/// rustc versions (e.g. uuid 1.27.0 requiring Rust 1.89.0), which breaks the build
-/// on the project's pinned toolchain (1.88.0).
-pub(crate) fn cargo_manifest_declares_msrv_matching_ci() {
+/// `rust-toolchain.toml` decides what a local `cargo` runs, `Cargo.toml`'s
+/// `rust-version` decides what `cargo update` may resolve (change 141: without
+/// it, uuid 1.27.0 needed a compiler newer than the pin), and every
+/// `toolchain:` line under `.github/workflows/` decides what CI runs. The test
+/// this replaces read only `ci.yml` and the manifest, so a bump that missed
+/// `harness.yml`, `scheduled-scan.yml` or `rust-toolchain.toml` passed — and
+/// left CI and a local build on two compilers. `@stable` jobs name no
+/// `toolchain:` line and are not pins.
+pub(crate) fn every_toolchain_pin_names_one_version() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml should exist");
-    let ci_yml = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect(".github/workflows/ci.yml should exist");
+    let values_of = |text: &str, key: &str, separator: char| -> Vec<String> {
+        text.lines()
+            .filter_map(|line| {
+                let (name, value) = line.trim().split_once(separator)?;
+                (name.trim() == key).then(|| value.trim().trim_matches('"').to_owned())
+            })
+            .collect()
+    };
+    let read = |relative: &str| {
+        fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("{relative}: {error}"))
+    };
 
-    let manifest_msrv = cargo_toml
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("rust-version") {
-                let (_, val) = trimmed.split_once('=')?;
-                Some(val.trim().trim_matches('"').to_string())
-            } else {
-                None
-            }
-        })
-        .expect("Cargo.toml must declare rust-version under [package]");
+    let mut pins: Vec<(String, String)> = Vec::new();
+    for version in values_of(&read("rust-toolchain.toml"), "channel", '=') {
+        pins.push(("rust-toolchain.toml channel".to_owned(), version));
+    }
+    for version in values_of(&read("Cargo.toml"), "rust-version", '=') {
+        pins.push(("Cargo.toml rust-version".to_owned(), version));
+    }
+    let mut workflows = fs::read_dir(root.join(".github/workflows"))
+        .expect(".github/workflows should exist")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|extension| extension == "yml"))
+        .collect::<Vec<_>>();
+    workflows.sort();
+    for path in workflows {
+        let text = fs::read_to_string(&path).expect("a workflow file should be readable");
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        for version in values_of(&text, "toolchain", ':') {
+            pins.push((format!(".github/workflows/{name} toolchain"), version));
+        }
+    }
 
-    let ci_toolchain = ci_yml
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("toolchain:") {
-                let (_, val) = trimmed.split_once(':')?;
-                Some(val.trim().to_string())
-            } else {
-                None
-            }
-        })
-        .expect("ci.yml must declare a toolchain");
-
-    assert_eq!(
-        manifest_msrv, ci_toolchain,
-        "Cargo.toml rust-version ({manifest_msrv}) does not match ci.yml toolchain ({ci_toolchain})"
+    let sources = pins
+        .iter()
+        .map(|(source, _)| source.as_str())
+        .collect::<Vec<_>>();
+    for required in ["rust-toolchain.toml channel", "Cargo.toml rust-version"] {
+        assert!(
+            sources.contains(&required),
+            "{required} is missing: {pins:?}"
+        );
+    }
+    assert!(
+        sources
+            .iter()
+            .any(|source| source.ends_with("/ci.yml toolchain")),
+        "ci.yml no longer pins a toolchain: {pins:?}"
+    );
+    let (first_source, first) = &pins[0];
+    let disagreeing = pins
+        .iter()
+        .filter(|(_, version)| version != first)
+        .collect::<Vec<_>>();
+    assert!(
+        disagreeing.is_empty(),
+        "toolchain pins disagree with {first_source} = {first}: {disagreeing:?}"
     );
 }
 
@@ -53072,7 +53246,7 @@ pub(crate) fn test_change_144_splitter_resize_grip_affordance() {
     let ctx = egui::Context::default();
     let palette = AppTheme::Dark.palette();
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let h_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 6.0));
             paint_splitter_h(ui, h_rect, palette, false);
@@ -53129,9 +53303,9 @@ pub(crate) fn test_change_144_file_tree_rows_culls_invisible_nodes() {
     let badges = HashMap::new();
     let mut actions = Vec::new();
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         // Constrain height to only 48px (approximately 2 rows)
-        egui::Area::new(egui::Id::new("test_culling_area"))
+        egui::Area::new(egui::Id::unique("test_culling_area"))
             .fixed_pos(egui::pos2(0.0, 0.0))
             .show(ctx, |ui| {
                 ui.set_width(200.0);
@@ -54117,7 +54291,7 @@ pub(crate) fn typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands() {
     let context = egui::Context::default();
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -54774,12 +54948,14 @@ fn column_hovered(app: &mut OperonApp, context: &egui::Context, at: egui::Pos2) 
     };
     let palette = app.store.theme.palette();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    Painted::read(&context.run(input, &mut draw), palette)
+    let _ = context.run_pass(input.clone(), &mut draw);
+    Painted::read(&context.run_pass(input, &mut draw), palette)
 }
 
 /// One settled frame of the workspace at `click_at`'s screen size.
@@ -54795,12 +54971,14 @@ fn column_painted(app: &mut OperonApp, context: &egui::Context) -> Painted {
     };
     let palette = app.store.theme.palette();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    Painted::read(&context.run(input, &mut draw), palette)
+    let _ = context.run_pass(input.clone(), &mut draw);
+    Painted::read(&context.run_pass(input, &mut draw), palette)
 }
 
 fn click_in_workspace(
@@ -54829,12 +55007,14 @@ fn click_in_workspace(
         ]
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input(press(true)), &mut draw);
-    let _ = context.run(input(press(false)), &mut draw);
+    let _ = context.run_pass(input(press(true)), &mut draw);
+    let _ = context.run_pass(input(press(false)), &mut draw);
 }
 
 /// `stop_session` was reached: it spawns this key synchronously. Under the
@@ -55273,13 +55453,15 @@ pub(crate) fn a_column_title_double_click_renames_its_session() {
     let (title, _) = painted.in_column("first").unwrap();
     let at = title.center();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
     // One pass with the pointer resting on the row first: its hover
     // layout is drawn from that pass, as it is before a person's press.
-    let _ = context.run(
+    let _ = context.run_pass(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -55314,7 +55496,7 @@ pub(crate) fn a_column_title_double_click_renames_its_session() {
             events,
             ..Default::default()
         };
-        let _ = context.run(input, &mut draw);
+        let _ = context.run_pass(input, &mut draw);
     }
     assert_eq!(
         app.renaming_session,
@@ -56631,10 +56813,10 @@ pub(crate) fn knowledge_ui_shows_embedding_gemma_device_and_available_cli_summar
     let mut disabled_output = None;
     let mut settings_output = None;
     for _ in 0..2 {
-        disabled_output = Some(context.run(egui::RawInput::default(), |ctx| {
+        disabled_output = Some(context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
         }));
-        settings_output = Some(context.run(egui::RawInput::default(), |ctx| {
+        settings_output = Some(context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_model_block(ui));
         }));
     }
@@ -57523,7 +57705,7 @@ pub(crate) fn a_knowledge_tab_that_failed_to_load_offers_a_retry() {
     let context = egui::Context::default();
     let mut output = None;
     for _ in 0..2 {
-        output = Some(context.run(egui::RawInput::default(), |ctx| {
+        output = Some(context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
         }));
     }
@@ -58153,7 +58335,7 @@ fn knowledge_tab_texts(app: &mut OperonApp, project: &Project) -> Vec<String> {
     let context = egui::Context::default();
     let mut output = None;
     for _ in 0..2 {
-        output = Some(context.run(
+        output = Some(context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -58316,7 +58498,7 @@ pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
         before.iter().any(|text| text == tr("グループ")),
         "{before:?}"
     );
-    assert!(!before.iter().any(|text| *text == entry.body));
+    assert!(!before.contains(&entry.body));
     // Chosen on the map: a reference, like opening the row.
     app.open_knowledge_entry(project.id, entry.id);
     assert_eq!(app.knowledge.open_entry, Some((project.id, entry.id)));
@@ -58324,14 +58506,11 @@ pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
         .background_tasks
         .contains(&BackgroundKey::KnowledgeEdit(project.id)));
     let on_map = knowledge_tab_texts(&mut app, &project);
-    assert!(on_map.iter().any(|text| *text == entry.body), "{on_map:?}");
+    assert!(on_map.contains(&entry.body), "{on_map:?}");
     // The list shows the same entry open.
     app.knowledge.layout_mode = KnowledgeLayoutMode::List;
     let in_list = knowledge_tab_texts(&mut app, &project);
-    assert!(
-        in_list.iter().any(|text| *text == entry.body),
-        "{in_list:?}"
-    );
+    assert!(in_list.contains(&entry.body), "{in_list:?}");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -58416,7 +58595,7 @@ pub(crate) fn knowledge_map_refits_when_the_window_narrows() {
     let context = egui::Context::default();
     let draw_at = |app: &mut OperonApp, width: f32| {
         for _ in 0..2 {
-            let _ = context.run(
+            let _ = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -58636,7 +58815,7 @@ fn column_181_output(
         events,
         ..Default::default()
     };
-    context.run(input, |ctx| {
+    context.run_ui(input, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| app.ui_terminal_session_tabs(ui));
@@ -59245,7 +59424,7 @@ pub(crate) fn test_change_181_drag_near_the_edge_scrolls_the_column() {
 pub(crate) fn test_change_181_hovers_say_rows_and_projects_can_be_dragged() {
     let mut column = ArrangedColumn::new("column-181-hovers");
     let context = egui::Context::default();
-    context.style_mut(|style| {
+    context.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -59296,7 +59475,7 @@ pub(crate) fn a_commit_message_stays_with_the_project_it_was_written_for() {
         let ctx = egui::Context::default();
         let mut texts = Vec::new();
         for _ in 0..2 {
-            let drawn = ctx.run(egui::RawInput::default(), |ctx| {
+            let drawn = ctx.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     app.ui_commit_box(ui, app.store.theme.palette(), project);
                 });
@@ -59358,7 +59537,7 @@ fn find_bar_frame(
     session_id: Uuid,
     events: Vec<egui::Event>,
 ) {
-    let _ = ctx.run(
+    let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -59413,10 +59592,10 @@ pub(crate) fn the_find_bar_steps_on_enter_but_not_on_a_conversions_enter() {
         &mut app,
         &ctx,
         session_id,
-        vec![
-            egui::Event::Ime(egui::ImeEvent::Enabled),
-            egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into())),
-        ],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        })],
     );
     // Mid-conversion: the Enter belongs to the IME. The preedit is in every
     // line, so a step would show.
@@ -59468,8 +59647,10 @@ pub(crate) fn esc_closes_the_find_bar_into_the_pane_but_not_mid_conversion() {
         &ctx,
         session_id,
         vec![
-            egui::Event::Ime(egui::ImeEvent::Enabled),
-            egui::Event::Ime(egui::ImeEvent::Preedit("か".into())),
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "か".into(),
+                active_range_chars: None,
+            }),
             escape(),
         ],
     );
@@ -59488,7 +59669,10 @@ pub(crate) fn esc_closes_the_find_bar_into_the_pane_but_not_mid_conversion() {
         &ctx,
         session_id,
         vec![
-            egui::Event::Ime(egui::ImeEvent::Preedit(String::new())),
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            }),
             escape(),
         ],
     );
@@ -59628,7 +59812,7 @@ pub(crate) fn a_note_on_a_changed_line_says_so_from_the_per_file_review() {
         diff_with_a_changed_second_line(),
     );
     let ctx = egui::Context::default();
-    let output = ctx.run(egui::RawInput::default(), |ctx| {
+    let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
         app.copy_diff_comments_markdown(project, ctx);
     });
     let copied: Vec<&String> = output
@@ -59690,7 +59874,7 @@ fn diff_pane_frame(
     before: &mut dyn FnMut(&mut egui::Ui),
 ) -> egui::FullOutput {
     let mut collapsed = HashSet::new();
-    ctx.run(
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -59795,7 +59979,7 @@ pub(crate) fn the_note_editor_does_not_take_the_keyboard_back() {
     let mut annotations = DiffAnnotations::default();
     annotations.open(project, "src/a.rs", 1);
     let ctx = egui::Context::default();
-    let other = egui::Id::new("another-field");
+    let other = egui::Id::unique("another-field");
     let mut filter = String::new();
     let mut draw = |annotations: &mut DiffAnnotations| {
         diff_pane_frame(&ctx, &files, project, annotations, &mut |ui| {
@@ -59853,7 +60037,7 @@ pub(crate) fn a_checkpoint_diff_is_copied_from_a_background_thread() {
             let mut copied = Vec::new();
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let output = ctx.run(egui::RawInput::default(), |_| {
+                let output = ctx.run_ui(egui::RawInput::default(), |_| {
                     app.process_background_results()
                 });
                 copied.extend(
@@ -60072,7 +60256,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
     let cell = {
         let ctx = egui::Context::default();
         let mut cell = egui::Vec2::ZERO;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| cell = terminal_cell_size(ui));
         });
         cell
@@ -60083,7 +60267,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
         let ctx = egui::Context::default();
         let mut unresolved = Vec::new();
         let mut hovered = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 events: pointer.map(egui::Event::PointerMoved).into_iter().collect(),
                 ..Default::default()
@@ -60098,7 +60282,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
                         &mut TerminalLinkOverlay {
                             resolved,
                             unresolved: &mut unresolved,
-                            palette: &palette,
+                            palette,
                         },
                     );
                 });
@@ -61873,7 +62057,7 @@ pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
     let (mut app, project, root) = launch_screen_fixture("sheet-button-accent");
     let palette = app.store.theme.palette();
     let context = egui::Context::default();
-    context.style_mut(|style| style.animation_time = 0.0);
+    context.global_style_mut(|style| style.animation_time = 0.0);
     app.open_project_session_setup(project.id);
     for agent in ["claude", "codex", "gemini"] {
         app.select_agent(agent);
@@ -62414,12 +62598,12 @@ pub(crate) fn the_changes_sub_tab_draws_the_file_list_and_commit_box_beside_the_
         )),
         ..Default::default()
     };
-    let _ = ctx.run(input.clone(), |ctx| {
+    let _ = ctx.run_ui(input.clone(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             app.ui_git(ui, &project);
         });
     });
-    let drawn = ctx.run(input, |ctx| {
+    let drawn = ctx.run_ui(input, |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             app.ui_git(ui, &project);
         });
@@ -62508,7 +62692,7 @@ pub(crate) fn clicking_a_changed_file_filters_the_diff_without_leaving_the_chang
             events,
             ..Default::default()
         };
-        ctx.run(input, |ctx| {
+        ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_git(ui, &project);
             });
@@ -62599,7 +62783,7 @@ pub(crate) fn the_command_palette_sits_centered_near_the_top_of_the_window() {
     };
     let mut output = egui::FullOutput::default();
     for _ in 0..2 {
-        output = ctx.run(raw_input.clone(), |ctx| {
+        output = ctx.run_ui(raw_input.clone(), |ctx| {
             app.ui_command_palette(ctx);
         });
     }
@@ -62947,7 +63131,7 @@ pub(crate) fn a_truncated_session_tab_names_its_title_once_on_hover() {
     app.select_session(second);
     app.select_session(first);
     let context = egui::Context::default();
-    context.style_mut(|style| {
+    context.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -62960,10 +63144,12 @@ pub(crate) fn a_truncated_session_tab_names_its_title_once_on_hover() {
             events,
             ..Default::default()
         };
-        text_positions(&context.run(input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        text_positions(&context.run_pass(input, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }))
     };
     let count = |texts: &[(String, egui::Pos2)]| texts.iter().filter(|(t, _)| t == long).count();
@@ -63009,10 +63195,12 @@ pub(crate) fn dragging_a_central_tab_onto_a_terminal_splits_it() {
             events,
             ..Default::default()
         };
-        text_positions(&context.run(input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        text_positions(&context.run_pass(input, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }))
     };
     frame(&mut app, Vec::new());
@@ -63949,7 +64137,7 @@ fn workspace_pointer_frame(
     context: &egui::Context,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    context.run(
+    context.run_pass(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -63959,9 +64147,11 @@ fn workspace_pointer_frame(
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         },
     )
 }
@@ -64212,7 +64402,7 @@ fn workspace_visible_documents_do_not_reparse_unchanged_frames() {
     ));
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64288,7 +64478,7 @@ fn terminal_pane_render_cache_hits_on_unchanged_frame() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64346,7 +64536,7 @@ fn terminal_pane_render_cache_isolates_split_panes_during_tab_move() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64453,7 +64643,7 @@ fn terminal_workspace_tab_switch_does_not_rebuild_unchanged_panes() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64570,7 +64760,7 @@ fn terminal_workspace_split_only_builds_affected_panes() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64683,7 +64873,7 @@ fn adversarial_focus_toggle_between_split_panes() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64871,7 +65061,7 @@ fn session_255_a_settling_size_wakes_the_frame() {
     // that has just happened. Nothing else in the pane asks for a frame.
     let ctx = egui::Context::default();
     let mut frame = || {
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64966,7 +65156,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
     for index in 0..5 {
         output.push_str(&format!("row {index}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     let cursor = TerminalCursor {
         x: 2,
         y: 4,
@@ -64978,7 +65168,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
     // The second frame is the same output in a pane pushed right and made
     // narrower, as a window resize or a sidebar does to it.
     for side in [None, Some(200.0)] {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64988,8 +65178,8 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
             },
             |ctx| {
                 if let Some(width) = side {
-                    egui::SidePanel::left("session-255-side")
-                        .exact_width(width)
+                    egui::Panel::left("session-255-side")
+                        .exact_size(width)
                         .resizable(false)
                         .show(ctx, |_| {});
                 }
@@ -65000,12 +65190,12 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
                         matches: &[],
                         current: None,
                         scroll_to: None,
-                        palette: &palette,
+                        palette,
                     };
                     let mut links = TerminalLinkOverlay {
                         resolved: &HashMap::new(),
                         unresolved: &mut Vec::new(),
-                        palette: &palette,
+                        palette,
                     };
                     carets.push(
                         terminal_rows(
@@ -65143,7 +65333,7 @@ fn non_session_background_task_completion_wakes_frame() {
     app.process_background_results();
 
     // Consume the previous frame repaint request so egui can fire the next one
-    let _ = context.run(egui::RawInput::default(), |_| {});
+    let _ = context.run_ui(egui::RawInput::default(), |_| {});
 
     // 2. Action-level background task (SystemAction) must wake the frame immediately on completion
     app.spawn_background(BackgroundKey::SystemAction(action_id), move || {
@@ -65183,7 +65373,7 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
         app.ports_scanned_at = Some(Instant::now());
         app.last_session_refresh = Instant::now();
         let mut frame = eframe::Frame::_new_kittest();
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65192,12 +65382,15 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
                 ..Default::default()
             },
             |ctx| {
-                <OperonApp as eframe::App>::update(app, ctx, &mut frame);
+                app_frame(app, ctx, &mut frame);
             },
         )
     };
 
-    // Warm-up initial frame
+    // Warm-up frames. egui 0.37 styles a button it did not see on the pass
+    // before as idle and asks for one more pass to style it right, and the
+    // second frame still draws buttons the first one laid out differently.
+    let _ = run_frame(&mut app);
     let _ = run_frame(&mut app);
     let full_output = run_frame(&mut app);
 
@@ -65266,7 +65459,7 @@ fn adversarial_rapid_20_cycle_focus_toggle_zero_misses() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65407,7 +65600,7 @@ fn adversarial_varying_content_and_cursor_positions_focus_invariance() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65491,7 +65684,7 @@ fn adversarial_multi_split_configurations_focus_invariance() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65645,7 +65838,7 @@ fn adversarial_secondary_factors_during_focus_toggle() {
             Some(pos) => vec![egui::Event::PointerMoved(pos)],
             None => Vec::new(),
         };
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65883,7 +66076,7 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         app.background_tasks.clear();
         while app.background_receiver.try_recv().is_ok() {}
         while wakes.try_recv().is_ok() {}
-        let _ = context.run(egui::RawInput::default(), |_| {});
+        let _ = context.run_ui(egui::RawInput::default(), |_| {});
 
         let k = key.clone();
         app.spawn_background(k, || BackgroundResult::ListeningPorts {
@@ -65905,7 +66098,7 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         app.background_tasks.clear();
         while app.background_receiver.try_recv().is_ok() {}
         while wakes.try_recv().is_ok() {}
-        let _ = context.run(egui::RawInput::default(), |_| {});
+        let _ = context.run_ui(egui::RawInput::default(), |_| {});
 
         let k = key.clone();
         app.spawn_background(k, || BackgroundResult::ListeningPorts {
@@ -65982,7 +66175,7 @@ fn adversarial_rapid_tab_cycling_zero_leak_zero_redundant_builds() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66129,7 +66322,7 @@ fn adversarial_deeply_nested_asymmetric_split_isolation() {
 
     let ctx = egui::Context::default();
     let run_frame = |app: &mut OperonApp, size: egui::Vec2| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
@@ -66241,7 +66434,7 @@ fn adversarial_concurrent_sibling_mutation_during_tab_switch() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66313,7 +66506,7 @@ fn adversarial_cache_invalidation_matrix() {
 
     let ctx = egui::Context::default();
     let frame_with_size = |app: &mut OperonApp, size: egui::Vec2| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
@@ -66475,7 +66668,7 @@ fn workspace_line_jump_waits_for_its_target_document() {
     app.navigate_to_file(&project, project.path.clone(), id.path.clone(), Some(120));
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(area),
                 ..Default::default()
@@ -66517,7 +66710,7 @@ fn workspace_worktree_document_tab_keeps_its_branch() {
         .open(WorkspaceTab::Document(app.open_documents[0].id()));
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66612,7 +66805,7 @@ fn history_title_single_click_opens_after_the_double_click_window() {
     let (mut app, first, _, third) = column_fixture(&root);
     let context = egui::Context::default();
     let frame = |app: &mut OperonApp, time: f64, events: Vec<egui::Event>| {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66690,12 +66883,14 @@ fn history_grid_long_project_header_keeps_actions_inside_its_group() {
             ..Default::default()
         };
         let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         };
-        let _ = context.run(input.clone(), &mut draw);
-        let output = context.run(input, &mut draw);
+        let _ = context.run_pass(input.clone(), &mut draw);
+        let output = context.run_pass(input, &mut draw);
         let sidebar_name = drawn_text_rects(&output, |text| text == long_name)
             .into_iter()
             .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
@@ -66881,7 +67076,7 @@ fn history_pending_title_is_cancelled_when_the_app_leaves_sessions() {
     for page in [Page::Home, Page::Settings] {
         app.page = page;
         app.pending_history_open = Some((first, 10.0));
-        let _ = context.run(
+        let _ = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66890,7 +67085,7 @@ fn history_pending_title_is_cancelled_when_the_app_leaves_sessions() {
                 time: Some(11.0),
                 ..Default::default()
             },
-            |ctx| <OperonApp as eframe::App>::update(&mut app, ctx, &mut frame),
+            |ctx| app_frame(&mut app, ctx, &mut frame),
         );
         assert!(
             app.pending_history_open.is_none(),
@@ -66941,7 +67136,7 @@ fn workspace_project_picker_keeps_saved_order_counts_and_per_project_launch() {
     app.show_session_inspector = false;
     app.session_arrangement.projects = vec![empty, populated];
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let row = |name: &str| {
@@ -67668,7 +67863,7 @@ fn workspace_session_tab_shows_its_status_glyph() {
     session_283_without_marks(&mut app);
     app.select_session(first);
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -68414,7 +68609,7 @@ fn store_oracle() -> StoreOracle {
         let generation = loaded
             .notice
             .is_none()
-            .then(|| loaded.store.pending_cancellations.len() as u8);
+            .then_some(loaded.store.pending_cancellations.len() as u8);
         let kept = fs::read_dir(&root)
             .unwrap()
             .filter_map(|entry| fs::read(entry.ok()?.path()).ok())
@@ -69931,10 +70126,10 @@ pub(crate) fn session_tabs_show_live_state_before_title() {
             .map(|s| s.shape.clone())
             .collect();
         let expected_ctx = egui::Context::default();
-        let expected = expected_ctx.run(egui::RawInput::default(), |ctx| {
+        let expected = expected_ctx.run_ui(egui::RawInput::default(), |ctx| {
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
-                egui::Id::new("expected-status"),
+                egui::Id::unique("expected-status"),
             ));
             expected_kind.status_mark().paint(
                 &painter,
@@ -70044,7 +70239,7 @@ fn selected_navigation_uses_a_fine_accent_rule() {
             let mut shapes = Vec::new();
             for _ in 0..2 {
                 shapes = ctx
-                    .run(egui::RawInput::default(), |ctx| {
+                    .run_ui(egui::RawInput::default(), |ctx| {
                         egui::CentralPanel::default().show(ctx, |ui| {
                             tab_rect = nav_tab(ui, p, "", "セッション", selected).rect;
                         });
@@ -70131,7 +70326,7 @@ fn topbar_wordmark_is_neutral_beside_the_primary_action() {
     let mut shapes = Vec::new();
     for _ in 0..2 {
         shapes = ctx
-            .run(
+            .run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -70189,10 +70384,10 @@ fn session_tab_status_badges_are_distinct_vectors() {
                     egui::pos2(20.0, 20.0),
                     egui::Vec2::splat(STATUS_ICON_SIZE * scale),
                 );
-                let output = ctx.run(egui::RawInput::default(), |ctx| {
+                let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
                     let painter = ctx.layer_painter(egui::LayerId::new(
                         egui::Order::Middle,
-                        egui::Id::new("status-test"),
+                        egui::Id::unique("status-test"),
                     ));
                     kind.status_mark().paint(&painter, rect, palette.text);
                 });
@@ -70513,7 +70708,7 @@ fn sidebar_251_short_stacked_column_can_scroll_to_project_rows() {
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
     let draw = |app: &mut OperonApp, events| {
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -70552,6 +70747,8 @@ fn sidebar_251_short_stacked_column_can_scroll_to_project_rows() {
         vec![egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, -500.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
             modifiers: egui::Modifiers::default(),
         }],
     );
@@ -70778,7 +70975,7 @@ fn sidebar_252_needs_you_covers_waiting() {
     assert!(app.session_matches_filters(&waiting));
     app.clear_session_filters();
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let right = project_column_right(&app);
@@ -71269,7 +71466,7 @@ pub(crate) fn session_254_compact_tabs() {
     );
     // Since change 267 the CLI mark sits between the state mark and the
     // title: one mark and one gap further right, and no more.
-    let mark = SESSION_MARK_SIZE + ctx.style().spacing.item_spacing.x;
+    let mark = SESSION_MARK_SIZE + ctx.global_style().spacing.item_spacing.x;
     assert!(
         texts[0].pos.x - right < 65.0 + mark,
         "title is left aligned beside the status icon and CLI mark"
@@ -71308,7 +71505,7 @@ pub(crate) fn session_254_terminal_action() {
     }
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
-    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
@@ -72207,7 +72404,7 @@ pub(crate) fn session_273_missing_cli_is_disabled() {
     app.show_session_inspector = false;
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
-    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
@@ -73754,7 +73951,7 @@ pub(crate) fn ide_261_diff_pane_hunk_buttons_emit_stage_and_discard() {
     let project = Uuid::new_v4();
     let mut annotations = DiffAnnotations::default();
     let mut action = None;
-    let output = ctx.run(
+    let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -73795,7 +73992,7 @@ pub(crate) fn ide_261_diff_pane_hunk_buttons_emit_stage_and_discard() {
                     collapsed: &mut HashSet<String>,
                     annotations: &mut DiffAnnotations| {
         let mut out_action = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -74540,7 +74737,7 @@ fn session_tab_mark_names_its_cli_on_hover() {
     let root = temporary_directory("session-tab-cli-hover");
     let (mut app, _first, _second) = tab_267_fixture(&root);
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -76545,16 +76742,20 @@ fn shortcut_272_frame(
             egui::Pos2::ZERO,
             egui::vec2(1280.0, 820.0),
         )),
-        events: vec![key_press(key, modifiers)],
-        modifiers,
+        events: vec![
+            egui::Event::ModifiersChanged(modifiers),
+            key_press(key, modifiers),
+        ],
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
+    let _ = ctx.run_pass(input, |ctx| {
         app.handle_app_shortcuts(ctx);
         if app.page == Page::Sessions {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }
     });
 }
@@ -76563,10 +76764,12 @@ fn shortcut_272_frame(
 /// presses a key: the workspace marks its live sessions seen on its first
 /// draw, and a tab closed before that draw is added back as newly live.
 fn shortcut_272_settle(app: &mut OperonApp, ctx: &egui::Context) {
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    let _ = ctx.run_pass(egui::RawInput::default(), |ctx| {
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     });
 }
 
@@ -77369,7 +77572,7 @@ fn poll_275_returning_to_the_window_reads_at_once() {
 fn poll_275_frame(app: &mut OperonApp, ctx: &egui::Context, focused: bool) {
     app.ports_scanned_at = Some(Instant::now());
     let mut frame = eframe::Frame::_new_kittest();
-    let _ = ctx.run(
+    let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -77378,7 +77581,7 @@ fn poll_275_frame(app: &mut OperonApp, ctx: &egui::Context, focused: bool) {
             focused,
             ..Default::default()
         },
-        |ctx| <OperonApp as eframe::App>::update(app, ctx, &mut frame),
+        |ctx| app_frame(app, ctx, &mut frame),
     );
 }
 
@@ -78081,7 +78284,7 @@ fn working_278_hover_texts(
     pick: impl Fn(&[(String, egui::Pos2)], f32) -> Option<egui::Pos2>,
 ) -> Vec<String> {
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -78115,7 +78318,7 @@ fn working_278_column_and_tab_hovers_say_how_long() {
             .next()
     });
     assert!(
-        row.iter().any(|text| *text == timed),
+        row.contains(&timed),
         "セッション列の行のホバーが作業時間を言いません: {row:?}"
     );
     // The tab's state mark is painted, not text: it sits left of the tab's
@@ -78139,7 +78342,7 @@ fn working_278_column_and_tab_hovers_say_how_long() {
         })
         .expect("the tab's state mark answers a hover");
     assert!(
-        tab.iter().any(|text| *text == timed),
+        tab.contains(&timed),
         "タブのホバーが作業時間を言いません: {tab:?}"
     );
     fs::remove_dir_all(&root).ok();
@@ -78216,7 +78419,7 @@ fn reply_279_frame(
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
     let sessions = app.store.sessions.clone();
-    ctx.run(
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -78226,8 +78429,8 @@ fn reply_279_frame(
             ..Default::default()
         },
         |ctx| {
-            egui::SidePanel::left("reply-279-rows")
-                .exact_width(300.0)
+            egui::Panel::left("reply-279-rows")
+                .exact_size(300.0)
                 .show(ctx, |ui| {
                     app.ui_pinned_sessions(ui, &sessions);
                 });
@@ -78731,7 +78934,7 @@ fn broadcast_282_frame(
     ctx: &egui::Context,
     events: Vec<egui::Event>,
 ) -> Vec<String> {
-    let output = ctx.run(
+    let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -78863,7 +79066,7 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
         "second".to_owned(),
     ] {
         assert!(
-            texts.iter().any(|text| *text == expected),
+            texts.contains(&expected),
             "シートに「{expected}」がありません: {texts:?}"
         );
     }
@@ -78974,11 +79177,13 @@ fn broadcast_282_f1_page_shortcuts_do_not_reach_past_the_sheet() {
         (egui::Key::N, "⌘N"),
     ] {
         let input = egui::RawInput {
-            events: vec![key_press(key, egui::Modifiers::COMMAND)],
-            modifiers: egui::Modifiers::COMMAND,
+            events: vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                key_press(key, egui::Modifiers::COMMAND),
+            ],
             ..Default::default()
         };
-        let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+        let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
         if app.command_palette_open {
             leaks.push(format!("{name} opens the palette over the sheet"));
         }
@@ -79302,7 +79507,7 @@ fn session_283_mark_names_cli_and_state_on_hover() {
         Some(AgentActivity::Idle),
     );
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -80220,20 +80425,20 @@ fn home_287_frame(
     session: &Session,
     pointer: Option<egui::Pos2>,
 ) -> egui::FullOutput {
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
     let mut pass = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             app.home_session_row(ui, session, "recent");
         });
     };
     let events = pointer
         .map(|at| vec![egui::Event::PointerMoved(at)])
         .unwrap_or_default();
-    let _ = ctx.run(home_287_input(events), &mut pass);
-    ctx.run(home_287_input(Vec::new()), &mut pass)
+    let _ = ctx.run_pass(home_287_input(events), &mut pass);
+    ctx.run_pass(home_287_input(Vec::new()), &mut pass)
 }
 
 fn home_287_count(output: &egui::FullOutput, text: &str) -> usize {
@@ -80310,7 +80515,7 @@ fn home_287_clicking_the_mark_opens_the_session() {
     let ctx = egui::Context::default();
     let mark = home_287_indicator(&mut app, &ctx, &session);
     click_at(&ctx, mark, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             app.home_session_row(ui, &session, "recent");
         });
     });
@@ -82957,7 +83162,7 @@ pub(crate) fn tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_
         assert!(delivered, "coalesced stream must deliver latest TUI burst");
         let captures_after_burst = app.terminal_streams.total_captures();
         assert!(
-            captures_after_burst >= 1 && captures_after_burst < 15,
+            (1..15).contains(&captures_after_burst),
             "expected burst coalescing (< 15 captures for 20 lines), got {captures_after_burst}"
         );
 
@@ -83059,7 +83264,7 @@ pub(crate) fn tui_perf_292_unchanged_capture_skips_repaint_and_cursor_only_prese
     // Render frame 1 to populate TerminalPaneRenderCache row galleys.
     let render_pane = |app: &mut OperonApp| {
         let s = session.clone();
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -83282,7 +83487,7 @@ pub(crate) fn tui_perf_292_incremental_ansi_layout_reparses_only_dirty_lines_and
 #[test]
 pub(crate) fn tui_perf_292_row_galley_cache_shapes_only_dirty_or_newly_visible_rows() {
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
 
     let mut raw_lines: Vec<String> = (0..100).map(|i| format!("row-content-{i:03}")).collect();
     let text0 = raw_lines.join("\n");
@@ -83436,7 +83641,7 @@ pub(crate) fn tui_perf_292_hovering_non_file_token_during_streaming_does_not_rep
     // Hovering pointer directly over row 0 (`status.ok`) during render produces
     // zero unresolved path pushes and zero extra request_repaint calls.
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
 
     let palette = AppTheme::Dark.palette();
     let lines = app.terminal_layouts.get(&session_id).unwrap().clone();
@@ -83460,7 +83665,7 @@ pub(crate) fn tui_perf_292_hovering_non_file_token_during_streaming_does_not_rep
         } else {
             Vec::new()
         };
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -83478,19 +83683,19 @@ pub(crate) fn tui_perf_292_hovering_non_file_token_during_streaming_does_not_rep
                             matches: &matches,
                             current: Some(0),
                             scroll_to: None,
-                            palette: &palette,
+                            palette,
                         };
                         let mut link_overlay = if frame == 0 {
                             TerminalLinkOverlay {
                                 resolved: &empty_resolved,
                                 unresolved: &mut probe_when_uncached,
-                                palette: &palette,
+                                palette,
                             }
                         } else {
                             TerminalLinkOverlay {
                                 resolved: &app.resolved_paths,
                                 unresolved: &mut unresolved,
-                                palette: &palette,
+                                palette,
                             }
                         };
                         let _ = terminal_rows(
@@ -83621,7 +83826,7 @@ pub(crate) fn tui_perf_292_session_workspace_steady_frame_and_module_budget() {
 
     let ctx = egui::Context::default();
     let run_workspace_frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -83630,8 +83835,8 @@ pub(crate) fn tui_perf_292_session_workspace_steady_frame_and_module_budget() {
                 ..Default::default()
             },
             |ctx| {
-                egui::SidePanel::left("tui-292-projects")
-                    .exact_width(240.0)
+                egui::Panel::left("tui-292-projects")
+                    .exact_size(240.0)
                     .show(ctx, |ui| {
                         app.ui_workspace_projects(ui);
                     });
@@ -84028,7 +84233,7 @@ pub(crate) fn tui_perf_292_f1_stream_folding_baseline_attach_font_key_and_split_
 
     // (e) TerminalRowGalleyKey includes font_size_bits so font size changes reshape rows.
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |_| {});
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
     let mut job_12 = LayoutJob::default();
     job_12.append(
         "hello",
@@ -84089,7 +84294,7 @@ pub(crate) fn tui_perf_292_f1_stream_folding_baseline_attach_font_key_and_split_
         .insert("stale.tok".into(), Instant::now());
     app.workspace.open(WorkspaceTab::Session(s2.id));
     let s2_clone = s2.clone();
-    let _ = ctx.run(
+    let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -84470,7 +84675,7 @@ fn launch_294_frame(
         events,
         ..Default::default()
     };
-    context.run(input, |ctx| app.ui_launch_sheet(ctx))
+    context.run_ui(input, |ctx| app.ui_launch_sheet(ctx))
 }
 
 /// Opens the sheet's project list by clicking its combo, the way a person
@@ -84652,12 +84857,7 @@ pub(crate) fn launch_294_folder_dropped_on_the_sheet_becomes_its_project() {
     let later = root.join("later");
     fs::create_dir_all(&dropped).unwrap();
     fs::create_dir_all(&later).unwrap();
-    let drop = |path: &Path| {
-        vec![egui::DroppedFile {
-            path: Some(path.to_path_buf()),
-            ..Default::default()
-        }]
-    };
+    let drop = |path: &Path| vec![dropped_file(path.to_path_buf())];
 
     app.page = Page::Home;
     app.launch_sheet_open = true;
@@ -84785,10 +84985,7 @@ pub(crate) fn launch_294_several_dropped_folders_and_a_dismissed_filter() {
     fs::create_dir_all(&second).unwrap();
     let dropped = [first.clone(), second, project.path.clone()]
         .into_iter()
-        .map(|path| egui::DroppedFile {
-            path: Some(path),
-            ..Default::default()
-        })
+        .map(dropped_file)
         .collect();
     app.page = Page::Home;
     app.launch_sheet_open = true;
@@ -84816,4 +85013,70 @@ pub(crate) fn launch_294_several_dropped_folders_and_a_dismissed_filter() {
         "a closed list does not keep its filter"
     );
     fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A notice that names a long path wraps inside its banner: egui 0.37 keeps
+/// subtracting a label's first-row indent after the first break, so a message
+/// that started after the mark drew its path rows outside the frame (change 295).
+fn a_banner_keeps_a_long_path_inside_its_frame() {
+    let ctx = egui::Context::default();
+    crate::configure_macos_fonts(&ctx, TerminalFont::default());
+    apply_interface_metrics(&ctx);
+    let palette = AppTheme::Dark.palette();
+    let message = "フック受信ソケットを開けませんでした: ソケットのパスが長すぎます: /Users/someone/dev/operon/.worktrees/feature/a-branch-name-that-goes-on/.tmp/claude-scratch/00acf7b0-418a-482e-90c5-74c45ac66d7a/home/Library/Application Support/com.local.operon/agent-hooks/hook.sock";
+    let mut frame = egui::Rect::NOTHING;
+    let drawn = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                frame = ui
+                    .scope(|ui| {
+                        banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
+                            ui.label(RichText::new(message).size(13.5).color(palette.text));
+                        });
+                    })
+                    .response
+                    .rect;
+            });
+        },
+    );
+    let mut rows = Vec::new();
+    fn visit(shape: &egui::epaint::Shape, rows: &mut Vec<(String, f32)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                for row in &text.galley.rows {
+                    if let Some(glyph) = row.glyphs.first() {
+                        rows.push((row.text(), text.pos.x + row.pos.x + glyph.pos.x));
+                    }
+                }
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    visit(child, rows);
+                }
+            }
+            _ => {}
+        }
+    }
+    for clipped in &drawn.shapes {
+        visit(&clipped.shape, &mut rows);
+    }
+    assert!(
+        rows.iter().any(|(text, _)| text.contains("hook.sock")),
+        "the path wraps onto rows of its own: {rows:?}"
+    );
+    for (text, left) in &rows {
+        assert!(
+            *left >= frame.left(),
+            "{text:?} starts at {left}, left of the banner at {}",
+            frame.left()
+        );
+    }
 }

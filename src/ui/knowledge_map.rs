@@ -153,7 +153,7 @@ pub(crate) fn paint_point_shape(
             painter.circle_filled(centre, radius, colour);
         }
         PointShape::Ring => {
-            painter.circle_stroke(centre, radius - 0.75, egui::Stroke::new(1.5, colour));
+            painter.circle_stroke(centre, radius - 0.75, egui::Stroke::new(1.5_f32, colour));
         }
         PointShape::Square => {
             let half = radius * 0.85;
@@ -409,7 +409,7 @@ pub(crate) fn draw_knowledge_map(
         rect,
         6.0,
         palette.inset,
-        egui::Stroke::new(1.0, palette.border_subtle),
+        egui::Stroke::new(1.0_f32, palette.border_subtle),
         egui::StrokeKind::Inside,
     );
     if !view.fitted {
@@ -438,9 +438,9 @@ pub(crate) fn draw_knowledge_map(
     }
 
     let placement = labels.get_or_place(LabelKey::new(map, view, rect), || {
-        let fonts = ui.fonts(|fonts| fonts.clone());
+        let painter = ui.painter();
         place_labels(map, entries, view, rect, &|text: &str| {
-            fonts
+            painter
                 .layout_no_wrap(
                     text.to_owned(),
                     egui::FontId::proportional(12.0),
@@ -477,7 +477,7 @@ pub(crate) fn draw_knowledge_map(
         painter.add(egui::Shape::convex_polygon(
             hull.clone(),
             fill,
-            egui::Stroke::new(1.0, palette.border_subtle),
+            egui::Stroke::new(1.0_f32, palette.border_subtle),
         ));
     }
 
@@ -489,11 +489,11 @@ pub(crate) fn draw_knowledge_map(
         }
         let lit = spotlight.is_some_and(|point| point == *a || point == *b);
         let stroke = if lit {
-            egui::Stroke::new(1.5, palette.accent)
+            egui::Stroke::new(1.5_f32, palette.accent)
         } else if spotlight.is_some() || focus.dimmed[*a] || focus.dimmed[*b] {
-            egui::Stroke::new(1.0, palette.border_subtle.gamma_multiply(QUIET_LINE))
+            egui::Stroke::new(1.0_f32, palette.border_subtle.gamma_multiply(QUIET_LINE))
         } else {
-            egui::Stroke::new(1.0, palette.border_subtle)
+            egui::Stroke::new(1.0_f32, palette.border_subtle)
         };
         painter.line_segment([from, to], stroke);
     }
@@ -531,14 +531,14 @@ pub(crate) fn draw_knowledge_map(
             painter.circle_stroke(
                 centre,
                 style.radius + 2.5,
-                egui::Stroke::new(1.2, palette.text_strong.gamma_multiply(opacity)),
+                egui::Stroke::new(1.2_f32, palette.text_strong.gamma_multiply(opacity)),
             );
         }
         if focus.chosen == Some(index) || hovered == Some(index) {
             painter.circle_stroke(
                 centre,
                 style.radius + 4.0,
-                egui::Stroke::new(2.0, palette.text_strong),
+                egui::Stroke::new(2.0_f32, palette.text_strong),
             );
         }
     }
@@ -617,7 +617,7 @@ pub(crate) fn knowledge_map_legend(ui: &mut egui::Ui, palette: &Palette) {
         ui.painter().circle_stroke(
             rect.center(),
             6.0,
-            egui::Stroke::new(1.2, palette.text_strong),
+            egui::Stroke::new(1.2_f32, palette.text_strong),
         );
         ui.label(
             RichText::new(tr("固定"))

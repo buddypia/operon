@@ -1,0 +1,27 @@
+# The evidence for change 295. Format: docs/sdlc/templates/verification.yaml.
+#
+# R2 has no test of its own: "newest" is a fact about crates.io on one day, not
+# an invariant. Its evidence is that the store and the
+# knowledge base work on the new versions (R2's filter and I3).
+#
+# I5 is R3's other half: the icon face is registered under the name the font
+# chain asks for, now that egui-phosphor's own `add_to_fonts` is not called.
+# I6-I9 are R4 where egui 0.37 changed what a person sees or does, each held by
+# a test the mutation sweep watched failing: button text size, the banner's
+# long path, a history title's first click, and a fully visible terminal caret.
+digest: "adb3f2735a4aefde"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked every_toolchain_pin_names_one_version
+  - R2 empirical-test :: cargo test --locked knowledge_
+  - R3 empirical-test :: cargo test --locked every_icon_resolves_from_the_bundled_icon_font
+  - I5 empirical-test :: cargo test --locked the_icon_face_is_registered_under_the_name_the_font_chain_names
+  - R4 empirical-test :: cargo test --locked session
+  - I6 empirical-test :: cargo test --locked only_a_nonzero_change_count_is_emphasised
+  - I7 empirical-test :: cargo test --locked a_banner_keeps_a_long_path_inside_its_frame
+  - I8 empirical-test :: cargo test --locked history_title_single_click_opens_after_the_double_click_window
+  - I9 empirical-test :: cargo test --locked a_caret_below_the_last_fully_visible_row_reports_none
+  - I4 empirical-test :: cargo test --locked terminal_
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/295-toolchain-and-dependencies-out-of-date/mutations.py
+  - I2 empirical-test :: cargo test --locked output_limited_command_behaves_as_before
+  - I3 empirical-test :: cargo test --locked saves_the_local_store_atomically_and_loads_it_back
