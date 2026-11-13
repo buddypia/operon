@@ -5,6 +5,7 @@ pub(crate) mod dock_badge;
 mod keymap;
 pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
+pub(crate) mod launch_projects;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
 pub(crate) mod session_order;
@@ -17,6 +18,7 @@ pub(crate) mod working_time;
 // reachable by symbol name from anywhere the way every other module's is.
 pub(crate) use keymap::*;
 pub(crate) use knowledge::*;
+pub(crate) use launch_projects::*;
 pub(crate) use relaunch::*;
 pub(crate) use terminal_output::TerminalStreamManager;
 #[cfg(test)]
@@ -643,6 +645,8 @@ pub(crate) struct OperonApp {
     /// opens or its project changes: the footer is drawn every frame, and a
     /// file-system stat there would stall it on a slow volume.
     pub(crate) launch_sheet_is_git: bool,
+    /// The sheet's project-list filter (change 294); transient.
+    pub(crate) launch_project_filter: String,
     /// The project 履歴's CLI section is showing, when not the selected one.
     pub(crate) history_project: Option<Uuid>,
     pub(crate) durability_warning: Option<String>,
@@ -1179,6 +1183,7 @@ impl OperonApp {
             launch_sheet_open: false,
             launch_sheet_needs_focus: false,
             launch_sheet_is_git: false,
+            launch_project_filter: String::new(),
             history_project: None,
             durability_warning: None,
             applied_theme: None,
@@ -4336,41 +4341,16 @@ impl OperonApp {
     /// Like `add_project_path`, and says why a folder was not added, so a
     /// caller never has to read the notice's (translated) text to find out.
     pub(crate) fn try_add_project_path(&mut self, path: PathBuf) -> ProjectAddition {
-        if !path.is_dir() {
-            self.notice = Some(tr("既存のフォルダを選んでください。").into());
-            return ProjectAddition::Declined;
-        }
-        let path = path.canonicalize().unwrap_or(path);
-        if let Some(existing) = self
-            .store
-            .projects
-            .iter()
-            .find(|project| project.path == path)
-        {
-            let existing_id = existing.id;
-            self.select_project(Some(existing_id));
-            self.page = Page::Projects;
-            self.notice = Some(tr("そのプロジェクトは追加済みのため、開きました。").into());
-            return ProjectAddition::Declined;
-        }
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("Project")
-            .to_owned();
-        let project = Project {
-            id: Uuid::new_v4(),
-            path,
-            name,
-            added_at: now(),
+        let project_id = match self.register_project_folder(path) {
+            Ok(RegisteredProject::New(project_id)) => project_id,
+            Ok(RegisteredProject::Existing(existing_id)) => {
+                self.select_project(Some(existing_id));
+                self.page = Page::Projects;
+                self.notice = Some(tr("そのプロジェクトは追加済みのため、開きました。").into());
+                return ProjectAddition::Declined;
+            }
+            Err(declined) => return declined,
         };
-        let previous_store = self.store.clone();
-        let project_id = project.id;
-        self.store.projects.push(project);
-        if !self.persist() {
-            self.store = previous_store;
-            return ProjectAddition::NotSaved;
-        }
         self.select_project(Some(project_id));
         self.project_path_input.clear();
         self.page = Page::Projects;
@@ -6007,6 +5987,7 @@ impl OperonApp {
             self.select_workspace_project(project_id);
         }
         self.apply_pinned_launch();
+        self.launch_project_filter.clear();
         self.launch_sheet_open = true;
         self.launch_sheet_needs_focus = true;
         self.launch_sheet_is_git = self
@@ -6095,8 +6076,9 @@ impl OperonApp {
             .or(self.selected_project)
             .or_else(|| self.store.projects.first().map(|project| project.id));
         let Some(project_id) = project_id else {
-            self.notice = Some(tr("先にプロジェクトを追加してください。").into());
-            self.page = Page::Projects;
+            // No project yet: the sheet asks for a folder (change 294).
+            self.launch_project_filter.clear();
+            self.launch_sheet_open = true;
             return;
         };
         self.open_project_session_setup(project_id);
@@ -7455,7 +7437,7 @@ impl eframe::App for OperonApp {
         }
         let dropped = ctx.input(|input| input.raw.dropped_files.clone());
         if !dropped.is_empty() {
-            self.add_dropped_folders(dropped);
+            self.route_dropped_folders(dropped);
         }
         if self.last_session_refresh.elapsed() >= SESSION_POLL_INTERVAL {
             self.retry_pending_store();
@@ -7577,7 +7559,11 @@ impl eframe::App for OperonApp {
             painter.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                tr("フォルダをドロップしてプロジェクトを追加"),
+                if self.launch_sheet_shows() {
+                    tr("フォルダをドロップして、このセッションのプロジェクトにする")
+                } else {
+                    tr("フォルダをドロップしてプロジェクトを追加")
+                },
                 egui::FontId::proportional(20.0),
                 palette.accent_soft,
             );

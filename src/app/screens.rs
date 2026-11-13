@@ -2655,20 +2655,16 @@ impl OperonApp {
     /// presses its button. Drawn before the launch-progress modal, which a
     /// launch hands over to.
     pub(crate) fn ui_launch_sheet(&mut self, ctx: &egui::Context) {
-        if !self.launch_sheet_open {
+        if !self.launch_sheet_shows() {
             return;
         }
-        // A progress modal owns the window while it shows: the sheet waits
-        // under it rather than taking Esc and ⌘↩ from it.
-        let progress_showing = self.launch_progress.as_ref().is_some_and(|p| !p.dismissed)
-            || self.restore_progress.is_some();
-        if progress_showing {
-            return;
-        }
-        let Some(project) = self.selected_project().cloned() else {
+        // No project: the sheet asks for a folder (change 294). One that has
+        // lost its project while projects remain closes, as before.
+        let project = self.selected_project().cloned();
+        if project.is_none() && !self.store.projects.is_empty() {
             self.launch_sheet_open = false;
             return;
-        };
+        }
         let palette = self.store.theme.palette();
         let screen = ctx.screen_rect();
         egui::Area::new(egui::Id::new("launch-sheet-scrim"))
@@ -2680,7 +2676,9 @@ impl OperonApp {
                 let (rect, _) = ui.allocate_exact_size(screen.size(), egui::Sense::click());
                 ui.painter().rect_filled(rect, 0.0, palette.scrim);
             });
+        // An open project list takes Esc for itself (change 294).
         if !self.command_palette_open
+            && !ctx.memory(|memory| memory.any_popup_open())
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.launch_sheet_open = false;
@@ -2688,16 +2686,14 @@ impl OperonApp {
         }
         let command_enter = !self.command_palette_open
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
-        let projects: Vec<(Uuid, String)> = self
-            .store
-            .projects
-            .iter()
-            .map(|project| (project.id, project.name.clone()))
-            .collect();
         let sessions_before = self.store.sessions.len();
         let mut close = false;
-        let mut switch_to = None;
-        let mut launch = command_enter && self.launch_ready(&project);
+        let mut pick = None;
+        let mut choose_folder = false;
+        let mut launch = command_enter
+            && project
+                .as_ref()
+                .is_some_and(|project| self.launch_ready(project));
         let mut terminal_only = false;
         const WIDTH: f32 = 560.0;
         egui::Area::new(egui::Id::new("launch-sheet"))
@@ -2722,15 +2718,9 @@ impl OperonApp {
                                     .strong()
                                     .color(palette.text_strong),
                             );
-                            egui::ComboBox::from_id_salt("launch-sheet-project")
-                                .selected_text(&project.name)
-                                .show_ui(ui, |ui| {
-                                    for (id, name) in &projects {
-                                        if ui.selectable_label(*id == project.id, name).clicked() {
-                                            switch_to = Some(*id);
-                                        }
-                                    }
-                                });
+                            if let Some(project) = &project {
+                                pick = self.ui_launch_sheet_project_picker(ui, project);
+                            }
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
@@ -2743,13 +2733,17 @@ impl OperonApp {
                             );
                         });
                         ui.add_space(SPACE_SM);
+                        let Some(project) = &project else {
+                            choose_folder = self.ui_launch_sheet_without_project(ui, palette);
+                            return;
+                        };
                         egui::ScrollArea::vertical()
                             .id_salt("launch-sheet-body")
                             .max_height((screen.height() * 0.8 - 200.0).max(160.0))
                             .auto_shrink([false, true])
-                            .show(ui, |ui| self.ui_launch_form(ui, &project));
+                            .show(ui, |ui| self.ui_launch_form(ui, project));
                         ui.separator();
-                        let (pressed, empty) = self.ui_launch_footer(ui, &project);
+                        let (pressed, empty) = self.ui_launch_footer(ui, project);
                         launch |= pressed;
                         terminal_only = empty;
                     });
@@ -2758,10 +2752,17 @@ impl OperonApp {
             self.launch_sheet_open = false;
             return;
         }
-        if let Some(project_id) = switch_to {
-            self.switch_launch_project(project_id);
+        if let Some(pick) = pick {
+            self.apply_launch_project_pick(pick);
             return;
         }
+        if choose_folder {
+            self.choose_launch_project_folder();
+            return;
+        }
+        let Some(project) = project else {
+            return;
+        };
         // Asked again after the form drew: a click in the same frame can have
         // changed the agent or a switch since `launch` was first computed.
         if launch && self.launch_ready(&project) {
@@ -2777,31 +2778,6 @@ impl OperonApp {
         // a notice instead, and the sheet stays to show it.
         if self.store.sessions.len() > sessions_before {
             self.launch_sheet_open = false;
-        }
-    }
-
-    /// The sheet's project picker. The request and the name were typed for
-    /// this launch, not for the old project, and the session behind the sheet
-    /// is not the sheet's to close: both survive the switch. Everything tied
-    /// to the old project's folder — the 作業場所, the dependency, the danger
-    /// acknowledgement — `select_project` still clears.
-    pub(crate) fn switch_launch_project(&mut self, project_id: Uuid) {
-        let goal = std::mem::take(&mut self.goal_input);
-        let name = std::mem::take(&mut self.session_name_input);
-        let session = self.selected_session;
-        let library_open = self.session_library_open;
-        self.select_project(Some(project_id));
-        self.goal_input = goal;
-        self.session_name_input = name;
-        self.selected_session = session;
-        self.session_library_open = library_open;
-        self.launch_sheet_is_git = self
-            .selected_project()
-            .is_some_and(|project| has_git_metadata(&project.path));
-        if let Some(project) = self.selected_project().cloned() {
-            if !self.file_cache.contains_key(&project.id) {
-                self.request_files(&project);
-            }
         }
     }
 

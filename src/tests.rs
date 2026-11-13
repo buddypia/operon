@@ -46630,12 +46630,12 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
             },
         ],
     );
-    assert_eq!(
-        app.notice.as_deref(),
-        Some(tr("先にプロジェクトを追加してください。")),
+    // Change 294: with no project the sheet opens anyway, on the same page.
+    assert!(
+        app.launch_sheet_open,
         "New-session click must reach open_new_session"
     );
-    assert_eq!(app.page, Page::Projects);
+    assert_eq!(app.page, Page::Home);
     assert!(!click_add.viewport_output[&egui::ViewportId::ROOT]
         .commands
         .contains(&egui::ViewportCommand::Maximized(true)));
@@ -48092,15 +48092,13 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
     assert!(!entries[0].chord.is_empty(), "the row shows ⌘N");
     assert_eq!(entries[1].kind, PaletteKind::Action("Open history"));
 
-    // No project yet: the row reaches `open_new_session`, which says why and
-    // goes to where a project is added.
+    // No project yet: the row reaches `open_new_session`, which opens the
+    // sheet where a folder is chosen (change 294), without leaving the page.
     app.page = Page::Home;
     app.activate_palette_entry(&entries[0].kind);
-    assert_eq!(app.page, Page::Projects);
-    assert_eq!(
-        app.notice.as_deref(),
-        Some(tr("先にプロジェクトを追加してください。"))
-    );
+    assert_eq!(app.page, Page::Home);
+    assert!(app.launch_sheet_open);
+    app.launch_sheet_open = false;
 
     app.session_library_open = false;
     app.activate_palette_entry(&entries[1].kind);
@@ -48512,17 +48510,15 @@ pub(crate) fn new_session_opens_the_sheet_over_the_current_page() {
     }
     fs::remove_dir_all(&root).ok();
 
-    // No project: nothing to open a sheet for, and the old answer stands.
+    // No project: the sheet opens to choose a folder (change 294), and the
+    // page stays.
     let root = temporary_root().join(format!("operon-sheet-none-{}", Uuid::new_v4()));
     let mut app = test_app(root.clone());
     app.page = Page::Home;
     app.open_new_session();
-    assert!(!app.launch_sheet_open);
-    assert_eq!(app.page, Page::Projects);
-    assert_eq!(
-        app.notice.as_deref(),
-        Some(tr("先にプロジェクトを追加してください。"))
-    );
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.page, Page::Home);
+    assert_eq!(app.notice, None);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -84457,5 +84453,367 @@ pub(crate) fn terminal_293_truncated_scan_does_not_prove_a_name_unique() {
     app.unresolved_paths.push("lib.rs".into());
     app.resolve_terminal_paths();
     assert_eq!(app.resolved_paths.get("lib.rs").cloned(), Some(None));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// One pass of the launch sheet alone, at the 900×600 screen `click_at` uses.
+fn launch_294_frame(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events,
+        ..Default::default()
+    };
+    context.run(input, |ctx| app.ui_launch_sheet(ctx))
+}
+
+/// Opens the sheet's project list by clicking its combo, the way a person
+/// does, and returns the frame that shows the list.
+fn launch_294_open_project_list(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    project_name: &str,
+) -> egui::FullOutput {
+    app.launch_sheet_open = true;
+    let _ = launch_294_frame(app, context, vec![]);
+    let laid_out = launch_294_frame(app, context, vec![]);
+    let combo = drawn_text_rects(&laid_out, |text| text == project_name)
+        .into_iter()
+        .next()
+        .expect("the sheet's combo shows the project's name");
+    click_at(context, combo.center(), |ctx| app.ui_launch_sheet(ctx));
+    let _ = launch_294_frame(app, context, vec![]);
+    launch_294_frame(app, context, vec![])
+}
+
+/// Change 294, R1: the list ends with 「＋ 新しいプロジェクト…」, and choosing
+/// it asks for a folder.
+#[test]
+pub(crate) fn launch_294_project_list_ends_with_new_project() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r1");
+    let context = egui::Context::default();
+    let list = launch_294_open_project_list(&mut app, &context, "repo");
+    let new_project = drawn_text_rect(&list, |text| text.contains("新しいプロジェクト…"))
+        .expect("the list offers a new project");
+    let last_row = drawn_text_rects(&list, |text| text == "repo")
+        .into_iter()
+        .map(|rect| rect.center().y)
+        .fold(f32::MIN, f32::max);
+    assert!(
+        new_project.center().y > last_row,
+        "「新しいプロジェクト…」 comes after the projects"
+    );
+    click_at(&context, new_project.center(), |ctx| {
+        app.ui_launch_sheet(ctx)
+    });
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("choose_launch_project_folder_invoked")
+    );
+    assert!(
+        app.launch_sheet_open,
+        "the sheet stays while the picker is up"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R2: a new folder becomes the sheet's project in place, and what
+/// was typed for this launch survives.
+#[test]
+pub(crate) fn launch_294_chosen_folder_becomes_the_sheets_project_in_place() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r2");
+    let other = root.join("other");
+    fs::create_dir_all(&other).unwrap();
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.goal_input = "ログインを直す".into();
+    app.session_name_input = "login".into();
+
+    app.apply_launch_project_folder(Some(other.clone()));
+
+    assert_eq!(app.store.projects.len(), 2);
+    let chosen = app
+        .selected_project()
+        .cloned()
+        .expect("a project is chosen");
+    assert_eq!(chosen.path, other.canonicalize().unwrap());
+    assert_eq!(app.page, Page::Home, "the page under the sheet stays");
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.goal_input, "ログインを直す");
+    assert_eq!(app.session_name_input, "login");
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("プロジェクトを追加しました。"))
+    );
+    let saved = fs::read_to_string(root.join("store-v2.json")).expect("the store was written");
+    assert!(
+        saved.contains(&chosen.id.to_string()),
+        "the project was saved"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R3: a folder that already is a project is switched to.
+#[test]
+pub(crate) fn launch_294_registered_folder_is_switched_to() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r3");
+    let other_path = root.join("other");
+    fs::create_dir_all(&other_path).unwrap();
+    let other = Project {
+        id: Uuid::new_v4(),
+        name: "other".into(),
+        path: other_path.canonicalize().unwrap(),
+        added_at: 0,
+    };
+    app.store.projects.push(other.clone());
+    app.page = Page::Sessions;
+    app.launch_sheet_open = true;
+
+    app.apply_launch_project_folder(Some(other_path));
+
+    assert_eq!(app.store.projects.len(), 2, "nothing is added twice");
+    assert_eq!(app.selected_project, Some(other.id));
+    assert_eq!(app.page, Page::Sessions);
+    assert!(app.launch_sheet_open);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("登録済みのプロジェクトに切り替えました。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R4: a path that is not a folder changes nothing but the notice.
+#[test]
+pub(crate) fn launch_294_not_a_folder_leaves_the_sheet_as_it_was() {
+    let (mut app, project, root) = launch_screen_fixture("launch-294-r4");
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+
+    app.apply_launch_project_folder(Some(root.join("missing")));
+
+    assert_eq!(app.store.projects.len(), 1);
+    assert_eq!(app.selected_project, Some(project.id));
+    assert_eq!(app.page, Page::Home);
+    assert!(app.launch_sheet_open);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("既存のフォルダを選んでください。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R5: with no project the sheet opens, stays open, offers a
+/// folder, and turns into the form once one is chosen.
+#[test]
+pub(crate) fn launch_294_without_projects_the_sheet_opens_and_offers_a_folder() {
+    let root = temporary_directory("launch-294-r5");
+    let folder = root.join("fresh");
+    fs::create_dir_all(&folder).unwrap();
+    let mut app = test_app(root.join("store-v2.json"));
+    app.page = Page::Home;
+    app.open_new_session();
+    assert!(app.launch_sheet_open);
+
+    let context = egui::Context::default();
+    let _ = launch_294_frame(&mut app, &context, vec![]);
+    let frame = launch_294_frame(&mut app, &context, vec![]);
+    assert!(app.launch_sheet_open, "the sheet does not close itself");
+    let choose = drawn_text_rect(&frame, |text| text.contains(tr("フォルダを選択…")))
+        .expect("the sheet offers choosing a folder");
+    click_at(&context, choose.center(), |ctx| app.ui_launch_sheet(ctx));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("choose_launch_project_folder_invoked")
+    );
+
+    app.apply_launch_project_folder(Some(folder.clone()));
+    let chosen = app
+        .selected_project()
+        .cloned()
+        .expect("the folder is the project");
+    assert_eq!(chosen.path, folder.canonicalize().unwrap());
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.page, Page::Home);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R6: a drop while the sheet is open is the sheet's; with the
+/// sheet closed it is the projects page's, as before.
+#[test]
+pub(crate) fn launch_294_folder_dropped_on_the_sheet_becomes_its_project() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r6");
+    let dropped = root.join("dropped");
+    let later = root.join("later");
+    fs::create_dir_all(&dropped).unwrap();
+    fs::create_dir_all(&later).unwrap();
+    let drop = |path: &Path| {
+        vec![egui::DroppedFile {
+            path: Some(path.to_path_buf()),
+            ..Default::default()
+        }]
+    };
+
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.route_dropped_folders(drop(&dropped));
+    let chosen = app.selected_project().cloned().expect("the drop is chosen");
+    assert_eq!(chosen.path, dropped.canonicalize().unwrap());
+    assert_eq!(app.page, Page::Home);
+    assert!(app.launch_sheet_open);
+
+    app.launch_sheet_open = false;
+    app.route_dropped_folders(drop(&later));
+    assert_eq!(app.store.projects.len(), 3);
+    assert_eq!(
+        app.page,
+        Page::Projects,
+        "without the sheet a drop is as before"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R7: recently started projects first, then the rest by when
+/// they were added, newest first.
+#[test]
+pub(crate) fn launch_294_recent_projects_come_first() {
+    let project = |name: &str, added_at: u64| Project {
+        id: Uuid::new_v4(),
+        name: name.into(),
+        path: PathBuf::from(format!("/tmp/{name}")),
+        added_at,
+    };
+    let projects = vec![
+        project("alpha", 1),
+        project("beta", 2),
+        project("gamma", 3),
+        project("delta", 4),
+    ];
+    let mut relaunched = test_session(Uuid::new_v4(), SessionStatus::Active);
+    relaunched.project_id = projects[0].id;
+    relaunched.created_at = 10;
+    relaunched.launched_at = Some(50);
+    let mut started = test_session(Uuid::new_v4(), SessionStatus::Active);
+    started.project_id = projects[2].id;
+    started.created_at = 40;
+    started.launched_at = None;
+
+    let names = |sessions: &[Session]| -> Vec<String> {
+        launch_project_choices(&projects, sessions, "")
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    };
+    assert_eq!(
+        names(&[relaunched.clone(), started.clone()]),
+        ["alpha", "gamma", "delta", "beta"]
+    );
+
+    // A project with an old and a new session counts its newest.
+    let mut old = test_session(Uuid::new_v4(), SessionStatus::Active);
+    old.project_id = projects[1].id;
+    old.created_at = 5;
+    let mut new = old.clone();
+    new.id = Uuid::new_v4();
+    new.created_at = 60;
+    assert_eq!(
+        names(&[old, relaunched, new, started]),
+        ["beta", "alpha", "gamma", "delta"]
+    );
+}
+
+/// Change 294, R8: from eight projects the list can be narrowed by name,
+/// case-insensitively.
+#[test]
+pub(crate) fn launch_294_filter_narrows_by_name() {
+    let project = |name: &str, added_at: u64| Project {
+        id: Uuid::new_v4(),
+        name: name.into(),
+        path: PathBuf::from(format!("/tmp/{name}")),
+        added_at,
+    };
+    let projects = vec![
+        project("Operon", 3),
+        project("web-app", 2),
+        project("OPS-tools", 1),
+    ];
+    let names = |filter: &str| -> Vec<String> {
+        launch_project_choices(&projects, &[], filter)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    };
+    assert_eq!(names("op"), ["Operon", "OPS-tools"]);
+    assert_eq!(names(" WEB "), ["web-app"]);
+    assert!(names("zzz").is_empty());
+    assert_eq!(names("").len(), 3);
+
+    // The field shows from eight projects and not before.
+    for (count, shown) in [
+        (LAUNCH_PROJECT_FILTER_MIN - 1, false),
+        (LAUNCH_PROJECT_FILTER_MIN, true),
+    ] {
+        let (mut app, _project, root) = launch_screen_fixture("launch-294-r8");
+        for index in 1..count {
+            app.store.projects.push(project(&format!("p{index}"), 0));
+        }
+        let context = egui::Context::default();
+        let list = launch_294_open_project_list(&mut app, &context, "repo");
+        assert_eq!(
+            drawn_text_rect(&list, |text| text == tr("プロジェクトを絞り込み")).is_some(),
+            shown,
+            "{count} projects"
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+}
+
+/// Change 294: several folders dropped on the sheet are all registered, the
+/// sheet takes the first, and the message counts only the new ones; a list
+/// closed without a choice forgets its filter.
+#[test]
+pub(crate) fn launch_294_several_dropped_folders_and_a_dismissed_filter() {
+    let (mut app, project, root) = launch_screen_fixture("launch-294-drops");
+    let first = root.join("first");
+    let second = root.join("second");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    let dropped = [first.clone(), second, project.path.clone()]
+        .into_iter()
+        .map(|path| egui::DroppedFile {
+            path: Some(path),
+            ..Default::default()
+        })
+        .collect();
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.route_dropped_folders(dropped);
+    assert_eq!(app.store.projects.len(), 3);
+    let chosen = app
+        .selected_project()
+        .cloned()
+        .expect("the first is chosen");
+    assert_eq!(chosen.path, first.canonicalize().unwrap());
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "{count} 件のフォルダを追加し、{name} を選びました。",
+            count = 2,
+            name = "first"
+        ))
+    );
+
+    app.launch_project_filter = "fir".into();
+    let context = egui::Context::default();
+    let _ = launch_294_frame(&mut app, &context, vec![]);
+    assert!(
+        app.launch_project_filter.is_empty(),
+        "a closed list does not keep its filter"
+    );
     fs::remove_dir_all(&root).ok();
 }
