@@ -1,0 +1,6 @@
+2026-11-13T08:34:53Z auto intent intent.md a4ff5b92c6b29626 approve Restates the quoted request: Cmd-click opens in Operon, right-click offers Finder and default-app open, bare names from the screenshot included; today-claims match screens.rs.
+2026-11-13T08:34:53Z auto screen screen.md fba54e2c5484f170 approve Matches spec; Before matches ui_terminal_path_menu; the person's verbatim request quoted in intent.md makes the structural decision (Cmd-click into Operon, choices on right-click).
+2026-11-13T08:34:53Z auto spec spec.md a1b9c19000935aa6 approve R5 requests the missing scan and forgets cached misses when it lands; R6 pins menu closing; every requirement names a test that can fail.
+2026-11-13T08:34:53Z auto plan plan.md 7f21ed499b6a6398 approve Matches the revised spec: drain scan request, forget_terminal_path_misses, nine tests, R5/R6 risks covered.
+2026-11-13T08:36:29Z auto spec spec.md 92cd3f85765ca5a7 approve Notation-only edit: the new module is written as app::terminal_paths; requirements and design unchanged.
+2026-11-13T08:36:29Z auto plan plan.md c404e627f0e0ed59 approve Same module notation; change list, order of work and nine-test coverage unchanged.
