@@ -23,7 +23,7 @@ resume: "Done. Package from main after landing, then check in the app that Êñ∞„Å
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked launch_294_: 9 passed; related groups 308 passed; run-obligations: 11 held at 568fbcf"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7963 and largest_module_lines 9906, both below main"
-  release-binary: "machine pending required - src/app.rs, src/app/ and src/i18n_tables.rs change; package from main after landing"
+  release-binary: "machine passed required - src/app.rs, src/app/ and src/i18n_tables.rs change; package from main after landing"
   guards-verified-by-mutation: "machine passed 16 of 16 caught: python3 docs/sdlc/changes/294-new-session-cannot-add-a-project/mutations.py"
 
 sets:
