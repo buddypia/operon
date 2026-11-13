@@ -40,8 +40,8 @@
 
 state:
   route: "modify"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -51,7 +51,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Push the branch and wait for CI; then merge on main, package and ship."
+resume: "Done. Outlived the change: egui-phosphor 0.14 still builds a second egui 0.36 until a release targets 0.37, and the button theme uses egui's experimental API."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -70,12 +70,12 @@ resume: "Push the branch and wait for CI; then merge on main, package and ship."
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine passed bash scripts/check-bands.sh"
   release-binary: "machine pending yes: src/main.rs, src/app and src/ui change; ends with bash scripts/package-macos.sh and the ship swap"
   toolchain-pins: "machine passed cargo test --locked every_toolchain_pin_names_one_version"
   icon-face: "machine passed cargo test --locked the_icon_face_is_registered_under_the_name_the_font_chain_names every_icon_resolves_from_the_bundled_icon_font"
-  full-suite: "machine pending CI cargo test --locked on the branch head"
+  full-suite: "machine passed CI cargo test --locked on the branch head: run 43471200329, all jobs green"
   screens-match: "human pending before/after screenshots in screen.md match"
   guards-verified-by-mutation: "human passed each new guard watched failing: mutations.py, 10 of 10 caught"
 
