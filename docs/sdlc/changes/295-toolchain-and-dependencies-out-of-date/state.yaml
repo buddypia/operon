@@ -72,7 +72,7 @@ resume: "Done. Outlived the change: egui-phosphor 0.14 still builds a second egu
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine passed bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: src/main.rs, src/app and src/ui change; ends with bash scripts/package-macos.sh and the ship swap"
+  release-binary: "machine passed required - src/main.rs, src/app and src/ui change; package from main after landing with bash scripts/package-macos.sh and the ship swap"
   toolchain-pins: "machine passed cargo test --locked every_toolchain_pin_names_one_version"
   icon-face: "machine passed cargo test --locked the_icon_face_is_registered_under_the_name_the_font_chain_names every_icon_resolves_from_the_bundled_icon_font"
   full-suite: "machine passed CI cargo test --locked on the branch head: run 43471200329, all jobs green"
