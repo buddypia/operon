@@ -1,0 +1,36 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (the launch sheet and project registration exist; the sheet
+# gains adding a project, a no-project state, drop, order and filter).
+# Risk: low — drawing (`src/app.rs`, `src/app/`), strings, tests, CLAUDE.md map;
+# screen required, and the person's answers quoted in intent.md are the
+# structural decision.
+
+state:
+  route: "modify"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Write the launch_294_ tests and watch them fail, then build src/app/launch_projects.rs."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - src/app.rs, src/app/ and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/294-new-session-cannot-add-a-project/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
