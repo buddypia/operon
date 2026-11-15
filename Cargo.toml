@@ -2,11 +2,10 @@
 name = "operon"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.100.0"
 description = "A local-first macOS cockpit for AI coding agents"
 license = "MIT"
 repository = "https://github.com/buddypia/operon"
-homepage = "https://github.com/buddypia/operon"
 readme = "README.md"
 keywords = ["macos", "ai", "coding-agent", "tmux", "gui"]
 categories = ["development-tools", "command-line-utilities", "gui"]
@@ -14,8 +13,19 @@ categories = ["development-tools", "command-line-utilities", "gui"]
 [dependencies]
 anyhow = "1.0"
 directories = "6.0"
-eframe = { version = "0.31", default-features = true }
-egui-phosphor = "0.9"
+# 0.37's defaults switch the renderer to wgpu and add `system_fonts`, an OS font
+# fallback that lets a glyph Sarasa lacks come from another face — which
+# src/main.rs's single-face chain exists to prevent. Keep 0.31's glow renderer
+# and leave the fallback off (change 295).
+eframe = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "glow", "links"] }
+# 0.14 is built against egui 0.36, so it brings a second egui into the build
+# for its `add_to_fonts`, which src/main.rs no longer calls: it registers
+# `Variant::Regular.font_bytes()` itself. Move to the release that targets the
+# app's egui once one exists, and the duplicate goes (change 295).
+egui-phosphor = "0.14"
+# eframe's own egui, named only for `experimental`: src/ui/widgets.rs replaces
+# the button theme so a button's label keeps `TextStyle::Button` (change 295).
+egui = { version = "0.37", default-features = false, features = ["experimental"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 libc = "0.2"
 # EmbeddingGemma 2, in-process on Metal (change 157). A git revision rather than
@@ -24,8 +34,8 @@ libc = "0.2"
 # bump and the two struct fields it added; go back to the crates.io release once
 # one vendors a llama.cpp that has `gemma-embedding2`.
 llama-cpp-2 = { git = "https://github.com/buddypia/llama-cpp-rs", rev = "48eedeb3c5b21ceafc06b4fae953a0d332d1e037", default-features = false, features = ["metal"] }
-rfd = "0.15"
-rusqlite = { version = "0.40.2", features = ["bundled"] }
+rfd = "0.18"
+rusqlite = { version = "0.42", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
@@ -42,6 +52,13 @@ debug = 1
 [profile.test]
 debug = 1
 
+# egui 0.37's epaint asserts, in debug builds, that every frame's texture
+# upload reached a renderer. eframe's renderer always takes it; src/tests.rs
+# runs frames with no renderer and drops their output by design, which that
+# assertion turns into a panic in nearly every UI test (change 295).
+[profile.test.package.epaint]
+debug-assertions = false
+
 # `cfg(kani)` is set only by `cargo kani`, for the proof harnesses in
 # src/tests.rs (change 244); without this rustc warns that it is unknown.
 [lints.rust]
@@ -57,4 +74,4 @@ ab_glyph = "0.2"
 # scalar written against a key Codex declares as a table, so every Codex session
 # on the machine failed to load its configuration. The parser is here to read
 # back what the line editor wrote; the shipped binary still never parses TOML.
-toml = "0.8"
+toml = "1"

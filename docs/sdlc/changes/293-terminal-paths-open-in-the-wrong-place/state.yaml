@@ -1,0 +1,36 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (terminal path links exist; ⌘-click moves from external open to
+# Operon, right-click gains a pointer-anchored menu, bare names resolve).
+# Risk: low — drawing (`src/app.rs`, `src/app/screens.rs`), `src/files.rs`,
+# strings, tests, manuals; screen required, and the person's request quoted in
+# intent.md is the structural decision.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing, then check in the app that ⌘-click on a terminal path opens a tab and right-click shows the four choices at the pointer."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked terminal: 120 passed; terminal_293_: 12 passed; run-obligations: 11 held at 8e45ad4"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7981 and largest_module_lines 9918 at diagnose as on main"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs, src/files.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/293-terminal-paths-open-in-the-wrong-place/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

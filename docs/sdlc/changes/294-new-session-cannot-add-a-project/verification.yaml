@@ -1,0 +1,15 @@
+# The evidence for change 294. Format: docs/sdlc/templates/verification.yaml.
+digest: "1ee7240095448fc7"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked launch_294_project_list_ends_with_new_project
+  - R2 empirical-test :: cargo test --locked launch_294_chosen_folder_becomes_the_sheets_project_in_place
+  - R3 empirical-test :: cargo test --locked launch_294_registered_folder_is_switched_to
+  - R4 empirical-test :: cargo test --locked launch_294_not_a_folder_leaves_the_sheet_as_it_was
+  - R5 empirical-test :: cargo test --locked launch_294_without_projects_the_sheet_opens_and_offers_a_folder
+  - I1 empirical-test :: cargo test --locked new_session_opens_the_sheet_over_the_current_page
+  - R6 empirical-test :: cargo test --locked launch_294_folder_dropped_on_the_sheet_becomes_its_project
+  - R7 empirical-test :: cargo test --locked launch_294_recent_projects_come_first
+  - R8 empirical-test :: cargo test --locked launch_294_filter_narrows_by_name
+  - I3 empirical-test :: cargo test --locked launch_294_several_dropped_folders_and_a_dismissed_filter
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/294-new-session-cannot-add-a-project/mutations.py

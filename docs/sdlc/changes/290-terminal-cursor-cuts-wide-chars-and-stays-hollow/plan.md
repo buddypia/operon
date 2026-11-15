@@ -40,4 +40,12 @@
 
 ## Departures from the plan
 
-None.
+- Landing waited while main moved to eframe/egui 0.37 (change 295). Merging
+  main meant porting the cursor code and its tests to that API (`run_ui`,
+  `fonts_mut`, `ByteIndex` section ranges, `Id::unique`, the `Preedit` struct
+  variant). No behaviour of this change moved.
+- egui 0.37 gives a variation selector and a whole Hangul syllable their own
+  advance, so the mutation `variation-selector-fed-to-shaper` stopped being
+  caught by F1's three inputs. A lone medial vowel (`U+1161`) still draws two
+  cells wide there, so that input joined F1's cases and the sweep is 13 of 13
+  again.

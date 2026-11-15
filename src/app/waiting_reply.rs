@@ -108,7 +108,7 @@ impl OperonApp {
                                             ui.painter().circle_stroke(
                                                 dot.center(),
                                                 4.0,
-                                                egui::Stroke::new(1.0, palette.selected_ink()),
+                                                egui::Stroke::new(1.0_f32, palette.selected_ink()),
                                             );
                                         }
                                         agent_chip(ui, &session.agent, 12.0, palette);

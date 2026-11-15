@@ -15,7 +15,7 @@ pub(crate) const WORKSPACE_LAUNCH_CHOICES: [&str; 4] = ["terminal", "claude", "c
 
 /// The popup the + of `group`'s pane opens, or the empty workspace's for `None`.
 fn workspace_launch_menu_id(group: Option<Uuid>) -> egui::Id {
-    egui::Id::new(("workspace-launch-menu", group))
+    egui::Id::unique(("workspace-launch-menu", group))
 }
 
 /// The + menu's width: the longest name, 「Antigravity」, with its mark and the
@@ -255,23 +255,15 @@ impl OperonApp {
     /// of the agent CLIs, started in `group`'s pane. Pressing the + opens and
     /// closes it; a choice, a click elsewhere or Escape closes it. The choice
     /// is acted on after the popup is drawn, so the launch sees a closed menu.
-    pub(crate) fn ui_workspace_launch_menu(
-        &mut self,
-        ui: &mut egui::Ui,
-        add: &egui::Response,
-        group: Option<Uuid>,
-    ) {
+    pub(crate) fn ui_workspace_launch_menu(&mut self, add: &egui::Response, group: Option<Uuid>) {
         let popup = workspace_launch_menu_id(group);
-        if add.clicked() {
-            ui.memory_mut(|memory| memory.toggle_popup(popup));
-        }
         let tools = &self.tools;
-        let chosen = egui::popup_below_widget(
-            ui,
-            popup,
-            add,
-            egui::PopupCloseBehavior::CloseOnClick,
-            |ui| {
+        let chosen = egui::Popup::from_response(add)
+            .id(popup)
+            .open_memory(add.clicked().then_some(egui::SetOpenCommand::Toggle))
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+            .align(egui::RectAlign::BOTTOM_START)
+            .show(|ui| {
                 ui.set_min_width(LAUNCH_MENU_WIDTH);
                 ui.spacing_mut().item_spacing.y = SPACE_XS;
                 let mut chosen = None;
@@ -289,9 +281,8 @@ impl OperonApp {
                     }
                 }
                 chosen
-            },
-        )
-        .flatten();
+            })
+            .and_then(|response| response.inner);
         match chosen {
             Some("terminal") => self.launch_workspace_terminal(group),
             Some(agent) => self.launch_workspace_agent(group, agent),
@@ -306,11 +297,11 @@ impl OperonApp {
     pub(crate) fn take_launch_menu_escape(&self, ui: &mut egui::Ui) {
         let launch_menu_open = std::iter::once(None)
             .chain(self.workspace.groups.iter().map(|g| Some(g.id)))
-            .any(|group| ui.memory(|m| m.is_popup_open(workspace_launch_menu_id(group))));
+            .any(|group| egui::Popup::is_id_open(ui, workspace_launch_menu_id(group)));
         if launch_menu_open
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            ui.memory_mut(|m| m.close_popup());
+            egui::Popup::close_all(ui);
         }
     }
 }

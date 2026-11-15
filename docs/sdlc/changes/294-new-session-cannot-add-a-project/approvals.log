@@ -1,0 +1,4 @@
+2026-11-13T09:44:58Z auto intent intent.md fba77faf39271de5 approve Faithfully restates the quoted request and the person's scope and extras answers; today-claims verified against open_new_session, try_add_project_path, the drop path and the combo.
+2026-11-13T09:44:58Z auto spec spec.md 70539c96b6a80e24 approve All eight requirements pinned by launch_294_ tests that fail on the old behaviour; today-claims match ui_launch_sheet, try_add_project_path, open_new_session and the overlay.
+2026-11-13T09:44:58Z auto screen screen.md 4e48ce25f99a15b7 approve Matches spec and the current sheet; the structural choices are the person's recorded answers, leaving additive layout and wording inside the existing sheet.
+2026-11-13T09:44:58Z auto plan plan.md 11cafcc5912a2dc7 approve Covers every requirement in a sound order, with each risk given a named catcher.

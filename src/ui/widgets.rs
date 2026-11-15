@@ -33,6 +33,9 @@ pub(crate) fn apply_interface_metrics(ctx: &egui::Context) {
         // The disclosure triangles in the project tree and the settings page
         // are not buttons, so they do not get a button's frame or its rule.
         style.visuals.collapsing_header_frame = false;
+        // egui 0.37 raised the default from 1/12s to 0.2s; the app keeps 0.31's
+        // pace for disclosures and scroll jumps (change 295).
+        style.animation_time = 1.0 / 12.0;
         style.visuals.indent_has_left_vline = false;
         // The scale `DESIGN.md` documents. egui only carries five slots, so the
         // rest of the scale is named at the call site through `RichText::size`.
@@ -57,6 +60,27 @@ pub(crate) fn apply_interface_metrics(ctx: &egui::Context) {
         ]
         .into();
     });
+    ctx.add_widget_theme::<egui::widget_style::ButtonStyle>(ButtonTextAtButtonSize);
+}
+
+/// egui's own look for every button, except the size of its text. egui 0.37's
+/// default button theme sets a plain label in `TextStyle::Body`, so every
+/// button would grow from the 13.5px `DESIGN.md` gives `Button` to the 14px of
+/// `Body`. The theme API is behind egui's `experimental` feature, the only way
+/// to put this in one place rather than on each call site (change 295).
+struct ButtonTextAtButtonSize;
+
+impl egui::theme::StyleProvider<egui::widget_style::ButtonStyle> for ButtonTextAtButtonSize {
+    fn style(
+        &mut self,
+        args: &egui::widget_style::StyleArgs<'_>,
+    ) -> egui::widget_style::ButtonStyle {
+        let mut style: egui::widget_style::ButtonStyle = egui::theme::DefaultStyle.style(args);
+        let text = &mut style.atom_layout.text_style;
+        *text =
+            egui::widget_style::TextVisuals::new(args.style, egui::TextStyle::Button, text.color);
+        style
+    }
 }
 
 /// The surface a group of related things sits on. One radius, one hairline, one
@@ -65,7 +89,7 @@ pub(crate) fn apply_interface_metrics(ctx: &egui::Context) {
 pub(crate) fn card_frame(palette: &Palette) -> egui::Frame {
     egui::Frame::new()
         .fill(palette.raised)
-        .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+        .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
         .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
         .inner_margin(egui::Margin::same(14))
 }
@@ -87,7 +111,7 @@ pub(crate) fn card_frame(palette: &Palette) -> egui::Frame {
 pub(crate) fn clickable_card<R>(
     ui: &mut egui::Ui,
     palette: &Palette,
-    id_salt: impl std::hash::Hash,
+    id_salt: impl egui::AsIdSalt,
     clickable: bool,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
@@ -101,7 +125,7 @@ pub(crate) fn clickable_card<R>(
             let hovered = clickable && ui.response().hovered();
             card_frame(palette)
                 .stroke(egui::Stroke::new(
-                    1.0,
+                    1.0_f32,
                     if hovered {
                         palette.border
                     } else {
@@ -147,7 +171,7 @@ pub(crate) fn clickable_card<R>(
 /// A pure decision so the contrast test can pin the ink and a unit test can
 /// pin both arms: `Some` while focused, `None` otherwise.
 pub(crate) fn focus_stroke(has_focus: bool, palette: &Palette) -> Option<egui::Stroke> {
-    has_focus.then(|| egui::Stroke::new(1.0, palette.border_strong))
+    has_focus.then(|| egui::Stroke::new(1.0_f32, palette.border_strong))
 }
 
 /// The keyboard focus mark on a button: the same 1px ring at `RADIUS_CONTROL`
@@ -213,7 +237,7 @@ pub(crate) fn hairline(ui: &mut egui::Ui, palette: &Palette) {
 pub(crate) fn paint_splitter_h(ui: &egui::Ui, rect: egui::Rect, palette: &Palette, active: bool) {
     let center_y = rect.center().y;
     let line_stroke = egui::Stroke::new(
-        1.0,
+        1.0_f32,
         if active {
             palette.accent
         } else {
@@ -243,7 +267,7 @@ pub(crate) fn paint_splitter_h(ui: &egui::Ui, rect: egui::Rect, palette: &Palett
 pub(crate) fn paint_splitter_v(ui: &egui::Ui, rect: egui::Rect, palette: &Palette, active: bool) {
     let center_x = rect.center().x;
     let line_stroke = egui::Stroke::new(
-        1.0,
+        1.0_f32,
         if active {
             palette.accent
         } else {
@@ -385,7 +409,7 @@ pub(crate) fn status_filter_tile(
             rect,
             egui::CornerRadius::same(RADIUS_CONTROL),
             fill,
-            egui::Stroke::new(1.0, edge),
+            egui::Stroke::new(1.0_f32, edge),
             egui::StrokeKind::Inside,
         );
         // The glyph the sidebar's rows and project counts already use for the
@@ -423,7 +447,7 @@ pub(crate) fn status_filter_tile(
         job.wrap = egui::text::TextWrapping::truncate_at_width(
             (count_at.x - SPACE_XS - word_left).max(0.0),
         );
-        let word = ui.fonts(|fonts| fonts.layout_job(job));
+        let word = ui.fonts_mut(|fonts| fonts.layout_job(job));
         painter.galley(
             egui::pos2(word_left, rect.center().y - word.size().y / 2.0),
             word,
@@ -432,7 +456,7 @@ pub(crate) fn status_filter_tile(
         painter.galley(count_at, count, count_ink);
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, label)
     });
     paint_button_focus(ui, &response, palette);
     response
@@ -462,7 +486,7 @@ pub(crate) fn agent_filter_toggle(
                 rect,
                 corner,
                 palette.control_active,
-                egui::Stroke::new(1.0, palette.border),
+                egui::Stroke::new(1.0_f32, palette.border),
                 egui::StrokeKind::Inside,
             );
         } else if response.hovered() {
@@ -498,7 +522,7 @@ pub(crate) fn agent_filter_toggle(
         }
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
+        egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, label)
     });
     paint_button_focus(ui, &response, palette);
     response.on_hover_text(label)
@@ -620,7 +644,7 @@ pub(crate) fn nav_tab(
                 egui::pos2(rect.left(), rect.bottom() - 1.0),
                 egui::pos2(rect.right(), rect.bottom() - 1.0),
             ],
-            egui::Stroke::new(2.0, palette.accent),
+            egui::Stroke::new(2.0_f32, palette.accent),
         );
     }
     paint_button_focus(ui, &response, palette);
@@ -692,7 +716,7 @@ pub(crate) fn tab_item_with_count(
         let y = rect.bottom() + 2.5;
         ui.painter().line_segment(
             [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-            egui::Stroke::new(2.0, palette.accent),
+            egui::Stroke::new(2.0_f32, palette.accent),
         );
     }
     response
@@ -776,12 +800,12 @@ pub(crate) fn verb_button(
             let visuals = ui.visuals_mut();
             visuals.widgets.hovered.weak_bg_fill = wash;
             visuals.widgets.hovered.bg_fill = wash;
-            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, palette.danger);
-            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, palette.danger);
+            visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, palette.danger);
+            visuals.widgets.hovered.fg_stroke = egui::Stroke::new(1.5_f32, palette.danger);
             visuals.widgets.active.weak_bg_fill = pressed;
             visuals.widgets.active.bg_fill = pressed;
-            visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0, palette.danger);
-            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5, palette.danger);
+            visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, palette.danger);
+            visuals.widgets.active.fg_stroke = egui::Stroke::new(1.5_f32, palette.danger);
         }
         let response = ui.add(
             egui::Button::new(
@@ -897,13 +921,21 @@ pub(crate) fn banner(
 ) {
     card_frame(palette)
         .inner_margin(egui::Margin::symmetric(12, 10))
-        .stroke(egui::Stroke::new(1.0, tone))
+        .stroke(egui::Stroke::new(1.0_f32, tone))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
+            // The mark in a column of its own and the message wrapping beside
+            // it, starting a row of its own. A label that starts partway along
+            // a wrapping row is laid out with a first-row indent, and egui
+            // 0.37 keeps subtracting that indent after the first break: a long
+            // path on a later row was drawn outside the frame (change 295).
+            ui.horizontal_top(|ui| {
                 ui.spacing_mut().item_spacing.x = SPACE_SM;
                 ui.label(RichText::new(icon).size(15.0).color(tone));
-                add_contents(ui);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = SPACE_SM;
+                    add_contents(ui);
+                });
             });
         });
 }
@@ -987,7 +1019,7 @@ pub(crate) fn theme_swatches(ui: &mut egui::Ui, palette: &Palette) {
                 rect,
                 2.0,
                 colour,
-                egui::Stroke::new(1.0, palette.border_subtle),
+                egui::Stroke::new(1.0_f32, palette.border_subtle),
                 egui::StrokeKind::Inside,
             );
             response.on_hover_text(name);
@@ -995,12 +1027,26 @@ pub(crate) fn theme_swatches(ui: &mut egui::Ui, palette: &Palette) {
     });
 }
 
-pub(crate) fn dropped_project_folders(dropped: &[egui::DroppedFile]) -> (Vec<PathBuf>, usize) {
+/// A menu behind a custom button: egui 0.31's `menu::menu_custom_button`, on
+/// 0.37's `MenuButton`, returning the button's response as the old one did.
+pub(crate) fn menu_custom_button<R>(
+    ui: &mut egui::Ui,
+    button: egui::Button<'_>,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::Response {
+    egui::menu::MenuButton::from_button(button)
+        .ui(ui, add_contents)
+        .0
+}
+
+pub(crate) fn dropped_project_folders(
+    dropped: &[egui::DroppedFileHandle],
+) -> (Vec<PathBuf>, usize) {
     let folders = dropped
         .iter()
-        .filter_map(|file| file.path.as_ref())
+        .map(|file| file.path())
         .filter(|path| path.is_dir())
-        .cloned()
+        .map(Path::to_path_buf)
         .collect::<Vec<_>>();
     let rejected = dropped.len().saturating_sub(folders.len());
     (folders, rejected)
@@ -1182,13 +1228,18 @@ impl SessionStatusKind {
         }
     }
 
-    /// The word a person reads for this state: its group's, a message id.
-    /// Fourteen states used to have fourteen English tokens beside four
-    /// Japanese chip words, so one session had two names depending on where it
-    /// was read. The state is still told apart by its colour and by the hint,
-    /// which says which of the fourteen it is.
+    /// The word a person reads for this state: its group's word for live or
+    /// actionable states, or its own exit word for clean exit and explicit stop
+    /// now that the fourth `終了` filter group is retired (change 291).
     pub(crate) fn label(self) -> &'static str {
-        self.group().message_id()
+        match self {
+            SessionStatusKind::Done => "正常終了",
+            SessionStatusKind::Stopped => "停止済み",
+            _ => self
+                .group()
+                .expect("every live or failed state belongs to one of the three status groups")
+                .message_id(),
+        }
     }
 
     pub(crate) fn tone(self) -> StatusTone {
@@ -1210,33 +1261,29 @@ impl SessionStatusKind {
         }
     }
 
-    /// Which of the four things a person can do about this session. The match
-    /// is exhaustive on purpose: a new state does not compile until someone
-    /// says what a reader is supposed to do with it.
-    pub(crate) fn group(self) -> SessionStatusGroup {
+    /// Which of the three actionable status groups this state belongs to, or
+    /// `None` once the session exited cleanly or was stopped by hand (change
+    /// 291). Exhaustive so a new state cannot compile without choosing.
+    pub(crate) fn group(self) -> Option<SessionStatusGroup> {
         match self {
-            // Stopped on a question, or stopped for good on a prerequisite
-            // that will not arrive. Either way nothing moves until a person
-            // does something.
-            SessionStatusKind::Waiting | SessionStatusKind::Blocked => SessionStatusGroup::NeedsYou,
-            // Live, with nothing to do. The one this filter exists for.
-            SessionStatusKind::Idle => SessionStatusGroup::Free,
-            // In flight, including the not-yet-started: a queued session is
-            // going to run without anyone's help, so it is no more actionable
-            // than one that is mid-turn.
+            // Stopped on a question, blocked on a failed prerequisite, or ended
+            // unexpectedly without automatic recovery.
+            SessionStatusKind::Waiting
+            | SessionStatusKind::Blocked
+            | SessionStatusKind::Failed
+            | SessionStatusKind::Lost => Some(SessionStatusGroup::NeedsYou),
+            // Live, with nothing to do.
+            SessionStatusKind::Idle => Some(SessionStatusGroup::Free),
+            // In flight, including queued and stopping states.
             SessionStatusKind::Starting
             | SessionStatusKind::Working
             | SessionStatusKind::Running
             | SessionStatusKind::Ready
             | SessionStatusKind::Queued
             | SessionStatusKind::Stopping
-            | SessionStatusKind::Checking => SessionStatusGroup::Busy,
-            // The terminal is gone. Its output may still be worth reading, but
-            // no instruction can be given to it.
-            SessionStatusKind::Done
-            | SessionStatusKind::Failed
-            | SessionStatusKind::Stopped
-            | SessionStatusKind::Lost => SessionStatusGroup::Finished,
+            | SessionStatusKind::Checking => Some(SessionStatusGroup::Busy),
+            // Cleanly exited or explicitly cancelled: retired to History (`すべて`).
+            SessionStatusKind::Done | SessionStatusKind::Stopped => None,
         }
     }
 }
@@ -1259,39 +1306,35 @@ pub(crate) fn session_status_icon(
             palette.status(kind.tone()),
         );
     }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, tr(kind.label())));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr(kind.label())));
     response
 }
 
-/// The four answers to "what can I do with this session right now", which is
-/// the question the session list is filtered by. Fourteen states is the right
-/// number to *report* and the wrong number to *choose between*.
+/// The three answers to "what can I do with this session right now" (change
+/// 291): respond/inspect (`NeedsYou`), let it run (`Busy`), or hand it work
+/// (`Free`). Completed and stopped sessions move to History (`すべて`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SessionStatusGroup {
     NeedsYou,
     Free,
     Busy,
-    Finished,
 }
 
 impl SessionStatusGroup {
     /// In the order the chips and the Home tiles are drawn, most actionable
-    /// first: what needs you, what is moving, what is free, what is over.
-    pub(crate) const GROUPS: [SessionStatusGroup; 4] = [
+    /// first: what needs you, what is moving, what is free.
+    pub(crate) const GROUPS: [SessionStatusGroup; 3] = [
         SessionStatusGroup::NeedsYou,
         SessionStatusGroup::Busy,
         SessionStatusGroup::Free,
-        SessionStatusGroup::Finished,
     ];
 
-    /// Its slot in the `[bool; 4]` of selected groups.
+    /// Its slot in the `[bool; 3]` of selected groups.
     pub(crate) fn index(self) -> usize {
         match self {
             SessionStatusGroup::NeedsYou => 0,
             SessionStatusGroup::Busy => 1,
             SessionStatusGroup::Free => 2,
-            SessionStatusGroup::Finished => 3,
         }
     }
 
@@ -1302,7 +1345,6 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => "要対応",
             SessionStatusGroup::Free => "アイドル",
             SessionStatusGroup::Busy => "実行中",
-            SessionStatusGroup::Finished => "終了",
         }
     }
 
@@ -1314,7 +1356,6 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => ICON_ATTENTION,
             SessionStatusGroup::Free => ICON_STATUS_IDLE,
             SessionStatusGroup::Busy => ICON_STATUS_RUNNING,
-            SessionStatusGroup::Finished => ICON_STATUS_DONE,
         }
     }
 
@@ -1325,7 +1366,6 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => StatusMark::Attention,
             SessionStatusGroup::Free => StatusMark::Pause,
             SessionStatusGroup::Busy => StatusMark::Progress,
-            SessionStatusGroup::Finished => StatusMark::Check,
         }
     }
 
@@ -1334,17 +1374,15 @@ impl SessionStatusGroup {
             SessionStatusGroup::NeedsYou => StatusTone::Attention,
             SessionStatusGroup::Free => StatusTone::Idle,
             SessionStatusGroup::Busy => StatusTone::Running,
-            SessionStatusGroup::Finished => StatusTone::Neutral,
         }
     }
 
     /// What the chip says on hover: which states it will show.
     pub(crate) fn hint_id(self) -> &'static str {
         match self {
-            SessionStatusGroup::NeedsYou => "回答待ち・前提が壊れて止まっているセッション",
-            SessionStatusGroup::Free => "ターンを終え、次の依頼を出せるセッション",
-            SessionStatusGroup::Busy => "実行中・起動中・順番待ちのセッション",
-            SessionStatusGroup::Finished => "ターミナルが終了したセッション",
+            Self::NeedsYou => "回答待ち・異常終了・前提が壊れて止まっているセッション",
+            Self::Free => "ターンを終え、次の依頼を出せるセッション",
+            Self::Busy => "実行中・起動中・順番待ちのセッション",
         }
     }
 }
@@ -1422,7 +1460,7 @@ pub(crate) fn session_status_view(
         },
         SessionStatusKind::Ready => tr("前提が完了しました").to_owned(),
         SessionStatusKind::Queued => tr("前提の完了待ち").to_owned(),
-        SessionStatusKind::Done => tr("正常終了").to_owned(),
+        SessionStatusKind::Done => tr("ターミナルは正常に終了しました").to_owned(),
         SessionStatusKind::Failed => tr("異常終了。出力を確認してください").to_owned(),
         SessionStatusKind::Stopped => tr("停止操作による終了").to_owned(),
         SessionStatusKind::Lost => tr("ターミナルが残っておらず、結果を確認できません").to_owned(),
@@ -1466,7 +1504,7 @@ pub(crate) fn png_texture(
     name: &'static str,
     bytes: &'static [u8],
 ) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new(("png-mark", name));
+    let id = egui::Id::unique(("png-mark", name));
     if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
@@ -1495,7 +1533,7 @@ pub(crate) fn document_image_texture(
     doc_id: &DocumentId,
     bytes: &[u8],
 ) -> Option<egui::TextureHandle> {
-    let id = egui::Id::new(("doc-image-texture", doc_id, bytes.len()));
+    let id = egui::Id::unique(("doc-image-texture", doc_id, bytes.len()));
     if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
@@ -1579,8 +1617,7 @@ pub(crate) fn session_badge(
             paint_status_dot(ui.painter(), mark, kind, palette, surface);
         }
     }
-    response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, tr(kind.label())));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, tr(kind.label())));
     response
 }
 
@@ -1639,7 +1676,7 @@ pub(crate) fn status_count_chip(
     // carries the count, as the old label's text did.
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
+            egui::Role::Button,
             true,
             tf!("{p0} {p1} 件", p0 = tr(group.message_id()), p1 = count),
         )

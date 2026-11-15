@@ -34,7 +34,7 @@ or state → wrong outcome, per `REVIEW.md`. At most five nits.
    where the scope could be restructured. `String` where `&str` reaches, or
    `Vec<T>` where `&[T]` reaches, **in a signature** — inside a body it is noise
    and belongs in the nit budget or nowhere.
-5. **Pinned APIs.** `eframe`/`egui` 0.31, `rfd` 0.15, `directories` 6.0. A call
+5. **Pinned APIs.** `eframe`/`egui` 0.37, `rfd` 0.18, `directories` 6.0. A call
    that looks like a different minor version's API is a finding even if it
    compiles, because the next upgrade is where it surfaces. Say which docs to
    check rather than asserting the signature from memory.

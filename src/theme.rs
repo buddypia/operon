@@ -1,5 +1,3 @@
-use crate::prelude::*;
-
 use crate::*;
 
 /// The geometry half of the design system. Colour answers to `Palette` and
@@ -467,21 +465,21 @@ impl Palette {
         visuals.hyperlink_color = self.link;
         visuals.warn_fg_color = self.warning;
         visuals.error_fg_color = self.danger;
-        visuals.window_stroke = egui::Stroke::new(1.0, self.border_subtle);
+        visuals.window_stroke = egui::Stroke::new(1.0_f32, self.border_subtle);
         visuals.window_corner_radius = egui::CornerRadius::same(RADIUS_WINDOW);
         visuals.menu_corner_radius = egui::CornerRadius::same(RADIUS_CONTROL);
         visuals.selection.bg_fill = self.selection;
-        visuals.selection.stroke = egui::Stroke::new(1.0, self.selection_border);
-        visuals.text_cursor.stroke = egui::Stroke::new(2.0, self.accent_text);
+        visuals.selection.stroke = egui::Stroke::new(1.0_f32, self.selection_border);
+        visuals.text_cursor.stroke = egui::Stroke::new(2.0_f32, self.accent_text);
         visuals.faint_bg_color = self.card;
 
         let widgets = &mut visuals.widgets;
         widgets.noninteractive.bg_fill = self.panel;
         widgets.noninteractive.weak_bg_fill = self.panel;
-        widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, self.border_subtle);
+        widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, self.border_subtle);
         // egui reads this one as "the colour of an ordinary label", so it sets
         // the reading contrast of most of the app.
-        widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, self.text);
+        widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0_f32, self.text);
         // A control at rest is a hairline, not a slab. `weak_bg_fill` is what a
         // button paints and it is allowed to be transparent; `bg_fill` is what
         // a checkbox or slider paints and is not, so the two part ways here.
@@ -490,20 +488,20 @@ impl Palette {
         // the only one that needs marking.
         widgets.inactive.bg_fill = self.control;
         widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-        widgets.inactive.bg_stroke = egui::Stroke::new(1.0, self.border_subtle);
-        widgets.inactive.fg_stroke = egui::Stroke::new(1.0, self.text);
+        widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, self.border_subtle);
+        widgets.inactive.fg_stroke = egui::Stroke::new(1.0_f32, self.text);
         widgets.hovered.bg_fill = self.control_hovered;
         widgets.hovered.weak_bg_fill = self.control;
-        widgets.hovered.bg_stroke = egui::Stroke::new(1.0, self.border);
-        widgets.hovered.fg_stroke = egui::Stroke::new(1.0, self.text_strong);
+        widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, self.border);
+        widgets.hovered.fg_stroke = egui::Stroke::new(1.0_f32, self.text_strong);
         widgets.active.bg_fill = self.control_active;
         widgets.active.weak_bg_fill = self.control_hovered;
-        widgets.active.bg_stroke = egui::Stroke::new(1.0, self.border_strong);
-        widgets.active.fg_stroke = egui::Stroke::new(1.0, self.text_strong);
+        widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, self.border_strong);
+        widgets.active.fg_stroke = egui::Stroke::new(1.0_f32, self.text_strong);
         widgets.open.bg_fill = self.control;
         widgets.open.weak_bg_fill = self.control;
-        widgets.open.bg_stroke = egui::Stroke::new(1.0, self.border);
-        widgets.open.fg_stroke = egui::Stroke::new(1.0, self.text_strong);
+        widgets.open.bg_stroke = egui::Stroke::new(1.0_f32, self.border);
+        widgets.open.fg_stroke = egui::Stroke::new(1.0_f32, self.text_strong);
         // egui thickens `fg_stroke` on hover by default, which makes a label
         // appear to gain weight under the pointer. Hierarchy is carried by the
         // ink, not by a stroke the text face never asked for.

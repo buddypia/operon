@@ -33,7 +33,7 @@ not an outcome; the outcome is the thing done, as the person sees it afterwards
 
 Only the ones that actually bind. Delete the rest.
 
-- macOS only; `eframe`/`egui` 0.31 immediate-mode GUI.
+- macOS only; `eframe`/`egui` 0.37 immediate-mode GUI.
 - Local-first: no telemetry, no accounts, no cloud calls.
 - User-facing text is Japanese; code, comments, and docs are English.
 - The persisted store is on real machines — a shape change needs a migration and

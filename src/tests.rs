@@ -2,6 +2,25 @@ use crate::i18n_tables::{catalog_keys, translation_for, EN_TABLE, KO_TABLE};
 use crate::prelude::*;
 use crate::*;
 
+/// A file a person dropped on the window, as eframe hands it over: egui 0.37
+/// made `DroppedFile` a trait the integration implements (change 295).
+#[derive(Debug)]
+struct TestDroppedFile(PathBuf);
+
+impl egui::DroppedFile for TestDroppedFile {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        fs::read(&self.0).map_err(|error| error.to_string())
+    }
+}
+
+fn dropped_file(path: PathBuf) -> egui::DroppedFileHandle {
+    Arc::new(TestDroppedFile(path))
+}
+
 #[cfg(test)]
 /// How many 10ms polls a test waits for a child process to signal that it
 /// reached a checkpoint.
@@ -1699,10 +1718,11 @@ pub(crate) fn the_app_sweeps_expired_handoff_archives_once_at_startup() {
         .contains(&BackgroundKey::HandoffArchiveSweep));
     assert!(later.is_file());
 
-    // And the frame is what starts it.
+    // And the frame is what starts it: egui 0.37's `App::logic`, which runs
+    // once per frame before the drawing.
     let app_source = include_str!("app.rs");
     let update = app_source
-        .split("fn update(&mut self, ctx: &egui::Context")
+        .split("fn logic(&mut self, ctx: &egui::Context")
         .nth(1)
         .unwrap();
     let update = &update[..update.find("\n    }\n").unwrap()];
@@ -4760,7 +4780,7 @@ pub(crate) fn the_restore_footer_never_paints_status_under_its_action() {
             )),
             ..Default::default()
         };
-        let _ = context.run(input, |context| {
+        let _ = context.run_ui(input, |context| {
             egui::CentralPanel::default().show(context, |ui| {
                 ui.set_width(width);
                 ui.set_max_width(width);
@@ -4856,7 +4876,7 @@ pub(crate) fn the_launch_footer_never_paints_status_under_its_action() {
             )),
             ..Default::default()
         };
-        let _ = context.run(input, |context| {
+        let _ = context.run_ui(input, |context| {
             egui::CentralPanel::default().show(context, |ui| {
                 ui.set_width(width);
                 ui.set_max_width(width);
@@ -4924,7 +4944,7 @@ pub(crate) fn the_launch_modal_renders_folder_and_handles_error_state() {
         )),
         ..Default::default()
     };
-    let _ = context.run(input, |ctx| {
+    let _ = context.run_ui(input, |ctx| {
         app.ui_launch_modal(ctx);
     });
     assert!(app.launch_progress.is_some());
@@ -5372,16 +5392,7 @@ pub(crate) fn accepts_only_finder_folders_from_a_drop() {
     fs::create_dir_all(&root).unwrap();
     let file = root.join("ticket.txt");
     fs::write(&file, "not a project folder").unwrap();
-    let dropped = vec![
-        egui::DroppedFile {
-            path: Some(root.clone()),
-            ..Default::default()
-        },
-        egui::DroppedFile {
-            path: Some(file),
-            ..Default::default()
-        },
-    ];
+    let dropped = vec![dropped_file(root.clone()), dropped_file(file)];
     let (folders, rejected) = dropped_project_folders(&dropped);
     assert_eq!(folders, vec![root.clone()]);
     assert_eq!(rejected, 1);
@@ -5457,7 +5468,7 @@ pub(crate) fn renders_terminal_background_colors_and_half_block_banners() {
     let row3_blocks: Vec<&egui::text::LayoutSection> = lines[2]
         .sections
         .iter()
-        .filter(|s| lines[2].text[s.byte_range.clone()].contains('▀'))
+        .filter(|s| lines[2].text[s.byte_range.start.0..s.byte_range.end.0].contains('▀'))
         .collect();
     assert_eq!(row3_blocks.len(), 8);
 
@@ -7660,7 +7671,7 @@ pub(crate) fn keyboard_focus_on_a_custom_row_is_a_strong_outline_or_nothing() {
         let palette = theme.palette();
         assert_eq!(
             focus_stroke(true, palette),
-            Some(egui::Stroke::new(1.0, palette.border_strong)),
+            Some(egui::Stroke::new(1.0_f32, palette.border_strong)),
             "{}",
             theme.label(),
         );
@@ -7703,10 +7714,10 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
             let mut rings_by_pass = Vec::new();
             let mut last_outline_by_pass = Vec::new();
             for pass in 0..2 {
-                let output = context.run(egui::RawInput::default(), |ctx| {
+                let output = context.run_ui(egui::RawInput::default(), |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         if let (1, Some(id)) = (pass, button_id) {
-                            ctx.memory_mut(|memory| memory.request_focus(id));
+                            ui.memory_mut(|memory| memory.request_focus(id));
                         }
                         let response = draw(ui, palette);
                         button_id = Some(response.id);
@@ -7717,7 +7728,7 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
                     .iter()
                     .filter_map(|clipped| match &clipped.shape {
                         egui::Shape::Rect(rect)
-                            if rect.stroke == egui::Stroke::new(1.0, palette.border_strong) =>
+                            if rect.stroke == egui::Stroke::new(1.0_f32, palette.border_strong) =>
                         {
                             Some(rect.corner_radius)
                         }
@@ -7751,7 +7762,7 @@ pub(crate) fn focus_ring_on_a_button_is_the_strong_outline_at_control_radius() {
             );
             assert_eq!(
                 last_outline_by_pass[1],
-                Some(egui::Stroke::new(1.0, palette.border_strong)),
+                Some(egui::Stroke::new(1.0_f32, palette.border_strong)),
                 "{name} in {} must paint the ring last when focused",
                 theme.label(),
             );
@@ -7785,7 +7796,7 @@ pub(crate) fn quiet_button_renders_with_link_color_for_affordance() {
         let palette = theme.palette();
         let context = egui::Context::default();
         context.set_visuals(theme.visuals());
-        let output = context.run(egui::RawInput::default(), |ctx| {
+        let output = context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 quiet_button(ui, palette, "すべて表示");
             });
@@ -7821,7 +7832,7 @@ pub(crate) fn progress_footers_use_secondary_button_affordance() {
         let palette = theme.palette();
         let context = egui::Context::default();
         context.set_visuals(theme.visuals());
-        let stroke = egui::Stroke::new(1.0, palette.border_subtle);
+        let stroke = egui::Stroke::new(1.0_f32, palette.border_subtle);
         let cases: [(&str, fn(&mut egui::Ui, &Palette)); 2] = [
             ("launch", |ui, p| {
                 let _ = launch_progress_footer(ui, p, 5);
@@ -7831,7 +7842,7 @@ pub(crate) fn progress_footers_use_secondary_button_affordance() {
             }),
         ];
         for (name, draw) in cases {
-            let output = context.run(egui::RawInput::default(), |ctx| {
+            let output = context.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     draw(ui, palette);
                 });
@@ -8051,8 +8062,8 @@ pub(crate) fn click_at(
             },
         ]
     };
-    let _ = context.run(input(button(true)), &mut pass);
-    let _ = context.run(input(button(false)), &mut pass);
+    let _ = context.run_pass(input(button(true)), &mut pass);
+    let _ = context.run_pass(input(button(false)), &mut pass);
 }
 
 /// A card that opens the thing it describes has to lose to the controls
@@ -8070,7 +8081,7 @@ pub(crate) fn a_clickable_card_yields_to_the_controls_drawn_on_it() {
         let card_clicks = std::cell::Cell::new(0);
         let button_clicks = std::cell::Cell::new(0);
         let mut pass = |context: &egui::Context| {
-            egui::CentralPanel::default().show(context, |ui| {
+            central_panel(context, |ui| {
                 let row = clickable_card(ui, &DARK_PALETTE, "row", true, |ui| {
                     ui.horizontal(|ui| {
                         label_rect.set(ui.label("セッション名").rect);
@@ -8087,7 +8098,7 @@ pub(crate) fn a_clickable_card_yields_to_the_controls_drawn_on_it() {
                 }
             });
         };
-        let _ = context.run(egui::RawInput::default(), &mut pass);
+        let _ = context.run_pass(egui::RawInput::default(), &mut pass);
         let target = match aim {
             // The far end of the row, where nothing but the card is drawn.
             "surface" => card_rect.get().right_center() - egui::vec2(20.0, 0.0),
@@ -8133,13 +8144,13 @@ pub(crate) fn tapping_a_session_row_opens_its_terminal() {
     let context = egui::Context::default();
     let card_rect = std::cell::Cell::new(egui::Rect::NOTHING);
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             let before = ui.next_widget_position();
             app.home_session_row(ui, &session, "card-migration");
             card_rect.set(egui::Rect::from_min_max(before, ui.min_rect().max));
         });
     };
-    let _ = context.run(egui::RawInput::default(), &mut pass);
+    let _ = context.run_pass(egui::RawInput::default(), &mut pass);
     // The row's leading edge, which carries nothing clickable.
     let target = card_rect.get().left_top() + egui::vec2(40.0, 24.0);
     click_at(&context, target, &mut pass);
@@ -8271,6 +8282,32 @@ pub(crate) fn bundled_ui_font_has_english_japanese_and_korean_glyphs() {
         assert_ne!(font.glyph_id(character).0, 0, "missing {character}");
     }
 }
+#[test]
+/// The icon face is registered under the very name the proportional chain
+/// asks for, and it is Phosphor's regular face (change 295). egui-phosphor's
+/// own `add_to_fonts` cannot take this egui's `FontDefinitions` any more, so
+/// startup registers the bytes itself; if the name drifted from the chain's,
+/// every icon would fall through to Apple Symbols or tofu with nothing failing.
+pub(crate) fn the_icon_face_is_registered_under_the_name_the_font_chain_names() {
+    let mut fonts = egui::FontDefinitions::default();
+    add_icon_face(&mut fonts);
+    assert!(
+        proportional_ui_font_chain()
+            .iter()
+            .any(|name| name == ICON_FACE),
+        "the chain does not name the icon face {ICON_FACE}"
+    );
+    let face = fonts
+        .font_data
+        .get(ICON_FACE)
+        .expect("the icon face should be registered under ICON_FACE");
+    assert_eq!(
+        (*face.font).as_ref(),
+        egui_phosphor::Variant::Regular.font_bytes(),
+        "the icon face is not Phosphor Regular"
+    );
+}
+
 #[test]
 pub(crate) fn ui_text_uses_one_cjk_aware_face_before_symbol_fallback() {
     assert_eq!(
@@ -10410,7 +10447,7 @@ pub(crate) fn a_marked_row_is_painted_with_its_emphasis_band() {
             let at = job.text.find(needle).expect("the word is in the row");
             job.sections
                 .iter()
-                .find(|section| section.byte_range.start <= at && section.byte_range.end > at)
+                .find(|section| section.byte_range.start.0 <= at && section.byte_range.end.0 > at)
                 .map(|section| section.format.background)
         };
         assert_eq!(background_at(word), Some(expected), "{word}");
@@ -10538,7 +10575,7 @@ pub(crate) fn the_editor_draws_every_view_without_a_window() {
             app.editor_view = view;
             app.active_document = Some(project_document(&project, path));
             context.begin_pass(egui::RawInput::default());
-            egui::CentralPanel::default().show(&context, |ui| {
+            central_panel(&context, |ui| {
                 app.ui_files(ui, &project);
             });
             let output = context.end_pass();
@@ -10551,7 +10588,7 @@ pub(crate) fn the_editor_draws_every_view_without_a_window() {
         app.active_document = None;
         app.editor_view = EditorView::Edit;
         context.begin_pass(egui::RawInput::default());
-        egui::CentralPanel::default().show(&context, |ui| {
+        central_panel(&context, |ui| {
             app.ui_files(ui, &project);
             app.git_view = GitView::Diff;
             app.ui_git(ui, &project);
@@ -11181,10 +11218,10 @@ pub(crate) fn viewer_rows_keep_the_colours_of_their_language() {
         let mut covered = 0;
         for section in &layout.job.sections {
             assert_eq!(
-                section.byte_range.start, covered,
+                section.byte_range.start.0, covered,
                 "row {row}: sections are contiguous"
             );
-            covered = section.byte_range.end;
+            covered = section.byte_range.end.0;
         }
         assert_eq!(
             covered,
@@ -11198,7 +11235,7 @@ pub(crate) fn viewer_rows_keep_the_colours_of_their_language() {
             .job
             .sections
             .iter()
-            .filter(|section| section.byte_range.start >= gutter_len)
+            .filter(|section| section.byte_range.start.0 >= gutter_len)
             .map(|section| section.format.color)
             .collect::<Vec<_>>()
     };
@@ -11417,7 +11454,8 @@ pub(crate) fn syntax_layout_carries_markup_grammar_across_lines() {
         .sections
         .iter()
         .find(|section| {
-            section.byte_range.start <= comment_offset && section.byte_range.end > comment_offset
+            section.byte_range.start.0 <= comment_offset
+                && section.byte_range.end.0 > comment_offset
         })
         .map(|section| section.format.color);
     assert_eq!(comment_colour, Some(palette.text_muted));
@@ -11427,7 +11465,8 @@ pub(crate) fn syntax_layout_carries_markup_grammar_across_lines() {
         .sections
         .iter()
         .find(|section| {
-            section.byte_range.start <= keyword_offset && section.byte_range.end > keyword_offset
+            section.byte_range.start.0 <= keyword_offset
+                && section.byte_range.end.0 > keyword_offset
         })
         .map(|section| section.format.color);
     assert_eq!(keyword_colour, Some(palette.accent_text));
@@ -16945,7 +16984,7 @@ fn find_word_boundary_match(haystack: &str, needle_ascii_lower: &str) -> Option<
                 haystack[..i]
                     .chars()
                     .next_back()
-                    .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             };
 
             let right_bounded = if i + needle_len == haystack_bytes.len() {
@@ -16954,7 +16993,7 @@ fn find_word_boundary_match(haystack: &str, needle_ascii_lower: &str) -> Option<
                 haystack[i + needle_len..]
                     .chars()
                     .next()
-                    .map_or(true, |c| !c.is_alphanumeric() && c != '_')
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             };
 
             if left_bounded && right_bounded {
@@ -28637,7 +28676,7 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     assert_eq!(lines.len(), 61);
     let cursor = TerminalCursor {
         x: 2,
@@ -28657,7 +28696,7 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
     // bottom-clamped pane shows the caret's rows. Stick-to-bottom is not
     // what this probes: `scroll_to: Some(_)` keeps it off, and the pane
     // anchors the caret to a row of the buffer either way.
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             // Viewport as tall as the pane grid's visible window in the bug.
@@ -28666,12 +28705,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 matches: &[],
                 current: None,
                 scroll_to: Some(25),
-                palette: &palette,
+                palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette,
             };
             let visible = ui.clip_rect();
             outcomes.push(Paned {
@@ -28697,12 +28736,12 @@ pub(crate) fn a_caret_inside_the_drawn_rows_reports_its_rect_and_a_scrolled_one_
                 matches: &[],
                 current: None,
                 scroll_to: Some(10),
-                palette: &palette,
+                palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette,
             };
             let visible = ui.clip_rect();
             outcomes.push(Paned {
@@ -28753,7 +28792,7 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     let cursor = TerminalCursor {
         x: 2,
         y: 20,
@@ -28765,7 +28804,7 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
         pane: egui::Rect,
     }
     let mut outcomes = Vec::new();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
@@ -28774,12 +28813,12 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
                     matches: &[],
                     current: None,
                     scroll_to: Some(scroll_to),
-                    palette: &palette,
+                    palette,
                 };
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
                     unresolved: &mut Vec::new(),
-                    palette: &palette,
+                    palette,
                 };
                 outcomes.push(Paned {
                     caret: terminal_rows(
@@ -28800,8 +28839,10 @@ pub(crate) fn a_caret_below_the_last_fully_visible_row_reports_none() {
     });
     assert_eq!(outcomes.len(), 3);
     let caret = &outcomes[0].caret;
+    // Half a pixel of slack, as the pane allows: egui 0.37 rounds the scroll
+    // offset to a whole pixel, which can push the rows a third of one down.
     assert!(
-        caret.is_some_and(|rect| rect.max.y <= outcomes[0].pane.max.y),
+        caret.is_some_and(|rect| rect.max.y <= outcomes[0].pane.max.y + 0.5),
         "a fully visible caret must fit inside the pane: {caret:?}"
     );
     assert!(
@@ -28825,7 +28866,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     // A real screen: headless defaults give the panel a placeholder width of
     // 10_000px, and 400 columns then still fit inside the pane.
     let input = egui::RawInput {
@@ -28841,14 +28882,14 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
             y: 20,
             pane_rows: 40,
         };
-        let _ = ctx.run(input.clone(), |ctx| {
+        let _ = ctx.run_ui(input.clone(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let cell = terminal_cell_size(ui);
                 let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
                 let mut links = TerminalLinkOverlay {
                     resolved: &HashMap::new(),
                     unresolved: &mut Vec::new(),
-                    palette: &palette,
+                    palette,
                 };
                 let search = TerminalSearchOverlay {
                     matches: &[],
@@ -28857,7 +28898,7 @@ pub(crate) fn a_caret_past_the_pane_width_reports_none() {
                     // probe's point here is the horizontal bound, not the
                     // vertical one.
                     scroll_to: Some(18),
-                    palette: &palette,
+                    palette,
                 };
                 let caret = terminal_rows(
                     ui,
@@ -28901,7 +28942,7 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
     for index in 0..60 {
         output.push_str(&format!("row {index:02}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     // A caret in the top grid rows (y=2 -> content row 60-40+2=23) against a
     // jump to the very bottom: the served band's top clamps to
     // total_rows - 36 = 25 rows — past the caret — which is also where egui's
@@ -28911,7 +28952,7 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
         y: 2,
         pane_rows: 40,
     };
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let cell = terminal_cell_size(ui);
             let viewport = egui::vec2(ui.available_width(), cell.y * 36.0);
@@ -28919,12 +28960,12 @@ pub(crate) fn a_caret_scrolled_above_the_viewport_reports_none() {
                 matches: &[],
                 current: None,
                 scroll_to: Some(55),
-                palette: &palette,
+                palette,
             };
             let mut links = TerminalLinkOverlay {
                 resolved: &HashMap::new(),
                 unresolved: &mut Vec::new(),
-                palette: &palette,
+                palette,
             };
             let caret = terminal_rows(
                 ui,
@@ -29042,8 +29083,10 @@ pub(crate) fn terminal_input_events_handles_ime_preedit_and_commit_enter_suppres
     // 2. Preedit composition: setting preedit string and suppressing Backspace during composition
     ctx.input_mut(|i| {
         i.events.clear();
-        i.events
-            .push(egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into())));
+        i.events.push(egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        }));
         i.events.push(egui::Event::Key {
             key: egui::Key::Backspace,
             physical_key: None,
@@ -32952,30 +32995,37 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
     );
 
     // `index()` is the position in `GROUPS`, because it indexes the app's
-    // `[bool; 4]` and a mismatch would toggle the wrong chip.
+    // `[bool; 3]` and a mismatch would toggle the wrong chip.
     for (position, group) in SessionStatusGroup::GROUPS.iter().enumerate() {
         assert_eq!(group.index(), position, "{group:?} indexes the wrong slot");
     }
 
-    // The states the intent names, pinned: these are the two groups a person
-    // reaches for when they have work in hand.
+    // The states the intent names, pinned: these are the actionable groups a
+    // person reaches for when they have work in hand; clean exits and explicit
+    // stops have no live group (`None`).
     assert_eq!(
         SessionStatusKind::Idle.group(),
-        SessionStatusGroup::Free,
-        "an idle agent is the one thing 手すき is for"
+        Some(SessionStatusGroup::Free),
+        "an idle agent is the one thing アイドル is for"
     );
     assert_eq!(
         SessionStatusKind::Waiting.group(),
-        SessionStatusGroup::NeedsYou
+        Some(SessionStatusGroup::NeedsYou)
     );
     assert_eq!(
         SessionStatusKind::Blocked.group(),
-        SessionStatusGroup::NeedsYou
+        Some(SessionStatusGroup::NeedsYou)
     );
     assert_eq!(
-        SessionStatusKind::Done.group(),
-        SessionStatusGroup::Finished
+        SessionStatusKind::Failed.group(),
+        Some(SessionStatusGroup::NeedsYou)
     );
+    assert_eq!(
+        SessionStatusKind::Lost.group(),
+        Some(SessionStatusGroup::NeedsYou)
+    );
+    assert_eq!(SessionStatusKind::Done.group(), None);
+    assert_eq!(SessionStatusKind::Stopped.group(), None);
 }
 
 #[test]
@@ -33016,7 +33066,7 @@ pub(crate) fn every_status_group_has_a_message_id() {
 pub(crate) fn the_status_filter_shows_everything_when_nothing_is_selected() {
     let root = temporary_directory("status-filter-default");
     let (mut app, first, second) = app_with_two_sessions(&root);
-    assert_eq!(app.status_filter, [false; 4]);
+    assert_eq!(app.status_filter, [false; 3]);
 
     // One session in each of the four groups, in turn: none of them is hidden.
     let busy = app.store.sessions[0].clone();
@@ -33073,26 +33123,24 @@ pub(crate) fn an_unread_session_is_counted_as_needing_a_person() {
     assert_eq!(
         app.session_status_kind_for(&app.store.sessions[index])
             .group(),
-        SessionStatusGroup::Finished
+        None
     );
 
-    // 要対応 reaches it, and 空き does not.
-    app.status_filter = [false; 4];
+    // 要対応 reaches it via the unread overlay, while 実行中 and アイドル do not.
+    app.status_filter = [false; 3];
     app.status_filter[SessionStatusGroup::NeedsYou.index()] = true;
     assert!(app.session_matches_status_filter(&app.store.sessions[index]));
 
-    app.status_filter = [false; 4];
+    app.status_filter = [false; 3];
     app.status_filter[SessionStatusGroup::Free.index()] = true;
     assert!(!app.session_matches_status_filter(&app.store.sessions[index]));
 
-    // 終了 reaches it too — the overlap is the point, and the counts say so.
-    app.status_filter = [false; 4];
-    app.status_filter[SessionStatusGroup::Finished.index()] = true;
-    assert!(app.session_matches_status_filter(&app.store.sessions[index]));
+    app.status_filter = [false; 3];
+    app.status_filter[SessionStatusGroup::Busy.index()] = true;
+    assert!(!app.session_matches_status_filter(&app.store.sessions[index]));
 
     let counts = app.status_group_counts();
     assert_eq!(counts[SessionStatusGroup::NeedsYou.index()], 1);
-    assert_eq!(counts[SessionStatusGroup::Finished.index()], 1);
     // The toolbar badge and the chip are the same predicate, so they agree.
     assert_eq!(
         app.attention_count(),
@@ -33124,22 +33172,22 @@ pub(crate) fn narrowing_the_list_forgets_a_pending_removal_confirmation() {
     assert_eq!(app.pending_session_close, None);
 
     // Clearing from the no-match message.
-    app.status_filter = [true; 4];
+    app.status_filter = [true; 3];
     app.pending_session_close = Some(first);
     app.clear_status_filter();
-    assert_eq!(app.status_filter, [false; 4]);
+    assert_eq!(app.status_filter, [false; 3]);
     assert_eq!(app.pending_session_close, None);
 
     // And the home screen's banner, which is the same narrowing by another
     // route: it lands on the session list with 要対応 on and nothing else.
     app.page = Page::Home;
-    app.status_filter = [true; 4];
+    app.status_filter = [true; 3];
     app.pending_session_close = Some(first);
     app.show_sessions_needing_you();
     assert_eq!(app.page, Page::Sessions);
     assert_eq!(
         app.status_filter,
-        [true, false, false, false],
+        [true, false, false],
         "the banner counts 要対応, so it shows 要対応 and nothing else"
     );
     assert_eq!(app.pending_session_close, None);
@@ -33290,19 +33338,19 @@ pub(crate) fn the_palette_selection_is_clamped_when_the_results_shrink() {
     let ctx = egui::Context::default();
 
     app.command_search = String::new();
-    let _ = ctx.run(Default::default(), |_| app.handle_palette_keys(&ctx));
+    let _ = ctx.run_ui(Default::default(), |_| app.handle_palette_keys(&ctx));
     let (entries, _) = app.palette_visible_entries();
     app.command_selection = entries.len() - 1;
 
     // A query that matches one row must pull the selection back into range.
     app.command_search = "ログ".to_owned();
-    let _ = ctx.run(Default::default(), |_| app.handle_palette_keys(&ctx));
+    let _ = ctx.run_ui(Default::default(), |_| app.handle_palette_keys(&ctx));
     let (entries, _) = app.palette_visible_entries();
     assert!(app.command_selection < entries.len());
 
     // And a query that matches nothing leaves it somewhere safe.
     app.command_search = "まったく一致しない語".to_owned();
-    let _ = ctx.run(Default::default(), |_| app.handle_palette_keys(&ctx));
+    let _ = ctx.run_ui(Default::default(), |_| app.handle_palette_keys(&ctx));
     assert_eq!(app.command_selection, 0);
     fs::remove_dir_all(&root).ok();
 }
@@ -34505,7 +34553,7 @@ fn rust_function_body(name: &str) -> Option<String> {
             let close = format!("{}}}", " ".repeat(indent));
             let from = source.find(line).unwrap();
             let body = &source[from..];
-            let to = body.find(&format!("\n{close}")).map_or(body.len(), |at| at);
+            let to = body.find(&format!("\n{close}")).unwrap_or(body.len());
             return Some(body[..to].to_owned());
         }
     }
@@ -39525,8 +39573,8 @@ fn editor_text_tops(app: &mut OperonApp, project: &Project) -> (Vec<(String, f32
     let context = egui::Context::default();
     let mut line = 0.0;
     let mut draw = || {
-        context.run(Default::default(), |ctx| {
-            line = ctx.fonts(|fonts| fonts.row_height(&FontId::monospace(MONOSPACE_SIZE)));
+        context.run_ui(Default::default(), |ctx| {
+            line = ctx.fonts_mut(|fonts| fonts.row_height(&FontId::monospace(MONOSPACE_SIZE)));
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_editor(ui, project, app.store.theme.palette(), 600.0);
             });
@@ -39552,7 +39600,7 @@ fn editor_view_labels(app: &mut OperonApp, project: &Project) -> Vec<String> {
     // Twice: the first frame lays the widgets out, the second is the one whose
     // shapes are the finished screen.
     let mut draw = || {
-        context.run(Default::default(), |ctx| {
+        context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_editor(ui, project, app.store.theme.palette(), 600.0);
             });
@@ -39740,7 +39788,7 @@ fn sheet_labels(app: &mut OperonApp, project: &Project) -> Vec<String> {
     app.selected_project = Some(project.id);
     let mut draw = || {
         app.launch_sheet_open = true;
-        context.run(Default::default(), |ctx| {
+        context.run_ui(Default::default(), |ctx| {
             app.ui_launch_sheet(ctx);
         })
     };
@@ -39896,7 +39944,7 @@ pub(crate) fn the_launch_screen_offers_every_mode_and_switch_the_agent_has() {
         app.selected_agent = agent.into();
         let context = egui::Context::default();
         let mut draw = || {
-            context.run(Default::default(), |ctx| {
+            context.run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     app.ui_launch_options(ui, palette);
                 });
@@ -40095,16 +40143,16 @@ pub(crate) fn the_card_shows_the_command_the_restart_will_run() {
 
     let context = egui::Context::default();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             app.home_session_row(ui, &session, "card-migration");
         });
     };
-    let _ = context.run(Default::default(), &mut draw);
-    let output = context.run(Default::default(), &mut draw);
+    let _ = context.run_pass(Default::default(), &mut draw);
+    let output = context.run_pass(Default::default(), &mut draw);
     let menu = drawn_text_rect(&output, |text| text == ICON_MORE)
         .expect("Home row exposes session details");
     click_at(&context, menu.center(), &mut draw);
-    let labels: Vec<String> = text_positions(&context.run(Default::default(), &mut draw))
+    let labels: Vec<String> = text_positions(&context.run_pass(Default::default(), &mut draw))
         .into_iter()
         .map(|(text, _)| text)
         .collect();
@@ -40603,7 +40651,7 @@ pub(crate) fn the_project_list_offers_inline_deletion_and_confirmation() {
 
     let context = egui::Context::default();
     let draw = |app: &mut OperonApp| {
-        let output = context.run(Default::default(), |ctx| {
+        let output = context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_projects(ui);
             });
@@ -41117,7 +41165,7 @@ fn ime_pane_pass(
     session: &Session,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    context.run(
+    context.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -41148,12 +41196,12 @@ fn ime_pane_pass(
 #[test]
 pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
     let (root, mut app, session) = ime_pane_fixture("ime-abandoned");
-    let pane = egui::Id::new(("terminal-pane", session.id));
+    let pane = egui::Id::unique(("terminal-pane", session.id));
     let context = egui::Context::default();
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -41164,7 +41212,10 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
         &context,
         &mut app,
         &session,
-        vec![egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into()))],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        })],
     );
     assert_eq!(
         app.terminal_preedits.get(&session.id).map(String::as_str),
@@ -41174,12 +41225,7 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
 
     // The keyboard goes elsewhere, and the IME ends its composition there.
     context.memory_mut(|memory| memory.surrender_focus(pane));
-    let left = ime_pane_pass(
-        &context,
-        &mut app,
-        &session,
-        vec![egui::Event::Ime(egui::ImeEvent::Disabled)],
-    );
+    let left = ime_pane_pass(&context, &mut app, &session, Vec::new());
     assert_eq!(
         app.terminal_preedits.get(&session.id),
         None,
@@ -41192,7 +41238,7 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
 
     // Back to the pane: Backspace is Backspace again.
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -41229,7 +41275,7 @@ pub(crate) fn a_conversion_abandoned_by_leaving_the_pane_does_not_stick() {
 #[test]
 pub(crate) fn a_conversion_does_not_survive_a_trip_to_another_screen() {
     let (root, mut app, session) = ime_pane_fixture("ime-screen");
-    let pane = egui::Id::new(("terminal-pane", session.id));
+    let pane = egui::Id::unique(("terminal-pane", session.id));
     let context = egui::Context::default();
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     app.terminal_focus_request = Some(session.id);
@@ -41239,13 +41285,16 @@ pub(crate) fn a_conversion_does_not_survive_a_trip_to_another_screen() {
         &context,
         &mut app,
         &session,
-        vec![egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into()))],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        })],
     );
     assert!(app.terminal_preedits.contains_key(&session.id));
 
     // Another screen: the pane is not drawn, and egui lets its focus go.
     for _ in 0..2 {
-        let _ = context.run(Default::default(), |context| {
+        let _ = context.run_ui(Default::default(), |context| {
             egui::CentralPanel::default().show(context, |_| {});
         });
     }
@@ -41279,7 +41328,7 @@ pub(crate) fn a_focused_terminal_pane_claims_the_ime_without_redrawing_every_fra
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -41359,7 +41408,7 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
 
     let context = egui::Context::default();
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     };
@@ -41373,8 +41422,8 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
     // Two passes before the click: a scroll area only learns its content is too
     // large after it has laid it out once, and that is the frame the stolen
     // drag widget appears in.
-    let _ = context.run(screen.clone(), &mut pass);
-    let _ = context.run(screen, &mut pass);
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    let _ = context.run_pass(screen, &mut pass);
 
     click_at(&context, egui::pos2(500.0, 300.0), &mut pass);
     fs::remove_dir_all(&root).ok();
@@ -41383,7 +41432,7 @@ pub(crate) fn a_full_terminal_pane_still_answers_a_click() {
     // same pane, and a click that landed there would leave the bug in place.
     assert_eq!(
         context.memory(|memory| memory.focused()),
-        Some(egui::Id::new(("terminal-pane", session.id))),
+        Some(egui::Id::unique(("terminal-pane", session.id))),
         "a click on a terminal that has filled up did not give the pane the keyboard"
     );
 }
@@ -43942,7 +43991,7 @@ fn render_workspace_output(
         ..Default::default()
     };
     // Pass 1: register widget IDs and layout sizing
-    let _ = context.run(screen.clone(), |ctx| {
+    let _ = context.run_ui(screen.clone(), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -43950,7 +43999,7 @@ fn render_workspace_output(
             });
     });
     // Pass 2: resolve immediate-mode layout and extract output shapes
-    context.run(screen, |ctx| {
+    context.run_ui(screen, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -44788,7 +44837,7 @@ pub(crate) fn test_session_file_tree_icon_clicks_toggle_and_open() {
 
     // 1. Initial pass without clicks
     let mut actions = Vec::new();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             file_tree_rows(
                 ui,
@@ -45026,7 +45075,7 @@ pub(crate) fn test_sidebar_tab_drag_escape_cancellation() {
         pressed: true,
         modifiers: egui::Modifiers::NONE,
     };
-    let _ = context.run(frame(vec![held, escape]), |ctx| {
+    let _ = context.run_ui(frame(vec![held, escape]), |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| fixture.app.ui_terminal_workspace(ui));
@@ -45704,10 +45753,12 @@ pub(crate) fn test_dock_drag_by_pointer_events() {
             events,
             ..Default::default()
         };
-        text_positions(&context.run(input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        text_positions(&context.run_pass(input, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }))
     };
     let button = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
@@ -45839,7 +45890,7 @@ pub(crate) fn test_in_editor_image_preview_document_state() {
 
     // 4. Render ui_editor without panics
     let ctx = egui::Context::default();
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             fixture.app.ui_editor(
                 ui,
@@ -45869,7 +45920,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -45897,7 +45948,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output1 = ctx.run(raw_input, |ctx| {
+    let output1 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     // First click should not maximize
@@ -45925,7 +45976,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output2 = ctx.run(raw_input, |ctx| {
+    let output2 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds2 = &output2.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -45958,7 +46009,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -45982,7 +46033,7 @@ pub(crate) fn test_titlebar_double_click_toggles_maximize() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output4 = ctx.run(raw_input, |ctx| {
+    let output4 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds4 = &output4.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46009,7 +46060,7 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46029,7 +46080,7 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46042,7 +46093,7 @@ pub(crate) fn test_titlebar_drag_starts_window_drag_on_empty_space() {
     ));
     raw_input.time = Some(0.15);
     raw_input.events = vec![egui::Event::PointerMoved(moved_pos)];
-    let output2 = ctx.run(raw_input, |ctx| {
+    let output2 = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46070,7 +46121,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46090,7 +46141,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46103,7 +46154,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
     raw_input.events = vec![egui::Event::PointerMoved(
         traffic_pos + egui::vec2(15.0, 0.0),
     )];
-    let output_drag = ctx.run(raw_input, |ctx| {
+    let output_drag = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds = &output_drag.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46133,7 +46184,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let mut raw_input = egui::RawInput::default();
@@ -46156,7 +46207,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output_dbl = ctx.run(raw_input, |ctx| {
+    let output_dbl = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds = &output_dbl.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46166,9 +46217,12 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
     );
     assert!(!app.window_maximized);
 
-    // 2. Nav tab interaction: clicking on "プロジェクト" nav tab (located around x = 300.0)
+    // 2. Nav tab interaction: clicking on the "プロジェクト" nav tab, found
+    // where the last frame drew it rather than at a typed coordinate.
     app.page = Page::Home;
-    let nav_pos = egui::pos2(300.0, 26.0); // Projects tab position
+    let nav_pos = drawn_text_rect(&output_dbl, |text| text.ends_with("プロジェクト"))
+        .expect("the projects tab is drawn")
+        .center();
     let mut raw_input = egui::RawInput::default();
     raw_input.screen_rect = Some(egui::Rect::from_min_size(
         egui::Pos2::ZERO,
@@ -46190,7 +46244,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let output_nav = ctx.run(raw_input, |ctx| {
+    let output_nav = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     // Click was handled by nav tab, switching page to Projects
@@ -46219,7 +46273,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(2.5);
-    let rendered = ctx.run(raw_input, |ctx| {
+    let rendered = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46243,7 +46297,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
             modifiers: egui::Modifiers::default(),
         },
     ];
-    let _ = ctx.run(raw_input, |ctx| {
+    let _ = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let mut raw_input = egui::RawInput::default();
@@ -46255,7 +46309,7 @@ pub(crate) fn test_titlebar_controls_and_traffic_lights_do_not_drag_or_maximize(
     raw_input.events = vec![egui::Event::PointerMoved(
         rate_limit_pos + egui::vec2(10.0, 0.0),
     )];
-    let output_rl = ctx.run(raw_input, |ctx| {
+    let output_rl = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
     let cmds_rl = &output_rl.viewport_output[&egui::ViewportId::ROOT].commands;
@@ -46319,7 +46373,7 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
         ));
         raw_input.time = Some(time);
         raw_input.events = events;
-        ctx.run(raw_input, |ctx| {
+        ctx.run_ui(raw_input, |ctx| {
             app.ui_topbar(ctx);
         })
     };
@@ -46458,8 +46512,10 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
         "Drag on Brand button must not StartDrag"
     );
 
-    // 2. Sessions nav tab (~410.0, 26.0)
-    let sessions_pos = egui::pos2(410.0, 26.0);
+    // 2. Sessions nav tab
+    let sessions_pos = drawn_text_rect(&layout, |text| text.ends_with("セッション"))
+        .expect("the sessions tab is drawn")
+        .center();
     let click_sessions = render_frame(
         &mut app,
         4.0,
@@ -46625,12 +46681,12 @@ pub(crate) fn test_titlebar_adversarial_all_controls_immunity() {
             },
         ],
     );
-    assert_eq!(
-        app.notice.as_deref(),
-        Some(tr("先にプロジェクトを追加してください。")),
+    // Change 294: with no project the sheet opens anyway, on the same page.
+    assert!(
+        app.launch_sheet_open,
         "New-session click must reach open_new_session"
     );
-    assert_eq!(app.page, Page::Projects);
+    assert_eq!(app.page, Page::Home);
     assert!(!click_add.viewport_output[&egui::ViewportId::ROOT]
         .commands
         .contains(&egui::ViewportCommand::Maximized(true)));
@@ -46726,7 +46782,7 @@ pub(crate) fn test_titlebar_none_position_failsafe() {
         egui::vec2(1280.0, 800.0),
     ));
     raw_input.time = Some(0.0);
-    let output = ctx.run(raw_input, |ctx| {
+    let output = ctx.run_ui(raw_input, |ctx| {
         app.ui_topbar(ctx);
     });
 
@@ -46750,7 +46806,7 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
         ));
         raw_input.time = Some(time);
         raw_input.events = events;
-        ctx.run(raw_input, |ctx| {
+        ctx.run_ui(raw_input, |ctx| {
             app.ui_topbar(ctx);
         })
     };
@@ -46834,11 +46890,16 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
             out
         };
 
-    // Warm up
-    let _ = render_frame(&mut app, 0.0, 1280.0, vec![]);
+    // Warm up, and read where the nav tabs landed.
+    let layout = render_frame(&mut app, 0.0, 1280.0, vec![]);
+    let tab_at = |label: &str| {
+        drawn_text_rect(&layout, |text| text.ends_with(label))
+            .expect("the nav tab is drawn")
+            .center()
+    };
 
-    // 1. Home nav tab (~230.0, 26.0)
-    let home_pos = egui::pos2(230.0, 26.0);
+    // 1. Home nav tab
+    let home_pos = tab_at("ホーム");
     app.page = Page::Settings;
     let click_home = render_frame(
         &mut app,
@@ -46880,8 +46941,8 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
         "Home tab must not StartDrag"
     );
 
-    // 2. Projects nav tab (~320.0, 26.0)
-    let proj_pos = egui::pos2(320.0, 26.0);
+    // 2. Projects nav tab
+    let proj_pos = tab_at("プロジェクト");
     let click_proj = render_frame(
         &mut app,
         4.0,
@@ -47020,7 +47081,7 @@ pub(crate) fn test_titlebar_adversarial_comprehensive_matrix() {
         .entry(egui::ViewportId::ROOT)
         .or_default()
         .maximized = Some(true);
-    let _ = ctx.run(raw_max, |ctx| {
+    let _ = ctx.run_ui(raw_max, |ctx| {
         app.ui_topbar(ctx);
     });
     assert!(
@@ -47136,7 +47197,7 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
     let ctx = egui::Context::default();
     let palette = app.store.theme.palette();
     let draw = |app: &mut OperonApp| {
-        let output = ctx.run(egui::RawInput::default(), |ctx| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_session_ports(ui, palette, &session);
             });
@@ -47379,7 +47440,7 @@ pub(crate) fn ports_262_badge_counts_own_folder_or_names_the_project() {
     let palette = app.store.theme.palette();
     let ctx = egui::Context::default();
     let draw = |app: &mut OperonApp, session: &Session| {
-        let output = ctx.run(screen_262(Vec::new()), |ctx| {
+        let output = ctx.run_ui(screen_262(Vec::new()), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.horizontal(|ui| app.ui_session_ports(ui, palette, session));
             });
@@ -47443,7 +47504,7 @@ pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
     let ctx = egui::Context::default();
     let menu = |ports: &SessionPorts, stopping: bool, events: Vec<egui::Event>| {
         let mut action = None;
-        let output = ctx.run(screen_262(events), |ctx| {
+        let output = ctx.run_ui(screen_262(events), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 action = crate::screens::session_ports_menu(ui, palette, ports, stopping);
             });
@@ -47533,7 +47594,7 @@ pub(crate) fn ports_262_confirmation_names_pid_and_folder() {
         root: None,
     };
     let draw = |app: &mut OperonApp, events: Vec<egui::Event>| {
-        let output = ctx.run(screen_262(events), |ctx| {
+        let output = ctx.run_ui(screen_262(events), |ctx| {
             app.ui_port_stop_modal(ctx, palette);
         });
         frame_texts_262(&output)
@@ -47731,7 +47792,7 @@ fn session_tabs_texts(app: &mut OperonApp) -> Vec<String> {
     let ctx = egui::Context::default();
     let mut texts = Vec::new();
     for _ in 0..2 {
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -47766,8 +47827,8 @@ pub(crate) fn the_filtered_session_list_says_how_many_it_hides() {
             .any(|text| text.contains("件を非表示中")),
         "フィルタなしで「非表示中」と出ています"
     );
-    // 終了 keeps the finished one and hides the running one.
-    app.status_filter[SessionStatusGroup::Finished.index()] = true;
+    // 実行中 keeps the running one and hides the finished one.
+    app.status_filter[SessionStatusGroup::Busy.index()] = true;
     let texts = session_tabs_texts(&mut app);
     assert!(
         texts.iter().any(|text| text == "1 件を非表示中"),
@@ -48087,15 +48148,13 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
     assert!(!entries[0].chord.is_empty(), "the row shows ⌘N");
     assert_eq!(entries[1].kind, PaletteKind::Action("Open history"));
 
-    // No project yet: the row reaches `open_new_session`, which says why and
-    // goes to where a project is added.
+    // No project yet: the row reaches `open_new_session`, which opens the
+    // sheet where a folder is chosen (change 294), without leaving the page.
     app.page = Page::Home;
     app.activate_palette_entry(&entries[0].kind);
-    assert_eq!(app.page, Page::Projects);
-    assert_eq!(
-        app.notice.as_deref(),
-        Some(tr("先にプロジェクトを追加してください。"))
-    );
+    assert_eq!(app.page, Page::Home);
+    assert!(app.launch_sheet_open);
+    app.launch_sheet_open = false;
 
     app.session_library_open = false;
     app.activate_palette_entry(&entries[1].kind);
@@ -48111,7 +48170,19 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
 #[test]
 pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
     for kind in SessionStatusKind::ALL {
-        assert_eq!(kind.label(), kind.group().message_id(), "{kind:?}");
+        if let Some(group) = kind.group() {
+            assert_eq!(kind.label(), group.message_id(), "{kind:?}");
+        } else {
+            assert!(
+                matches!(
+                    (kind, kind.label()),
+                    (SessionStatusKind::Done, "正常終了")
+                        | (SessionStatusKind::Stopped, "停止済み")
+                ),
+                "{kind:?}: {}",
+                kind.label()
+            );
+        }
         assert!(
             !kind.label().is_ascii(),
             "{kind:?} is drawn as an English token"
@@ -48130,6 +48201,8 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         .map(|group| group.message_id())
         .collect();
     ids.extend([
+        "正常終了",
+        "停止済み",
         "新しいセッション",
         "新しいセッション  {chord}",
         "検索・操作",
@@ -48179,12 +48252,12 @@ pub(crate) fn a_group_tile_filters_the_session_list_to_that_group() {
         ..Default::default()
     };
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     };
-    let _ = context.run(screen.clone(), &mut pass);
-    let drawn = context.run(screen, &mut pass);
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    let drawn = context.run_pass(screen, &mut pass);
     let label = drawn_text_rect(&drawn, |text| {
         text == format!("{ICON_STATUS_RUNNING}  {}", tr("実行中"))
     })
@@ -48204,7 +48277,7 @@ pub(crate) fn a_group_tile_filters_the_session_list_to_that_group() {
 
     click_at(&context, label.center(), &mut pass);
     assert_eq!(app.page, Page::Sessions);
-    let mut only_busy = [false; 4];
+    let mut only_busy = [false; 3];
     only_busy[SessionStatusGroup::Busy.index()] = true;
     assert_eq!(app.status_filter, only_busy);
     fs::remove_dir_all(&root).ok();
@@ -48222,12 +48295,12 @@ fn draw_home(app: &mut OperonApp, context: &egui::Context) -> egui::FullOutput {
         ..Default::default()
     };
     let mut pass = |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     };
-    let _ = context.run(screen.clone(), &mut pass);
-    context.run(screen, &mut pass)
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    context.run_pass(screen, &mut pass)
 }
 
 fn home_app(label: &str, store: Store) -> (OperonApp, PathBuf) {
@@ -48335,7 +48408,7 @@ pub(crate) fn a_recent_session_is_one_line_with_its_details_behind_the_menu() {
     }
 
     click_at(&context, open.center(), |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     });
@@ -48427,7 +48500,7 @@ pub(crate) fn starting_from_a_project_on_home_opens_that_projects_launch_form() 
         })
         .unwrap();
     click_at(&context, button.center(), |context: &egui::Context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_home(ui);
         });
     });
@@ -48451,11 +48524,10 @@ fn sheet_frame(
             egui::Pos2::ZERO,
             egui::vec2(900.0, 600.0),
         )),
-        events,
-        modifiers,
+        events: [vec![egui::Event::ModifiersChanged(modifiers)], events].concat(),
         ..Default::default()
     };
-    context.run(input, |ctx| app.ui_launch_sheet(ctx))
+    context.run_ui(input, |ctx| app.ui_launch_sheet(ctx))
 }
 
 fn key_press(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
@@ -48493,17 +48565,15 @@ pub(crate) fn new_session_opens_the_sheet_over_the_current_page() {
     }
     fs::remove_dir_all(&root).ok();
 
-    // No project: nothing to open a sheet for, and the old answer stands.
+    // No project: the sheet opens to choose a folder (change 294), and the
+    // page stays.
     let root = temporary_root().join(format!("operon-sheet-none-{}", Uuid::new_v4()));
     let mut app = test_app(root.clone());
     app.page = Page::Home;
     app.open_new_session();
-    assert!(!app.launch_sheet_open);
-    assert_eq!(app.page, Page::Projects);
-    assert_eq!(
-        app.notice.as_deref(),
-        Some(tr("先にプロジェクトを追加してください。"))
-    );
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.page, Page::Home);
+    assert_eq!(app.notice, None);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -48618,7 +48688,7 @@ pub(crate) fn cmd_enter_and_the_button_share_one_readiness() {
 pub(crate) fn opening_the_sheet_takes_focus_from_the_terminal() {
     let (mut app, project, root) = launch_screen_fixture("sheet-focus");
     let context = egui::Context::default();
-    let stand_in = egui::Id::new("terminal-pane-stand-in");
+    let stand_in = egui::Id::unique("terminal-pane-stand-in");
     context.memory_mut(|memory| memory.request_focus(stand_in));
     app.open_project_session_setup(project.id);
     let _ = sheet_frame(&mut app, &context, Vec::new(), egui::Modifiers::NONE);
@@ -48657,7 +48727,7 @@ pub(crate) fn the_worktree_tabs_new_session_opens_the_sheet_there() {
     app.project_tab = ProjectTab::Worktrees;
     let context = egui::Context::default();
     let mut pass = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| app.ui_worktrees(ui, &project));
         });
     };
@@ -48668,8 +48738,8 @@ pub(crate) fn the_worktree_tabs_new_session_opens_the_sheet_there() {
         )),
         ..Default::default()
     };
-    let _ = context.run(screen.clone(), &mut pass);
-    let drawn = context.run(screen, &mut pass);
+    let _ = context.run_pass(screen.clone(), &mut pass);
+    let drawn = context.run_pass(screen, &mut pass);
     let label = format!("{ICON_ADD}  {}", tr("この場所で新規セッション"));
     let buttons = drawn_text_rects(&drawn, |text| text == label);
     let feature = drawn_text_rect(&drawn, |text| text.contains("feature/x")).expect("listed");
@@ -48754,7 +48824,7 @@ pub(crate) fn the_overview_tab_summarises_the_project() {
     );
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(Default::default(), |ctx| {
+        context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_overview(ui, &project));
         })
     };
@@ -48781,7 +48851,7 @@ pub(crate) fn cli_restore_is_in_history_not_in_the_overview() {
     let labels = |app: &mut OperonApp, history: bool| {
         let context = egui::Context::default();
         let mut draw = || {
-            context.run(Default::default(), |ctx| {
+            context.run_ui(Default::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if history {
                         app.ui_history_cli_section(ui);
@@ -48850,7 +48920,7 @@ pub(crate) fn the_history_card_offers_the_destination_model_and_effort() {
     let width = 880.0;
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -48931,11 +49001,13 @@ pub(crate) fn page_shortcuts_do_not_reach_past_the_launch_sheet() {
         (egui::Key::O, "⌘O"),
     ] {
         let input = egui::RawInput {
-            events: vec![key_press(key, egui::Modifiers::COMMAND)],
-            modifiers: egui::Modifiers::COMMAND,
+            events: vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                key_press(key, egui::Modifiers::COMMAND),
+            ],
             ..Default::default()
         };
-        let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+        let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
         assert_eq!(
             app.selected_project,
             Some(project.id),
@@ -48959,11 +49031,13 @@ pub(crate) fn page_shortcuts_do_not_reach_past_the_launch_sheet() {
     // Closed, the same chord still does what it always did.
     app.launch_sheet_open = false;
     let input = egui::RawInput {
-        events: vec![key_press(egui::Key::Num2, egui::Modifiers::COMMAND)],
-        modifiers: egui::Modifiers::COMMAND,
+        events: vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+            key_press(egui::Key::Num2, egui::Modifiers::COMMAND),
+        ],
         ..Default::default()
     };
-    let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+    let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
     assert_eq!(app.page, Page::Projects, "⌘2 still goes to Projects");
     fs::remove_dir_all(&root).ok();
 }
@@ -49085,7 +49159,7 @@ pub(crate) fn the_tab_row_draws_its_counts() {
     app.page = Page::Projects;
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -49116,7 +49190,7 @@ pub(crate) fn agent_settings_shows_skills_and_rules() {
     app.skill_cache.insert(project.id, Default::default());
     app.rule_cache.insert(project.id, Default::default());
     let context = egui::Context::default();
-    let drawn = context.run(Default::default(), |ctx| {
+    let drawn = context.run_ui(Default::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| app.ui_agent_settings(ui, &project));
     });
     let has = |text: &str| drawn_text_rect(&drawn, |drawn| drawn == text).is_some();
@@ -49135,8 +49209,10 @@ pub(crate) fn only_a_nonzero_change_count_is_emphasised() {
         // The app's sizes, where Body and Button differ; egui's defaults are
         // equal and would hide a tab drawn at the wrong one.
         apply_interface_metrics(&context);
-        let button = egui::TextStyle::Button.resolve(&context.style()).size;
-        let drawn = context.run(Default::default(), |ctx| {
+        let button = egui::TextStyle::Button
+            .resolve(&context.global_style())
+            .size;
+        let drawn = context.run_ui(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 tab_item_with_count(ui, palette, "変更", count, emphasise, false);
             });
@@ -49247,7 +49323,7 @@ fn settings_texts(app: &mut OperonApp, section: SettingsSection) -> Vec<String> 
     app.settings_section = section;
     let context = egui::Context::default();
     let mut draw = || {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -51774,15 +51850,17 @@ pub(crate) fn the_next_waiting_chord_opens_the_next_session_in_the_queue() {
     let ctx = egui::Context::default();
     let press = |app: &mut OperonApp| {
         let mut raw = egui::RawInput::default();
-        raw.modifiers = chord.modifiers;
-        raw.events = vec![egui::Event::Key {
-            key: chord.key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: chord.modifiers,
-        }];
-        let _ = ctx.run(raw, |ctx| app.handle_app_shortcuts(ctx));
+        raw.events = vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ];
+        let _ = ctx.run_ui(raw, |ctx| app.handle_app_shortcuts(ctx));
     };
 
     press(&mut app);
@@ -51830,7 +51908,7 @@ pub(crate) fn opening_the_next_waiting_session_focuses_its_terminal() {
         ..Default::default()
     };
     app.selected_session = Some(session.id);
-    let _ = context.run(screen, |ctx| {
+    let _ = context.run_ui(screen, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| {
@@ -51839,7 +51917,7 @@ pub(crate) fn opening_the_next_waiting_session_focuses_its_terminal() {
     });
     assert_eq!(
         context.memory(|memory| memory.focused()),
-        Some(egui::Id::new(("terminal-pane", second))),
+        Some(egui::Id::unique(("terminal-pane", second))),
         "the pane of the opened session should hold the keyboard"
     );
     assert_eq!(
@@ -51975,7 +52053,7 @@ pub(crate) fn chips_that_exclude_needs_you_hide_the_pinned_section() {
     let root = temporary_directory("pinned-chips");
     let (mut app, first, second) = app_with_two_sessions(&root);
     queue_first_only(&mut app, first);
-    app.status_filter = [false; 4];
+    app.status_filter = [false; 3];
     app.status_filter[SessionStatusGroup::Busy.index()] = true;
     let texts = pinned_layout(&mut app, second);
     let project = text_y(&texts, "p").expect("the project group should be drawn");
@@ -52065,7 +52143,7 @@ pub(crate) fn the_title_bar_offers_the_next_waiting_session_while_one_waits() {
         ));
         raw.time = Some(time);
         raw.events = events;
-        ctx.run(raw, |ctx| app.ui_topbar(ctx))
+        ctx.run_ui(raw, |ctx| app.ui_topbar(ctx))
     };
     let press = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
         pos,
@@ -52218,21 +52296,70 @@ pub(crate) fn the_panel_chord_folds_and_reopens_the_side_panel() {
     let ctx = egui::Context::default();
     let press = |app: &mut OperonApp| {
         let mut raw = egui::RawInput::default();
-        raw.modifiers = chord.modifiers;
-        raw.events = vec![egui::Event::Key {
-            key: chord.key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: chord.modifiers,
-        }];
-        let _ = ctx.run(raw, |ctx| app.handle_app_shortcuts(ctx));
+        raw.events = vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ];
+        let _ = ctx.run_ui(raw, |ctx| app.handle_app_shortcuts(ctx));
     };
     assert!(app.show_session_inspector);
     press(&mut app);
     assert!(!app.show_session_inspector);
     press(&mut app);
     assert!(app.show_session_inspector);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A hidden window still runs `logic`, between shown frames, and reads the
+/// last shown frame's input there: the chord a person pressed must fold the
+/// panel once, not again on every hidden call (change 295).
+pub(crate) fn a_hidden_frame_does_not_replay_the_last_shortcut() {
+    use eframe::App;
+    let root = temporary_directory("hidden-replay");
+    let mut app = test_app(root.join("store-v2.json"));
+    let chord = app
+        .keymap
+        .chord_for("panel.toggle")
+        .expect("panel.toggle should have a default chord");
+    let ctx = egui::Context::default();
+    let mut frame = eframe::Frame::_new_kittest();
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1280.0, 820.0),
+        )),
+        events: vec![
+            egui::Event::ModifiersChanged(chord.modifiers),
+            egui::Event::Key {
+                key: chord.key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord.modifiers,
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(app.show_session_inspector);
+    let _ = ctx.run_ui(raw, |root| app_frame(&mut app, root, &mut frame));
+    assert!(
+        !app.show_session_inspector,
+        "the shown frame folds the panel"
+    );
+    // eframe's hidden path: `logic` with no pass, the input still the last one.
+    app.logic(&ctx, &mut frame);
+    app.logic(&ctx, &mut frame);
+    assert!(
+        !app.show_session_inspector,
+        "a hidden call must not press the chord again"
+    );
     fs::remove_dir_all(&root).ok();
 }
 
@@ -52306,10 +52433,12 @@ pub(crate) fn clicking_a_pinned_rows_title_opens_the_session() {
             egui::vec2(1280.0, 800.0),
         ));
         raw.events = events;
-        ctx.run(raw, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.run_pass(raw, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         })
     };
     let _ = render(&mut app, vec![]);
@@ -52391,12 +52520,14 @@ fn workspace_texts_at_click_size(
         ..Default::default()
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    text_positions(&context.run(input, &mut draw))
+    let _ = context.run_pass(input.clone(), &mut draw);
+    text_positions(&context.run_pass(input, &mut draw))
 }
 
 // --- Change 166: one ＋ per project header starts a session ----------------
@@ -52443,9 +52574,11 @@ fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
         panic!("{name} の見出しに＋が描かれていません: {row:?}");
     };
     click_at(&context, *at + egui::vec2(4.0, 4.0), |ctx| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     });
     row.iter().map(|(text, _)| text.clone()).collect()
 }
@@ -52455,7 +52588,7 @@ fn click_header_add(app: &mut OperonApp, name: &str) -> Vec<String> {
 /// does only there.
 fn header_add_hover_texts(app: &mut OperonApp, name: &str) -> Vec<String> {
     let context = egui::Context::default();
-    context.style_mut(|style| {
+    context.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -52476,13 +52609,15 @@ fn header_add_hover_texts(app: &mut OperonApp, name: &str) -> Vec<String> {
         ..Default::default()
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    let _ = context.run(input.clone(), &mut draw);
-    text_positions(&context.run(input, &mut draw))
+    let _ = context.run_pass(input.clone(), &mut draw);
+    let _ = context.run_pass(input.clone(), &mut draw);
+    text_positions(&context.run_pass(input, &mut draw))
         .into_iter()
         .map(|(text, _)| text)
         .collect()
@@ -52722,12 +52857,14 @@ pub(crate) fn the_session_grid_keeps_every_card_inside_its_view() {
         ..Default::default()
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    let output = context.run(input, &mut draw);
+    let _ = context.run_pass(input.clone(), &mut draw);
+    let output = context.run_pass(input, &mut draw);
     // The history is right of the session column; its own "p" header is the
     // rightmost one painted.
     let history_left = drawn_text_rects(&output, |text| text == "p")
@@ -52968,48 +53105,100 @@ pub(crate) fn the_prune_workflow_runs_the_script_on_every_push_to_main() {
     }
 }
 
+/// One eframe frame of the app: `logic`, then `ui` on the root `Ui`, in the
+/// order eframe 0.37 calls them (change 295 split 0.31's `update` in two).
+fn app_frame(app: &mut OperonApp, root: &mut egui::Ui, frame: &mut eframe::Frame) {
+    use eframe::App;
+    let ctx = root.ctx().clone();
+    app.logic(&ctx, frame);
+    app.ui(root, frame);
+}
+
+/// The page under test, inside a central panel on the pass's root `Ui`: what
+/// `egui::CentralPanel::default().show(ctx, …)` was before egui 0.37 moved
+/// panels from the `Context` onto a `Ui` (change 295).
+fn central_panel<R>(
+    ctx: &egui::Context,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    ctx.root_ui(|root| egui::CentralPanel::default().show(root, add_contents))
+}
+
 #[test]
-/// Cargo.toml must declare `rust-version` under `[package]` matching the CI toolchain
-/// pinned in `.github/workflows/ci.yml`.
+/// Every place that names the Rust toolchain names the same version (change 295).
 ///
-/// Without this manifest key, `cargo update` resolves packages that require newer
-/// rustc versions (e.g. uuid 1.27.0 requiring Rust 1.89.0), which breaks the build
-/// on the project's pinned toolchain (1.88.0).
-pub(crate) fn cargo_manifest_declares_msrv_matching_ci() {
+/// `rust-toolchain.toml` decides what a local `cargo` runs, `Cargo.toml`'s
+/// `rust-version` decides what `cargo update` may resolve (change 141: without
+/// it, uuid 1.27.0 needed a compiler newer than the pin), and every
+/// `toolchain:` line under `.github/workflows/` decides what CI runs. The test
+/// this replaces read only `ci.yml` and the manifest, so a bump that missed
+/// `harness.yml`, `scheduled-scan.yml` or `rust-toolchain.toml` passed — and
+/// left CI and a local build on two compilers. `@stable` jobs name no
+/// `toolchain:` line and are not pins.
+pub(crate) fn every_toolchain_pin_names_one_version() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cargo_toml = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml should exist");
-    let ci_yml = fs::read_to_string(root.join(".github/workflows/ci.yml"))
-        .expect(".github/workflows/ci.yml should exist");
+    let values_of = |text: &str, key: &str, separator: char| -> Vec<String> {
+        text.lines()
+            .filter_map(|line| {
+                let (name, value) = line.trim().split_once(separator)?;
+                (name.trim() == key).then(|| value.trim().trim_matches('"').to_owned())
+            })
+            .collect()
+    };
+    let read = |relative: &str| {
+        fs::read_to_string(root.join(relative))
+            .unwrap_or_else(|error| panic!("{relative}: {error}"))
+    };
 
-    let manifest_msrv = cargo_toml
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("rust-version") {
-                let (_, val) = trimmed.split_once('=')?;
-                Some(val.trim().trim_matches('"').to_string())
-            } else {
-                None
-            }
-        })
-        .expect("Cargo.toml must declare rust-version under [package]");
+    let mut pins: Vec<(String, String)> = Vec::new();
+    for version in values_of(&read("rust-toolchain.toml"), "channel", '=') {
+        pins.push(("rust-toolchain.toml channel".to_owned(), version));
+    }
+    for version in values_of(&read("Cargo.toml"), "rust-version", '=') {
+        pins.push(("Cargo.toml rust-version".to_owned(), version));
+    }
+    let mut workflows = fs::read_dir(root.join(".github/workflows"))
+        .expect(".github/workflows should exist")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|path| path.extension().is_some_and(|extension| extension == "yml"))
+        .collect::<Vec<_>>();
+    workflows.sort();
+    for path in workflows {
+        let text = fs::read_to_string(&path).expect("a workflow file should be readable");
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        for version in values_of(&text, "toolchain", ':') {
+            pins.push((format!(".github/workflows/{name} toolchain"), version));
+        }
+    }
 
-    let ci_toolchain = ci_yml
-        .lines()
-        .find_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.starts_with("toolchain:") {
-                let (_, val) = trimmed.split_once(':')?;
-                Some(val.trim().to_string())
-            } else {
-                None
-            }
-        })
-        .expect("ci.yml must declare a toolchain");
-
-    assert_eq!(
-        manifest_msrv, ci_toolchain,
-        "Cargo.toml rust-version ({manifest_msrv}) does not match ci.yml toolchain ({ci_toolchain})"
+    let sources = pins
+        .iter()
+        .map(|(source, _)| source.as_str())
+        .collect::<Vec<_>>();
+    for required in ["rust-toolchain.toml channel", "Cargo.toml rust-version"] {
+        assert!(
+            sources.contains(&required),
+            "{required} is missing: {pins:?}"
+        );
+    }
+    assert!(
+        sources
+            .iter()
+            .any(|source| source.ends_with("/ci.yml toolchain")),
+        "ci.yml no longer pins a toolchain: {pins:?}"
+    );
+    let (first_source, first) = &pins[0];
+    let disagreeing = pins
+        .iter()
+        .filter(|(_, version)| version != first)
+        .collect::<Vec<_>>();
+    assert!(
+        disagreeing.is_empty(),
+        "toolchain pins disagree with {first_source} = {first}: {disagreeing:?}"
     );
 }
 
@@ -53057,7 +53246,7 @@ pub(crate) fn test_change_144_splitter_resize_grip_affordance() {
     let ctx = egui::Context::default();
     let palette = AppTheme::Dark.palette();
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             let h_rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(200.0, 6.0));
             paint_splitter_h(ui, h_rect, palette, false);
@@ -53114,9 +53303,9 @@ pub(crate) fn test_change_144_file_tree_rows_culls_invisible_nodes() {
     let badges = HashMap::new();
     let mut actions = Vec::new();
 
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         // Constrain height to only 48px (approximately 2 rows)
-        egui::Area::new(egui::Id::new("test_culling_area"))
+        egui::Area::new(egui::Id::unique("test_culling_area"))
             .fixed_pos(egui::pos2(0.0, 0.0))
             .show(ctx, |ui| {
                 ui.set_width(200.0);
@@ -54102,7 +54291,7 @@ pub(crate) fn typing_in_the_pane_keeps_it_reading_tmux_until_the_echo_lands() {
     let context = egui::Context::default();
     let _ = ime_pane_pass(&context, &mut app, &session, Vec::new());
     click_at(&context, egui::pos2(450.0, 300.0), |context| {
-        egui::CentralPanel::default().show(context, |ui| {
+        central_panel(context, |ui| {
             app.ui_terminal_panel(ui, &session);
         });
     });
@@ -54759,12 +54948,14 @@ fn column_hovered(app: &mut OperonApp, context: &egui::Context, at: egui::Pos2) 
     };
     let palette = app.store.theme.palette();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    Painted::read(&context.run(input, &mut draw), palette)
+    let _ = context.run_pass(input.clone(), &mut draw);
+    Painted::read(&context.run_pass(input, &mut draw), palette)
 }
 
 /// One settled frame of the workspace at `click_at`'s screen size.
@@ -54780,12 +54971,14 @@ fn column_painted(app: &mut OperonApp, context: &egui::Context) -> Painted {
     };
     let palette = app.store.theme.palette();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input.clone(), &mut draw);
-    Painted::read(&context.run(input, &mut draw), palette)
+    let _ = context.run_pass(input.clone(), &mut draw);
+    Painted::read(&context.run_pass(input, &mut draw), palette)
 }
 
 fn click_in_workspace(
@@ -54814,12 +55007,14 @@ fn click_in_workspace(
         ]
     };
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
-    let _ = context.run(input(press(true)), &mut draw);
-    let _ = context.run(input(press(false)), &mut draw);
+    let _ = context.run_pass(input(press(true)), &mut draw);
+    let _ = context.run_pass(input(press(false)), &mut draw);
 }
 
 /// `stop_session` was reached: it spawns this key synchronously. Under the
@@ -55258,13 +55453,15 @@ pub(crate) fn a_column_title_double_click_renames_its_session() {
     let (title, _) = painted.in_column("first").unwrap();
     let at = title.center();
     let mut draw = |ctx: &egui::Context| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     };
     // One pass with the pointer resting on the row first: its hover
     // layout is drawn from that pass, as it is before a person's press.
-    let _ = context.run(
+    let _ = context.run_pass(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -55299,7 +55496,7 @@ pub(crate) fn a_column_title_double_click_renames_its_session() {
             events,
             ..Default::default()
         };
-        let _ = context.run(input, &mut draw);
+        let _ = context.run_pass(input, &mut draw);
     }
     assert_eq!(
         app.renaming_session,
@@ -56616,10 +56813,10 @@ pub(crate) fn knowledge_ui_shows_embedding_gemma_device_and_available_cli_summar
     let mut disabled_output = None;
     let mut settings_output = None;
     for _ in 0..2 {
-        disabled_output = Some(context.run(egui::RawInput::default(), |ctx| {
+        disabled_output = Some(context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
         }));
-        settings_output = Some(context.run(egui::RawInput::default(), |ctx| {
+        settings_output = Some(context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_model_block(ui));
         }));
     }
@@ -57508,7 +57705,7 @@ pub(crate) fn a_knowledge_tab_that_failed_to_load_offers_a_retry() {
     let context = egui::Context::default();
     let mut output = None;
     for _ in 0..2 {
-        output = Some(context.run(egui::RawInput::default(), |ctx| {
+        output = Some(context.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| app.ui_knowledge(ui, &project));
         }));
     }
@@ -58138,7 +58335,7 @@ fn knowledge_tab_texts(app: &mut OperonApp, project: &Project) -> Vec<String> {
     let context = egui::Context::default();
     let mut output = None;
     for _ in 0..2 {
-        output = Some(context.run(
+        output = Some(context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -58301,7 +58498,7 @@ pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
         before.iter().any(|text| text == tr("グループ")),
         "{before:?}"
     );
-    assert!(!before.iter().any(|text| *text == entry.body));
+    assert!(!before.contains(&entry.body));
     // Chosen on the map: a reference, like opening the row.
     app.open_knowledge_entry(project.id, entry.id);
     assert_eq!(app.knowledge.open_entry, Some((project.id, entry.id)));
@@ -58309,14 +58506,11 @@ pub(crate) fn knowledge_map_and_list_share_the_open_entry() {
         .background_tasks
         .contains(&BackgroundKey::KnowledgeEdit(project.id)));
     let on_map = knowledge_tab_texts(&mut app, &project);
-    assert!(on_map.iter().any(|text| *text == entry.body), "{on_map:?}");
+    assert!(on_map.contains(&entry.body), "{on_map:?}");
     // The list shows the same entry open.
     app.knowledge.layout_mode = KnowledgeLayoutMode::List;
     let in_list = knowledge_tab_texts(&mut app, &project);
-    assert!(
-        in_list.iter().any(|text| *text == entry.body),
-        "{in_list:?}"
-    );
+    assert!(in_list.contains(&entry.body), "{in_list:?}");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -58401,7 +58595,7 @@ pub(crate) fn knowledge_map_refits_when_the_window_narrows() {
     let context = egui::Context::default();
     let draw_at = |app: &mut OperonApp, width: f32| {
         for _ in 0..2 {
-            let _ = context.run(
+            let _ = context.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -58621,7 +58815,7 @@ fn column_181_output(
         events,
         ..Default::default()
     };
-    context.run(input, |ctx| {
+    context.run_ui(input, |ctx| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ctx, |ui| app.ui_terminal_session_tabs(ui));
@@ -59230,7 +59424,7 @@ pub(crate) fn test_change_181_drag_near_the_edge_scrolls_the_column() {
 pub(crate) fn test_change_181_hovers_say_rows_and_projects_can_be_dragged() {
     let mut column = ArrangedColumn::new("column-181-hovers");
     let context = egui::Context::default();
-    context.style_mut(|style| {
+    context.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -59281,7 +59475,7 @@ pub(crate) fn a_commit_message_stays_with_the_project_it_was_written_for() {
         let ctx = egui::Context::default();
         let mut texts = Vec::new();
         for _ in 0..2 {
-            let drawn = ctx.run(egui::RawInput::default(), |ctx| {
+            let drawn = ctx.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     app.ui_commit_box(ui, app.store.theme.palette(), project);
                 });
@@ -59343,7 +59537,7 @@ fn find_bar_frame(
     session_id: Uuid,
     events: Vec<egui::Event>,
 ) {
-    let _ = ctx.run(
+    let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -59398,10 +59592,10 @@ pub(crate) fn the_find_bar_steps_on_enter_but_not_on_a_conversions_enter() {
         &mut app,
         &ctx,
         session_id,
-        vec![
-            egui::Event::Ime(egui::ImeEvent::Enabled),
-            egui::Event::Ime(egui::ImeEvent::Preedit("にほん".into())),
-        ],
+        vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+            text: "にほん".into(),
+            active_range_chars: None,
+        })],
     );
     // Mid-conversion: the Enter belongs to the IME. The preedit is in every
     // line, so a step would show.
@@ -59453,8 +59647,10 @@ pub(crate) fn esc_closes_the_find_bar_into_the_pane_but_not_mid_conversion() {
         &ctx,
         session_id,
         vec![
-            egui::Event::Ime(egui::ImeEvent::Enabled),
-            egui::Event::Ime(egui::ImeEvent::Preedit("か".into())),
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "か".into(),
+                active_range_chars: None,
+            }),
             escape(),
         ],
     );
@@ -59473,7 +59669,10 @@ pub(crate) fn esc_closes_the_find_bar_into_the_pane_but_not_mid_conversion() {
         &ctx,
         session_id,
         vec![
-            egui::Event::Ime(egui::ImeEvent::Preedit(String::new())),
+            egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: String::new(),
+                active_range_chars: None,
+            }),
             escape(),
         ],
     );
@@ -59613,7 +59812,7 @@ pub(crate) fn a_note_on_a_changed_line_says_so_from_the_per_file_review() {
         diff_with_a_changed_second_line(),
     );
     let ctx = egui::Context::default();
-    let output = ctx.run(egui::RawInput::default(), |ctx| {
+    let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
         app.copy_diff_comments_markdown(project, ctx);
     });
     let copied: Vec<&String> = output
@@ -59675,7 +59874,7 @@ fn diff_pane_frame(
     before: &mut dyn FnMut(&mut egui::Ui),
 ) -> egui::FullOutput {
     let mut collapsed = HashSet::new();
-    ctx.run(
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -59780,7 +59979,7 @@ pub(crate) fn the_note_editor_does_not_take_the_keyboard_back() {
     let mut annotations = DiffAnnotations::default();
     annotations.open(project, "src/a.rs", 1);
     let ctx = egui::Context::default();
-    let other = egui::Id::new("another-field");
+    let other = egui::Id::unique("another-field");
     let mut filter = String::new();
     let mut draw = |annotations: &mut DiffAnnotations| {
         diff_pane_frame(&ctx, &files, project, annotations, &mut |ui| {
@@ -59838,7 +60037,7 @@ pub(crate) fn a_checkpoint_diff_is_copied_from_a_background_thread() {
             let mut copied = Vec::new();
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
-                let output = ctx.run(egui::RawInput::default(), |_| {
+                let output = ctx.run_ui(egui::RawInput::default(), |_| {
                     app.process_background_results()
                 });
                 copied.extend(
@@ -60057,7 +60256,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
     let cell = {
         let ctx = egui::Context::default();
         let mut cell = egui::Vec2::ZERO;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| cell = terminal_cell_size(ui));
         });
         cell
@@ -60068,7 +60267,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
         let ctx = egui::Context::default();
         let mut unresolved = Vec::new();
         let mut hovered = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 events: pointer.map(egui::Event::PointerMoved).into_iter().collect(),
                 ..Default::default()
@@ -60083,7 +60282,7 @@ pub(crate) fn a_terminal_row_is_read_for_links_only_under_the_pointer() {
                         &mut TerminalLinkOverlay {
                             resolved,
                             unresolved: &mut unresolved,
-                            palette: &palette,
+                            palette,
                         },
                     );
                 });
@@ -61858,7 +62057,7 @@ pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
     let (mut app, project, root) = launch_screen_fixture("sheet-button-accent");
     let palette = app.store.theme.palette();
     let context = egui::Context::default();
-    context.style_mut(|style| style.animation_time = 0.0);
+    context.global_style_mut(|style| style.animation_time = 0.0);
     app.open_project_session_setup(project.id);
     for agent in ["claude", "codex", "gemini"] {
         app.select_agent(agent);
@@ -61899,27 +62098,27 @@ pub(crate) fn the_launch_button_is_the_accent_whichever_agent_is_selected() {
 pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
     let readme = fs::read_to_string("README.md").unwrap();
     assert!(
-        readme.contains("header — **要対応**, **実行中**, **アイドル**, **終了** —"),
-        "README.md must name the idle filter アイドル"
+        readme.contains("header — **要対応**, **実行中**, **アイドル** —"),
+        "README.md must name the three status filters including アイドル"
     );
 
     let readme_ja = fs::read_to_string("README.ja.md").unwrap();
     assert!(
-        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・アイドル・終了で一覧"),
+        readme_ja.contains("全プロジェクトのセッションを要対応・実行中・アイドルで一覧"),
         "README.ja.md hero caption must name アイドル"
     );
     assert!(
-        readme_ja.contains("**要対応**・**実行中**・**アイドル**・**終了** の 4 つのトグル"),
+        readme_ja.contains("**要対応**・**実行中**・**アイドル** の 3 つのトグル"),
         "README.ja.md filter toggles must name アイドル"
     );
 
     let readme_ko = fs::read_to_string("README.ko.md").unwrap();
     assert!(
-        readme_ko.contains("모든 프로젝트의 세션을 확인 필요·실행 중·유휴·종료로 한눈에"),
+        readme_ko.contains("모든 프로젝트의 세션을 확인 필요·실행 중·유휴로 한눈에"),
         "README.ko.md hero caption must name 확인 필요 and 유휴"
     );
     assert!(
-        readme_ko.contains("**확인 필요**·**실행 중**·**유휴**·**종료** 네 개의 토글"),
+        readme_ko.contains("**확인 필요**·**실행 중**·**유휴** 세 개의 토글"),
         "README.ko.md filter toggles must name 확인 필요 and 유휴"
     );
 
@@ -61929,7 +62128,7 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         "docs/MANUAL.ja.md state table must name アイドル as a finished turn"
     );
     assert!(
-        manual_ja.contains("**要対応**・**実行中**・**アイドル**・**終了** の 4 つのトグル"),
+        manual_ja.contains("**要対応**・**実行中**・**アイドル** の 3 つのトグル"),
         "docs/MANUAL.ja.md filter toggles must name アイドル"
     );
     assert!(
@@ -61947,7 +62146,7 @@ pub(crate) fn the_documents_name_the_idle_filter_with_the_windows_word() {
         "docs/MANUAL.ko.md state table must name 유휴 as a finished turn"
     );
     assert!(
-        manual_ko.contains("**확인 필요**, **실행 중**, **유휴**, **종료** 네 개의 토글 칩"),
+        manual_ko.contains("**확인 필요**, **실행 중**, **유휴** 세 개의 토글 칩"),
         "docs/MANUAL.ko.md filter toggles must name 확인 필요 and 유휴"
     );
     assert!(
@@ -62399,12 +62598,12 @@ pub(crate) fn the_changes_sub_tab_draws_the_file_list_and_commit_box_beside_the_
         )),
         ..Default::default()
     };
-    let _ = ctx.run(input.clone(), |ctx| {
+    let _ = ctx.run_ui(input.clone(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             app.ui_git(ui, &project);
         });
     });
-    let drawn = ctx.run(input, |ctx| {
+    let drawn = ctx.run_ui(input, |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             app.ui_git(ui, &project);
         });
@@ -62493,7 +62692,7 @@ pub(crate) fn clicking_a_changed_file_filters_the_diff_without_leaving_the_chang
             events,
             ..Default::default()
         };
-        ctx.run(input, |ctx| {
+        ctx.run_ui(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 app.ui_git(ui, &project);
             });
@@ -62584,7 +62783,7 @@ pub(crate) fn the_command_palette_sits_centered_near_the_top_of_the_window() {
     };
     let mut output = egui::FullOutput::default();
     for _ in 0..2 {
-        output = ctx.run(raw_input.clone(), |ctx| {
+        output = ctx.run_ui(raw_input.clone(), |ctx| {
             app.ui_command_palette(ctx);
         });
     }
@@ -62932,7 +63131,7 @@ pub(crate) fn a_truncated_session_tab_names_its_title_once_on_hover() {
     app.select_session(second);
     app.select_session(first);
     let context = egui::Context::default();
-    context.style_mut(|style| {
+    context.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -62945,10 +63144,12 @@ pub(crate) fn a_truncated_session_tab_names_its_title_once_on_hover() {
             events,
             ..Default::default()
         };
-        text_positions(&context.run(input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        text_positions(&context.run_pass(input, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }))
     };
     let count = |texts: &[(String, egui::Pos2)]| texts.iter().filter(|(t, _)| t == long).count();
@@ -62994,10 +63195,12 @@ pub(crate) fn dragging_a_central_tab_onto_a_terminal_splits_it() {
             events,
             ..Default::default()
         };
-        text_positions(&context.run(input, |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+        text_positions(&context.run_pass(input, |ctx| {
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }))
     };
     frame(&mut app, Vec::new());
@@ -63934,7 +64137,7 @@ fn workspace_pointer_frame(
     context: &egui::Context,
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
-    context.run(
+    context.run_pass(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -63944,9 +64147,11 @@ fn workspace_pointer_frame(
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         },
     )
 }
@@ -64197,7 +64402,7 @@ fn workspace_visible_documents_do_not_reparse_unchanged_frames() {
     ));
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64273,7 +64478,7 @@ fn terminal_pane_render_cache_hits_on_unchanged_frame() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64331,7 +64536,7 @@ fn terminal_pane_render_cache_isolates_split_panes_during_tab_move() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64438,7 +64643,7 @@ fn terminal_workspace_tab_switch_does_not_rebuild_unchanged_panes() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64555,7 +64760,7 @@ fn terminal_workspace_split_only_builds_affected_panes() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64668,7 +64873,7 @@ fn adversarial_focus_toggle_between_split_panes() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64856,7 +65061,7 @@ fn session_255_a_settling_size_wakes_the_frame() {
     // that has just happened. Nothing else in the pane asks for a frame.
     let ctx = egui::Context::default();
     let mut frame = || {
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64951,7 +65156,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
     for index in 0..5 {
         output.push_str(&format!("row {index}\n"));
     }
-    let lines = terminal_line_layouts(&output, &palette);
+    let lines = terminal_line_layouts(&output, palette);
     let cursor = TerminalCursor {
         x: 2,
         y: 4,
@@ -64963,7 +65168,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
     // The second frame is the same output in a pane pushed right and made
     // narrower, as a window resize or a sidebar does to it.
     for side in [None, Some(200.0)] {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -64973,8 +65178,8 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
             },
             |ctx| {
                 if let Some(width) = side {
-                    egui::SidePanel::left("session-255-side")
-                        .exact_width(width)
+                    egui::Panel::left("session-255-side")
+                        .exact_size(width)
                         .resizable(false)
                         .show(ctx, |_| {});
                 }
@@ -64985,12 +65190,12 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
                         matches: &[],
                         current: None,
                         scroll_to: None,
-                        palette: &palette,
+                        palette,
                     };
                     let mut links = TerminalLinkOverlay {
                         resolved: &HashMap::new(),
                         unresolved: &mut Vec::new(),
-                        palette: &palette,
+                        palette,
                     };
                     carets.push(
                         terminal_rows(
@@ -65005,6 +65210,7 @@ fn session_255_pane_size_change_reuses_rows_and_moves_the_caret() {
                                 session_id,
                                 output_generation: 1,
                                 theme: AppTheme::Dark,
+                                line_ids: None,
                                 cache: &mut cache,
                             }),
                         )
@@ -65127,7 +65333,7 @@ fn non_session_background_task_completion_wakes_frame() {
     app.process_background_results();
 
     // Consume the previous frame repaint request so egui can fire the next one
-    let _ = context.run(egui::RawInput::default(), |_| {});
+    let _ = context.run_ui(egui::RawInput::default(), |_| {});
 
     // 2. Action-level background task (SystemAction) must wake the frame immediately on completion
     app.spawn_background(BackgroundKey::SystemAction(action_id), move || {
@@ -65167,7 +65373,7 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
         app.ports_scanned_at = Some(Instant::now());
         app.last_session_refresh = Instant::now();
         let mut frame = eframe::Frame::_new_kittest();
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65176,12 +65382,15 @@ fn repaint_loop_idle_interval_is_not_polling_100ms() {
                 ..Default::default()
             },
             |ctx| {
-                <OperonApp as eframe::App>::update(app, ctx, &mut frame);
+                app_frame(app, ctx, &mut frame);
             },
         )
     };
 
-    // Warm-up initial frame
+    // Warm-up frames. egui 0.37 styles a button it did not see on the pass
+    // before as idle and asks for one more pass to style it right, and the
+    // second frame still draws buttons the first one laid out differently.
+    let _ = run_frame(&mut app);
     let _ = run_frame(&mut app);
     let full_output = run_frame(&mut app);
 
@@ -65250,7 +65459,7 @@ fn adversarial_rapid_20_cycle_focus_toggle_zero_misses() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65391,7 +65600,7 @@ fn adversarial_varying_content_and_cursor_positions_focus_invariance() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65475,7 +65684,7 @@ fn adversarial_multi_split_configurations_focus_invariance() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65629,7 +65838,7 @@ fn adversarial_secondary_factors_during_focus_toggle() {
             Some(pos) => vec![egui::Event::PointerMoved(pos)],
             None => Vec::new(),
         };
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -65867,7 +66076,7 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         app.background_tasks.clear();
         while app.background_receiver.try_recv().is_ok() {}
         while wakes.try_recv().is_ok() {}
-        let _ = context.run(egui::RawInput::default(), |_| {});
+        let _ = context.run_ui(egui::RawInput::default(), |_| {});
 
         let k = key.clone();
         app.spawn_background(k, || BackgroundResult::ListeningPorts {
@@ -65889,7 +66098,7 @@ fn empirical_stress_test_all_55_background_key_variants_wake_partition() {
         app.background_tasks.clear();
         while app.background_receiver.try_recv().is_ok() {}
         while wakes.try_recv().is_ok() {}
-        let _ = context.run(egui::RawInput::default(), |_| {});
+        let _ = context.run_ui(egui::RawInput::default(), |_| {});
 
         let k = key.clone();
         app.spawn_background(k, || BackgroundResult::ListeningPorts {
@@ -65966,7 +66175,7 @@ fn adversarial_rapid_tab_cycling_zero_leak_zero_redundant_builds() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66113,7 +66322,7 @@ fn adversarial_deeply_nested_asymmetric_split_isolation() {
 
     let ctx = egui::Context::default();
     let run_frame = |app: &mut OperonApp, size: egui::Vec2| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
@@ -66225,7 +66434,7 @@ fn adversarial_concurrent_sibling_mutation_during_tab_switch() {
 
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66297,7 +66506,7 @@ fn adversarial_cache_invalidation_matrix() {
 
     let ctx = egui::Context::default();
     let frame_with_size = |app: &mut OperonApp, size: egui::Vec2| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                 ..Default::default()
@@ -66459,7 +66668,7 @@ fn workspace_line_jump_waits_for_its_target_document() {
     app.navigate_to_file(&project, project.path.clone(), id.path.clone(), Some(120));
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(area),
                 ..Default::default()
@@ -66501,7 +66710,7 @@ fn workspace_worktree_document_tab_keeps_its_branch() {
         .open(WorkspaceTab::Document(app.open_documents[0].id()));
     let ctx = egui::Context::default();
     let frame = |app: &mut OperonApp| {
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66596,7 +66805,7 @@ fn history_title_single_click_opens_after_the_double_click_window() {
     let (mut app, first, _, third) = column_fixture(&root);
     let context = egui::Context::default();
     let frame = |app: &mut OperonApp, time: f64, events: Vec<egui::Event>| {
-        context.run(
+        context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66674,12 +66883,14 @@ fn history_grid_long_project_header_keeps_actions_inside_its_group() {
             ..Default::default()
         };
         let mut draw = |ctx: &egui::Context| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         };
-        let _ = context.run(input.clone(), &mut draw);
-        let output = context.run(input, &mut draw);
+        let _ = context.run_pass(input.clone(), &mut draw);
+        let output = context.run_pass(input, &mut draw);
         let sidebar_name = drawn_text_rects(&output, |text| text == long_name)
             .into_iter()
             .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
@@ -66865,7 +67076,7 @@ fn history_pending_title_is_cancelled_when_the_app_leaves_sessions() {
     for page in [Page::Home, Page::Settings] {
         app.page = page;
         app.pending_history_open = Some((first, 10.0));
-        let _ = context.run(
+        let _ = context.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -66874,7 +67085,7 @@ fn history_pending_title_is_cancelled_when_the_app_leaves_sessions() {
                 time: Some(11.0),
                 ..Default::default()
             },
-            |ctx| <OperonApp as eframe::App>::update(&mut app, ctx, &mut frame),
+            |ctx| app_frame(&mut app, ctx, &mut frame),
         );
         assert!(
             app.pending_history_open.is_none(),
@@ -66925,7 +67136,7 @@ fn workspace_project_picker_keeps_saved_order_counts_and_per_project_launch() {
     app.show_session_inspector = false;
     app.session_arrangement.projects = vec![empty, populated];
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let row = |name: &str| {
@@ -67652,7 +67863,7 @@ fn workspace_session_tab_shows_its_status_glyph() {
     session_283_without_marks(&mut app);
     app.select_session(first);
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -68398,7 +68609,7 @@ fn store_oracle() -> StoreOracle {
         let generation = loaded
             .notice
             .is_none()
-            .then(|| loaded.store.pending_cancellations.len() as u8);
+            .then_some(loaded.store.pending_cancellations.len() as u8);
         let kept = fs::read_dir(&root)
             .unwrap()
             .filter_map(|entry| fs::read(entry.ok()?.path()).ok())
@@ -69915,10 +70126,10 @@ pub(crate) fn session_tabs_show_live_state_before_title() {
             .map(|s| s.shape.clone())
             .collect();
         let expected_ctx = egui::Context::default();
-        let expected = expected_ctx.run(egui::RawInput::default(), |ctx| {
+        let expected = expected_ctx.run_ui(egui::RawInput::default(), |ctx| {
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Middle,
-                egui::Id::new("expected-status"),
+                egui::Id::unique("expected-status"),
             ));
             expected_kind.status_mark().paint(
                 &painter,
@@ -70028,7 +70239,7 @@ fn selected_navigation_uses_a_fine_accent_rule() {
             let mut shapes = Vec::new();
             for _ in 0..2 {
                 shapes = ctx
-                    .run(egui::RawInput::default(), |ctx| {
+                    .run_ui(egui::RawInput::default(), |ctx| {
                         egui::CentralPanel::default().show(ctx, |ui| {
                             tab_rect = nav_tab(ui, p, "", "セッション", selected).rect;
                         });
@@ -70115,7 +70326,7 @@ fn topbar_wordmark_is_neutral_beside_the_primary_action() {
     let mut shapes = Vec::new();
     for _ in 0..2 {
         shapes = ctx
-            .run(
+            .run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -70173,10 +70384,10 @@ fn session_tab_status_badges_are_distinct_vectors() {
                     egui::pos2(20.0, 20.0),
                     egui::Vec2::splat(STATUS_ICON_SIZE * scale),
                 );
-                let output = ctx.run(egui::RawInput::default(), |ctx| {
+                let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
                     let painter = ctx.layer_painter(egui::LayerId::new(
                         egui::Order::Middle,
-                        egui::Id::new("status-test"),
+                        egui::Id::unique("status-test"),
                     ));
                     kind.status_mark().paint(&painter, rect, palette.text);
                 });
@@ -70248,15 +70459,15 @@ fn sidebar_251_filters_drive_real_rows() {
     let target =
         |out: &egui::FullOutput, label: &str| sidebar_252_top(out, right, label).unwrap().center();
     let out = sidebar_251_click(&mut app, &ctx, target(&out, "要対応"));
-    assert_eq!(app.status_filter, [true, false, false, false]);
+    assert_eq!(app.status_filter, [true, false, false]);
     assert!(rows(&out, "first"));
     assert!(!rows(&out, "second") && !rows(&out, "finished-third"));
-    let out = sidebar_251_click(&mut app, &ctx, target(&out, "終了"));
+    let out = sidebar_251_click(&mut app, &ctx, target(&out, "実行中"));
     assert!(
-        rows(&out, "first") && rows(&out, "finished-third"),
+        rows(&out, "first") && rows(&out, "second"),
         "status choices form a union"
     );
-    assert!(!rows(&out, "second"));
+    assert!(!rows(&out, "finished-third"));
     let out = sidebar_251_click(&mut app, &ctx, target(&out, "クリア"));
     assert!(!app.has_session_filters());
     assert!(rows(&out, "first") && rows(&out, "second"));
@@ -70306,7 +70517,7 @@ fn sidebar_251_filter_combinations() {
     // to the Other choice.
     for agent_bits in 0..16 {
         app.agent_filter = std::array::from_fn(|i| agent_bits & (1 << i) != 0);
-        for status_bits in 0..16 {
+        for status_bits in 0..8 {
             app.status_filter = std::array::from_fn(|i| status_bits & (1 << i) != 0);
             for (agent, slot) in [
                 ("codex", 0),
@@ -70322,9 +70533,12 @@ fn sidebar_251_filter_combinations() {
                     if ended {
                         session.status = SessionStatus::Exited;
                     }
-                    let group_slot = if ended { 3 } else { 0 };
                     let agent_match = agent_bits == 0 || agent_bits & (1 << slot) != 0;
-                    let status_match = status_bits == 0 || status_bits & (1 << group_slot) != 0;
+                    let status_match = if ended {
+                        status_bits == 0
+                    } else {
+                        status_bits == 0 || status_bits & 1 != 0
+                    };
                     assert_eq!(
                         app.session_matches_filters(&session),
                         agent_match && status_match,
@@ -70342,7 +70556,7 @@ fn sidebar_251_filter_combinations() {
     assert_eq!(app.pending_session_close, None);
     app.show_status_group(SessionStatusGroup::Busy);
     assert_eq!(app.agent_filter, [false; 4]);
-    assert_eq!(app.status_filter, [false, true, false, false]);
+    assert_eq!(app.status_filter, [false, true, false]);
     app.clear_session_filters();
     assert!(!app.has_session_filters());
     // A stale waiting hook must not keep promising a permission prompt.
@@ -70447,7 +70661,7 @@ fn sidebar_251_marks_and_accessible_filters() {
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert_eq!(app.selected_session, selected_before);
     assert_eq!(app.workspace.active().cloned(), active_before);
-    for label in ["要対応", "実行中", "アイドル", "終了"] {
+    for label in ["要対応", "実行中", "アイドル"] {
         for rect in drawn_text_rects(&output, |text| text == label) {
             assert!(
                 rect.right() < right,
@@ -70494,7 +70708,7 @@ fn sidebar_251_short_stacked_column_can_scroll_to_project_rows() {
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
     let draw = |app: &mut OperonApp, events| {
-        ctx.run(
+        ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -70533,6 +70747,8 @@ fn sidebar_251_short_stacked_column_can_scroll_to_project_rows() {
         vec![egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, -500.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
             modifiers: egui::Modifiers::default(),
         }],
     );
@@ -70635,7 +70851,7 @@ fn sidebar_252_status_tiles_count_and_toggle() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let right = project_column_right(&app);
-    for gone in ["CLI", "ステータス", "すべて", "承認・回答待ち"] {
+    for gone in ["CLI", "ステータス", "すべて", "承認・回答待ち", "終了"] {
         assert!(
             !sidebar_252_in_column(&out, right, gone),
             "{gone} must not be drawn in the sidebar filters"
@@ -70644,23 +70860,21 @@ fn sidebar_252_status_tiles_count_and_toggle() {
     let tiles = sidebar_252_tiles(&out, right);
     assert!(
         (tiles[0].center().y - tiles[1].center().y).abs() < 1.0
-            && (tiles[2].center().y - tiles[3].center().y).abs() < 1.0
             && tiles[2].top() > tiles[0].bottom()
             && tiles[1].left() > tiles[0].right(),
-        "four tiles, two per row, at the default width: {tiles:?}"
+        "three tiles (two on row 1, one full-width on row 2) at the default width: {tiles:?}"
     );
-    let mut expected = [0usize; 4];
+    let mut expected = [0usize; 3];
     for session in &app.store.sessions {
-        expected[app.session_status_kind_for(session).group().index()] += 1;
+        if let Some(group) = app.session_status_kind_for(session).group() {
+            expected[group.index()] += 1;
+        }
     }
     assert_eq!(expected[SessionStatusGroup::NeedsYou.index()], 1);
-    assert_eq!(expected[SessionStatusGroup::Finished.index()], 1);
+    assert_eq!(expected[SessionStatusGroup::Busy.index()], 1);
+    assert_eq!(expected[SessionStatusGroup::Free.index()], 0);
     for (slot, tile) in tiles.iter().enumerate() {
-        let end = if slot % 2 == 0 {
-            tiles[slot + 1].left()
-        } else {
-            right
-        };
+        let end = if slot == 0 { tiles[1].left() } else { right };
         let count = expected[slot].to_string();
         assert!(
             drawn_text_rects(&out, |text| text == count)
@@ -70674,21 +70888,23 @@ fn sidebar_252_status_tiles_count_and_toggle() {
         );
     }
     let out = sidebar_251_click(&mut app, &ctx, tiles[0].center());
-    assert_eq!(app.status_filter, [true, false, false, false]);
+    assert_eq!(app.status_filter, [true, false, false]);
     assert!(sidebar_252_in_column(&out, right, "first"));
     assert!(!sidebar_252_in_column(&out, right, "second"));
     let tiles = sidebar_252_tiles(&out, right);
-    let out = sidebar_251_click(&mut app, &ctx, tiles[3].center());
+    let out = sidebar_251_click(&mut app, &ctx, tiles[1].center());
     assert!(
         sidebar_252_in_column(&out, right, "first")
-            && sidebar_252_in_column(&out, right, "finished-third"),
+            && sidebar_252_in_column(&out, right, "second")
+            && !sidebar_252_in_column(&out, right, "finished-third"),
         "status tiles form a union"
     );
     let tiles = sidebar_252_tiles(&out, right);
     sidebar_251_click(&mut app, &ctx, tiles[0].center());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
-    assert_eq!(app.status_filter, [false, false, false, true]);
+    assert_eq!(app.status_filter, [false, true, false]);
     assert!(!sidebar_252_in_column(&out, right, "first"));
+    assert!(sidebar_252_in_column(&out, right, "second"));
     fs::remove_dir_all(root).ok();
 }
 
@@ -70710,11 +70926,7 @@ fn sidebar_252_counts_follow_cli_and_clear_only_while_filtering() {
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let tiles = sidebar_252_tiles(&out, right);
     for (slot, tile) in tiles.iter().enumerate() {
-        let end = if slot % 2 == 0 {
-            tiles[slot + 1].left()
-        } else {
-            right
-        };
+        let end = if slot == 0 { tiles[1].left() } else { right };
         assert!(
             drawn_text_rects(&out, |text| text == "0").iter().any(|r| {
                 (r.center().y - tile.center().y).abs() < 1.0
@@ -70763,7 +70975,7 @@ fn sidebar_252_needs_you_covers_waiting() {
     assert!(app.session_matches_filters(&waiting));
     app.clear_session_filters();
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let right = project_column_right(&app);
@@ -70818,7 +71030,7 @@ fn sidebar_252_tiles_fit_narrow_column() {
                 .filter(|r| r.left() < right),
         );
     }
-    assert!(controls.len() >= 4 + 2 + 3);
+    assert!(controls.len() >= 3 + 2 + 3);
     for rect in controls {
         assert!(
             rect.right() <= right,
@@ -71254,7 +71466,7 @@ pub(crate) fn session_254_compact_tabs() {
     );
     // Since change 267 the CLI mark sits between the state mark and the
     // title: one mark and one gap further right, and no more.
-    let mark = SESSION_MARK_SIZE + ctx.style().spacing.item_spacing.x;
+    let mark = SESSION_MARK_SIZE + ctx.global_style().spacing.item_spacing.x;
     assert!(
         texts[0].pos.x - right < 65.0 + mark,
         "title is left aligned beside the status icon and CLI mark"
@@ -71293,7 +71505,7 @@ pub(crate) fn session_254_terminal_action() {
     }
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
-    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
@@ -72192,7 +72404,7 @@ pub(crate) fn session_273_missing_cli_is_disabled() {
     app.show_session_inspector = false;
     let ctx = egui::Context::default();
     app.apply_appearance(&ctx);
-    ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+    ctx.global_style_mut(|s| s.interaction.tooltip_delay = 0.0);
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let add = session_254_add_rect(&app, &out);
@@ -73739,7 +73951,7 @@ pub(crate) fn ide_261_diff_pane_hunk_buttons_emit_stage_and_discard() {
     let project = Uuid::new_v4();
     let mut annotations = DiffAnnotations::default();
     let mut action = None;
-    let output = ctx.run(
+    let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -73780,7 +73992,7 @@ pub(crate) fn ide_261_diff_pane_hunk_buttons_emit_stage_and_discard() {
                     collapsed: &mut HashSet<String>,
                     annotations: &mut DiffAnnotations| {
         let mut out_action = None;
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -74525,7 +74737,7 @@ fn session_tab_mark_names_its_cli_on_hover() {
     let root = temporary_directory("session-tab-cli-hover");
     let (mut app, _first, _second) = tab_267_fixture(&root);
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -75295,11 +75507,12 @@ fn relaunch_270_first_look(fixture: &Relaunch270) -> Vec<(Uuid, TmuxObservation)
 }
 
 #[test]
-/// Change 270: after a restart takes the tmux server with it, every session
-/// that was running at the quit starts again in its own record and tab — a
-/// CLI reopening its conversation, a terminal opening a shell — and nothing
-/// the person ended, nothing already stopped, and nothing without a
-/// conversation to reopen.
+/// Change 270, updated in change 288: after a restart takes the tmux server
+/// with it, every session that was running at the quit starts again in its own
+/// record and tab — a CLI reopening its conversation, a terminal opening a
+/// shell — while a cleanly exited CLI (`Dead`, `Some(0)`) converts to a plain
+/// terminal shell instead of re-running its CLI, and a mid-run forced kill
+/// restores once and stops on immediate repeat failure within cooldown.
 pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone() {
     let mut fixture = relaunch_270_fixture("relaunch-270");
     let before = fixture.app.store.sessions.len();
@@ -75308,7 +75521,12 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         .app
         .apply_session_poll(states, Vec::new(), Vec::new(), Vec::new());
     let app = &fixture.app;
-    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+    for id in [
+        fixture.terminal,
+        fixture.resumable,
+        fixture.crashed,
+        fixture.quit_cleanly,
+    ] {
         let session = relaunch_270_find(app, id);
         assert_eq!(session.status, SessionStatus::Starting, "{}", session.agent);
         assert!(
@@ -75326,6 +75544,15 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
     assert_eq!(
         relaunch_270_find(app, fixture.crashed).agent_command,
         CliProvider::Codex.native_resume_command(&fixture.crashed_id)
+    );
+    let quit_cleanly = relaunch_270_find(app, fixture.quit_cleanly);
+    assert_eq!(
+        quit_cleanly.agent, "terminal",
+        "自分で終了した CLI がシェルに切り替わりませんでした"
+    );
+    assert!(
+        quit_cleanly.agent_command.is_empty(),
+        "自分で終了した CLI を再開しました"
     );
     assert_eq!(app.store.sessions.len(), before, "再開で記録が増えました");
     assert_eq!(
@@ -75351,11 +75578,6 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         SessionStatus::Active
     );
     assert_eq!(
-        relaunch_270_find(app, fixture.quit_cleanly).status,
-        SessionStatus::Exited,
-        "自分で終了した CLI を再開しました"
-    );
-    assert_eq!(
         relaunch_270_find(app, fixture.no_transcript).status,
         SessionStatus::Lost
     );
@@ -75364,7 +75586,6 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         fixture.exited,
         fixture.lost_before,
         fixture.alive,
-        fixture.quit_cleanly,
         fixture.no_transcript,
     ] {
         assert!(!app
@@ -75372,8 +75593,42 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
             .contains(&BackgroundKey::SessionStart(id)));
     }
 
-    // Only the first look decides: a session that dies later in this run is
-    // not started again by itself.
+    // Change 288 / 291: a running session whose terminal disappears mid-run
+    // restores automatically once, and an immediate repeat disappearance inside
+    // `AUTO_RESTORE_COOLDOWN` settles in `Lost`.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.alive,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.alive).status,
+        SessionStatus::Starting
+    );
+    assert!(fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.alive)));
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.alive),
+        Duration::from_secs(30),
+    );
+    fixture
+        .app
+        .store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == fixture.alive)
+        .unwrap()
+        .status = SessionStatus::Active;
     fixture.app.apply_session_poll(
         vec![(
             fixture.alive,
@@ -75394,7 +75649,12 @@ pub(crate) fn sessions_running_at_the_quit_come_back_when_their_terminal_is_gone
         .app
         .background_tasks
         .contains(&BackgroundKey::SessionStart(fixture.alive)));
-    for id in [fixture.terminal, fixture.resumable, fixture.crashed] {
+    for id in [
+        fixture.terminal,
+        fixture.resumable,
+        fixture.crashed,
+        fixture.quit_cleanly,
+    ] {
         wait_for_background_task(
             &mut fixture.app,
             &BackgroundKey::SessionStart(id),
@@ -75633,7 +75893,7 @@ const WS_PANE_CAP: usize = PANE_MAX + 1;
 const WS1_STATES: usize = 599_549;
 const WS2_STATES: usize = 140_880;
 const WS3_STATES: usize = 656_525;
-const R6_STATES: usize = 164;
+const R6_STATES: usize = 183;
 
 fn ws_group(k: u128) -> Uuid {
     Uuid::from_u128(0x1_0000 + k)
@@ -76186,12 +76446,12 @@ const R6_OBSERVATIONS: [(TmuxState, Option<i32>); 7] = [
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 struct Relaunch6State {
-    /// Status index at load and whether `relaunch_kind` is `Some`.
+    /// Status index at load and whether `relaunch_kind` is `Some` now.
     load: Option<(u8, bool)>,
     status: u8,
     candidate: bool,
     looked: bool,
-    relaunched: u8,
+    cooldown: bool,
     polls: u8,
     violation: Option<String>,
 }
@@ -76200,6 +76460,8 @@ struct Relaunch6State {
 enum Relaunch6Event {
     Load(u8, bool),
     Poll(u8, bool),
+    CooldownExpired,
+    ManualStart,
 }
 
 fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uuid) {
@@ -76233,22 +76495,22 @@ fn r6_app(root: &Path, serial: usize, status: u8, kind: bool) -> (OperonApp, Uui
 }
 
 #[test]
-/// Change 270, R6 (departure 6, F1 and 7): the relaunch decision of
-/// `apply_session_poll`, run for real. The model loads one session in each of
-/// the eight statuses, with and without a `relaunch_kind` (a plain terminal, a
-/// Claude session with no conversation), then takes up to three polls, each
-/// one of seven observations (every `TmuxState`; `Dead` with status 0, nonzero
-/// and none; `Gone` with and without a status) with the store write
-/// succeeding or failing (the folder made read-only around the poll). Every
-/// state of that walk, the real app rebuilt at each step from the state
-/// reached.
+/// Change 270, R6 (updated in changes 288 and 291): the poll transition and
+/// relaunch decision of `apply_session_poll`, run for real across every load
+/// status, `relaunch_kind` (`"terminal"` vs `"claude"` without ID),
+/// observation, store-write outcome, cooldown expiry, and manual retry reset.
 ///
-/// The property, kept as its own ledger beside the app: a session is started
-/// again iff it was Starting/Active/Unknown at load, this poll is its first
-/// non-Unknown look whose outcome was stored (a look that changes nothing has
-/// nothing to store; a failed write leaves the look unspent), the outcome is
-/// Lost or Failed, the write succeeded, and `relaunch_kind` is `Some` — and at
-/// most once over the sequence; the real candidate set agrees with the ledger.
+/// The ledger checks:
+/// - Clean exit (`Dead`, `Some(0)`) on a pollable interactive session opens a
+///   shell in place (`kind` becomes `true`, status becomes `Starting`) when
+///   `stored`, without spending auto-restore cooldown or flashing a restore
+///   toast.
+/// - Abnormal exit (`Lost` or `Failed`) launches in place iff `pollable`,
+///   `kind`, `stored`, and `(was_candidate || !cooldown)`, stamping `cooldown`
+///   and emitting the matching startup or mid-run toast while never emitting a
+///   lying toast when declined.
+/// - `relaunch_candidates` keeps its look unspent on a failed store write, and
+///   cooldown expires after `AUTO_RESTORE_COOLDOWN` or clears on `start_session`.
 pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look() {
     use std::os::unix::fs::PermissionsExt;
     let root = temporary_directory("model-relaunch-270");
@@ -76264,12 +76526,14 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
             events.push(Relaunch6Event::Poll(observation, stored));
         }
     }
+    events.push(Relaunch6Event::CooldownExpired);
+    events.push(Relaunch6Event::ManualStart);
     let initial = Relaunch6State {
         load: None,
         status: 0,
         candidate: false,
         looked: false,
-        relaunched: 0,
+        cooldown: false,
         polls: 0,
         violation: None,
     };
@@ -76295,10 +76559,14 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
             {
                 let (state_of, exit) = R6_OBSERVATIONS[usize::from(*observation)];
                 let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                let session_name = app.store.sessions[0].name.clone();
                 if state.candidate {
                     app.relaunch_candidates.insert(id);
                 } else {
                     app.relaunch_candidates.clear();
+                }
+                if state.cooldown {
+                    app.last_auto_restore.insert(id, Instant::now());
                 }
                 if !stored {
                     fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
@@ -76321,43 +76589,120 @@ pub(crate) fn model_check_a_session_is_relaunched_only_at_its_first_stored_look(
                     .contains(&BackgroundKey::SessionStart(id));
                 let candidate_now = app.relaunch_candidates.contains(&id);
                 let status_now = r6_index(&app.store.sessions[0].status);
+                let notice_now = app.notice.clone();
+                let kind_now = relaunch_kind(&app.store.sessions[0]).is_some();
+                let cooldown_now = app.last_auto_restore.contains_key(&id);
                 // The ledger, from the requirement alone.
+                let pollable = R6_RUNNING.contains(&state.status);
                 let was_candidate = R6_RUNNING.contains(&loaded) && !state.looked;
-                let looks = was_candidate && state_of != TmuxState::Unknown;
-                let lost_or_failed = match (state_of, exit) {
-                    (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
-                    (TmuxState::Dead, Some(code)) => code != 0,
-                    _ => false,
-                };
-                let needs_write = match state_of {
-                    TmuxState::Alive => state.status != 1,
-                    TmuxState::Unknown => false,
-                    _ => true,
-                };
-                let expected = looks && lost_or_failed && kind && *stored;
+                let looks = pollable && was_candidate && state_of != TmuxState::Unknown;
+                let clean_exit = pollable && matches!((state_of, exit), (TmuxState::Dead, Some(0)));
+                let lost_or_failed = pollable
+                    && match (state_of, exit) {
+                        (TmuxState::Gone, _) | (TmuxState::Dead, None) => true,
+                        (TmuxState::Dead, Some(code)) => code != 0,
+                        _ => false,
+                    };
+                let needs_write = pollable
+                    && match state_of {
+                        TmuxState::Alive => state.status != 1,
+                        TmuxState::Unknown => false,
+                        _ => true,
+                    };
+                let expected_auto_restore =
+                    lost_or_failed && kind && *stored && (looks || !state.cooldown);
+                let expected_shell = clean_exit && *stored;
+                let expected = expected_auto_restore || expected_shell;
                 let looked = state.looked || (looks && (!needs_write || *stored));
-                let count = state.relaunched + u8::from(relaunched);
+                let expected_cooldown = state.cooldown || expected_auto_restore;
+                let expected_kind = kind || expected_shell;
+                let expected_toast = expected_auto_restore.then(|| {
+                    if looks {
+                        "前回開いていたセッションを 1 件再開しました。".to_owned()
+                    } else {
+                        format!("強制終了されたセッションを自動で復元しました: {session_name}")
+                    }
+                });
                 let violation = if relaunched != expected {
                     Some(format!(
-                        "relaunched {relaunched}, the requirement says {expected}"
+                        "relaunched {relaunched}, the requirement says {expected} (status={}, kind={kind}, obs={observation}, stored={stored}, cooldown={})",
+                        state.status, state.cooldown
                     ))
-                } else if count > 1 {
-                    Some("relaunched twice".to_owned())
+                } else if expected_auto_restore && notice_now != expected_toast {
+                    Some(format!(
+                        "toast {:?}, expected {:?}",
+                        notice_now, expected_toast
+                    ))
+                } else if !expected_auto_restore
+                    && notice_now.as_deref().is_some_and(|n| {
+                        n.contains("再開しました") || n.contains("自動で復元しました")
+                    })
+                {
+                    Some(format!(
+                        "lying restore toast {:?} when expected_auto_restore=false",
+                        notice_now
+                    ))
                 } else if candidate_now != (R6_RUNNING.contains(&loaded) && !looked) {
                     Some(format!(
                         "candidate {candidate_now} after a look the ledger calls spent={looked}"
                     ))
+                } else if cooldown_now != expected_cooldown {
+                    Some(format!(
+                        "cooldown {cooldown_now}, expected {expected_cooldown}"
+                    ))
+                } else if kind_now != expected_kind {
+                    Some(format!("kind {kind_now}, expected {expected_kind}"))
                 } else {
                     None
                 };
                 Some(Relaunch6State {
-                    load: state.load,
+                    load: Some((loaded, expected_kind)),
                     status: status_now,
                     candidate: candidate_now,
                     looked,
-                    relaunched: count,
+                    cooldown: expected_cooldown,
                     polls: state.polls + 1,
                     violation,
+                })
+            }
+            (Some((_, kind)), Relaunch6Event::CooldownExpired)
+                if state.polls < 3 && state.violation.is_none() && state.cooldown =>
+            {
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                app.last_auto_restore
+                    .insert(id, Instant::now() - AUTO_RESTORE_COOLDOWN);
+                let violation = (!app.auto_restore_ready(id, Instant::now()))
+                    .then(|| "cooldown did not expire after AUTO_RESTORE_COOLDOWN".into());
+                Some(Relaunch6State {
+                    cooldown: false,
+                    polls: state.polls + 1,
+                    violation,
+                    ..state.clone()
+                })
+            }
+            (Some((_, kind)), Relaunch6Event::ManualStart)
+                if state.polls < 3
+                    && state.violation.is_none()
+                    && matches!(state.status, 4 | 6) =>
+            {
+                let (mut app, id) = r6_app(&root, serial.get(), state.status, kind);
+                if state.cooldown {
+                    app.last_auto_restore.insert(id, Instant::now());
+                }
+                app.start_session(id);
+                let violation = if app.last_auto_restore.contains_key(&id) {
+                    Some("manual start_session did not clear cooldown".into())
+                } else if app.store.sessions[0].status != SessionStatus::Starting {
+                    Some("manual start_session did not start session".into())
+                } else {
+                    None
+                };
+                Some(Relaunch6State {
+                    status: 0,
+                    cooldown: false,
+                    polls: state.polls + 1,
+                    violation,
+                    ..state.clone()
                 })
             }
             _ => None,
@@ -76397,16 +76742,20 @@ fn shortcut_272_frame(
             egui::Pos2::ZERO,
             egui::vec2(1280.0, 820.0),
         )),
-        events: vec![key_press(key, modifiers)],
-        modifiers,
+        events: vec![
+            egui::Event::ModifiersChanged(modifiers),
+            key_press(key, modifiers),
+        ],
         ..Default::default()
     };
-    let _ = ctx.run(input, |ctx| {
+    let _ = ctx.run_pass(input, |ctx| {
         app.handle_app_shortcuts(ctx);
         if app.page == Page::Sessions {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE)
-                .show(ctx, |ui| app.ui_terminal_workspace(ui));
+            ctx.root_ui(|root| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(root, |ui| app.ui_terminal_workspace(ui))
+            });
         }
     });
 }
@@ -76415,10 +76764,12 @@ fn shortcut_272_frame(
 /// presses a key: the workspace marks its live sessions seen on its first
 /// draw, and a tab closed before that draw is added back as newly live.
 fn shortcut_272_settle(app: &mut OperonApp, ctx: &egui::Context) {
-    let _ = ctx.run(egui::RawInput::default(), |ctx| {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| app.ui_terminal_workspace(ui));
+    let _ = ctx.run_pass(egui::RawInput::default(), |ctx| {
+        ctx.root_ui(|root| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE)
+                .show(root, |ui| app.ui_terminal_workspace(ui))
+        });
     });
 }
 
@@ -77221,7 +77572,7 @@ fn poll_275_returning_to_the_window_reads_at_once() {
 fn poll_275_frame(app: &mut OperonApp, ctx: &egui::Context, focused: bool) {
     app.ports_scanned_at = Some(Instant::now());
     let mut frame = eframe::Frame::_new_kittest();
-    let _ = ctx.run(
+    let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -77230,7 +77581,7 @@ fn poll_275_frame(app: &mut OperonApp, ctx: &egui::Context, focused: bool) {
             focused,
             ..Default::default()
         },
-        |ctx| <OperonApp as eframe::App>::update(app, ctx, &mut frame),
+        |ctx| app_frame(app, ctx, &mut frame),
     );
 }
 
@@ -77933,7 +78284,7 @@ fn working_278_hover_texts(
     pick: impl Fn(&[(String, egui::Pos2)], f32) -> Option<egui::Pos2>,
 ) -> Vec<String> {
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -77967,7 +78318,7 @@ fn working_278_column_and_tab_hovers_say_how_long() {
             .next()
     });
     assert!(
-        row.iter().any(|text| *text == timed),
+        row.contains(&timed),
         "セッション列の行のホバーが作業時間を言いません: {row:?}"
     );
     // The tab's state mark is painted, not text: it sits left of the tab's
@@ -77991,7 +78342,7 @@ fn working_278_column_and_tab_hovers_say_how_long() {
         })
         .expect("the tab's state mark answers a hover");
     assert!(
-        tab.iter().any(|text| *text == timed),
+        tab.contains(&timed),
         "タブのホバーが作業時間を言いません: {tab:?}"
     );
     fs::remove_dir_all(&root).ok();
@@ -78068,7 +78419,7 @@ fn reply_279_frame(
     events: Vec<egui::Event>,
 ) -> egui::FullOutput {
     let sessions = app.store.sessions.clone();
-    ctx.run(
+    ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -78078,8 +78429,8 @@ fn reply_279_frame(
             ..Default::default()
         },
         |ctx| {
-            egui::SidePanel::left("reply-279-rows")
-                .exact_width(300.0)
+            egui::Panel::left("reply-279-rows")
+                .exact_size(300.0)
                 .show(ctx, |ui| {
                     app.ui_pinned_sessions(ui, &sessions);
                 });
@@ -78583,7 +78934,7 @@ fn broadcast_282_frame(
     ctx: &egui::Context,
     events: Vec<egui::Event>,
 ) -> Vec<String> {
-    let output = ctx.run(
+    let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -78715,7 +79066,7 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
         "second".to_owned(),
     ] {
         assert!(
-            texts.iter().any(|text| *text == expected),
+            texts.contains(&expected),
             "シートに「{expected}」がありません: {texts:?}"
         );
     }
@@ -78826,11 +79177,13 @@ fn broadcast_282_f1_page_shortcuts_do_not_reach_past_the_sheet() {
         (egui::Key::N, "⌘N"),
     ] {
         let input = egui::RawInput {
-            events: vec![key_press(key, egui::Modifiers::COMMAND)],
-            modifiers: egui::Modifiers::COMMAND,
+            events: vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                key_press(key, egui::Modifiers::COMMAND),
+            ],
             ..Default::default()
         };
-        let _ = context.run(input, |ctx| app.handle_app_shortcuts(ctx));
+        let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
         if app.command_palette_open {
             leaks.push(format!("{name} opens the palette over the sheet"));
         }
@@ -79040,7 +79393,7 @@ fn session_283_waiting_dot_keeps_a_shape() {
         let output = session_283_frame(&mut app, &ctx);
         let kind = session_283_kind(&app, first);
         assert_eq!(
-            kind.group() == SessionStatusGroup::NeedsYou,
+            kind.group() == Some(SessionStatusGroup::NeedsYou),
             needs_you,
             "{kind:?}"
         );
@@ -79154,7 +79507,7 @@ fn session_283_mark_names_cli_and_state_on_hover() {
         Some(AgentActivity::Idle),
     );
     let ctx = egui::Context::default();
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
@@ -79453,8 +79806,8 @@ fn session_285_column_lists_exactly_the_tabs() {
         app.status_group_counts_for_chosen_agents()
             .iter()
             .sum::<usize>(),
-        3,
-        "the filter tiles count the same rows"
+        1,
+        "the three actionable filter tiles count only live/attention tabs"
     );
     fs::remove_dir_all(root).unwrap();
 }
@@ -80072,20 +80425,20 @@ fn home_287_frame(
     session: &Session,
     pointer: Option<egui::Pos2>,
 ) -> egui::FullOutput {
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
         style.interaction.show_tooltips_only_when_still = false;
     });
     let mut pass = |ctx: &egui::Context| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             app.home_session_row(ui, session, "recent");
         });
     };
     let events = pointer
         .map(|at| vec![egui::Event::PointerMoved(at)])
         .unwrap_or_default();
-    let _ = ctx.run(home_287_input(events), &mut pass);
-    ctx.run(home_287_input(Vec::new()), &mut pass)
+    let _ = ctx.run_pass(home_287_input(events), &mut pass);
+    ctx.run_pass(home_287_input(Vec::new()), &mut pass)
 }
 
 fn home_287_count(output: &egui::FullOutput, text: &str) -> usize {
@@ -80162,13 +80515,4570 @@ fn home_287_clicking_the_mark_opens_the_session() {
     let ctx = egui::Context::default();
     let mark = home_287_indicator(&mut app, &ctx, &session);
     click_at(&ctx, mark, |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        central_panel(ctx, |ui| {
             app.home_session_row(ui, &session, "recent");
         });
     });
     assert_eq!(app.page, Page::Sessions);
     assert_eq!(app.selected_session, Some(session.id));
     fs::remove_dir_all(root).ok();
+}
+
+// --- Change 288: keep cleanly exited panes as live shells and auto-restore forced terminations ---
+
+#[test]
+/// Change 288, R1 & R2 (tmux layer): configured sessions suppress tmux's
+/// `Pane is dead (...)` footer (`remain-on-exit-format ""`), and launching a
+/// plain terminal onto a `Dead` pane respawns the login shell in place while
+/// preserving prior scrollback (both on initial shell conversion and on retry).
+pub(crate) fn pane_288_configure_tmux_suppresses_dead_pane_banner_and_keeps_scrollback() {
+    let sample_name = "operon-pane288a";
+    let sample_cwd = Path::new("/tmp/pane-288-cwd");
+    let config_steps = configure_tmux_session_steps(sample_name);
+    assert_eq!(
+        config_steps,
+        vec![
+            TmuxStep {
+                args: ["set-option", "-t", sample_name, "remain-on-exit", "on"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                required: true,
+            },
+            TmuxStep {
+                args: [
+                    "set-option",
+                    "-q",
+                    "-t",
+                    sample_name,
+                    "remain-on-exit-format",
+                    "",
+                ]
+                .into_iter()
+                .map(std::ffi::OsString::from)
+                .collect(),
+                required: true,
+            },
+            TmuxStep {
+                args: ["set-option", "-t", sample_name, "history-limit", "50000"]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                required: true,
+            },
+        ]
+    );
+    assert_eq!(
+        plain_terminal_action(TmuxState::Gone, sample_name, sample_cwd, &[]),
+        Ok(PlainTerminalAction::StartNew)
+    );
+    let dead_env = [("OPERON_PANE_288_ENV", "kept".to_owned())];
+    let dead_steps = dead_pane_reopen_steps(sample_name, sample_cwd, &dead_env);
+    assert_eq!(
+        plain_terminal_action(TmuxState::Dead, sample_name, sample_cwd, &dead_env),
+        Ok(PlainTerminalAction::RespawnDead(dead_steps.clone()))
+    );
+    let env_pos = dead_steps
+        .iter()
+        .position(|step| {
+            step.required
+                && step.args
+                    == [
+                        "set-environment",
+                        "-t",
+                        sample_name,
+                        "OPERON_PANE_288_ENV",
+                        "kept",
+                    ]
+                    .map(std::ffi::OsString::from)
+        })
+        .expect("dead-pane reopen must set updated session environment");
+    let banner_pos = dead_steps
+        .iter()
+        .position(|step| {
+            step.required
+                && step.args
+                    == [
+                        "set-option",
+                        "-q",
+                        "-t",
+                        sample_name,
+                        "remain-on-exit-format",
+                        "",
+                    ]
+                    .map(std::ffi::OsString::from)
+        })
+        .expect("dead-pane reopen must clear remain-on-exit-format");
+    let reset_pos = dead_steps
+        .iter()
+        .position(|step| {
+            !step.required
+                && step.args == ["send-keys", "-R", "-t", sample_name].map(std::ffi::OsString::from)
+        })
+        .expect("dead-pane reopen must push visible cells into scrollback via send-keys -R");
+    let respawn_pos = dead_steps
+        .iter()
+        .position(|step| {
+            step.required
+                && step.args.first().and_then(|arg| arg.to_str()) == Some("respawn-pane")
+                && step.args.get(1).and_then(|arg| arg.to_str()) == Some("-k")
+        })
+        .expect("dead-pane reopen must respawn the pane in place");
+    assert!(
+        env_pos < banner_pos && banner_pos < reset_pos && reset_pos < respawn_pos,
+        "unexpected dead-pane reopen step order: env={env_pos}, banner={banner_pos}, reset={reset_pos}, respawn={respawn_pos}"
+    );
+
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("pane-288-tmux");
+    let project = relaunch_270_project(&root);
+    fs::create_dir_all(&project.path).unwrap();
+    let mut session = relaunch_270_session(project.id, "gemini", SessionStatus::Active, None);
+    session.worktree_path = Some(project.path.clone());
+    let name = session.tmux_name.clone();
+
+    start_tmux_agent_session(
+        &name,
+        &project.path,
+        "printf 'scrollback-marker-288\\n'; sleep 0.1; exit 0",
+        &[],
+    )
+    .unwrap();
+    for _ in 0..100 {
+        if tmux_observation(&name).state == TmuxState::Dead {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        tmux_observation(&name),
+        TmuxObservation {
+            state: TmuxState::Dead,
+            exit_status: Some(0),
+        }
+    );
+    let dead_screen = tmux_capture(&name).unwrap();
+    assert!(
+        dead_screen.contains("scrollback-marker-288"),
+        "expected agent output in dead pane, got: {dead_screen:?}"
+    );
+    assert!(
+        !dead_screen.contains("Pane is dead"),
+        "tmux painted a dead-pane footer despite remain-on-exit-format: {dead_screen:?}"
+    );
+
+    // Converting the record to a plain terminal (`retrying = false`) respawns
+    // a login shell in the dead pane without killing the session or wiping scrollback.
+    session.agent = "terminal".into();
+    session.agent_command.clear();
+    session.origin = Some(SessionOrigin::PlainTerminal);
+    launch_stored_session(
+        &session,
+        &project.path,
+        false,
+        false,
+        None,
+        &[("OPERON_PANE_288_ENV", "kept".into())],
+    )
+    .unwrap();
+    assert_eq!(tmux_observation(&name).state, TmuxState::Alive);
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        "printf 'shell-ready-288:%s\\n' \"$OPERON_PANE_288_ENV\"",
+        "Enter",
+    ]);
+    run_command_with_timeout(&mut send, Duration::from_secs(5)).unwrap();
+    let mut live_screen = String::new();
+    for _ in 0..100 {
+        live_screen = tmux_capture(&name).unwrap_or_default();
+        if live_screen.contains("shell-ready-288:kept") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        live_screen.contains("shell-ready-288:kept"),
+        "respawned shell did not run with updated environment: {live_screen:?}"
+    );
+    assert!(
+        live_screen.contains("scrollback-marker-288"),
+        "respawning the login shell erased prior scrollback: {live_screen:?}"
+    );
+
+    // Force-killing the shell into `Dead` and retrying (`retrying = true`) also
+    // respawns in place while keeping the scrollback.
+    respawn_tmux_pane(
+        &name,
+        &project.path,
+        "printf 'before-crash-288\\n'; sleep 0.1; exit 137",
+    )
+    .unwrap();
+    for _ in 0..100 {
+        if tmux_observation(&name).state == TmuxState::Dead {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    launch_stored_session(&session, &project.path, true, false, None, &[]).unwrap();
+    assert_eq!(tmux_observation(&name).state, TmuxState::Alive);
+    let retried_screen = tmux_capture(&name).unwrap();
+    assert!(
+        retried_screen.contains("before-crash-288"),
+        "retrying a dead plain terminal erased scrollback: {retried_screen:?}"
+    );
+
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, R2: an interactive session whose process exits cleanly (`Dead`,
+/// `Some(0)`) converts in place into a plain terminal (`agent == "terminal"`)
+/// and starts a quiet shell launch, whereas cancelled sessions, setup runs,
+/// `.operon/run.sh` scripts, and dependency parents keep their terminal states.
+pub(crate) fn pane_288_clean_exit_reopens_interactive_session_as_shell() {
+    let root = temporary_directory("pane-288-clean-exit");
+    let data_file = root.join("store.json");
+    let missing = root.join("gone");
+    let project = relaunch_270_project(&root);
+    let make = |agent: &str, origin: Option<SessionOrigin>| {
+        let mut s = relaunch_270_session(project.id, agent, SessionStatus::Active, origin);
+        s.worktree_path = Some(missing.clone());
+        s.goal = "ship it".into();
+        s.agent_command = if agent == "terminal" {
+            String::new()
+        } else {
+            format!("{agent} --flag")
+        };
+        if agent != "terminal" {
+            s.native_session_id = Some(Uuid::new_v4().to_string());
+            s.native_session_path = Some(root.join("conv.jsonl"));
+        }
+        s
+    };
+
+    let cli_done = make("gemini", None);
+    let adopted_done = make("claude", Some(SessionOrigin::Adopted));
+    let cancelled = make("codex", None);
+    let setup = make("terminal", Some(SessionOrigin::PlainTerminal));
+    let mut run_script = make(RUN_SCRIPT_AGENT, None);
+    run_script.agent_command = "sh .operon/run.sh".into();
+    let parent = make("claude", None);
+    let mut child = make("codex", None);
+    child.status = SessionStatus::Queued;
+    child.depends_on = vec![parent.id];
+
+    let (cli_id, adopted_id, cancel_id, setup_id, script_id, parent_id, child_id) = (
+        cli_done.id,
+        adopted_done.id,
+        cancelled.id,
+        setup.id,
+        run_script.id,
+        parent.id,
+        child.id,
+    );
+
+    let mut store = Store::default();
+    store.notifications_enabled = true;
+    store.projects.push(project);
+    store.pending_cancellations.push(cancel_id);
+    store.sessions.extend([
+        cli_done,
+        adopted_done,
+        cancelled,
+        setup,
+        run_script,
+        parent,
+        child,
+    ]);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.relaunch_candidates.clear();
+    app.setup_sessions.insert(setup_id);
+
+    let clean = TmuxObservation {
+        state: TmuxState::Dead,
+        exit_status: Some(0),
+    };
+    app.apply_session_poll(
+        vec![
+            (cli_id, clean),
+            (adopted_id, clean),
+            (cancel_id, clean),
+            (setup_id, clean),
+            (script_id, clean),
+            (parent_id, clean),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    for (id, expected_origin) in [
+        (cli_id, SessionOrigin::PlainTerminal),
+        (adopted_id, SessionOrigin::Adopted),
+    ] {
+        let s = relaunch_270_find(&app, id);
+        assert_eq!(s.agent, "terminal");
+        assert!(s.agent_command.is_empty());
+        assert!(s.goal.is_empty());
+        assert!(s.native_session_id.is_none());
+        assert!(s.native_session_path.is_none());
+        assert_eq!(s.origin, Some(expected_origin));
+        assert_eq!(s.status, SessionStatus::Starting);
+        assert!(app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+        assert!(app.quiet_launches.contains(&id));
+    }
+
+    assert_eq!(
+        relaunch_270_find(&app, cancel_id).status,
+        SessionStatus::Cancelled
+    );
+    assert_eq!(
+        relaunch_270_find(&app, setup_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("セットアップが完了しました。"))
+    );
+    assert_eq!(
+        relaunch_270_find(&app, script_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(&app, parent_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        ready_queued_session_ids(&app.store.sessions),
+        vec![child_id]
+    );
+    for excluded in [cancel_id, setup_id, script_id, parent_id] {
+        assert!(!app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(excluded)));
+    }
+
+    for id in [cli_id, adopted_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, R3: open workspace tabs saved as `SessionStatus::Exited` by an
+/// older build re-evaluate on startup and reopen in place as plain terminals
+/// whether their old pane is `Dead` or `Gone`, while closed `Exited` sessions
+/// stay `SessionStatus::Exited` and no spurious toast or notification fires.
+pub(crate) fn pane_288_exited_open_tab_from_previous_run_reopens_as_shell() {
+    let root = temporary_directory("pane-288-legacy-exited");
+    let data_file = root.join("store.json");
+    let missing = root.join("gone");
+    let project_a = relaunch_270_project(&root);
+    let mut project_b = relaunch_270_project(&root);
+    project_b.id = Uuid::new_v4();
+
+    let make = |project_id: Uuid, agent: &str| {
+        let mut s = relaunch_270_session(project_id, agent, SessionStatus::Exited, None);
+        s.worktree_path = Some(missing.clone());
+        s.agent_command = format!("{agent} --dangerously-skip-permissions");
+        s.native_session_id = Some(Uuid::new_v4().to_string());
+        s
+    };
+    let open_dead = make(project_a.id, "gemini");
+    let closed_history = make(project_a.id, "gemini");
+    let open_other_project = make(project_b.id, "codex");
+    let (open_dead_id, closed_id, other_id) =
+        (open_dead.id, closed_history.id, open_other_project.id);
+
+    let mut tabs_a = WorkspaceTabs::default();
+    tabs_a.open(WorkspaceTab::Session(open_dead_id));
+    let mut tabs_b = WorkspaceTabs::default();
+    tabs_b.open(WorkspaceTab::Session(other_id));
+    let saved_layout = WorkspaceLayout {
+        project: Some(project_a.id),
+        workspaces: vec![
+            tabs_a.to_saved(project_a.id, Some(open_dead_id)),
+            tabs_b.to_saved(project_b.id, Some(other_id)),
+        ],
+        placed: vec![open_dead_id, closed_id, other_id],
+    };
+    save_workspace_layout(&data_file, &saved_layout).unwrap();
+
+    let mut store = Store::default();
+    store.notifications_enabled = true;
+    store.projects.extend([project_a, project_b]);
+    store
+        .sessions
+        .extend([open_dead, closed_history, open_other_project]);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    // Stored status stays `Exited` before the first poll so a pre-poll persist
+    // or directory reservation check never mistakes a finished tab for active.
+    assert_eq!(
+        relaunch_270_find(&app, open_dead_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(&app, other_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(
+        relaunch_270_find(&app, closed_id).status,
+        SessionStatus::Exited
+    );
+    assert!(app.exited_tabs_on_load.contains(&open_dead_id));
+    assert!(app.exited_tabs_on_load.contains(&other_id));
+    assert!(!app.exited_tabs_on_load.contains(&closed_id));
+
+    app.apply_session_poll(
+        vec![
+            (
+                open_dead_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+            (
+                other_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    for id in [open_dead_id, other_id] {
+        let s = relaunch_270_find(&app, id);
+        assert_eq!(s.agent, "terminal");
+        assert!(s.agent_command.is_empty());
+        assert_eq!(s.status, SessionStatus::Starting);
+        assert!(app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+    }
+    assert_eq!(
+        relaunch_270_find(&app, closed_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(app.notice, None);
+    assert!(
+        !app.background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "legacy Exited tab migration emitted a notification"
+    );
+
+    for id in [open_dead_id, other_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, R4 & R5: forced termination during an active run (`!first_look`)
+/// automatically restores a CLI with a saved transcript or a plain terminal,
+/// announces single and multiple restorations with the Japanese toast, refuses
+/// an immediate repeat crash within `AUTO_RESTORE_COOLDOWN`, and clears that
+/// cooldown when the person manually starts the session again.
+pub(crate) fn pane_288_forced_kill_mid_run_restores_cli_and_shell_with_cooldown() {
+    let mut fixture = relaunch_270_fixture("pane-288-forced-restore");
+    // All sessions are already past startup's first look.
+    fixture.app.relaunch_candidates.clear();
+    let codex_name = relaunch_270_find(&fixture.app, fixture.resumable)
+        .name
+        .clone();
+
+    // 1. Single forced kill (`SIGKILL` -> `Dead`, `None` -> `Lost`) mid-run.
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.resumable,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let resumed = relaunch_270_find(&fixture.app, fixture.resumable);
+    assert_eq!(resumed.status, SessionStatus::Starting);
+    assert_eq!(
+        resumed.agent_command,
+        CliProvider::Codex.native_resume_command(&fixture.resume_id)
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "強制終了されたセッションを自動で復元しました: {name}",
+                name = codex_name
+            )
+            .as_str()
+        )
+    );
+    assert!(fixture.app.brief_notice.is_some());
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.resumable),
+        Duration::from_secs(15),
+    );
+
+    // 2. Immediate repeat crash inside `AUTO_RESTORE_COOLDOWN` settles in `Failed`
+    //    instead of looping.
+    fixture
+        .app
+        .store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == fixture.resumable)
+        .unwrap()
+        .status = SessionStatus::Active;
+    fixture.app.notice = None;
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.resumable,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(137),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.resumable).status,
+        SessionStatus::Failed
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fixture.resumable)));
+    assert_eq!(fixture.app.notice, None);
+
+    // 3. Multiple sessions killed in one poll (`terminal` + `crashed`) show the
+    //    count toast, while `no_transcript` does not count or loop.
+    fixture.app.apply_session_poll(
+        vec![
+            (
+                fixture.terminal,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+            (
+                fixture.crashed,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                fixture.no_transcript,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "強制終了されたセッションを {count} 件自動で復元しました。",
+                count = 2
+            )
+            .as_str()
+        )
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.no_transcript).status,
+        SessionStatus::Lost
+    );
+    for id in [fixture.terminal, fixture.crashed] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+
+    // 4. Manual retry (`start_session`) clears the cooldown so a later mid-run
+    //    kill is eligible for auto-restore again.
+    fixture.app.start_session(fixture.terminal);
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(15),
+    );
+    fixture
+        .app
+        .store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == fixture.terminal)
+        .unwrap()
+        .status = SessionStatus::Active;
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.terminal,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 288, R6: when a quiet background launch (`LaunchFocus::Keep`)
+/// completes for a session whose terminal is currently on screen, Operon
+/// requests fresh terminal output right away without altering selection, page,
+/// focus, or notice; off-screen quiet launches do not spawn output captures.
+pub(crate) fn pane_288_quiet_launch_on_screen_requests_immediate_output() {
+    let has_tmux = tool_available("tmux");
+    let mut fixture = relaunch_270_fixture("pane-288-quiet-output");
+    let shown = fixture.terminal;
+    let hidden = fixture.alive;
+    let shown_tmux = relaunch_270_find(&fixture.app, shown).tmux_name.clone();
+    let hidden_tmux = relaunch_270_find(&fixture.app, hidden).tmux_name.clone();
+    if has_tmux {
+        let workdir = fixture.root.join("live-pane");
+        fs::create_dir_all(&workdir).unwrap();
+        start_tmux_agent_session(
+            &shown_tmux,
+            &workdir,
+            "printf 'quiet-shown-output-288\\n'; exec /bin/cat",
+            &[],
+        )
+        .unwrap();
+        start_tmux_agent_session(
+            &hidden_tmux,
+            &workdir,
+            "printf 'quiet-hidden-output-288\\n'; exec /bin/cat",
+            &[],
+        )
+        .unwrap();
+    }
+
+    fixture.app.page = Page::Sessions;
+    fixture.app.session_library_open = false;
+    fixture.app.workspace.open(WorkspaceTab::Session(shown));
+    fixture.app.workspace_initialized = true;
+    fixture.app.selected_session = Some(shown);
+    fixture.app.notice = Some("keep-notice".into());
+    fixture.app.terminal_focus_request = None;
+
+    // 1. Off-screen quiet launch (`hidden`) must not request `SessionOutput`.
+    fixture.app.quiet_launches.insert(hidden);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::SessionStart(hidden));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: hidden,
+            result: Ok(None),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionOutput(hidden),
+        Duration::from_secs(15),
+    );
+    fixture.app.process_background_results();
+    assert!(
+        !fixture.app.session_output.contains_key(&hidden)
+            && fixture.app.notice.as_deref() == Some("keep-notice"),
+        "off-screen quiet launch requested terminal output unnecessarily: output={:?}, notice={:?}",
+        fixture.app.session_output.get(&hidden),
+        fixture.app.notice
+    );
+
+    // 2. On-screen quiet launch (`shown`) requests immediate `SessionOutput`
+    //    without altering focus, page, or selection.
+    fixture.app.quiet_launches.insert(shown);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::SessionStart(shown));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: shown,
+            result: Ok(None),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionOutput(shown),
+        Duration::from_secs(15),
+    );
+    fixture.app.process_background_results();
+
+    if has_tmux {
+        let rendered = fixture
+            .app
+            .session_output
+            .get(&shown)
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            rendered.contains("quiet-shown-output-288"),
+            "visible quiet launch did not capture fresh terminal output, got: {rendered:?}"
+        );
+        assert_eq!(fixture.app.notice.as_deref(), Some("keep-notice"));
+    } else {
+        assert!(
+            fixture
+                .app
+                .notice
+                .as_deref()
+                .is_some_and(|n| n != "keep-notice"),
+            "visible quiet launch did not run SessionOutput capture when tmux is absent"
+        );
+    }
+    assert_eq!(fixture.app.terminal_focus_request, None);
+    assert_eq!(fixture.app.selected_session, Some(shown));
+    assert_eq!(fixture.app.page, Page::Sessions);
+    for id in [shown, hidden] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::NativeSessionResolution(id),
+            Duration::from_secs(15),
+        );
+    }
+    if has_tmux {
+        kill_tmux_session(&shown_tmux);
+        kill_tmux_session(&hidden_tmux);
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Pane288ModelState {
+    /// `(agent_kind, cancellable_or_dependent)`:
+    /// `agent_kind`: 0 = plain terminal, 1 = resumable codex, 2 = claude without id, 3 = run-script.
+    /// `blocked`: true when a queued child depends on this session.
+    config: Option<(u8, bool)>,
+    agent_is_terminal: bool,
+    status: u8,
+    cooldown: bool,
+    steps: u8,
+    violation: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Pane288ModelEvent {
+    Init(u8, bool),
+    /// `(obs_kind, stored)`:
+    /// `obs_kind`: 0 = Alive, 1 = Dead(0), 2 = Dead(1), 3 = Gone.
+    Poll(u8, bool),
+}
+
+#[test]
+/// Change 288, formal model check: walks every combination of session kind
+/// (plain terminal, resumable CLI, unresumable CLI, run script), dependency
+/// hold (`queued_dependency_count > 0` vs `0`), poll observation (`Alive`,
+/// `Dead(0)`, `Dead(1)`, `Gone`), and store-write outcome (`stored` true/false)
+/// across two consecutive live polls, verifying against the real
+/// `OperonApp::apply_session_poll` that:
+/// 1. Clean exit (`Dead(0)`) converts interactive non-dependent sessions into
+///    `agent == "terminal"` and starts a shell, while run scripts and dependency
+///    parents settle in `Exited`.
+/// 2. Forced death (`Dead(1)` / `Gone`) mid-run restores sessions with a
+///    `relaunch_kind` once and sets cooldown, refusing an immediate second
+///    automatic restore while cooldown holds.
+/// 3. Failed `persist()` rolls back all in-memory session mutations and leaves
+///    cooldown unspent.
+pub(crate) fn model_check_pane_288_poll_transitions_and_cooldown() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("model-pane-288");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let serial = std::cell::Cell::new(0usize);
+
+    let mut events = Vec::new();
+    for agent_kind in 0..4 {
+        for dependent in [false, true] {
+            events.push(Pane288ModelEvent::Init(agent_kind, dependent));
+        }
+    }
+    for obs in 0..4 {
+        for stored in [false, true] {
+            events.push(Pane288ModelEvent::Poll(obs, stored));
+        }
+    }
+
+    let initial = Pane288ModelState {
+        config: None,
+        agent_is_terminal: false,
+        status: 1, // Active
+        cooldown: false,
+        steps: 0,
+        violation: None,
+    };
+
+    let observations = [
+        TmuxObservation {
+            state: TmuxState::Alive,
+            exit_status: None,
+        },
+        TmuxObservation {
+            state: TmuxState::Dead,
+            exit_status: Some(0),
+        },
+        TmuxObservation {
+            state: TmuxState::Dead,
+            exit_status: Some(1),
+        },
+        TmuxObservation {
+            state: TmuxState::Gone,
+            exit_status: None,
+        },
+    ];
+
+    let step = |state: &Pane288ModelState, event: &Pane288ModelEvent| match (state.config, event) {
+        (None, Pane288ModelEvent::Init(agent_kind, dependent)) => Some(Pane288ModelState {
+            config: Some((*agent_kind, *dependent)),
+            agent_is_terminal: *agent_kind == 0,
+            status: 1,
+            cooldown: false,
+            steps: 0,
+            violation: None,
+        }),
+        (Some((agent_kind, dependent)), Pane288ModelEvent::Poll(obs_idx, stored))
+            if state.steps < 2 && state.violation.is_none() =>
+        {
+            serial.set(serial.get() + 1);
+            let n = serial.get();
+            let dir = root.join(format!("case-{n}"));
+            fs::create_dir_all(&dir).unwrap();
+            let project = relaunch_270_project(&dir);
+            let agent = if state.agent_is_terminal {
+                "terminal"
+            } else {
+                match agent_kind {
+                    0 => "terminal",
+                    1 => "codex",
+                    2 => "claude",
+                    _ => RUN_SCRIPT_AGENT,
+                }
+            };
+            let mut session = relaunch_270_session(
+                project.id,
+                agent,
+                r6_status(state.status),
+                (agent == "terminal").then_some(SessionOrigin::PlainTerminal),
+            );
+            session.worktree_path = Some(dir.join("gone"));
+            if agent == "codex" {
+                session.native_session_id = Some(Uuid::new_v4().to_string());
+                session.native_session_path = Some(transcript.clone());
+            } else if agent == RUN_SCRIPT_AGENT {
+                session.agent_command = "sh .operon/run.sh".into();
+            }
+            let id = session.id;
+            let mut store = Store::default();
+            store.projects.push(project.clone());
+            store.sessions.push(session);
+            if dependent {
+                let mut child =
+                    relaunch_270_session(project.id, "codex", SessionStatus::Queued, None);
+                child.depends_on = vec![id];
+                store.sessions.push(child);
+            }
+            let tools = ToolStatus {
+                tmux: true,
+                codex: true,
+                ..ToolStatus::default()
+            };
+            let mut app = OperonApp::from_state(dir.join("store.json"), store, tools, None);
+            app.relaunch_candidates.clear();
+            if state.cooldown {
+                // Seed an active cooldown via an initial forced restore before locking permissions.
+                let seed = relaunch_270_session(
+                    project.id,
+                    "terminal",
+                    SessionStatus::Active,
+                    Some(SessionOrigin::PlainTerminal),
+                );
+                let _ = seed;
+                // Record cooldown through a real forced-kill poll on a temporary unlocked store,
+                // then restore the state under test so we exercise the real cooldown map.
+                app.store.sessions[0].status = SessionStatus::Active;
+                app.apply_session_poll(
+                    vec![(
+                        id,
+                        TmuxObservation {
+                            state: TmuxState::Gone,
+                            exit_status: None,
+                        },
+                    )],
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                app.background_tasks
+                    .remove(&BackgroundKey::SessionStart(id));
+                app.quiet_launches.remove(&id);
+                app.store.sessions[0].status = r6_status(state.status);
+            }
+
+            let obs = observations[usize::from(*obs_idx)];
+            if !stored {
+                fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+            }
+            app.apply_session_poll(vec![(id, obs)], Vec::new(), Vec::new(), Vec::new());
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+            let launched = app
+                .background_tasks
+                .contains(&BackgroundKey::SessionStart(id));
+            let after = &app.store.sessions[0];
+            let pollable = matches!(state.status, 0 | 1 | 7);
+            let interactive = agent != RUN_SCRIPT_AGENT;
+            let can_relaunch = agent == "terminal" || agent == "codex";
+
+            let (want_launched, want_terminal, want_cooldown) = if !pollable {
+                (false, state.agent_is_terminal, state.cooldown)
+            } else {
+                match *obs_idx {
+                    0 => (false, state.agent_is_terminal, state.cooldown),
+                    1 => {
+                        if *stored && interactive && !dependent {
+                            (true, true, state.cooldown)
+                        } else {
+                            (false, state.agent_is_terminal, state.cooldown)
+                        }
+                    }
+                    _ => {
+                        if *stored && can_relaunch && !state.cooldown {
+                            (true, state.agent_is_terminal, true)
+                        } else {
+                            (false, state.agent_is_terminal, state.cooldown)
+                        }
+                    }
+                }
+            };
+
+            // If launched (`Starting`), simulate background launch completion to `Active`
+            // so the second step tests consecutive runtime behaviour cleanly.
+            let next_status = if launched { 1 } else { r6_index(&after.status) };
+            let violation = if launched != want_launched {
+                Some(format!(
+                    "agent={agent} dep={dependent} cooldown={} obs={obs_idx} stored={stored}: launched={launched}, want={want_launched}",
+                    state.cooldown
+                ))
+            } else if (after.agent == "terminal") != want_terminal {
+                Some(format!(
+                    "agent={agent} dep={dependent} obs={obs_idx} stored={stored}: after.agent={}, want_terminal={want_terminal}",
+                    after.agent
+                ))
+            } else {
+                None
+            };
+            fs::remove_dir_all(&dir).ok();
+            Some(Pane288ModelState {
+                config: state.config,
+                agent_is_terminal: want_terminal,
+                status: next_status,
+                cooldown: want_cooldown,
+                steps: state.steps + 1,
+                violation,
+            })
+        }
+        _ => None,
+    };
+
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        step,
+        |state| state.violation.clone().map_or(Ok(()), Err),
+        100_000,
+    );
+    fs::remove_dir_all(&root).ok();
+    assert!(
+        coverage.states > 60,
+        "unexpectedly small state space: {coverage:?}"
+    );
+}
+
+#[test]
+/// Change 288, F1: an in-flight `NativeSessionResolved` (either `Ok` or `Err`)
+/// completing after a CLI session has cleanly exited into `"terminal"` must not
+/// write stale `native_session_id` back onto the terminal record or overwrite
+/// `notice` with a resolution error.
+pub(crate) fn pane_288_f1_stale_native_resolution_after_shell_conversion_is_ignored() {
+    let root = temporary_directory("pane-288-f1-native-race");
+    let data_file = root.join("store.json");
+    let missing = root.join("gone");
+    let project = relaunch_270_project(&root);
+    let mut codex = relaunch_270_session(project.id, "codex", SessionStatus::Active, None);
+    codex.worktree_path = Some(missing);
+    let id = codex.id;
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(codex);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.relaunch_candidates.clear();
+    app.background_tasks
+        .insert(BackgroundKey::NativeSessionResolution(id));
+
+    app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(15),
+    );
+    app.notice = None;
+
+    // Late `Ok` from worker thread for the exited Codex turn.
+    app.background_sender
+        .send(BackgroundResult::NativeSessionResolved {
+            session_id: id,
+            result: Ok(CliSession {
+                provider: CliProvider::Codex,
+                native_id: Uuid::new_v4().to_string(),
+                id: Uuid::new_v4().to_string(),
+                title: None,
+                last_user_message: None,
+                branch: None,
+                updated_at: 1,
+                path: root.join("stale.jsonl"),
+            }),
+        })
+        .unwrap();
+    // Late `Err` from worker thread for the exited Codex turn.
+    app.background_sender
+        .send(BackgroundResult::NativeSessionResolved {
+            session_id: id,
+            result: Err("timed out".into()),
+        })
+        .unwrap();
+    app.process_background_results();
+
+    let after = relaunch_270_find(&app, id);
+    assert_eq!(after.agent, "terminal");
+    assert_eq!(after.native_session_id, None);
+    assert_eq!(after.native_session_path, None);
+    assert_eq!(app.notice, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F2: when a CLI session with a pre-allocated `native_session_id`
+/// crashes (`Failed`) before writing a transcript (`NativeResume::NoTranscript`),
+/// `relaunch_lost_session` returns `false`, so `"セッションが失敗しました: {name}"`
+/// must still be dispatched when notifications are enabled.
+pub(crate) fn pane_288_f2_failed_unresumable_cli_still_sends_failure_notification() {
+    let mut fixture = relaunch_270_fixture("pane-288-f2-fail-notify");
+    fixture.app.relaunch_candidates.clear();
+    fixture.app.store.notifications_enabled = true;
+    fixture.app.background_tasks.clear();
+
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.no_transcript,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.no_transcript).status,
+        SessionStatus::Failed
+    );
+    assert!(
+        fixture
+            .app
+            .background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "failure notification was suppressed even though auto-restore could not resume"
+    );
+    // Drain spawned notification task cleanly.
+    let notif_keys = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|key| matches!(key, BackgroundKey::Notification(_)))
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in notif_keys {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(15));
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 288, F3: `reopen_exited_workspace_tabs_on_load` keeps `Exited` on disk
+/// if `persist()` runs before the first poll (never turning a finished CLI tab
+/// into a `relaunch_candidates` resume on a subsequent restart), does not
+/// reserve its directory as active, and leaves the parent `Exited` if a child
+/// session is queued onto it before the first poll.
+pub(crate) fn pane_288_f3_exited_tab_pre_poll_persist_and_dependency_stay_exited() {
+    let root = temporary_directory("pane-288-f3-startup-exited");
+    let data_file = root.join("store.json");
+    let transcript = root.join("claude.jsonl");
+    fs::write(&transcript, "{\"type\":\"user\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+    let mut exited_cli = relaunch_270_session(project.id, "claude", SessionStatus::Exited, None);
+    exited_cli.worktree_path = Some(root.join("gone"));
+    exited_cli.native_session_id = Some(Uuid::new_v4().to_string());
+    exited_cli.native_session_path = Some(transcript);
+    let exited_id = exited_cli.id;
+
+    let mut tabs = WorkspaceTabs::default();
+    tabs.open(WorkspaceTab::Session(exited_id));
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(exited_id))],
+            placed: vec![exited_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project.clone());
+    store.sessions.push(exited_cli);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file.clone(), store, tools.clone(), None);
+    assert!(
+        !worktree_has_reserved_session(&app.store.sessions, &root.join("gone")),
+        "Exited open tab falsely reserved its worktree before first poll"
+    );
+
+    // Persisting before the first poll writes `Exited`, so the next launch still
+    // treats it as an `Exited` open tab rather than a crashed running CLI.
+    assert!(app.persist());
+    let reloaded_store = load_store_safely(&data_file).store;
+    let mut app2 = OperonApp::from_state(data_file, reloaded_store, tools, None);
+    assert!(!app2.relaunch_candidates.contains(&exited_id));
+    assert!(app2.exited_tabs_on_load.contains(&exited_id));
+
+    // Queueing a dependent child before the first poll prevents shell conversion
+    // so the child can become ready.
+    let mut child = relaunch_270_session(project.id, "codex", SessionStatus::Queued, None);
+    child.depends_on = vec![exited_id];
+    let child_id = child.id;
+    app2.store.sessions.push(child);
+    app2.apply_session_poll(
+        vec![(
+            exited_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&app2, exited_id).status,
+        SessionStatus::Exited
+    );
+    assert_eq!(relaunch_270_find(&app2, exited_id).agent, "claude");
+    assert_eq!(
+        ready_queued_session_ids(&app2.store.sessions),
+        vec![child_id]
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F4: if launching the replacement shell is refused (for example
+/// while a git worktree mutation is running), `reopen_exited_session_as_shell`
+/// rolls back the session's CLI agent, command, goal, and `native_session_id`
+/// on both memory and disk; and a deleted account folder bound to the finished
+/// CLI does not block opening a plain terminal shell.
+pub(crate) fn pane_288_f4_refused_shell_launch_preserves_cli_metadata_and_ignores_stale_account() {
+    let root = temporary_directory("pane-288-f4-rollback");
+    let data_file = root.join("store.json");
+    let project = relaunch_270_project(&root);
+    let mut claude = relaunch_270_session(project.id, "claude", SessionStatus::Exited, None);
+    claude.worktree_path = Some(root.join("gone"));
+    claude.agent_command = "claude --resume".into();
+    claude.goal = "finish audit".into();
+    let conv_id = Uuid::new_v4().to_string();
+    claude.native_session_id = Some(conv_id.clone());
+    let id = claude.id;
+
+    let mut store = Store::default();
+    store.projects.push(project.clone());
+    store.sessions.push(claude);
+    let tools = ToolStatus {
+        tmux: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file.clone(), store, tools, None);
+    assert!(app.persist());
+
+    // 1. Busy worktree refuses `launch_session_record` -> full CLI metadata survives.
+    app.background_tasks
+        .insert(BackgroundKey::WorktreeMutation(project.id));
+    assert!(!app.reopen_exited_session_as_shell(id));
+    let kept = relaunch_270_find(&app, id);
+    assert_eq!(kept.agent, "claude");
+    assert_eq!(kept.goal, "finish audit");
+    assert_eq!(kept.native_session_id.as_deref(), Some(conv_id.as_str()));
+    let on_disk = load_store_safely(&data_file).store;
+    assert_eq!(on_disk.sessions[0].agent, "claude");
+    assert_eq!(
+        on_disk.sessions[0].native_session_id.as_deref(),
+        Some(conv_id.as_str())
+    );
+    app.background_tasks
+        .remove(&BackgroundKey::WorktreeMutation(project.id));
+
+    // 2. Deleted account folder bound to the former Claude session does not
+    //    prevent opening a plain login shell once worktree mutation clears.
+    let acct_dir = root.join("deleted-claude-acct");
+    fs::create_dir_all(&acct_dir).unwrap();
+    let acct_id = register_account(&mut app.accounts, "claude", "work", &acct_dir).unwrap();
+    app.accounts.remember_session(id, Some(acct_id));
+    fs::remove_dir_all(&acct_dir).unwrap();
+
+    assert!(app.reopen_exited_session_as_shell(id));
+    assert_eq!(relaunch_270_find(&app, id).agent, "terminal");
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F5: respawning a plain login shell onto a `Dead` pane unsets
+/// stale managed hook and account environment variables that are no longer
+/// present in the new launch's `environment`.
+pub(crate) fn pane_288_f5_dead_pane_respawn_unsets_removed_hook_and_account_vars() {
+    let sample_name = "operon-pane288f5";
+    let env_steps = tmux_session_environment_steps(
+        sample_name,
+        &[(CLAUDE_ACCOUNT_ENV, "/tmp/new-acct".to_owned())],
+    );
+    for removed in [
+        HOOK_SESSION_ENV,
+        HOOK_LAUNCH_ENV,
+        HOOK_ENDPOINT_ENV,
+        HOOK_SOCKET_ENV,
+        HOOK_EXECUTABLE_ENV,
+        CODEX_ACCOUNT_ENV,
+    ] {
+        assert!(
+            env_steps.contains(&TmuxStep {
+                args: ["set-environment", "-u", "-t", sample_name, removed]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                required: true,
+            }),
+            "missing `set-environment -u` for removed managed var {removed}"
+        );
+    }
+    assert!(
+        !env_steps.iter().any(|step| {
+            step.args
+                == [
+                    "set-environment",
+                    "-u",
+                    "-t",
+                    sample_name,
+                    CLAUDE_ACCOUNT_ENV,
+                ]
+                .map(std::ffi::OsString::from)
+        }),
+        "must not unset managed var that is present in the new environment"
+    );
+    assert!(
+        env_steps.contains(&TmuxStep {
+            args: [
+                "set-environment",
+                "-t",
+                sample_name,
+                CLAUDE_ACCOUNT_ENV,
+                "/tmp/new-acct",
+            ]
+            .into_iter()
+            .map(std::ffi::OsString::from)
+            .collect(),
+            required: true,
+        }),
+        "missing `set-environment` for present managed var"
+    );
+
+    if !tool_available("tmux") {
+        return;
+    }
+    let root = temporary_directory("pane-288-f5-unset-env");
+    let project = relaunch_270_project(&root);
+    fs::create_dir_all(&project.path).unwrap();
+    let mut session = relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    session.worktree_path = Some(project.path.clone());
+    let name = session.tmux_name.clone();
+
+    start_tmux_agent_session(
+        &name,
+        &project.path,
+        "sleep 0.1; exit 0",
+        &[
+            (HOOK_SESSION_ENV, session.id.to_string()),
+            (HOOK_LAUNCH_ENV, "tok-1".into()),
+            (CLAUDE_ACCOUNT_ENV, "/tmp/old-acct".into()),
+        ],
+    )
+    .unwrap();
+    for _ in 0..100 {
+        if tmux_observation(&name).state == TmuxState::Dead {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    // Reopen as plain terminal with hooks & account off (`&[]`).
+    reopen_or_start_plain_terminal(&name, &project.path, &[]).unwrap();
+    let mut send = tmux_command();
+    send.args([
+        "send-keys",
+        "-t",
+        &name,
+        "printf 'env-check-%s:<%s><%s><%s>\\n' 288 \"$OPERON_SESSION\" \"$OPERON_LAUNCH_TOKEN\" \"$CLAUDE_CONFIG_DIR\"",
+        "Enter",
+    ]);
+    run_command_with_timeout(&mut send, Duration::from_secs(5)).unwrap();
+    let mut screen = String::new();
+    for _ in 0..100 {
+        screen = tmux_capture(&name).unwrap_or_default();
+        if screen.contains("env-check-288:") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        screen.contains("env-check-288:<><><>"),
+        "stale managed hook/account env leaked into respawned shell: {screen:?}"
+    );
+    kill_tmux_session(&name);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 288, F6: when the same poll both raises a persistent error banner
+/// (such as a non-zero setup completion or a resume refusal) and restores
+/// another force-killed session, the restoration toast must not clobber the
+/// persistent error banner.
+pub(crate) fn pane_288_f6_persistent_poll_error_is_not_clobbered_by_restore_toast() {
+    let mut fixture = relaunch_270_fixture("pane-288-f6-notice-priority");
+    fixture.app.relaunch_candidates.clear();
+    let setup = relaunch_270_session(
+        fixture.app.store.projects[0].id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    let setup_id = setup.id;
+    fixture.app.store.sessions.push(setup);
+    fixture.app.setup_sessions.insert(setup_id);
+
+    fixture.app.apply_session_poll(
+        vec![
+            (
+                setup_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(2),
+                },
+            ),
+            (
+                fixture.terminal,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some(
+            tf!(
+                "セットアップが終了コード {p0} で終わりました。セッションを開いて確認してください。",
+                p0 = 2
+            )
+            .as_str()
+        )
+    );
+    assert!(
+        fixture.app.brief_notice.is_none(),
+        "persistent setup failure notice was turned into an auto-expiring toast"
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+/// Change 288, F7: if an `exited_tabs_on_load` session is manually restarted or
+/// has its tab closed before the in-flight startup `SessionPoll` returns, the
+/// stale `Dead`/`Gone` observation drops out of `exited_tabs_on_load` without
+/// converting the restarted CLI to `"terminal"` or spawning an orphan shell for
+/// the closed tab.
+pub(crate) fn pane_288_f7_stale_exited_tab_poll_skips_restarted_or_closed_tabs() {
+    let root = temporary_directory("pane-288-f7-stale-poll");
+    let data_file = root.join("store.json");
+    let project = relaunch_270_project(&root);
+    let make = |agent: &str| {
+        let mut s = relaunch_270_session(project.id, agent, SessionStatus::Exited, None);
+        s.worktree_path = Some(root.join("gone"));
+        s.agent_command = format!("{agent} --flag");
+        s
+    };
+    let restarted = make("claude");
+    let closed = make("gemini");
+    let (restarted_id, closed_id) = (restarted.id, closed.id);
+
+    let mut tabs = WorkspaceTabs::default();
+    tabs.open(WorkspaceTab::Session(restarted_id));
+    tabs.open(WorkspaceTab::Session(closed_id));
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(restarted_id))],
+            placed: vec![restarted_id, closed_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.extend([restarted, closed]);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    assert!(app.exited_tabs_on_load.contains(&restarted_id));
+    assert!(app.exited_tabs_on_load.contains(&closed_id));
+
+    // User manually restarts `restarted` (now `Active` as `"claude"`) and closes `closed`'s tab
+    // while the startup poll is still in flight.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == restarted_id)
+        .unwrap()
+        .status = SessionStatus::Active;
+    app.close_workspace_tab(&WorkspaceTab::Session(closed_id));
+
+    app.apply_session_poll(
+        vec![
+            (
+                restarted_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+            (
+                closed_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let after_restarted = relaunch_270_find(&app, restarted_id);
+    assert_eq!(after_restarted.agent, "claude");
+    assert_eq!(after_restarted.status, SessionStatus::Active);
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(restarted_id)));
+
+    let after_closed = relaunch_270_find(&app, closed_id);
+    assert_eq!(after_closed.agent, "gemini");
+    assert_eq!(after_closed.status, SessionStatus::Exited);
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(closed_id)));
+    assert!(app.exited_tabs_on_load.is_empty());
+    fs::remove_dir_all(&root).ok();
+}
+
+// ── Change 291: retire 終了, mid-run auto-restore, and clean-exit tab close ──
+
+#[test]
+fn status_291_groups_are_three_and_done_stopped_avoid_finished_word() {
+    assert_eq!(
+        SessionStatusGroup::GROUPS,
+        [
+            SessionStatusGroup::NeedsYou,
+            SessionStatusGroup::Busy,
+            SessionStatusGroup::Free,
+        ]
+    );
+    assert_eq!(SessionStatusKind::Done.group(), None);
+    assert_eq!(SessionStatusKind::Stopped.group(), None);
+    assert_eq!(
+        SessionStatusKind::Failed.group(),
+        Some(SessionStatusGroup::NeedsYou)
+    );
+    assert_eq!(
+        SessionStatusKind::Lost.group(),
+        Some(SessionStatusGroup::NeedsYou)
+    );
+    assert_eq!(SessionStatusKind::Done.label(), "正常終了");
+    assert_eq!(SessionStatusKind::Stopped.label(), "停止済み");
+    assert_eq!(
+        SessionStatusGroup::NeedsYou.hint_id(),
+        "回答待ち・異常終了・前提が壊れて止まっているセッション"
+    );
+
+    let done_session = test_session(Uuid::new_v4(), SessionStatus::Exited);
+    let done_view = session_status_view(
+        std::slice::from_ref(&done_session),
+        &done_session,
+        false,
+        None,
+    );
+    assert_eq!(done_view.label, tr("正常終了"));
+    assert_eq!(done_view.hint, tr("ターミナルは正常に終了しました"));
+
+    let stopped_session = test_session(Uuid::new_v4(), SessionStatus::Cancelled);
+    let stopped_view = session_status_view(
+        std::slice::from_ref(&stopped_session),
+        &stopped_session,
+        false,
+        None,
+    );
+    assert_eq!(stopped_view.label, tr("停止済み"));
+    assert_eq!(stopped_view.hint, tr("停止操作による終了"));
+
+    // Home draws only the three actionable tiles and never 終了.
+    let (root, mut app, _) = sidebar_252_fixture("status-291-groups-ui");
+    app.page = Page::Home;
+    let ctx = egui::Context::default();
+    let home = draw_home(&mut app, &ctx);
+    for group in SessionStatusGroup::GROUPS {
+        assert!(
+            drawn_text_rect(&home, |text| {
+                text == format!("{}  {}", group.icon(), tr(group.message_id()))
+            })
+            .is_some(),
+            "Home is missing {:?} tile",
+            group
+        );
+    }
+    assert!(
+        drawn_text_rect(&home, |text| text.contains("終了")
+            && !text.contains("正常終了"))
+        .is_none(),
+        "Home still draws a 終了 tile"
+    );
+
+    // History chip bar draws すべて plus the three group chips and never 終了.
+    let history_texts = session_tabs_texts(&mut app);
+    assert!(history_texts.iter().any(|t| t.starts_with("すべて ")));
+    for word in ["要対応", "実行中", "アイドル"] {
+        assert!(
+            history_texts
+                .iter()
+                .any(|t| t == word || t.starts_with(&format!("{word} "))),
+            "History chip bar missing {word}: {history_texts:?}"
+        );
+    }
+    assert!(
+        !history_texts
+            .iter()
+            .any(|t| t == "終了" || t.starts_with("終了 ")),
+        "History chip bar still draws 終了: {history_texts:?}"
+    );
+
+    // Session sidebar responsive geometry across wide (3-col), default 268px (2+1 full-width), and narrow 180px (1-col).
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+
+    // 1) Wide sidebar (400px -> 3 equal tiles on 1 row)
+    app.dock.sizes[DockEdge::Left.index()] = 400.0;
+    app.apply_appearance(&ctx);
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let wide_out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let wide_right = project_column_right(&app);
+    let wide_tiles = sidebar_252_tiles(&wide_out, wide_right);
+    assert_eq!(wide_tiles.len(), 3);
+    assert!(
+        (wide_tiles[0].center().y - wide_tiles[1].center().y).abs() < 1.0
+            && (wide_tiles[1].center().y - wide_tiles[2].center().y).abs() < 1.0
+            && wide_tiles[1].left() > wide_tiles[0].right()
+            && wide_tiles[2].left() > wide_tiles[1].right(),
+        "wide sidebar should place all 3 tiles on one row: {wide_tiles:?}"
+    );
+
+    // 2) Default 268px sidebar -> row 1 has 2 tiles, row 2 has アイドル spanning the full row width (count near right edge)
+    app.dock.sizes[DockEdge::Left.index()] = 268.0;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let mid_out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let mid_right = project_column_right(&app);
+    assert!(!sidebar_252_in_column(&mid_out, mid_right, "終了"));
+    let mid_tiles = sidebar_252_tiles(&mid_out, mid_right);
+    assert!(
+        (mid_tiles[0].center().y - mid_tiles[1].center().y).abs() < 1.0
+            && mid_tiles[2].top() > mid_tiles[0].bottom(),
+        "default 268px sidebar should draw 2 tiles on row 1 and 1 tile on row 2: {mid_tiles:?}"
+    );
+    let idle_count_right = drawn_text_rects(&mid_out, |text| text == "0")
+        .into_iter()
+        .filter(|r| (r.center().y - mid_tiles[2].center().y).abs() < 2.0 && r.right() < mid_right)
+        .map(|r| r.right())
+        .fold(0.0_f32, f32::max);
+    assert!(
+        idle_count_right > (mid_tiles[1].left() + mid_right) * 0.5,
+        "row 2 アイドル tile must span the full column width rather than leaving a half-row hole (idle_count_right={idle_count_right}, col_mid={}, right={mid_right})",
+        (mid_tiles[1].left() + mid_right) * 0.5
+    );
+
+    // 3) Narrow 180px minimum sidebar -> 3 stacked rows
+    app.dock.sizes[DockEdge::Left.index()] = SIDEBAR_MIN_W;
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let narrow_out = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let narrow_right = project_column_right(&app);
+    let narrow_tiles = sidebar_252_tiles(&narrow_out, narrow_right);
+    assert!(
+        narrow_tiles[1].top() > narrow_tiles[0].bottom()
+            && narrow_tiles[2].top() > narrow_tiles[1].bottom(),
+        "minimum-width sidebar should stack 3 tiles vertically: {narrow_tiles:?}"
+    );
+
+    fs::remove_dir_all(root).ok();
+}
+
+fn relaunch_270_find_mut(app: &mut OperonApp, id: Uuid) -> &mut Session {
+    app.store.sessions.iter_mut().find(|s| s.id == id).unwrap()
+}
+
+#[test]
+fn status_291_midrun_crash_auto_restores_in_same_tab_with_toast() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut fixture = relaunch_270_fixture("status-291-midrun-restore");
+    // Simulate mid-run: startup first-look candidates are already spent.
+    fixture.app.relaunch_candidates.clear();
+    fixture.app.store.notifications_enabled = true;
+    fixture.app.page = Page::Sessions;
+    fixture.app.workspace_project = Some(fixture.app.store.projects[0].id);
+    fixture
+        .app
+        .workspace
+        .open(WorkspaceTab::Session(fixture.resumable));
+    fixture
+        .app
+        .workspace
+        .open(WorkspaceTab::Session(fixture.terminal));
+    fixture.app.selected_session = Some(fixture.alive);
+
+    // Mid-run crash of both a CLI with saved conversation (`Failed`) and a plain terminal (`Lost`).
+    fixture.app.apply_session_poll(
+        vec![
+            (
+                fixture.resumable,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                fixture.terminal,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.resumable).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    assert!(fixture.app.session_has_a_tab(fixture.resumable));
+    assert!(fixture.app.session_has_a_tab(fixture.terminal));
+    assert_eq!(
+        fixture.app.selected_session,
+        Some(fixture.alive),
+        "mid-run auto-restore uses LaunchFocus::Keep without stealing focus"
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some("強制終了されたセッションを 2 件自動で復元しました。")
+    );
+    assert!(
+        !fixture
+            .app
+            .background_tasks
+            .iter()
+            .any(|key| matches!(key, BackgroundKey::Notification(_))),
+        "transient crash undone by auto-restore must not send a failure notification"
+    );
+
+    for id in [fixture.resumable, fixture.terminal] {
+        wait_for_background_task(
+            &mut fixture.app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(30),
+        );
+    }
+
+    // Setup sessions must never auto-restore when they exit non-zero.
+    let setup_id = fixture.crashed;
+    fixture.app.setup_sessions.insert(setup_id);
+    fixture.app.apply_session_poll(
+        vec![(
+            setup_id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(2),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, setup_id).status,
+        SessionStatus::Failed
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(setup_id)));
+
+    // Drain any notification task spawned for setup_id.
+    let notif_keys: Vec<_> = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|k| matches!(k, BackgroundKey::Notification(_)))
+        .cloned()
+        .collect();
+    for key in notif_keys {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(10));
+    }
+
+    // TerminalResized observing TmuxState::Gone on an Unknown session:
+    // 1) When persist() fails (read-only directory), keep candidate & store_retry_pending notice and do NOT relaunch.
+    let resize_id = fixture.alive;
+    relaunch_270_find_mut(&mut fixture.app, resize_id).status = SessionStatus::Unknown;
+    fixture.app.relaunch_candidates.insert(resize_id);
+    let size = (80, 24);
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::TerminalResize(resize_id));
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o555)).unwrap();
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id: resize_id,
+            size,
+            result: Err("can't find session: gone".into()),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+    fs::set_permissions(&fixture.root, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(fixture.app.store_retry_pending);
+    assert!(
+        fixture
+            .app
+            .notice
+            .as_deref()
+            .is_some_and(|n| n.contains("保存できませんでした")),
+        "store-retry notice must not be clobbered on failed persist: {:?}",
+        fixture.app.notice
+    );
+    assert!(
+        fixture.app.relaunch_candidates.contains(&resize_id),
+        "failed persist must leave relaunch_candidates unspent"
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(resize_id)));
+
+    // 2) When persist() succeeds mid-run on an Unknown session, TerminalResized Gone auto-restores in place.
+    fixture.app.store_retry_pending = false;
+    fixture.app.relaunch_candidates.remove(&resize_id);
+    relaunch_270_find_mut(&mut fixture.app, resize_id).status = SessionStatus::Unknown;
+    fixture
+        .app
+        .background_tasks
+        .insert(BackgroundKey::TerminalResize(resize_id));
+    fixture
+        .app
+        .background_sender
+        .send(BackgroundResult::TerminalResized {
+            session_id: resize_id,
+            size,
+            result: Err("no server running on /private/tmp/tmux".into()),
+        })
+        .unwrap();
+    fixture.app.process_background_results();
+
+    assert_eq!(
+        relaunch_270_find(&fixture.app, resize_id).status,
+        SessionStatus::Starting
+    );
+    let resize_name = relaunch_270_find(&fixture.app, resize_id).name.clone();
+    assert_eq!(
+        fixture.app.notice,
+        Some(format!(
+            "強制終了されたセッションを自動で復元しました: {resize_name}"
+        ))
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(resize_id),
+        Duration::from_secs(30),
+    );
+
+    // 3) Declined restore (`NoTranscript`) must NOT emit a lying "自動で復元しました" toast.
+    fixture.app.notice = None;
+    fixture.app.brief_notice = None;
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.no_transcript,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.no_transcript).status,
+        SessionStatus::Failed
+    );
+    assert_eq!(
+        fixture.app.notice, None,
+        "declined mid-run restore must never claim a session was restored"
+    );
+    let notif_keys: Vec<_> = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|k| matches!(k, BackgroundKey::Notification(_)))
+        .cloned()
+        .collect();
+    for key in notif_keys {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(10));
+    }
+
+    // 4) An active `store_retry_pending` durability warning in `notice` must not be
+    //    clobbered by `notice_briefly` when another session auto-restores.
+    fixture.app.clear_auto_restore_cooldown(fixture.terminal);
+    relaunch_270_find_mut(&mut fixture.app, fixture.terminal).status = SessionStatus::Active;
+    fixture.app.store_retry_pending = true;
+    fixture.app.brief_notice = None;
+    fixture.app.notice = Some("キャンセル復旧用メタデータが保留中です。".into());
+    fixture.app.apply_session_poll(
+        vec![(
+            fixture.terminal,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, fixture.terminal).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(
+        fixture.app.notice.as_deref(),
+        Some("キャンセル復旧用メタデータが保留中です。"),
+        "transient restore toast must not overwrite an active store_retry_pending notice"
+    );
+    assert!(!notice_is_brief(
+        &fixture.app.notice,
+        &fixture.app.brief_notice
+    ));
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(fixture.terminal),
+        Duration::from_secs(30),
+    );
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+fn status_291_auto_restore_cooldown_stops_crash_loop_until_manual_retry() {
+    let mut fixture = relaunch_270_fixture("status-291-cooldown");
+    fixture.app.relaunch_candidates.clear();
+    let id = fixture.terminal;
+    fixture.app.workspace.open(WorkspaceTab::Session(id));
+
+    // First crash -> auto-restores and records cooldown timestamp.
+    fixture.app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(id)));
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+
+    // Simulate launch having come up Active, then crashing again immediately (< 15s).
+    relaunch_270_find_mut(&mut fixture.app, id).status = SessionStatus::Active;
+    fixture.app.notice = None;
+    fixture.app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, id).status,
+        SessionStatus::Failed,
+        "repeat crash inside 15s cooldown must stay Failed instead of looping"
+    );
+    assert!(!fixture
+        .app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(id)));
+    assert_eq!(
+        fixture.app.notice, None,
+        "cooldown-suppressed crash must not emit a restore toast"
+    );
+    assert!(
+        fixture.app.session_has_a_tab(id),
+        "failed session keeps its tab open so error output can be read"
+    );
+
+    // Once AUTO_RESTORE_COOLDOWN_SECONDS elapses, automatic restore works again.
+    fixture.app.last_auto_restore.insert(
+        id,
+        Instant::now() - Duration::from_secs(AUTO_RESTORE_COOLDOWN_SECONDS),
+    );
+    relaunch_270_find_mut(&mut fixture.app, id).status = SessionStatus::Active;
+    fixture.app.apply_session_poll(
+        vec![(
+            id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&fixture.app, id).status,
+        SessionStatus::Starting,
+        "crash after cooldown window elapses auto-restores again"
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+
+    // Manual retry (`start_session` and `resume_managed_native_session`) clears the cooldown immediately.
+    assert!(fixture.app.last_auto_restore.contains_key(&id));
+    fixture.app.start_session(id);
+    assert!(
+        !fixture.app.last_auto_restore.contains_key(&id),
+        "manual start_session clears auto-restore cooldown"
+    );
+    wait_for_background_task(
+        &mut fixture.app,
+        &BackgroundKey::SessionStart(id),
+        Duration::from_secs(30),
+    );
+
+    let resumable_id = fixture.resumable;
+    relaunch_270_find_mut(&mut fixture.app, resumable_id).status = SessionStatus::Failed;
+    fixture
+        .app
+        .last_auto_restore
+        .insert(resumable_id, Instant::now());
+    fixture.app.resume_managed_native_session(resumable_id);
+    assert!(
+        !fixture.app.last_auto_restore.contains_key(&resumable_id),
+        "manual resume_managed_native_session clears auto-restore cooldown"
+    );
+    let spawned: Vec<_> = fixture
+        .app
+        .background_tasks
+        .iter()
+        .filter(|k| matches!(k, BackgroundKey::SessionStart(_)))
+        .cloned()
+        .collect();
+    for key in spawned {
+        wait_for_background_task(&mut fixture.app, &key, Duration::from_secs(30));
+    }
+    fs::remove_dir_all(&fixture.root).ok();
+}
+
+#[test]
+fn status_291_unrestorable_failure_stays_in_needs_you_only_while_tab_open_or_unread() {
+    let root = temporary_directory("status-291-unrestorable-needs-you");
+    let (mut app, open_failed, historical_lost) = app_with_two_sessions(&root);
+    app.relaunch_candidates.clear();
+    let project = app.store.projects[0].id;
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+    app.workspace_project = Some(project);
+    app.workspace.open(WorkspaceTab::Session(open_failed));
+    app.select_session(open_failed);
+
+    // `historical_lost` has no tab and is already read; `open_failed` crashes with no native_session_id.
+    app.store.sessions[1].status = SessionStatus::Lost;
+    assert!(!app.session_has_a_tab(historical_lost));
+    assert!(!app.is_session_unread(historical_lost));
+
+    app.apply_session_poll(
+        vec![(
+            open_failed,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(1),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(app.store.sessions[0].status, SessionStatus::Failed);
+    assert!(app.session_has_a_tab(open_failed));
+
+    // Only the open-tab failure counts under 要対応; the closed historical Lost session does not.
+    let counts = app.status_group_counts();
+    assert_eq!(counts[SessionStatusGroup::NeedsYou.index()], 1);
+    assert_eq!(app.attention_count(), 1);
+    app.track_attention(Instant::now());
+    assert_eq!(app.attention_order, vec![open_failed]);
+
+    // Closing the failed session's tab (when already read) retires it from 要対応 while keeping it in History (`すべて`).
+    app.select_session(open_failed);
+    assert!(!app.is_session_unread(open_failed));
+    app.close_session_tab(open_failed);
+    assert!(!app.session_has_a_tab(open_failed));
+    assert_eq!(
+        app.status_group_counts()[SessionStatusGroup::NeedsYou.index()],
+        0
+    );
+    assert_eq!(app.attention_count(), 0);
+    app.track_attention(Instant::now());
+    assert!(app.attention_order.is_empty());
+
+    // If an unrestorable failure finished off-screen and is still unread, it stays in 要対応 until read.
+    app.unread_sessions.insert(open_failed);
+    assert_eq!(
+        app.status_group_counts()[SessionStatusGroup::NeedsYou.index()],
+        1
+    );
+    app.unread_sessions.remove(&open_failed);
+
+    // Both closed failures remain visible in History when `すべて` is active (`status_filter == [false; 3]`).
+    app.clear_status_filter();
+    assert!(app.session_matches_status_filter(&app.store.sessions[0]));
+    assert!(app.session_matches_status_filter(&app.store.sessions[1]));
+
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn status_291_clean_exit_and_stop_close_unpinned_tab_but_keep_pinned_and_history_open() {
+    let root = temporary_directory("status-291-clean-exit-close");
+    let names = ["clean", "neighbour", "pinned", "stopped", "queued"];
+    let (mut app, project, ids) = session_285_app(&root, &names);
+    let (clean, neighbour, pinned, stopped, queued) = (ids[0], ids[1], ids[2], ids[3], ids[4]);
+    app.relaunch_candidates.clear();
+    app.store.sessions[4].status = SessionStatus::Queued;
+    let ctx = egui::Context::default();
+    session_285_frame(&mut app, &ctx);
+
+    // Pin `pinned` so clean exit leaves it open without a refusal notice.
+    app.toggle_session_pin(pinned);
+    app.notice = None;
+
+    // 1) Off-screen clean exit (`Page::Home`) closes unpinned `clean`, records it in `closed_tabs`,
+    //    keeps `clean`'s unread mark, and preserves unseen `neighbour`'s unread mark!
+    app.page = Page::Home;
+    app.unread_sessions.insert(clean);
+    app.unread_sessions.insert(neighbour);
+    app.unread_hold = Some(neighbour);
+    app.apply_session_poll(
+        vec![
+            (
+                clean,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+            (
+                pinned,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(0),
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(
+        !app.session_has_a_tab(clean),
+        "unpinned clean exit closes its tab"
+    );
+    assert!(
+        app.closed_tabs.contains(&WorkspaceTab::Session(clean)),
+        "auto-closed tab is remembered for ⇧⌘T"
+    );
+    assert!(
+        app.is_session_unread(clean),
+        "clean exit off-screen keeps its unread mark until viewed"
+    );
+    assert!(
+        app.is_session_unread(neighbour),
+        "off-screen auto-close must not clear an unseen neighbour tab's unread mark"
+    );
+    assert!(
+        app.session_has_a_tab(pinned),
+        "pinned session tab stays open on clean exit"
+    );
+    assert_eq!(
+        app.notice, None,
+        "pinned auto-close skip must not flash the manual-close refusal notice"
+    );
+
+    // 2) Explicit cancellation (`SessionStopped` and `cancel_queued_session`) closes unpinned tab AND clears unread/hold.
+    app.unread_sessions.insert(stopped);
+    app.unread_hold = Some(stopped);
+    app.background_tasks
+        .insert(BackgroundKey::SessionStop(stopped));
+    app.background_sender
+        .send(BackgroundResult::SessionStopped {
+            session_id: stopped,
+            result: Ok(()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(!app.session_has_a_tab(stopped));
+    assert!(
+        !app.is_session_unread(stopped) && app.unread_hold != Some(stopped),
+        "explicit stop clears unread_sessions and unread_hold so stopped session leaves 要対応"
+    );
+
+    app.workspace.open(WorkspaceTab::Session(queued));
+    app.unread_sessions.insert(queued);
+    app.cancel_queued_session(queued);
+    assert!(!app.session_has_a_tab(queued));
+    assert!(!app.is_session_unread(queued));
+
+    // 3) Visible workspace where only a Document tab remains clears `selected_session` to None.
+    app.toggle_session_pin(pinned);
+    app.close_workspace_tab(&WorkspaceTab::Session(pinned));
+    let doc = DocumentId {
+        project,
+        root: root.clone(),
+        path: root.join("README.md"),
+    };
+    app.page = Page::Sessions;
+    app.session_library_open = false;
+    app.workspace.open(WorkspaceTab::Document(doc));
+    app.workspace.open(WorkspaceTab::Session(neighbour));
+    app.select_session(neighbour);
+    assert_eq!(app.selected_session, Some(neighbour));
+    app.apply_session_poll(
+        vec![(
+            neighbour,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(!app.session_has_a_tab(neighbour));
+    assert_eq!(
+        app.selected_session, None,
+        "when only a Document tab remains active, selected_session must clear"
+    );
+
+    // 4) Background project workspace tab closes and clears its stored `selected` session ID.
+    let other_project = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other_project,
+        path: root.join("other"),
+        name: "other".into(),
+        added_at: 2_000,
+    });
+    let mut away = test_session(other_project, SessionStatus::Active);
+    let away_id = away.id;
+    away.name = "away".into();
+    app.store.sessions.push(away);
+    let mut away_tabs = WorkspaceTabs::default();
+    away_tabs.open(WorkspaceTab::Session(away_id));
+    app.project_workspaces
+        .insert(other_project, (away_tabs, Some(away_id)));
+    app.apply_session_poll(
+        vec![(
+            away_id,
+            TmuxObservation {
+                state: TmuxState::Dead,
+                exit_status: Some(0),
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert!(!app.session_has_a_tab(away_id));
+    assert_eq!(
+        app.project_workspaces
+            .get(&other_project)
+            .and_then(|(_, sel)| *sel),
+        None,
+        "closing a background project's selected session clears its stored selection"
+    );
+
+    // 5) Opening a past completed session manually from History keeps its tab open.
+    app.select_session(clean);
+    assert!(app.session_has_a_tab(clean));
+    app.apply_session_poll(Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    assert!(
+        app.session_has_a_tab(clean),
+        "manually opened past session stays open in its tab"
+    );
+
+    fs::remove_dir_all(root).ok();
+}
+
+// --- Change 292: Event-driven, damage-tracked terminal TUI pipeline ----------
+
+#[test]
+pub(crate) fn tui_perf_292_control_stream_coalesces_bursts_and_suppresses_blind_echo_polls() {
+    assert!(tmux_output_watcher_args("not-managed").is_err());
+    assert!(tmux_output_watcher_args("operon-bad;rm").is_err());
+    let valid_id = Uuid::new_v4();
+    let valid_name = managed_tmux_name(valid_id);
+    assert_eq!(
+        tmux_output_watcher_args(&valid_name).unwrap(),
+        [
+            "-C",
+            "attach-session",
+            "-t",
+            valid_name.as_str(),
+            "-fignore-size",
+        ]
+    );
+
+    // StreamingChild strips inherited repository pointers and reaps cleanly on shutdown.
+    let mut env_probe = Command::new("/bin/sh");
+    env_probe
+        .env("GIT_DIR", "/tmp/leaked-git-dir")
+        .args(["-c", "printf '%s\\n' \"${GIT_DIR:-clean}\"; cat"]);
+    let mut child = spawn_piped_streaming(&mut env_probe).unwrap();
+    let mut stdout = child.take_stdout().unwrap();
+    let mut line_buf = [0_u8; 32];
+    let n = stdout.read(&mut line_buf).unwrap();
+    assert_eq!(&line_buf[..n], b"clean\n");
+    child.shutdown();
+
+    // O(1) control-mode chunk scanner across arbitrary 1-byte splits.
+    let mut carry = ControlLineState::default();
+    assert!(!carry.is_attached());
+    for &b in b"%begin 1 2 0\n%end 1 2 0\n" {
+        assert_eq!(
+            tmux_control_chunk_has_activity(&mut carry, &[b]),
+            ControlChunkSignal::None
+        );
+    }
+    assert!(!carry.is_attached());
+
+    let mut saw_attach_only = ControlChunkSignal::None;
+    for &b in b"%session-changed $1 s\n" {
+        let sig = tmux_control_chunk_has_activity(&mut carry, &[b]);
+        if sig != ControlChunkSignal::None {
+            saw_attach_only = sig;
+        }
+    }
+    assert_eq!(saw_attach_only, ControlChunkSignal::None);
+    assert!(carry.is_attached());
+
+    for sample in [
+        &b"%output %0 hello\n"[..],
+        &b"%extended-output %0 5 : hi\n"[..],
+        &b"%layout-change @0 abc\n"[..],
+    ] {
+        let mut saw_act = false;
+        for &b in sample {
+            if tmux_control_chunk_has_activity(&mut carry, &[b]) == ControlChunkSignal::Activity {
+                saw_act = true;
+            }
+        }
+        assert!(saw_act, "expected Activity for {sample:?}");
+    }
+
+    let combined = tmux_control_chunk_has_activity(&mut carry, b"%output %0 tail\n%exit\n");
+    assert_eq!(combined, ControlChunkSignal::Exited);
+    assert!(carry.had_activity_in_last_chunk());
+
+    // Frame-budget coalescing delay (16ms focused, 250ms unfocused).
+    let base = Instant::now();
+    assert_eq!(
+        stream_coalesce_delay(None, base, TERMINAL_STREAM_FRAME_BUDGET),
+        Duration::ZERO
+    );
+    assert_eq!(
+        stream_coalesce_delay(
+            Some(base),
+            base + Duration::from_millis(6),
+            TERMINAL_STREAM_FRAME_BUDGET
+        ),
+        Duration::from_millis(10)
+    );
+    assert_eq!(
+        stream_coalesce_delay(
+            Some(base),
+            base + TERMINAL_STREAM_FRAME_BUDGET,
+            TERMINAL_STREAM_FRAME_BUDGET
+        ),
+        Duration::ZERO
+    );
+    assert_eq!(
+        stream_coalesce_delay(
+            Some(base),
+            base + Duration::from_millis(50),
+            TERMINAL_STREAM_UNFOCUSED_BUDGET
+        ),
+        Duration::from_millis(200)
+    );
+
+    // Respawn cooldown on missing session + fallback polling when watcher is not live,
+    // and suppression of blind echo polling / post-send-keys capture when watcher IS live.
+    let root = temporary_directory("tui-292-stream");
+    let mut app = test_app(root.join("store.json"));
+    app.tools.tmux = true;
+    app.page = Page::Sessions;
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "p292".into(),
+        path: root.clone(),
+        added_at: 1,
+    });
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    let session_id = session.id;
+    session.tmux_name = managed_tmux_name(session_id);
+    let missing_tmux = session.tmux_name.clone();
+    app.store.sessions.push(session);
+    app.workspace.open(WorkspaceTab::Session(session_id));
+    app.select_session(session_id);
+
+    app.sync_terminal_streams(true);
+    let spawns_after_first = app.terminal_streams.total_spawns();
+    assert_eq!(spawns_after_first, 1);
+    for _ in 0..400 {
+        if !app.terminal_streams.has_active_entry(session_id) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        !app.terminal_streams.has_active_entry(session_id),
+        "failed attach on missing session must terminate reader cleanly"
+    );
+    app.sync_terminal_streams(true);
+    app.sync_terminal_streams(true);
+    assert_eq!(
+        app.terminal_streams.total_spawns(),
+        1,
+        "SESSION_POLL_INTERVAL cooldown must prevent fork-storming tmux -C on a missing session"
+    );
+    assert!(!app.terminal_streams.is_watching(session_id));
+    assert_eq!(app.terminal_streams.active_watcher_count(), 0);
+
+    // When watcher is NOT live, fallback echo poll still schedules SessionOutput.
+    let typed_at = Instant::now();
+    app.last_terminal_input = Some(typed_at);
+    assert_eq!(
+        app.poll_terminal_echo(session_id, typed_at),
+        Some(TERMINAL_ECHO_POLL)
+    );
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(session_id)));
+    app.background_tasks
+        .remove(&BackgroundKey::SessionOutput(session_id));
+
+    // When a live watcher IS attached, blind 33ms echo polling, post-send-keys
+    // speculative capture, and drag-end duplicate capture are all suppressed.
+    let mut cat_cmd = Command::new("/bin/cat");
+    let mock_child = spawn_piped_streaming(&mut cat_cmd).unwrap();
+    app.terminal_streams
+        .insert_live_watcher_for_test(session_id, missing_tmux, mock_child);
+    assert!(app.terminal_streams.is_watching(session_id));
+    assert_eq!(app.terminal_streams.active_watcher_count(), 1);
+    assert_eq!(
+        app.poll_terminal_echo(session_id, typed_at + Duration::from_millis(40)),
+        None,
+        "live watcher must suppress blind 33ms echo polling"
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(session_id)));
+
+    app.background_sender
+        .send(BackgroundResult::TerminalInputSent {
+            session_id,
+            result: Ok(()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(session_id)),
+        "live watcher must suppress speculative post-send-keys SessionOutput capture"
+    );
+
+    app.terminal_resize_requested.insert(session_id, (80, 24));
+    app.terminal_resize_applied.insert(session_id, (80, 24));
+    app.finish_layout_drag();
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(session_id)),
+        "live watcher must suppress duplicate drag-end capture when size already matches"
+    );
+
+    app.terminal_streams.shutdown_all();
+    assert!(!app.terminal_streams.is_watching(session_id));
+    assert_eq!(app.terminal_streams.active_watcher_count(), 0);
+
+    if tool_available("tmux") {
+        app.tools.tmux = true;
+        let mut live_session = test_session(Uuid::new_v4(), SessionStatus::Active);
+        live_session.project_id = project_id;
+        let live_id = live_session.id;
+        live_session.tmux_name = managed_tmux_name(live_id);
+        let live_name = live_session.tmux_name.clone();
+        start_tmux_agent_session(
+            &live_name,
+            &root,
+            "printf 'READY-292\\n'; exec /bin/sh",
+            &[],
+        )
+        .unwrap();
+        for _ in 0..50 {
+            if tmux_capture(&live_name)
+                .unwrap_or_default()
+                .contains("READY-292")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.store.sessions.push(live_session);
+        app.workspace.open(WorkspaceTab::Session(live_id));
+        app.select_session(live_id);
+
+        app.sync_terminal_streams(true);
+        for _ in 0..100 {
+            if app.terminal_streams.is_watching(live_id) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            app.terminal_streams.is_watching(live_id),
+            "watcher must attach and report live on an active tmux session"
+        );
+        assert_eq!(app.terminal_streams.active_watcher_count(), 1);
+
+        // Emit a rapid 20-line burst via tmux_send_input while watcher is attached:
+        // verifies input is accepted (not rejected as read-only) and burst is coalesced.
+        tmux_resize(&live_name, (91, 27)).unwrap();
+        tmux_send_input(
+            &live_name,
+            &[
+                TerminalInput::Text(
+                    "i=0; while [ $i -lt 20 ]; do printf 'burst-292-%02d\\n' $i; i=$((i+1)); done"
+                        .into(),
+                ),
+                TerminalInput::Key("Enter".into()),
+            ],
+        )
+        .expect("tmux_send_input must succeed while control watcher is attached");
+
+        let mut delivered = false;
+        for _ in 0..150 {
+            app.drain_terminal_streams();
+            if app
+                .session_output
+                .get(&live_id)
+                .is_some_and(|out| out.contains("burst-292-19"))
+            {
+                delivered = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(delivered, "coalesced stream must deliver latest TUI burst");
+        let captures_after_burst = app.terminal_streams.total_captures();
+        assert!(
+            (1..15).contains(&captures_after_burst),
+            "expected burst coalescing (< 15 captures for 20 lines), got {captures_after_burst}"
+        );
+
+        // Settle any trailing echo, then verify zero captures while idle.
+        thread::sleep(Duration::from_millis(60));
+        app.drain_terminal_streams();
+        let idle_baseline = app.terminal_streams.total_captures();
+        thread::sleep(Duration::from_millis(180));
+        assert_eq!(
+            app.terminal_streams.total_captures(),
+            idle_baseline,
+            "idle pane must trigger zero captures"
+        );
+
+        // Closing the tab detaches the read-only control client immediately.
+        app.close_workspace_tab(&WorkspaceTab::Session(live_id));
+        app.sync_terminal_streams(true);
+        assert!(!app.terminal_streams.is_watching(live_id));
+        let mut clients_out = String::new();
+        for _ in 0..50 {
+            let mut list_clients = tmux_command();
+            list_clients.args(["list-clients", "-t", &live_name]);
+            clients_out = run_command_with_timeout(&mut list_clients, Duration::from_secs(5))
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+                .unwrap_or_default();
+            if clients_out.trim().is_empty() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let _ = tmux_command()
+            .args(["kill-session", "-t", &live_name])
+            .output();
+        assert!(
+            clients_out.trim().is_empty(),
+            "detached watcher left an attached tmux client: {clients_out:?}"
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn tui_perf_292_unchanged_capture_skips_repaint_and_cursor_only_preserves_galleys() {
+    let root = temporary_directory("tui-292-unchanged-cursor");
+    let mut app = test_app(root.join("store.json"));
+    let ctx = egui::Context::default();
+    let repaints = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let repaints_cb = Arc::clone(&repaints);
+    ctx.set_request_repaint_callback(move |_| {
+        repaints_cb.fetch_add(1, Ordering::Relaxed);
+    });
+    app.repaint = Some(ctx.clone());
+    app.page = Page::Sessions;
+
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "p292-c".into(),
+        path: root.clone(),
+        added_at: 1,
+    });
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    let session_id = session.id;
+    app.store.sessions.push(session.clone());
+    app.workspace.open(WorkspaceTab::Session(session_id));
+    app.select_session(session_id);
+
+    let mut worker_inc = None;
+    let mut last_delivered = None;
+    let initial_cursor = Some(TerminalCursor {
+        x: 0,
+        y: 1,
+        pane_rows: 24,
+    });
+    let first_update = app::terminal_output::classify_captured_snapshot(
+        session_id,
+        TerminalCapture {
+            output: "\u{1b}[32mready\u{1b}[0m\nprompt> ".into(),
+            cursor: initial_cursor,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .expect("initial snapshot must emit Full update");
+    app.terminal_streams
+        .send_stream_update_for_test(first_update);
+    app.drain_terminal_streams();
+
+    let gen_initial = app.terminal_output_generations[&session_id];
+    assert_eq!(gen_initial, 1);
+    assert_eq!(
+        app.terminal_cursors.get(&session_id).copied(),
+        initial_cursor
+    );
+
+    // Render frame 1 to populate TerminalPaneRenderCache row galleys.
+    let render_pane = |app: &mut OperonApp| {
+        let s = session.clone();
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.ui_terminal_pane(ui, &s, false);
+                });
+            },
+        );
+    };
+    render_pane(&mut app);
+    let initial_row_builds = app.terminal_pane_render_cache.row_galley_builds();
+    assert_eq!(initial_row_builds, 2);
+
+    // 1) Identical (theme, output, cursor) snapshot produces None -> zero channel traffic, zero repaint.
+    let repaints_before_dup = repaints.load(Ordering::Relaxed);
+    let dup_update = app::terminal_output::classify_captured_snapshot(
+        session_id,
+        TerminalCapture {
+            output: "\u{1b}[32mready\u{1b}[0m\nprompt> ".into(),
+            cursor: initial_cursor,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    );
+    assert!(
+        dup_update.is_none(),
+        "unchanged snapshot must be dropped before waking UI"
+    );
+    assert_eq!(repaints.load(Ordering::Relaxed), repaints_before_dup);
+
+    // 2) Cursor-only movement under same theme and output -> CursorOnly update:
+    //    updates cursor without bumping output_generation or rebuilding row galleys.
+    let moved_cursor = Some(TerminalCursor {
+        x: 8,
+        y: 1,
+        pane_rows: 24,
+    });
+    let cursor_update = app::terminal_output::classify_captured_snapshot(
+        session_id,
+        TerminalCapture {
+            output: "\u{1b}[32mready\u{1b}[0m\nprompt> ".into(),
+            cursor: moved_cursor,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .expect("cursor-only delta must emit CursorOnly");
+    assert!(matches!(
+        cursor_update,
+        app::terminal_output::StreamedTerminalUpdate::CursorOnly { .. }
+    ));
+    app.terminal_streams
+        .send_stream_update_for_test(cursor_update);
+    app.drain_terminal_streams();
+
+    assert_eq!(app.terminal_cursors.get(&session_id).copied(), moved_cursor);
+    assert_eq!(
+        app.terminal_output_generations[&session_id], gen_initial,
+        "cursor-only movement must not increment output_generation"
+    );
+    render_pane(&mut app);
+    assert_eq!(
+        app.terminal_pane_render_cache.row_galley_builds(),
+        initial_row_builds,
+        "cursor-only movement must reuse existing row galleys without re-shaping"
+    );
+
+    if tool_available("tmux") {
+        app.tools.tmux = true;
+        let mut live_session = test_session(Uuid::new_v4(), SessionStatus::Active);
+        live_session.project_id = project_id;
+        let live_id = live_session.id;
+        live_session.tmux_name = managed_tmux_name(live_id);
+        let live_name = live_session.tmux_name.clone();
+        start_tmux_agent_session(&live_name, &root, "printf 'abcde'; sleep 30", &[]).unwrap();
+        for _ in 0..50 {
+            if tmux_capture(&live_name)
+                .unwrap_or_default()
+                .contains("abcde")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.store.sessions.push(live_session);
+        app.workspace.open(WorkspaceTab::Session(live_id));
+        app.select_session(live_id);
+        if let Ok(mut visible) = app.visible_sessions.write() {
+            visible.insert(live_id);
+        }
+        app.sync_terminal_streams(true);
+        for _ in 0..100 {
+            if app.terminal_streams.is_watching(live_id) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        // Initial attach baseline capture (and optional resize) delivers once, then stays silent.
+        tmux_resize(&live_name, (82, 24)).unwrap();
+        for _ in 0..100 {
+            app.drain_terminal_streams();
+            if app.terminal_layouts.contains_key(&live_id) {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        thread::sleep(Duration::from_millis(45));
+        app.drain_terminal_streams();
+        let deliveries_before = app.terminal_streams.total_deliveries();
+        assert!(deliveries_before >= 1);
+        thread::sleep(Duration::from_millis(120));
+        assert_eq!(
+            app.terminal_streams.total_deliveries(),
+            deliveries_before,
+            "unchanged live tmux pane must not deliver redundant updates"
+        );
+        app.terminal_streams.shutdown_all();
+        let _ = tmux_command()
+            .args(["kill-session", "-t", &live_name])
+            .output();
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn tui_perf_292_incremental_ansi_layout_reparses_only_dirty_lines_and_matches_full_parse(
+) {
+    let mut lines: Vec<String> = (0..1200)
+        .map(|idx| format!("\u{1b}[3{}mline-{idx:04}\u{1b}[0m plain-{idx}\r", idx % 7))
+        .collect();
+    let initial_text = lines.join("\n");
+
+    let (inc0, jobs0, ids0) =
+        terminal_line_layouts_incremental(&initial_text, AppTheme::Dark, None);
+    assert_eq!(inc0.parsed_lines(), 1200);
+    assert_eq!(
+        jobs0,
+        terminal_line_layouts(&initial_text, AppTheme::Dark.palette())
+    );
+
+    // (a) Single-line in-place TUI status bar update re-parses only 1 line.
+    lines[600] = "\u{1b}[1;33mstatus: 42% [====>   ]\u{1b}[0m\r".into();
+    let edited_text = lines.join("\n");
+    let (mut inc1, jobs1, ids1) =
+        terminal_line_layouts_incremental(&edited_text, AppTheme::Dark, Some(&inc0));
+    assert_eq!(
+        inc1.parsed_lines(),
+        1,
+        "in-place 1-line TUI update must re-parse only the 1 changed line"
+    );
+    assert_eq!(inc1.take_dirty_lines(), vec![600]);
+    assert_eq!(ids1[0..600], ids0[0..600]);
+    assert_ne!(ids1[600], ids0[600]);
+    assert_eq!(ids1[601..], ids0[601..]);
+    assert_eq!(
+        jobs1,
+        terminal_line_layouts(&edited_text, AppTheme::Dark.palette())
+    );
+
+    // (b) Scrollback shift at capacity: 3 lines scroll off the top, 3 new lines append at bottom.
+    lines.drain(0..3);
+    for extra in 0..3 {
+        lines.push(format!("\u{1b}[36mappended-{extra}\u{1b}[0m"));
+    }
+    let shifted_text = lines.join("\n");
+    let (inc2, jobs2, ids2) =
+        terminal_line_layouts_incremental(&shifted_text, AppTheme::Dark, Some(&inc1));
+    assert_eq!(
+        inc2.parsed_lines(),
+        3,
+        "scrollback shift of 3 lines must reuse all 1197 surviving lines and parse only 3"
+    );
+    assert_eq!(ids2[..1197], ids1[3..1200]);
+    assert_eq!(
+        jobs2,
+        terminal_line_layouts(&shifted_text, AppTheme::Dark.palette())
+    );
+
+    // (c) Multi-line unclosed SGR colour change cascades only until style converges again.
+    lines[500] = "\u{1b}[31munclosed-red-start".into();
+    lines[501] = "still-red-1".into();
+    lines[502] = "still-red-2".into();
+    lines[503] = "closing-red\u{1b}[0m".into();
+    let cascade_text = lines.join("\n");
+    let (inc3, jobs3, _) =
+        terminal_line_layouts_incremental(&cascade_text, AppTheme::Dark, Some(&inc2));
+    assert_eq!(
+        inc3.parsed_lines(),
+        4,
+        "multi-line SGR change that resets on line 503 must re-parse lines 500..=503 only"
+    );
+    assert_eq!(
+        jobs3,
+        terminal_line_layouts(&cascade_text, AppTheme::Dark.palette())
+    );
+
+    // (d) Theme switch invalidates cached theme colours and matches full parse in every theme.
+    for theme in [AppTheme::Light, AppTheme::HighContrast, AppTheme::Dark] {
+        let (inc_theme, jobs_theme, _) =
+            terminal_line_layouts_incremental(&cascade_text, theme, Some(&inc3));
+        assert_eq!(
+            jobs_theme,
+            terminal_line_layouts(&cascade_text, theme.palette()),
+            "incremental layout must match full layout under {theme:?}"
+        );
+        if theme != AppTheme::Dark {
+            assert_eq!(inc_theme.parsed_lines(), lines.len());
+        }
+    }
+}
+
+#[test]
+pub(crate) fn tui_perf_292_row_galley_cache_shapes_only_dirty_or_newly_visible_rows() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+
+    let mut raw_lines: Vec<String> = (0..100).map(|i| format!("row-content-{i:03}")).collect();
+    let text0 = raw_lines.join("\n");
+    let (inc0, jobs0, ids0) = terminal_line_layouts_incremental(&text0, AppTheme::Dark, None);
+
+    let session_id = Uuid::new_v4();
+    let mut cache = TerminalPaneRenderCache::default();
+    let ppp = ctx.pixels_per_point().to_bits();
+
+    // Frame 1: initial visible window 0..30 shapes 30 galleys.
+    let key1 = TerminalPaneKey {
+        session_id,
+        visible_rows: (0, 30),
+        output_generation: 1,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key1, &jobs0, Some(&ids0));
+    assert_eq!(cache.builds(), 1);
+    assert_eq!(cache.hits(), 0);
+    assert_eq!(cache.row_galley_builds(), 30);
+    assert_eq!(cache.row_galley_hits(), 0);
+
+    // Frame 2: unchanged key hits pane slice directly with zero row shaping.
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key1, &jobs0, Some(&ids0));
+    assert_eq!(cache.builds(), 1);
+    assert_eq!(cache.hits(), 1);
+    assert_eq!(cache.row_galley_builds(), 30);
+
+    // Frame 3: 1 line inside visible window changes -> 29 row hits, only 1 row shaped!
+    raw_lines[12] = "row-content-012-updated".into();
+    let text1 = raw_lines.join("\n");
+    let (_inc1, jobs1, ids1) =
+        terminal_line_layouts_incremental(&text1, AppTheme::Dark, Some(&inc0));
+    let key2 = TerminalPaneKey {
+        session_id,
+        visible_rows: (0, 30),
+        output_generation: 2,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key2, &jobs1, Some(&ids1));
+    assert_eq!(cache.builds(), 2);
+    assert_eq!(cache.row_galley_hits(), 29);
+    assert_eq!(
+        cache.row_galley_builds(),
+        31,
+        "updating 1 of 30 visible rows must call fonts.layout_job only once"
+    );
+
+    // Frame 4: scrolling down by 2 rows (2..32) reuses 28 rows and shapes only 2 newly visible rows.
+    let key3 = TerminalPaneKey {
+        session_id,
+        visible_rows: (2, 32),
+        output_generation: 2,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key3, &jobs1, Some(&ids1));
+    assert_eq!(cache.builds(), 3);
+    assert_eq!(cache.row_galley_hits(), 29 + 28);
+    assert_eq!(
+        cache.row_galley_builds(),
+        33,
+        "scrolling by 2 rows must shape only the 2 newly visible rows"
+    );
+
+    // Bounded capacity check (`MAX_CACHED_TERMINAL_ROW_GALLEYS`) and `clear()` reset.
+    let huge_text: String = (0..(MAX_CACHED_TERMINAL_ROW_GALLEYS + 64))
+        .map(|i| format!("huge-{i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (_, huge_jobs, huge_ids) =
+        terminal_line_layouts_incremental(&huge_text, AppTheme::Dark, None);
+    let key_huge = TerminalPaneKey {
+        session_id,
+        visible_rows: (0, MAX_CACHED_TERMINAL_ROW_GALLEYS),
+        output_generation: 3,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key_huge, &huge_jobs, Some(&huge_ids));
+    let key_overflow = TerminalPaneKey {
+        session_id,
+        visible_rows: (64, MAX_CACHED_TERMINAL_ROW_GALLEYS + 64),
+        output_generation: 4,
+        theme: AppTheme::Dark,
+        pixels_per_point_bits: ppp,
+    };
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key_overflow, &huge_jobs, Some(&huge_ids));
+
+    cache.clear();
+    let builds_before_after_clear = cache.row_galley_builds();
+    let _ = cache.get_or_render_rows(&ctx, session_id, &key3, &jobs1, Some(&ids1));
+    assert_eq!(
+        cache.row_galley_builds() - builds_before_after_clear,
+        30,
+        "clear() must evict row_galleys so subsequent render shapes fresh galleys"
+    );
+}
+
+#[test]
+pub(crate) fn tui_perf_292_hovering_non_file_token_during_streaming_does_not_reprobe_or_repaint() {
+    let root = temporary_directory("tui-292-hover-ttl");
+    let project_path = root.join("project");
+    fs::create_dir_all(project_path.join("src")).unwrap();
+
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "hover-proj".into(),
+        path: project_path.clone(),
+        added_at: 0,
+    });
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project_id;
+    session.worktree_path = Some(project_path.clone());
+    let session_id = session.id;
+    app.store.sessions.push(session);
+    app.page = Page::Sessions;
+    app.select_session(session_id);
+
+    app.set_session_output(
+        session_id,
+        "status.ok\nstream-line-1\nstream-line-2\n".into(),
+        None,
+    );
+
+    // Initial hover probe over non-file dotted token `status.ok` caches None + timestamp.
+    app.unresolved_paths.push("status.ok".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("status.ok"), Some(&None));
+    assert!(app.negative_path_probed_at.contains_key("status.ok"));
+
+    // Streaming updates on lines 1..5 keep static line 0 (`status.ok`) untouched:
+    // negative cache entry stays intact within TERMINAL_NEGATIVE_PATH_TTL.
+    for tick in 0..5 {
+        app.set_session_output(
+            session_id,
+            format!("status.ok\nstream-tick-{tick}\nprogress-{tick}\n"),
+            None,
+        );
+        assert_eq!(
+            app.resolved_paths.get("status.ok"),
+            Some(&None),
+            "static-line negative token must stay cached during streaming tick {tick}"
+        );
+    }
+
+    // Hovering pointer directly over row 0 (`status.ok`) during render produces
+    // zero unresolved path pushes and zero extra request_repaint calls.
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+
+    let palette = AppTheme::Dark.palette();
+    let lines = app.terminal_layouts.get(&session_id).unwrap().clone();
+    let line_ids = app.terminal_line_ids.get(&session_id).unwrap().clone();
+    let mut cache = TerminalPaneRenderCache::default();
+    let mut unresolved = Vec::new();
+    let matches = [TerminalMatch {
+        line: 1,
+        column: 0,
+        columns: 6,
+    }];
+
+    // Move pointer over row 0 (`status.ok`), let ScrollArea settle, then measure steady frame.
+    let hover_pt = egui::pos2(16.0, 14.0);
+    let mut steady_delay = Duration::ZERO;
+    let mut probe_when_uncached = Vec::new();
+    let empty_resolved: HashMap<String, Option<PathBuf>> = HashMap::new();
+    for frame in 0..4 {
+        let events = if frame == 0 {
+            vec![egui::Event::PointerMoved(hover_pt)]
+        } else {
+            Vec::new()
+        };
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 400.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::Frame::NONE.show(ui, |ui| {
+                        let cell = terminal_cell_size(ui);
+                        let viewport = egui::vec2(600.0, cell.y * 10.0);
+                        let search = TerminalSearchOverlay {
+                            matches: &matches,
+                            current: Some(0),
+                            scroll_to: None,
+                            palette,
+                        };
+                        let mut link_overlay = if frame == 0 {
+                            TerminalLinkOverlay {
+                                resolved: &empty_resolved,
+                                unresolved: &mut probe_when_uncached,
+                                palette,
+                            }
+                        } else {
+                            TerminalLinkOverlay {
+                                resolved: &app.resolved_paths,
+                                unresolved: &mut unresolved,
+                                palette,
+                            }
+                        };
+                        let _ = terminal_rows(
+                            ui,
+                            &lines,
+                            viewport,
+                            cell.y,
+                            search,
+                            &mut link_overlay,
+                            None,
+                            Some(TerminalPaneContext {
+                                session_id,
+                                output_generation: 1,
+                                theme: AppTheme::Dark,
+                                line_ids: Some(&line_ids),
+                                cache: &mut cache,
+                            }),
+                        );
+                    });
+                });
+            },
+        );
+        if frame == 3 {
+            steady_delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+        }
+    }
+    assert_eq!(
+        probe_when_uncached,
+        vec!["status.ok".to_string()],
+        "hover_pt must geometrically hit row 0 token `status.ok`"
+    );
+    assert!(
+        unresolved.is_empty(),
+        "cached negative token must not re-enter unresolved_paths: {unresolved:?}"
+    );
+    assert_eq!(
+        steady_delay,
+        Duration::MAX,
+        "hovering cached negative token must not request an immediate repaint"
+    );
+
+    // Dynamic file printed on a newly changed/dirty line evicts immediately even within 2s!
+    app.unresolved_paths.push("src/live_gen.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("src/live_gen.rs"), Some(&None));
+    let created = project_path.join("src/live_gen.rs");
+    fs::write(&created, "pub fn ok() {}\n").unwrap();
+    app.set_session_output(
+        session_id,
+        "status.ok\nwrote src/live_gen.rs\n".into(),
+        None,
+    );
+    assert!(
+        !app.resolved_paths.contains_key("src/live_gen.rs"),
+        "dirty line mentioning src/live_gen.rs must evict negative cache immediately"
+    );
+    app.unresolved_paths.push("src/live_gen.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("src/live_gen.rs"),
+        Some(&Some(created.canonicalize().unwrap()))
+    );
+
+    // Once TERMINAL_NEGATIVE_PATH_TTL elapses, static-line negative entries also evict cleanly.
+    app.negative_path_probed_at.insert(
+        "status.ok".into(),
+        Instant::now()
+            .checked_sub(TERMINAL_NEGATIVE_PATH_TTL + Duration::from_millis(50))
+            .unwrap(),
+    );
+    app.set_session_output(session_id, "status.ok\nafter-ttl\n".into(), None);
+    assert!(
+        !app.resolved_paths.contains_key("status.ok"),
+        "expired negative entry must evict after TERMINAL_NEGATIVE_PATH_TTL"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn tui_perf_292_session_workspace_steady_frame_and_module_budget() {
+    let root = temporary_directory("tui-292-workspace");
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+
+    let p1 = Uuid::new_v4();
+    let p2 = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: p1,
+        name: "alpha-project".into(),
+        path: root.join("alpha"),
+        added_at: 1,
+    });
+    app.store.projects.push(Project {
+        id: p2,
+        name: "beta-project".into(),
+        path: root.join("beta"),
+        added_at: 2,
+    });
+
+    let mut s_short = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s_short.project_id = p1;
+    s_short.name = "cli".into();
+    let s_short_id = s_short.id;
+    let mut s_long = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s_long.project_id = p1;
+    s_long.name =
+        "very-long-interactive-tui-session-title-that-truncates-with-ellipsis-in-tab-bar".into();
+    let s_long_id = s_long.id;
+    app.store.sessions.push(s_short);
+    app.store.sessions.push(s_long);
+
+    app.workspace.open(WorkspaceTab::Session(s_short_id));
+    app.workspace.open(WorkspaceTab::Session(s_long_id));
+    app.select_session(s_short_id);
+    app.set_session_output(
+        s_short_id,
+        (0..40)
+            .map(|i| format!("tui-line-{i:02}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Some(TerminalCursor {
+            x: 3,
+            y: 10,
+            pane_rows: 24,
+        }),
+    );
+
+    let ctx = egui::Context::default();
+    let run_workspace_frame = |app: &mut OperonApp| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::Panel::left("tui-292-projects")
+                    .exact_size(240.0)
+                    .show(ctx, |ui| {
+                        app.ui_workspace_projects(ui);
+                    });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    app.ui_tab_workspace(ui);
+                });
+            },
+        );
+    };
+
+    run_workspace_frame(&mut app);
+    run_workspace_frame(&mut app);
+    let builds_steady = app.terminal_pane_render_cache.row_galley_builds();
+    let hits_before = app.terminal_pane_render_cache.hits();
+    run_workspace_frame(&mut app);
+    assert!(
+        app.terminal_pane_render_cache.hits() > hits_before,
+        "steady workspace frame must hit TerminalPaneRenderCache"
+    );
+    assert_eq!(
+        app.terminal_pane_render_cache.row_galley_builds(),
+        builds_steady,
+        "steady workspace frame must shape zero new terminal row galleys"
+    );
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let app_rs_lines = fs::read_to_string(manifest_dir.join("src/app.rs"))
+        .unwrap()
+        .lines()
+        .count();
+    let screens_rs_lines = fs::read_to_string(manifest_dir.join("src/app/screens.rs"))
+        .unwrap()
+        .lines()
+        .count();
+    assert!(
+        app_rs_lines < 9979,
+        "src/app.rs ({app_rs_lines} lines) must shrink below 9979 lines"
+    );
+    assert!(
+        screens_rs_lines < 10000,
+        "src/app/screens.rs ({screens_rs_lines} lines) must stay below 10000 lines"
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn model_check_tui_292_incremental_ansi_and_coalescer_equivalence() {
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    struct ModelState {
+        lines: [u8; 3],
+        theme: u8,
+        scroll_epoch: u8,
+        last_capture_ms: Option<u16>,
+        now_ms: u16,
+        focused: bool,
+        split_at: u8,
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum ModelEvent {
+        SetLine0(u8),
+        SetLine1(u8),
+        ScrollAppend(u8),
+        FlipTheme,
+        ToggleFocus,
+        CaptureNow,
+        Advance8ms,
+        Advance16ms,
+        StepSplit,
+    }
+
+    fn token_text(code: u8, epoch: u8) -> String {
+        match code {
+            0 => format!("plain-{epoch}"),
+            1 => format!("\u{1b}[31mopen-red-{epoch}"),
+            2 => format!("reset-{epoch}\u{1b}[0m\r"),
+            _ => format!("\u{1b}[1;32mbright-{epoch}\u{1b}[0m"),
+        }
+    }
+
+    let initial = ModelState {
+        lines: [0, 0, 2],
+        theme: 0,
+        scroll_epoch: 0,
+        last_capture_ms: None,
+        now_ms: 0,
+        focused: true,
+        split_at: 1,
+    };
+
+    let events = [
+        ModelEvent::SetLine0(1),
+        ModelEvent::SetLine0(2),
+        ModelEvent::SetLine1(3),
+        ModelEvent::ScrollAppend(1),
+        ModelEvent::FlipTheme,
+        ModelEvent::ToggleFocus,
+        ModelEvent::CaptureNow,
+        ModelEvent::Advance8ms,
+        ModelEvent::Advance16ms,
+        ModelEvent::StepSplit,
+    ];
+
+    let base_instant = Instant::now();
+    let sample_stream = b"%session-changed $1 s\n%output %0 hi\n%exit\n";
+
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| {
+            let mut next = state.clone();
+            match *event {
+                ModelEvent::SetLine0(v) => {
+                    if next.lines[0] == v {
+                        return None;
+                    }
+                    next.lines[0] = v;
+                }
+                ModelEvent::SetLine1(v) => {
+                    if next.lines[1] == v {
+                        return None;
+                    }
+                    next.lines[1] = v;
+                }
+                ModelEvent::ScrollAppend(v) => {
+                    if next.scroll_epoch >= 1 {
+                        return None;
+                    }
+                    next.lines = [next.lines[1], next.lines[2], v];
+                    next.scroll_epoch += 1;
+                }
+                ModelEvent::FlipTheme => {
+                    next.theme = (next.theme + 1) % 2;
+                }
+                ModelEvent::ToggleFocus => {
+                    next.focused = !next.focused;
+                }
+                ModelEvent::CaptureNow => {
+                    if next.last_capture_ms == Some(next.now_ms) {
+                        return None;
+                    }
+                    next.last_capture_ms = Some(next.now_ms);
+                }
+                ModelEvent::Advance8ms => {
+                    if next.now_ms >= 24 {
+                        return None;
+                    }
+                    next.now_ms += 8;
+                }
+                ModelEvent::Advance16ms => {
+                    if next.now_ms >= 24 {
+                        return None;
+                    }
+                    next.now_ms += 16;
+                }
+                ModelEvent::StepSplit => {
+                    if usize::from(next.split_at) + 7 >= sample_stream.len() {
+                        return None;
+                    }
+                    next.split_at += 7;
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            let theme = app_theme_from_code(state.theme);
+            let prev_doc = [token_text(0, 0), token_text(0, 0), token_text(2, 0)].join("\n");
+            let cur_doc = [
+                token_text(state.lines[0], state.scroll_epoch),
+                token_text(state.lines[1], state.scroll_epoch),
+                token_text(state.lines[2], state.scroll_epoch),
+            ]
+            .join("\n");
+
+            let (inc_base, _, _) =
+                terminal_line_layouts_incremental(&prev_doc, AppTheme::Dark, None);
+            let (inc_cur, jobs_inc, ids_cur) =
+                terminal_line_layouts_incremental(&cur_doc, theme, Some(&inc_base));
+            let jobs_full = terminal_line_layouts(&cur_doc, theme.palette());
+            if jobs_inc != jobs_full {
+                return Err(format!(
+                    "incremental jobs diverged from full parse for {state:?}"
+                ));
+            }
+
+            // Re-running on identical (cur_doc, theme) must parse 0 lines and keep line_ids.
+            let (mut inc_same, jobs_same, ids_same) =
+                terminal_line_layouts_incremental(&cur_doc, theme, Some(&inc_cur));
+            if inc_same.parsed_lines() != 0
+                || !inc_same.take_dirty_lines().is_empty()
+                || ids_same != ids_cur
+                || jobs_same != jobs_full
+            {
+                return Err(format!(
+                    "unchanged incremental pass was not zero-work for {state:?}"
+                ));
+            }
+
+            // Coalesce budget invariant.
+            let budget = if state.focused {
+                TERMINAL_STREAM_FRAME_BUDGET
+            } else {
+                TERMINAL_STREAM_UNFOCUSED_BUDGET
+            };
+            let now = base_instant + Duration::from_millis(u64::from(state.now_ms));
+            let last = state
+                .last_capture_ms
+                .map(|ms| base_instant + Duration::from_millis(u64::from(ms)));
+            let delay = stream_coalesce_delay(last, now, budget);
+            if let Some(last_at) = last {
+                let elapsed = now.saturating_duration_since(last_at);
+                if elapsed >= budget && !delay.is_zero() {
+                    return Err("expected zero coalesce delay once budget elapsed".into());
+                }
+                if elapsed < budget && elapsed + delay != budget {
+                    return Err("coalesce delay violated frame budget".into());
+                }
+            } else if !delay.is_zero() {
+                return Err("first capture must have zero coalesce delay".into());
+            }
+
+            // Control-mode arbitrary split framing invariant.
+            let split = usize::from(state.split_at).min(sample_stream.len());
+            let mut carry = ControlLineState::default();
+            let s1 = tmux_control_chunk_has_activity(&mut carry, &sample_stream[..split]);
+            let s2 = tmux_control_chunk_has_activity(&mut carry, &sample_stream[split..]);
+            if !carry.is_attached() {
+                return Err("split control stream lost attachment state".into());
+            }
+            if s1 != ControlChunkSignal::Exited && s2 != ControlChunkSignal::Exited {
+                return Err("split control stream missed %exit".into());
+            }
+            Ok(())
+        },
+        50_000,
+    );
+    assert!(
+        coverage.states > 500,
+        "expected rich state exploration, got {}",
+        coverage.states
+    );
+}
+
+#[test]
+pub(crate) fn tui_perf_292_f1_stream_folding_baseline_attach_font_key_and_split_switch() {
+    let root = temporary_directory("tui-292-f1");
+    let project_path = root.join("proj");
+    fs::create_dir_all(project_path.join("src")).unwrap();
+
+    let mut app = test_app(root.join("store.json"));
+    app.page = Page::Sessions;
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        name: "p292-f1".into(),
+        path: project_path.clone(),
+        added_at: 1,
+    });
+
+    let mut s1 = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s1.project_id = project_id;
+    s1.worktree_path = Some(project_path.clone());
+    let s1_id = s1.id;
+    let mut s2 = test_session(Uuid::new_v4(), SessionStatus::Active);
+    s2.project_id = project_id;
+    s2.worktree_path = Some(project_path.clone());
+    app.store.sessions.push(s1.clone());
+    app.store.sessions.push(s2.clone());
+    app.select_session(s1_id);
+
+    // (a) Synchronous set_session_output followed by standalone CursorOnly updates cursor.
+    let c0 = Some(TerminalCursor {
+        x: 0,
+        y: 0,
+        pane_rows: 24,
+    });
+    let c1 = Some(TerminalCursor {
+        x: 5,
+        y: 0,
+        pane_rows: 24,
+    });
+    app.set_session_output(s1_id, "sync-seeded\n".into(), c0);
+    assert!(!app.terminal_output_fingerprints.contains_key(&s1_id));
+    app.terminal_streams.send_stream_update_for_test(
+        app::terminal_output::StreamedTerminalUpdate::CursorOnly {
+            session_id: s1_id,
+            theme: app.store.theme,
+            fingerprint: app::terminal_output::terminal_output_fingerprint("sync-seeded\n"),
+            cursor: c1,
+        },
+    );
+    app.drain_terminal_streams();
+    assert_eq!(
+        app.terminal_cursors.get(&s1_id).copied(),
+        c1,
+        "CursorOnly must update cursor even when seeded from synchronous set_session_output"
+    );
+
+    // (b) [Full, CursorOnly] queued in the same UI frame folds without dropping Full.
+    let mut worker_inc = None;
+    let mut last_delivered = None;
+    let u_full = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "frame-folded-text\n".into(),
+            cursor: c0,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    let c2 = Some(TerminalCursor {
+        x: 12,
+        y: 0,
+        pane_rows: 24,
+    });
+    let u_cur = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "frame-folded-text\n".into(),
+            cursor: c2,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    app.terminal_streams.send_stream_update_for_test(u_full);
+    app.terminal_streams.send_stream_update_for_test(u_cur);
+    app.drain_terminal_streams();
+    assert_eq!(
+        app.session_output.get(&s1_id).map(String::as_str),
+        Some("frame-folded-text\n"),
+        "[Full, CursorOnly] in one frame must deliver Full text"
+    );
+    assert_eq!(app.terminal_cursors.get(&s1_id).copied(), c2);
+
+    // (c) [Full #1, Full #2] queued in one frame still evicts negative path from Full #1.
+    app.unresolved_paths.push("src/folded_new.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("src/folded_new.rs"), Some(&None));
+    fs::write(project_path.join("src/folded_new.rs"), "pub fn f() {}\n").unwrap();
+    let f1 = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "created src/folded_new.rs\nstep 1\n".into(),
+            cursor: c2,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    let f2 = app::terminal_output::classify_captured_snapshot(
+        s1_id,
+        TerminalCapture {
+            output: "created src/folded_new.rs\nstep 2\n".into(),
+            cursor: c2,
+        },
+        app.store.theme,
+        &mut worker_inc,
+        &mut last_delivered,
+    )
+    .unwrap();
+    app.terminal_streams.send_stream_update_for_test(f1);
+    app.terminal_streams.send_stream_update_for_test(f2);
+    app.drain_terminal_streams();
+    assert!(
+        !app.resolved_paths.contains_key("src/folded_new.rs"),
+        "folded consecutive Full updates must not lose dirty-line negative path eviction"
+    );
+
+    // (d) Removed session's in-flight stream update is discarded without resurrecting state.
+    let ghost_id = Uuid::new_v4();
+    let mut ghost_inc = None;
+    let mut ghost_last = None;
+    let ghost_full = app::terminal_output::classify_captured_snapshot(
+        ghost_id,
+        TerminalCapture {
+            output: "ghost-output\n".into(),
+            cursor: c0,
+        },
+        app.store.theme,
+        &mut ghost_inc,
+        &mut ghost_last,
+    )
+    .unwrap();
+    app.terminal_streams.send_stream_update_for_test(ghost_full);
+    app.drain_terminal_streams();
+    assert!(!app.session_output.contains_key(&ghost_id));
+    assert!(!app.terminal_layouts.contains_key(&ghost_id));
+
+    // (e) TerminalRowGalleyKey includes font_size_bits so font size changes reshape rows.
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+    let mut job_12 = LayoutJob::default();
+    job_12.append(
+        "hello",
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::monospace(12.0),
+            ..Default::default()
+        },
+    );
+    let mut job_18 = LayoutJob::default();
+    job_18.append(
+        "hello",
+        0.0,
+        egui::TextFormat {
+            font_id: egui::FontId::monospace(18.0),
+            ..Default::default()
+        },
+    );
+    let mut row_cache = TerminalPaneRenderCache::default();
+    let ppp = ctx.pixels_per_point().to_bits();
+    let _ = row_cache.get_or_render_rows(
+        &ctx,
+        s1_id,
+        &TerminalPaneKey {
+            session_id: s1_id,
+            visible_rows: (0, 1),
+            output_generation: 1,
+            theme: AppTheme::Dark,
+            pixels_per_point_bits: ppp,
+        },
+        &[job_12],
+        Some(&[42]),
+    );
+    assert_eq!(row_cache.row_galley_builds(), 1);
+    let g18 = row_cache.get_or_render_rows(
+        &ctx,
+        s1_id,
+        &TerminalPaneKey {
+            session_id: s1_id,
+            visible_rows: (0, 1),
+            output_generation: 2,
+            theme: AppTheme::Dark,
+            pixels_per_point_bits: ppp,
+        },
+        &[job_18],
+        Some(&[42]),
+    );
+    let height_18 = g18[0].as_ref().unwrap().rect.height();
+    assert_eq!(
+        row_cache.row_galley_builds(),
+        2,
+        "changing font_size on the same line_id must miss row_galleys and shape a new Galley"
+    );
+    assert!(height_18 > 14.0);
+
+    // (f) Split-pane focus switch in ui_terminal_pane clears negative_path_probed_at.
+    app.negative_path_probed_at
+        .insert("stale.tok".into(), Instant::now());
+    app.workspace.open(WorkspaceTab::Session(s2.id));
+    let s2_clone = s2.clone();
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 500.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.ui_terminal_pane(ui, &s2_clone, true);
+            });
+        },
+    );
+    assert!(
+        app.negative_path_probed_at.is_empty(),
+        "focusing another pane in ui_terminal_pane must clear negative_path_probed_at"
+    );
+
+    // (g) Re-attaching to a session whose output changed while off-screen catches up immediately.
+    if tool_available("tmux") {
+        app.tools.tmux = true;
+        let mut live_b = test_session(Uuid::new_v4(), SessionStatus::Active);
+        live_b.project_id = project_id;
+        let live_b_id = live_b.id;
+        live_b.tmux_name = managed_tmux_name(live_b_id);
+        let live_b_name = live_b.tmux_name.clone();
+        start_tmux_agent_session(
+            &live_b_name,
+            &root,
+            "printf 'DONE-OFFSCREEN-292\\n'; sleep 30",
+            &[],
+        )
+        .unwrap();
+        for _ in 0..50 {
+            if tmux_capture(&live_b_name)
+                .unwrap_or_default()
+                .contains("DONE-OFFSCREEN-292")
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.store.sessions.push(live_b);
+        // Seed stale cached output before attaching watcher (simulates off-screen output while detached).
+        app.set_session_output(live_b_id, "Building...\n".into(), None);
+        app.workspace.open(WorkspaceTab::Session(live_b_id));
+        app.select_session(live_b_id);
+        app.sync_terminal_streams(true);
+        let mut caught_up = false;
+        for _ in 0..100 {
+            app.drain_terminal_streams();
+            if app
+                .session_output
+                .get(&live_b_id)
+                .is_some_and(|out| out.contains("DONE-OFFSCREEN-292"))
+            {
+                caught_up = true;
+                break;
+            }
+            thread::sleep(Duration::from_millis(15));
+        }
+        app.terminal_streams.shutdown_all();
+        let _ = tmux_command()
+            .args(["kill-session", "-t", &live_b_name])
+            .output();
+        assert!(
+            caught_up,
+            "attaching watcher to pane with stale cached output must catch up immediately"
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 293: one project, one session on it (no worktree), selected on the
+/// Sessions page, with the files dist/Operon_LT_10min.pptx and src/lib.rs on disk.
+fn terminal_293_fixture(tag: &str) -> (PathBuf, PathBuf, OperonApp, Project, Uuid) {
+    let root = temporary_directory(tag);
+    let project_path = root.join("project");
+    fs::create_dir_all(project_path.join("dist")).unwrap();
+    fs::create_dir_all(project_path.join("src")).unwrap();
+    fs::write(project_path.join("dist/Operon_LT_10min.pptx"), b"pk").unwrap();
+    fs::write(project_path.join("src/lib.rs"), "fn main() {}\n").unwrap();
+    let project_path = project_path.canonicalize().unwrap();
+    let mut app = test_app(root.join("store.json"));
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "proj".into(),
+        path: project_path.clone(),
+        added_at: 0,
+    };
+    app.store.projects.push(project.clone());
+    let mut session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    session.project_id = project.id;
+    session.worktree_path = None;
+    app.store.sessions.push(session.clone());
+    app.selected_session = Some(session.id);
+    app.page = Page::Sessions;
+    (root, project_path, app, project, session.id)
+}
+
+#[test]
+pub(crate) fn terminal_293_cmd_and_option_click_open_a_path_inside_operon() {
+    let (root, project_path, mut app, _project, _session) = terminal_293_fixture("t293-cmd-click");
+    let target = TerminalTargetKind::Path {
+        path: "src/lib.rs".into(),
+        line: None,
+    };
+    let plain = egui::Modifiers::NONE;
+    app.open_clicked_terminal_target(&plain, target.clone());
+    assert_eq!(
+        app.active_document, None,
+        "a plain click only focuses the pane"
+    );
+
+    for modifiers in [egui::Modifiers::COMMAND, egui::Modifiers::ALT] {
+        app.active_document = None;
+        app.notice = None;
+        app.open_clicked_terminal_target(&modifiers, target.clone());
+        let opened = app
+            .active_document
+            .as_ref()
+            .map(|document| document.path.clone());
+        assert_eq!(
+            opened,
+            Some(PathBuf::from("src/lib.rs")),
+            "{modifiers:?}-click must open the file as a tab inside Operon"
+        );
+        assert_ne!(
+            app.notice,
+            Some(format!("{}…", tr("ファイルを開く"))),
+            "{modifiers:?}-click must not hand the file to the default app"
+        );
+    }
+    let _ = project_path;
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_path_menu_lists_four_choices_in_order() {
+    assert_eq!(
+        TERMINAL_PATH_MENU,
+        [
+            TerminalPathMenuChoice::OpenInOperon,
+            TerminalPathMenuChoice::OpenWithDefaultApp,
+            TerminalPathMenuChoice::RevealInFinder,
+            TerminalPathMenuChoice::CopyPath,
+        ]
+    );
+    let labels: Vec<&str> = TERMINAL_PATH_MENU
+        .iter()
+        .map(|choice| choice.label())
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            tr("Operon で開く"),
+            tr("既定のアプリで開く"),
+            tr("Finder で表示"),
+            tr("パスをコピー"),
+        ]
+    );
+}
+
+#[test]
+pub(crate) fn terminal_293_secondary_click_opens_the_menu_at_the_pointer() {
+    let (root, project_path, mut app, _project, session_id) = terminal_293_fixture("t293-menu-at");
+    let pointer = Some(egui::pos2(120.0, 340.0));
+    app.open_terminal_path_menu(
+        session_id,
+        &TerminalTargetKind::Path {
+            path: "src/lib.rs".into(),
+            line: None,
+        },
+        pointer,
+    );
+    assert_eq!(
+        app.terminal_path_menu,
+        Some((session_id, project_path.join("src/lib.rs")))
+    );
+    assert_eq!(app.terminal_path_menu_at, pointer);
+
+    // A URL has no path menu.
+    app.terminal_path_menu = None;
+    app.terminal_path_menu_at = None;
+    app.open_terminal_path_menu(
+        session_id,
+        &TerminalTargetKind::Url("https://example.com".into()),
+        pointer,
+    );
+    assert_eq!(app.terminal_path_menu, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_menu_open_in_operon_opens_a_document() {
+    let (root, project_path, mut app, _project, _session) = terminal_293_fixture("t293-menu-open");
+    let ctx = egui::Context::default();
+    app.apply_terminal_path_menu_choice(
+        &ctx,
+        TerminalPathMenuChoice::OpenInOperon,
+        project_path.join("src/lib.rs"),
+    );
+    assert_eq!(
+        app.active_document
+            .as_ref()
+            .map(|document| document.path.clone()),
+        Some(PathBuf::from("src/lib.rs"))
+    );
+
+    app.apply_terminal_path_menu_choice(
+        &ctx,
+        TerminalPathMenuChoice::CopyPath,
+        project_path.join("src/lib.rs"),
+    );
+    assert_eq!(app.notice, Some(tr("パスをコピーしました。").into()));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_resolves_to_the_only_file_with_that_name() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-bare-one");
+    app.file_cache
+        .insert(project.id, list_files(&project_path, FILE_TREE_LIMIT));
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths
+            .get("Operon_LT_10min.pptx")
+            .cloned()
+            .flatten(),
+        Some(project_path.join("dist/Operon_LT_10min.pptx"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_with_two_matches_stays_unresolved() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-bare-two");
+    fs::create_dir_all(project_path.join("docs")).unwrap();
+    fs::write(project_path.join("docs/Operon_LT_10min.pptx"), b"pk").unwrap();
+    app.file_cache
+        .insert(project.id, list_files(&project_path, FILE_TREE_LIMIT));
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("Operon_LT_10min.pptx").cloned(),
+        Some(None),
+        "two files of that name: neither is guessed"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_probe_requests_the_scan_a_bare_name_needs() {
+    let (root, _project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-scan-request");
+    assert!(!app.file_cache.contains_key(&project.id));
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::Files(project.id)),
+        "a bare name that missed with no scan must ask for one"
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::Files(project.id),
+        Duration::from_secs(10),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_missed_before_the_scan_resolves_after_it() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-scan-lands");
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("Operon_LT_10min.pptx").cloned(),
+        Some(None)
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::Files(project.id),
+        Duration::from_secs(10),
+    );
+    assert_eq!(
+        app.resolved_paths.get("Operon_LT_10min.pptx"),
+        None,
+        "the scan landing must forget the miss so the next hover asks again"
+    );
+    app.unresolved_paths.push("Operon_LT_10min.pptx".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths
+            .get("Operon_LT_10min.pptx")
+            .cloned()
+            .flatten(),
+        Some(project_path.join("dist/Operon_LT_10min.pptx"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+pub(crate) fn terminal_293_menu_closes_on_escape_or_outside_click() {
+    assert!(!terminal_path_menu_closes(false, false, false));
+    assert!(terminal_path_menu_closes(true, false, false));
+    assert!(terminal_path_menu_closes(false, true, false));
+    assert!(terminal_path_menu_closes(false, false, true));
+}
+
+#[test]
+pub(crate) fn terminal_293_bare_name_symlinked_outside_the_root_stays_unresolved() {
+    let (root, project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-bare-symlink");
+    let outside = root.join("outside-notes.md");
+    fs::write(&outside, "# away\n").unwrap();
+    std::os::unix::fs::symlink(&outside, project_path.join("dist/notes.md")).unwrap();
+    // The scan skips symlinks itself; a stale or foreign scan may not.
+    let mut scan = list_files(&project_path, FILE_TREE_LIMIT);
+    scan.paths.push(PathBuf::from("dist/notes.md"));
+    app.file_cache.insert(project.id, scan);
+    app.unresolved_paths.push("notes.md".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("notes.md").cloned(),
+        Some(None),
+        "a link out of the root is not underlined: the click would refuse it"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Found by the empirical verifier: a bare name that resolves directly at the
+/// root must not start a scan of the whole project.
+#[test]
+pub(crate) fn terminal_293_bare_name_at_the_root_does_not_request_a_scan() {
+    let (root, project_path, mut app, project, _session) =
+        terminal_293_fixture("t293-root-no-scan");
+    fs::write(project_path.join("README.md"), "x").unwrap();
+    app.unresolved_paths.push("README.md".into());
+    app.resolve_terminal_paths();
+    assert_eq!(
+        app.resolved_paths.get("README.md").cloned().flatten(),
+        Some(project_path.join("README.md"))
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::Files(project.id)));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Found by the empirical verifier: a truncated scan cannot say a name is the
+/// only one of its kind.
+#[test]
+pub(crate) fn terminal_293_truncated_scan_does_not_prove_a_name_unique() {
+    let (root, project_path, mut app, project, _session) = terminal_293_fixture("t293-truncated");
+    let mut scan = list_files(&project_path, FILE_TREE_LIMIT);
+    scan.truncated = true;
+    app.file_cache.insert(project.id, scan);
+    app.unresolved_paths.push("lib.rs".into());
+    app.resolve_terminal_paths();
+    assert_eq!(app.resolved_paths.get("lib.rs").cloned(), Some(None));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// One pass of the launch sheet alone, at the 900×600 screen `click_at` uses.
+fn launch_294_frame(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events,
+        ..Default::default()
+    };
+    context.run_ui(input, |ctx| app.ui_launch_sheet(ctx))
+}
+
+/// Opens the sheet's project list by clicking its combo, the way a person
+/// does, and returns the frame that shows the list.
+fn launch_294_open_project_list(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    project_name: &str,
+) -> egui::FullOutput {
+    app.launch_sheet_open = true;
+    let _ = launch_294_frame(app, context, vec![]);
+    let laid_out = launch_294_frame(app, context, vec![]);
+    let combo = drawn_text_rects(&laid_out, |text| text == project_name)
+        .into_iter()
+        .next()
+        .expect("the sheet's combo shows the project's name");
+    click_at(context, combo.center(), |ctx| app.ui_launch_sheet(ctx));
+    let _ = launch_294_frame(app, context, vec![]);
+    launch_294_frame(app, context, vec![])
+}
+
+/// Change 294, R1: the list ends with 「＋ 新しいプロジェクト…」, and choosing
+/// it asks for a folder.
+#[test]
+pub(crate) fn launch_294_project_list_ends_with_new_project() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r1");
+    let context = egui::Context::default();
+    let list = launch_294_open_project_list(&mut app, &context, "repo");
+    let new_project = drawn_text_rect(&list, |text| text.contains("新しいプロジェクト…"))
+        .expect("the list offers a new project");
+    let last_row = drawn_text_rects(&list, |text| text == "repo")
+        .into_iter()
+        .map(|rect| rect.center().y)
+        .fold(f32::MIN, f32::max);
+    assert!(
+        new_project.center().y > last_row,
+        "「新しいプロジェクト…」 comes after the projects"
+    );
+    click_at(&context, new_project.center(), |ctx| {
+        app.ui_launch_sheet(ctx)
+    });
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("choose_launch_project_folder_invoked")
+    );
+    assert!(
+        app.launch_sheet_open,
+        "the sheet stays while the picker is up"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R2: a new folder becomes the sheet's project in place, and what
+/// was typed for this launch survives.
+#[test]
+pub(crate) fn launch_294_chosen_folder_becomes_the_sheets_project_in_place() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r2");
+    let other = root.join("other");
+    fs::create_dir_all(&other).unwrap();
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.goal_input = "ログインを直す".into();
+    app.session_name_input = "login".into();
+
+    app.apply_launch_project_folder(Some(other.clone()));
+
+    assert_eq!(app.store.projects.len(), 2);
+    let chosen = app
+        .selected_project()
+        .cloned()
+        .expect("a project is chosen");
+    assert_eq!(chosen.path, other.canonicalize().unwrap());
+    assert_eq!(app.page, Page::Home, "the page under the sheet stays");
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.goal_input, "ログインを直す");
+    assert_eq!(app.session_name_input, "login");
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("プロジェクトを追加しました。"))
+    );
+    let saved = fs::read_to_string(root.join("store-v2.json")).expect("the store was written");
+    assert!(
+        saved.contains(&chosen.id.to_string()),
+        "the project was saved"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R3: a folder that already is a project is switched to.
+#[test]
+pub(crate) fn launch_294_registered_folder_is_switched_to() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r3");
+    let other_path = root.join("other");
+    fs::create_dir_all(&other_path).unwrap();
+    let other = Project {
+        id: Uuid::new_v4(),
+        name: "other".into(),
+        path: other_path.canonicalize().unwrap(),
+        added_at: 0,
+    };
+    app.store.projects.push(other.clone());
+    app.page = Page::Sessions;
+    app.launch_sheet_open = true;
+
+    app.apply_launch_project_folder(Some(other_path));
+
+    assert_eq!(app.store.projects.len(), 2, "nothing is added twice");
+    assert_eq!(app.selected_project, Some(other.id));
+    assert_eq!(app.page, Page::Sessions);
+    assert!(app.launch_sheet_open);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("登録済みのプロジェクトに切り替えました。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R4: a path that is not a folder changes nothing but the notice.
+#[test]
+pub(crate) fn launch_294_not_a_folder_leaves_the_sheet_as_it_was() {
+    let (mut app, project, root) = launch_screen_fixture("launch-294-r4");
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+
+    app.apply_launch_project_folder(Some(root.join("missing")));
+
+    assert_eq!(app.store.projects.len(), 1);
+    assert_eq!(app.selected_project, Some(project.id));
+    assert_eq!(app.page, Page::Home);
+    assert!(app.launch_sheet_open);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("既存のフォルダを選んでください。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R5: with no project the sheet opens, stays open, offers a
+/// folder, and turns into the form once one is chosen.
+#[test]
+pub(crate) fn launch_294_without_projects_the_sheet_opens_and_offers_a_folder() {
+    let root = temporary_directory("launch-294-r5");
+    let folder = root.join("fresh");
+    fs::create_dir_all(&folder).unwrap();
+    let mut app = test_app(root.join("store-v2.json"));
+    app.page = Page::Home;
+    app.open_new_session();
+    assert!(app.launch_sheet_open);
+
+    let context = egui::Context::default();
+    let _ = launch_294_frame(&mut app, &context, vec![]);
+    let frame = launch_294_frame(&mut app, &context, vec![]);
+    assert!(app.launch_sheet_open, "the sheet does not close itself");
+    let choose = drawn_text_rect(&frame, |text| text.contains(tr("フォルダを選択…")))
+        .expect("the sheet offers choosing a folder");
+    click_at(&context, choose.center(), |ctx| app.ui_launch_sheet(ctx));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("choose_launch_project_folder_invoked")
+    );
+
+    app.apply_launch_project_folder(Some(folder.clone()));
+    let chosen = app
+        .selected_project()
+        .cloned()
+        .expect("the folder is the project");
+    assert_eq!(chosen.path, folder.canonicalize().unwrap());
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.page, Page::Home);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R6: a drop while the sheet is open is the sheet's; with the
+/// sheet closed it is the projects page's, as before.
+#[test]
+pub(crate) fn launch_294_folder_dropped_on_the_sheet_becomes_its_project() {
+    let (mut app, _project, root) = launch_screen_fixture("launch-294-r6");
+    let dropped = root.join("dropped");
+    let later = root.join("later");
+    fs::create_dir_all(&dropped).unwrap();
+    fs::create_dir_all(&later).unwrap();
+    let drop = |path: &Path| vec![dropped_file(path.to_path_buf())];
+
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.route_dropped_folders(drop(&dropped));
+    let chosen = app.selected_project().cloned().expect("the drop is chosen");
+    assert_eq!(chosen.path, dropped.canonicalize().unwrap());
+    assert_eq!(app.page, Page::Home);
+    assert!(app.launch_sheet_open);
+
+    app.launch_sheet_open = false;
+    app.route_dropped_folders(drop(&later));
+    assert_eq!(app.store.projects.len(), 3);
+    assert_eq!(
+        app.page,
+        Page::Projects,
+        "without the sheet a drop is as before"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 294, R7: recently started projects first, then the rest by when
+/// they were added, newest first.
+#[test]
+pub(crate) fn launch_294_recent_projects_come_first() {
+    let project = |name: &str, added_at: u64| Project {
+        id: Uuid::new_v4(),
+        name: name.into(),
+        path: PathBuf::from(format!("/tmp/{name}")),
+        added_at,
+    };
+    let projects = vec![
+        project("alpha", 1),
+        project("beta", 2),
+        project("gamma", 3),
+        project("delta", 4),
+    ];
+    let mut relaunched = test_session(Uuid::new_v4(), SessionStatus::Active);
+    relaunched.project_id = projects[0].id;
+    relaunched.created_at = 10;
+    relaunched.launched_at = Some(50);
+    let mut started = test_session(Uuid::new_v4(), SessionStatus::Active);
+    started.project_id = projects[2].id;
+    started.created_at = 40;
+    started.launched_at = None;
+
+    let names = |sessions: &[Session]| -> Vec<String> {
+        launch_project_choices(&projects, sessions, "")
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    };
+    assert_eq!(
+        names(&[relaunched.clone(), started.clone()]),
+        ["alpha", "gamma", "delta", "beta"]
+    );
+
+    // A project with an old and a new session counts its newest.
+    let mut old = test_session(Uuid::new_v4(), SessionStatus::Active);
+    old.project_id = projects[1].id;
+    old.created_at = 5;
+    let mut new = old.clone();
+    new.id = Uuid::new_v4();
+    new.created_at = 60;
+    assert_eq!(
+        names(&[old, relaunched, new, started]),
+        ["beta", "alpha", "gamma", "delta"]
+    );
+}
+
+/// Change 294, R8: from eight projects the list can be narrowed by name,
+/// case-insensitively.
+#[test]
+pub(crate) fn launch_294_filter_narrows_by_name() {
+    let project = |name: &str, added_at: u64| Project {
+        id: Uuid::new_v4(),
+        name: name.into(),
+        path: PathBuf::from(format!("/tmp/{name}")),
+        added_at,
+    };
+    let projects = vec![
+        project("Operon", 3),
+        project("web-app", 2),
+        project("OPS-tools", 1),
+    ];
+    let names = |filter: &str| -> Vec<String> {
+        launch_project_choices(&projects, &[], filter)
+            .into_iter()
+            .map(|(_, name)| name)
+            .collect()
+    };
+    assert_eq!(names("op"), ["Operon", "OPS-tools"]);
+    assert_eq!(names(" WEB "), ["web-app"]);
+    assert!(names("zzz").is_empty());
+    assert_eq!(names("").len(), 3);
+
+    // The field shows from eight projects and not before.
+    for (count, shown) in [
+        (LAUNCH_PROJECT_FILTER_MIN - 1, false),
+        (LAUNCH_PROJECT_FILTER_MIN, true),
+    ] {
+        let (mut app, _project, root) = launch_screen_fixture("launch-294-r8");
+        for index in 1..count {
+            app.store.projects.push(project(&format!("p{index}"), 0));
+        }
+        let context = egui::Context::default();
+        let list = launch_294_open_project_list(&mut app, &context, "repo");
+        assert_eq!(
+            drawn_text_rect(&list, |text| text == tr("プロジェクトを絞り込み")).is_some(),
+            shown,
+            "{count} projects"
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+}
+
+/// Change 294: several folders dropped on the sheet are all registered, the
+/// sheet takes the first, and the message counts only the new ones; a list
+/// closed without a choice forgets its filter.
+#[test]
+pub(crate) fn launch_294_several_dropped_folders_and_a_dismissed_filter() {
+    let (mut app, project, root) = launch_screen_fixture("launch-294-drops");
+    let first = root.join("first");
+    let second = root.join("second");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    let dropped = [first.clone(), second, project.path.clone()]
+        .into_iter()
+        .map(dropped_file)
+        .collect();
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.route_dropped_folders(dropped);
+    assert_eq!(app.store.projects.len(), 3);
+    let chosen = app
+        .selected_project()
+        .cloned()
+        .expect("the first is chosen");
+    assert_eq!(chosen.path, first.canonicalize().unwrap());
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "{count} 件のフォルダを追加し、{name} を選びました。",
+            count = 2,
+            name = "first"
+        ))
+    );
+
+    app.launch_project_filter = "fir".into();
+    let context = egui::Context::default();
+    let _ = launch_294_frame(&mut app, &context, vec![]);
+    assert!(
+        app.launch_project_filter.is_empty(),
+        "a closed list does not keep its filter"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// A notice that names a long path wraps inside its banner: egui 0.37 keeps
+/// subtracting a label's first-row indent after the first break, so a message
+/// that started after the mark drew its path rows outside the frame (change 295).
+fn a_banner_keeps_a_long_path_inside_its_frame() {
+    let ctx = egui::Context::default();
+    crate::configure_macos_fonts(&ctx, TerminalFont::default());
+    apply_interface_metrics(&ctx);
+    let palette = AppTheme::Dark.palette();
+    let message = "フック受信ソケットを開けませんでした: ソケットのパスが長すぎます: /Users/someone/dev/operon/.worktrees/feature/a-branch-name-that-goes-on/.tmp/claude-scratch/00acf7b0-418a-482e-90c5-74c45ac66d7a/home/Library/Application Support/com.local.operon/agent-hooks/hook.sock";
+    let mut frame = egui::Rect::NOTHING;
+    let drawn = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                frame = ui
+                    .scope(|ui| {
+                        banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
+                            ui.label(RichText::new(message).size(13.5).color(palette.text));
+                        });
+                    })
+                    .response
+                    .rect;
+            });
+        },
+    );
+    let mut rows = Vec::new();
+    fn visit(shape: &egui::epaint::Shape, rows: &mut Vec<(String, f32)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                for row in &text.galley.rows {
+                    if let Some(glyph) = row.glyphs.first() {
+                        rows.push((row.text(), text.pos.x + row.pos.x + glyph.pos.x));
+                    }
+                }
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    visit(child, rows);
+                }
+            }
+            _ => {}
+        }
+    }
+    for clipped in &drawn.shapes {
+        visit(&clipped.shape, &mut rows);
+    }
+    assert!(
+        rows.iter().any(|(text, _)| text.contains("hook.sock")),
+        "the path wraps onto rows of its own: {rows:?}"
+    );
+    for (text, left) in &rows {
+        assert!(
+            *left >= frame.left(),
+            "{text:?} starts at {left}, left of the banner at {}",
+            frame.left()
+        );
+    }
 }
 
 fn cursor_290_collect_shapes(
@@ -80388,7 +85298,7 @@ pub(crate) fn cursor_290_wide_and_four_byte_glyphs_span_two_cells() {
             egui::Vec2::ZERO,
             0.0f32,
         );
-        let _ = ctx.run(
+        let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -80636,7 +85546,7 @@ pub(crate) fn cursor_290_focused_pane_draws_filled_theme_block_with_inverted_gly
 
         let cell = {
             let mut measured = egui::Vec2::ZERO;
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     measured = terminal_cell_size(ui);
                 });
@@ -80769,7 +85679,10 @@ pub(crate) fn cursor_290_focused_pane_draws_filled_theme_block_with_inverted_gly
             &ctx,
             &mut app,
             &session,
-            vec![egui::Event::Ime(egui::ImeEvent::Preedit("かん".into()))],
+            vec![egui::Event::Ime(egui::ImeEvent::Preedit {
+                text: "かん".into(),
+                active_range_chars: None,
+            })],
         );
         assert_eq!(
             app.terminal_preedits.get(&session.id).map(String::as_str),
@@ -80801,13 +85714,13 @@ pub(crate) fn cursor_290_focused_pane_draws_filled_theme_block_with_inverted_gly
 pub(crate) fn cursor_290_unfocused_pane_draws_hollow_outline_and_inactive_session_draws_none() {
     let (root, mut app, mut session) = ime_pane_fixture("cursor-290-unfocused");
     let palette = app.store.theme.palette();
-    let pane_id = egui::Id::new(("terminal-pane", session.id));
+    let pane_id = egui::Id::unique(("terminal-pane", session.id));
     let ctx = egui::Context::default();
     configure_macos_fonts(&ctx, TerminalFont::default());
 
     let cell = {
         let mut measured = egui::Vec2::ZERO;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 measured = terminal_cell_size(ui);
             });
@@ -80914,7 +85827,7 @@ pub(crate) fn cursor_290_unfocused_pane_draws_hollow_outline_and_inactive_sessio
     ));
     app.activate_workspace_tab(&WorkspaceTab::Session(session.id));
     app.terminal_focus_request = Some(session.id);
-    let _ = ctx.run(
+    let _ = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -80926,7 +85839,7 @@ pub(crate) fn cursor_290_unfocused_pane_draws_hollow_outline_and_inactive_sessio
             egui::CentralPanel::default().show(ctx, |ui| app.ui_terminal_workspace(ui));
         },
     );
-    let split_out = ctx.run(
+    let split_out = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -81003,13 +85916,13 @@ pub(crate) fn cursor_290_unfocused_pane_draws_hollow_outline_and_inactive_sessio
 #[test]
 pub(crate) fn cursor_290_ime_anchor_and_galley_cache_follow_wide_caret() {
     let (root, mut app, session) = ime_pane_fixture("cursor-290-ime-cache");
-    let pane_id = egui::Id::new(("terminal-pane", session.id));
+    let pane_id = egui::Id::unique(("terminal-pane", session.id));
     let ctx = egui::Context::default();
     configure_macos_fonts(&ctx, TerminalFont::default());
 
     let cell = {
         let mut measured = egui::Vec2::ZERO;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 measured = terminal_cell_size(ui);
             });
@@ -81141,7 +86054,7 @@ pub(crate) fn cursor_290_variation_selector_clusters_do_not_overflow_caret_or_dr
 
     let cell = {
         let mut measured = egui::Vec2::ZERO;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 measured = terminal_cell_size(ui);
             });
@@ -81157,6 +86070,9 @@ pub(crate) fn cursor_290_variation_selector_clusters_do_not_overflow_caret_or_dr
         ("葛\u{E0100}z\n", 0, 2),
         ("a\u{FE0F}z\n", 0, 1),
         ("\u{1112}\u{1161}\u{11AB}z\n", 0, 2),
+        // egui 0.37 shapes a selector and a whole syllable to their own
+        // advance; a lone medial vowel still draws two cells wide.
+        ("a\u{1161}z\n", 0, 1),
     ];
 
     for &(line, cluster_x, cluster_cols) in cases {
@@ -81687,7 +86603,7 @@ pub(crate) fn model_check_cursor_290_viewport_edge_and_focus_paint() {
         let mut cell = egui::Vec2::ZERO;
         let mut left = 0.0f32;
 
-        let output = ctx.run(
+        let output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
