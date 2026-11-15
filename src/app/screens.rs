@@ -6493,7 +6493,7 @@ impl OperonApp {
                     };
                     let cache = &mut self.terminal_pane_render_cache;
 
-                    let (terminal_rect, (hovered_target, unresolved, caret)) = {
+                    let (terminal_rect, (hovered_target, unresolved, caret, caret_glyph)) = {
                         let border = if split {
                             egui::Stroke::new(
                                 2.0_f32,
@@ -6540,14 +6540,19 @@ impl OperonApp {
                                             cursor,
                                             Some(context),
                                         );
-                                        (hovered.hovered, unresolved, hovered.caret)
+                                        (
+                                            hovered.hovered,
+                                            unresolved,
+                                            hovered.caret,
+                                            hovered.caret_glyph,
+                                        )
                                     }
                                     None => {
                                         ui.label(
                                             RichText::new(tr("ターミナル出力を待っています…"))
                                                 .color(palette.text_muted),
                                         );
-                                        (None, Vec::new(), None)
+                                        (None, Vec::new(), None, TerminalCaretGlyph::default())
                                     }
                                 }
                             });
@@ -6666,13 +6671,19 @@ impl OperonApp {
                         // when the caret row was scrolled out of the pane.
                         if !preedit.is_empty() {
                             draw_terminal_preedit(ui, anchor, &preedit, palette);
-                        } else if terminal_response.has_focus() {
+                        } else if let Some(caret) = caret {
                             // Only a caret in a row this frame drew gets a box:
                             // the rows report nothing when the cursor's row was
-                            // scrolled away (change 155).
-                            if let Some(caret) = caret {
-                                draw_terminal_cursor(ui, caret, palette);
-                            }
+                            // scrolled away (change 155). Focused panes paint a
+                            // solid theme block with inverted glyph; unfocused
+                            // panes paint a 1px hollow outline (change 290).
+                            draw_terminal_cursor(
+                                ui,
+                                caret,
+                                caret_glyph.as_str(),
+                                terminal_response.has_focus(),
+                                palette,
+                            );
                         }
                     }
 
