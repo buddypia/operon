@@ -28,7 +28,7 @@ resume: "Done. Package and swap /Applications/Operon.app from main after landing
 
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked session_notice_289_: 4 passed"
-  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9969 at diagnose as on main"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9900 and always_loaded_bytes 7997 at diagnose"
   release-binary: "machine passed required - src/app.rs changes; package and swap from main after landing"
   guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/289-session-notice-shakes-terminal/mutations.py"
 

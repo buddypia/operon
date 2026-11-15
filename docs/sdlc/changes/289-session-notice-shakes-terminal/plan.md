@@ -65,3 +65,9 @@ worse than no plan, because the next reader trusts it.
   two-pass helper because `click_at` hands a pass no root `Ui`. Main's drop
   overlay text and terminal-stream sync after the modals are kept as main
   wrote them. No behaviour of this change moved.
+- The overlay made `src/app.rs` 9981 lines, over the 9979 that change 292's
+  `tui_perf_292_session_workspace_steady_frame_and_module_budget` allows, and
+  CI refused it. `ui_brief_notice_toast` moved, unchanged, to the new module
+  `src/app/toast.rs`; its line in `CLAUDE.md`'s map is paid for by three
+  shortened lines there, which keeps `always_loaded_bytes` under its propose
+  tier. `mutations.py` aims the overlay's mutations at the new file.
