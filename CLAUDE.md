@@ -17,15 +17,16 @@ alternatives; commit `plan.md` before editing source files.
        claude_md_maps_every_module_that_exists. Add a module, add its line. -->
   - `src/app.rs` — `OperonApp`: app state, background tasks, top-level UI wiring.
     `src/app/screens.rs` holds toolbar through terminal workspace drawing.
-    `src/app/knowledge.rs` holds the knowledge tab, model block, and run wiring.
+    `src/app/knowledge.rs` holds the knowledge tab, model block, run wiring.
     `src/app/dock_badge.rs` badges the Dock icon.
     `src/app/broadcast.rs` messages idle agents.
-    `src/app/relaunch.rs` keeps tabs across a relaunch and restarts gone sessions.
+    `src/app/relaunch.rs` keeps tabs across a relaunch, restarts gone sessions.
     `src/app/session_order.rs` keeps the column and the tabs one list, and pins.
-    `src/app/launch_menu.rs` holds the tab strip's + menu and its quick launch.
+    `src/app/launch_menu.rs` holds the tab strip's + menu and quick launch.
     `src/app/launch_projects.rs` adds and picks the launch sheet's project.
     `src/app/terminal_output.rs` lays terminal text out off the frame.
     `src/app/terminal_paths.rs` opens terminal paths.
+    `src/app/toast.rs` draws corner notices.
     `src/app/waiting_reply.rs` draws the 要対応 rows and replies.
     `src/app/working_time.rs` times agent turns.
   - `src/tests.rs` — inline `#[cfg(test)]` suite; no other module has tests.

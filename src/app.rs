@@ -11,6 +11,7 @@ pub(crate) mod screens;
 pub(crate) mod session_order;
 pub(crate) mod terminal_output;
 pub(crate) mod terminal_paths;
+pub(crate) mod toast;
 pub(crate) mod waiting_reply;
 pub(crate) mod working_time;
 
@@ -7467,100 +7468,7 @@ impl eframe::App for OperonApp {
         if self.page != Page::Sessions {
             self.pending_history_open = None;
         }
-        egui::CentralPanel::default().show(root, |ui| {
-            ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
-            // Two screens hold something that is as wide as it is and take the
-            // whole window edge to edge: the session workspace, which is a
-            // terminal, and the editor, which is a file tree beside a page of
-            // code. Every other page is inset by a gutter and takes the rest.
-            let full_width = self.page == Page::Sessions
-                || (self.page == Page::Projects
-                    && self.project_tab == ProjectTab::Files
-                    // The tab a person left the last project on is remembered,
-                    // so this has to check that there is a project open —
-                    // otherwise the project list itself would be drawn at full
-                    // width and, worse, outside the scroll area it needs.
-                    && self.selected_project.is_some());
-            let content_width = if full_width {
-                ui.available_width()
-            } else {
-                page_column_width(ui.available_width())
-            };
-            let content_height = ui.available_height();
-            let side_space = (ui.available_width() - content_width) / 2.0;
-            ui.horizontal(|ui| {
-                ui.add_space(side_space);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(content_width, content_height),
-                    egui::Layout::top_down(egui::Align::LEFT),
-                    |ui| {
-                        // Two banners, and they answer to different rules. The
-                        // durability warning is about data on disk and stays
-                        // until the retry clears it, so it has no close button
-                        // and wears the warning edge. An ordinary notice is the
-                        // result of something the person just did, and closes.
-                        if let Some(warning) = self.durability_warning.clone() {
-                            banner(ui, palette, ICON_ATTENTION, palette.warning, |ui| {
-                                ui.label(RichText::new(warning).size(13.5).color(palette.text));
-                            });
-                            ui.add_space(SPACE_SM);
-                        }
-                        // A brief notice is a toast, drawn over the window's
-                        // corner after the page, and takes no row here.
-                        let brief = notice_is_brief(&self.notice, &self.brief_notice);
-                        if let Some(notice) = self.notice.clone().filter(|_| !brief) {
-                            let mut dismissed = false;
-                            banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
-                                ui.label(RichText::new(notice).size(13.5).color(palette.text));
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if small_icon_button(
-                                            ui,
-                                            palette,
-                                            ICON_CLOSE,
-                                            tr("この通知を閉じる"),
-                                        )
-                                        .clicked()
-                                        {
-                                            dismissed = true;
-                                        }
-                                    },
-                                );
-                            });
-                            if dismissed {
-                                self.notice = None;
-                            }
-                            ui.add_space(SPACE_SM);
-                        }
-                        // The two full-width screens also scroll themselves —
-                        // the terminal sticks to the bottom of its own buffer,
-                        // and the editor scrolls its tree and its text
-                        // separately. Wrapping either in the page's scroll
-                        // area would give it an unbounded height and take its
-                        // scrolling away.
-                        if full_width {
-                            match self.page {
-                                Page::Sessions => self.ui_terminal_workspace(ui),
-                                _ => self.ui_projects(ui),
-                            }
-                        } else {
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    ui.set_min_width(ui.available_width());
-                                    match self.page {
-                                        Page::Home => self.ui_home(ui),
-                                        Page::Projects => self.ui_projects(ui),
-                                        Page::Sessions => self.ui_terminal_workspace(ui),
-                                        Page::Settings => self.ui_settings(ui),
-                                    }
-                                });
-                        }
-                    },
-                );
-            });
-        });
+        self.ui_central_panel(root, palette);
         if ctx.input(|input| !input.raw.hovered_files.is_empty()) {
             let rect = ctx.content_rect().shrink(14.0);
             let painter = ctx.layer_painter(egui::LayerId::new(
@@ -7598,49 +7506,105 @@ impl eframe::App for OperonApp {
 }
 
 impl OperonApp {
-    /// The brief notice, in the window's bottom-right corner. Its ✕ clears the
-    /// notice and the record that made it brief together, so neither outlives
-    /// the other.
-    pub(crate) fn ui_brief_notice_toast(&mut self, ctx: &egui::Context, palette: &Palette) {
-        if !notice_is_brief(&self.notice, &self.brief_notice) {
-            return;
-        }
-        let Some(text) = self.notice.clone() else {
-            return;
-        };
-        let mut dismissed = false;
-        egui::Area::new(egui::Id::unique("brief-notice-toast"))
-            .order(egui::Order::Foreground)
-            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-SPACE_LG, -SPACE_LG))
-            .interactable(true)
-            .show(ctx, |ui| {
-                egui::Frame::default()
-                    .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
-                    .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
-                    .inner_margin(egui::Margin::symmetric(12, 8))
-                    .shadow(ctx.global_style().visuals.popup_shadow)
-                    .show(ui, |ui| {
-                        ui.set_max_width(420.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(ICON_STATUS_DONE)
-                                    .size(14.0)
-                                    .color(palette.success),
-                            );
-                            ui.label(RichText::new(text).size(13.5).color(palette.text));
-                            if small_icon_button(ui, palette, ICON_CLOSE, tr("この通知を閉じる"))
-                                .clicked()
-                            {
-                                dismissed = true;
+    pub(crate) fn ui_central_panel(&mut self, root: &mut egui::Ui, palette: &Palette) {
+        egui::CentralPanel::default().show(root, |ui| {
+            ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
+            // Two screens hold something that is as wide as it is and take the
+            // whole window edge to edge: the session workspace, which is a
+            // terminal, and the editor, which is a file tree beside a page of
+            // code. Every other page is inset by a gutter and takes the rest.
+            let full_width = self.page == Page::Sessions
+                || (self.page == Page::Projects
+                    && self.project_tab == ProjectTab::Files
+                    // The tab a person left the last project on is remembered,
+                    // so this has to check that there is a project open —
+                    // otherwise the project list itself would be drawn at full
+                    // width and, worse, outside the scroll area it needs.
+                    && self.selected_project.is_some());
+            let content_width = if full_width {
+                ui.available_width()
+            } else {
+                page_column_width(ui.available_width())
+            };
+            let content_height = ui.available_height();
+            let side_space = (ui.available_width() - content_width) / 2.0;
+            ui.horizontal(|ui| {
+                ui.add_space(side_space);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(content_width, content_height),
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        // Two banners, and they answer to different rules. The
+                        // durability warning is about data on disk and stays
+                        // until the retry clears it, so it has no close button
+                        // and wears the warning edge. An ordinary notice is the
+                        // result of something the person just did, and closes.
+                        // On Sessions both float over the corner instead, so
+                        // neither ever shifts the terminal workspace.
+                        if self.page != Page::Sessions {
+                            if let Some(warning) = self.durability_warning.as_deref() {
+                                banner(ui, palette, ICON_ATTENTION, palette.warning, |ui| {
+                                    ui.label(RichText::new(warning).size(13.5).color(palette.text));
+                                });
+                                ui.add_space(SPACE_SM);
                             }
-                        });
-                    });
+                            // A brief notice is a toast, drawn over the window's
+                            // corner after the page, and takes no row here.
+                            let brief = notice_is_brief(&self.notice, &self.brief_notice);
+                            let mut dismissed = false;
+                            if let Some(notice) = self.notice.as_deref().filter(|_| !brief) {
+                                banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
+                                    ui.label(RichText::new(notice).size(13.5).color(palette.text));
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if small_icon_button(
+                                                ui,
+                                                palette,
+                                                ICON_CLOSE,
+                                                tr("この通知を閉じる"),
+                                            )
+                                            .clicked()
+                                            {
+                                                dismissed = true;
+                                            }
+                                        },
+                                    );
+                                });
+                                ui.add_space(SPACE_SM);
+                            }
+                            if dismissed {
+                                self.notice = None;
+                            }
+                        }
+                        // The two full-width screens also scroll themselves —
+                        // the terminal sticks to the bottom of its own buffer,
+                        // and the editor scrolls its tree and its text
+                        // separately. Wrapping either in the page's scroll
+                        // area would give it an unbounded height and take its
+                        // scrolling away.
+                        if full_width {
+                            match self.page {
+                                Page::Sessions => self.ui_terminal_workspace(ui),
+                                _ => self.ui_projects(ui),
+                            }
+                        } else {
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    match self.page {
+                                        Page::Home => self.ui_home(ui),
+                                        Page::Projects => self.ui_projects(ui),
+                                        Page::Sessions => self.ui_terminal_workspace(ui),
+                                        Page::Settings => self.ui_settings(ui),
+                                    }
+                                });
+                        }
+                    },
+                );
             });
-        if dismissed {
-            self.notice = None;
-            self.brief_notice = None;
-        }
+        });
     }
 }
 
