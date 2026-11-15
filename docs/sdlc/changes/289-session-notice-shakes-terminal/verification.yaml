@@ -1,0 +1,9 @@
+# The evidence for change 289. Format: docs/sdlc/templates/verification.yaml.
+digest: "84bd6c8221cdcca8"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked session_notice_289_terminal_workspace_never_shifts_on_notices_or_warnings
+  - R2 empirical-test :: cargo test --locked session_notice_289_persistent_notice_floats_stays_past_toast_timeout_and_closes
+  - R3 empirical-test :: cargo test --locked session_notice_289_durability_warning_floats_without_close_button
+  - R4 empirical-test :: cargo test --locked session_notice_289_other_pages_keep_top_banner_without_duplicate_toast
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/289-session-notice-shakes-terminal/mutations.py

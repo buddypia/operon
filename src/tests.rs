@@ -80170,3 +80170,339 @@ fn home_287_clicking_the_mark_opens_the_session() {
     assert_eq!(app.selected_session, Some(session.id));
     fs::remove_dir_all(root).ok();
 }
+
+/// Fixture for change 289: one project with one active session open in the
+/// Sessions workspace.
+fn session_notice_289_fixture(label: &str) -> (PathBuf, OperonApp, Uuid) {
+    let root = temporary_directory(label);
+    let project_path = root.join("repo");
+    fs::create_dir_all(&project_path).unwrap();
+    let project = Project {
+        id: Uuid::new_v4(),
+        name: "operon".into(),
+        path: project_path.clone(),
+        added_at: now(),
+    };
+    let mut session = test_session(project.id, SessionStatus::Active);
+    session.worktree_path = Some(project_path);
+    let session_id = session.id;
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.push(session);
+    let mut app =
+        OperonApp::from_state(root.join("store.json"), store, ToolStatus::default(), None);
+    app.page = Page::Sessions;
+    app.select_session(session_id);
+    app.session_output.insert(session_id, "$ claude\n".into());
+    (root, app, session_id)
+}
+
+fn session_notice_289_screen() -> egui::Rect {
+    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0))
+}
+
+/// Runs the real topbar + CentralPanel + notice overlay pass over two frames so
+/// `egui::Area` anchors settle at their bottom-right screen coordinates.
+fn session_notice_289_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    let screen = session_notice_289_screen();
+    let mut pass = |ctx: &egui::Context| {
+        app.apply_appearance(ctx);
+        let palette = app.store.theme.palette();
+        app.ui_topbar(ctx);
+        app.ui_central_panel(ctx, palette);
+        app.ui_brief_notice_toast(ctx, palette);
+    };
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(screen),
+            events,
+            ..Default::default()
+        },
+        &mut pass,
+    );
+    ctx.run(
+        egui::RawInput {
+            screen_rect: Some(screen),
+            ..Default::default()
+        },
+        &mut pass,
+    )
+}
+
+/// R1 (change 289): no notice or durability warning on `Page::Sessions` —
+/// neither in the terminal workspace nor in its inline history view — moves the
+/// workspace's top edge or shrinks its height.
+#[test]
+fn session_notice_289_terminal_workspace_never_shifts_on_notices_or_warnings() {
+    let (root, mut app, _session_id) = session_notice_289_fixture("session-notice-289-steady");
+    let ctx = egui::Context::default();
+
+    let _ = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let baseline = app.dock_area.expect("workspace area with no notice");
+    let baseline_pane = app
+        .workspace
+        .rects(app.dock.rects(baseline, Some(true)).center)
+        .panes[0]
+        .1;
+
+    // 1. Ordinary interrupting notice (e.g. `request_system_action` progress).
+    app.notice = Some("ファイルを開く…".into());
+    app.brief_notice = None;
+    let _ = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let with_notice = app
+        .dock_area
+        .expect("workspace area with persistent notice");
+    assert_eq!(
+        (with_notice.top(), with_notice.height()),
+        (baseline.top(), baseline.height()),
+        "an ordinary notice shifted the terminal workspace vertically"
+    );
+
+    // 2. Replacement by a brief completion toast (`notice_briefly`).
+    app.notice_briefly("ファイルを開く: 完了");
+    let _ = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let with_brief = app.dock_area.expect("workspace area with brief toast");
+    assert_eq!(
+        (with_brief.top(), with_brief.height()),
+        (baseline.top(), baseline.height()),
+        "switching between ordinary and brief notice shifted the terminal workspace"
+    );
+
+    // 3. Unconfirmed disk-sync durability warning.
+    app.durability_warning =
+        Some("変更は書き込まれましたが、ディスクに保存されたことを確認できませんでした。".into());
+    app.notice = Some("セッションをキャンセルしました。".into());
+    app.brief_notice = None;
+    let _ = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let with_both = app
+        .dock_area
+        .expect("workspace area with warning and notice");
+    let pane_with_both = app
+        .workspace
+        .rects(app.dock.rects(with_both, Some(true)).center)
+        .panes[0]
+        .1;
+    assert_eq!(
+        (with_both.top(), with_both.height()),
+        (baseline.top(), baseline.height()),
+        "durability warning + notice shifted the terminal workspace"
+    );
+    assert_eq!(pane_with_both, baseline_pane, "terminal pane rect moved");
+
+    // 4. Inline history library inside `Page::Sessions` keeps the same area too.
+    app.session_library_open = true;
+    let _ = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let with_library = app.dock_area.expect("workspace area in session library");
+    assert_eq!(
+        (with_library.top(), with_library.height()),
+        (baseline.top(), baseline.height()),
+        "session library view shifted under notice/warning"
+    );
+
+    fs::remove_dir_all(root).ok();
+}
+
+/// R2 (change 289): on `Page::Sessions`, a non-brief notice renders in the
+/// bottom-right overlay with `ICON_NOTICE`, wraps long text so `この通知を閉じる`
+/// stays inside the window, outlives `NOTICE_TOAST_SECONDS`, and clears on `✕`.
+#[test]
+fn session_notice_289_persistent_notice_floats_stays_past_toast_timeout_and_closes() {
+    let (root, mut app, _session_id) = session_notice_289_fixture("session-notice-289-persist");
+    let ctx = egui::Context::default();
+    let screen = session_notice_289_screen();
+
+    let long_error = "セッションを開始できませんでした: tmux が PATH 上に見つかりません。インストールしてから、「設定」で「ツールを再確認」を押してください。";
+    app.notice = Some(long_error.into());
+    app.brief_notice = None;
+
+    let output = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let text_rects = drawn_text_rects(&output, |drawn| {
+        drawn.contains("セッションを開始できませんでした")
+    });
+    assert_eq!(text_rects.len(), 1, "persistent notice must be drawn once");
+    let notice_rect = text_rects[0];
+    assert!(
+        notice_rect.top() > screen.height() * 0.5 && notice_rect.right() > screen.width() * 0.5,
+        "persistent notice must float in the bottom-right corner on Page::Sessions, got {notice_rect:?}"
+    );
+    assert!(
+        notice_rect.left() >= screen.left()
+            && notice_rect.right() <= screen.right()
+            && notice_rect.width() <= 420.0,
+        "long persistent notice must wrap within <= 420px inside the window, got {notice_rect:?}"
+    );
+    let info_marks = drawn_text_rects(&output, |drawn| drawn == ICON_NOTICE);
+    assert!(
+        info_marks.iter().any(|r| r.top() > screen.height() * 0.5),
+        "persistent notice in bottom-right overlay must carry ICON_NOTICE"
+    );
+
+    // Outlives the brief-toast timeout.
+    let later = Instant::now() + Duration::from_secs(NOTICE_TOAST_SECONDS * 3);
+    assert_eq!(app.expire_brief_notice(later), None);
+    assert_eq!(app.notice.as_deref(), Some(long_error));
+
+    // Find the close button in the bottom-right toast, verify it sits wholly
+    // inside the window and shows `この通知を閉じる` on hover, then click it.
+    let close_rects: Vec<egui::Rect> = drawn_text_rects(&output, |drawn| drawn == ICON_CLOSE)
+        .into_iter()
+        .filter(|r| r.top() > screen.height() * 0.5)
+        .collect();
+    assert_eq!(
+        close_rects.len(),
+        1,
+        "expected one close button in the corner toast"
+    );
+    let close_rect = close_rects[0];
+    assert!(
+        close_rect.left() >= screen.left() && close_rect.right() <= screen.right(),
+        "long notice pushed the close button outside the window: {close_rect:?}"
+    );
+    let hovered = session_notice_289_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(close_rect.center())],
+    );
+    assert!(
+        !drawn_text_rects(&hovered, |drawn| drawn.contains(tr("この通知を閉じる"))).is_empty(),
+        "corner close button must carry the この通知を閉じる tooltip"
+    );
+
+    click_at(&ctx, close_rect.center(), |ctx| {
+        app.apply_appearance(ctx);
+        let palette = app.store.theme.palette();
+        app.ui_topbar(ctx);
+        app.ui_central_panel(ctx, palette);
+        app.ui_brief_notice_toast(ctx, palette);
+    });
+    assert_eq!(
+        app.notice, None,
+        "clicking ✕ must dismiss the persistent notice"
+    );
+
+    fs::remove_dir_all(root).ok();
+}
+
+/// R3 (change 289): on `Page::Sessions`, `durability_warning` floats in the
+/// bottom-right overlay with `ICON_ATTENTION` and no close button of its own,
+/// stacking above `notice` when both are present.
+#[test]
+fn session_notice_289_durability_warning_floats_without_close_button() {
+    let (root, mut app, _session_id) = session_notice_289_fixture("session-notice-289-durability");
+    let ctx = egui::Context::default();
+    let screen = session_notice_289_screen();
+
+    let warning = "変更は書き込まれましたが、ディスクに保存されたことを確認できませんでした。Operon が自動的に再試行します。";
+    app.durability_warning = Some(warning.into());
+    app.notice = None;
+
+    let only_warning = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let warning_rects = drawn_text_rects(&only_warning, |drawn| {
+        drawn.contains("変更は書き込まれましたが")
+    });
+    assert_eq!(
+        warning_rects.len(),
+        1,
+        "durability warning must be drawn once"
+    );
+    assert!(
+        warning_rects[0].top() > screen.height() * 0.5
+            && warning_rects[0].left() >= screen.left()
+            && warning_rects[0].width() <= 420.0,
+        "durability warning must float wrapped in the bottom-right overlay on Page::Sessions"
+    );
+    assert!(
+        drawn_text_rects(&only_warning, |drawn| drawn == ICON_ATTENTION)
+            .iter()
+            .any(|r| r.top() > screen.height() * 0.5),
+        "durability warning in corner overlay must carry ICON_ATTENTION"
+    );
+    let corner_closes: Vec<egui::Rect> =
+        drawn_text_rects(&only_warning, |drawn| drawn == ICON_CLOSE)
+            .into_iter()
+            .filter(|r| r.top() > screen.height() * 0.5)
+            .collect();
+    assert!(
+        corner_closes.is_empty(),
+        "durability warning must have no close button of its own"
+    );
+
+    // When a notice is also present, the warning stacks above it and clicking ✕
+    // dismisses only the notice, keeping `durability_warning`.
+    app.notice = Some("セッションをキャンセルしました。".into());
+    let both = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let warn_y =
+        drawn_text_rects(&both, |drawn| drawn.contains("変更は書き込まれましたが"))[0].top();
+    let notice_y = drawn_text_rects(&both, |drawn| {
+        drawn.contains("セッションをキャンセルしました")
+    })[0]
+        .top();
+    assert!(
+        warn_y < notice_y,
+        "durability warning must stack above the notice"
+    );
+
+    let close_center = drawn_text_rects(&both, |drawn| drawn == ICON_CLOSE)
+        .into_iter()
+        .find(|r| r.top() > screen.height() * 0.5)
+        .expect("notice close button")
+        .center();
+    click_at(&ctx, close_center, |ctx| {
+        app.apply_appearance(ctx);
+        let palette = app.store.theme.palette();
+        app.ui_topbar(ctx);
+        app.ui_central_panel(ctx, palette);
+        app.ui_brief_notice_toast(ctx, palette);
+    });
+    assert_eq!(app.notice, None);
+    assert_eq!(app.durability_warning.as_deref(), Some(warning));
+
+    fs::remove_dir_all(root).ok();
+}
+
+/// R4 (change 289): non-Session pages keep their top `CentralPanel` banner and
+/// never duplicate a persistent notice or durability warning in the corner toast.
+#[test]
+fn session_notice_289_other_pages_keep_top_banner_without_duplicate_toast() {
+    let (root, mut app, _session_id) = session_notice_289_fixture("session-notice-289-home");
+    let ctx = egui::Context::default();
+    let screen = session_notice_289_screen();
+
+    app.page = Page::Home;
+    app.durability_warning = Some("保存確認を再試行しています。".into());
+    app.notice = Some("ローカル履歴を 3 件見つけました。".into());
+    app.brief_notice = None;
+
+    let output = session_notice_289_frame(&mut app, &ctx, Vec::new());
+    let notice_rects = drawn_text_rects(&output, |drawn| {
+        drawn.contains("ローカル履歴を 3 件見つけました")
+    });
+    let warning_rects = drawn_text_rects(&output, |drawn| {
+        drawn.contains("保存確認を再試行しています")
+    });
+    assert_eq!(
+        notice_rects.len(),
+        1,
+        "Home must draw the persistent notice once"
+    );
+    assert_eq!(
+        warning_rects.len(),
+        1,
+        "Home must draw the durability warning once"
+    );
+    assert!(
+        notice_rects[0].top() < screen.height() * 0.35
+            && warning_rects[0].top() < notice_rects[0].top(),
+        "Home must keep the warning and notice as top banners above the page content"
+    );
+
+    fs::remove_dir_all(root).ok();
+}

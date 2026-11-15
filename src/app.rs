@@ -7506,6 +7506,37 @@ impl eframe::App for OperonApp {
         if self.page != Page::Sessions {
             self.pending_history_open = None;
         }
+        self.ui_central_panel(ctx, palette);
+        if ctx.input(|input| !input.raw.hovered_files.is_empty()) {
+            let rect = ctx.screen_rect().shrink(14.0);
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("folder-drop-overlay"),
+            ));
+            painter.rect_filled(rect, 8.0, palette.scrim);
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                tr("フォルダをドロップしてプロジェクトを追加"),
+                egui::FontId::proportional(20.0),
+                palette.accent_soft,
+            );
+        }
+        self.ui_brief_notice_toast(ctx, palette);
+        self.ui_command_palette(ctx);
+        self.ui_launch_sheet(ctx);
+        self.ui_broadcast_sheet(ctx);
+        self.ui_restore_modal(ctx);
+        self.ui_launch_modal(ctx);
+        self.ui_land_worktree_modal(ctx, palette);
+        self.ui_create_pr_modal(ctx, palette);
+        self.ui_run_script_modal(ctx, palette);
+        self.ui_port_stop_modal(ctx, palette);
+    }
+}
+
+impl OperonApp {
+    pub(crate) fn ui_central_panel(&mut self, ctx: &egui::Context, palette: &Palette) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
             // Two screens hold something that is as wide as it is and take the
@@ -7538,39 +7569,43 @@ impl eframe::App for OperonApp {
                         // until the retry clears it, so it has no close button
                         // and wears the warning edge. An ordinary notice is the
                         // result of something the person just did, and closes.
-                        if let Some(warning) = self.durability_warning.clone() {
-                            banner(ui, palette, ICON_ATTENTION, palette.warning, |ui| {
-                                ui.label(RichText::new(warning).size(13.5).color(palette.text));
-                            });
-                            ui.add_space(SPACE_SM);
-                        }
-                        // A brief notice is a toast, drawn over the window's
-                        // corner after the page, and takes no row here.
-                        let brief = notice_is_brief(&self.notice, &self.brief_notice);
-                        if let Some(notice) = self.notice.clone().filter(|_| !brief) {
+                        // On Sessions both float over the corner instead, so
+                        // neither ever shifts the terminal workspace.
+                        if self.page != Page::Sessions {
+                            if let Some(warning) = self.durability_warning.as_deref() {
+                                banner(ui, palette, ICON_ATTENTION, palette.warning, |ui| {
+                                    ui.label(RichText::new(warning).size(13.5).color(palette.text));
+                                });
+                                ui.add_space(SPACE_SM);
+                            }
+                            // A brief notice is a toast, drawn over the window's
+                            // corner after the page, and takes no row here.
+                            let brief = notice_is_brief(&self.notice, &self.brief_notice);
                             let mut dismissed = false;
-                            banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
-                                ui.label(RichText::new(notice).size(13.5).color(palette.text));
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        if small_icon_button(
-                                            ui,
-                                            palette,
-                                            ICON_CLOSE,
-                                            tr("この通知を閉じる"),
-                                        )
-                                        .clicked()
-                                        {
-                                            dismissed = true;
-                                        }
-                                    },
-                                );
-                            });
+                            if let Some(notice) = self.notice.as_deref().filter(|_| !brief) {
+                                banner(ui, palette, ICON_NOTICE, palette.info, |ui| {
+                                    ui.label(RichText::new(notice).size(13.5).color(palette.text));
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if small_icon_button(
+                                                ui,
+                                                palette,
+                                                ICON_CLOSE,
+                                                tr("この通知を閉じる"),
+                                            )
+                                            .clicked()
+                                            {
+                                                dismissed = true;
+                                            }
+                                        },
+                                    );
+                                });
+                                ui.add_space(SPACE_SM);
+                            }
                             if dismissed {
                                 self.notice = None;
                             }
-                            ui.add_space(SPACE_SM);
                         }
                         // The two full-width screens also scroll themselves —
                         // the terminal sticks to the bottom of its own buffer,
@@ -7600,73 +7635,101 @@ impl eframe::App for OperonApp {
                 );
             });
         });
-        if ctx.input(|input| !input.raw.hovered_files.is_empty()) {
-            let rect = ctx.screen_rect().shrink(14.0);
-            let painter = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("folder-drop-overlay"),
-            ));
-            painter.rect_filled(rect, 8.0, palette.scrim);
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                tr("フォルダをドロップしてプロジェクトを追加"),
-                egui::FontId::proportional(20.0),
-                palette.accent_soft,
-            );
-        }
-        self.ui_brief_notice_toast(ctx, palette);
-        self.ui_command_palette(ctx);
-        self.ui_launch_sheet(ctx);
-        self.ui_broadcast_sheet(ctx);
-        self.ui_restore_modal(ctx);
-        self.ui_launch_modal(ctx);
-        self.ui_land_worktree_modal(ctx, palette);
-        self.ui_create_pr_modal(ctx, palette);
-        self.ui_run_script_modal(ctx, palette);
-        self.ui_port_stop_modal(ctx, palette);
     }
-}
-
-impl OperonApp {
-    /// The brief notice, in the window's bottom-right corner. Its ✕ clears the
-    /// notice and the record that made it brief together, so neither outlives
-    /// the other.
+    /// Corner overlay for transient toasts everywhere, and for persistent
+    /// notices and durability warnings on `Page::Sessions` so they never shift
+    /// the terminal workspace vertically.
     pub(crate) fn ui_brief_notice_toast(&mut self, ctx: &egui::Context, palette: &Palette) {
-        if !notice_is_brief(&self.notice, &self.brief_notice) {
+        let show_warning = self.page == Page::Sessions && self.durability_warning.is_some();
+        let brief = notice_is_brief(&self.notice, &self.brief_notice);
+        let show_notice = self.notice.is_some() && (brief || self.page == Page::Sessions);
+        if !show_warning && !show_notice {
             return;
         }
-        let Some(text) = self.notice.clone() else {
-            return;
-        };
+        let card_max_w = (ctx.screen_rect().width() - SPACE_LG * 2.0).clamp(200.0, 420.0);
+        let warn_text_w = (card_max_w - 52.0).max(80.0);
+        let notice_text_w = (card_max_w - 52.0 - CONTROL_HEIGHT_SMALL - SPACE_SM * 2.0).max(80.0);
+        let shadow = ctx.style().visuals.popup_shadow;
         let mut dismissed = false;
         egui::Area::new(egui::Id::new("brief-notice-toast"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-SPACE_LG, -SPACE_LG))
             .interactable(true)
             .show(ctx, |ui| {
-                egui::Frame::default()
-                    .fill(palette.raised)
-                    .stroke(egui::Stroke::new(1.0, palette.border_subtle))
-                    .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
-                    .inner_margin(egui::Margin::symmetric(12, 8))
-                    .shadow(ctx.style().visuals.popup_shadow)
-                    .show(ui, |ui| {
-                        ui.set_max_width(420.0);
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(ICON_STATUS_DONE)
-                                    .size(14.0)
-                                    .color(palette.success),
-                            );
-                            ui.label(RichText::new(text).size(13.5).color(palette.text));
-                            if small_icon_button(ui, palette, ICON_CLOSE, tr("この通知を閉じる"))
-                                .clicked()
-                            {
-                                dismissed = true;
-                            }
-                        });
-                    });
+                if show_warning {
+                    if let Some(warning) = self.durability_warning.as_deref() {
+                        egui::Frame::new()
+                            .fill(palette.raised)
+                            .stroke(egui::Stroke::new(1.0, palette.warning))
+                            .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .shadow(shadow)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = SPACE_SM;
+                                    ui.label(
+                                        RichText::new(ICON_ATTENTION)
+                                            .size(14.0)
+                                            .color(palette.warning),
+                                    );
+                                    ui.scope(|ui| {
+                                        ui.set_max_width(warn_text_w);
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(warning)
+                                                    .size(13.5)
+                                                    .color(palette.text),
+                                            )
+                                            .wrap(),
+                                        );
+                                    });
+                                });
+                            });
+                        if show_notice {
+                            ui.add_space(SPACE_SM);
+                        }
+                    }
+                }
+                if show_notice {
+                    if let Some(text) = self.notice.as_deref() {
+                        let (icon, icon_color, border) = if brief {
+                            (ICON_STATUS_DONE, palette.success, palette.border_subtle)
+                        } else {
+                            (ICON_NOTICE, palette.info, palette.info)
+                        };
+                        egui::Frame::new()
+                            .fill(palette.raised)
+                            .stroke(egui::Stroke::new(1.0, border))
+                            .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
+                            .inner_margin(egui::Margin::symmetric(12, 8))
+                            .shadow(shadow)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = SPACE_SM;
+                                    ui.label(RichText::new(icon).size(14.0).color(icon_color));
+                                    ui.scope(|ui| {
+                                        ui.set_max_width(notice_text_w);
+                                        ui.add(
+                                            egui::Label::new(
+                                                RichText::new(text).size(13.5).color(palette.text),
+                                            )
+                                            .wrap(),
+                                        );
+                                    });
+                                    if small_icon_button(
+                                        ui,
+                                        palette,
+                                        ICON_CLOSE,
+                                        tr("この通知を閉じる"),
+                                    )
+                                    .clicked()
+                                    {
+                                        dismissed = true;
+                                    }
+                                });
+                            });
+                    }
+                }
             });
         if dismissed {
             self.notice = None;

@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-12
-- **Status**: approved
+- **Status**: done
 
 This is the plan produced in plan mode and accepted before any file was edited.
 If the implementation departs from it, update this file — an abandoned plan is
@@ -57,3 +57,5 @@ worse than no plan, because the next reader trusts it.
 - In `/Applications/Operon.app` after landing and packaging from `main`: triggering a notice on the Sessions page shows the bottom-right card without moving the terminal workspace.
 
 ## Departures from the plan
+
+- None.

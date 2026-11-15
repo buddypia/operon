@@ -15,8 +15,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -24,13 +24,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the four session_notice_289_* tests in src/tests.rs, watch them fail against the current CentralPanel banner, then update src/app.rs."
+resume: "Done. Package and swap /Applications/Operon.app from main after landing."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked session_notice_289_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs changes; package and swap from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/289-session-notice-shakes-terminal/mutations.py"
+  three-gates: "machine passed make q.fast; cargo test --locked session_notice_289_: 4 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9969 at diagnose as on main"
+  release-binary: "machine passed required - src/app.rs changes; package and swap from main after landing"
+  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/289-session-notice-shakes-terminal/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
