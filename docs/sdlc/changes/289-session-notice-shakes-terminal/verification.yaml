@@ -1,5 +1,5 @@
 # The evidence for change 289. Format: docs/sdlc/templates/verification.yaml.
-digest: "707e3ad6edc4312c"
+digest: "ca9dbfb906fb227d"
 
 obligations:
   - R1 empirical-test :: cargo test --locked session_notice_289_terminal_workspace_never_shifts_on_notices_or_warnings
