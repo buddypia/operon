@@ -1,4 +1,3 @@
-use crate::prelude::*;
 use crate::*;
 use std::{str::FromStr, sync::OnceLock};
 use syntect::{
@@ -148,7 +147,7 @@ pub(crate) fn viewer_rows(text: &str) -> ViewerRows {
         let Ok(start) = u32::try_from(start) else {
             return false;
         };
-        if rows.starts.len() % VIEWER_CHUNK_ROWS == 0 {
+        if rows.starts.len().is_multiple_of(VIEWER_CHUNK_ROWS) {
             rows.chunk_lines.push(line);
         }
         rows.starts.push(start);
@@ -397,12 +396,13 @@ fn append_slice(into: &mut LayoutJob, job: &LayoutJob, range: std::ops::Range<us
     into.text
         .push_str(job.text.get(range.clone()).unwrap_or(""));
     for section in &job.sections {
-        let start = section.byte_range.start.max(range.start);
-        let end = section.byte_range.end.min(range.end);
+        let start = section.byte_range.start.0.max(range.start);
+        let end = section.byte_range.end.0.min(range.end);
         if start < end {
             into.sections.push(egui::text::LayoutSection {
                 leading_space: 0.0,
-                byte_range: offset + start - range.start..offset + end - range.start,
+                byte_range: egui::text::ByteIndex(offset + start - range.start)
+                    ..egui::text::ByteIndex(offset + end - range.start),
                 format: section.format.clone(),
             });
         }
@@ -442,13 +442,16 @@ pub(crate) fn syntax_layout(text: &str, language: EditorLanguage, palette: &Pale
             );
             layout.sections.push(egui::text::LayoutSection {
                 leading_space: 0.0,
-                byte_range: range_in(text, range),
+                byte_range: {
+                    let bytes = range_in(text, range);
+                    egui::text::ByteIndex(bytes.start)..egui::text::ByteIndex(bytes.end)
+                },
                 format: TextFormat {
                     font_id: FontId::monospace(MONOSPACE_SIZE),
                     color: colour,
                     italics: style.font_style.contains(FontStyle::ITALIC),
                     underline: if style.font_style.contains(FontStyle::UNDERLINE) {
-                        egui::Stroke::new(1.0, colour)
+                        egui::Stroke::new(1.0_f32, colour)
                     } else {
                         egui::Stroke::NONE
                     },

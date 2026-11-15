@@ -74,15 +74,10 @@ pub(crate) fn vector_hash(vector: &[f32]) -> u64 {
 /// `sum()` of products is a serial chain it may not reorder.
 fn dot(left: &[f32], right: &[f32]) -> f32 {
     let mut lanes = [0.0_f32; 8];
-    let left_chunks = left.chunks_exact(8);
-    let right_chunks = right.chunks_exact(8);
-    let tail: f32 = left_chunks
-        .remainder()
-        .iter()
-        .zip(right_chunks.remainder())
-        .map(|(a, b)| a * b)
-        .sum();
-    for (a, b) in left_chunks.zip(right_chunks) {
+    let (left_chunks, left_tail) = left.as_chunks::<8>();
+    let (right_chunks, right_tail) = right.as_chunks::<8>();
+    let tail: f32 = left_tail.iter().zip(right_tail).map(|(a, b)| a * b).sum();
+    for (a, b) in left_chunks.iter().zip(right_chunks) {
         for lane in 0..8 {
             lanes[lane] += a[lane] * b[lane];
         }

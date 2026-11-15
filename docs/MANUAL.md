@@ -239,9 +239,11 @@ Releasing in the middle or on the panel's own edge, or pressing Escape, cancels.
 An edge the window is too small to show the panel on is outlined in amber and
 refuses it; widen the window to use it.
 
-Paths in terminal output are links: hold **⌥** and click to open the file in the
-built-in editor at that line, or **⌘** and click to open it externally. Only
-paths that resolve to a file inside the session's own folder are offered.
+Paths in terminal output are links: hold **⌘** or **⌥** and click to open the
+file in the built-in editor at that line. Right-click one for a menu: Open in
+Operon, Open in default app, Show in Finder, Copy path. Only paths that resolve
+to a file inside the session's own folder are offered; a bare file name such as
+`slides.pptx` counts when exactly one file in that folder has that name.
 Addresses printed by a dev server open in the browser the same way. A plain
 click only focuses the pane, so the agent never loses the keyboard by accident.
 
@@ -251,24 +253,24 @@ click only focuses the pane, so the agent never loses the keyboard by accident.
 
 ### Status
 
-Every session carries one of four labels, with a hover that gives the detail:
+Live and actionable sessions carry one of three status groups, with a hover that gives the detail:
 
 | Label | Meaning |
 | --- | --- |
-| **Needs you** | Waiting for an answer, or stopped because a prerequisite failed |
+| **Needs you** | Waiting for an answer, exited abnormally without an automatic restore, or stopped because a prerequisite failed |
 | **Running** | Starting, working, stopping, or queued |
 | **Idle** | Finished its turn; ready for your next request |
-| **Finished** | The terminal has ended (done, failed, stopped, or lost) |
+
+Completed or cancelled sessions show **Exited normally** or **Stopped** on their own records in **History** (or on a pinned/reopened tab). When an unpinned session exits cleanly or is stopped, its workspace tab closes automatically and the record remains in **History**; if a running session crashes or its terminal disappears unexpectedly, Operon restores it in the same tab from its saved conversation ID or shell (with a 15-second cooldown per session to stop immediate crash loops).
 
 The **Session** page lists each project's live sessions in the order you act on
-them: waiting on you first, then running, then idle. Finished sessions move to
-**History** once you have seen them.
+them: waiting on you first, then running, then idle.
 
-The session sidebar's header has four toggle chips — **Needs you**, **Running**,
-**Idle**, **Finished** — each with a live count, and a segment below them that
+The session sidebar's header has three toggle chips — **Needs you**, **Running**,
+**Idle** — each with a live count, and a segment below them that
 narrows by CLI (Codex, Claude Code, Antigravity, others). Turn some on to show
 only those sessions; the column says how many it shows, and **Clear** turns the
-filter off. The same chips filter the list in **History**, where **Clear the
+filter off. The same three chips filter the list in **History** (alongside **All**), where **Clear the
 filter** does the same. The filter is not remembered after a restart.
 
 Sessions that need you are pinned under **要対応** (Needs you) at the top of the
@@ -570,7 +572,7 @@ Knowledge is stored in Operon's data folder on this Mac
 | ⇧⌘T | Reopen closed tab | Newest first; a removed session's tab is skipped |
 | ⇧⌘] / ⇧⌘[ | Next / previous tab | Wraps round within the focused pane |
 | ⌃Tab / ⌃⇧Tab | Next / previous tab | |
-| ⌥ + click / ⌘ + click | Open a path or URL in terminal output | In the editor / externally |
+| ⌘ + click / ⌥ + click | Open a path or URL in terminal output | Paths in the editor, URLs in the browser; right-click a path for more |
 
 ⌘↩, Esc, ⌘S, ⌃Tab, ⌃⇧Tab, and the clicks are fixed; the others can be changed.
 To change a shortcut, open **Settings → Key bindings** and press
@@ -678,9 +680,11 @@ not open its local data**, check the folder's permissions and free disk space.
 **Hook installed** for that CLI. If it shows **Hook failed**, hover for the reason.
 Without hooks Operon falls back to reading the screen.
 
-**A session shows Finished, and its hover says its terminal is gone** — Its
-`tmux` session disappeared outside Operon, so the result cannot be confirmed
-(Operon records this as "lost", not "failed"). Use **Retry** or **会話 ID から再開**
+**A session shows Needs you, and its hover says its terminal is gone** — Its
+`tmux` session disappeared outside Operon and could not be automatically
+restored (for example, no conversation transcript existed yet or it crashed
+again inside the 15-second cooldown; Operon records this as "lost", not
+"failed"). Use **Retry** or **会話 ID から再開**
 (Resume from conversation ID).
 
 **Sessions exist in `tmux` but not in Operon** — **Settings → Data and

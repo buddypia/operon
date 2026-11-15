@@ -58,4 +58,10 @@ worse than no plan, because the next reader trusts it.
 
 ## Departures from the plan
 
-- None.
+- Landing waited while main moved to eframe/egui 0.37 (change 295) and the
+  root pass became `ui(&mut egui::Ui)`. Merging main meant `ui_central_panel`
+  takes the root `Ui` rather than the `Context`, the overlay reads
+  `content_rect` and `global_style`, and the tests click through their own
+  two-pass helper because `click_at` hands a pass no root `Ui`. Main's drop
+  overlay text and terminal-stream sync after the modals are kept as main
+  wrote them. No behaviour of this change moved.

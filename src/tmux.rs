@@ -328,17 +328,16 @@ pub(crate) fn launch_stored_session(
         )
         .into());
     }
-    if retrying {
-        prepare_tmux_for_retry(&session.tmux_name)?;
-    }
     if session.agent == "terminal" && session.agent_command.is_empty() {
-        start_empty_tmux_session(
+        reopen_or_start_plain_terminal(
             &session.tmux_name,
             &worktree_path,
             &session_variables(hooks, account),
-        )
-        .map_err(|error| error.to_string())?;
+        )?;
     } else {
+        if retrying {
+            prepare_tmux_for_retry(&session.tmux_name)?;
+        }
         let command = stored_launch_command(session, project_path)?;
         let executable = command.split_whitespace().next().unwrap_or_default();
         if !tool_available(executable) {
@@ -553,22 +552,180 @@ pub(crate) fn start_empty_tmux_session(
     Ok(())
 }
 
-pub(crate) fn configure_tmux_session(name: &str) -> Result<()> {
-    let mut command = tmux_command();
-    command.args(["set-option", "-t", name, "remain-on-exit", "on"]);
-    let configured = run_command_with_timeout(&mut command, Duration::from_secs(5))?;
-    if !configured.status.success() {
-        return Err(anyhow!(
-            String::from_utf8_lossy(&configured.stderr).to_string()
-        ));
+/// One `tmux` invocation in a multi-step session setup or dead-pane reopen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TmuxStep {
+    pub(crate) args: Vec<std::ffi::OsString>,
+    /// Whether a non-zero exit aborts the sequence (`false` for best-effort
+    /// scrollback preservation on a dead pane).
+    pub(crate) required: bool,
+}
+
+impl TmuxStep {
+    fn required<I, S>(args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<std::ffi::OsString>,
+    {
+        Self {
+            args: args.into_iter().map(Into::into).collect(),
+            required: true,
+        }
     }
-    let mut command = tmux_command();
-    command.args(["set-option", "-t", name, "history-limit", "50000"]);
-    let history = run_command_with_timeout(&mut command, Duration::from_secs(5))?;
-    if !history.status.success() {
-        return Err(anyhow!(String::from_utf8_lossy(&history.stderr).to_string()));
+
+    fn best_effort<I, S>(args: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<std::ffi::OsString>,
+    {
+        Self {
+            args: args.into_iter().map(Into::into).collect(),
+            required: false,
+        }
+    }
+}
+
+fn run_tmux_steps(steps: &[TmuxStep]) -> Result<()> {
+    for step in steps {
+        let mut command = tmux_command();
+        command.args(&step.args);
+        let result = run_command_with_timeout(&mut command, Duration::from_secs(5));
+        if step.required {
+            let output = result?;
+            if !output.status.success() {
+                return Err(anyhow!(String::from_utf8_lossy(&output.stderr).to_string()));
+            }
+        }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlainTerminalAction {
+    StartNew,
+    RespawnDead(Vec<TmuxStep>),
+}
+
+/// Decides whether opening a plain login shell in `name` starts a fresh tmux
+/// session (`Gone`), respawns in place inside the dead pane (`Dead`) so prior
+/// output stays in scrollback and any legacy `Pane is dead (...)` overlay is
+/// cleared (change 288), or refuses a live or unreadable pane just like
+/// `prepare_tmux_for_retry`.
+pub(crate) fn plain_terminal_action(
+    state: TmuxState,
+    name: &str,
+    cwd: &Path,
+    environment: &[(&'static str, String)],
+) -> UiResult<PlainTerminalAction> {
+    match state {
+        TmuxState::Gone => Ok(PlainTerminalAction::StartNew),
+        TmuxState::Dead => Ok(PlainTerminalAction::RespawnDead(dead_pane_reopen_steps(
+            name,
+            cwd,
+            environment,
+        ))),
+        TmuxState::Alive => Err(
+            tr("そのターミナルはまだ実行中です。「古いターミナルを停止」を実行してから、もう一度「再試行」を選んでください。")
+                .into(),
+        ),
+        TmuxState::Unknown => {
+            Err(tr("古いターミナルがまだ開いているか判定できませんでした。").into())
+        }
+    }
+}
+
+pub(crate) fn reopen_or_start_plain_terminal(
+    name: &str,
+    cwd: &Path,
+    environment: &[(&'static str, String)],
+) -> UiResult<()> {
+    match plain_terminal_action(tmux_observation(name).state, name, cwd, environment)? {
+        PlainTerminalAction::StartNew => {
+            start_empty_tmux_session(name, cwd, environment).map_err(|error| error.to_string())
+        }
+        PlainTerminalAction::RespawnDead(steps) => {
+            run_tmux_steps(&steps).map_err(|error| error.to_string())
+        }
+    }
+}
+
+/// Refreshes a dead pane's managed session environment and options, pushes its
+/// visible cells into tmux scrollback history before `respawn-pane -k` resets
+/// the cursor to `(0, 0)`, and respawns the login shell in place (change 288;
+/// pair to `clear_retired_placeholder`, without `clear-history`).
+pub(crate) fn dead_pane_reopen_steps(
+    name: &str,
+    cwd: &Path,
+    environment: &[(&'static str, String)],
+) -> Vec<TmuxStep> {
+    let mut steps = tmux_session_environment_steps(name, environment);
+    steps.extend(configure_tmux_session_steps(name));
+    steps.push(TmuxStep::best_effort(["send-keys", "-R", "-t", name]));
+    steps.push(TmuxStep {
+        args: vec![
+            "respawn-pane".into(),
+            "-k".into(),
+            "-t".into(),
+            name.into(),
+            "-c".into(),
+            cwd.as_os_str().to_owned(),
+            tmux_pane_command(cwd, PLAIN_TERMINAL_COMMAND).into(),
+        ],
+        required: true,
+    });
+    steps
+}
+
+const MANAGED_TMUX_ENV_KEYS: [&str; 7] = [
+    HOOK_SESSION_ENV,
+    HOOK_LAUNCH_ENV,
+    HOOK_ENDPOINT_ENV,
+    HOOK_SOCKET_ENV,
+    HOOK_EXECUTABLE_ENV,
+    CLAUDE_ACCOUNT_ENV,
+    CODEX_ACCOUNT_ENV,
+];
+
+pub(crate) fn tmux_session_environment_steps(
+    name: &str,
+    environment: &[(&'static str, String)],
+) -> Vec<TmuxStep> {
+    let mut steps = Vec::new();
+    for managed in MANAGED_TMUX_ENV_KEYS {
+        if !environment.iter().any(|(key, _)| *key == managed) {
+            steps.push(TmuxStep::required([
+                "set-environment",
+                "-u",
+                "-t",
+                name,
+                managed,
+            ]));
+        }
+    }
+    for (key, value) in environment {
+        steps.push(TmuxStep::required([
+            "set-environment",
+            "-t",
+            name,
+            key,
+            value.as_str(),
+        ]));
+    }
+    steps
+}
+
+pub(crate) fn configure_tmux_session_steps(name: &str) -> Vec<TmuxStep> {
+    vec![
+        TmuxStep::required(["set-option", "-t", name, "remain-on-exit", "on"]),
+        // Keep the pane open on exit so `#{pane_dead_status}` and error output
+        // survive, without painting tmux's `Pane is dead (...)` footer (change 288).
+        TmuxStep::required(["set-option", "-q", "-t", name, "remain-on-exit-format", ""]),
+        TmuxStep::required(["set-option", "-t", name, "history-limit", "50000"]),
+    ]
+}
+
+pub(crate) fn configure_tmux_session(name: &str) -> Result<()> {
+    run_tmux_steps(&configure_tmux_session_steps(name))
 }
 
 pub(crate) fn kill_tmux_session(name: &str) {
@@ -726,6 +883,115 @@ pub(crate) fn tmux_capture_with_cursor(name: &str) -> Result<TerminalCapture> {
     }
     let raw = String::from_utf8_lossy(&output.stdout);
     Ok(parse_tmux_capture_with_cursor(&raw))
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ControlLineState {
+    prefix: [u8; 20],
+    len: u8,
+    decided: bool,
+    attached: bool,
+    had_activity_in_chunk: bool,
+}
+
+impl ControlLineState {
+    pub(crate) fn is_attached(&self) -> bool {
+        self.attached
+    }
+
+    pub(crate) fn had_activity_in_last_chunk(&self) -> bool {
+        self.had_activity_in_chunk
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ControlChunkSignal {
+    None,
+    Activity,
+    Exited,
+}
+
+fn is_control_candidate_prefix(prefix: &[u8]) -> bool {
+    const CANDIDATES: [&[u8]; 6] = [
+        b"%output ",
+        b"%extended-output ",
+        b"%layout-change ",
+        b"%session-changed ",
+        b"%exit ",
+        b"%exit\r",
+    ];
+    CANDIDATES
+        .iter()
+        .any(|candidate| candidate.starts_with(prefix))
+}
+
+pub(crate) fn tmux_control_chunk_has_activity(
+    carry: &mut ControlLineState,
+    chunk: &[u8],
+) -> ControlChunkSignal {
+    let mut saw_activity = false;
+    let mut saw_exit = false;
+    for &byte in chunk {
+        if byte == b'\n' {
+            if !carry.decided {
+                let raw = &carry.prefix[..usize::from(carry.len)];
+                let trimmed = raw.strip_suffix(b"\r").unwrap_or(raw);
+                if trimmed == b"%exit" {
+                    saw_exit = true;
+                }
+            }
+            carry.len = 0;
+            carry.decided = false;
+            continue;
+        }
+        if carry.decided {
+            continue;
+        }
+        let next_idx = usize::from(carry.len);
+        if next_idx < carry.prefix.len() {
+            carry.prefix[next_idx] = byte;
+            carry.len += 1;
+        }
+        let current = &carry.prefix[..usize::from(carry.len)];
+        if current == b"%output "
+            || current == b"%extended-output "
+            || current == b"%layout-change "
+        {
+            carry.attached = true;
+            saw_activity = true;
+            carry.decided = true;
+        } else if current == b"%session-changed " {
+            carry.attached = true;
+            carry.decided = true;
+        } else if current == b"%exit " || current == b"%exit\r" {
+            saw_exit = true;
+            carry.decided = true;
+        } else if !is_control_candidate_prefix(current) {
+            carry.decided = true;
+        }
+    }
+    carry.had_activity_in_chunk = saw_activity;
+    if saw_exit {
+        ControlChunkSignal::Exited
+    } else if saw_activity {
+        ControlChunkSignal::Activity
+    } else {
+        ControlChunkSignal::None
+    }
+}
+
+pub(crate) fn tmux_output_watcher_args(name: &str) -> Result<[&str; 5]> {
+    if !is_safe_tmux_name(name) {
+        return Err(anyhow!(tf!("管理ターミナル名が不正です")));
+    }
+    Ok(["-C", "attach-session", "-t", name, "-fignore-size"])
+}
+
+pub(crate) fn tmux_spawn_output_watcher(name: &str) -> Result<StreamingChild> {
+    let args = tmux_output_watcher_args(name)?;
+    let mut command = tmux_command();
+    command.args(args);
+    spawn_piped_streaming(&mut command)
 }
 
 /// Scrollback and all, escapes kept, cursor position dropped.

@@ -1,4 +1,3 @@
-use crate::prelude::*;
 use crate::*;
 
 /// One bounded cache for the one rendered document on screen, shaped like
@@ -235,7 +234,7 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
                 ui.add_space(6.0);
                 egui::Frame::new()
                     .fill(palette.inset)
-                    .stroke(egui::Stroke::new(1.0, palette.border_subtle))
+                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
                     .inner_margin(egui::Margin::symmetric(10, 8))
                     .show(ui, |ui| {
                         if !language.is_empty() {

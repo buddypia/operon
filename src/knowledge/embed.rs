@@ -48,7 +48,9 @@ pub(crate) fn vector_to_blob(vector: &[f32]) -> Vec<u8> {
 
 pub(crate) fn vector_from_blob(blob: &[u8]) -> Option<Vec<f32>> {
     (blob.len() == EMBEDDING_DIMENSIONS * 4).then(|| {
-        blob.chunks_exact(4)
+        blob.as_chunks::<4>()
+            .0
+            .iter()
             .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
             .collect()
     })

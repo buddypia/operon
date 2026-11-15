@@ -1,0 +1,4 @@
+2026-11-11T17:09:33Z auto intent intent.md c0b7d0de495e45ad approve Independent evaluator 12bbae35: restates the person's verbatim request with concrete outcomes and no implementation smuggling.
+2026-11-11T17:09:33Z auto spec spec.md 9b27fb8a6e55fefb approve Independent evaluator 12bbae35: after one revise (exact 13.14:1 Dark contrast, visible-caret R4 precondition, ui_terminal_pane caller, NFD ranges), Design and policies match the code.
+2026-11-11T17:09:33Z auto screen screen.md 03a5f019c7fd179c approve Independent evaluator 12bbae35: 760px Before/After across Dark, Light, focused, unfocused, IME preedit, empty, overflow and exited states inside existing terminal roles.
+2026-11-11T17:09:33Z auto plan plan.md 6970f02dfc979d14 approve Independent evaluator 12bbae35: after one revise, ui_terminal_pane and exhaustive_check model check align with spec.md.
