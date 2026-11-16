@@ -1,0 +1,48 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. Change 290 ran empirical-verifier and formal-verifier under Antigravity
+#    CLI. agy gave each subagent a linked worktree of this repository under
+#    ~/.gemini/antigravity-cli/worktrees/<conversation>/subagent-<Name>--… on
+#    a branch of the same name, and never removed either. Four days after 290
+#    landed both were still listed by `git worktree list` and `git branch`
+#    (`+ subagent-Empirical-Verifier--Change-290--self-1a9e7910`,
+#    `+ subagent-Formal-Verifier--Change-290--self-e27b164f`): clean trees,
+#    HEAD at e6da434, already in main. Claude Code drops an unchanged
+#    isolation worktree itself; agy does not, and nothing in this repository
+#    reaps what agy leaves.
+# 2. The person asked on 2026-11-16 for a permanent fix, landed through to
+#    main (「上記を恒久対応して … コミットPRマージまで進めて」).
+#
+# Gate-configuration surface (.claude/scripts): the change adds a removal to
+# the landing cleanup; it removes no check and widens no bypass.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Write the failing test cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else, then the sweep in ops.mjs."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  failing-test-first: "machine pending the new test fails on the unedited ops.mjs"
+  release-binary: "machine waived touches .claude/scripts, docs/sdlc and src/tests.rs only"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/296-subagent-worktrees-outlive-the-change/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

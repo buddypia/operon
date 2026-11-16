@@ -1,0 +1,2 @@
+2026-11-16T08:11:43Z person plan plan.md e99bc093b0269854 approve user 2026-11-16: 「上記を恒久対応して … コミットPRマージまで進めて」 — the request to fix the leftover agy subagent worktrees permanently and land it; this plan is that fix
+2026-11-16T08:11:43Z person gate-configuration plan.md e99bc093b0269854 approve user 2026-11-16: 「上記を恒久対応して … コミットPRマージまで進めて」 — the same request; the edit adds a guarded removal to the landing cleanup and relaxes no check
