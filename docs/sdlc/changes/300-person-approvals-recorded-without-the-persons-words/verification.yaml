@@ -1,6 +1,7 @@
-digest: "9789e7f2cd11225a"
+digest: "27bca25d1071e5d8"
 
 obligations:
   - I1 empirical-test :: cargo test --locked the_approval_checker_wants_the_persons_words_on_a_person_line
   - I2 empirical-test :: cargo test --locked approval
   - I3 empirical-mutation :: python3 docs/sdlc/changes/300-person-approvals-recorded-without-the-persons-words/mutations.py
+  - F1 empirical-test :: cargo test --locked the_approval_checker_wants_the_persons_words_on_a_person_line

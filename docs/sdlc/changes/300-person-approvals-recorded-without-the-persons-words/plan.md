@@ -73,3 +73,11 @@ The edit tightens a check and relaxes none.
   rule added about 800 bytes to `approval.md`, which loads only when an
   approval is about to be written. The band asks for a read-only look, not a
   cut, and nothing here was moved to make room.
+- **The empirical verifier, run in an isolated worktree (change 299), broke
+  it once.** A tab before the quote ended the field the checker read, so a
+  quoted line was refused (F1). The checker now reads the line past its two
+  leading fields. It also noted that an empty 「」 or "" passed; an empty
+  quote holds no words, so it is refused too (F2). Both are cases of
+  `the_approval_checker_wants_the_persons_words_on_a_person_line`, watched
+  failing on the first version of the checker, and three more mutations pin
+  them (11 of 11 caught).

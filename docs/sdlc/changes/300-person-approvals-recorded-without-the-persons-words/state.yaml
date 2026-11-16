@@ -28,7 +28,7 @@ contract:
   three-gates: "machine passed fmt and clippy at commit; cargo test --locked approval 11 passed, stop_gate harness_documents every_state_file lesson 12 passed; full suite in CI"
   failing-test-first: "machine passed the_approval_checker_wants_the_persons_words_on_a_person_line failed on the unedited checker: 303-no-words passed"
   release-binary: "machine waived touches scripts/check-approvals.sh, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine passed 8 of 8 caught: python3 docs/sdlc/changes/300-person-approvals-recorded-without-the-persons-words/mutations.py"
+  guards-verified-by-mutation: "machine passed 11 of 11 caught: python3 docs/sdlc/changes/300-person-approvals-recorded-without-the-persons-words/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

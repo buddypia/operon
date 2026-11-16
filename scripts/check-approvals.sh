@@ -70,16 +70,17 @@ ledger() {
 judge() {
   ledger | awk -F'\t' -v categories="$categories" '
     function from_300(name,   n) { n = name; sub(/-.*/, "", n); return n ~ /^[0-9]+$/ && n + 0 >= 300 }
-    function quoted(text,   open, rest, marks) {
+    function quoted(text,   open) {
       open = index(text, "「")
-      if (open > 0 && index(substr(text, open + 1), "」") > 0) return 1
-      rest = text; marks = gsub(/"/, "", rest)
-      return marks >= 2
+      if (open > 0 && index(substr(text, open + length("「")), "」") > 1) return 1
+      return text ~ /"[^"]+"/
     }
     BEGIN { n = split(categories, c, " "); for (i = 1; i <= n; i++) known[c[i]] = 1 }
     {
-      change = $1; line = $2; split($3, f, " ")
-      reason = $3; for (i = 1; i <= 6; i++) sub(/^[^ ]+ +/, "", reason)
+      # The line itself, not $3: a tab inside the reason would end $3 there
+      # and hide a quote written after it (change 300).
+      change = $1; line = $2; rec = $0; sub(/^[^\t]*\t[^\t]*\t/, "", rec); split(rec, f, " ")
+      reason = rec; for (i = 1; i <= 6; i++) sub(/^[^ ]+ +/, "", reason)
       where = change "/approvals.log:" line
       if (f[1] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { bad = "時刻が UTC の ISO 8601 ではありません" }
       else if (f[2] != "auto" && f[2] != "person" && f[2] != "escape") { bad = "by は auto / person / escape のいずれかです" }

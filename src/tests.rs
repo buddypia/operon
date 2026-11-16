@@ -20271,6 +20271,8 @@ pub(crate) fn the_approval_checker_wants_the_persons_words_on_a_person_line() {
             line("person", "the person said \"go ahead\" to this plan"),
         ),
         ("302-auto", line("auto", "evaluator a1b2: fits the spec")),
+        // F1, from the empirical verifier: a tab before the quote hid it.
+        ("306-tab", line("person", "user:\t「go」")),
         (
             "299-legacy",
             line("person", "existing authorization still applies"),
@@ -20282,6 +20284,12 @@ pub(crate) fn the_approval_checker_wants_the_persons_words_on_a_person_line() {
             line("person", "existing authorization still applies"),
         ),
         ("304-one-mark", line("person", "the person said 「go ahead")),
+        // F2: an empty quote holds no words of the person.
+        ("307-empty", line("person", "the person said 「」")),
+        (
+            "308-empty-ascii",
+            line("person", "the person said \"\" to it"),
+        ),
         (
             "305-one-ascii",
             line("person", "the person said \"go ahead"),

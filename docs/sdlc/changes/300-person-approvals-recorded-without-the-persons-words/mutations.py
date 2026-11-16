@@ -38,13 +38,28 @@ MUTATIONS = {
     ),
     "one opening bracket is enough": (
         CHECKER,
-        'if (open > 0 && index(substr(text, open + 1), "」") > 0) return 1',
+        'if (open > 0 && index(substr(text, open + length("「")), "」") > 1) return 1',
         "if (open > 0) return 1",
+    ),
+    "an empty bracket quote is enough": (
+        CHECKER,
+        'index(substr(text, open + length("「")), "」") > 1)',
+        'index(substr(text, open + length("「")), "」") > 0)',
     ),
     "one ascii quote mark is enough": (
         CHECKER,
-        "return marks >= 2",
-        "return marks >= 1",
+        'return text ~ /"[^"]+"/',
+        'return text ~ /"/',
+    ),
+    "an empty ascii quote is enough": (
+        CHECKER,
+        'return text ~ /"[^"]+"/',
+        'return text ~ /"[^"]*"/',
+    ),
+    "the reason is cut at a tab again": (
+        CHECKER,
+        'rec = $0; sub(/^[^\\t]*\\t[^\\t]*\\t/, "", rec);',
+        "rec = $3;",
     ),
     "the refusal does not name the quote": (
         CHECKER,
