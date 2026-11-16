@@ -32,11 +32,18 @@
 # reference-transaction); the same push is already admitted from any worktree;
 # the Publishing gate still refuses every non-plain push (force, refspecs,
 # another remote, redirects, chains).
+#
+# Residual, accepted (empirical verifier): the trunk allowlist alone admits a
+# push behind git's global options (-c, --git-dir), behind HOME= or env HOME=,
+# or chained with another allowlisted command — as it already did for the
+# main-only push. The Publishing gate refuses all of them, now pinned in
+# a_plain_push_to_origin_is_not_asked_about. Tags, HEAD and other refs within
+# the branch character set pass both guards alike, as before.
 
 state:
   route: "bugfix"
-  stage: "plan"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -44,13 +51,13 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Plan committed; edit the trunk allowlist pattern and the trunk test, then land."
+resume: "Done. The trunk allowlist admits the plain branch push; the Publishing gate is pinned as the layer refusing every other spelling. No bundle swap: nothing in the app changed."
 
 contract:
-  three-gates: "machine pending fmt and clippy at commit; cargo test --locked the_trunk_allowlist_and_the_ownership_check_are_switched_on_here; full suite in CI"
-  failing-test-first: "machine pending the moved and added assertions fail against the old pattern"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked the_trunk_allowlist_and_the_ownership_check_are_switched_on_here a_plain_push_to_origin_is_not_asked_about 2 passed; filter trunk policy worktree push landing ship 68 passed; full suite in CI"
+  failing-test-first: "machine passed the trunk test failed against the old pattern (git push -q origin main denied); the Publishing gate pins passed at once, being evidence of an existing layer, and are watched failing by mutation"
   release-binary: "machine waived touches .claude/config, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/304-branch-push-refused-from-main-and-worktree/mutations.py"
+  guards-verified-by-mutation: "machine passed 8 of 8 caught: python3 docs/sdlc/changes/304-branch-push-refused-from-main-and-worktree/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

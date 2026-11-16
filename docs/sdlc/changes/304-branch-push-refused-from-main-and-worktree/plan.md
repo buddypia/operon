@@ -65,3 +65,20 @@ worktree" still describes a working form and stays.
 - CI green on the branch head; this change's own branch push runs as the plain form.
 
 ## Departures from the plan
+
+- The plan said a chained command stays refused on the trunk. The empirical
+  verifier measured that the trunk allowlist alone, judging only its own
+  patterns, admits a push chained with another allowlisted command
+  (`git push origin main & ls`, `… || ls`) and spellings that pick the
+  transport, URL, repository or config read (`git -c core.sshCommand=./x push
+  …`, `git -c remote.origin.pushurl=… push …`, `git --git-dir=… push …`,
+  `HOME=… git push …`, `env HOME=… git push …`). The same held for
+  `git push origin main` before this change. The Publishing gate refuses every
+  one of them (a push must be the whole line, starting `git push`), so no guard
+  is changed — the approved relaxation is option A alone — and
+  `a_plain_push_to_origin_is_not_asked_about` now pins those refusals, with an
+  eighth mutation that loosens the Publishing gate's whole-line check.
+- `git push origin feature/x --force` joined the trunk deny assertions so that
+  dropping the pattern's end anchor is caught (the guard's own `(?=\s|$)`
+  anchor admits a trailing flag).
+- `docs/sdlc/lessons.md` gains lesson 116.
