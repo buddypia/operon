@@ -9,16 +9,16 @@
 
 state:
   route: "feature"
-  stage: "design"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Complete intent approval, write and gate spec.md, screen.md, and plan.md, then write tests before code."
+resume: "Write failing TDD tests pane_303_* and model_check_pane_303_* in src/tests.rs, then implement R1-R5 across src/app/terminal_output.rs, src/app/relaunch.rs, src/app.rs, src/app/screens.rs, src/i18n_tables.rs, and README*.md."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
