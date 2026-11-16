@@ -95,6 +95,11 @@ MUTATIONS = {
         "        self.pending_history_open = None;\n        self.terminal_capture_missing.remove(&session_id);",
         "        self.pending_history_open = None;",
     ),
+    "resize-spawns-while-session-launch-running": (
+        TERM_OUT,
+        "        if self.session_launch_running(session_id)\n",
+        "        if (self.session_launch_running(session_id) && false)\n",
+    ),
 }
 
 sys.dont_write_bytecode = True

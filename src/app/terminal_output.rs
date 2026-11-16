@@ -1180,9 +1180,10 @@ impl OperonApp {
     }
 
     pub(crate) fn flush_terminal_resize(&mut self, session_id: Uuid) -> Option<Duration> {
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::TerminalResize(session_id))
+        if self.session_launch_running(session_id)
+            || self
+                .background_tasks
+                .contains(&BackgroundKey::TerminalResize(session_id))
         {
             return None;
         }

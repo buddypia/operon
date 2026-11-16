@@ -24,7 +24,7 @@ contract:
   three-gates: "machine passed cargo fmt --check && cargo clippy --locked -- -D warnings; cargo test --locked pane_303_ (7 passed), model_check_pane_303_ (305 states), -- --ignored (6 passed)"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9898 (src/app.rs 9861, src/app/screens.rs 9898)"
   release-binary: "machine passed touches src/app.rs, src/app/terminal_output.rs, src/app/relaunch.rs, src/app/screens.rs, and src/i18n_tables.rs; package and replace /Applications/Operon.app from main after landing"
-  guards-verified-by-mutation: "machine passed 16 of 16 caught: python3 docs/sdlc/changes/303-missing-pane-loops-output-error/mutations.py"
+  guards-verified-by-mutation: "machine passed 17 of 17 caught: python3 docs/sdlc/changes/303-missing-pane-loops-output-error/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

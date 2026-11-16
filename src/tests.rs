@@ -88311,6 +88311,11 @@ pub(crate) fn pane_303_missing_pane_does_not_loop_output_requests_or_spam_error_
         "SessionStart in flight must suppress premature SessionOutput capture"
     );
     assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::TerminalResize(active_id)),
+        "SessionStart in flight must suppress premature TerminalResize"
+    );
+    assert!(
         drawn_text_rect(&launch_frame, |t| t
             .contains("ターミナル出力を待っています…"))
         .is_some(),
