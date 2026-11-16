@@ -1,0 +1,39 @@
+# Change 297. Bug report, as the bugfix route takes it in place of an intent:
+#
+# `.claude/hooks/gate-stop.sh` walks every docs/sdlc/changes/*/state.yaml at
+# each stop and drops the ones not in play one at a time, three child
+# processes each. With 290 changes it takes 6 to 13 seconds on an idle
+# machine. Over the 30 days to 2026-11-16, 182 stops in this repository's
+# transcripts ran into the hook's 30-second timeout and were recorded as
+# `hook_cancelled`: each cost the person half a minute and checked nothing —
+# no open contract, no approval ledger, no branch audit — while the turn ended
+# as if the gate had passed. The cost grows with every change that lands.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Fix the loop in gate-stop.sh to read only the changes in play, then run the test and the mutation sweep."
+
+contract:
+  three-gates: "machine pending fmt and clippy at commit; cargo test --locked the_stop_gate_ in the worktree; full suite in CI"
+  bands: "machine pending bash scripts/check-bands.sh"
+  failing-test-first: "machine passed the_stop_gate_does_not_pay_for_changes_it_is_not_working_on failed on the unedited gate-stop.sh: 25 child processes with 2 parked changes, 199 with 60"
+  release-binary: "machine waived touches .claude/hooks, docs/sdlc and src/tests.rs only"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/297-the-stop-gate-runs-out-of-time-and-checks-nothing/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

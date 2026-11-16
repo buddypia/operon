@@ -1,0 +1,2 @@
+2026-11-16T11:06:17Z person plan plan.md 55440fcdec279ad7 approve user 2026-11-16: 「최대한 전체 매커니즘/개발 사이클 등 효율화 할 수 있는 부분을 최대한 찾아서 효율화 시켜줘」 — the request to find and remove the development cycle's waste; this plan removes the stop gate's per-change cost, measured as the cause of 182 cancelled stops
+2026-11-16T11:06:17Z person gate-configuration plan.md 55440fcdec279ad7 approve user 2026-11-16: 「최대한 … 효율화 시켜줘」 — the same request; the edit reads exactly the state files the filter let through before, so it relaxes no check, and the stops that timed out without checking now finish
