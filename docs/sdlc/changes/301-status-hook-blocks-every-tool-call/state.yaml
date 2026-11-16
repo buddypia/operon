@@ -1,0 +1,96 @@
+# Change 301. Bug report, as the bugfix route takes it in place of an intent:
+#
+# Every Claude Code tool call waits for Operon's status hook. Hooks of one
+# event run in parallel and the slowest sets the wait; over 14 days and 96
+# sessions in another repository (trip-jarvis ledger
+# docs/audit/harness-review-2026-11-16-claude-mods-efficiency.md, F1 and F2)
+# Operon's claude-hook.sh was the slowest PreToolUse hook 508 times (708 s)
+# and the slowest PostToolUse hook 284 times (497 s). The hook decides nothing
+# on those events, yet it is registered synchronously with timeout 60. The
+# person added "async": true to the three handlers by hand on 2026-10-31 and
+# again on 2026-11-16; Operon rewrites ~/.claude/settings.json on every launch
+# and drops it, because managed_handler writes {type, command, timeout} only.
+#
+# Reproduce: install_claude_hooks into a settings file whose PreToolUse handler
+# carries "async": true; the rewritten handler has no "async".
+#
+# Decisions (recoverable, taken without asking — the request named them):
+# - Claude only. Codex's trust hash covers the handler (codex_trusted_hash_with
+#   hashes "async": false), so an async Codex handler would put every Operon
+#   hook back to "needs review". Gemini (agy) has its own path.
+# - Async: PreToolUse, PostToolUse, PostToolUseFailure. Synchronous: SessionStart
+#   (its stdout is the knowledge brief; async stdout is ignored),
+#   UserPromptSubmit, Stop and StopFailure (Idle must be the last word),
+#   PostCompact, PermissionRequest (an empty stdout from a permission-capable
+#   hook reads as refusal, and AwaitingInput must not lag).
+#
+# Race decision (recorded here because the request asked for it):
+# Async hooks are not ordered against each other or against the synchronous
+# ones; the listener applies readings in arrival order. Two orderings matter.
+#  1. Claude runs PreToolUse hooks and then, for a tool that needs approval,
+#     PermissionRequest hooks for the same call, back to back. With PreToolUse
+#     async both shells start within milliseconds, so the PreToolUse post
+#     (Working) arriving after PermissionRequest (AwaitingInput) is a coin
+#     toss, not a corner case — and it hides that the agent is waiting for the
+#     person. Guard: while a row is AwaitingInput because of a tool call, a
+#     PreToolUse for that same call (tool_name and tool_input equal; the
+#     PermissionRequest payload carries no tool_use_id, per the Claude Code
+#     hooks reference) is late and does not change the row.
+#  2. A PostToolUse/PreToolUse post can arrive after the Stop (Idle) that ended
+#     the turn, or after a later question (AwaitingInput). Less likely — one
+#     model response lies between them — but under load a shell start was
+#     measured at 11 s, and the cost is a finished row shown as working for up
+#     to 30 minutes (HOOK_STALE_AFTER_SECONDS). Guard: Claude tool events carry
+#     tool_use_id; a tool event whose id was already seen before the row became
+#     Idle or AwaitingInput is late and does not change the row. A new id still
+#     turns the row Working, so a turn that continues after a blocked Stop, or
+#     after a refused permission, still shows as working. The one exception is
+#     the end of the call the row is waiting on (PostToolUse after a granted
+#     permission, or after a question is answered), matched by tool_name and
+#     tool_input.
+# Rejected: ignoring Working after Idle until the next UserPromptSubmit — a
+# Stop hook that blocks (this repository's gate-stop.sh does) continues the
+# turn without a UserPromptSubmit, and the row would stay idle while working.
+# Rejected: a timestamp from the script — the delay is the shell start itself,
+# before any line of the script runs.
+# Residual, accepted: a late PreToolUse for an *earlier, different* call, whose
+# id was never seen, still turns AwaitingInput into Working; it needs a
+# PreToolUse post to lose a race by a whole tool run and model response.
+# Found by the empirical verifier and fixed: a question's own PreToolUse is
+# async too and reads AwaitingInput, so the first guard (Working readings only)
+# let it reopen a wait after its answer or after Stop. Rule added: a
+# PreToolUse whose id is already known is late whatever it says (a call's
+# PreToolUse comes before anything else naming it).
+# Residual, accepted (verifier's third reproduction): two PermissionRequests
+# with no resolution between them, then the first call's late PreToolUse,
+# turns the row Working — awaiting_call holds only the latest call. Claude
+# puts permission prompts to the person one at a time, so the sequence needs
+# a second prompt before the first is answered.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Done. Claude tool hooks are written async; late tool posts no longer move a row that is idle or waiting. Package from main after landing."
+
+contract:
+  three-gates: "machine passed make q.fast (fmt, clippy -D warnings); cargo test --locked claude_tool_hooks_run_async a_late_ hook codex 61 passed; full suite in CI"
+  failing-test-first: "machine passed the four tests failed with the fields in place and no fix; a_late_question_pre_tool_use_does_not_reopen_a_wait (verifier F1) failed before its rule"
+  release-binary: "machine passed required - src/tmux/hooks.rs and src/config.rs change; package from main after landing with the ship skill"
+  guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/301-status-hook-blocks-every-tool-call/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

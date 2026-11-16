@@ -1,0 +1,9 @@
+digest: "034bb39582f45127"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked claude_tool_hooks_run_async_and_every_other_handler_waits
+  - R2 empirical-test :: cargo test --locked a_late_pre_tool_use_does_not_hide_a_permission_prompt
+  - R3 empirical-test :: cargo test --locked a_late_tool_event_does_not_reopen_a_finished_turn
+  - R4 empirical-test :: cargo test --locked a_late_tool_event_does_not_hide_a_question
+  - F1 empirical-test :: cargo test --locked a_late_question_pre_tool_use_does_not_reopen_a_wait
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/301-status-hook-blocks-every-tool-call/mutations.py

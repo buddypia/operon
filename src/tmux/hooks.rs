@@ -423,12 +423,29 @@ fn write_json_object(
     Ok(())
 }
 
-fn managed_handler(command: String) -> serde_json::Value {
-    serde_json::json!({
+/// Whether a CLI runs this event's handler without waiting for it (change
+/// 301). Hooks of one event run in parallel and the slowest sets the wait, so a
+/// synchronous status post stood in front of every tool call while deciding
+/// nothing there. Only Claude's three tool events: SessionStart prints the
+/// knowledge brief on stdout, which an async hook's output never reaches; a
+/// permission-capable hook must print `{}` or Claude reads a refusal; Stop
+/// must stay the last word on a turn. Codex hashes `async` into its trust
+/// entries, so its handlers keep the shape they were trusted in.
+pub(crate) fn hook_runs_async(provider: CliProvider, event: &str) -> bool {
+    provider == CliProvider::Claude
+        && matches!(event, "PreToolUse" | "PostToolUse" | "PostToolUseFailure")
+}
+
+fn managed_handler(command: String, run_async: bool) -> serde_json::Value {
+    let mut handler = serde_json::json!({
         "type": "command",
         "command": command,
         "timeout": HOOK_ENTRY_TIMEOUT_SECONDS,
-    })
+    });
+    if run_async {
+        handler["async"] = serde_json::Value::Bool(true);
+    }
+    handler
 }
 
 fn group_is_managed(group: &serde_json::Value, marker: &str) -> bool {
@@ -484,7 +501,10 @@ fn install_event_groups(
     let mut written = Vec::new();
     if !remove_only {
         for (event, needs_matcher) in hook_events(provider) {
-            let handler = managed_handler(hook_managed_command(script, provider, event));
+            let handler = managed_handler(
+                hook_managed_command(script, provider, event),
+                hook_runs_async(provider, event),
+            );
             let group = if *needs_matcher {
                 serde_json::json!({ "matcher": "*", "hooks": [handler] })
             } else {
@@ -1897,8 +1917,10 @@ pub(crate) fn install_antigravity_hooks(
     if !remove_only {
         let mut bundle = serde_json::Map::new();
         for (event, needs_matcher) in hook_events(CliProvider::Gemini) {
-            let handler =
-                managed_handler(hook_managed_command(&script, CliProvider::Gemini, event));
+            let handler = managed_handler(
+                hook_managed_command(&script, CliProvider::Gemini, event),
+                hook_runs_async(CliProvider::Gemini, event),
+            );
             let entry = if *needs_matcher {
                 serde_json::json!([{ "matcher": "*", "hooks": [handler] }])
             } else {
@@ -2208,6 +2230,13 @@ pub(crate) struct HookReading {
     pub(crate) last_message: Option<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) transcript_path: Option<String>,
+    /// Claude's id for the tool call a tool event is about.
+    pub(crate) tool_use_id: Option<String>,
+    /// The call itself — tool name and input — as a hash, for Claude: the one
+    /// way to pair a PermissionRequest, which carries no id, with its call.
+    pub(crate) tool_call: Option<u64>,
+    /// A PostToolUse or PostToolUseFailure: the call has ended.
+    pub(crate) tool_finished: bool,
 }
 
 fn payload_string(payload: &serde_json::Value, keys: &[&str]) -> Option<String> {
@@ -2263,6 +2292,23 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
     let last_message = payload_string(payload, &["last_assistant_message", "lastAssistantMessage"])
         .map(|message| message.chars().take(HOOK_LAST_MESSAGE_MAX_CHARS).collect());
     let mut boundary = false;
+    let (tool_use_id, tool_call) = match event.source {
+        CliProvider::Claude => (
+            payload_string(payload, &["tool_use_id"]),
+            tool.as_deref()
+                .zip(payload.get("tool_input"))
+                .map(|(name, input)| {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    name.hash(&mut hasher);
+                    input.to_string().hash(&mut hasher);
+                    hasher.finish()
+                }),
+        ),
+        _ => (None, None),
+    };
+    let tool_finished = event.source == CliProvider::Claude
+        && matches!(event.event.as_str(), "PostToolUse" | "PostToolUseFailure");
     let activity = match event.source {
         CliProvider::Claude => match event.event.as_str() {
             "UserPromptSubmit" => {
@@ -2350,6 +2396,9 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
         last_message,
         session_id,
         transcript_path,
+        tool_use_id,
+        tool_call,
+        tool_finished,
     })
 }
 
@@ -2368,6 +2417,11 @@ pub(crate) struct HookStatus {
     /// The transcript `agy` said it had finished. A bookkeeping tool event
     /// arriving after that Stop must not turn the row yellow again.
     pub(crate) completed_transcript: Option<String>,
+    /// The last Claude tool-call ids reported, newest last, at most
+    /// `HOOK_SEEN_TOOL_IDS_MAX`.
+    pub(crate) seen_tool_ids: Vec<String>,
+    /// While awaiting input, the call that is waiting (`HookReading::tool_call`).
+    pub(crate) awaiting_call: Option<u64>,
 }
 
 pub(crate) fn apply_hook_reading(
@@ -2388,6 +2442,14 @@ pub(crate) fn apply_hook_reading(
         unchanged.received_at = now;
         return (unchanged, None);
     }
+    // Claude's tool events run async (change 301), so their posts are not
+    // ordered against the Stop or the question that followed them.
+    if let Some(waiting) = previous.filter(|status| is_late_tool_event(status, &reading)) {
+        let mut unchanged = waiting.clone();
+        unchanged.received_at = now;
+        remember_tool_id(&mut unchanged.seen_tool_ids, reading.tool_use_id.as_deref());
+        return (unchanged, None);
+    }
     let same_activity = previous.is_some_and(|status| status.activity == reading.activity);
     let started_at = match previous {
         Some(status) if same_activity => status.started_at,
@@ -2398,6 +2460,13 @@ pub(crate) fn apply_hook_reading(
     } else {
         activity_notice(previous.map(|status| status.activity), reading.activity)
     };
+    let mut seen_tool_ids = previous
+        .map(|status| status.seen_tool_ids.clone())
+        .unwrap_or_default();
+    remember_tool_id(&mut seen_tool_ids, reading.tool_use_id.as_deref());
+    let awaiting_call = reading
+        .tool_call
+        .filter(|_| reading.activity == AgentActivity::AwaitingInput);
     let completed_transcript = if reading.activity == AgentActivity::Idle {
         reading.transcript_path.clone()
     } else {
@@ -2418,9 +2487,57 @@ pub(crate) fn apply_hook_reading(
             started_at,
             received_at: now,
             completed_transcript,
+            seen_tool_ids,
+            awaiting_call,
         },
         notice,
     )
+}
+
+/// Whether a Claude tool post lost the race to a state that came after it.
+///
+/// While idle: a call already seen before the turn ended. While awaiting
+/// input: the PreToolUse of the very call that is waiting — Claude starts its
+/// PermissionRequest hooks right behind it, and that payload carries no id,
+/// so the pair is matched by name and input — or a different call already
+/// seen. The waiting call's own end always passes, and a call never seen turns
+/// the row working: a turn continued after a blocked Stop is working.
+fn is_late_tool_event(previous: &HookStatus, reading: &HookReading) -> bool {
+    let Some(id) = reading.tool_use_id.as_deref() else {
+        return false;
+    };
+    let seen = previous.seen_tool_ids.iter().any(|known| known == id);
+    // A call's PreToolUse comes before anything else that names it, so one
+    // whose id is already known is late whatever it says — a question's
+    // included, which would otherwise reopen a wait already answered.
+    if seen && !reading.tool_finished {
+        return true;
+    }
+    if reading.activity != AgentActivity::Working {
+        return false;
+    }
+    match previous.activity {
+        AgentActivity::Idle => seen,
+        AgentActivity::AwaitingInput => {
+            if reading.tool_call.is_some() && reading.tool_call == previous.awaiting_call {
+                !reading.tool_finished
+            } else {
+                seen
+            }
+        }
+        AgentActivity::Working => false,
+    }
+}
+
+fn remember_tool_id(seen: &mut Vec<String>, id: Option<&str>) {
+    let Some(id) = id else { return };
+    if seen.iter().any(|known| known == id) {
+        return;
+    }
+    if seen.len() >= HOOK_SEEN_TOOL_IDS_MAX {
+        seen.remove(0);
+    }
+    seen.push(id.to_owned());
 }
 
 /// Whether a reported state still outranks what the screen says.

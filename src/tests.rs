@@ -29676,6 +29676,71 @@ pub(crate) fn claude_hook_install_is_idempotent_and_keeps_every_foreign_entry() 
 }
 
 #[test]
+/// Change 301: hooks of one event run in parallel and the slowest sets the
+/// wait, and Operon's was the slowest around most tool calls while deciding
+/// nothing there. Claude's three tool events run async; every other Claude
+/// handler stays synchronous (the brief on SessionStart's stdout, the `{}` a
+/// permission-capable hook must print, Idle as the last word), and Codex's
+/// handlers stay as its trust hash expects them — no `async` key at all.
+pub(crate) fn claude_tool_hooks_run_async_and_every_other_handler_waits() {
+    let root = temporary_directory("claude-hook-async");
+    let home = root.join("home");
+    let data_file = root.join("data").join("store-v2.json");
+    fs::create_dir_all(data_file.parent().unwrap()).unwrap();
+    home_with_foreign_hooks(&home);
+    write_hook_runtime(
+        &data_file,
+        &root.join("hook.sock"),
+        &[CliProvider::Claude, CliProvider::Codex],
+    )
+    .unwrap();
+    install_claude_hooks(&data_file, &claude_config_root(&home), false).unwrap();
+    install_codex_hooks(&data_file, &codex_config_root(&home), &[], false).unwrap();
+
+    let managed_handler_of = |hooks: &serde_json::Value, provider, event: &str| {
+        let marker = hook_command_marker(provider);
+        hooks["hooks"][event]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|group| group["hooks"][0].clone())
+            .find(|handler| {
+                handler["command"]
+                    .as_str()
+                    .is_some_and(|command| command.contains(&marker))
+            })
+            .unwrap_or_else(|| panic!("{event} に管理フックがありません"))
+    };
+    let claude = read_json(&claude_settings_in(&claude_config_root(&home)));
+    let mut async_events = Vec::new();
+    for (event, _) in hook_events(CliProvider::Claude) {
+        let handler = managed_handler_of(&claude, CliProvider::Claude, event);
+        match handler.get("async") {
+            Some(serde_json::Value::Bool(true)) => async_events.push(*event),
+            None => {}
+            other => panic!("{event} の async が想定外です: {other:?}"),
+        }
+        assert_eq!(handler["timeout"], HOOK_ENTRY_TIMEOUT_SECONDS, "{event}");
+    }
+    assert_eq!(
+        async_events,
+        ["PreToolUse", "PostToolUse", "PostToolUseFailure"],
+        "async にするのはツールの 3 イベントだけです"
+    );
+
+    let codex = read_json(&codex_hooks_in(&codex_config_root(&home)));
+    for (event, _) in hook_events(CliProvider::Codex) {
+        let handler = managed_handler_of(&codex, CliProvider::Codex, event);
+        assert_eq!(
+            handler.as_object().unwrap().keys().collect::<Vec<_>>(),
+            ["command", "timeout", "type"],
+            "Codex の {event} の形が変わると信頼ハッシュが外れます"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 /// The CLI kills a hook at this timeout and reports `timed out after Ns`. The
 /// script's own post is capped at 1.5 s, but on a machine at load average 100
 /// with 25 sessions running, the path that posts nothing was measured at 11 s —
@@ -32809,6 +32874,198 @@ pub(crate) fn a_bookkeeping_event_after_an_antigravity_stop_keeps_the_row_finish
     .unwrap();
     let (after, _) = apply_hook_reading(Some(&after), next, start);
     assert_eq!(after.activity, AgentActivity::Working);
+}
+
+/// One Claude hook event as the listener reads it, for the ordering tests of
+/// change 301: the tool call is its name, input and id.
+fn claude_tool_reading(event: &str, tool: &str, input: &str, id: Option<&str>) -> HookReading {
+    let mut payload = serde_json::json!({
+        "tool_name": tool,
+        "tool_input": { "command": input },
+    });
+    if let Some(id) = id {
+        payload["tool_use_id"] = serde_json::Value::from(id);
+    }
+    normalise_hook_event(&hook_event(CliProvider::Claude, event, payload)).unwrap()
+}
+
+#[test]
+/// Change 301: PreToolUse runs async, and Claude starts the same call's
+/// PermissionRequest hooks right after it, so the PreToolUse post can arrive
+/// second. It must not turn a row that is waiting for the person back to
+/// working; the call's own PostToolUse — permission granted — does.
+pub(crate) fn a_late_pre_tool_use_does_not_hide_a_permission_prompt() {
+    let start = Instant::now();
+    let (status, _) = apply_hook_reading(
+        None,
+        claude_tool_reading("PostToolUse", "Read", "a", Some("t1")),
+        start,
+    );
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PermissionRequest", "Bash", "rm -rf x", None),
+        start,
+    );
+    assert_eq!(status.activity, AgentActivity::AwaitingInput);
+
+    let (status, notice) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PreToolUse", "Bash", "rm -rf x", Some("t2")),
+        start,
+    );
+    assert_eq!(
+        status.activity,
+        AgentActivity::AwaitingInput,
+        "遅れて届いた PreToolUse が承認待ちを消しました"
+    );
+    assert_eq!(notice, None);
+
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PostToolUse", "Bash", "rm -rf x", Some("t2")),
+        start,
+    );
+    assert_eq!(
+        status.activity,
+        AgentActivity::Working,
+        "承認後も待ちのままです"
+    );
+}
+
+#[test]
+/// Change 301: a tool post that lost the race to the turn's Stop must not
+/// reopen the finished turn for the half hour a hook state outranks the screen.
+/// A call nobody has seen yet still does: a Stop hook that blocks continues the
+/// turn without a new prompt, and that turn is working.
+pub(crate) fn a_late_tool_event_does_not_reopen_a_finished_turn() {
+    let start = Instant::now();
+    let (status, _) = apply_hook_reading(
+        None,
+        claude_tool_reading("PreToolUse", "Edit", "a", Some("t1")),
+        start,
+    );
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        normalise_hook_event(&hook_event(
+            CliProvider::Claude,
+            "Stop",
+            serde_json::json!({}),
+        ))
+        .unwrap(),
+        start,
+    );
+    assert_eq!(status.activity, AgentActivity::Idle);
+
+    let (status, notice) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PostToolUse", "Edit", "a", Some("t1")),
+        start,
+    );
+    assert_eq!(
+        status.activity,
+        AgentActivity::Idle,
+        "終わったターンが作業中に戻りました"
+    );
+    assert_eq!(notice, None);
+
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PreToolUse", "Bash", "make", Some("t2")),
+        start,
+    );
+    assert_eq!(
+        status.activity,
+        AgentActivity::Working,
+        "続きのターンが作業中になりません"
+    );
+}
+
+#[test]
+/// Change 301: while a question waits, a post from a call that already
+/// reported — an earlier step, or a sibling in a parallel batch — leaves it
+/// waiting; the answer, the question's own PostToolUse, ends the wait.
+pub(crate) fn a_late_tool_event_does_not_hide_a_question() {
+    let start = Instant::now();
+    let (status, _) = apply_hook_reading(
+        None,
+        claude_tool_reading("PreToolUse", "Grep", "a", Some("t1")),
+        start,
+    );
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PreToolUse", "AskUserQuestion", "どちら？", Some("q1")),
+        start,
+    );
+    assert_eq!(status.activity, AgentActivity::AwaitingInput);
+
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PostToolUse", "Grep", "a", Some("t1")),
+        start,
+    );
+    assert_eq!(
+        status.activity,
+        AgentActivity::AwaitingInput,
+        "遅れて届いた PostToolUse が質問待ちを消しました"
+    );
+
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PostToolUse", "AskUserQuestion", "どちら？", Some("q1")),
+        start,
+    );
+    assert_eq!(status.activity, AgentActivity::Working);
+}
+
+#[test]
+/// Change 301, found by the empirical verifier: a question's own PreToolUse is
+/// async too. Arriving after its answer, or after the Stop that followed, it
+/// must not put the row back to waiting — a call's PreToolUse comes before
+/// anything else that names it, so one whose id was already seen is late.
+pub(crate) fn a_late_question_pre_tool_use_does_not_reopen_a_wait() {
+    let start = Instant::now();
+    let (status, _) = apply_hook_reading(
+        None,
+        claude_tool_reading("PreToolUse", "Grep", "a", Some("t1")),
+        start,
+    );
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PostToolUse", "AskUserQuestion", "q", Some("q1")),
+        start,
+    );
+    let (after_answer, _) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PreToolUse", "AskUserQuestion", "q", Some("q1")),
+        start,
+    );
+    assert_eq!(
+        after_answer.activity,
+        AgentActivity::Working,
+        "答えた後の質問が待ちに戻りました"
+    );
+
+    let (status, _) = apply_hook_reading(
+        Some(&status),
+        normalise_hook_event(&hook_event(
+            CliProvider::Claude,
+            "Stop",
+            serde_json::json!({}),
+        ))
+        .unwrap(),
+        start,
+    );
+    let (status, notice) = apply_hook_reading(
+        Some(&status),
+        claude_tool_reading("PreToolUse", "AskUserQuestion", "q", Some("q1")),
+        start,
+    );
+    assert_eq!(
+        status.activity,
+        AgentActivity::Idle,
+        "終わったターンが待ちに戻りました"
+    );
+    assert_eq!(notice, None);
 }
 
 #[test]
@@ -52852,6 +53109,8 @@ pub(crate) fn a_pinned_session_shows_what_its_agent_last_said() {
         started_at: now,
         received_at: now,
         completed_transcript: None,
+        seen_tool_ids: Vec::new(),
+        awaiting_call: None,
     };
     app.hook_status.insert(first, status(AgentActivity::Idle));
     let texts = pinned_layout(&mut app, second);
@@ -52977,6 +53236,8 @@ pub(crate) fn the_palette_finds_a_session_by_what_its_agent_last_said() {
             started_at: now,
             received_at: now,
             completed_transcript: None,
+            seen_tool_ids: Vec::new(),
+            awaiting_call: None,
         },
     );
     app.command_search = "0042".to_owned();
@@ -71253,6 +71514,8 @@ fn sidebar_251_hook(activity: AgentActivity) -> HookStatus {
         started_at: Instant::now(),
         received_at: Instant::now(),
         completed_transcript: None,
+        seen_tool_ids: Vec::new(),
+        awaiting_call: None,
     }
 }
 
