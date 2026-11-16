@@ -43400,7 +43400,7 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
          const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
          const bash = (command) => ({{ tool_name: 'Bash', tool_input: {{ command }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
          const out = {{}};\n\
-         for (const c of ['cargo build', \"make wt.run CMD='cargo build'\", 'node .claude/scripts/wt-run.mjs cargo build', 'make wt.new BR=feature/x', 'make -C /tmp/operon wt.new BR=feature/x', 'make q.check', 'make q.check 2>&1', 'git merge --no-ff feature/x', 'cargo test --locked', 'trash dist/Operon.previous.app', 'trash -v dist/Operon.previous.app', 'trashcan foo', 'make wt.new BR=feature/x --eval=x', 'make --eval=x q.check', 'make wt.new BR=feature/x SHELL=/tmp/sh', 'make q.check SHELL=/tmp/sh', 'git merge --abort', 'git branch -d feature/x', 'git branch --delete feature/x feature/y', 'git branch -D feature/x', 'git branch -d -f feature/x', 'git branch -d --force feature/x', 'git merge --abort --no-ff', 'git push origin main', 'git push origin feature/x', 'git push --force origin main', 'gh run watch', 'gh run list --branch feature/x', 'gh run rerun 1', 'make q.fast', 'bash scripts/ci-verified.sh HEAD', {reads}])\n\
+         for (const c of ['cargo build', \"make wt.run CMD='cargo build'\", 'node .claude/scripts/wt-run.mjs cargo build', 'make wt.new BR=feature/x', 'make -C /tmp/operon wt.new BR=feature/x', 'make q.check', 'make q.check 2>&1', 'git merge --no-ff feature/x', 'cargo test --locked', 'trash dist/Operon.previous.app', 'trash -v dist/Operon.previous.app', 'trashcan foo', 'make wt.new BR=feature/x --eval=x', 'make --eval=x q.check', 'make wt.new BR=feature/x SHELL=/tmp/sh', 'make q.check SHELL=/tmp/sh', 'git merge --abort', 'git branch -d feature/x', 'git branch --delete feature/x feature/y', 'git branch -D feature/x', 'git branch -d -f feature/x', 'git branch -d --force feature/x', 'git merge --abort --no-ff', 'git push origin main', 'git push origin feature/x', 'git push --force origin main', 'git push -u origin feature/x', 'git push -q origin main', 'git push origin main:other', 'git push origin +main', 'git push origin :main', 'git push upstream feature/x', 'git push origin feature/x > out', 'git push origin feature/x; rm -rf src', 'git push origin feature/x --force', 'gh run watch', 'gh run list --branch feature/x', 'gh run rerun 1', 'make q.fast', 'bash scripts/ci-verified.sh HEAD', {reads}])\n\
            out['trunk: ' + c] = decide(await policy(bash(c)));\n\
          const edit = (file_path) => ({{ tool_name: 'Edit', tool_input: {{ file_path }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }});\n\
          for (const p of ['.agents/teamwork/reviewer_r1/report.md', 'dist/Operon.app', 'src/main.rs'])\n\
@@ -43489,10 +43489,17 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "trunk: git branch -d --force feature/x",
         "trunk: git merge --abort --no-ff",
         // Change 128: main is pushed after the landing merge, and CI is
-        // watched from here. Only main, unforced, and only the reading half of
-        // `gh run`.
-        "trunk: git push origin feature/x",
+        // watched from here, only the reading half of `gh run`. Change 304:
+        // a branch is pushed from here too, in the Publishing gate's plain
+        // form only — no force, no refspec, no other remote, nothing after it.
         "trunk: git push --force origin main",
+        "trunk: git push origin main:other",
+        "trunk: git push origin +main",
+        "trunk: git push origin :main",
+        "trunk: git push upstream feature/x",
+        "trunk: git push origin feature/x > out",
+        "trunk: git push origin feature/x; rm -rf src",
+        "trunk: git push origin feature/x --force",
         "trunk: gh run rerun 1",
     ] {
         assert_eq!(
@@ -43512,6 +43519,12 @@ pub(crate) fn the_trunk_allowlist_and_the_ownership_check_are_switched_on_here()
         "trunk: git merge --no-ff feature/x",
         "trunk: cargo test --locked",
         "trunk: git push origin main",
+        "trunk: git push -q origin main",
+        // Change 304: a session whose working directory does not persist
+        // pushes its branch from the main checkout; the Publishing gate
+        // refuses `cd <worktree> && git push` and `git -C <worktree> push`.
+        "trunk: git push origin feature/x",
+        "trunk: git push -u origin feature/x",
         "trunk: gh run watch",
         "trunk: gh run list --branch feature/x",
         "trunk: make q.fast",
@@ -52716,6 +52729,17 @@ pub(crate) fn a_plain_push_to_origin_is_not_asked_about() {
         "bash -c \"git push\"",
         "git push;echo done",
         "git push origin x &",
+        // Change 304: the trunk allowlist now admits a branch push from main
+        // and, judging only its own patterns, lets through these spellings,
+        // which pick the transport, the URL, the repository or the config
+        // read. This gate is what refuses them.
+        "git -c core.sshCommand=./x push origin main",
+        "git -c remote.origin.pushurl=/tmp/x push origin feature/x",
+        "git --git-dir=/tmp/x push origin main",
+        "HOME=/tmp/h git push origin main",
+        "env HOME=/tmp/h git push origin main",
+        "git push origin main & ls",
+        "git push origin main || ls",
         // A push that is only text has nothing to ask about either.
         "git commit -m \"docs: explain the git push gate\"",
         "grep -rn \"git push\" docs/",
