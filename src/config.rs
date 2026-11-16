@@ -363,6 +363,10 @@ pub(crate) const HOOK_SETTINGS_MAX_BYTES: u64 = 1024 * 1024;
 /// hashes this value into its trust entries, so changing it re-trusts ours on
 /// the next install — the keys stay, the hashes are rewritten.
 pub(crate) const HOOK_ENTRY_TIMEOUT_SECONDS: u64 = 60;
+/// How many Claude tool-call ids a session's hook state remembers, to tell a
+/// post that lost the race to a later Stop or question from a new call
+/// (change 301). One turn's worth: a late post trails by one tool run.
+pub(crate) const HOOK_SEEN_TOOL_IDS_MAX: usize = 64;
 /// How many rows the quick-action palette draws. A palette is read by scanning
 /// it, and a list longer than a glance is a list nobody scans — the query is
 /// the way to narrow it, not the scrollbar.

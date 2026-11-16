@@ -1,0 +1,1 @@
+2026-11-16T13:03:32Z auto plan plan.md 6c8e788d294decfa approve evaluator (fresh subagent) 2026-11-16: fix covers the bug report; guard (a) targets the likely PreToolUse/PermissionRequest race, a new tool_use_id still turns the row Working, proportionate
