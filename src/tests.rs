@@ -50716,6 +50716,145 @@ fn ci_gate_commit(repository: &Path, file: &str, text: &str) -> String {
     ci_gate_git(repository, &["rev-parse", "HEAD"])
 }
 
+/// Change 298. A repository with one commit, a fake `gh` that lists no run for
+/// the commit until it has been asked `appear_after` times and then lists run
+/// 4242, and a runner for `scripts/wait-ci.sh` that returns its exit code, what
+/// it said, and every `gh` call it made.
+fn ci_wait_fixture(label: &str) -> (PathBuf, PathBuf, String, String) {
+    let root = temporary_directory(label);
+    let repository = root.join("repo");
+    fs::create_dir_all(&repository).unwrap();
+    ci_gate_git(&repository, &["init", "-q", "--initial-branch=main"]);
+    let head = ci_gate_commit(&repository, "a.txt", "a\n");
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let gh = "#!/bin/sh\n\
+        printf '%s\\n' \"$*\" >> \"$FAKE_GH_LOG\"\n\
+        case \"$1 $2\" in\n\
+        'run list')\n\
+          asked=$(grep -c '^run list' \"$FAKE_GH_LOG\")\n\
+          [ \"$asked\" -gt \"$FAKE_GH_APPEAR_AFTER\" ] && echo 4242\n\
+          exit 0 ;;\n\
+        'run watch') exit \"$FAKE_GH_WATCH_STATUS\" ;;\n\
+        esac\n\
+        exit 1\n";
+    fs::write(bin.join("gh"), gh).unwrap();
+    fs::set_permissions(bin.join("gh"), fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    (root, repository, head, path)
+}
+
+fn ci_wait_run(
+    root: &Path,
+    repository: &Path,
+    path: &str,
+    appear_after: u32,
+    watch_status: u32,
+    appear_seconds: u32,
+) -> (Option<i32>, String, String) {
+    let log = root.join("gh-calls");
+    let _ = fs::remove_file(&log);
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // Bounded, so a wait that never gives up fails the test instead of hanging it.
+    let output = forget_inherited_repository(&mut Command::new("bash"))
+        .arg(manifest.join("scripts/run-bounded.sh"))
+        .arg("20")
+        .arg("bash")
+        .arg(manifest.join("scripts/wait-ci.sh"))
+        .current_dir(repository)
+        .env("PATH", path)
+        .env("FAKE_GH_LOG", &log)
+        .env("FAKE_GH_APPEAR_AFTER", appear_after.to_string())
+        .env("FAKE_GH_WATCH_STATUS", watch_status.to_string())
+        .env("OPERON_CI_APPEAR_SECONDS", appear_seconds.to_string())
+        .env("OPERON_CI_POLL_SECONDS", "0")
+        .env("OPERON_CI_WATCH_SECONDS", "30")
+        .output()
+        .unwrap();
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        fs::read_to_string(&log).unwrap_or_default(),
+    )
+}
+
+/// Change 298. Straight after a push GitHub lists no run for the commit yet, and
+/// `gh run watch` there found nothing to watch; change 297's landing then polled
+/// by hand for 219 turns. The wait asks until the run exists, watches that run,
+/// and reports how it ended — a failed run is never reported as passed.
+#[test]
+pub(crate) fn the_ci_wait_waits_for_the_run_to_appear_then_watches_it() {
+    let (root, repository, head, path) = ci_wait_fixture("ci-wait-appears");
+
+    let (code, said, calls) = ci_wait_run(&root, &repository, &path, 3, 0, 30);
+    assert_eq!(
+        code,
+        Some(0),
+        "CI が通った run を通過と言いません: {said}\n{calls}"
+    );
+    assert_eq!(
+        calls.lines().filter(|l| l.starts_with("run list")).count(),
+        4,
+        "run が現れるまで聞き続けていません: {calls}"
+    );
+    assert!(
+        calls
+            .lines()
+            .filter(|l| l.starts_with("run list"))
+            .all(|l| l.contains(&format!("--commit {head}")) && l.contains("--workflow ci.yml")),
+        "この commit の ci.yml を聞いていません: {calls}"
+    );
+    let watched: Vec<&str> = calls
+        .lines()
+        .filter(|l| l.starts_with("run watch"))
+        .collect();
+    assert_eq!(
+        watched,
+        ["run watch 4242 --exit-status"],
+        "現れた run を一度だけ watch していません: {calls}"
+    );
+
+    let (code, said, calls) = ci_wait_run(&root, &repository, &path, 0, 1, 30);
+    assert_eq!(
+        code,
+        Some(1),
+        "失敗した run を通過と言いました: {said}\n{calls}"
+    );
+    assert!(
+        said.contains("4242"),
+        "どの run が失敗したか言いません: {said}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Change 298. A commit that was never pushed has no run to wait for: the wait
+/// ends within its bound and says to push, rather than asking forever.
+#[test]
+pub(crate) fn the_ci_wait_gives_up_when_no_run_appears() {
+    let (root, repository, _, path) = ci_wait_fixture("ci-wait-never");
+    let started = Instant::now();
+    let (code, said, calls) = ci_wait_run(&root, &repository, &path, u32::MAX, 0, 2);
+    assert_eq!(
+        code,
+        Some(1),
+        "run のない commit を通過と言いました: {said}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "現れない run を待ち続けました"
+    );
+    assert!(said.contains("push"), "push するよう言いません: {said}");
+    assert!(
+        !calls.contains("run watch"),
+        "存在しない run を watch しました: {calls}"
+    );
+    let _ = fs::remove_dir_all(&root);
+}
+
 /// `scripts/ci-verified.sh` is the one place "CI passed on this tree" is
 /// decided, for the merge gate and the release check alike. Its three answers
 /// have to stay apart: a pass, a not-yet (which blocks), and a could-not-ask

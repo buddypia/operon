@@ -158,7 +158,7 @@ git merge-base --is-ancestor main "$sha" ||
   block "$branch does not contain main" \
 "main moved after $branch was branched or last updated, so the merge would be a
 tree CI never ran. Merge main into $branch in its worktree, push it, wait for CI
-(gh run watch), then merge."
+(bash scripts/wait-ci.sh), then merge."
 
 touched_changes=$(git diff --no-renames --name-only main "$sha" -- 'docs/sdlc/changes/' 2>/dev/null |
   sed -n 's|^docs/sdlc/changes/\([^/]*\)/.*|\1|p' | sort -u)
@@ -263,7 +263,7 @@ case "$status" in
   1) block "CI has not passed on $branch (${sha:0:12})" \
 "$verdict
 Push the branch (git push -u origin $branch) from its worktree, wait for the run
-(gh run watch), then merge. A failed run is evidence: fix it on the branch." ;;
+(bash scripts/wait-ci.sh), then merge. A failed run is evidence: fix it on the branch." ;;
 esac
 
 # CI could not be asked. Run the suite where the branch is checked out.

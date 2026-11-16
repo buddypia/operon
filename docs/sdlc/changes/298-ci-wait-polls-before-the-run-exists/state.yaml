@@ -1,0 +1,36 @@
+# Change 298. Bug report, as the bugfix route takes it in place of an intent:
+#
+# The landing steps say to wait for CI with `gh run watch` right after
+# `git push`. GitHub registers the push's run a few seconds later, so the first
+# `gh run watch` / `gh run list --commit` finds no run, and the session falls
+# back to asking again by hand, one tool call each time. Change 297's landing
+# spent 219 turns polling that way. Nothing in the repository waits for the run
+# to appear before watching it.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Done. Landings wait for CI with bash scripts/wait-ci.sh in one call."
+
+contract:
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked the_ci_wait_ 2 passed, merge harness landing feature_pilot approval 34 passed; full suite in CI"
+  failing-test-first: "machine passed both the_ci_wait_ tests failed with scripts/wait-ci.sh moved away"
+  release-binary: "machine waived touches scripts, .claude, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine passed 6 of 6 caught: python3 docs/sdlc/changes/298-ci-wait-polls-before-the-run-exists/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
