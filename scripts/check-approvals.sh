@@ -51,12 +51,17 @@ digest() {
     shasum -a 256 | cut -c1-16
 }
 
+# Every ledger in one awk (change 297): one per ledger, with a basename and a
+# dirname each, cost 2.4 seconds at 134 ledgers, and the Stop gate asks twice.
+# `${1+"$@"}` because macOS's bash 3.2 calls an empty "$@" unbound under set -u.
 ledger() {
+  set --
   for log in "$changes_root"/*/approvals.log; do
-    [ -f "$log" ] || continue
-    awk -v change="$(basename "$(dirname "$log")")" \
-      '!/^[[:space:]]*(#|$)/ { print change "\t" NR "\t" $0 }' "$log"
+    [ -f "$log" ] && set -- ${1+"$@"} "$log"
   done
+  [ "$#" -gt 0 ] || return 0
+  awk 'FNR == 1 { change = FILENAME; sub(/\/approvals\.log$/, "", change); sub(/.*\//, "", change) }
+    !/^[[:space:]]*(#|$)/ { print change "\t" FNR "\t" $0 }' "$@"
 }
 
 # One pass over every ledger, in time order: ERR lines for findings, SEEN for

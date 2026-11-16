@@ -11,8 +11,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -20,14 +20,14 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Fix the loop in gate-stop.sh to read only the changes in play, then run the test and the mutation sweep."
+resume: "Done. After landing, the transcripts' Stop records should show gate-stop.sh finishing in about a second, with no hook_cancelled."
 
 contract:
-  three-gates: "machine pending fmt and clippy at commit; cargo test --locked the_stop_gate_ in the worktree; full suite in CI"
-  bands: "machine pending bash scripts/check-bands.sh"
-  failing-test-first: "machine passed the_stop_gate_does_not_pay_for_changes_it_is_not_working_on failed on the unedited gate-stop.sh: 25 child processes with 2 parked changes, 199 with 60"
-  release-binary: "machine waived touches .claude/hooks, docs/sdlc and src/tests.rs only"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/297-the-stop-gate-runs-out-of-time-and-checks-nothing/mutations.py"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked the_stop_gate_ approval 17 passed, lesson harness every_state_file sdlc change_ 37 passed; full suite in CI"
+  bands: "machine passed bash scripts/check-bands.sh: warn and diagnose rows only, none moved by this diff"
+  failing-test-first: "machine passed the_stop_gate_does_not_pay_for_changes_it_is_not_working_on failed on the unedited gate-stop.sh: 25 child processes with 2 parked changes, 199 with 60; the_approval_ledger_reads_every_ledger_in_one_pass failed on the unedited check-approvals.sh: 15 with 2 ledgers, 189 with 60"
+  release-binary: "machine waived touches .claude/hooks, scripts/check-approvals.sh, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine passed 6 of 6 caught: python3 docs/sdlc/changes/297-the-stop-gate-runs-out-of-time-and-checks-nothing/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

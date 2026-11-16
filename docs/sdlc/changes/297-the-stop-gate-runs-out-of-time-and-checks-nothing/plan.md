@@ -65,4 +65,27 @@ items reported, and the stops that used to be cancelled now finish.
 
 ## Departures from the plan
 
-None yet.
+- **`scripts/check-approvals.sh` too.** With the loop fixed the hook still took
+  5 to 6 seconds on this tree. A trace put 5.1 of them in the two calls of
+  `scripts/check-approvals.sh` the gate makes: its `ledger()` ran an `awk`, a
+  `basename` and a `dirname` per change's `approvals.log` (134 ledgers, 402
+  child processes, 2.4 seconds a call). Trust is computed from every ledger,
+  so every ledger is still read, now in one `awk` over all of them. Its
+  `--list` output over the real 558 ledger lines is byte-identical before and
+  after; a call takes 0.3 seconds. Test:
+  `the_approval_ledger_reads_every_ledger_in_one_pass` (15 child processes with
+  2 ledgers, 189 with 60, before the fix). The file is gate configuration like
+  the hook, and like it the edit reads the same lines and relaxes nothing.
+- **Where "the same set" is not exact.** The empirical verifier, refused a
+  shell by the worktree guard in its isolated worktree, read the diff and named
+  two trees where the loop reads differently, neither a valid change: a change
+  directory whose name starts with a dot is now read when in play (the glob
+  skipped it — a check gained, not lost), and on the no-`main` fallback a
+  directory name holding a newline is split. `scripts/check-approvals.sh` now
+  takes a change's name literally where `awk -v` read backslash escapes in it.
+  Old and new `check-approvals.sh` were compared over empty, comment-only,
+  unterminated, spaced, non-ASCII, malformed and directory-shaped ledgers, and
+  over none, in every mode, under `/bin/bash` 3.2 and bash 5: identical.
+- **Measured.** The whole hook on this tree under a load average of 23 to 25:
+  1.0 to 1.3 seconds, against 8 to 11 for the old hook with the fixed script
+  and 9.5 to 14.4 for the old hook with the old script.
