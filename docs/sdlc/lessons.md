@@ -1639,3 +1639,26 @@ reviewer or verifier could not run is a bug report, not a footnote.
 hook and the policy guard against it, each watched failing in
 `docs/sdlc/changes/299-isolated-subagent-worktrees-are-judged-as-main/mutations.py`
 (9 of 9 caught).
+
+
+## 116 — Two guards that each name the form the other refuses leave no form
+
+The trunk allowlist admitted only `git push origin main`, and its refusal said
+to run a branch push as `cd <worktree> && …` or `git -C <worktree> …`; the
+Publishing gate refuses both, because a push must be a call of its own with
+nothing before `push`. A session whose working directory does not persist
+(`CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1`) sits in the main checkout, so
+neither guard admitted any spelling of its branch push, and the session pushed
+from a script file that no guard reads (change 304). **The rule:** when two
+guards judge the same command, the form one of them says is the way through
+must be admitted by the other; and a guard relaxed to meet another names that
+other guard as the layer refusing what it now lets pass, with a test pinning
+the refusal.
+
+**Guard.** `the_trunk_allowlist_and_the_ownership_check_are_switched_on_here`
+admits the plain branch push on a trunk fixture and denies force, refspec,
+forced-ref, other-remote, redirected, chained and trailing-flag spellings;
+`a_plain_push_to_origin_is_not_asked_about` pins that the Publishing gate
+refuses the spellings the trunk allowlist alone lets through (`git -c … push`,
+`--git-dir`, `HOME=` prefixes, `&`, `||`). Each watched failing in
+`docs/sdlc/changes/304-branch-push-refused-from-main-and-worktree/mutations.py`.

@@ -1,0 +1,6 @@
+digest: "e80ba91586521985"
+
+obligations:
+  - I1 empirical-test :: cargo test --locked the_trunk_allowlist_and_the_ownership_check_are_switched_on_here
+  - I2 empirical-test :: cargo test --locked a_plain_push_to_origin_is_not_asked_about
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/304-branch-push-refused-from-main-and-worktree/mutations.py
