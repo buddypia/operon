@@ -1,0 +1,36 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: feature (new user-visible recovery for missing-pane open tabs and
+# un-ID'd CLI sessions, plus plain-terminal fallback and honest empty-pane
+# states). Risk: low — touches `src/app.rs` (`drawing`, screen yes),
+# `src/app/terminal_output.rs`, `src/app/relaunch.rs`, `src/app/screens.rs`,
+# and `src/i18n_tables.rs` (`text`), staying off all medium/paused surfaces.
+
+state:
+  route: "feature"
+  stage: "design"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Complete intent approval, write and gate spec.md, screen.md, and plan.md, then write tests before code."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required — touches src/app.rs, src/app/terminal_output.rs, src/app/relaunch.rs, src/app/screens.rs, and src/i18n_tables.rs; package and replace /Applications/Operon.app from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/303-missing-pane-loops-output-error/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
