@@ -66,7 +66,7 @@ name the script instead of `gh run watch`; the gate's verdict does not change.
   moved away before it came back unchanged.
 - **The test bounds the script.** The first sweep hung on "the wait never gives
   up": the test ran the script with no limit. It now runs under
-  `scripts/run-bounded.sh 20`, and that mutation fails in seconds.
+  `scripts/run-bounded.sh` with a 20-second limit, and that mutation fails in seconds.
 - **No independent verifier run.** `empirical-verifier` needs an isolated
   worktree, and Claude Code's isolated worktrees are refused by this
   repository's guards — change 299 fixes that. The evidence here is the two
