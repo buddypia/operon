@@ -2,7 +2,7 @@
 
 - **Spec**: n/a (`bugfix` route — the bug report is in `./state.yaml`)
 - **Approved**: 2026-11-16
-- **Status**: approved
+- **Status**: done
 
 ## Root cause
 
@@ -69,3 +69,17 @@ on the next launch.
 
 The four named tests pass; `mutations.py` catches every mutation; CI green on
 the branch head; after shipping, `/Applications/Operon.app` is the new build.
+## Departures from the plan
+
+- The empirical verifier reproduced a case the plan's guard missed: a
+  question's own PreToolUse (async, reads AwaitingInput) arriving after its
+  answer or after Stop reopened the wait. `is_late_tool_event` now treats any
+  PreToolUse whose id is already known as late, ahead of the Working-only
+  checks; `a_late_question_pre_tool_use_does_not_reopen_a_wait` (F1) and a
+  twelfth mutation pin it.
+- The verifier's third reproduction (two unanswered PermissionRequests, then
+  the first call's late PreToolUse) is recorded in `state.yaml` as an accepted
+  residual rather than fixed.
+- `managed_handler` also serves Antigravity's installer; that call passes
+  `hook_runs_async(CliProvider::Gemini, …)`, which is `false`, so its handlers
+  are unchanged.

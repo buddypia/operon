@@ -56,11 +56,21 @@
 # Residual, accepted: a late PreToolUse for an *earlier, different* call, whose
 # id was never seen, still turns AwaitingInput into Working; it needs a
 # PreToolUse post to lose a race by a whole tool run and model response.
+# Found by the empirical verifier and fixed: a question's own PreToolUse is
+# async too and reads AwaitingInput, so the first guard (Working readings only)
+# let it reopen a wait after its answer or after Stop. Rule added: a
+# PreToolUse whose id is already known is late whatever it says (a call's
+# PreToolUse comes before anything else naming it).
+# Residual, accepted (verifier's third reproduction): two PermissionRequests
+# with no resolution between them, then the first call's late PreToolUse,
+# turns the row Working — awaiting_call holds only the latest call. Claude
+# puts permission prompts to the person one at a time, so the sequence needs
+# a second prompt before the first is answered.
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -68,13 +78,13 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Plan, then the failing tests, then managed_handler and the reading guard in src/tmux/hooks.rs."
+resume: "Done. Claude tool hooks are written async; late tool posts no longer move a row that is idle or waiting. Package from main after landing."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  failing-test-first: "machine pending the new tests fail before the fix"
-  release-binary: "machine pending touches src/tmux/hooks.rs, so /Applications/Operon.app is stale; ends with the ship skill"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/301-status-hook-blocks-every-tool-call/mutations.py"
+  three-gates: "machine passed make q.fast (fmt, clippy -D warnings); cargo test --locked claude_tool_hooks_run_async a_late_ hook codex 61 passed; full suite in CI"
+  failing-test-first: "machine passed the four tests failed with the fields in place and no fix; a_late_question_pre_tool_use_does_not_reopen_a_wait (verifier F1) failed before its rule"
+  release-binary: "machine passed required - src/tmux/hooks.rs and src/config.rs change; package from main after landing with the ship skill"
+  guards-verified-by-mutation: "machine passed 12 of 12 caught: python3 docs/sdlc/changes/301-status-hook-blocks-every-tool-call/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
