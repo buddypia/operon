@@ -21,9 +21,9 @@ pub(crate) use keymap::*;
 pub(crate) use knowledge::*;
 pub(crate) use launch_projects::*;
 pub(crate) use relaunch::*;
-pub(crate) use terminal_output::TerminalStreamManager;
 #[cfg(test)]
 pub(crate) use terminal_output::{stream_coalesce_delay, terminal_echo_poll_wait};
+pub(crate) use terminal_output::{terminal_empty_placeholder, TerminalStreamManager};
 pub(crate) use terminal_paths::*;
 
 pub(crate) type UiResult<T> = std::result::Result<T, String>;
@@ -827,6 +827,16 @@ pub(crate) struct OperonApp {
     /// Open workspace tabs that an older build saved as `SessionStatus::Exited`
     /// and queued for shell conversion on the first poll (change 288).
     pub(crate) exited_tabs_on_load: HashSet<Uuid>,
+    /// Open workspace tabs loaded as `Lost` or `Failed` and queued for
+    /// conversation recovery or plain-terminal fallback on the first poll.
+    pub(crate) lost_tabs_on_load: HashSet<Uuid>,
+    /// Sessions whose latest capture found no tmux pane, suppressing
+    /// per-frame `SessionOutput` loops until reopened or explicitly synced.
+    pub(crate) terminal_capture_missing: HashSet<Uuid>,
+    /// Sessions whose next `SessionOutput` completion came from 「今すぐ同期」.
+    pub(crate) explicit_output_requests: HashSet<Uuid>,
+    #[cfg(test)]
+    pub(crate) cli_recovery_roots: Option<CliRecoveryRoots>,
     pub(crate) workspace_drag: Option<WorkspaceTab>,
     pub(crate) workspace_editor_views: HashMap<DocumentId, EditorView>,
     /// One syntax/preview cache per visible group, bounded by PANE_MAX.
@@ -1249,6 +1259,11 @@ impl OperonApp {
             quiet_launches: HashSet::new(),
             last_auto_restore: HashMap::new(),
             exited_tabs_on_load: HashSet::new(),
+            lost_tabs_on_load: HashSet::new(),
+            terminal_capture_missing: HashSet::new(),
+            explicit_output_requests: HashSet::new(),
+            #[cfg(test)]
+            cli_recovery_roots: None,
             workspace_drag: None,
             workspace_editor_views: HashMap::new(),
             workspace_editor_caches: HashMap::new(),
@@ -1290,6 +1305,7 @@ impl OperonApp {
         let layout = load_workspace_layout(&app.data_file);
         app.restore_workspace_layout(&layout);
         app.reopen_exited_workspace_tabs_on_load();
+        app.reopen_lost_workspace_tabs_on_load();
         app.saved_workspace_layout = app.workspace_layout_snapshot();
         app
     }
@@ -1849,6 +1865,7 @@ impl OperonApp {
                     let previous_store = self.store.clone();
                     match result {
                         Ok(branch) => {
+                            self.terminal_capture_missing.remove(&session_id);
                             if let Some(session) = self
                                 .store
                                 .sessions
@@ -1933,6 +1950,7 @@ impl OperonApp {
                     let previous_store = self.store.clone();
                     match result {
                         Ok(branch) => {
+                            self.terminal_capture_missing.remove(&session_id);
                             if let Some(session) = self
                                 .store
                                 .sessions
@@ -2069,23 +2087,7 @@ impl OperonApp {
                     result,
                     laid_out,
                 } => {
-                    self.background_tasks
-                        .remove(&BackgroundKey::SessionOutput(session_id));
-                    match result {
-                        Ok(capture) => {
-                            if let Some(laid_out) = laid_out {
-                                self.terminal_prelaid.insert(session_id, laid_out);
-                            }
-                            self.set_session_output(session_id, capture.output, capture.cursor);
-                            self.terminal_prelaid.remove(&session_id);
-                        }
-                        Err(error) => {
-                            self.notice = Some(tf!(
-                                "ターミナル出力を読み取れませんでした: {error}",
-                                error = error
-                            ));
-                        }
-                    }
+                    self.handle_session_output_result(session_id, result, laid_out);
                 }
                 BackgroundResult::FullHistoryImported(imported_result) => {
                     let FullHistoryImportResult {
@@ -2188,10 +2190,17 @@ impl OperonApp {
                             }
                         }
                         Err(error) => {
-                            self.notice = Some(tf!(
-                                "ターミナルに入力を送れませんでした: {error}",
-                                error = error
-                            ));
+                            if tmux_error_state(&error) == TmuxState::Gone
+                                && self.tools.tmux
+                                && self.session_is_live_without_inflight_launch(session_id)
+                            {
+                                self.reconcile_observed_tmux_gone(session_id, Instant::now());
+                            } else {
+                                self.notice = Some(tf!(
+                                    "ターミナルに入力を送れませんでした: {error}",
+                                    error = error
+                                ));
+                            }
                         }
                     }
                     // Input that arrived while tmux was handling the previous
@@ -2219,59 +2228,7 @@ impl OperonApp {
                                 self.terminal_resize_requested.remove(&session_id);
                             }
                             if tmux_error_state(&error) == TmuxState::Gone {
-                                let cancellation_was_pending =
-                                    self.cancellation_pending(session_id);
-                                if cancellation_was_pending {
-                                    self.store
-                                        .pending_cancellations
-                                        .retain(|pending| *pending != session_id);
-                                    if let Some(session) =
-                                        self.store.sessions.iter_mut().find(|session| {
-                                            session.id == session_id
-                                                && matches!(
-                                                    session.status,
-                                                    SessionStatus::Active
-                                                        | SessionStatus::Starting
-                                                        | SessionStatus::Unknown
-                                                )
-                                        })
-                                    {
-                                        session.status = SessionStatus::Cancelled;
-                                    }
-                                    self.persist_external_transition(
-                                        tr("セッションをキャンセルしました。"),
-                                        tr("tmux セッションはキャンセルされました"),
-                                    );
-                                    if !self.remove_after_close.contains(&session_id) {
-                                        self.clear_cancelled_unread_and_close_tab(session_id);
-                                    }
-                                } else if let Some(session) =
-                                    self.store.sessions.iter_mut().find(|session| {
-                                        session.id == session_id
-                                            && matches!(
-                                                session.status,
-                                                SessionStatus::Active
-                                                    | SessionStatus::Starting
-                                                    | SessionStatus::Unknown
-                                            )
-                                    })
-                                {
-                                    // The server is gone whether or not the store
-                                    // can be written. Rolling back to `Active`
-                                    // would ask for a resize, and so a tmux child
-                                    // and a store write, every frame; stay `Lost`
-                                    // and retry the save.
-                                    session.status = SessionStatus::Lost;
-                                    if !self.persist() {
-                                        self.store_retry_pending = true;
-                                        self.notice = Some(tr("tmux が見つからないためセッションを停止扱いにしましたが、保存できませんでした。Operon が自動的に再試行します。").into());
-                                    } else {
-                                        self.auto_restore_after_resize_gone(
-                                            session_id,
-                                            Instant::now(),
-                                        );
-                                    }
-                                }
+                                self.reconcile_observed_tmux_gone(session_id, Instant::now());
                             } else {
                                 self.notice = Some(tf!(
                                     "ターミナルのサイズを変更できませんでした: {error}",
@@ -3553,6 +3510,7 @@ impl OperonApp {
                 session.status == SessionStatus::Active
                     || session.status == SessionStatus::Unknown
                     || self.exited_tabs_on_load.contains(&session.id)
+                    || self.lost_tabs_on_load.contains(&session.id)
                     || (session.status == SessionStatus::Starting
                         && !self
                             .background_tasks
@@ -3679,7 +3637,11 @@ impl OperonApp {
         let mut forced_restore = Vec::new();
         let mut looked = Vec::new();
         let mut exited_looked = Vec::new();
+        let mut lost_looked = Vec::new();
         for (id, observation) in states {
+            if self.session_launch_running(id) {
+                continue;
+            }
             let cancellation_pending = self.cancellation_pending(id);
             let Some(idx) = self.store.sessions.iter().position(|session| {
                 session.id == id
@@ -3687,7 +3649,9 @@ impl OperonApp {
                         session.status,
                         SessionStatus::Starting | SessionStatus::Active | SessionStatus::Unknown
                     ) || (session.status == SessionStatus::Exited
-                        && self.exited_tabs_on_load.contains(&id)))
+                        && self.exited_tabs_on_load.contains(&id))
+                        || (matches!(session.status, SessionStatus::Lost | SessionStatus::Failed)
+                            && self.lost_tabs_on_load.contains(&id)))
             }) else {
                 continue;
             };
@@ -3701,15 +3665,17 @@ impl OperonApp {
                 if observation.state == TmuxState::Unknown {
                     continue;
                 }
-                exited_looked.push(id);
                 if cancellation_pending
                     && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
                 {
+                    exited_looked.push(id);
                     previous_store.get_or_insert_with(|| self.store.clone());
                     completed_cancellations.push(id);
                     self.store.sessions[idx].status = SessionStatus::Cancelled;
                     changed = true;
                 } else if observation.state == TmuxState::Alive {
+                    exited_looked.push(id);
+                    self.terminal_capture_missing.remove(&id);
                     previous_store.get_or_insert_with(|| self.store.clone());
                     self.store.sessions[idx].status = SessionStatus::Active;
                     changed = true;
@@ -3720,8 +3686,50 @@ impl OperonApp {
                     && queued_dependency_count(&self.store.sessions, id) == 0
                 {
                     reopen_shells.push(id);
+                } else {
+                    exited_looked.push(id);
                 }
                 continue;
+            }
+            if self.lost_tabs_on_load.contains(&id) {
+                if !matches!(
+                    self.store.sessions[idx].status,
+                    SessionStatus::Lost | SessionStatus::Failed
+                ) || !self.session_has_a_tab(id)
+                {
+                    lost_looked.push(id);
+                    continue;
+                }
+                if observation.state == TmuxState::Unknown {
+                    continue;
+                }
+                if cancellation_pending
+                    && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
+                {
+                    lost_looked.push(id);
+                    previous_store.get_or_insert_with(|| self.store.clone());
+                    completed_cancellations.push(id);
+                    self.store.sessions[idx].status = SessionStatus::Cancelled;
+                    changed = true;
+                } else if observation.state == TmuxState::Alive {
+                    lost_looked.push(id);
+                    self.terminal_capture_missing.remove(&id);
+                    previous_store.get_or_insert_with(|| self.store.clone());
+                    self.store.sessions[idx].status = SessionStatus::Active;
+                    changed = true;
+                } else if !cancellation_pending
+                    && self.tools.tmux
+                    && !self.setup_sessions.contains(&id)
+                    && self.can_auto_recover_session(&self.store.sessions[idx])
+                {
+                    relaunch.push(id);
+                } else {
+                    lost_looked.push(id);
+                }
+                continue;
+            }
+            if observation.state == TmuxState::Alive {
+                self.terminal_capture_missing.remove(&id);
             }
             let next = if cancellation_pending
                 && matches!(observation.state, TmuxState::Dead | TmuxState::Gone)
@@ -3752,7 +3760,7 @@ impl OperonApp {
                 && self.tools.tmux
                 && !self.setup_sessions.contains(&id)
                 && matches!(next, Some(SessionStatus::Lost | SessionStatus::Failed))
-                && relaunch_kind(&self.store.sessions[idx]).is_some();
+                && self.can_auto_recover_session(&self.store.sessions[idx]);
             let startup_relaunching = first_look && can_auto_restore;
             let forced_restoring =
                 !first_look && can_auto_restore && self.auto_restore_ready(id, poll_now);
@@ -3809,6 +3817,9 @@ impl OperonApp {
         }
         for id in exited_looked {
             self.exited_tabs_on_load.remove(&id);
+        }
+        for id in lost_looked {
+            self.lost_tabs_on_load.remove(&id);
         }
         self.finish_session_poll_transitions(
             changed,
@@ -4150,6 +4161,7 @@ impl OperonApp {
         let previous_store = self.store.clone();
         let session = &mut self.store.sessions[index];
         take_cli_kind(session, provider);
+        session.launched_at = Some(now());
         session.native_session_id = None;
         session.native_session_path = None;
         if !self.persist() {
@@ -4862,6 +4874,7 @@ impl OperonApp {
             self.store = previous_store;
             return;
         }
+        self.terminal_capture_missing.remove(&id);
         let project_path = project.path;
         // A plain terminal has no agent to report for, but a person who types
         // one in by hand gets the same reporting as a launched session.
@@ -5444,78 +5457,12 @@ impl OperonApp {
         source: &Session,
         provider: CliProvider,
     ) -> Result<NativeResume, String> {
-        let Some(native_session_id) = source.native_session_id.clone() else {
-            return Err(
+        let workspace = self.session_workspace_path(source);
+        self.resolve_or_recover_native_session(source, provider, &workspace)?
+            .ok_or_else(|| {
                 tr("このターミナルにはネイティブ再開 ID がまだ保存されていません。初回起動の完了を待つか、ローカル CLI セッションを検出してください。")
-                    .into(),
-            );
-        };
-        if !is_safe_cli_session_id(&native_session_id) {
-            return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
-        }
-        let missing = self.tools.missing_session_tools(provider);
-        if !missing.is_empty() {
-            return Err(tf!(
-                "この会話を再開するには {tools} が PATH 上に必要です。",
-                tools = missing.join(tr(" と "))
-            ));
-        }
-        let project_path = self
-            .store
-            .projects
-            .iter()
-            .find(|project| project.id == source.project_id)
-            .map(|project| project.path.clone())
-            .unwrap_or_default();
-        let workspace = source.worktree_path.clone().unwrap_or(project_path);
-        let recorded_transcript = source
-            .native_session_path
-            .clone()
-            .or_else(|| native_session_path_for_project(provider, &workspace, &native_session_id));
-        // Reopening the wrong conversation is exactly as wrong as restoring it
-        // elsewhere, so the stored identity is re-checked here too.
-        let (native_session_id, native_session_path) = match corrected_managed_claude_conversation(
-            source,
-            &workspace,
-            recorded_transcript.as_deref(),
-        ) {
-            Ok(Some(corrected)) => (corrected.native_id, Some(corrected.path)),
-            Ok(None) => (native_session_id, source.native_session_path.clone()),
-            Err(error) => {
-                return Err(tf!(
-                    "このターミナルの実際の会話を特定できませんでした: {error}",
-                    error = error
-                ));
-            }
-        };
-        if !is_safe_cli_session_id(&native_session_id) {
-            return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
-        }
-        Ok(
-            match validate_session_transcript_for_resume(
-                provider,
-                &workspace,
-                &native_session_id,
-                native_session_path
-                    .as_deref()
-                    .or(recorded_transcript.as_deref()),
-            ) {
-                TranscriptResumeReadiness::Ready(path) => NativeResume::Ready {
-                    native_id: native_session_id,
-                    path: Some(path),
-                    repaired_bytes: None,
-                },
-                TranscriptResumeReadiness::Sanitized {
-                    path,
-                    removed_bytes,
-                } => NativeResume::Ready {
-                    native_id: native_session_id,
-                    path: Some(path),
-                    repaired_bytes: Some(removed_bytes),
-                },
-                TranscriptResumeReadiness::EmptyOrMissing => NativeResume::NoTranscript,
-            },
-        )
+                    .into()
+            })
     }
 
     pub(crate) fn resume_managed_native_session(&mut self, source_id: Uuid) {
@@ -6609,7 +6556,16 @@ impl OperonApp {
         else {
             return;
         };
-        if can_retry_session(&session.status) && session.native_session_id.is_some() {
+        let should_resume_native = can_retry_session(&session.status)
+            && (session.native_session_id.is_some()
+                || cli_provider_for_agent(&session.agent).is_some_and(|provider| {
+                    let workspace = self.session_workspace_path(&session);
+                    matches!(
+                        self.resolve_or_recover_native_session(&session, provider, &workspace),
+                        Ok(Some(NativeResume::Ready { .. })) | Err(_)
+                    )
+                }));
+        if should_resume_native {
             if tmux_observation(&session.tmux_name).state == TmuxState::Alive {
                 self.notice = Some(
                     tr("古いターミナルがまだ動作しています。ネイティブ会話を再開する前に、停止してください。")
@@ -6623,7 +6579,7 @@ impl OperonApp {
         self.launch_session_record(session_id, LaunchFocus::Bring);
     }
 
-    fn session_launch_running(&self, session_id: Uuid) -> bool {
+    pub(crate) fn session_launch_running(&self, session_id: Uuid) -> bool {
         self.background_tasks
             .contains(&BackgroundKey::SessionStart(session_id))
             || self
@@ -6637,8 +6593,16 @@ impl OperonApp {
     /// the notice stay as they are, now and when the launch finishes, and no
     /// launch dialog is kept for it (change 270).
     pub(crate) fn launch_session_record(&mut self, session_id: Uuid, focus: LaunchFocus) -> bool {
+        self.launch_session_record_attempt(session_id, focus) == RelaunchAttempt::Launched
+    }
+
+    pub(crate) fn launch_session_record_attempt(
+        &mut self,
+        session_id: Uuid,
+        focus: LaunchFocus,
+    ) -> RelaunchAttempt {
         if self.session_launch_running(session_id) {
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         }
         let Some(session) = self
             .store
@@ -6647,7 +6611,7 @@ impl OperonApp {
             .find(|session| session.id == session_id)
             .cloned()
         else {
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         };
         if self.worktree_mutation_running(session.project_id) {
             self.notice = Some(if session.status == SessionStatus::Queued {
@@ -6656,7 +6620,7 @@ impl OperonApp {
             } else {
                 tr("worktree 操作の完了を待ってください。").into()
             });
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         }
         let project_path = self
             .store
@@ -6673,7 +6637,7 @@ impl OperonApp {
             .flatten();
         if let Err(reason) = account_ready_to_launch(&self.accounts, account) {
             self.notice = Some(reason);
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         }
         let previous_status = session.status.clone();
         let previous_launched_at = session.launched_at;
@@ -6702,8 +6666,11 @@ impl OperonApp {
                 stored.status = previous_status;
                 stored.launched_at = previous_launched_at;
             }
-            return false;
+            return RelaunchAttempt::PersistFailed;
         }
+        self.terminal_capture_missing.remove(&session_id);
+        self.lost_tabs_on_load.remove(&session_id);
+        self.exited_tabs_on_load.remove(&session_id);
         let auto_approve_workspace_prompts = self.store.auto_approve_workspace_prompts;
         // A launch token per launch, not per session: a retried pane replaces
         // the process that held the previous one, and the events still in
@@ -6766,7 +6733,7 @@ impl OperonApp {
                 tr("セッションを起動しています…").into()
             });
         }
-        true
+        RelaunchAttempt::Launched
     }
 
     pub(crate) fn stop_session(&mut self, session_id: Uuid) {
@@ -7006,6 +6973,9 @@ impl OperonApp {
             return;
         }
         self.session_output.remove(&session_id);
+        self.terminal_capture_missing.remove(&session_id);
+        self.explicit_output_requests.remove(&session_id);
+        self.lost_tabs_on_load.remove(&session_id);
         self.terminal_layouts.remove(&session_id);
         self.terminal_incremental_layouts.remove(&session_id);
         self.terminal_line_ids.remove(&session_id);
@@ -7041,7 +7011,15 @@ impl OperonApp {
     }
 
     pub(crate) fn refresh_session_output(&mut self, session_id: Uuid) {
-        self.request_session_output(session_id);
+        let eligible = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| self.session_eligible_for_initial_output(session));
+        if eligible {
+            self.request_session_output(session_id);
+        }
     }
 
     pub(crate) fn open_session_in_terminal(&mut self, session_id: Uuid) {
@@ -7054,6 +7032,7 @@ impl OperonApp {
             return;
         }
         self.pending_history_open = None;
+        self.terminal_capture_missing.remove(&session_id);
         self.select_session(session_id);
         self.page = Page::Sessions;
         self.session_library_open = false;

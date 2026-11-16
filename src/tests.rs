@@ -88122,3 +88122,1636 @@ fn session_notice_289_other_pages_keep_top_banner_without_duplicate_toast() {
 
     fs::remove_dir_all(root).ok();
 }
+
+// ── Change 303: missing-pane capture loop, CLI recovery, and shell fallback ──
+
+#[test]
+/// Change 303, R1/R2: viewing a session whose pane does not exist must not
+/// loop `SessionOutput` captures or emit `ターミナル出力を読み取れませんでした`,
+/// `Queued` / launching sessions must not trigger missing-pane captures, explicit
+/// 「今すぐ同期」 must emit once and consume its explicit marker, and empty
+/// panes must display honest status placeholders.
+pub(crate) fn pane_303_missing_pane_does_not_loop_output_requests_or_spam_error_banner() {
+    let root = temporary_directory("pane-303-missing-loop");
+    let mut app = test_app(root.join("store.json"));
+    app.tools.tmux = true;
+    app.show_session_inspector = false;
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "operon".into(),
+        added_at: now(),
+    });
+    let mut lost = relaunch_270_session(project_id, "claude", SessionStatus::Lost, None);
+    lost.name = "operon-2122260b".into();
+    lost.worktree_path = Some(root.join("gone"));
+    let lost_id = lost.id;
+    let mut queued = relaunch_270_session(project_id, "codex", SessionStatus::Queued, None);
+    queued.worktree_path = Some(root.join("gone"));
+    let _queued_id = queued.id;
+    let mut active = relaunch_270_session(project_id, "claude", SessionStatus::Active, None);
+    active.worktree_path = Some(root.join("gone"));
+    let active_id = active.id;
+    app.store.sessions.extend([lost, queued, active]);
+    app.page = Page::Sessions;
+
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+
+    // 1. Non-explicit `SessionOutput` Gone on already-`Lost` session marks
+    //    `terminal_capture_missing` without raising `self.notice`, and
+    //    subsequent workspace frames do not re-request captures or claim
+    //    `ターミナル出力を待っています…`.
+    app.select_session(lost_id);
+    app.background_tasks
+        .insert(BackgroundKey::SessionOutput(lost_id));
+    app.background_sender
+        .send(BackgroundResult::SessionOutput {
+            session_id: lost_id,
+            result: Err("can't find pane: operon-2122260b".into()),
+            laid_out: None,
+        })
+        .unwrap();
+    app.process_background_results();
+    assert_eq!(
+        app.notice, None,
+        "passive missing-pane output failure on a Lost session must not raise a notice"
+    );
+    assert!(
+        app.terminal_capture_missing.contains(&lost_id),
+        "passive missing-pane output failure must record terminal_capture_missing"
+    );
+    let lost_frame = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(lost_id)),
+        "frame after missing-pane capture must not spawn another SessionOutput loop"
+    );
+    assert!(
+        drawn_text_rect(&lost_frame, |t| {
+            t.contains("このセッションのターミナルは終了しているため、表示できる出力はありません。")
+        })
+        .is_some(),
+        "ended pane with missing capture must show honest ended placeholder"
+    );
+
+    // 2. Explicit `sync_session_output_now` DOES request output, surfaces the
+    //    error once on failure, and consumes `explicit_output_requests` so a
+    //    later passive failure stays silent.
+    app.background_tasks
+        .insert(BackgroundKey::SessionOutput(lost_id));
+    app.sync_session_output_now(lost_id);
+    app.background_sender
+        .send(BackgroundResult::SessionOutput {
+            session_id: lost_id,
+            result: Err("can't find pane: operon-2122260b".into()),
+            laid_out: None,
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(
+        app.notice
+            .as_deref()
+            .is_some_and(|n| n.starts_with("ターミナル出力を読み取れませんでした:")),
+        "explicit sync must surface output read failure once, got {:?}",
+        app.notice
+    );
+    app.notice = None;
+    app.background_sender
+        .send(BackgroundResult::SessionOutput {
+            session_id: lost_id,
+            result: Err("can't find pane: operon-2122260b".into()),
+            laid_out: None,
+        })
+        .unwrap();
+    app.process_background_results();
+    assert_eq!(
+        app.notice, None,
+        "explicit_output_requests must be consumed after one completion so later passive errors stay silent"
+    );
+
+    // 3. `Queued` session never triggers `SessionOutput` from frame render,
+    //    `open_session_in_terminal`, or `select_default_terminal_session`
+    //    fallback, and draws its waiting-to-start placeholder.
+    let mut queued_only_app = test_app(root.join("queued-store.json"));
+    queued_only_app.tools.tmux = true;
+    let q_only = relaunch_270_session(project_id, "codex", SessionStatus::Queued, None);
+    let q_only_id = q_only.id;
+    queued_only_app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "operon".into(),
+        added_at: now(),
+    });
+    queued_only_app.store.sessions.push(q_only);
+    queued_only_app.select_default_terminal_session();
+    assert!(
+        !queued_only_app
+            .background_tasks
+            .contains(&BackgroundKey::SessionOutput(q_only_id)),
+        "select_default_terminal_session fallback must not capture a Queued session"
+    );
+    queued_only_app.open_session_in_terminal(q_only_id);
+    assert!(
+        !queued_only_app
+            .background_tasks
+            .contains(&BackgroundKey::SessionOutput(q_only_id)),
+        "open_session_in_terminal must not capture a Queued session"
+    );
+    let queued_frame = workspace_pointer_frame(&mut queued_only_app, &ctx, Vec::new());
+    assert!(
+        !queued_only_app
+            .background_tasks
+            .contains(&BackgroundKey::SessionOutput(q_only_id)),
+        "rendering a Queued session pane must never spawn SessionOutput"
+    );
+    assert!(
+        drawn_text_rect(&queued_frame, |t| {
+            t.contains("開始待機中のため、まだターミナル出力はありません。")
+        })
+        .is_some(),
+        "Queued pane must show waiting-to-start placeholder"
+    );
+
+    // 4. While `SessionStart` is in flight, neither `ui_terminal_pane` nor a
+    //    stale pre-launch `SessionOutput` `Gone` result records missing or
+    //    emits an error notice.
+    app.select_session(active_id);
+    app.background_tasks
+        .insert(BackgroundKey::SessionStart(active_id));
+    let launch_frame = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::SessionOutput(active_id)),
+        "SessionStart in flight must suppress premature SessionOutput capture"
+    );
+    assert!(
+        drawn_text_rect(&launch_frame, |t| t
+            .contains("ターミナル出力を待っています…"))
+        .is_some(),
+        "launching pane must keep waiting-for-output placeholder"
+    );
+    app.background_sender
+        .send(BackgroundResult::SessionOutput {
+            session_id: active_id,
+            result: Err("can't find pane: stale".into()),
+            laid_out: None,
+        })
+        .unwrap();
+    app.process_background_results();
+    assert_eq!(app.notice, None);
+    assert!(!app.terminal_capture_missing.contains(&active_id));
+
+    // 5. Passive `SessionOutput` or `TerminalInputSent` `Gone` after launch
+    //    finishes reconciles an unresumable off-tab `Active` session to `Lost`
+    //    without leaving a `can't find pane` notice.
+    app.background_tasks
+        .remove(&BackgroundKey::SessionStart(active_id));
+    app.close_workspace_tab(&WorkspaceTab::Session(active_id));
+    app.background_sender
+        .send(BackgroundResult::TerminalInputSent {
+            session_id: active_id,
+            result: Err("can't find pane: gone".into()),
+        })
+        .unwrap();
+    app.process_background_results();
+    assert_eq!(
+        relaunch_270_find(&app, active_id).status,
+        SessionStatus::Lost
+    );
+    assert_eq!(app.notice, None);
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 303, R3: adopting a CLI in a plain terminal stamps `launched_at`, and
+/// local CLI recovery finds Claude (via registry even with empty `goal`),
+/// Codex, and Antigravity conversations when `native_session_id` was `None`,
+/// driving end-to-end `apply_session_poll` auto-restore and manual `start_session`.
+pub(crate) fn pane_303_adopted_or_untracked_cli_recovers_conversation_on_crash_and_resume() {
+    let root = temporary_directory("pane-303-cli-recovery");
+    let workspace = root.join("workspace");
+    let claude_registry = root.join("claude-registry");
+    let claude_projects = root.join("claude-projects");
+    let codex_sessions = root.join("codex-sessions");
+    let codex_index = root.join("codex-index.jsonl");
+    let agy_store = root.join("agy");
+    let agy_history = agy_store.join("history.jsonl");
+    fs::create_dir_all(&workspace).unwrap();
+    let claude_dir = claude_projects.join(encode_claude_project_path(&workspace));
+    fs::create_dir_all(&claude_registry).unwrap();
+    fs::create_dir_all(&claude_dir).unwrap();
+    fs::create_dir_all(&codex_sessions).unwrap();
+    fs::create_dir_all(&agy_store).unwrap();
+
+    let project = relaunch_270_project(&workspace);
+    let mut terminal = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    terminal.created_at = now().saturating_sub(3_600);
+    terminal.launched_at = None;
+    terminal.worktree_path = Some(workspace.clone());
+    let adopted_id = terminal.id;
+
+    let mut store = Store::default();
+    store.projects.push(project.clone());
+    store.sessions.push(terminal);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        codex: true,
+        antigravity: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store.json"), store, tools, None);
+    app.relaunch_candidates.clear();
+
+    // 1. Adopting a foreground CLI stamps `launched_at` and switches kind.
+    app.adopt_terminal_cli(adopted_id, CliProvider::Claude);
+    let adopted = relaunch_270_find(&app, adopted_id).clone();
+    assert_eq!(adopted.agent, "claude");
+    assert!(
+        adopted.launched_at.is_some(),
+        "adopt_terminal_cli must stamp launched_at so local recovery dates from CLI start"
+    );
+
+    // 2. Write a real Claude registry entry + transcript matching `adopted.launched_at`
+    //    while keeping `adopted.native_session_id == None` and empty `goal`.
+    let claude_conv_id = Uuid::new_v4().to_string();
+    let claude_transcript = claude_dir.join(format!("{claude_conv_id}.jsonl"));
+    fs::write(
+        &claude_transcript,
+        "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+    )
+    .unwrap();
+    fs::write(
+        claude_registry.join("1234.json"),
+        format!(
+            "{{\"pid\":1234,\"sessionId\":\"{claude_conv_id}\",\"cwd\":\"{}\",\"startedAt\":{}}}",
+            workspace.display(),
+            adopted.launched_at.unwrap() * 1000
+        ),
+    )
+    .unwrap();
+
+    // Verify `recover_cli_conversation_in` directly for Claude, Codex, and Antigravity.
+    let claude_found = recover_cli_conversation_in(
+        Some(&claude_registry),
+        Some(&claude_projects),
+        None,
+        None,
+        None,
+        &adopted,
+        CliProvider::Claude,
+        &workspace,
+    )
+    .unwrap()
+    .expect("Claude registry conversation must be recovered when native_session_id is None");
+    assert_eq!(claude_found.native_id, claude_conv_id);
+
+    let codex_conv_id = Uuid::new_v4().to_string();
+    let codex_started_at = now().saturating_sub(30);
+    let codex_rollout =
+        codex_sessions.join(format!("rollout-2026-11-17T00-00-00-{codex_conv_id}.jsonl"));
+    let codex_ts = chrono_iso_for_test(codex_started_at);
+    fs::write(
+        &codex_rollout,
+        format!(
+            "{{\"type\":\"session_meta\",\"timestamp\":\"{codex_ts}\",\"payload\":{{\"id\":\"{codex_conv_id}\",\"cwd\":\"{}\"}}}}\n\
+             {{\"type\":\"event_msg\",\"timestamp\":\"{codex_ts}\",\"payload\":{{\"type\":\"user_message\",\"message\":\"fix pane\"}}}}\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+    let mut codex_session = relaunch_270_session(project.id, "codex", SessionStatus::Lost, None);
+    codex_session.created_at = codex_started_at;
+    codex_session.launched_at = Some(codex_started_at);
+    codex_session.worktree_path = Some(workspace.clone());
+    let codex_found = recover_cli_conversation_in(
+        None,
+        None,
+        Some(&codex_sessions),
+        Some(&codex_index),
+        None,
+        &codex_session,
+        CliProvider::Codex,
+        &workspace,
+    )
+    .unwrap()
+    .expect("Codex rollout must be recovered when native_session_id is None");
+    assert_eq!(codex_found.native_id, codex_conv_id);
+
+    let agy_conv_id = "agy-conv-303";
+    let agy_started_at = 1787128567u64;
+    fs::write(
+        &agy_history,
+        format!(
+            "{{\"workspace\":\"{}\",\"conversationId\":\"{agy_conv_id}\",\"display\":\"fix\",\"timestamp\":1787128600000}}\n",
+            workspace.display()
+        ),
+    )
+    .unwrap();
+    let agy_transcript = antigravity_conversation_transcript_in(&agy_store, agy_conv_id);
+    fs::create_dir_all(agy_transcript.parent().unwrap()).unwrap();
+    fs::write(
+        &agy_transcript,
+        "{\"step_index\":0,\"source\":\"USER_EXPLICIT\",\"type\":\"USER_INPUT\",\"created_at\":\"2026-08-19T08:36:07Z\",\"content\":\"ping\"}\n",
+    )
+    .unwrap();
+    let mut agy_session = relaunch_270_session(project.id, "gemini", SessionStatus::Lost, None);
+    agy_session.created_at = agy_started_at;
+    agy_session.launched_at = Some(agy_started_at);
+    agy_session.worktree_path = Some(workspace.clone());
+    let agy_found = recover_cli_conversation_in(
+        None,
+        None,
+        None,
+        None,
+        Some(&agy_history),
+        &agy_session,
+        CliProvider::Gemini,
+        &workspace,
+    )
+    .unwrap()
+    .expect("Antigravity conversation must be recovered when native_session_id is None");
+    assert_eq!(agy_found.native_id, agy_conv_id);
+
+    // 3. End-to-end mid-run poll crash with injected roots recovers and resumes
+    //    the adopted Claude session's conversation without `native_session_id`.
+    app.cli_recovery_roots = Some(CliRecoveryRoots {
+        claude_registry: Some(claude_registry),
+        claude_projects: Some(claude_projects),
+        codex_sessions: Some(codex_sessions),
+        codex_title_index: Some(codex_index),
+        antigravity_history: Some(agy_history),
+    });
+    app.workspace.open(WorkspaceTab::Session(adopted_id));
+    app.apply_session_poll(
+        vec![(
+            adopted_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let after = relaunch_270_find(&app, adopted_id);
+    assert_eq!(after.status, SessionStatus::Starting);
+    assert_eq!(
+        after.native_session_id.as_deref(),
+        Some(claude_conv_id.as_str())
+    );
+    assert_eq!(
+        after.agent_command,
+        CliProvider::Claude.native_resume_command(&claude_conv_id)
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(adopted_id),
+        Duration::from_secs(15),
+    );
+
+    // 4. Manual `start_session` on an un-ID'd `Lost` Codex session also recovers
+    //    its conversation via `prepare_native_resume` into a resumed record.
+    let codex_id = codex_session.id;
+    app.store.sessions.push(codex_session);
+    app.start_session(codex_id);
+    let resumed = app
+        .store
+        .sessions
+        .iter()
+        .find(|s| s.id != codex_id && s.agent == "codex")
+        .cloned()
+        .expect(
+            "manual start_session on un-ID'd Lost Codex session must resume recovered conversation",
+        );
+    assert_eq!(
+        resumed.native_session_id.as_deref(),
+        Some(codex_conv_id.as_str())
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(resumed.id),
+        Duration::from_secs(15),
+    );
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 303, R4: unresumable open workspace tabs fall back in place to a
+/// plain terminal shell with the fallback toast (singular and plural) and
+/// cooldown enforcement, while preserving macOS failure notifications, closed
+/// historical records, pending cancellations, and dependency parents.
+pub(crate) fn pane_303_unresumable_open_tab_falls_back_to_plain_terminal_with_cooldown() {
+    let root = temporary_directory("pane-303-fallback-shell");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let project = relaunch_270_project(&workspace);
+
+    let mut open_no_transcript =
+        relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    open_no_transcript.name = "alpha-tab".into();
+    open_no_transcript.worktree_path = Some(root.join("gone"));
+    open_no_transcript.native_session_id = Some(Uuid::new_v4().to_string());
+    let open_one_id = open_no_transcript.id;
+
+    let mut open_custom = relaunch_270_session(project.id, "custom", SessionStatus::Active, None);
+    open_custom.name = "beta-custom".into();
+    open_custom.worktree_path = Some(root.join("gone"));
+    let open_two_id = open_custom.id;
+
+    let mut closed_unresumable =
+        relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    closed_unresumable.name = "closed-cli".into();
+    closed_unresumable.worktree_path = Some(root.join("gone"));
+    let closed_id = closed_unresumable.id;
+
+    let mut dep_parent = relaunch_270_session(project.id, "custom", SessionStatus::Active, None);
+    dep_parent.worktree_path = Some(root.join("gone"));
+    let dep_parent_id = dep_parent.id;
+    let mut dep_child = relaunch_270_session(project.id, "codex", SessionStatus::Queued, None);
+    dep_child.depends_on = vec![dep_parent_id];
+
+    let mut store = Store::default();
+    store.notifications_enabled = true;
+    store.projects.push(project);
+    store.sessions.extend([
+        open_no_transcript,
+        open_custom,
+        closed_unresumable,
+        dep_parent,
+        dep_child,
+    ]);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store.json"), store, tools, None);
+    app.relaunch_candidates.clear();
+    app.cli_recovery_roots = Some(CliRecoveryRoots::default());
+    app.workspace.open(WorkspaceTab::Session(open_one_id));
+    app.workspace.open(WorkspaceTab::Session(open_two_id));
+    app.workspace.open(WorkspaceTab::Session(dep_parent_id));
+
+    // 1. Single open unresumable `Failed` tab falls back to `"terminal"`, keeps
+    //    failure notification, stamps cooldown, and shows singular toast.
+    app.apply_session_poll(
+        vec![
+            (
+                open_one_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                closed_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                dep_parent_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    let one_after = relaunch_270_find(&app, open_one_id);
+    assert_eq!(one_after.agent, "terminal");
+    assert_eq!(one_after.status, SessionStatus::Starting);
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(open_one_id)));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("会話を復元できなかったため、ターミナルとして開き直しました: alpha-tab")
+    );
+    assert!(
+        app.background_tasks
+            .iter()
+            .any(|k| matches!(k, BackgroundKey::Notification(_))),
+        "fallback shell recovery must still emit macOS failure notification for a Failed CLI"
+    );
+    assert_eq!(relaunch_270_find(&app, closed_id).agent, "claude");
+    assert_eq!(
+        relaunch_270_find(&app, closed_id).status,
+        SessionStatus::Failed
+    );
+    assert_eq!(relaunch_270_find(&app, dep_parent_id).agent, "custom");
+    assert_eq!(
+        relaunch_270_find(&app, dep_parent_id).status,
+        SessionStatus::Lost
+    );
+
+    let pending_keys: Vec<_> = app
+        .background_tasks
+        .iter()
+        .filter(|k| {
+            matches!(
+                k,
+                BackgroundKey::SessionStart(_) | BackgroundKey::Notification(_)
+            )
+        })
+        .cloned()
+        .collect();
+    for key in pending_keys {
+        wait_for_background_task(&mut app, &key, Duration::from_secs(15));
+    }
+
+    // 2. Immediate repeat disappearance within 15s cooldown settles in `Lost`
+    //    without falling back a second time.
+    app.notice = None;
+    relaunch_270_find_mut(&mut app, open_one_id).status = SessionStatus::Active;
+    app.apply_session_poll(
+        vec![(
+            open_one_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        relaunch_270_find(&app, open_one_id).status,
+        SessionStatus::Lost
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(open_one_id)));
+
+    // 3. Two open unresumable tabs in the same poll emit the plural toast.
+    app.clear_auto_restore_cooldown(open_one_id);
+    relaunch_270_find_mut(&mut app, open_one_id).agent = "claude".into();
+    relaunch_270_find_mut(&mut app, open_one_id).status = SessionStatus::Active;
+    app.apply_session_poll(
+        vec![
+            (
+                open_one_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+            (
+                open_two_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("会話を復元できなかったため、2 件をターミナルとして開き直しました。")
+    );
+    for id in [open_one_id, open_two_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 303, R5: open `Lost`/`Failed` workspace tabs saved from a previous
+/// run are queued in `lost_tabs_on_load` without mutating disk status before
+/// the first poll, recover their CLI conversations or fall back to plain
+/// terminal shells on first `Dead`/`Gone` poll, drop stale entries if closed or
+/// manually restarted before the poll lands, and leave closed history untouched.
+pub(crate) fn pane_303_lost_or_failed_open_tab_from_previous_run_recovers_on_load() {
+    let root = temporary_directory("pane-303-lost-on-load");
+    let data_file = root.join("store.json");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let project = relaunch_270_project(&root);
+
+    let mut resumable_lost = relaunch_270_session(project.id, "codex", SessionStatus::Lost, None);
+    resumable_lost.worktree_path = Some(root.join("gone"));
+    resumable_lost.native_session_id = Some(Uuid::new_v4().to_string());
+    resumable_lost.native_session_path = Some(transcript);
+    let resumable_id = resumable_lost.id;
+
+    let mut unresumable_failed =
+        relaunch_270_session(project.id, "claude", SessionStatus::Failed, None);
+    unresumable_failed.name = "failed-open".into();
+    unresumable_failed.worktree_path = Some(root.join("gone"));
+    let fallback_id = unresumable_failed.id;
+
+    let mut stale_closed = relaunch_270_session(project.id, "claude", SessionStatus::Lost, None);
+    stale_closed.worktree_path = Some(root.join("gone"));
+    let stale_id = stale_closed.id;
+
+    let mut off_tab_lost = relaunch_270_session(project.id, "claude", SessionStatus::Lost, None);
+    off_tab_lost.worktree_path = Some(root.join("gone"));
+    let off_tab_id = off_tab_lost.id;
+
+    let mut tabs = WorkspaceTabs::default();
+    tabs.open(WorkspaceTab::Session(resumable_id));
+    tabs.open(WorkspaceTab::Session(fallback_id));
+    tabs.open(WorkspaceTab::Session(stale_id));
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(resumable_id))],
+            placed: vec![resumable_id, fallback_id, stale_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.extend([
+        resumable_lost,
+        unresumable_failed,
+        stale_closed,
+        off_tab_lost,
+    ]);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file.clone(), store, tools, None);
+    app.cli_recovery_roots = Some(CliRecoveryRoots::default());
+
+    assert!(app.lost_tabs_on_load.contains(&resumable_id));
+    assert!(app.lost_tabs_on_load.contains(&fallback_id));
+    assert!(app.lost_tabs_on_load.contains(&stale_id));
+    assert!(!app.lost_tabs_on_load.contains(&off_tab_id));
+
+    // Disk status stays `Lost`/`Failed` if persisted before the first poll.
+    assert!(app.persist());
+    let reloaded = load_store_safely(&data_file).store;
+    assert_eq!(reloaded.sessions[0].status, SessionStatus::Lost);
+    assert_eq!(reloaded.sessions[1].status, SessionStatus::Failed);
+
+    // Close `stale_id`'s tab before the poll returns -> skipped cleanly.
+    app.close_workspace_tab(&WorkspaceTab::Session(stale_id));
+
+    app.apply_session_poll(
+        vec![
+            (
+                resumable_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+            (
+                fallback_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                stale_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(relaunch_270_find(&app, resumable_id).agent, "codex");
+    assert_eq!(
+        relaunch_270_find(&app, resumable_id).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(relaunch_270_find(&app, fallback_id).agent, "terminal");
+    assert_eq!(
+        relaunch_270_find(&app, fallback_id).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(relaunch_270_find(&app, stale_id).agent, "claude");
+    assert_eq!(
+        relaunch_270_find(&app, stale_id).status,
+        SessionStatus::Lost
+    );
+    assert_eq!(
+        relaunch_270_find(&app, off_tab_id).status,
+        SessionStatus::Lost
+    );
+    assert!(app.lost_tabs_on_load.is_empty());
+
+    for id in [resumable_id, fallback_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 303, F1: when `persist()` fails during startup polling of
+/// `lost_tabs_on_load` or `exited_tabs_on_load`, the entries remain unspent so
+/// a subsequent poll after store permissions recover completes the recovery.
+pub(crate) fn pane_303_f1_lost_and_exited_tabs_on_load_stay_unspent_when_relaunch_persist_fails() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("pane-303-f1-persist-fail");
+    let store_dir = root.join("store");
+    let work = root.join("project");
+    fs::create_dir_all(&store_dir).unwrap();
+    fs::create_dir_all(&work).unwrap();
+    let project = relaunch_270_project(&work);
+
+    let mut lost = relaunch_270_session(
+        project.id,
+        "terminal",
+        SessionStatus::Lost,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    lost.agent_command.clear();
+    lost.worktree_path = Some(work.clone());
+    let lost_id = lost.id;
+
+    let mut exited = relaunch_270_session(project.id, "claude", SessionStatus::Exited, None);
+    exited.worktree_path = Some(work.clone());
+    let exited_id = exited.id;
+
+    let data_file = store_dir.join("store.json");
+    let mut tabs = WorkspaceTabs::default();
+    tabs.open(WorkspaceTab::Session(lost_id));
+    tabs.open(WorkspaceTab::Session(exited_id));
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(lost_id))],
+            placed: vec![lost_id, exited_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.extend([lost, exited]);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.cli_recovery_roots = Some(CliRecoveryRoots::default());
+    assert!(app.lost_tabs_on_load.contains(&lost_id));
+    assert!(app.exited_tabs_on_load.contains(&exited_id));
+
+    fs::set_permissions(&store_dir, fs::Permissions::from_mode(0o555)).unwrap();
+    app.apply_session_poll(
+        vec![
+            (
+                lost_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+            (
+                exited_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    fs::set_permissions(&store_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(relaunch_270_find(&app, lost_id).status, SessionStatus::Lost);
+    assert_eq!(relaunch_270_find(&app, exited_id).agent, "claude");
+    assert_eq!(
+        relaunch_270_find(&app, exited_id).status,
+        SessionStatus::Exited
+    );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(lost_id)));
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(exited_id)));
+    assert!(app.lost_tabs_on_load.contains(&lost_id));
+    assert!(app.exited_tabs_on_load.contains(&exited_id));
+
+    app.request_session_poll();
+    assert!(app.background_tasks.contains(&BackgroundKey::SessionPoll));
+    app.background_tasks.remove(&BackgroundKey::SessionPoll);
+
+    app.apply_session_poll(
+        vec![
+            (
+                lost_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+            (
+                exited_id,
+                TmuxObservation {
+                    state: TmuxState::Gone,
+                    exit_status: None,
+                },
+            ),
+        ],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    assert_eq!(
+        relaunch_270_find(&app, lost_id).status,
+        SessionStatus::Starting
+    );
+    assert_eq!(relaunch_270_find(&app, exited_id).agent, "terminal");
+    assert_eq!(
+        relaunch_270_find(&app, exited_id).status,
+        SessionStatus::Starting
+    );
+    assert!(app.lost_tabs_on_load.is_empty());
+    assert!(app.exited_tabs_on_load.is_empty());
+
+    for id in [lost_id, exited_id] {
+        wait_for_background_task(
+            &mut app,
+            &BackgroundKey::SessionStart(id),
+            Duration::from_secs(15),
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 303, F2: a resumable CLI open tab whose launch is refused (missing
+/// account dir or missing CLI tool on PATH) keeps its CLI agent, goal, and
+/// `native_session_id` intact instead of being wiped into a plain shell, while
+/// an un-ID'd ambiguous CLI open tab still falls back to a shell and keeps
+/// its persistent notice ahead of the brief fallback toast.
+pub(crate) fn pane_303_f2_refused_relaunch_preserves_resumable_cli_metadata_instead_of_shell_fallback(
+) {
+    let root = temporary_directory("pane-303-f2-launch-refused");
+    let workspace = root.join("workspace");
+    let acct_dir = root.join("acct");
+    let claude_registry = root.join("claude-registry");
+    let claude_projects = root.join("claude-projects");
+    let transcript = root.join("codex.jsonl");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&acct_dir).unwrap();
+    fs::create_dir_all(&claude_registry).unwrap();
+    fs::create_dir_all(claude_projects.join(encode_claude_project_path(&workspace))).unwrap();
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let project = relaunch_270_project(&workspace);
+
+    let mut codex = relaunch_270_session(project.id, "codex", SessionStatus::Active, None);
+    codex.worktree_path = Some(workspace.clone());
+    codex.goal = "important work".into();
+    let native_id = Uuid::new_v4().to_string();
+    codex.native_session_id = Some(native_id.clone());
+    codex.native_session_path = Some(transcript);
+    let codex_id = codex.id;
+
+    let started_at = now();
+    let mut ambiguous_claude =
+        relaunch_270_session(project.id, "claude", SessionStatus::Active, None);
+    ambiguous_claude.launched_at = Some(started_at);
+    ambiguous_claude.worktree_path = Some(workspace.clone());
+    let claude_id = ambiguous_claude.id;
+    let id1 = Uuid::new_v4().to_string();
+    let id2 = Uuid::new_v4().to_string();
+    fs::write(
+        claude_registry.join("100.json"),
+        format!(
+            "{{\"pid\":100,\"sessionId\":\"{id1}\",\"cwd\":\"{}\",\"startedAt\":{}}}",
+            workspace.display(),
+            started_at * 1000
+        ),
+    )
+    .unwrap();
+    fs::write(
+        claude_registry.join("101.json"),
+        format!(
+            "{{\"pid\":101,\"sessionId\":\"{id2}\",\"cwd\":\"{}\",\"startedAt\":{}}}",
+            workspace.display(),
+            started_at * 1000
+        ),
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.extend([codex, ambiguous_claude]);
+    let tools = ToolStatus {
+        tmux: true,
+        codex: true,
+        claude: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(root.join("store.json"), store, tools, None);
+    app.relaunch_candidates.clear();
+    app.cli_recovery_roots = Some(CliRecoveryRoots {
+        claude_registry: Some(claude_registry),
+        claude_projects: Some(claude_projects),
+        ..CliRecoveryRoots::default()
+    });
+    app.workspace.open(WorkspaceTab::Session(codex_id));
+    app.workspace.open(WorkspaceTab::Session(claude_id));
+
+    let acct_id = register_account(&mut app.accounts, "codex", "work", &acct_dir).unwrap();
+    app.accounts.remember_session(codex_id, Some(acct_id));
+    fs::remove_dir_all(&acct_dir).unwrap();
+
+    app.apply_session_poll(
+        vec![(
+            codex_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let after_codex = relaunch_270_find(&app, codex_id);
+    assert_eq!(after_codex.agent, "codex");
+    assert_eq!(after_codex.goal, "important work");
+    assert_eq!(
+        after_codex.native_session_id.as_deref(),
+        Some(native_id.as_str())
+    );
+    assert_eq!(after_codex.status, SessionStatus::Lost);
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(codex_id)));
+    assert!(!app.relaunch_lost_session(codex_id));
+
+    // Missing PATH tool on an already-ID'd Codex session also preserves metadata.
+    app.tools.codex = false;
+    app.notice = None;
+    relaunch_270_find_mut(&mut app, codex_id).status = SessionStatus::Active;
+    app.apply_session_poll(
+        vec![(
+            codex_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(relaunch_270_find(&app, codex_id).agent, "codex");
+    assert_eq!(
+        relaunch_270_find(&app, codex_id).status,
+        SessionStatus::Lost
+    );
+    assert!(app
+        .notice
+        .as_deref()
+        .is_some_and(|msg| msg.contains("PATH")));
+
+    // Ambiguous un-ID'd Claude tab falls back to shell while preserving persistent ambiguity notice.
+    app.notice = None;
+    app.brief_notice = None;
+    app.apply_session_poll(
+        vec![(
+            claude_id,
+            TmuxObservation {
+                state: TmuxState::Gone,
+                exit_status: None,
+            },
+        )],
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+    assert_eq!(relaunch_270_find(&app, claude_id).agent, "terminal");
+    assert_eq!(
+        relaunch_270_find(&app, claude_id).status,
+        SessionStatus::Starting
+    );
+    assert!(app
+        .notice
+        .as_deref()
+        .is_some_and(|msg| msg.contains("同時に開始された Claude ターミナル")));
+    assert!(app.brief_notice.is_none());
+
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(claude_id),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Change 303, F3: `poll_terminal_echo` (during an active `TERMINAL_ECHO_WINDOW`)
+/// and `finish_layout_drag` obey `session_eligible_for_initial_output`, so
+/// switching to or resizing `Queued`, `SessionStart`-inflight, or
+/// `terminal_capture_missing` ended tabs spawns zero captures, while
+/// `open_session_in_terminal` clears `terminal_capture_missing` and syncs once.
+pub(crate) fn pane_303_f3_echo_poll_and_drag_end_skip_queued_and_missing_ended_panes() {
+    let root = temporary_directory("pane-303-f3-echo-drag-guard");
+    let mut app = test_app(root.join("store.json"));
+    app.tools.tmux = true;
+    app.show_session_inspector = false;
+    let project_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: project_id,
+        path: root.clone(),
+        name: "operon".into(),
+        added_at: now(),
+    });
+    let mut active = relaunch_270_session(
+        project_id,
+        "terminal",
+        SessionStatus::Active,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    active.worktree_path = Some(root.join("gone"));
+    let active_id = active.id;
+    let mut queued = relaunch_270_session(project_id, "codex", SessionStatus::Queued, None);
+    queued.worktree_path = Some(root.join("gone"));
+    let queued_id = queued.id;
+    let mut lost = relaunch_270_session(project_id, "claude", SessionStatus::Lost, None);
+    lost.worktree_path = Some(root.join("gone"));
+    let lost_id = lost.id;
+    app.store.sessions.extend([active, queued, lost]);
+    app.terminal_capture_missing.insert(lost_id);
+    app.page = Page::Sessions;
+
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+
+    // Launch completion opens the app-global TERMINAL_ECHO_WINDOW.
+    app.select_session(active_id);
+    app.background_tasks
+        .insert(BackgroundKey::SessionStart(active_id));
+    app.background_sender
+        .send(BackgroundResult::SessionStarted {
+            session_id: active_id,
+            result: Ok(None),
+        })
+        .unwrap();
+    app.process_background_results();
+    app.background_tasks
+        .remove(&BackgroundKey::SessionOutput(active_id));
+
+    app.select_session(queued_id);
+    let _ = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(queued_id)));
+
+    app.select_session(lost_id);
+    let _ = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(lost_id)));
+
+    app.terminal_resize_requested.insert(lost_id, (80, 24));
+    app.terminal_resize_applied.insert(lost_id, (80, 24));
+    app.finish_layout_drag();
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(lost_id)));
+
+    // Explicitly opening the ended tab clears `terminal_capture_missing` and requests once.
+    app.open_session_in_terminal(lost_id);
+    assert!(!app.terminal_capture_missing.contains(&lost_id));
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionOutput(lost_id)));
+    app.background_tasks
+        .remove(&BackgroundKey::SessionOutput(lost_id));
+
+    fs::remove_dir_all(&root).ok();
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Pane303Status {
+    Starting,
+    Active,
+    Lost,
+    Cancelled,
+    Queued,
+}
+
+impl Pane303Status {
+    fn to_session(self) -> SessionStatus {
+        match self {
+            Self::Starting => SessionStatus::Starting,
+            Self::Active => SessionStatus::Active,
+            Self::Lost => SessionStatus::Lost,
+            Self::Cancelled => SessionStatus::Cancelled,
+            Self::Queued => SessionStatus::Queued,
+        }
+    }
+
+    fn from_session(status: &SessionStatus) -> Self {
+        match status {
+            SessionStatus::Starting => Self::Starting,
+            SessionStatus::Active => Self::Active,
+            SessionStatus::Lost => Self::Lost,
+            SessionStatus::Cancelled => Self::Cancelled,
+            SessionStatus::Queued => Self::Queued,
+            _ => Self::Lost,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Pane303Mode {
+    Active,
+    LostOnLoad,
+    Queued,
+    CancelPending,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Pane303CaseKind {
+    Unresumable,
+    Resumable,
+    ResumableMissingAcct,
+    HasDep,
+    SetupSession,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct Pane303Config {
+    mode: Pane303Mode,
+    has_tab: bool,
+    kind: Pane303CaseKind,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+struct Pane303ModelState {
+    config: Option<Pane303Config>,
+    status: Pane303Status,
+    agent_is_terminal: bool,
+    lost_on_load: bool,
+    cancel_pending: bool,
+    terminal_capture_missing: bool,
+    cooldown: bool,
+    steps: u8,
+    violation: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Pane303ModelEvent {
+    Init(Pane303Config),
+    PassiveOutputAndGone { persist_ok: bool },
+    ExplicitSyncGone,
+    PollGone { persist_ok: bool },
+    FinishLaunch,
+}
+
+#[test]
+/// Change 303, formal model check: walks multi-step persistent states across
+/// `Active`, `LostOnLoad`, `Queued`, and `CancelPending`, combined with open-tab
+/// presence, resumable/missing-account/dependency/setup cases, passive output +
+/// echo poll vs explicit sync, missing-pane poll observations, launch finish,
+/// and store write success/failure against the real `OperonApp` guards.
+pub(crate) fn model_check_pane_303_missing_pane_recovery_and_output_guard() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("model-pane-303");
+    let transcript = root.join("codex.jsonl");
+    fs::write(&transcript, "{\"type\":\"session_meta\"}\n").unwrap();
+    let serial = std::cell::Cell::new(0usize);
+
+    let mut events = Vec::new();
+    for mode in [
+        Pane303Mode::Active,
+        Pane303Mode::LostOnLoad,
+        Pane303Mode::Queued,
+        Pane303Mode::CancelPending,
+    ] {
+        for has_tab in [false, true] {
+            for kind in [
+                Pane303CaseKind::Unresumable,
+                Pane303CaseKind::Resumable,
+                Pane303CaseKind::ResumableMissingAcct,
+                Pane303CaseKind::HasDep,
+                Pane303CaseKind::SetupSession,
+            ] {
+                events.push(Pane303ModelEvent::Init(Pane303Config {
+                    mode,
+                    has_tab,
+                    kind,
+                }));
+            }
+        }
+    }
+    events.extend([
+        Pane303ModelEvent::PassiveOutputAndGone { persist_ok: false },
+        Pane303ModelEvent::PassiveOutputAndGone { persist_ok: true },
+        Pane303ModelEvent::ExplicitSyncGone,
+        Pane303ModelEvent::PollGone { persist_ok: false },
+        Pane303ModelEvent::PollGone { persist_ok: true },
+        Pane303ModelEvent::FinishLaunch,
+    ]);
+
+    let initial = Pane303ModelState {
+        config: None,
+        status: Pane303Status::Active,
+        agent_is_terminal: false,
+        lost_on_load: false,
+        cancel_pending: false,
+        terminal_capture_missing: false,
+        cooldown: false,
+        steps: 0,
+        violation: None,
+    };
+
+    let step = |state: &Pane303ModelState, event: &Pane303ModelEvent| match (state.config, *event) {
+        (None, Pane303ModelEvent::Init(cfg)) => {
+            let (status, lost_on_load, cancel_pending) = match cfg.mode {
+                Pane303Mode::Active => (Pane303Status::Active, false, false),
+                Pane303Mode::LostOnLoad => (Pane303Status::Lost, true, false),
+                Pane303Mode::Queued => (Pane303Status::Queued, false, false),
+                Pane303Mode::CancelPending => (Pane303Status::Active, false, true),
+            };
+            Some(Pane303ModelState {
+                config: Some(cfg),
+                status,
+                agent_is_terminal: false,
+                lost_on_load,
+                cancel_pending,
+                terminal_capture_missing: false,
+                cooldown: false,
+                steps: 0,
+                violation: None,
+            })
+        }
+        (Some(cfg), ev) if state.steps < 2 && state.violation.is_none() => {
+            if matches!(ev, Pane303ModelEvent::Init(_))
+                || (matches!(ev, Pane303ModelEvent::FinishLaunch)
+                    && state.status != Pane303Status::Starting)
+            {
+                return None;
+            }
+            serial.set(serial.get() + 1);
+            let n = serial.get();
+            let dir = root.join(format!("case-{n}"));
+            fs::create_dir_all(&dir).unwrap();
+            let project = relaunch_270_project(&dir);
+            let agent = if state.agent_is_terminal {
+                "terminal"
+            } else if matches!(
+                cfg.kind,
+                Pane303CaseKind::Resumable | Pane303CaseKind::ResumableMissingAcct
+            ) {
+                "codex"
+            } else {
+                "claude"
+            };
+            let mut session =
+                relaunch_270_session(project.id, agent, state.status.to_session(), None);
+            session.worktree_path = Some(dir.join("gone"));
+            if !state.agent_is_terminal
+                && matches!(
+                    cfg.kind,
+                    Pane303CaseKind::Resumable | Pane303CaseKind::ResumableMissingAcct
+                )
+            {
+                session.native_session_id = Some(Uuid::new_v4().to_string());
+                session.native_session_path = Some(transcript.clone());
+            } else if state.agent_is_terminal {
+                session.agent_command.clear();
+            }
+            let id = session.id;
+            let mut store = Store::default();
+            store.projects.push(project);
+            store.sessions.push(session);
+            if cfg.kind == Pane303CaseKind::HasDep {
+                let mut child = relaunch_270_session(
+                    project_id_of(&store),
+                    "codex",
+                    SessionStatus::Queued,
+                    None,
+                );
+                child.depends_on = vec![id];
+                store.sessions.push(child);
+            }
+            if state.cancel_pending {
+                store.pending_cancellations.push(id);
+            }
+            let tools = ToolStatus {
+                tmux: true,
+                codex: true,
+                claude: true,
+                ..ToolStatus::default()
+            };
+            let mut app = OperonApp::from_state(dir.join("store.json"), store, tools, None);
+            app.relaunch_candidates.clear();
+            app.cli_recovery_roots = Some(CliRecoveryRoots::default());
+            app.lost_tabs_on_load.clear();
+            if state.lost_on_load {
+                app.lost_tabs_on_load.insert(id);
+            }
+            if cfg.has_tab {
+                app.workspace.open(WorkspaceTab::Session(id));
+            }
+            if state.terminal_capture_missing {
+                app.terminal_capture_missing.insert(id);
+            }
+            if state.cooldown {
+                app.last_auto_restore.insert(id, Instant::now());
+            }
+            if cfg.kind == Pane303CaseKind::SetupSession {
+                app.setup_sessions.insert(id);
+            }
+            if state.status == Pane303Status::Starting {
+                app.background_tasks.insert(BackgroundKey::SessionStart(id));
+            }
+            if cfg.kind == Pane303CaseKind::ResumableMissingAcct && !state.agent_is_terminal {
+                let missing_acct = dir.join("missing-acct");
+                fs::create_dir_all(&missing_acct).unwrap();
+                let acct_id =
+                    register_account(&mut app.accounts, "codex", "work", &missing_acct).unwrap();
+                app.accounts.remember_session(id, Some(acct_id));
+                fs::remove_dir_all(&missing_acct).unwrap();
+            }
+
+            let launch_inflight_before = state.status == Pane303Status::Starting;
+            let mut violation: Option<String> = None;
+
+            match ev {
+                Pane303ModelEvent::PassiveOutputAndGone { persist_ok } => {
+                    app.last_terminal_input = Some(Instant::now());
+                    let _ = app.poll_terminal_echo(id, Instant::now());
+                    let spawned_echo = app
+                        .background_tasks
+                        .contains(&BackgroundKey::SessionOutput(id));
+                    app.background_tasks
+                        .remove(&BackgroundKey::SessionOutput(id));
+
+                    let session_copy = app.store.sessions[0].clone();
+                    app.request_initial_pane_output_if_needed(&session_copy);
+                    let spawned_initial = app
+                        .background_tasks
+                        .contains(&BackgroundKey::SessionOutput(id));
+                    app.background_tasks
+                        .remove(&BackgroundKey::SessionOutput(id));
+
+                    let expected_echo = state.status == Pane303Status::Active
+                        && !state.terminal_capture_missing
+                        && !state.lost_on_load;
+                    let expected_initial = state.status != Pane303Status::Queued
+                        && !launch_inflight_before
+                        && !state.terminal_capture_missing
+                        && !state.lost_on_load;
+                    if spawned_echo != expected_echo || spawned_initial != expected_initial {
+                        violation = Some(format!(
+                            "capture guard mismatch: status={:?} missing={} lost_on_load={} echo=({spawned_echo},{expected_echo}) init=({spawned_initial},{expected_initial})",
+                            state.status, state.terminal_capture_missing, state.lost_on_load
+                        ));
+                    }
+
+                    if !persist_ok {
+                        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+                    }
+                    app.handle_session_output_result(
+                        id,
+                        Err("can't find pane: operon-model".into()),
+                        None,
+                    );
+                    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+                    if app
+                        .notice
+                        .as_deref()
+                        .is_some_and(|m| m.contains("ターミナル出力を読み取れませんでした"))
+                    {
+                        violation.get_or_insert_with(|| {
+                            "passive Gone emitted output-read error banner".into()
+                        });
+                    }
+                }
+                Pane303ModelEvent::ExplicitSyncGone => {
+                    app.sync_session_output_now(id);
+                    let spawned_explicit = app
+                        .background_tasks
+                        .contains(&BackgroundKey::SessionOutput(id));
+                    app.background_tasks
+                        .remove(&BackgroundKey::SessionOutput(id));
+                    if !spawned_explicit {
+                        violation.get_or_insert_with(|| {
+                            "sync_session_output_now failed to schedule SessionOutput".into()
+                        });
+                    }
+                    app.handle_session_output_result(
+                        id,
+                        Err("can't find pane: operon-model".into()),
+                        None,
+                    );
+                    if app.explicit_output_requests.contains(&id) {
+                        violation.get_or_insert_with(|| {
+                            "explicit_output_requests not consumed on Err completion".into()
+                        });
+                    }
+                    if !app
+                        .notice
+                        .as_deref()
+                        .is_some_and(|m| m.contains("ターミナル出力を読み取れませんでした"))
+                    {
+                        violation.get_or_insert_with(|| {
+                            "explicit Gone failed to surface output-read error".into()
+                        });
+                    }
+                }
+                Pane303ModelEvent::PollGone { persist_ok } => {
+                    if !persist_ok {
+                        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+                    }
+                    app.apply_session_poll(
+                        vec![(
+                            id,
+                            TmuxObservation {
+                                state: TmuxState::Gone,
+                                exit_status: None,
+                            },
+                        )],
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                    );
+                    fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+                    let lost_unspent_ok = if state.lost_on_load
+                        && !persist_ok
+                        && !launch_inflight_before
+                        && cfg.has_tab
+                    {
+                        app.lost_tabs_on_load.contains(&id)
+                            || (cfg.kind == Pane303CaseKind::ResumableMissingAcct
+                                && !state.agent_is_terminal)
+                            || (cfg.kind == Pane303CaseKind::HasDep && !state.agent_is_terminal)
+                            || cfg.kind == Pane303CaseKind::SetupSession
+                    } else {
+                        true
+                    };
+                    if !lost_unspent_ok {
+                        violation.get_or_insert_with(|| {
+                            "lost_tabs_on_load evicted before persist() succeeded".into()
+                        });
+                    }
+                }
+                Pane303ModelEvent::FinishLaunch => {
+                    app.background_sender
+                        .send(BackgroundResult::SessionStarted {
+                            session_id: id,
+                            result: Ok(None),
+                        })
+                        .unwrap();
+                    app.process_background_results();
+                }
+                Pane303ModelEvent::Init(_) => unreachable!(),
+            }
+
+            let after = relaunch_270_find(&app, id);
+            let after_status = Pane303Status::from_session(&after.status);
+            let after_missing = app.terminal_capture_missing.contains(&id);
+            let placeholder = terminal_empty_placeholder(&after.status, after_missing);
+            let expected_placeholder = match &after.status {
+                SessionStatus::Queued => "開始待機中のため、まだターミナル出力はありません。",
+                SessionStatus::Lost
+                | SessionStatus::Failed
+                | SessionStatus::Exited
+                | SessionStatus::Cancelled
+                    if after_missing =>
+                {
+                    "このセッションのターミナルは終了しているため、表示できる出力はありません。"
+                }
+                _ => "ターミナル出力を待っています…",
+            };
+            if placeholder != expected_placeholder {
+                violation.get_or_insert_with(|| format!("wrong placeholder {placeholder:?}"));
+            }
+            if state.cancel_pending
+                && (after_status == Pane303Status::Starting || after.agent == "terminal")
+            {
+                violation.get_or_insert_with(|| {
+                    "pending cancellation spawned recovery or converted to terminal".into()
+                });
+            }
+            if cfg.kind == Pane303CaseKind::SetupSession
+                && (after_status == Pane303Status::Starting || after.agent == "terminal")
+            {
+                violation.get_or_insert_with(|| {
+                    "setup session triggered recovery or shell conversion".into()
+                });
+            }
+            if cfg.kind == Pane303CaseKind::ResumableMissingAcct
+                && !state.agent_is_terminal
+                && (after.agent == "terminal" || after_status == Pane303Status::Starting)
+            {
+                violation.get_or_insert_with(|| {
+                    "missing-account resumable CLI wiped into terminal or launched".into()
+                });
+            }
+
+            let after_launched = app
+                .background_tasks
+                .contains(&BackgroundKey::SessionStart(id));
+            let after_lost_on_load = app.lost_tabs_on_load.contains(&id);
+            let after_cancel_pending = app.cancellation_pending(id);
+            let after_cooldown = state.cooldown || after_launched;
+            if !launch_inflight_before && after_launched {
+                wait_for_background_task(
+                    &mut app,
+                    &BackgroundKey::SessionStart(id),
+                    Duration::from_secs(5),
+                );
+            }
+            let after_is_terminal = relaunch_270_find(&app, id).agent == "terminal";
+            fs::remove_dir_all(&dir).ok();
+            Some(Pane303ModelState {
+                config: state.config,
+                status: after_status,
+                agent_is_terminal: after_is_terminal,
+                lost_on_load: after_lost_on_load,
+                cancel_pending: after_cancel_pending,
+                terminal_capture_missing: after_missing,
+                cooldown: after_cooldown,
+                steps: state.steps + 1,
+                violation,
+            })
+        }
+        _ => None,
+    };
+
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        step,
+        |state| state.violation.clone().map_or(Ok(()), Err),
+        100_000,
+    );
+    fs::remove_dir_all(&root).ok();
+    assert_eq!(coverage.states, 305, "unexpected state space: {coverage:?}");
+}
+
+fn project_id_of(store: &Store) -> Uuid {
+    store.projects[0].id
+}
+
+fn chrono_iso_for_test(unix_secs: u64) -> String {
+    let days = (unix_secs / 86_400) as i64 + 719_468;
+    let secs = unix_secs % 86_400;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let doe = (days - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    format!(
+        "{year:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        secs / 3_600,
+        (secs % 3_600) / 60,
+        secs % 60
+    )
+}

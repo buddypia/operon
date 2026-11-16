@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-17
-- **Status**: approved
+- **Status**: done
 
 This is the plan produced in plan mode and accepted before any file was edited.
 If the implementation departs from it, update this file — an abandoned plan is
@@ -52,3 +52,8 @@ worse than no plan, because the next reader trusts it.
 - `bash scripts/check-installed-build.sh` after packaging and swapping `/Applications/Operon.app` on `main` — reports the installed app matches `HEAD`.
 
 ## Departures from the plan
+
+- `start_session` checks `resolve_or_recover_native_session` when `native_session_id` is `None` so manual retry on an un-ID'd CLI session with a recoverable local transcript reopens its conversation instead of discarding it.
+- Added `RelaunchAttempt` (`Launched | ConversationUnavailable | LaunchRefused | PersistFailed`) and `RecoveryOutcome::PersistFailed` (verifier findings `F1` and `F2`), keeping `lost_tabs_on_load` and `exited_tabs_on_load` unspent when `persist()` fails during startup recovery, preventing `LaunchRefused` from wiping resumable CLI metadata into `"terminal"`, and making `recover_cli_conversation_in` idempotent on `Claude`. Marked `relaunch_lost_session` and `reopen_exited_session_as_shell` `#[cfg(test)]` after moving production callers to `*_attempt`.
+- Guarded `poll_terminal_echo` and `finish_layout_drag` (verifier finding `F3`) with `session_eligible_for_initial_output` / `refresh_session_output`.
+- Kept `BackgroundResult::TerminalResized` `Gone` independent of `self.tools.tmux` because existing Change 128 tests run with `ToolStatus::default()` (`tools.tmux == false`) while expecting `Gone` to transition `Active` to `Lost`/`Cancelled` (with `auto_restore_after_resize_gone` gating recovery on `self.tools.tmux`).
