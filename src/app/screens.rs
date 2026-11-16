@@ -7493,7 +7493,7 @@ impl OperonApp {
         egui::Frame::NONE
             .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
             .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
-            .inner_margin(egui::Margin::same(2))
+            .inner_margin(egui::Margin::same(1))
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
                 for agent in ["codex", "claude", "gemini", "other"] {
@@ -7523,19 +7523,20 @@ impl OperonApp {
         }
         ui.label(
             RichText::new(tf!("{count} 件", count = self.matching_session_count()))
-                .size(12.0)
+                .size(11.5)
                 .color(palette.text_muted),
         );
     }
 
     pub(crate) fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
+        ui.spacing_mut().item_spacing.y = SPACE_XS;
         // One start per project, on its own header: the toolbar holds the
         // column-wide one (change 237).
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(tr("プロジェクト"))
-                    .size(12.5)
+                    .size(11.5)
                     .color(palette.text_muted),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -7638,9 +7639,11 @@ impl OperonApp {
                     // its sessions here, and is a destination only on the
                     // Projects page, so no fill makes it look like one.
                     let card = egui::Frame::new()
-                        .inner_margin(egui::Margin::same(SPACE_SM as i8))
+                        .inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 2))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
+                            ui.spacing_mut().item_spacing.y = SIDEBAR_ROW_GAP;
+                            ui.spacing_mut().interact_size.y = CONTROL_HEIGHT_SMALL;
                             ui.horizontal(|ui| {
                                 let (icon, tip) = if folded {
                                     (ICON_DISCLOSURE_CLOSED, tr("展開する"))
@@ -7703,12 +7706,12 @@ impl OperonApp {
                                                     .add(
                                                         egui::Label::new(if selected {
                                                             RichText::new(&project.name)
-                                                                .size(12.5)
+                                                                .size(12.0)
                                                                 .strong()
                                                                 .color(palette.text_muted)
                                                         } else {
                                                             RichText::new(&project.name)
-                                                                .size(12.5)
+                                                                .size(12.0)
                                                                 .color(palette.text_muted)
                                                         })
                                                         .truncate()
@@ -7768,10 +7771,12 @@ impl OperonApp {
                                         Color32::TRANSPARENT
                                     })
                                     .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
-                                    .inner_margin(egui::Margin::symmetric(SPACE_SM as i8, 2))
+                                    .inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 2))
                                     .show(ui, |ui| {
                                         ui.set_min_width(ui.available_width());
+                                        ui.spacing_mut().interact_size.y = COLUMN_SESSION_MARK_SIZE;
                                         ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = SPACE_XS;
                                             if session_mark_texture(ui.ctx(), &session.agent)
                                                 .is_some()
                                             {
@@ -7794,12 +7799,17 @@ impl OperonApp {
                                                     ui.label(tr(kind.label()));
                                                 });
                                             } else {
-                                                session_status_icon(ui, palette, kind);
+                                                session_status_icon_sized(
+                                                    ui,
+                                                    palette,
+                                                    kind,
+                                                    COLUMN_SESSION_MARK_SIZE,
+                                                );
                                                 // Legacy commands can be arbitrarily long;
                                                 // keep space for the session's title.
                                                 let width = ui.available_width().min(72.0);
                                                 ui.allocate_ui_with_layout(
-                                                    egui::vec2(width, 18.0),
+                                                    egui::vec2(width, COLUMN_SESSION_MARK_SIZE),
                                                     egui::Layout::left_to_right(
                                                         egui::Align::Center,
                                                     ),
@@ -7837,7 +7847,7 @@ impl OperonApp {
                                                 ui.add(
                                                     egui::Label::new(
                                                         RichText::new(&title)
-                                                            .size(12.5)
+                                                            .size(12.0)
                                                             .strong()
                                                             .color(
                                                                 if self.selected_session == Some(id)
@@ -7957,15 +7967,12 @@ impl OperonApp {
                         });
                     let project = &self.store.projects[proj_idx];
                     targets.push(project.id, card.response.rect);
-                    ui.add_space(SPACE_SM);
                 }
                 if let Some(drag) = drag {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     let (targets, gap) = match drag {
-                        ColumnDrag::Project(_) => (&targets, SPACE_SM),
-                        ColumnDrag::Session { .. } => {
-                            (&session_targets, ui.spacing().item_spacing.y)
-                        }
+                        ColumnDrag::Project(_) => (&targets, SPACE_XS),
+                        ColumnDrag::Session { .. } => (&session_targets, SIDEBAR_ROW_GAP),
                     };
                     let slot =
                         targets.slot(drag.moved(), pointer.filter(|pos| view.contains(*pos)));

@@ -1295,8 +1295,19 @@ pub(crate) fn session_status_icon(
     palette: &Palette,
     kind: SessionStatusKind,
 ) -> egui::Response {
+    session_status_icon_sized(ui, palette, kind, CONTROL_HEIGHT_SMALL)
+}
+
+/// Same passive status indicator as [`session_status_icon`], with an explicit
+/// row height for compact sidebar rows.
+pub(crate) fn session_status_icon_sized(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    kind: SessionStatusKind,
+    height: f32,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(TAB_STATUS_MARK_SIZE, CONTROL_HEIGHT_SMALL),
+        egui::vec2(TAB_STATUS_MARK_SIZE, height),
         egui::Sense::hover(),
     );
     if ui.is_rect_visible(rect) {
@@ -1653,7 +1664,7 @@ pub(crate) fn status_count_chip(
     let ink = palette.status(group.tone());
     let galley =
         ui.painter()
-            .layout_no_wrap(count.to_string(), egui::FontId::proportional(12.5), ink);
+            .layout_no_wrap(count.to_string(), egui::FontId::proportional(11.5), ink);
     let gap = SPACE_XS / 2.0;
     let size = egui::vec2(
         STATUS_COUNT_MARK_SIZE + gap + galley.size().x,

@@ -112,6 +112,8 @@ pub(crate) const SIDEBAR_MIN_W: f32 = 180.0;
 pub(crate) const SIDEBAR_MAX_W: f32 = 480.0;
 /// Default width for workspace sidebars.
 pub(crate) const SIDEBAR_DEFAULT_W: f32 = 268.0;
+/// Vertical gap between rows and beside the heading inside a project block in the session sidebar.
+pub(crate) const SIDEBAR_ROW_GAP: f32 = 2.0;
 /// Least width of one sidebar status filter tile: mark, the longest group
 /// word and a two-digit count. Two fit side by side in the default column and
 /// not in the narrowest, where the tiles stack (change 252).
