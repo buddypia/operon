@@ -1,0 +1,40 @@
+# Change 300. Bug report, as the bugfix route takes it in place of an intent:
+#
+# A `person` line in an approvals.log says a person approved an artifact, and
+# the agent writes it. Nothing says what the line must hold, so each session
+# improvised: some quote the person's reply, some quote the request the work
+# started from, and some hold no words of the person at all ("existing
+# explicit user authorization still applies", "Carried from the person's 08:46
+# choice"). A line with no quote cannot be checked against what the person
+# said, and an approval taken from a broad request is never shown back to the
+# person, so they cannot see that their request was read as one. Changes 296
+# and 297 recorded gate-configuration approvals that way, and the session
+# could only mention it in passing.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Write the failing test for a person line without a quote, then the checker and approval.md."
+
+contract:
+  three-gates: "machine pending fmt and clippy at commit; cargo test --locked approval; full suite in CI"
+  failing-test-first: "machine pending the_approval_checker_wants_the_persons_words_on_a_person_line fails on the unedited checker"
+  release-binary: "machine waived touches scripts/check-approvals.sh, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/300-person-approvals-recorded-without-the-persons-words/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
