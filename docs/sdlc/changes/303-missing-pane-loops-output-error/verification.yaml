@@ -1,5 +1,5 @@
 # The evidence for change 303. Format: docs/sdlc/templates/verification.yaml.
-digest: "20e5536f453c8eb4"
+digest: "c1ea085363b0b3de"
 
 obligations:
   - R1 empirical-test :: cargo test --locked pane_303_missing_pane_does_not_loop_output_requests_or_spam_error_banner
