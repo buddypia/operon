@@ -69,6 +69,13 @@ ledger() {
 # and the counts.
 judge() {
   ledger | awk -F'\t' -v categories="$categories" '
+    function from_300(name,   n) { n = name; sub(/-.*/, "", n); return n ~ /^[0-9]+$/ && n + 0 >= 300 }
+    function quoted(text,   open, rest, marks) {
+      open = index(text, "「")
+      if (open > 0 && index(substr(text, open + 1), "」") > 0) return 1
+      rest = text; marks = gsub(/"/, "", rest)
+      return marks >= 2
+    }
     BEGIN { n = split(categories, c, " "); for (i = 1; i <= n; i++) known[c[i]] = 1 }
     {
       change = $1; line = $2; split($3, f, " ")
@@ -82,6 +89,12 @@ judge() {
       else if (f[2] == "escape" && f[6] !~ /^lesson-[0-9][0-9][0-9]$/) { bad = "escape の verdict は lesson-NNN です" }
       else if (f[2] != "escape" && f[6] !~ /^(approve|revise|reject|escalate)$/) { bad = "verdict は approve / revise / reject / escalate のいずれかです" }
       else if (f[7] == "") { bad = "理由がありません" }
+      # Change 300: a person line is written on the person'"'"'s behalf, so it carries
+      # their words. index(), not a bracket class: this awk reads bytes, and a
+      # class built from 」 would refuse the bytes of the words inside it.
+      else if (f[2] == "person" && from_300(change) && !quoted(reason)) {
+        bad = "person 行には人の言葉の引用（「…」 か \"…\"）が要ります（change 300 以降。approval.md の The ledger）"
+      }
       else { bad = "" }
       if (bad != "") { print "ERR\t" change "\t" where ": " bad; next }
       rank = (f[2] == "auto") ? 0 : (f[2] == "person") ? 1 : 2

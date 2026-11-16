@@ -13,8 +13,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -22,13 +22,13 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Write the failing test for a person line without a quote, then the checker and approval.md."
+resume: "Done. From change 300 on a person approval quotes the person, and an approval read from a request is reported back."
 
 contract:
-  three-gates: "machine pending fmt and clippy at commit; cargo test --locked approval; full suite in CI"
-  failing-test-first: "machine pending the_approval_checker_wants_the_persons_words_on_a_person_line fails on the unedited checker"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked approval 11 passed, stop_gate harness_documents every_state_file lesson 12 passed; full suite in CI"
+  failing-test-first: "machine passed the_approval_checker_wants_the_persons_words_on_a_person_line failed on the unedited checker: 303-no-words passed"
   release-binary: "machine waived touches scripts/check-approvals.sh, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/300-person-approvals-recorded-without-the-persons-words/mutations.py"
+  guards-verified-by-mutation: "machine passed 8 of 8 caught: python3 docs/sdlc/changes/300-person-approvals-recorded-without-the-persons-words/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

@@ -53,6 +53,17 @@ review digest:
 contract` or a paused surface. The digest is the checker's `digest()`: 16 hex of
 the artifact without its `Status` line, and a plan only up to its departures.
 
+**A `person` line is written on the person's behalf**, so it carries what they
+said. A `person` line quotes the person's own words in 「…」 (or "…") — the
+answer they gave, or the request that asks for exactly what the artifact does —
+and says why those words cover this artifact. A request counts only for what it
+asks: one that does not name a relaxation, a removal, or a direction does not
+approve it, and the person is asked instead. When an approval is read from a
+request rather than given as an answer, the session's final report says so in
+the person's words — which request, read as approving what — so they can take
+it back. `scripts/check-approvals.sh` refuses a `person` line without a quote
+from change 300 on (sdlc 300); earlier ledgers stay as written.
+
 **An escape** is a defect a person found in something approved `auto`. Once its
 lesson and guard exist, write it in the fixing change: `escape <category>
 <NNN-slug/artifact> <that digest> lesson-NNN <what>`. The category then goes to

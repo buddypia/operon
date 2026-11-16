@@ -62,3 +62,14 @@ The edit tightens a check and relaxes none.
 - `python3 docs/sdlc/changes/300-…/mutations.py` — every mutation caught.
 
 ## Departures from the plan
+
+- **Three fixtures gained quotes.** The width, escape and paused-surface tests
+  wrote `person` lines numbered from 900 with no words of the person; each now
+  quotes a fixture reply, which is what the rule asks of a real line.
+- **The quote is found with `index()`.** The checker's awk reads bytes, so a
+  bracket class built from 」 would also refuse the bytes of the words inside
+  the quote; `index()` looks for the two brackets as strings.
+- **`steering_bytes` reads 264,424 against a diagnose tier of 264,000.** The
+  rule added about 800 bytes to `approval.md`, which loads only when an
+  approval is about to be written. The band asks for a read-only look, not a
+  cut, and nothing here was moved to make room.
