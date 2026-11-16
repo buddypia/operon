@@ -20190,7 +20190,7 @@ pub(crate) fn the_approval_ledger_rows_are_the_width_the_checker_reads() {
         "901-valid",
         "# <utc> <by> <category> <artifact> <digest> <verdict> <reason...>\n\n\
          2026-09-26T09:00:00Z auto plan plan.md 0123456789abcdef approve fits the spec\n\
-         2026-09-26T09:05:00Z person screen screen.md 0123456789abcdef approve owner: これでいい\n",
+         2026-09-26T09:05:00Z person screen screen.md 0123456789abcdef approve owner: 「これでいい」\n",
     );
     let malformed = [
         (
@@ -20243,6 +20243,111 @@ pub(crate) fn the_approval_ledger_rows_are_the_width_the_checker_reads() {
         assert!(
             code == Some(1) && output.contains("approvals.log:1"),
             "{name}: 読めない台帳の行が通りました ({code:?}):\n{output}"
+        );
+    }
+}
+
+/// Change 300. A `person` line is written by the agent on the person's behalf,
+/// so it is the one line whose truth the ledger cannot show unless it carries
+/// what the person said. From change 300 on, its reason quotes the person in
+/// 「…」 or "…"; earlier ledgers stay as written. The rule a session reads in
+/// `approval.md` is pinned here too, so prose and checker cannot drift apart.
+#[test]
+pub(crate) fn the_approval_checker_wants_the_persons_words_on_a_person_line() {
+    let root = approval_fixture("approval-person-words");
+    let line = |by: &str, reason: &str| {
+        format!("2026-11-16T09:00:00Z {by} plan plan.md 0123456789abcdef approve {reason}\n")
+    };
+    let accepted = [
+        (
+            "300-brackets",
+            line(
+                "person",
+                "user 2026-11-16: 「進めて」 — the plan asked about",
+            ),
+        ),
+        (
+            "301-ascii",
+            line("person", "the person said \"go ahead\" to this plan"),
+        ),
+        ("302-auto", line("auto", "evaluator a1b2: fits the spec")),
+        // F1, from the empirical verifier: a tab before the quote hid it.
+        ("306-tab", line("person", "user:\t「go」")),
+        (
+            "299-legacy",
+            line("person", "existing authorization still applies"),
+        ),
+    ];
+    let refused = [
+        (
+            "303-no-words",
+            line("person", "existing authorization still applies"),
+        ),
+        ("304-one-mark", line("person", "the person said 「go ahead")),
+        // F2: an empty quote holds no words of the person.
+        ("307-empty", line("person", "the person said 「」")),
+        (
+            "308-empty-ascii",
+            line("person", "the person said \"\" to it"),
+        ),
+        (
+            "305-one-ascii",
+            line("person", "the person said \"go ahead"),
+        ),
+    ];
+    for (name, ledger) in accepted.iter().chain(refused.iter()) {
+        approval_change(&root, name, ledger);
+    }
+    let passed: Vec<_> = accepted
+        .iter()
+        .map(|(name, _)| {
+            (
+                *name,
+                run_approvals(&root, &[&format!("docs/sdlc/changes/{name}")]),
+            )
+        })
+        .collect();
+    let failed: Vec<_> = refused
+        .iter()
+        .map(|(name, _)| {
+            (
+                *name,
+                run_approvals(&root, &[&format!("docs/sdlc/changes/{name}")]),
+            )
+        })
+        .collect();
+    let _ = fs::remove_dir_all(&root);
+
+    for (name, (code, output)) in passed {
+        assert_eq!(
+            code,
+            Some(0),
+            "{name}: 通るべき台帳を拒否しました:\n{output}"
+        );
+    }
+    for (name, (code, output)) in failed {
+        assert!(
+            code == Some(1) && output.contains("approvals.log:1") && output.contains("引用"),
+            "{name}: 人の言葉のない person 行が通りました ({code:?}):\n{output}"
+        );
+    }
+    let rule = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".claude/skills/sdlc/references/approval.md"),
+    )
+    .unwrap()
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ");
+    for sentence in [
+        "A `person` line quotes the person's own words in 「…」 (or \"…\")",
+        "A request counts only for what it asks",
+        "the session's final report says so",
+        "from change 300 on",
+    ] {
+        assert!(
+            rule.contains(sentence),
+            "approval.md から person 行の規則「{sentence}」が消えています"
         );
     }
 }
@@ -20406,7 +20511,9 @@ pub(crate) fn the_approval_checker_demotes_on_escape_until_a_clean_run() {
         fn pair(&mut self, n: usize, verdict: &str) {
             let digest = format!("{n:016x}");
             self.line(&format!("auto plan p{n}.md {digest} approve ok"));
-            self.line(&format!("person plan p{n}.md {digest} {verdict} ok"));
+            self.line(&format!(
+                "person plan p{n}.md {digest} {verdict} owner: 「ok」"
+            ));
         }
     }
     let mut ledger = Ledger {
@@ -20579,7 +20686,9 @@ pub(crate) fn the_approval_checker_holds_a_paused_edit_to_a_person_whatever_its_
     let on_the_surface = run();
     fs::write(
         change.join("approvals.log"),
-        format!("{auto}2026-09-26T09:30:00Z person plan plan.md {digest} approve owner read it\n"),
+        format!(
+            "{auto}2026-09-26T09:30:00Z person plan plan.md {digest} approve owner: 「読んだ」\n"
+        ),
     )
     .unwrap();
     let with_a_person = run();

@@ -69,10 +69,18 @@ ledger() {
 # and the counts.
 judge() {
   ledger | awk -F'\t' -v categories="$categories" '
+    function from_300(name,   n) { n = name; sub(/-.*/, "", n); return n ~ /^[0-9]+$/ && n + 0 >= 300 }
+    function quoted(text,   open) {
+      open = index(text, "「")
+      if (open > 0 && index(substr(text, open + length("「")), "」") > 1) return 1
+      return text ~ /"[^"]+"/
+    }
     BEGIN { n = split(categories, c, " "); for (i = 1; i <= n; i++) known[c[i]] = 1 }
     {
-      change = $1; line = $2; split($3, f, " ")
-      reason = $3; for (i = 1; i <= 6; i++) sub(/^[^ ]+ +/, "", reason)
+      # The line itself, not $3: a tab inside the reason would end $3 there
+      # and hide a quote written after it (change 300).
+      change = $1; line = $2; rec = $0; sub(/^[^\t]*\t[^\t]*\t/, "", rec); split(rec, f, " ")
+      reason = rec; for (i = 1; i <= 6; i++) sub(/^[^ ]+ +/, "", reason)
       where = change "/approvals.log:" line
       if (f[1] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/) { bad = "時刻が UTC の ISO 8601 ではありません" }
       else if (f[2] != "auto" && f[2] != "person" && f[2] != "escape") { bad = "by は auto / person / escape のいずれかです" }
@@ -82,6 +90,12 @@ judge() {
       else if (f[2] == "escape" && f[6] !~ /^lesson-[0-9][0-9][0-9]$/) { bad = "escape の verdict は lesson-NNN です" }
       else if (f[2] != "escape" && f[6] !~ /^(approve|revise|reject|escalate)$/) { bad = "verdict は approve / revise / reject / escalate のいずれかです" }
       else if (f[7] == "") { bad = "理由がありません" }
+      # Change 300: a person line is written on the person'"'"'s behalf, so it carries
+      # their words. index(), not a bracket class: this awk reads bytes, and a
+      # class built from 」 would refuse the bytes of the words inside it.
+      else if (f[2] == "person" && from_300(change) && !quoted(reason)) {
+        bad = "person 行には人の言葉の引用（「…」 か \"…\"）が要ります（change 300 以降。approval.md の The ledger）"
+      }
       else { bad = "" }
       if (bad != "") { print "ERR\t" change "\t" where ": " bad; next }
       rank = (f[2] == "auto") ? 0 : (f[2] == "person") ? 1 : 2

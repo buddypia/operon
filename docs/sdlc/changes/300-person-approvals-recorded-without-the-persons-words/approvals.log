@@ -1,0 +1,2 @@
+2026-11-16T12:55:13Z person plan plan.md b9a62b396f60d8cf approve user 2026-11-16: 「承認の記録方法: 297 の approvals.log には、change 296 と同じ形で、今回のご依頼文を引用して person 承認として記録しました … 上記を恒久対応してください」 — the request to settle how a person's approval is recorded; this plan writes that rule and checks it
+2026-11-16T12:55:13Z person gate-configuration plan.md b9a62b396f60d8cf approve user 2026-11-16: 「承認の記録方法 … 上記を恒久対応してください」 — the same request; the checker gains a refusal and loses none, and approval.md, always a person's, is edited at this request
