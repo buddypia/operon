@@ -1619,3 +1619,23 @@ through shims on `PATH` and refuse a count that grows with parked changes or
 ledgers, each watched failing in
 `docs/sdlc/changes/297-the-stop-gate-runs-out-of-time-and-checks-nothing/mutations.py`
 (6 of 6 caught).
+
+
+## 115 — A tool's default place is a convention the guards never agreed to
+
+Claude Code puts a subagent's isolated worktree at `<repo>/.claude/worktrees/<name>`.
+Every worktree guard here knows a worktree only under `<repo>/.worktrees/`, so
+the tree was read as the main checkout, its branch as `main`, and the
+verifiers the pipeline tells to run isolated were refused every shell command
+that was not on main's allowlist. Changes 296 and 297 each recorded a verifier
+reporting from reading only, and neither departure was read as a defect in
+the harness (change 299). **The rule:** when a tool the pipeline relies on
+creates a working tree, fix where it creates it — through the tool's own hook —
+rather than teach every guard a second convention; and a departure that says a
+reviewer or verifier could not run is a bug report, not a footnote.
+
+**Guard.** `isolated_subagent_worktrees_land_where_the_guards_look` and
+`isolated_subagent_worktree_work_is_not_judged_as_main` run the WorktreeCreate
+hook and the policy guard against it, each watched failing in
+`docs/sdlc/changes/299-isolated-subagent-worktrees-are-judged-as-main/mutations.py`
+(9 of 9 caught).

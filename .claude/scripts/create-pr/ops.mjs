@@ -2471,7 +2471,7 @@ export function refuseUnlinkedWorktree(absWtPath, gitFn = git, { readLedgerFn = 
 }
 
 /**
- * Change 296. Antigravity CLI gives each subagent a linked worktree under
+ * Change 296 (Claude Code's `.worktrees/agent-*` trees too since change 299). Antigravity CLI gives each subagent a linked worktree under
  * `~/.gemini/antigravity-cli/worktrees/<conversation>/` on a branch of the same name and never
  * removes it, so every verifier run under agy left a worktree and a branch behind for good. The
  * landing cleanup is the one step every CLI runs after each merge, so it reaps them here — only
@@ -2485,15 +2485,21 @@ export function sweepAgentWorktrees({ gitFn = git, home = homedir(), now = Date.
   const removed = [];
   let linked;
   let agentRoot;
+  let claudeAgentPrefix;
   try {
     linked = parseWorktreePaths(gitFn(['worktree', 'list', '--porcelain'], { cwd: PROJECT_DIR })).slice(1);
     agentRoot = canonicalPath(join(home, '.gemini', 'antigravity-cli', 'worktrees')) + sep;
+    // Change 299: Claude Code's isolated worktrees, put here by .claude/hooks/worktree-create.sh.
+    claudeAgentPrefix = join(canonicalPath(join(PROJECT_DIR, '.worktrees')), 'agent-');
   } catch {
     return removed;
   }
   for (const path of linked) {
     try {
-      if (!existsSync(path) || !canonicalPath(path).startsWith(agentRoot)) continue;
+      if (!existsSync(path)) continue;
+      const real = canonicalPath(path);
+      const claudeAgent = real.startsWith(claudeAgentPrefix) && !real.slice(claudeAgentPrefix.length).includes(sep);
+      if (!real.startsWith(agentRoot) && !claudeAgent) continue;
       if (now - statSync(path).mtimeMs < AGENT_WORKTREE_IDLE_MS) continue;
       if (gitFn(['status', '--porcelain'], { cwd: path }).length > 0) continue;
       gitFn(['merge-base', '--is-ancestor', 'HEAD', baseBranch], { cwd: path });

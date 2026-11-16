@@ -13,7 +13,7 @@ guard that decides "is this a worktree", is `<repo>/.worktrees/<…>`:
 `.cli/hooks/worktree-policy-guard.mjs`, `splitWorktreePath` in
 `.cli/lib/worktree-path.mjs`, `resolveProjectDir` in `.cli/lib/utils.mjs`, and
 the session-owner, commit and destructive-git guards beside them. A path under
-`.claude/worktrees/` is therefore inside the main checkout and outside every
+`<repo>/.claude/worktrees/<name>` is therefore inside the main checkout and outside every
 worktree; the guard asks the main checkout's branch (CLAUDE_PROJECT_DIR), reads
 `main`, and refuses the subagent's shell commands and edits as trunk work.
 
@@ -59,7 +59,7 @@ worktree work; this only puts subagent trees there.
 1. Tests, watched failing without the hooks.
 2. The hooks and the settings entry.
 3. The sweep.
-4. `mutations.py`: the tree put back under `.claude/worktrees`, a name with a
+4. `mutations.py`: the tree put back under `.claude/worktrees/<name>`, a name with a
    slash or `..` let through, the tree started at main rather than the parent's
    head, removal of a path outside `.worktrees/agent-*`, and the sweep skipping
    agent trees — each turns a test red.
@@ -84,3 +84,16 @@ worktree work; this only puts subagent trees there.
 - After landing, an isolated subagent's shell and edit are not refused.
 
 ## Departures from the plan
+
+- **The guard test uses `touch`, not `cargo test`.** `cargo test --locked` is
+  on main's allowlist, so it passes in either tree and cannot tell them apart;
+  a command off the allowlist does.
+- **The remove hook checks once.** It first checked the prefix and then the
+  name; the sweep showed the first check could go without a test noticing,
+  because the second alone refuses anything outside `.worktrees/agent-*`. Only
+  the second is kept.
+- **Lesson 115** records the departure pattern that hid this: 296 and 297 each
+  noted a verifier that could not run, and neither was read as a defect.
+- **The live check runs after landing.** Claude Code reads hooks from the main
+  checkout's settings, so a real isolated subagent can use the hook only once
+  this is on main; its result is reported to the person.

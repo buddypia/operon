@@ -11,8 +11,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -20,13 +20,13 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Write the failing tests for the WorktreeCreate hook, then the hook, the settings entry, and the sweep."
+resume: "Done. Isolated subagents work in .worktrees/agent-<name>; the landing cleanup sweeps the ones left behind."
 
 contract:
-  three-gates: "machine pending fmt and clippy at commit; cargo test --locked isolated_subagent; full suite in CI"
-  failing-test-first: "machine pending the isolated_subagent tests fail without the hook"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked isolated_subagent 2 passed, hook settings worktree cleanup harness gate 134 passed after the lesson fix; full suite in CI"
+  failing-test-first: "machine passed both isolated_subagent tests failed with the two hooks moved away"
   release-binary: "machine waived touches .claude, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/299-isolated-subagent-worktrees-are-judged-as-main/mutations.py"
+  guards-verified-by-mutation: "machine passed 9 of 9 caught: python3 docs/sdlc/changes/299-isolated-subagent-worktrees-are-judged-as-main/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
