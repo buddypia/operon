@@ -1,0 +1,2 @@
+2026-11-16T11:52:19Z person plan plan.md 22604c30cb670bf2 approve user 2026-11-16: 「CI 待ちスクリプトをリポジトリに追加する … 上記を恒久対応してください」 — the request to add the wait-for-the-run script; this plan is that script and the steps that name it
+2026-11-16T11:52:19Z person gate-configuration plan.md 22604c30cb670bf2 approve user 2026-11-16: 「CI 待ちスクリプトをリポジトリに追加する … 上記を恒久対応してください」 — the same request; the gate's edit is two refusal messages naming the script, and no check changes
