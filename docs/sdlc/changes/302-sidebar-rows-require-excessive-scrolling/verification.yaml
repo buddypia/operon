@@ -1,0 +1,9 @@
+# The evidence for change 302. Format: docs/sdlc/templates/verification.yaml.
+digest: "a00c6c5dd84d136b"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked sidebar_302_session_rows_and_project_headings_are_compact
+  - R2 empirical-test :: cargo test --locked sidebar_302_column_uses_compact_type_scale
+  - R3 empirical-test :: cargo test --locked sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs
+  - F1 empirical-test :: cargo test --locked sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/302-sidebar-rows-require-excessive-scrolling/mutations.py

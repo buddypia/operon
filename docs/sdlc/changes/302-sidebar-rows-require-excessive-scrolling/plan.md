@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-17
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -41,3 +41,7 @@
 - CI passes on branch before merging to `main`, and `/Applications/Operon.app` is packaged, installed, verified (`check-installed-build.sh` CURRENT), and running instead of the stale `Operon Stable.app`.
 
 ## Departures from the plan
+
+- Extracted `session_status_icon_sized(..., height: f32)` in `src/ui/widgets.rs` and called it with `COLUMN_SESSION_MARK_SIZE` in `src/app/screens.rs` for custom/fallback rows after the independent verifier caught that `session_status_icon` kept `CONTROL_HEIGHT_SMALL` (`24.0px`) row height on custom commands.
+- Kept session row vertical `inner_margin` at `2px` (`Margin::symmetric(SPACE_XS as i8, 2)`) alongside `SIDEBAR_ROW_GAP = 2.0` (`20px` row height, `22px` pitch, `4.0px` badge-ring clearance below `mark.bottom()` vs `3.55px` outer ring) and restored the selected accent bar to `+/- 2.0`, after the verifier caught a `0.55px` ring overlap at `1px` margin.
+- Added `F1` (`sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap`), added unselected project `"q"` coverage in `sidebar_302_column_uses_compact_type_scale` and `session_column_project_is_a_heading_not_a_card`, added `ColumnDrag::Project` drop-line verification in `sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs`, updated `sidebar_302_session_rows_and_project_headings_are_compact` to verify `ui_sidebar_agent_segment`'s `28.0px` `widget_rect` (`24px + 2*1px margin + 2*1px stroke`), and expanded `mutations.py` to 19 single-hit mutations.

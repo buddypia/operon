@@ -18,7 +18,7 @@ Before (outer 10px spacing, 28px horizontal row min, 12.5px text, ~42px/row)
 │                               │  8+8+10+8 = 34px between projects
 │   ▾ proj-b (12.5)           +│
 
-After (4px column / 2px row gap, ~19-20px rows, 12.0/11.5px text, ~21-22px/row)
+After (4px column / 2px row gap, 20px rows, 12.0/11.5px text, 22px/row)
 ┌─ 268px ───────────────────────┐
 │ プロジェクト (11.5)     [履歴]│   4px gap
 │ [ ! 要対応 1 ] [ ⟳ 実行中 3 ] │   4px gap
@@ -27,13 +27,13 @@ After (4px column / 2px row gap, ~19-20px rows, 12.0/11.5px text, ~21-22px/row)
 │ ───────────────────────────── │   4px gap
 │ ▾ proj-a (12.0)       !1 ⟳3 + │   2px margin + 2px gap
 │ ───────────────────────────── │   2px gap
-│ [Ag] 📌 セッション10 (12.0)   │  ~19px row + 2px gap
-│ [Cl] セッション9              │  ~19px row + 2px gap
-│ [Tm] セッション6              │  ~19px row + 2px gap
-│ [Tm] セッション4              │  ~19px row + 2px gap
+│ [Ag] 📌 セッション10 (12.0)   │  20px row + 2px gap
+│ [Cl] セッション9              │  20px row + 2px gap
+│ [Tm] セッション6              │  20px row + 2px gap
+│ [Tm] セッション4              │  20px row + 2px gap
 │                               │   8px between projects
-│ ▾ proj-b (12.0)             +│   2px margin + 2px gap
-│ [Cl] 調査タスク               │  ~19px row + 2px gap
+│ ▾ proj-b (12.0)             + │   2px margin + 2px gap
+│ [Cl] 調査タスク               │  20px row + 2px gap
 └───────────────────────────────┘
 ```
 

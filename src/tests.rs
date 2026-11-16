@@ -70837,7 +70837,7 @@ pub(crate) fn session_column_project_is_a_heading_not_a_card() {
         .expect("プロジェクト名が描かれていません");
     let name_block = &column[name_at..column.len().min(name_at + 700)];
     assert!(
-        name_block.contains(".size(12.5)") && name_block.contains("palette.text_muted"),
+        name_block.matches(".size(12.0)").count() == 2 && name_block.contains("palette.text_muted"),
         "プロジェクト名が小さな薄い見出しになっていません"
     );
     assert!(
@@ -88120,5 +88120,556 @@ fn session_notice_289_other_pages_keep_top_banner_without_duplicate_toast() {
         "Home must keep the warning and notice as top banners above the page content"
     );
 
+    fs::remove_dir_all(root).ok();
+}
+
+// ── Change 302: compact sidebar spacing, type scale, and pin/tab sync ───────
+
+#[cfg(test)]
+fn sidebar_302_frame(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 820.0));
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(screen),
+            events,
+            ..Default::default()
+        },
+        |root| {
+            let ctx = root.ctx().clone();
+            app.apply_appearance(&ctx);
+            let palette = app.store.theme.palette();
+            app.ui_central_panel(root, palette);
+        },
+    )
+}
+
+#[cfg(test)]
+fn sidebar_302_settled(app: &mut OperonApp, ctx: &egui::Context) -> egui::FullOutput {
+    sidebar_302_frame(app, ctx, Vec::new());
+    sidebar_302_frame(app, ctx, Vec::new())
+}
+
+#[cfg(test)]
+fn sidebar_302_click(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    pos: egui::Pos2,
+    button: egui::PointerButton,
+) {
+    for pressed in [true, false] {
+        sidebar_302_frame(
+            app,
+            ctx,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+    }
+}
+
+#[cfg(test)]
+fn sidebar_302_hline(output: &egui::FullOutput, accent: Color32) -> f32 {
+    fn find_hline(shape: &egui::epaint::Shape, accent: Color32) -> Option<f32> {
+        match shape {
+            egui::epaint::Shape::LineSegment { points, stroke }
+                if stroke.color == accent
+                    && (stroke.width - 2.0).abs() < 0.01
+                    && (points[0].y - points[1].y).abs() < 0.01 =>
+            {
+                Some(points[0].y)
+            }
+            egui::epaint::Shape::Vec(children) => {
+                children.iter().find_map(|c| find_hline(c, accent))
+            }
+            _ => None,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .find_map(|clipped| find_hline(&clipped.shape, accent))
+        .expect("horizontal 2px accent drop line while dragging")
+}
+
+#[cfg(test)]
+fn sidebar_302_font_size(output: &egui::FullOutput, right: f32, min_y: f32, needle: &str) -> f32 {
+    fn visit(shape: &egui::epaint::Shape, right: f32, min_y: f32, needle: &str) -> Option<f32> {
+        match shape {
+            egui::epaint::Shape::Text(text)
+                if text.galley.text() == needle && text.pos.x < right && text.pos.y >= min_y =>
+            {
+                text.galley
+                    .job
+                    .sections
+                    .first()
+                    .map(|s| s.format.font_id.size)
+            }
+            egui::epaint::Shape::Vec(children) => children
+                .iter()
+                .find_map(|child| visit(child, right, min_y, needle)),
+            _ => None,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .find_map(|clipped| visit(&clipped.shape, right, min_y, needle))
+        .unwrap_or_else(|| {
+            panic!("text `{needle}` not drawn in left column below {min_y} (right={right})")
+        })
+}
+
+#[test]
+fn sidebar_302_session_rows_and_project_headings_are_compact() {
+    let root = temporary_directory("sidebar-302-compact-rows");
+    let names = ["r1", "r2", "r3", "r4"];
+    let (mut app, _project, _ids) = session_285_app(&root, &names);
+    app.page = Page::Sessions;
+    app.store.projects[0].name = "alpha-proj".into();
+    let other_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: other_id,
+        path: root.join("beta"),
+        name: "beta-proj".into(),
+        added_at: now(),
+    });
+    let mut beta_session = app.store.sessions[0].clone();
+    beta_session.id = Uuid::new_v4();
+    beta_session.tmux_name = managed_tmux_name(beta_session.id);
+    beta_session.project_id = other_id;
+    beta_session.name = "beta-one".into();
+    app.store.sessions.push(beta_session);
+
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+
+    let alpha_heading = column_rect(&output, "alpha-proj").expect("alpha-proj heading");
+    let beta_heading = column_rect(&output, "beta-proj").expect("beta-proj heading");
+    let row_rects = ["r4", "r3", "r2", "r1"]
+        .iter()
+        .map(|name| column_rect(&output, name).unwrap_or_else(|| panic!("row `{name}` missing")))
+        .collect::<Vec<_>>();
+
+    for pair in row_rects.windows(2) {
+        let pitch = pair[1].center().y - pair[0].center().y;
+        let gap = pair[1].top() - pair[0].bottom();
+        assert!(
+            pitch <= 24.0,
+            "session row center-to-center pitch must be <= 24.0px, got {pitch:.2} ({pair:?})"
+        );
+        assert!(
+            gap <= 8.0,
+            "session row vertical gap must be <= 8.0px, got {gap:.2} ({pair:?})"
+        );
+    }
+    let heading_to_first = row_rects[0].top() - alpha_heading.bottom();
+    assert!(
+        heading_to_first <= 13.0,
+        "heading to first row gap must be <= 13.0px, got {heading_to_first:.2}"
+    );
+    let beta_heading_top = beta_heading.center().y - CONTROL_HEIGHT_SMALL / 2.0;
+    let last_to_next_project = beta_heading_top - row_rects[3].bottom();
+    assert!(
+        last_to_next_project <= 14.0,
+        "inter-project gap must be <= 14.0px, got {last_to_next_project:.2}"
+    );
+
+    let right = project_column_right(&app);
+    let palette = app.store.theme.palette();
+    let idle_bottom = column_rect(&output, tr("アイドル"))
+        .expect("アイドル filter tile")
+        .bottom();
+    let mut segment_rect: Option<egui::Rect> = None;
+    for clipped in &output.shapes {
+        fn find_segment(
+            shape: &egui::epaint::Shape,
+            right: f32,
+            min_y: f32,
+            border: Color32,
+            out: &mut Option<egui::Rect>,
+        ) {
+            match shape {
+                egui::epaint::Shape::Rect(rect)
+                    if rect.rect.left() < right
+                        && rect.rect.top() > min_y
+                        && (rect.stroke.width - 1.0).abs() < 0.05
+                        && rect.stroke.color == border
+                        && rect.rect.width() > 60.0
+                        && rect.rect.height() > 16.0 =>
+                {
+                    if out.is_none_or(|cur| rect.rect.top() < cur.top()) {
+                        *out = Some(rect.rect);
+                    }
+                }
+                egui::epaint::Shape::Vec(children) => {
+                    for child in children {
+                        find_segment(child, right, min_y, border, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        find_segment(
+            &clipped.shape,
+            right,
+            idle_bottom,
+            palette.border_subtle,
+            &mut segment_rect,
+        );
+    }
+    let segment_rect = segment_rect.expect("agent filter segment frame");
+    assert!(
+        segment_rect.height() <= 28.5,
+        "agent filter segment margin must stay compact (1px + 1px stroke = 28px), got height {:.2}",
+        segment_rect.height()
+    );
+    let segment_to_heading = alpha_heading.top() - segment_rect.bottom();
+    assert!(
+        segment_to_heading <= 16.5,
+        "project heading must keep compact height and 4px outer gap, got {segment_to_heading:.2}"
+    );
+
+    let claude_tex = agent_icon_texture(&ctx, "claude")
+        .expect("claude icon")
+        .id();
+    let row0_mark = sidebar_251_mesh_rects(&output, claude_tex)
+        .into_iter()
+        .find(|r| r.left() < right && (r.center().y - row_rects[0].center().y).abs() < 4.0)
+        .expect("row 0 claude mark");
+    let row_item_gap = row_rects[0].left() - row0_mark.right();
+    assert!(
+        row_item_gap <= SPACE_XS + 1.5,
+        "session row horizontal gap must use SPACE_XS, got {row_item_gap:.2}"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_302_column_uses_compact_type_scale() {
+    let root = temporary_directory("sidebar-302-type-scale");
+    let (mut app, project, ids) = session_285_app(&root, &["one"]);
+    app.page = Page::Sessions;
+    let unselected_project = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: unselected_project,
+        path: root.join("q"),
+        name: "q".into(),
+        added_at: now(),
+    });
+    let mut q_session = app.store.sessions[0].clone();
+    q_session.id = Uuid::new_v4();
+    q_session.tmux_name = managed_tmux_name(q_session.id);
+    q_session.project_id = unselected_project;
+    q_session.name = "q-one".into();
+    app.store.sessions.push(q_session);
+    app.select_session(ids[0]);
+    app.select_workspace_project(project);
+
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let right = project_column_right(&app);
+    let p_top = column_rect(&output, "p").expect("project p heading").top();
+    assert_ne!(app.selected_project, Some(unselected_project));
+
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "one"), 12.0);
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "p"), 12.0);
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "q"), 12.0);
+    assert_eq!(
+        sidebar_302_font_size(&output, right, 0.0, tr("プロジェクト")),
+        11.5
+    );
+    assert_eq!(
+        sidebar_302_font_size(&output, right, p_top - 4.0, "1"),
+        11.5
+    );
+
+    app.agent_filter[session_agent_filter_index("codex")] = true;
+    let filtered = sidebar_302_settled(&mut app, &ctx);
+    assert_eq!(sidebar_302_font_size(&filtered, right, 0.0, "0 件"), 11.5);
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs() {
+    let root = temporary_directory("sidebar-302-pin-sync");
+    let names = ["oldest", "middle", "newest"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let initial = vec!["newest", "middle", "oldest"];
+    assert_eq!(session_285_rows(&output, &names), initial);
+    assert_eq!(session_285_tabs(&output, &names), initial);
+
+    let row = column_rect(&output, "oldest").unwrap().center();
+    sidebar_302_click(&mut app, &ctx, row, egui::PointerButton::Secondary);
+    let menu = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    let pin_entry = drawn_text_rect(&menu, |t| t == "ピン留め").expect("row menu ピン留め");
+    sidebar_302_click(
+        &mut app,
+        &ctx,
+        pin_entry.center(),
+        egui::PointerButton::Primary,
+    );
+    assert!(app.is_session_pinned(ids[0]));
+
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let pinned_order = vec!["oldest", "newest", "middle"];
+    assert_eq!(session_285_rows(&output, &names), pinned_order);
+    assert_eq!(session_285_tabs(&output, &names), pinned_order);
+    let col_right = column_right(&output);
+    let pin_rects = drawn_text_rects(&output, |t| t == ICON_PIN);
+    assert!(
+        pin_rects.iter().any(|r| r.left() < col_right),
+        "column row must draw ICON_PIN"
+    );
+    assert!(
+        pin_rects.iter().any(|r| r.left() > col_right),
+        "center-top tab must draw ICON_PIN"
+    );
+
+    let from = column_rect(&output, "middle").unwrap().center();
+    let newest_rect = column_rect(&output, "newest").unwrap();
+    let to = egui::pos2(newest_rect.center().x, newest_rect.top() + 1.0);
+    sidebar_302_frame(
+        &mut app,
+        &ctx,
+        vec![
+            egui::Event::PointerMoved(from),
+            column_181_button(from, true),
+        ],
+    );
+    for step in 1..=3 {
+        let pos = from + (to - from) * (step as f32 / 4.0);
+        sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(pos)]);
+    }
+    let drag_out = sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(to)]);
+    let palette = app.store.theme.palette();
+    let drop_y = sidebar_302_hline(&drag_out, palette.accent);
+    let expected_drop_y = newest_rect.center().y - COLUMN_SESSION_MARK_SIZE / 2.0 - 2.0 - 1.0;
+    assert!(
+        (drop_y - expected_drop_y).abs() <= 1.0,
+        "session drop line must land in the 2px SIDEBAR_ROW_GAP ({drop_y:.2} vs {expected_drop_y:.2})"
+    );
+    sidebar_302_frame(&mut app, &ctx, vec![column_181_button(to, false)]);
+
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let reordered = vec!["oldest", "middle", "newest"];
+    assert_eq!(session_285_rows(&output, &names), reordered);
+    assert_eq!(session_285_tabs(&output, &names), reordered);
+
+    // Project drag also uses SPACE_XS (4px) for its slot-0 drop line.
+    let q_proj_id = Uuid::new_v4();
+    app.store.projects.push(Project {
+        id: q_proj_id,
+        path: root.join("q-proj"),
+        name: "q-proj".into(),
+        added_at: now(),
+    });
+    let mut q_sess = app.store.sessions[0].clone();
+    q_sess.id = Uuid::new_v4();
+    q_sess.tmux_name = managed_tmux_name(q_sess.id);
+    q_sess.project_id = q_proj_id;
+    q_sess.name = "q-one".into();
+    app.store.sessions.push(q_sess);
+
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let p_heading = column_rect(&output, "p").expect("p heading");
+    let q_heading = column_rect(&output, "q-proj").expect("q-proj heading");
+    let proj_from = q_heading.center();
+    let proj_to = egui::pos2(p_heading.center().x, p_heading.top() - 2.0);
+    sidebar_302_frame(
+        &mut app,
+        &ctx,
+        vec![
+            egui::Event::PointerMoved(proj_from),
+            column_181_button(proj_from, true),
+        ],
+    );
+    for step in 1..=3 {
+        let pos = proj_from + (proj_to - proj_from) * (step as f32 / 4.0);
+        sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(pos)]);
+    }
+    let proj_drag_out = sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(proj_to)]);
+    let proj_drop_y = sidebar_302_hline(&proj_drag_out, palette.accent);
+    let expected_proj_drop_y =
+        p_heading.center().y - CONTROL_HEIGHT_SMALL / 2.0 - 2.0 - SPACE_XS / 2.0;
+    assert!(
+        (proj_drop_y - expected_proj_drop_y).abs() <= 1.0,
+        "project drop line must land in the 4px SPACE_XS gap ({proj_drop_y:.2} vs {expected_proj_drop_y:.2})"
+    );
+    sidebar_302_frame(&mut app, &ctx, vec![column_181_button(proj_to, false)]);
+    let after_proj_drag = sidebar_302_settled(&mut app, &ctx);
+    let new_p_heading = column_rect(&after_proj_drag, "p").expect("p heading after reorder");
+    let new_q_heading =
+        column_rect(&after_proj_drag, "q-proj").expect("q-proj heading after reorder");
+    assert!(
+        new_q_heading.top() < new_p_heading.top(),
+        "q-proj moved first"
+    );
+    fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap() {
+    let root = temporary_directory("sidebar-302-custom-and-ring");
+    let names = ["c1", "c2", "c3"];
+    let (mut app, _project, ids) = session_285_app(&root, &names);
+    app.page = Page::Sessions;
+    app.store.projects[0].name = "alpha-proj".into();
+    for session in &mut app.store.sessions {
+        session.agent = "custom".into();
+        session.agent_command = "my-custom-tool".into();
+    }
+
+    let ctx = egui::Context::default();
+    let custom_out = sidebar_302_settled(&mut app, &ctx);
+    let alpha_heading = column_rect(&custom_out, "alpha-proj").expect("alpha-proj heading");
+    let custom_rows = ["c3", "c2", "c1"]
+        .iter()
+        .map(|name| {
+            column_rect(&custom_out, name).unwrap_or_else(|| panic!("row `{name}` missing"))
+        })
+        .collect::<Vec<_>>();
+    for pair in custom_rows.windows(2) {
+        let pitch = pair[1].center().y - pair[0].center().y;
+        let gap = pair[1].top() - pair[0].bottom();
+        assert!(
+            pitch <= 24.0,
+            "custom session row pitch must be <= 24.0px, got {pitch:.2}"
+        );
+        assert!(
+            gap <= 8.0,
+            "custom session row vertical gap must be <= 8.0px, got {gap:.2}"
+        );
+    }
+    let custom_heading_to_first = custom_rows[0].top() - alpha_heading.bottom();
+    assert!(
+        custom_heading_to_first <= 13.0,
+        "heading to first custom row gap must be <= 13.0px, got {custom_heading_to_first:.2}"
+    );
+
+    // Part B: speaking badge ring on row 0 must not reach into selected row 1's background,
+    // and when row 0 is selected its colored dot stays within its own row_selected fill.
+    for session in &mut app.store.sessions {
+        session.agent = "claude".into();
+        session.agent_command = "claude".into();
+    }
+    let top_id = ids[2];
+    let second_id = ids[1];
+    app.select_session(second_id);
+    let out_second_selected = sidebar_302_settled(&mut app, &ctx);
+    let right = project_column_right(&app);
+    let palette = app.store.theme.palette();
+
+    fn collect_circles(
+        shape: &egui::epaint::Shape,
+        right: f32,
+        out: &mut Vec<egui::epaint::CircleShape>,
+    ) {
+        match shape {
+            egui::epaint::Shape::Circle(circle) if circle.center.x < right => out.push(*circle),
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect_circles(child, right, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    fn collect_selected_rects(
+        shape: &egui::epaint::Shape,
+        right: f32,
+        fill: Color32,
+        out: &mut Vec<egui::Rect>,
+    ) {
+        match shape {
+            egui::epaint::Shape::Rect(rect) if rect.fill == fill && rect.rect.left() < right => {
+                out.push(rect.rect);
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    collect_selected_rects(child, right, fill, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut circles = Vec::new();
+    let mut selected_rects = Vec::new();
+    for clipped in &out_second_selected.shapes {
+        collect_circles(&clipped.shape, right, &mut circles);
+        collect_selected_rects(
+            &clipped.shape,
+            right,
+            palette.row_selected,
+            &mut selected_rects,
+        );
+    }
+    let expected_ring_r = COLUMN_SESSION_MARK_SIZE * STATUS_DOT_RATIO / 2.0 + STATUS_DOT_RING;
+    let c3_rect = column_rect(&out_second_selected, "c3").expect("c3 rect");
+    let top_ring = circles
+        .iter()
+        .filter(|c| {
+            (c.radius - expected_ring_r).abs() < 0.05
+                && (c.center.y - c3_rect.center().y).abs() < 16.0
+        })
+        .min_by(|a, b| a.center.y.total_cmp(&b.center.y))
+        .expect("top row badge outer ring");
+    let c2_rect = column_rect(&out_second_selected, "c2").expect("c2 rect");
+    let second_selected_rect = selected_rects
+        .iter()
+        .find(|r| r.contains(c2_rect.center()))
+        .expect("second row selected background");
+    let ring_bottom = top_ring.center.y + top_ring.radius;
+    assert!(
+        ring_bottom <= second_selected_rect.top() + 0.05,
+        "badge outer ring ({ring_bottom:.2}) overlaps next row ({:.2})",
+        second_selected_rect.top()
+    );
+
+    app.select_session(top_id);
+    let out_top_selected = sidebar_302_settled(&mut app, &ctx);
+    circles.clear();
+    selected_rects.clear();
+    for clipped in &out_top_selected.shapes {
+        collect_circles(&clipped.shape, right, &mut circles);
+        collect_selected_rects(
+            &clipped.shape,
+            right,
+            palette.row_selected,
+            &mut selected_rects,
+        );
+    }
+    let expected_dot_r = COLUMN_SESSION_MARK_SIZE * STATUS_DOT_RATIO / 2.0;
+    let c3_rect_sel = column_rect(&out_top_selected, "c3").expect("c3 selected rect");
+    let top_selected_rect = selected_rects
+        .iter()
+        .find(|r| r.contains(c3_rect_sel.center()))
+        .expect("top row selected background");
+    let top_dot = circles
+        .iter()
+        .find(|c| {
+            (c.radius - expected_dot_r).abs() < 0.05
+                && (c.center.y - c3_rect_sel.center().y).abs() < 16.0
+        })
+        .expect("top row colored status dot");
+    assert!(
+        top_dot.center.y + top_dot.radius <= top_selected_rect.bottom() + 0.1,
+        "colored status dot ({:.2}) extends below selected row ({:.2})",
+        top_dot.center.y + top_dot.radius,
+        top_selected_rect.bottom()
+    );
     fs::remove_dir_all(root).ok();
 }

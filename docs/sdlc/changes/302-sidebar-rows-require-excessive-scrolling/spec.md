@@ -5,8 +5,8 @@
 
 ## Requirements
 
-1. On `Page::Sessions` rendered through `ui_central_panel` (where the outer layout sets `item_spacing = vec2(10.0, 10.0)` and `apply_interface_metrics` sets `interact_size.y = 28.0`), `ui_workspace_projects` tightens vertical spacing (`SPACE_XS` = `4.0` at column level and `SIDEBAR_ROW_GAP` = `2.0` inside each project frame), tightens frame margins (`Margin::symmetric(SPACE_XS as i8, 2)` on projects and `Margin::symmetric(SPACE_XS as i8, 1)` on session rows, with `1px` padding in `ui_sidebar_agent_segment`), trims `ui.horizontal` row minimum height to `CONTROL_HEIGHT_SMALL` on project headings and `COLUMN_SESSION_MARK_SIZE` on session rows (keeping `workspace_session_name_editor` at `CONTROL_HEIGHT_SMALL`), and removes the trailing `add_space(SPACE_SM)` between projects — so consecutive standard session rows sit at `<= 24.0px` center-to-center pitch with `<= 6.0px` vertical gap, the gap from a project heading to its first session row is `<= 12.0px`, and the gap from one project's last session row to the next project heading is `<= 14.0px`.
-   Test: `sidebar_302_session_rows_and_project_headings_are_compact`.
+1. On `Page::Sessions` rendered through `ui_central_panel` (where the outer layout sets `item_spacing = vec2(10.0, 10.0)` and `apply_interface_metrics` sets `interact_size.y = 28.0`), `ui_workspace_projects` tightens vertical spacing (`SPACE_XS` = `4.0` at column level and `SIDEBAR_ROW_GAP` = `2.0` inside each project frame), tightens frame margins (`Margin::symmetric(SPACE_XS as i8, 2)` on projects and session rows — preserving `2px + 2px = 4.0px` vertical clearance below `session_badge`'s `3.55px` outer dot ring — with `1px` padding in `ui_sidebar_agent_segment`), trims `ui.horizontal` row minimum height to `CONTROL_HEIGHT_SMALL` on project headings and `COLUMN_SESSION_MARK_SIZE` on session rows (including custom/fallback rows via `session_status_icon_sized` while keeping `workspace_session_name_editor` at `CONTROL_HEIGHT_SMALL`), and removes the trailing `add_space(SPACE_SM)` between projects — so consecutive standard and custom session rows sit at `<= 24.0px` center-to-center pitch with `<= 8.0px` text vertical gap, the gap from a project heading to its first session row is `<= 13.0px`, the gap from one project's last session row to the next project heading is `<= 14.0px`, and `session_badge`'s outer dot ring clears the next row without overlapping it while keeping the colored status dot on the row's fill.
+   Tests: `sidebar_302_session_rows_and_project_headings_are_compact`, `sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap`.
 2. Sidebar labels step down one notch on `DESIGN.md`'s existing typography scale: `12.0` (`caption`) for session row titles and project headings, and `11.5` (`chip`) for the `"プロジェクト"` column header, the filter summary count `"{count} 件"`, and per-project `status_count_chip` counts — keeping every `.size(...)` and `FontId` on the documented scale and every button at `CONTROL_HEIGHT` or `CONTROL_HEIGHT_SMALL`.
    Test: `sidebar_302_column_uses_compact_type_scale`.
 3. With compact sidebar spacing and `SIDEBAR_ROW_GAP` wired to `ColumnDrag::Session` (and `SPACE_XS` to `ColumnDrag::Project`), open sessions appear in the exact same order in both the left sidebar and the center-top workspace tab strip, pinning/unpinning (`ピン留め` / `ピン留めを外す`) moves the session first with `ICON_PIN` in both places, and dragging a row across the `2.0px` gap reorders both the sidebar and the center-top tabs.
@@ -27,7 +27,9 @@
 Placement: `EXTEND` (route `modify`) — edits existing sidebar rendering and constants without adding new modules, persisted fields, external commands, or per-frame heap work beyond existing draw code:
 
 - `src/config.rs`: add `pub(crate) const SIDEBAR_ROW_GAP: f32 = 2.0;` right after `SIDEBAR_DEFAULT_W`.
-- `src/ui/widgets.rs`: in `status_count_chip`, change `egui::FontId::proportional(12.5)` to `egui::FontId::proportional(11.5)`.
+- `src/ui/widgets.rs`:
+  - `status_count_chip`: change `egui::FontId::proportional(12.5)` to `egui::FontId::proportional(11.5)`.
+  - Extract `pub(crate) fn session_status_icon_sized(ui: &mut egui::Ui, palette: &Palette, kind: SessionStatusKind, height: f32) -> egui::Response` (allocating `egui::vec2(TAB_STATUS_MARK_SIZE, height)` and painting `TAB_STATUS_MARK_SIZE` centered); have `session_status_icon` delegate to `session_status_icon_sized(..., CONTROL_HEIGHT_SMALL)` so tabs and Home rows keep their existing height.
 - `src/app/screens.rs`:
   - `ui_sidebar_agent_segment`: `.inner_margin(egui::Margin::same(1))` (was `2`).
   - `ui_sidebar_filter_summary`: `RichText::new(...).size(11.5)` (was `12.0`).
@@ -36,14 +38,13 @@ Placement: `EXTEND` (route `modify`) — edits existing sidebar rendering and co
     - `"プロジェクト"` column header label `.size(11.5)` (was `12.5`).
     - Project `egui::Frame::new()`: `.inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 2))` (was `Margin::same(SPACE_SM as i8)`), and inside `.show(ui, |ui| { ... })` set `ui.spacing_mut().item_spacing.y = SIDEBAR_ROW_GAP;` and `ui.spacing_mut().interact_size.y = CONTROL_HEIGHT_SMALL;` for the project heading row.
     - Project heading `RichText::new(&project.name)` (both selected and unselected branches): `.size(12.0)` (was `12.5`).
-    - Session row `egui::Frame::new()`: `.inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 1))` (was `Margin::symmetric(SPACE_SM as i8, 2)`), and before its `ui.horizontal` set `ui.spacing_mut().interact_size.y = COLUMN_SESSION_MARK_SIZE;` and inside `ui.horizontal` set `ui.spacing_mut().item_spacing.x = SPACE_XS;` (also clamp fallback command label allocation to `egui::vec2(width, COLUMN_SESSION_MARK_SIZE)`).
+    - Session row `egui::Frame::new()`: `.inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 2))` (was `Margin::symmetric(SPACE_SM as i8, 2)`), keeping `4.0px` vertical clearance (`2px` margin + `2px` `SIDEBAR_ROW_GAP`) below `session_badge`'s `3.55px` outer ring; before its `ui.horizontal` set `ui.spacing_mut().interact_size.y = COLUMN_SESSION_MARK_SIZE;` and inside `ui.horizontal` set `ui.spacing_mut().item_spacing.x = SPACE_XS;`; in the fallback branch call `session_status_icon_sized(ui, palette, kind, COLUMN_SESSION_MARK_SIZE);` and allocate `egui::vec2(width, COLUMN_SESSION_MARK_SIZE)` for the fallback CLI label.
     - Session title `RichText::new(&title)`: `.size(12.0)` (was `12.5`).
-    - Selected row left accent bar: `row.rect.top() + 1.0` .. `row.rect.bottom() - 1.0` (was `+/- 2.0`).
     - Remove `ui.add_space(SPACE_SM);` after `targets.push(project.id, card.response.rect);`.
     - Wire `ColumnDrag` drop gap: `ColumnDrag::Project(_) => (&targets, SPACE_XS)`, `ColumnDrag::Session { .. } => (&session_targets, SIDEBAR_ROW_GAP)`.
 - `src/tests.rs`:
-  - Update `session_column_project_is_a_heading_not_a_card` to assert `.size(12.0)` on `&project.name`.
-  - Add `sidebar_302_session_rows_and_project_headings_are_compact`, `sidebar_302_column_uses_compact_type_scale`, and `sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs`.
+  - Update `session_column_project_is_a_heading_not_a_card` to assert both `selected` and unselected `.size(12.0)` branches on `&project.name`.
+  - Add `sidebar_302_session_rows_and_project_headings_are_compact`, `sidebar_302_column_uses_compact_type_scale`, `sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs`, and `sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap`.
 - `src/app/screens.rs` line budget: stays below `10000` (`propose` ceiling in `docs/sdlc/bands.yaml`).
 - Persisted shape, external commands, background work: none.
 
@@ -67,7 +68,7 @@ None.
 
 ## Acceptance
 
-- `cargo test --locked sidebar_302_` passes (3 tests, watched failing before code edits).
+- `cargo test --locked sidebar_302_` passes (4 tests, including `sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap`, watched failing before fixes).
 - `cargo test --locked session_column_project_`, `sidebar_251_`, `sidebar_252_`, `session_285_`, `workspace_project_`, `every_button_keeps_a_documented_height`, `every_text_size_is_a_level_on_the_type_scale`, `design_md_documents_exactly_what_the_app_paints`, and `every_theme_stays_readable` pass.
 - `python3 docs/sdlc/changes/302-sidebar-rows-require-excessive-scrolling/mutations.py` catches every mutation.
 - `make q.fast` passes and CI passes before merging to `main`.

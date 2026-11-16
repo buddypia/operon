@@ -13,8 +13,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -22,13 +22,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the three sidebar_302_* tests in src/tests.rs and watch them fail, then apply the compact spacing and type-scale edits."
+resume: "Done. Package and ship /Applications/Operon.app from main after merge so compact sidebar, pinning, and top tabs are live."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: touches src/app/screens.rs, src/ui/widgets.rs, and src/config.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh and shipping from main"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed make q.fast; cargo test --locked sidebar_302_: 4 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose (9907 < 10000)"
+  release-binary: "machine passed yes: touches src/app/screens.rs, src/ui/widgets.rs, and src/config.rs; package and ship from main after landing"
+  guards-verified-by-mutation: "human passed 19 of 19 caught: python3 docs/sdlc/changes/302-sidebar-rows-require-excessive-scrolling/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
