@@ -17,7 +17,7 @@ for a deterministic step).
 
 ## The fix
 
-`scripts/wait-ci.sh [commit]`: ask `gh run list --workflow ci.yml --commit <sha>`
+`scripts/wait-ci.sh`, given a commit (default HEAD): ask `gh run list --workflow ci.yml --commit <sha>`
 every few seconds until a run appears (bounded, default 180 s), then
 `gh run watch <id> --exit-status` (bounded, default an hour). Exit 0 on success,
 1 on failure or no run, 2 when gh cannot be asked — the codes
@@ -60,3 +60,14 @@ name the script instead of `gh run watch`; the gate's verdict does not change.
 - This change's own landing waits with `bash scripts/wait-ci.sh` in one call.
 
 ## Departures from the plan
+
+- **The script was drafted before this plan was committed.** It was kept out
+  of the plan's commit, and the tests were watched failing with the script
+  moved away before it came back unchanged.
+- **The test bounds the script.** The first sweep hung on "the wait never gives
+  up": the test ran the script with no limit. It now runs under
+  `scripts/run-bounded.sh 20`, and that mutation fails in seconds.
+- **No independent verifier run.** `empirical-verifier` needs an isolated
+  worktree, and Claude Code's isolated worktrees are refused by this
+  repository's guards — change 299 fixes that. The evidence here is the two
+  tests and the six-of-six sweep, which CI re-runs.

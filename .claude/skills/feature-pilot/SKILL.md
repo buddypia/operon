@@ -115,7 +115,9 @@ the earlier sections stay as they were.
   direct edits after `cleanup-worktree`.
 - **Commit** in the worktree directory — never `git -C` from elsewhere.
 - **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
-  for CI with `gh run watch` (in the background; about five minutes). A red run
+  for CI with `bash scripts/wait-ci.sh` in the background (about five minutes):
+  it waits for the push's run to appear, then watches it, in one call — a bare
+  `gh run watch` right after the push finds no run (change 298). A red run
   is fixed on the branch and pushed again. When `main` has moved, merge it into
   the branch first: the merge gate wants the branch to contain `main`. Merge
   with `git merge --no-commit origin/main`, then run

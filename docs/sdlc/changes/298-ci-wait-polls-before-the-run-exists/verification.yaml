@@ -1,0 +1,6 @@
+digest: "0a24010c8350b882"
+
+obligations:
+  - I1 empirical-test :: cargo test --locked the_ci_wait_waits_for_the_run_to_appear_then_watches_it
+  - I2 empirical-test :: cargo test --locked the_ci_wait_gives_up_when_no_run_appears
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/298-ci-wait-polls-before-the-run-exists/mutations.py

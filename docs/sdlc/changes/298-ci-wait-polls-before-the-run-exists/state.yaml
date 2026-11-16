@@ -9,8 +9,8 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -18,13 +18,13 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Write the failing tests for scripts/wait-ci.sh, then point the landing steps at it."
+resume: "Done. Landings wait for CI with bash scripts/wait-ci.sh in one call."
 
 contract:
-  three-gates: "machine pending fmt and clippy at commit; cargo test --locked the_ci_wait_; full suite in CI"
-  failing-test-first: "machine pending the_ci_wait_ tests fail without scripts/wait-ci.sh"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked the_ci_wait_ 2 passed, merge harness landing feature_pilot approval 34 passed; full suite in CI"
+  failing-test-first: "machine passed both the_ci_wait_ tests failed with scripts/wait-ci.sh moved away"
   release-binary: "machine waived touches scripts, .claude, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/298-ci-wait-polls-before-the-run-exists/mutations.py"
+  guards-verified-by-mutation: "machine passed 6 of 6 caught: python3 docs/sdlc/changes/298-ci-wait-polls-before-the-run-exists/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
