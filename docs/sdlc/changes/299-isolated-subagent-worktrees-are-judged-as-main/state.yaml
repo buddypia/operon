@@ -1,0 +1,38 @@
+# Change 299. Bug report, as the bugfix route takes it in place of an intent:
+#
+# A subagent started with `isolation: "worktree"` (empirical-verifier,
+# formal-verifier — both are told to run that way) cannot work in its tree.
+# Claude Code puts the tree at `<repo>/.claude/worktrees/<name>`, and every
+# worktree guard here recognises a worktree only under `.worktrees/`; with
+# CLAUDE_PROJECT_DIR naming the main checkout, the guard asks main's branch,
+# reads `main`, and refuses the subagent's commands and edits as trunk work.
+# Changes 296 and 297 both record a verifier refused that way and reporting
+# from reading only, so neither had its claims tested by experiment.
+
+state:
+  route: "bugfix"
+  stage: "build"
+  status: "in-progress"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Write the failing tests for the WorktreeCreate hook, then the hook, the settings entry, and the sweep."
+
+contract:
+  three-gates: "machine pending fmt and clippy at commit; cargo test --locked isolated_subagent; full suite in CI"
+  failing-test-first: "machine pending the isolated_subagent tests fail without the hook"
+  release-binary: "machine waived touches .claude, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/299-isolated-subagent-worktrees-are-judged-as-main/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
