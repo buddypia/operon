@@ -28,7 +28,7 @@ contract:
   three-gates: "machine passed make q.fast; cargo test --locked sidebar_302_: 4 passed"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose (9907 < 10000)"
   release-binary: "machine passed yes: touches src/app/screens.rs, src/ui/widgets.rs, and src/config.rs; package and ship from main after landing"
-  guards-verified-by-mutation: "human passed 19 of 19 caught: python3 docs/sdlc/changes/302-sidebar-rows-require-excessive-scrolling/mutations.py"
+  guards-verified-by-mutation: "human passed 12 of 12 caught: python3 docs/sdlc/changes/302-sidebar-rows-require-excessive-scrolling/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
