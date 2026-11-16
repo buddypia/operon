@@ -5,6 +5,71 @@
 
 use crate::*;
 
+#[cfg(test)]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CliRecoveryRoots {
+    pub(crate) claude_registry: Option<PathBuf>,
+    pub(crate) claude_projects: Option<PathBuf>,
+    pub(crate) codex_sessions: Option<PathBuf>,
+    pub(crate) codex_title_index: Option<PathBuf>,
+    pub(crate) antigravity_history: Option<PathBuf>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn recover_cli_conversation_in(
+    claude_registry: Option<&Path>,
+    claude_projects: Option<&Path>,
+    codex_sessions: Option<&Path>,
+    codex_title_index: Option<&Path>,
+    antigravity_history: Option<&Path>,
+    source: &Session,
+    provider: CliProvider,
+    workspace: &Path,
+) -> UiResult<Option<CliSession>> {
+    if !workspace.is_dir() {
+        return Ok(None);
+    }
+    let started_at = source.launched_at.unwrap_or(source.created_at);
+    match provider {
+        CliProvider::Claude => {
+            let (Some(registry_root), Some(projects_root)) = (claude_registry, claude_projects)
+            else {
+                return Ok(None);
+            };
+            match registered_claude_conversation_in(registry_root, workspace, started_at, None)? {
+                RegisteredConversation::Named(registered) => {
+                    if claude_transcript_path_in(projects_root, workspace, &registered).is_none() {
+                        return Ok(None);
+                    }
+                    let mut unnamed = source.clone();
+                    unnamed.native_session_id = None;
+                    return corrected_managed_claude_conversation_in(
+                        registry_root,
+                        projects_root,
+                        &unnamed,
+                        workspace,
+                        None,
+                    );
+                }
+                RegisteredConversation::Unknown => {}
+            }
+            recover_managed_claude_session_in(projects_root, workspace, started_at, &source.goal)
+        }
+        CliProvider::Codex => match (codex_sessions, codex_title_index) {
+            (Some(sessions_root), Some(title_index)) => {
+                recover_managed_codex_session_in(sessions_root, title_index, workspace, started_at)
+            }
+            _ => Ok(None),
+        },
+        CliProvider::Gemini => match antigravity_history {
+            Some(history_path) => {
+                recover_managed_antigravity_session_in(history_path, workspace, started_at)
+            }
+            None => Ok(None),
+        },
+    }
+}
+
 /// Whether a launch brings its session forward — selects it, shows the
 /// session page, and says it is starting — or starts it where it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +109,8 @@ pub(crate) fn relaunch_kind(session: &Session) -> Option<RelaunchKind> {
     session
         .native_session_id
         .as_ref()
+        .cloned()
+        .or_else(|| native_session_id_from_agent_command(provider, &session.agent_command))
         .map(|_| RelaunchKind::Resume(provider))
 }
 
@@ -86,6 +153,22 @@ pub(crate) fn take_cli_kind(session: &mut Session, provider: CliProvider) -> boo
     session.goal.clear();
     session.origin = Some(provenance);
     true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RelaunchAttempt {
+    Launched,
+    ConversationUnavailable,
+    LaunchRefused,
+    PersistFailed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryOutcome {
+    NotRecovered,
+    PersistFailed,
+    Resumed,
+    FallbackShell,
 }
 
 impl OperonApp {
@@ -200,34 +283,52 @@ impl OperonApp {
         }
     }
 
-    /// Queues interactive sessions that an older build saved as `Exited` while
-    /// their workspace tab was still open so the first poll reopens them as
-    /// live login shells instead of leaving `Pane is dead` on screen
-    /// (change 288). Closed historical sessions stay `Exited`.
-    pub(crate) fn reopen_exited_workspace_tabs_on_load(&mut self) {
+    fn collect_open_workspace_tab_sessions(
+        &self,
+        status_filter: impl Fn(&SessionStatus) -> bool,
+    ) -> Vec<Uuid> {
         if !self.tools.tmux {
-            return;
+            return Vec::new();
         }
         let mut open_tabs = self.workspace.session_ids().collect::<HashSet<_>>();
         for (tabs, _) in self.project_workspaces.values() {
             open_tabs.extend(tabs.session_ids());
         }
         if open_tabs.is_empty() {
-            return;
+            return Vec::new();
         }
-        let candidates = self
-            .store
+        self.store
             .sessions
             .iter()
             .filter(|session| {
-                session.status == SessionStatus::Exited
+                status_filter(&session.status)
                     && open_tabs.contains(&session.id)
                     && !self.store.pending_cancellations.contains(&session.id)
                     && is_interactive_terminal_session(session)
                     && queued_dependency_count(&self.store.sessions, session.id) == 0
             })
             .map(|session| session.id)
-            .collect::<Vec<_>>();
+            .collect()
+    }
+
+    /// Queues interactive sessions that a previous run left as `Lost` or
+    /// `Failed` while their workspace tab remained open so the first poll
+    /// recovers their CLI conversation or reopens them as login shells instead
+    /// of leaving an unrecoverable missing-pane tab on screen (change 303).
+    pub(crate) fn reopen_lost_workspace_tabs_on_load(&mut self) {
+        let candidates = self.collect_open_workspace_tab_sessions(|status| {
+            matches!(status, SessionStatus::Lost | SessionStatus::Failed)
+        });
+        self.lost_tabs_on_load.extend(candidates);
+    }
+
+    /// Queues interactive sessions that an older build saved as `Exited` while
+    /// their workspace tab was still open so the first poll reopens them as
+    /// live login shells instead of leaving `Pane is dead` on screen
+    /// (change 288). Closed historical sessions stay `Exited`.
+    pub(crate) fn reopen_exited_workspace_tabs_on_load(&mut self) {
+        let candidates =
+            self.collect_open_workspace_tab_sessions(|status| *status == SessionStatus::Exited);
         self.exited_tabs_on_load.extend(candidates);
     }
 
@@ -237,9 +338,17 @@ impl OperonApp {
     /// pointers so future retries or typed CLIs start clean (change 288).
     /// Rolls back the whole record if launching the shell is refused or cannot
     /// be persisted.
+    #[cfg(test)]
     pub(crate) fn reopen_exited_session_as_shell(&mut self, session_id: Uuid) -> bool {
+        self.reopen_exited_session_as_shell_attempt(session_id) == RelaunchAttempt::Launched
+    }
+
+    pub(crate) fn reopen_exited_session_as_shell_attempt(
+        &mut self,
+        session_id: Uuid,
+    ) -> RelaunchAttempt {
         if self.session_launch_running(session_id) {
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         }
         let Some(existing) = self
             .store
@@ -248,7 +357,7 @@ impl OperonApp {
             .find(|session| session.id == session_id)
             .cloned()
         else {
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         };
         let origin = terminal_provenance(&existing).unwrap_or(SessionOrigin::PlainTerminal);
         let previous_store = self.store.clone();
@@ -265,14 +374,15 @@ impl OperonApp {
             stored.native_session_path = None;
             stored.origin = Some(origin);
         }
-        if !self.launch_session_record(session_id, LaunchFocus::Keep) {
+        let attempt = self.launch_session_record_attempt(session_id, LaunchFocus::Keep);
+        if attempt != RelaunchAttempt::Launched {
             self.store = previous_store;
-            return false;
+            return attempt;
         }
         self.hook_status.remove(&session_id);
         self.background_tasks
             .remove(&BackgroundKey::NativeSessionResolution(session_id));
-        true
+        RelaunchAttempt::Launched
     }
 
     /// Whether enough time has passed since the last automatic restoration of
@@ -298,9 +408,234 @@ impl OperonApp {
         self.last_auto_restore.remove(&session_id);
     }
 
-    /// Handles automatic restore after `BackgroundResult::TerminalResized`
-    /// observed `TmuxState::Gone` and persisted `SessionStatus::Lost`
-    /// (change 291).
+    pub(crate) fn session_workspace_path(&self, session: &Session) -> PathBuf {
+        session.worktree_path.clone().unwrap_or_else(|| {
+            self.store
+                .projects
+                .iter()
+                .find(|project| project.id == session.project_id)
+                .map(|project| project.path.clone())
+                .unwrap_or_default()
+        })
+    }
+
+    pub(crate) fn can_attempt_session_relaunch(&self, session: &Session) -> bool {
+        relaunch_kind(session).is_some()
+            || (cli_provider_for_agent(&session.agent).is_some()
+                && self.session_workspace_path(session).is_dir())
+    }
+
+    pub(crate) fn can_fallback_open_tab_to_shell(&self, session: &Session) -> bool {
+        self.session_has_a_tab(session.id)
+            && is_interactive_terminal_session(session)
+            && queued_dependency_count(&self.store.sessions, session.id) == 0
+    }
+
+    pub(crate) fn can_auto_recover_session(&self, session: &Session) -> bool {
+        self.can_attempt_session_relaunch(session) || self.can_fallback_open_tab_to_shell(session)
+    }
+
+    fn recover_cli_conversation_for_session(
+        &self,
+        source: &Session,
+        provider: CliProvider,
+        workspace: &Path,
+    ) -> UiResult<Option<CliSession>> {
+        #[cfg(test)]
+        if let Some(roots) = &self.cli_recovery_roots {
+            return recover_cli_conversation_in(
+                roots.claude_registry.as_deref(),
+                roots.claude_projects.as_deref(),
+                roots.codex_sessions.as_deref(),
+                roots.codex_title_index.as_deref(),
+                roots.antigravity_history.as_deref(),
+                source,
+                provider,
+                workspace,
+            );
+        }
+        let claude_registry = claude_session_registry_root();
+        let claude_projects = claude_projects_root();
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let codex_sessions = home.as_ref().map(|h| h.join(".codex").join("sessions"));
+        let codex_index = home
+            .as_ref()
+            .map(|h| h.join(".codex").join("session_index.jsonl"));
+        let antigravity_history = antigravity_history_index_path().ok();
+        recover_cli_conversation_in(
+            claude_registry.as_deref(),
+            claude_projects.as_deref(),
+            codex_sessions.as_deref(),
+            codex_index.as_deref(),
+            antigravity_history.as_deref(),
+            source,
+            provider,
+            workspace,
+        )
+    }
+
+    pub(crate) fn resolve_or_recover_native_session(
+        &self,
+        source: &Session,
+        provider: CliProvider,
+        workspace: &Path,
+    ) -> Result<Option<NativeResume>, String> {
+        let explicit_or_command_id = source
+            .native_session_id
+            .clone()
+            .or_else(|| native_session_id_from_agent_command(provider, &source.agent_command));
+        let (native_session_id, native_session_path) = if let Some(native_id) =
+            explicit_or_command_id
+        {
+            if !is_safe_cli_session_id(&native_id) {
+                return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
+            }
+            let missing = self.tools.missing_session_tools(provider);
+            if !missing.is_empty() {
+                return Err(tf!(
+                    "この会話を再開するには {tools} が PATH 上に必要です。",
+                    tools = missing.join(tr(" と "))
+                ));
+            }
+            let recorded_transcript = source
+                .native_session_path
+                .clone()
+                .or_else(|| native_session_path_for_project(provider, workspace, &native_id));
+            let corrected = {
+                #[cfg(test)]
+                if let Some(roots) = &self.cli_recovery_roots {
+                    if let (Some(registry_root), Some(projects_root)) = (
+                        roots.claude_registry.as_deref(),
+                        roots.claude_projects.as_deref(),
+                    ) {
+                        corrected_managed_claude_conversation_in(
+                            registry_root,
+                            projects_root,
+                            source,
+                            workspace,
+                            recorded_transcript.as_deref(),
+                        )
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    corrected_managed_claude_conversation(
+                        source,
+                        workspace,
+                        recorded_transcript.as_deref(),
+                    )
+                }
+                #[cfg(not(test))]
+                corrected_managed_claude_conversation(
+                    source,
+                    workspace,
+                    recorded_transcript.as_deref(),
+                )
+            };
+            match corrected {
+                Ok(Some(found)) => (found.native_id, Some(found.path)),
+                Ok(None) => (native_id, recorded_transcript),
+                Err(error) => {
+                    return Err(tf!(
+                        "このターミナルの実際の会話を特定できませんでした: {error}",
+                        error = error
+                    ));
+                }
+            }
+        } else {
+            let Some(found) =
+                self.recover_cli_conversation_for_session(source, provider, workspace)?
+            else {
+                return Ok(None);
+            };
+            if !is_safe_cli_session_id(&found.native_id) {
+                return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
+            }
+            let missing = self.tools.missing_session_tools(provider);
+            if !missing.is_empty() {
+                return Err(tf!(
+                    "この会話を再開するには {tools} が PATH 上に必要です。",
+                    tools = missing.join(tr(" と "))
+                ));
+            }
+            (found.native_id, Some(found.path))
+        };
+
+        if !is_safe_cli_session_id(&native_session_id) {
+            return Err(tr("保存されているネイティブ再開 ID は安全に実行できません。").into());
+        }
+        Ok(Some(
+            match validate_session_transcript_for_resume(
+                provider,
+                workspace,
+                &native_session_id,
+                native_session_path.as_deref(),
+            ) {
+                TranscriptResumeReadiness::Ready(path) => NativeResume::Ready {
+                    native_id: native_session_id,
+                    path: Some(path),
+                    repaired_bytes: None,
+                },
+                TranscriptResumeReadiness::Sanitized {
+                    path,
+                    removed_bytes,
+                } => NativeResume::Ready {
+                    native_id: native_session_id,
+                    path: Some(path),
+                    repaired_bytes: Some(removed_bytes),
+                },
+                TranscriptResumeReadiness::EmptyOrMissing => NativeResume::NoTranscript,
+            },
+        ))
+    }
+
+    pub(crate) fn reconcile_observed_tmux_gone(&mut self, session_id: Uuid, now: Instant) {
+        if self.session_launch_running(session_id) {
+            return;
+        }
+        if self.cancellation_pending(session_id) {
+            self.store
+                .pending_cancellations
+                .retain(|pending| *pending != session_id);
+            if let Some(session) = self.store.sessions.iter_mut().find(|session| {
+                session.id == session_id
+                    && matches!(
+                        session.status,
+                        SessionStatus::Active | SessionStatus::Starting | SessionStatus::Unknown
+                    )
+            }) {
+                session.status = SessionStatus::Cancelled;
+            }
+            self.persist_external_transition(
+                tr("セッションをキャンセルしました。"),
+                tr("tmux セッションはキャンセルされました"),
+            );
+            if !self.remove_after_close.contains(&session_id) {
+                self.clear_cancelled_unread_and_close_tab(session_id);
+            }
+        } else if let Some(session) = self.store.sessions.iter_mut().find(|session| {
+            session.id == session_id
+                && matches!(
+                    session.status,
+                    SessionStatus::Active | SessionStatus::Starting | SessionStatus::Unknown
+                )
+        }) {
+            // The server is gone whether or not the store can be written.
+            // Rolling back to `Active` would ask for a resize or capture every
+            // frame; stay `Lost` and retry the save.
+            session.status = SessionStatus::Lost;
+            if !self.persist() {
+                self.store_retry_pending = true;
+                self.notice = Some(tr("tmux が見つからないためセッションを停止扱いにしましたが、保存できませんでした。Operon が自動的に再試行します。").into());
+            } else {
+                self.auto_restore_after_resize_gone(session_id, now);
+            }
+        }
+    }
+
+    /// Handles automatic restore after `TerminalResized`, `TerminalInputSent`,
+    /// or passive `SessionOutput` observed `TmuxState::Gone` and persisted
+    /// `SessionStatus::Lost` (changes 291, 303).
     pub(crate) fn auto_restore_after_resize_gone(&mut self, session_id: Uuid, now: Instant) {
         let first_look = self.relaunch_candidates.remove(&session_id);
         if !self.tools.tmux || self.setup_sessions.contains(&session_id) {
@@ -310,7 +645,7 @@ impl OperonApp {
             .store
             .sessions
             .iter()
-            .find(|session| session.id == session_id && relaunch_kind(session).is_some())
+            .find(|session| session.id == session_id && self.can_auto_recover_session(session))
             .map(|session| session.name.clone())
         else {
             return;
@@ -323,6 +658,161 @@ impl OperonApp {
         }
     }
 
+    fn recover_session_or_fallback_shell(
+        &mut self,
+        session_id: Uuid,
+        now: Instant,
+        persistent_notice: &mut bool,
+    ) -> RecoveryOutcome {
+        let can_try_relaunch = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| self.can_attempt_session_relaunch(session));
+        if can_try_relaunch {
+            let saved_notice = self.notice.take();
+            let attempt = self.relaunch_lost_session_attempt(session_id);
+            if self.notice.is_some() {
+                self.brief_notice = None;
+                *persistent_notice = true;
+            } else {
+                self.notice = saved_notice;
+            }
+            match attempt {
+                RelaunchAttempt::Launched => {
+                    self.record_auto_restore(session_id, now);
+                    return RecoveryOutcome::Resumed;
+                }
+                RelaunchAttempt::LaunchRefused => return RecoveryOutcome::NotRecovered,
+                RelaunchAttempt::PersistFailed => return RecoveryOutcome::PersistFailed,
+                RelaunchAttempt::ConversationUnavailable => {}
+            }
+        }
+        let can_fallback = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .is_some_and(|session| self.can_fallback_open_tab_to_shell(session));
+        if can_fallback {
+            let saved_notice = self.notice.take();
+            let attempt = self.reopen_exited_session_as_shell_attempt(session_id);
+            if self.notice.is_some() {
+                self.brief_notice = None;
+                *persistent_notice = true;
+            } else {
+                self.notice = saved_notice;
+            }
+            match attempt {
+                RelaunchAttempt::Launched => {
+                    self.record_auto_restore(session_id, now);
+                    return RecoveryOutcome::FallbackShell;
+                }
+                RelaunchAttempt::PersistFailed => return RecoveryOutcome::PersistFailed,
+                RelaunchAttempt::LaunchRefused | RelaunchAttempt::ConversationUnavailable => {
+                    return RecoveryOutcome::NotRecovered;
+                }
+            }
+        }
+        RecoveryOutcome::NotRecovered
+    }
+
+    fn emit_startup_relaunch_toast(&mut self, count: usize) {
+        if count > 0 {
+            self.notice_briefly(tf!(
+                "前回開いていたセッションを {count} 件再開しました。",
+                count = count
+            ));
+        }
+    }
+
+    fn emit_forced_restore_toast(&mut self, names: &[String]) {
+        match names {
+            [] => {}
+            [name] => self.notice_briefly(tf!(
+                "強制終了されたセッションを自動で復元しました: {name}",
+                name = name
+            )),
+            many => self.notice_briefly(tf!(
+                "強制終了されたセッションを {count} 件自動で復元しました。",
+                count = many.len()
+            )),
+        }
+    }
+
+    fn emit_fallback_shell_toast(&mut self, names: &[String]) {
+        match names {
+            [] => {}
+            [name] => self.notice_briefly(tf!(
+                "会話を復元できなかったため、ターミナルとして開き直しました: {name}",
+                name = name
+            )),
+            many => self.notice_briefly(tf!(
+                "会話を復元できなかったため、{count} 件をターミナルとして開き直しました。",
+                count = many.len()
+            )),
+        }
+    }
+
+    fn relaunch_remembered_batch(
+        &mut self,
+        ids: Vec<Uuid>,
+        now: Instant,
+        persistent_notice: &mut bool,
+        fallback_names: &mut Vec<String>,
+    ) -> HashSet<Uuid> {
+        let mut started = HashSet::new();
+        for id in ids {
+            let name = self
+                .store
+                .sessions
+                .iter()
+                .find(|session| session.id == id)
+                .map(|session| session.name.clone())
+                .unwrap_or_default();
+            match self.recover_session_or_fallback_shell(id, now, persistent_notice) {
+                RecoveryOutcome::Resumed => {
+                    self.lost_tabs_on_load.remove(&id);
+                    started.insert(id);
+                }
+                RecoveryOutcome::FallbackShell => {
+                    self.lost_tabs_on_load.remove(&id);
+                    fallback_names.push(name);
+                }
+                RecoveryOutcome::NotRecovered => {
+                    self.lost_tabs_on_load.remove(&id);
+                }
+                RecoveryOutcome::PersistFailed => {}
+            }
+        }
+        started
+    }
+
+    fn restore_forced_batch(
+        &mut self,
+        sessions: Vec<(Uuid, String)>,
+        now: Instant,
+        persistent_notice: &mut bool,
+        fallback_names: &mut Vec<String>,
+    ) -> (HashSet<Uuid>, Vec<String>) {
+        let mut restored_ids = HashSet::new();
+        let mut restored_names = Vec::new();
+        for (id, name) in sessions {
+            match self.recover_session_or_fallback_shell(id, now, persistent_notice) {
+                RecoveryOutcome::Resumed => {
+                    restored_ids.insert(id);
+                    restored_names.push(name);
+                }
+                RecoveryOutcome::FallbackShell => {
+                    fallback_names.push(name);
+                }
+                RecoveryOutcome::NotRecovered | RecoveryOutcome::PersistFailed => {}
+            }
+        }
+        (restored_ids, restored_names)
+    }
+
     /// Starts again, in place, the sessions the first look found gone that
     /// were running when Operon last closed, and says how many it started
     /// unless a persistent notice was raised during the same poll.
@@ -332,26 +822,12 @@ impl OperonApp {
         now: Instant,
         persistent_notice: &mut bool,
     ) -> HashSet<Uuid> {
-        let mut started = HashSet::new();
-        for id in ids {
-            let saved_notice = self.notice.take();
-            let launched = self.relaunch_lost_session(id);
-            if self.notice.is_some() {
-                self.brief_notice = None;
-                *persistent_notice = true;
-            } else {
-                self.notice = saved_notice;
-            }
-            if launched {
-                self.record_auto_restore(id, now);
-                started.insert(id);
-            }
-        }
-        if !started.is_empty() && !*persistent_notice && !self.store_retry_pending {
-            self.notice_briefly(tf!(
-                "前回開いていたセッションを {count} 件再開しました。",
-                count = started.len()
-            ));
+        let mut fallback_names = Vec::new();
+        let started =
+            self.relaunch_remembered_batch(ids, now, persistent_notice, &mut fallback_names);
+        if !*persistent_notice && !self.store_retry_pending {
+            self.emit_startup_relaunch_toast(started.len());
+            self.emit_fallback_shell_toast(&fallback_names);
         }
         started
     }
@@ -366,35 +842,12 @@ impl OperonApp {
         now: Instant,
         persistent_notice: &mut bool,
     ) -> HashSet<Uuid> {
-        let mut restored_ids = HashSet::new();
-        let mut restored_names = Vec::new();
-        for (id, name) in sessions {
-            let saved_notice = self.notice.take();
-            let launched = self.relaunch_lost_session(id);
-            if self.notice.is_some() {
-                self.brief_notice = None;
-                *persistent_notice = true;
-            } else {
-                self.notice = saved_notice;
-            }
-            if launched {
-                self.record_auto_restore(id, now);
-                restored_ids.insert(id);
-                restored_names.push(name);
-            }
-        }
+        let mut fallback_names = Vec::new();
+        let (restored_ids, restored_names) =
+            self.restore_forced_batch(sessions, now, persistent_notice, &mut fallback_names);
         if !*persistent_notice && !self.store_retry_pending {
-            match restored_names.as_slice() {
-                [] => {}
-                [name] => self.notice_briefly(tf!(
-                    "強制終了されたセッションを自動で復元しました: {name}",
-                    name = name
-                )),
-                many => self.notice_briefly(tf!(
-                    "強制終了されたセッションを {count} 件自動で復元しました。",
-                    count = many.len()
-                )),
-            }
+            self.emit_forced_restore_toast(&restored_names);
+            self.emit_fallback_shell_toast(&fallback_names);
         }
         restored_ids
     }
@@ -458,7 +911,10 @@ impl OperonApp {
         }
         for id in reopen_shells {
             let saved_notice = self.notice.take();
-            self.reopen_exited_session_as_shell(id);
+            let attempt = self.reopen_exited_session_as_shell_attempt(id);
+            if attempt != RelaunchAttempt::PersistFailed {
+                self.exited_tabs_on_load.remove(&id);
+            }
             if self.notice.is_some() {
                 self.brief_notice = None;
                 persistent_notice = true;
@@ -466,13 +922,26 @@ impl OperonApp {
                 self.notice = saved_notice;
             }
         }
-        let mut relaunched_ids =
-            self.relaunch_remembered_sessions(relaunch, now, &mut persistent_notice);
-        relaunched_ids.extend(self.restore_forced_sessions(
+        let mut fallback_names = Vec::new();
+        let mut relaunched_ids = self.relaunch_remembered_batch(
+            relaunch,
+            now,
+            &mut persistent_notice,
+            &mut fallback_names,
+        );
+        let (forced_ids, forced_names) = self.restore_forced_batch(
             forced_restore,
             now,
             &mut persistent_notice,
-        ));
+            &mut fallback_names,
+        );
+        let startup_count = relaunched_ids.len();
+        relaunched_ids.extend(forced_ids);
+        if !persistent_notice && !self.store_retry_pending {
+            self.emit_startup_relaunch_toast(startup_count);
+            self.emit_forced_restore_toast(&forced_names);
+            self.emit_fallback_shell_toast(&fallback_names);
+        }
         if changed && self.store.notifications_enabled {
             for name in completed {
                 self.send_notification(tf!("セッションが完了しました: {name}", name = name));
@@ -496,7 +965,12 @@ impl OperonApp {
     /// that would send its first request again — and keeps its 「再試行」.
     /// Which sessions come here — Lost or Failed at the first look, never one
     /// the person exited — is `apply_session_poll`'s decision alone.
+    #[cfg(test)]
     pub(crate) fn relaunch_lost_session(&mut self, session_id: Uuid) -> bool {
+        self.relaunch_lost_session_attempt(session_id) == RelaunchAttempt::Launched
+    }
+
+    pub(crate) fn relaunch_lost_session_attempt(&mut self, session_id: Uuid) -> RelaunchAttempt {
         let Some(session) = self
             .store
             .sessions
@@ -504,25 +978,34 @@ impl OperonApp {
             .find(|session| session.id == session_id)
             .cloned()
         else {
-            return false;
+            return RelaunchAttempt::LaunchRefused;
         };
-        let provider = match relaunch_kind(&session) {
-            None => return false,
-            Some(RelaunchKind::Shell) => {
-                return self.launch_session_record(session_id, LaunchFocus::Keep)
-            }
-            Some(RelaunchKind::Resume(provider)) => provider,
+        if session.agent == "terminal" && session.agent_command.is_empty() {
+            return self.launch_session_record_attempt(session_id, LaunchFocus::Keep);
+        }
+        let Some(provider) = cli_provider_for_agent(&session.agent) else {
+            return RelaunchAttempt::ConversationUnavailable;
         };
-        let (native_id, path) = match self.prepare_native_resume(&session, provider) {
-            Ok(NativeResume::Ready {
-                native_id, path, ..
-            }) => (native_id, path),
-            Ok(NativeResume::NoTranscript) => return false,
-            Err(notice) => {
-                self.notice = Some(notice);
-                return false;
-            }
-        };
+        let workspace = self.session_workspace_path(&session);
+        let has_saved_id = session.native_session_id.is_some()
+            || native_session_id_from_agent_command(provider, &session.agent_command).is_some();
+        let (native_id, path) =
+            match self.resolve_or_recover_native_session(&session, provider, &workspace) {
+                Ok(Some(NativeResume::Ready {
+                    native_id, path, ..
+                })) => (native_id, path),
+                Ok(Some(NativeResume::NoTranscript)) | Ok(None) => {
+                    return RelaunchAttempt::ConversationUnavailable;
+                }
+                Err(notice) => {
+                    self.notice = Some(notice);
+                    return if has_saved_id {
+                        RelaunchAttempt::LaunchRefused
+                    } else {
+                        RelaunchAttempt::ConversationUnavailable
+                    };
+                }
+            };
         let previous_store = self.store.clone();
         if let Some(stored) = self
             .store
@@ -541,8 +1024,8 @@ impl OperonApp {
         }
         if !self.persist() {
             self.store = previous_store;
-            return false;
+            return RelaunchAttempt::PersistFailed;
         }
-        self.launch_session_record(session_id, LaunchFocus::Keep)
+        self.launch_session_record_attempt(session_id, LaunchFocus::Keep)
     }
 }

@@ -27,6 +27,24 @@ pub(crate) struct PrelaidIncremental {
     pub(crate) dirty_lines: Option<Vec<usize>>,
 }
 
+pub(crate) fn terminal_empty_placeholder(
+    status: &SessionStatus,
+    capture_missing: bool,
+) -> &'static str {
+    match status {
+        SessionStatus::Queued => tr("開始待機中のため、まだターミナル出力はありません。"),
+        SessionStatus::Lost
+        | SessionStatus::Failed
+        | SessionStatus::Exited
+        | SessionStatus::Cancelled
+            if capture_missing =>
+        {
+            tr("このセッションのターミナルは終了しているため、表示できる出力はありません。")
+        }
+        _ => tr("ターミナル出力を待っています…"),
+    }
+}
+
 pub(crate) fn terminal_output_fingerprint(output: &str) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     output.hash(&mut hasher);
@@ -801,6 +819,100 @@ impl OperonApp {
         }
     }
 
+    pub(crate) fn session_eligible_for_initial_output(&self, session: &Session) -> bool {
+        session.status != SessionStatus::Queued
+            && !self.session_launch_running(session.id)
+            && !self.terminal_capture_missing.contains(&session.id)
+            && !self.lost_tabs_on_load.contains(&session.id)
+            && !self.exited_tabs_on_load.contains(&session.id)
+    }
+
+    pub(crate) fn session_is_live_without_inflight_launch(&self, session_id: Uuid) -> bool {
+        !self.session_launch_running(session_id)
+            && self.store.sessions.iter().any(|session| {
+                session.id == session_id
+                    && matches!(
+                        session.status,
+                        SessionStatus::Active | SessionStatus::Starting | SessionStatus::Unknown
+                    )
+            })
+    }
+
+    pub(crate) fn record_terminal_capture_missing(&mut self, session_id: Uuid) {
+        let sessions = &self.store.sessions;
+        self.terminal_capture_missing
+            .retain(|known| sessions.iter().any(|session| session.id == *known));
+        if sessions.iter().any(|session| session.id == session_id) {
+            self.terminal_capture_missing.insert(session_id);
+        }
+    }
+
+    pub(crate) fn request_initial_pane_output_if_needed(&mut self, session: &Session) {
+        let has_layouts = self.terminal_layouts.contains_key(&session.id);
+        let has_fallback = self.terminal_fallback_layouts.contains_key(&session.id);
+        let has_raw = self.session_output.contains_key(&session.id);
+        if !has_layouts
+            && !has_fallback
+            && !has_raw
+            && self.session_eligible_for_initial_output(session)
+        {
+            self.request_session_output(session.id);
+        }
+    }
+
+    pub(crate) fn sync_session_output_now(&mut self, session_id: Uuid) {
+        self.terminal_capture_missing.remove(&session_id);
+        let sessions = &self.store.sessions;
+        self.explicit_output_requests
+            .retain(|known| sessions.iter().any(|session| session.id == *known));
+        if sessions.iter().any(|session| session.id == session_id) {
+            self.explicit_output_requests.insert(session_id);
+        }
+        self.request_session_output(session_id);
+    }
+
+    pub(crate) fn handle_session_output_result(
+        &mut self,
+        session_id: Uuid,
+        result: UiResult<TerminalCapture>,
+        laid_out: Option<LaidOutTerminal>,
+    ) {
+        self.background_tasks
+            .remove(&BackgroundKey::SessionOutput(session_id));
+        let explicit = self.explicit_output_requests.remove(&session_id);
+        match result {
+            Ok(capture) => {
+                self.terminal_capture_missing.remove(&session_id);
+                if let Some(laid_out) = laid_out {
+                    self.terminal_prelaid.insert(session_id, laid_out);
+                }
+                self.set_session_output(session_id, capture.output, capture.cursor);
+                self.terminal_prelaid.remove(&session_id);
+            }
+            Err(error) => {
+                self.terminal_prelaid.remove(&session_id);
+                let is_gone = tmux_error_state(&error) == TmuxState::Gone;
+                if !explicit && is_gone && self.tools.tmux {
+                    if self.session_launch_running(session_id) {
+                        return;
+                    }
+                    self.record_terminal_capture_missing(session_id);
+                    if self.session_is_live_without_inflight_launch(session_id) {
+                        self.reconcile_observed_tmux_gone(session_id, Instant::now());
+                    }
+                } else {
+                    if !self.session_output.contains_key(&session_id) {
+                        self.record_terminal_capture_missing(session_id);
+                    }
+                    self.notice = Some(tf!(
+                        "ターミナル出力を読み取れませんでした: {error}",
+                        error = error
+                    ));
+                }
+            }
+        }
+    }
+
     pub(crate) fn request_session_output(&mut self, session_id: Uuid) {
         let Some(session) = self
             .store
@@ -835,6 +947,7 @@ impl OperonApp {
         output: String,
         cursor: Option<TerminalCursor>,
     ) {
+        self.terminal_capture_missing.remove(&session_id);
         let prelaid = self.terminal_prelaid.remove(&session_id);
         let prelaid_inc = self.terminal_prelaid_incremental.remove(&session_id);
         if let Some(cursor) = cursor {
@@ -974,7 +1087,15 @@ impl OperonApp {
         session_id: Uuid,
         now: Instant,
     ) -> Option<Duration> {
-        if self.terminal_streams.is_watching(session_id) {
+        let eligible = self.store.sessions.iter().any(|session| {
+            session.id == session_id
+                && matches!(
+                    session.status,
+                    SessionStatus::Active | SessionStatus::Starting | SessionStatus::Unknown
+                )
+                && self.session_eligible_for_initial_output(session)
+        });
+        if !eligible || self.terminal_streams.is_watching(session_id) {
             return None;
         }
         let last_poll = self
@@ -1039,7 +1160,7 @@ impl OperonApp {
                     self.terminal_resize_changed_at.remove(&session_id);
                     self.flush_terminal_resize(session_id);
                 } else if !self.terminal_streams.is_watching(session_id) {
-                    self.request_session_output(session_id);
+                    self.refresh_session_output(session_id);
                 }
             }
         }
@@ -1059,9 +1180,10 @@ impl OperonApp {
     }
 
     pub(crate) fn flush_terminal_resize(&mut self, session_id: Uuid) -> Option<Duration> {
-        if self
-            .background_tasks
-            .contains(&BackgroundKey::TerminalResize(session_id))
+        if self.session_launch_running(session_id)
+            || self
+                .background_tasks
+                .contains(&BackgroundKey::TerminalResize(session_id))
         {
             return None;
         }

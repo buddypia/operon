@@ -1,0 +1,15 @@
+# The evidence for change 303. Format: docs/sdlc/templates/verification.yaml.
+digest: "c1ea085363b0b3de"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked pane_303_missing_pane_does_not_loop_output_requests_or_spam_error_banner
+  - R2 empirical-test :: cargo test --locked pane_303_missing_pane_does_not_loop_output_requests_or_spam_error_banner
+  - R3 empirical-test :: cargo test --locked pane_303_adopted_or_untracked_cli_recovers_conversation_on_crash_and_resume
+  - R4 empirical-test :: cargo test --locked pane_303_unresumable_open_tab_falls_back_to_plain_terminal_with_cooldown
+  - R5 empirical-test :: cargo test --locked pane_303_lost_or_failed_open_tab_from_previous_run_recovers_on_load
+  - F1 empirical-test :: cargo test --locked pane_303_f1_lost_and_exited_tabs_on_load_stay_unspent_when_relaunch_persist_fails
+  - F2 empirical-test :: cargo test --locked pane_303_f2_refused_relaunch_preserves_resumable_cli_metadata_instead_of_shell_fallback
+  - F3 empirical-test :: cargo test --locked pane_303_f3_echo_poll_and_drag_end_skip_queued_and_missing_ended_panes
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/303-missing-pane-loops-output-error/mutations.py
+  - I2 formal-model :: cargo test --locked model_check_pane_303_missing_pane_recovery_and_output_guard
+  - I3 empirical-test :: cargo test --locked every_message_the_code_shows_has_a_row_in_every_table

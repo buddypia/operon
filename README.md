@@ -81,7 +81,10 @@ Settings. The projects, sessions, and agent output in them are a demo.
   is gone at the next start — the Mac restarted, the tmux server died — or one
   that is force-killed or crashes while Operon is running starts again in its
   own tab by itself (with a 15-second cooldown if it crashes right away): a CLI
-  reopens its saved conversation, a terminal opens a shell in its folder. When
+  reopens its saved conversation (recovering its local conversation history
+  when no ID had been saved yet), a terminal opens a shell in its folder, and
+  an open tab whose conversation cannot be restored reopens in place as a shell
+  in its folder (including tabs left lost or failed from a previous run). When
   an interactive CLI exits cleanly (status 0), the pane opens a login shell in
   the same folder with the prior scrollback kept above the prompt instead of
   freezing on `Pane is dead`. A terminal you type `claude`, `codex`, or `agy`

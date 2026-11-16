@@ -6205,7 +6205,7 @@ impl OperonApp {
                             ui.close();
                         }
                         if ui.button(tr("今すぐ同期")).clicked() {
-                            self.refresh_session_output(session_id);
+                            self.sync_session_output_now(session_id);
                             ui.close();
                         }
                         if ui.button(tr("直近のエラーをエージェントに送る")).clicked()
@@ -6444,12 +6444,7 @@ impl OperonApp {
                     // the buffer, so the rows themselves have to know it.
                     let cursor = self.terminal_cursors.get(&session_id).copied();
 
-                    let has_layouts = self.terminal_layouts.contains_key(&session_id);
-                    let has_fallback = self.terminal_fallback_layouts.contains_key(&session_id);
-                    let has_raw = self.session_output.contains_key(&session_id);
-                    if !has_layouts && !has_fallback && !has_raw {
-                        self.request_session_output(session_id);
-                    }
+                    self.request_initial_pane_output_if_needed(session);
 
                     let fallback_holder = if self.terminal_layouts.contains_key(&session_id)
                         || self.terminal_fallback_layouts.contains_key(&session_id)
@@ -6548,9 +6543,12 @@ impl OperonApp {
                                         )
                                     }
                                     None => {
+                                        let placeholder = terminal_empty_placeholder(
+                                            &session.status,
+                                            self.terminal_capture_missing.contains(&session_id),
+                                        );
                                         ui.label(
-                                            RichText::new(tr("ターミナル出力を待っています…"))
-                                                .color(palette.text_muted),
+                                            RichText::new(placeholder).color(palette.text_muted),
                                         );
                                         (None, Vec::new(), None, TerminalCaretGlyph::default())
                                     }
