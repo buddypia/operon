@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (tightens existing vertical spacing and type scale in the
+# session page's left sidebar). Risk: low — it paints (risk.yaml `drawing`);
+# full autonomy.
+#
+# Operational note observed before starting: PID 11510 was running stale
+# /Applications/Operon Stable.app (commit 5f2558b, 2026-10-24), which explained
+# why pinning and the unified center-top tab strip appeared missing to the user;
+# packaging and shipping /Applications/Operon.app after landing resolves that
+# while leaving /Applications/Operon Stable.app untouched unless asked.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Get intent.md evaluated, then write spec.md, screen.md, and plan.md for the compact session sidebar."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: touches src/app/screens.rs, src/ui/widgets.rs, and src/config.rs, so /Applications/Operon.app goes stale and the change ends with bash scripts/package-macos.sh and shipping from main"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
