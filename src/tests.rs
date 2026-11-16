@@ -41784,7 +41784,33 @@ pub(crate) fn cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else() {
     git_in(&ahead, &["add", "-A"]);
     git_in(&ahead, &["commit", "-m", "work"]);
     let outside = fixture_worktree(&root, "subagent-Outside");
-    for worktree in [&leftover, &dirty, &ahead, &outside] {
+    // Change 299: Claude Code's isolated trees, detached under .worktrees/agent-*,
+    // and a person's tree beside them that the sweep must not take.
+    let claude_tree = |name: &str| {
+        let worktree = root.join(".worktrees").join(name);
+        git_in(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        worktree
+    };
+    let claude_leftover = claude_tree("agent-leftover");
+    let claude_fresh = claude_tree("agent-fresh");
+    let person_tree = claude_tree("hotfix-kept");
+    for worktree in [
+        &leftover,
+        &dirty,
+        &ahead,
+        &outside,
+        &claude_leftover,
+        &person_tree,
+    ] {
         backdate(worktree);
     }
 
@@ -41799,6 +41825,8 @@ pub(crate) fn cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else() {
     let branches = git_in(&root, &["branch", "--list"]);
     let survivors = [&fresh, &dirty, &ahead, &outside].map(|worktree| worktree.exists());
     let leftover_survived = leftover.exists();
+    let claude_leftover_survived = claude_leftover.exists();
+    let claude_kept = [&claude_fresh, &person_tree].map(|worktree| worktree.exists());
     discard_worktree_fixture(&root);
     let _ = fs::remove_dir_all(&home);
 
@@ -41810,6 +41838,17 @@ pub(crate) fn cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else() {
     assert!(
         !leftover_survived && !branches.contains("subagent-Leftover"),
         "放置された subagent の worktree が残っています: {branches}\n{}",
+        both_streams(&cleanup)
+    );
+    assert!(
+        !claude_leftover_survived,
+        "放置された .worktrees/agent-* の worktree が残っています: {}",
+        both_streams(&cleanup)
+    );
+    assert_eq!(
+        claude_kept,
+        [true; 2],
+        "消してはいけない .worktrees の worktree を消しました（agent-fresh, hotfix-kept）: {}",
         both_streams(&cleanup)
     );
     assert_eq!(
@@ -41829,6 +41868,212 @@ pub(crate) fn cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else() {
             "{kept} のブランチを消しました: {branches}"
         );
     }
+}
+
+/// Runs one of Claude Code's worktree hooks in `.claude/hooks/` with `payload`
+/// on stdin; returns the exit code, stdout, and both streams for messages.
+fn run_worktree_hook(
+    hook: &str,
+    root: &Path,
+    payload: serde_json::Value,
+) -> (Option<i32>, String, String) {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join(".claude/hooks")
+        .join(hook);
+    let mut command = Command::new("bash");
+    forget_inherited_repository(&mut command)
+        .arg(&script)
+        .current_dir(root)
+        .env("CLAUDE_PROJECT_DIR", root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    let _ = child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes());
+    let finished = child.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&finished.stdout).to_string();
+    let both = format!("{stdout}{}", String::from_utf8_lossy(&finished.stderr));
+    (finished.status.code(), stdout, both)
+}
+
+/// Change 299. Claude Code put a subagent's isolated worktree at
+/// `.claude/worktrees/<name>`, which no guard here counts as a worktree, so the
+/// verifiers' work was refused as work on main. The WorktreeCreate hook puts the
+/// tree at `<main checkout>/.worktrees/agent-<name>`, detached at the head of the
+/// directory the session is in, refuses a name that would land anywhere else,
+/// and the WorktreeRemove hook removes only such a tree.
+#[test]
+pub(crate) fn isolated_subagent_worktrees_land_where_the_guards_look() {
+    let root = fs::canonicalize(worktree_fixture_repository("isolated-subagent-create")).unwrap();
+    let change = root.join(".worktrees/fix/x");
+    git_in(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "fix/x",
+            change.to_str().unwrap(),
+            "main",
+        ],
+    );
+    fs::write(change.join("work.txt"), "work\n").unwrap();
+    git_in(&change, &["add", "-A"]);
+    git_in(&change, &["commit", "-m", "work"]);
+    let change_head = git_in(&change, &["rev-parse", "HEAD"]);
+    let branches_before = git_in(&root, &["branch", "--list"]);
+
+    let (code, stdout, said) = run_worktree_hook(
+        "worktree-create.sh",
+        &root,
+        serde_json::json!({ "name": "bold-oak-a3f2", "cwd": change.to_string_lossy(), "hook_event_name": "WorktreeCreate" }),
+    );
+    let expected = root.join(".worktrees/agent-bold-oak-a3f2");
+    let created_head = git_in(&expected, &["rev-parse", "HEAD"]);
+    let detached = git_command(&expected)
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .status()
+        .unwrap()
+        .success();
+    let branches_after = git_in(&root, &["branch", "--list"]);
+
+    let mut refused = Vec::new();
+    for name in ["../escape", "a/b", ".hidden", ""] {
+        let (code, stdout, _) = run_worktree_hook(
+            "worktree-create.sh",
+            &root,
+            serde_json::json!({ "name": name, "cwd": root.to_string_lossy() }),
+        );
+        refused.push((name, code != Some(0) && stdout.trim().is_empty()));
+    }
+    let worktrees_dir: Vec<String> = fs::read_dir(root.join(".worktrees"))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    let escaped = root.join("escape").exists() || root.join(".worktrees/agent-a").exists();
+
+    let (refuse_code, _, refuse_said) = run_worktree_hook(
+        "worktree-remove.sh",
+        &root,
+        serde_json::json!({ "worktree_path": change.to_string_lossy() }),
+    );
+    let change_kept = change.exists();
+    let (remove_code, _, remove_said) = run_worktree_hook(
+        "worktree-remove.sh",
+        &root,
+        serde_json::json!({ "worktree_path": expected.to_string_lossy() }),
+    );
+    let removed = !expected.exists();
+    discard_worktree_fixture(&root);
+
+    assert_eq!(code, Some(0), "WorktreeCreate hook が失敗しました: {said}");
+    assert_eq!(
+        stdout.lines().last().unwrap_or_default(),
+        expected.to_string_lossy(),
+        "worktree を .worktrees/agent-<name> に作っていません: {said}"
+    );
+    assert_eq!(
+        created_head, change_head,
+        "親セッションのいる worktree の HEAD から作っていません"
+    );
+    assert!(!detached, "ブランチを作って checkout しました");
+    assert_eq!(branches_before, branches_after, "ブランチが増えました");
+    for (name, was_refused) in refused {
+        assert!(was_refused, "名前 {name:?} を断りませんでした");
+    }
+    assert!(
+        !escaped
+            && worktrees_dir
+                .iter()
+                .all(|n| n == "fix" || n == "agent-bold-oak-a3f2"),
+        ".worktrees の外か別の名前で作りました: {worktrees_dir:?}"
+    );
+    assert!(
+        refuse_code != Some(0) && change_kept,
+        "agent-* でない worktree を WorktreeRemove が消しました: {refuse_said}"
+    );
+    assert!(
+        remove_code == Some(0) && removed,
+        "WorktreeRemove が agent worktree を消しませんでした: {remove_said}"
+    );
+}
+
+/// Change 299. The point of the WorktreeCreate hook: on main, with
+/// CLAUDE_PROJECT_DIR naming the main checkout, a shell command and an edit in
+/// the tree the hook makes are worktree work, and the same in Claude Code's
+/// default `.claude/worktrees/<name>` are refused as trunk work — which is why
+/// the tree is moved rather than left there.
+#[test]
+pub(crate) fn isolated_subagent_worktree_work_is_not_judged_as_main() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = fs::canonicalize(worktree_fixture_repository("isolated-subagent-guard")).unwrap();
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let (code, stdout, said) = run_worktree_hook(
+        "worktree-create.sh",
+        &root,
+        serde_json::json!({ "name": "verifier", "cwd": root.to_string_lossy() }),
+    );
+    assert_eq!(code, Some(0), "WorktreeCreate hook が失敗しました: {said}");
+    let hooked = PathBuf::from(stdout.trim());
+    let default = root.join(".claude/worktrees/verifier");
+    git_in(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "--detach",
+            default.to_str().unwrap(),
+            "main",
+        ],
+    );
+
+    let verdicts = |tree: &Path| {
+        let script = format!(
+            "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+             const {{ run }} = await import({policy:?});\n\
+             const decide = (v) => v?.hookSpecificOutput?.permissionDecision || v?.decision || 'allow';\n\
+             const bash = await run({{ tool_name: 'Bash', tool_input: {{ command: 'touch notes.txt' }}, cwd: {tree:?}, session_id: 's', hook_event_name: 'PreToolUse' }});\n\
+             const edit = await run({{ tool_name: 'Edit', tool_input: {{ file_path: {file:?}, old_string: 'a', new_string: 'b' }}, cwd: {tree:?}, session_id: 's', hook_event_name: 'PreToolUse' }});\n\
+             console.log(JSON.stringify([decide(bash), decide(edit)]));",
+            policy = repository
+                .join(".cli/hooks/worktree-policy-guard.mjs")
+                .to_str()
+                .unwrap(),
+            tree = tree.to_str().unwrap(),
+            file = tree.join("README.md").to_str().unwrap(),
+        );
+        let mut command = node_in(&root);
+        command.args(["--input-type=module", "-e", &script]);
+        let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT)
+            .expect("node が見つからないか、時間内に終わりませんでした");
+        assert!(output.status.success(), "{}", both_streams(&output));
+        serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            .unwrap_or_else(|_| panic!("{}", both_streams(&output)))
+    };
+    let in_hooked = verdicts(&hooked);
+    let in_default = verdicts(&default);
+    discard_worktree_fixture(&root);
+
+    assert_eq!(
+        in_hooked,
+        serde_json::json!(["allow", "allow"]),
+        "hook が作った worktree での作業を main の作業として拒否しました"
+    );
+    assert_eq!(
+        in_default,
+        serde_json::json!(["deny", "deny"]),
+        "既定の .claude/worktrees は拒否される前提でこの修正がありますが、拒否されませんでした"
+    );
 }
 
 /// `node_in`, but carrying the repository pointers a session exports — which
