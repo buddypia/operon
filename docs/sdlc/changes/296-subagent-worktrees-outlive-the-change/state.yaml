@@ -21,7 +21,7 @@
 state:
   route: "bugfix"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
@@ -29,10 +29,10 @@ state:
   readiness: "conditional"
   screen: "n/a"
 
-resume: "Have empirical-verifier try to break the sweep, then push and land."
+resume: "Done. Landing it removes the two worktrees change 290 left; check git worktree list after cleanup-worktree."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked cleanup_ 5 passed; full suite in CI"
   bands: "machine passed bash scripts/check-bands.sh: warn and diagnose rows only, none moved by this diff"
   failing-test-first: "machine passed cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else failed on the unedited ops.mjs (subagent-Leftover still listed)"
   release-binary: "machine waived touches .claude/scripts, docs/sdlc and src/tests.rs only"

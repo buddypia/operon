@@ -63,3 +63,12 @@ owners already remove them.
 - `cargo test --locked cleanup_removes_a_merged_worktree_in_a_repository_with_no_remote` still passes.
 - `python3 docs/sdlc/changes/296-subagent-worktrees-outlive-the-change/mutations.py` — every mutation caught.
 - Landing this change removes the two worktrees change 290 left.
+
+## Departures from the plan
+
+- empirical-verifier could not check out the branch (the worktree hooks refused
+  every checkout in its isolation tree) and reported from reading only. Two of
+  its points were taken: a worktree removed is reported even when its branch
+  refuses deletion, and the root is computed inside the guarded block so the
+  sweep cannot throw. Ignored files (`target/`) in a swept tree are removed
+  with it, as the plan says; agy's subagent trees hold nothing else ignored.

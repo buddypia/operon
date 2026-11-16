@@ -2,7 +2,7 @@
 # I1 is the bug: a leftover agy subagent worktree is reaped by the landing
 # cleanup, and a fresh, dirty, ahead, or out-of-root one is not. I2 keeps the
 # cleanup's own removal and refusals as they were.
-digest: "dd022d2db37a474b"
+digest: "f104b9ee40af598a"
 
 obligations:
   - I1 empirical-test :: cargo test --locked cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else

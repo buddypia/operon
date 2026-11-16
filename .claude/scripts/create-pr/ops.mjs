@@ -2484,12 +2484,13 @@ const AGENT_WORKTREE_IDLE_MS = 6 * 60 * 60 * 1000;
 export function sweepAgentWorktrees({ gitFn = git, home = homedir(), now = Date.now(), baseBranch = BASE_BRANCH } = {}) {
   const removed = [];
   let linked;
+  let agentRoot;
   try {
     linked = parseWorktreePaths(gitFn(['worktree', 'list', '--porcelain'], { cwd: PROJECT_DIR })).slice(1);
+    agentRoot = canonicalPath(join(home, '.gemini', 'antigravity-cli', 'worktrees')) + sep;
   } catch {
     return removed;
   }
-  const agentRoot = canonicalPath(join(home, '.gemini', 'antigravity-cli', 'worktrees')) + sep;
   for (const path of linked) {
     try {
       if (!existsSync(path) || !canonicalPath(path).startsWith(agentRoot)) continue;
@@ -2498,8 +2499,11 @@ export function sweepAgentWorktrees({ gitFn = git, home = homedir(), now = Date.
       gitFn(['merge-base', '--is-ancestor', 'HEAD', baseBranch], { cwd: path });
       const branch = gitFn(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path });
       gitFn(['worktree', 'remove', path], { cwd: PROJECT_DIR, timeout: 600_000 });
-      if (branch && branch !== 'HEAD') gitFn(['branch', '-D', branch], { cwd: PROJECT_DIR });
       removed.push(path);
+      // A branch checked out elsewhere refuses deletion; the worktree is still gone and reported.
+      if (branch && branch !== 'HEAD') {
+        try { gitFn(['branch', '-D', branch], { cwd: PROJECT_DIR }); } catch {}
+      }
     } catch {
       // Not in the base branch, removal refused, or unreadable: left for a person to see.
     }
