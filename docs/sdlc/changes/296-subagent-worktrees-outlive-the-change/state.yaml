@@ -1,0 +1,48 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Bug report (it is the intent on this route):
+# 1. Change 290 ran empirical-verifier and formal-verifier under Antigravity
+#    CLI. agy gave each subagent a linked worktree of this repository under
+#    ~/.gemini/antigravity-cli/worktrees/<conversation>/subagent-<Name>--… on
+#    a branch of the same name, and never removed either. Four days after 290
+#    landed both were still listed by `git worktree list` and `git branch`
+#    (`+ subagent-Empirical-Verifier--Change-290--self-1a9e7910`,
+#    `+ subagent-Formal-Verifier--Change-290--self-e27b164f`): clean trees,
+#    HEAD at e6da434, already in main. Claude Code drops an unchanged
+#    isolation worktree itself; agy does not, and nothing in this repository
+#    reaps what agy leaves.
+# 2. The person asked on 2026-11-16 for a permanent fix, landed through to
+#    main (「上記を恒久対応して … コミットPRマージまで進めて」).
+#
+# Gate-configuration surface (.claude/scripts): the change adds a removal to
+# the landing cleanup; it removes no check and widens no bypass.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Done. Landing it removes the two worktrees change 290 left; check git worktree list after cleanup-worktree."
+
+contract:
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked cleanup_ 5 passed; full suite in CI"
+  bands: "machine passed bash scripts/check-bands.sh: warn and diagnose rows only, none moved by this diff"
+  failing-test-first: "machine passed cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else failed on the unedited ops.mjs (subagent-Leftover still listed)"
+  release-binary: "machine waived touches .claude/scripts, docs/sdlc and src/tests.rs only"
+  guards-verified-by-mutation: "machine passed 5 of 5 caught: python3 docs/sdlc/changes/296-subagent-worktrees-outlive-the-change/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
