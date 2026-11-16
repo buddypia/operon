@@ -1596,3 +1596,26 @@ missed a row the independent verifier then rewrote as a failure.
 failing in `docs/sdlc/changes/274-ui-wording-reads-machine-made/mutations.py`
 (20 of 20 caught).
 
+
+## 114 — A filter inside a walk still pays for the walk, and a gate out of time checks nothing
+
+Change 081 narrowed the Stop gate's contract check to the changes in play by
+filtering a walk of every `state.yaml`, three child processes per change, and
+`scripts/check-approvals.sh`, which the gate asks twice, read each ledger with
+three more. Both grew with every change that landed: at 290 changes a stop took
+6 to 13 seconds idle, and over thirty days 182 stops ran into the hook's
+30-second timeout. Claude Code cancels a hook that runs out of time and goes
+on, so each of those stops waited half a minute and then checked nothing — no
+contract, no ledger, no branch audit (change 297). Nobody saw it, because a
+cancelled hook prints nothing and the turn ends as if it had passed.
+**The rule:** a hook's cost must not grow with the repository's history: walk what is
+in play, and read many files in one process, not one process per file. A
+gate's time budget is part of its correctness, so a gate that can approach its
+timeout is a gate that is sometimes off.
+
+**Guard.** `the_stop_gate_does_not_pay_for_changes_it_is_not_working_on` and
+`the_approval_ledger_reads_every_ledger_in_one_pass` count the child processes
+through shims on `PATH` and refuse a count that grows with parked changes or
+ledgers, each watched failing in
+`docs/sdlc/changes/297-the-stop-gate-runs-out-of-time-and-checks-nothing/mutations.py`
+(6 of 6 caught).

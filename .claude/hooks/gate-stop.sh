@@ -155,14 +155,25 @@ in_play=$(
 # With no `main` to fork from, nothing can say what this branch committed, so
 # every open change is read, as before 081: an unread contract is the failure
 # this section exists to prevent, and a list is only noise.
+#
+# Change 297: the names in play are walked, not the tree. 081 filtered a walk of
+# every state.yaml instead, three child processes per change in the tree: at
+# 290 changes a stop took 6 to 13 seconds idle, and under load it ran into the
+# hook's timeout, was cancelled, and checked nothing. Lines, not words, so a
+# name git quotes is read whole.
 every_change=0
 git merge-base refs/heads/main HEAD >/dev/null 2>&1 || every_change=1
 open_contract=$(
-  for state_file in docs/sdlc/changes/*/state.yaml; do
-    [ -f "$state_file" ] || continue
+  {
     if [ "$every_change" = 0 ]; then
-      printf '%s\n' "$in_play" | grep -xF "$(basename "$(dirname "$state_file")")" >/dev/null || continue
+      printf '%s\n' "$in_play" | while IFS= read -r change; do
+        [ -n "$change" ] && printf 'docs/sdlc/changes/%s/state.yaml\n' "$change"
+      done
+    else
+      printf '%s\n' docs/sdlc/changes/*/state.yaml
     fi
+  } | while IFS= read -r state_file; do
+    [ -f "$state_file" ] || continue
     status=$(sed -n 's/^  status: "\(.*\)"$/\1/p' "$state_file" | head -1)
     # `if`, not a one-line `case`: macOS's stock /bin/bash 3.2 rejects a
     # `case … ;; esac` written on one line inside a command substitution, and

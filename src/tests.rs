@@ -19928,6 +19928,132 @@ pub(crate) fn the_stop_gate_holds_a_session_only_to_the_changes_it_is_working_on
     );
 }
 
+#[test]
+/// Change 297. Change 081 narrowed what the Stop gate reports to the changes in
+/// play, but kept walking every `docs/sdlc/changes/*/state.yaml` and dropped
+/// the rest one at a time, three child processes each. With 290 changes in the
+/// tree a stop took six to thirteen seconds on an idle machine, and over thirty
+/// days 182 stops ran into the hook's thirty-second timeout, were cancelled,
+/// and checked nothing — the contract, the ledger and the branch audit all
+/// skipped while the turn ended as if they had passed.
+///
+/// Wall-clock time is the symptom and a flaky thing to assert, so this counts
+/// the cause: the child processes the gate starts, through shims on `PATH`, in
+/// two trees that differ only in how many parked changes sit beside the one in
+/// play. The count must not grow with them. Both runs must still name the
+/// change in play, so a gate that stopped reading contracts would not pass.
+pub(crate) fn the_stop_gate_does_not_pay_for_changes_it_is_not_working_on() {
+    let hook = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".claude/hooks/gate-stop.sh");
+    let stamp = fs::read_to_string(&hook)
+        .unwrap()
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("stamp=").map(str::to_owned))
+        .map(|value| value.trim_matches('"').to_owned())
+        .expect("gate-stop.sh に stamp= の代入がありません");
+    let (shims, shimmed) = spawn_counting_path("stop-gate-cost-shims");
+
+    let spawns_with_parked = |parked: usize| {
+        let root = worktree_fixture_repository(&format!("stop-gate-cost-{parked}"));
+        let write_change = |name: &str, item: &str| {
+            let change = root.join("docs/sdlc/changes").join(name);
+            fs::create_dir_all(&change).unwrap();
+            fs::write(
+                change.join("state.yaml"),
+                format!(
+                    "state:\n  status: \"in-progress\"\n\ncontract:\n  \
+                     {item}: \"machine pending bash scripts/nothing.sh\"\n"
+                ),
+            )
+            .unwrap();
+        };
+        for index in 0..parked {
+            write_change(&format!("8{index:02}-parked"), &format!("item-8{index:02}"));
+        }
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-q", "-m", "changes parked on main"]);
+        git_in(&root, &["checkout", "-q", "-b", "fix/907"]);
+        write_change("907-this-branch", "item-907");
+        git_in(&root, &["add", "-A"]);
+        git_in(&root, &["commit", "-q", "-m", "the change this branch is"]);
+
+        let log = root.join("spawns.log");
+        let _ = fs::remove_file(root.join(&stamp));
+        let mut process = Command::new("/bin/bash");
+        forget_inherited_repository(&mut process)
+            .arg(&hook)
+            .current_dir(&root)
+            .env("CLAUDE_PROJECT_DIR", &root)
+            .env("PATH", &shimmed)
+            .env("OPERON_TEST_SPAWN_LOG", &log)
+            .env_remove("OPERON_SKIP_STOP_GATE")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = process.spawn().unwrap();
+        let payload = serde_json::json!({ "cwd": root.to_string_lossy() });
+        let _ = child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.to_string().as_bytes());
+        let finished = child.wait_with_output().unwrap();
+        let stderr = String::from_utf8_lossy(&finished.stderr).to_string();
+        let spawns = fs::read_to_string(&log).unwrap_or_default().lines().count();
+        discard_worktree_fixture(&root);
+        (finished.status.code(), stderr, spawns)
+    };
+
+    let (few_code, few_stderr, few) = spawns_with_parked(2);
+    let (many_code, many_stderr, many) = spawns_with_parked(60);
+    let _ = fs::remove_dir_all(&shims);
+
+    for (code, stderr) in [(few_code, &few_stderr), (many_code, &many_stderr)] {
+        assert!(
+            code == Some(2) && stderr.contains("item-907") && !stderr.contains("item-800"),
+            "Stop が作業中の change だけを挙げていません ({code:?}):\n{stderr}"
+        );
+    }
+    // 58 more parked changes at even one child each would add 58; a little
+    // slack keeps a constant-sized difference in the tools from failing this.
+    assert!(
+        many <= few + 8,
+        "触っていない change が増えると Stop の子プロセスが増えます: \
+         2 件で {few} 個、60 件で {many} 個"
+    );
+}
+
+/// A `PATH` whose text tools each log their name to `$OPERON_TEST_SPAWN_LOG`
+/// before running the real one, and the directory holding the shims. Every
+/// tool a per-change loop in a shell script would reach for is shimmed, so a
+/// loop rewritten around a different one still shows (change 297).
+fn spawn_counting_path(label: &str) -> (PathBuf, std::ffi::OsString) {
+    let tools = [
+        "basename", "dirname", "grep", "sed", "awk", "head", "cat", "tr", "sort", "cut",
+    ];
+    let search = std::env::var_os("PATH").unwrap_or_default();
+    let shims = temporary_directory(label);
+    for tool in tools {
+        let real = std::env::split_paths(&search)
+            .map(|directory| directory.join(tool))
+            .find(|candidate| candidate.is_file())
+            .unwrap_or_else(|| panic!("{tool} が PATH にありません"));
+        let shim = shims.join(tool);
+        fs::write(
+            &shim,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' {tool} >> \"$OPERON_TEST_SPAWN_LOG\"\nexec '{}' \"$@\"\n",
+                real.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut shimmed = std::ffi::OsString::from(shims.as_os_str());
+    shimmed.push(":");
+    shimmed.push(&search);
+    (shims, shimmed)
+}
+
 // ── The approval ledger (change 082) ────────────────────────────────────────
 
 /// A scratch tree holding what `scripts/check-approvals.sh` reads: itself, the
@@ -20004,6 +20130,52 @@ fn approval_clean_run() -> usize {
         .trim()
         .parse()
         .unwrap()
+}
+
+#[test]
+/// Change 297. The Stop gate asks this script twice at every stop, and it read
+/// each change's ledger with three child processes of its own: 134 ledgers
+/// cost 2.4 seconds a call, the half of a stop that remained once the gate
+/// stopped walking every state file. Trust is computed from every ledger, so
+/// all of them are still read — in one pass. The count of automatic approvals
+/// shows each ledger was read; the child processes must not grow with them.
+pub(crate) fn the_approval_ledger_reads_every_ledger_in_one_pass() {
+    let (shims, path) = spawn_counting_path("approval-cost-shims");
+    let metrics_with_ledgers = |count: usize| {
+        let root = approval_fixture(&format!("approval-cost-{count}"));
+        for index in 0..count {
+            approval_change(
+                &root,
+                &format!("8{index:02}-ledger"),
+                "2026-11-16T00:00:00Z auto plan plan.md 0123456789abcdef approve fixture\n",
+            );
+        }
+        let log = root.join("spawns.log");
+        let output = Command::new("/bin/bash")
+            .arg(root.join("scripts/check-approvals.sh"))
+            .arg("--metrics")
+            .current_dir(&root)
+            .env("PATH", &path)
+            .env("OPERON_TEST_SPAWN_LOG", &log)
+            .output()
+            .unwrap();
+        let spawns = fs::read_to_string(&log).unwrap_or_default().lines().count();
+        let _ = fs::remove_dir_all(&root);
+        (String::from_utf8_lossy(&output.stdout).to_string(), spawns)
+    };
+
+    let (few_metrics, few) = metrics_with_ledgers(2);
+    let (many_metrics, many) = metrics_with_ledgers(60);
+    let _ = fs::remove_dir_all(&shims);
+
+    assert!(
+        few_metrics.contains("auto_approvals 2\n") && many_metrics.contains("auto_approvals 60\n"),
+        "台帳を全部読んでいません:\n2 件: {few_metrics}\n60 件: {many_metrics}"
+    );
+    assert!(
+        many <= few + 8,
+        "台帳が増えると承認チェックの子プロセスが増えます: 2 件で {few} 個、60 件で {many} 個"
+    );
 }
 
 #[test]
