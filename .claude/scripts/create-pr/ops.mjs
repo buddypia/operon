@@ -33,6 +33,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, statSync, readdirSync } from 'node:fs';
 import { basename, join, resolve, dirname, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import {
   inferBranchFromWorktreePath,
   resolveMilestoneReminderPath,
@@ -2469,6 +2470,43 @@ export function refuseUnlinkedWorktree(absWtPath, gitFn = git, { readLedgerFn = 
   };
 }
 
+/**
+ * Change 296. Antigravity CLI gives each subagent a linked worktree under
+ * `~/.gemini/antigravity-cli/worktrees/<conversation>/` on a branch of the same name and never
+ * removes it, so every verifier run under agy left a worktree and a branch behind for good. The
+ * landing cleanup is the one step every CLI runs after each merge, so it reaps them here — only
+ * what loses nothing and belongs to no running subagent: a clean tree (untracked files count),
+ * HEAD already in the base branch, directory untouched for `AGENT_WORKTREE_IDLE_MS`. Removal is
+ * `git worktree remove` without `--force`, so git refuses a tree that changed after the check.
+ * Returns the removed paths; never throws.
+ */
+const AGENT_WORKTREE_IDLE_MS = 6 * 60 * 60 * 1000;
+export function sweepAgentWorktrees({ gitFn = git, home = homedir(), now = Date.now(), baseBranch = BASE_BRANCH } = {}) {
+  const removed = [];
+  let linked;
+  try {
+    linked = parseWorktreePaths(gitFn(['worktree', 'list', '--porcelain'], { cwd: PROJECT_DIR })).slice(1);
+  } catch {
+    return removed;
+  }
+  const agentRoot = canonicalPath(join(home, '.gemini', 'antigravity-cli', 'worktrees')) + sep;
+  for (const path of linked) {
+    try {
+      if (!existsSync(path) || !canonicalPath(path).startsWith(agentRoot)) continue;
+      if (now - statSync(path).mtimeMs < AGENT_WORKTREE_IDLE_MS) continue;
+      if (gitFn(['status', '--porcelain'], { cwd: path }).length > 0) continue;
+      gitFn(['merge-base', '--is-ancestor', 'HEAD', baseBranch], { cwd: path });
+      const branch = gitFn(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: path });
+      gitFn(['worktree', 'remove', path], { cwd: PROJECT_DIR, timeout: 600_000 });
+      if (branch && branch !== 'HEAD') gitFn(['branch', '-D', branch], { cwd: PROJECT_DIR });
+      removed.push(path);
+    } catch {
+      // Not in the base branch, removal refused, or unreadable: left for a person to see.
+    }
+  }
+  return removed;
+}
+
 function cmdCleanupWorktree(args, { verifiedMerged = false } = {}) {
   const wtPath = requireArg(args, 'worktree');
   const absWtPath = resolveWorktreeAbsPath(wtPath);
@@ -2505,6 +2543,7 @@ function cmdCleanupWorktree(args, { verifiedMerged = false } = {}) {
   }
   const worktreeCleaned = !existsSync(absWtPath);
   if (branch) deleteBranchAndStashes(branch);
+  for (const swept of sweepAgentWorktrees()) warnings.push(`removed a leftover subagent worktree: ${swept}`);
 
   clearWorktreeFromContext(wtPath, warnings);
 

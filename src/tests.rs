@@ -41569,6 +41569,96 @@ pub(crate) fn cleanup_removes_a_merged_worktree_in_a_repository_with_no_remote()
     );
 }
 
+/// Change 296. Antigravity gives each subagent a linked worktree under
+/// `~/.gemini/antigravity-cli/worktrees/` and never removes it; change 290's
+/// two verifiers were still listed four days after it landed. The landing
+/// cleanup sweeps them — but only a clean one, with no commit outside main,
+/// untouched for six hours, under agy's root. Each survivor below breaks
+/// exactly one of those conditions.
+#[test]
+pub(crate) fn cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else() {
+    let root = worktree_fixture_repository("cleanup-subagent-sweep");
+    let ops = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".claude/scripts/create-pr/ops.mjs");
+    let home = temporary_directory("cleanup-subagent-home");
+    let agy_root = home.join(".gemini/antigravity-cli/worktrees/conversation");
+    let long_ago = std::time::SystemTime::now() - Duration::from_secs(7 * 3600);
+    let backdate = |dir: &Path| {
+        fs::File::open(dir)
+            .and_then(|handle| handle.set_modified(long_ago))
+            .expect("worktree の更新時刻を戻せません");
+    };
+    let subagent = |name: &str| {
+        let worktree = agy_root.join(name);
+        git_in(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-b",
+                name,
+                worktree.to_str().unwrap(),
+                "main",
+            ],
+        );
+        worktree
+    };
+
+    let leftover = subagent("subagent-Leftover");
+    let fresh = subagent("subagent-Fresh");
+    let dirty = subagent("subagent-Dirty");
+    fs::write(dirty.join("notes.txt"), "unsaved\n").unwrap();
+    let ahead = subagent("subagent-Ahead");
+    fs::write(ahead.join("work.txt"), "work\n").unwrap();
+    git_in(&ahead, &["add", "-A"]);
+    git_in(&ahead, &["commit", "-m", "work"]);
+    let outside = fixture_worktree(&root, "subagent-Outside");
+    for worktree in [&leftover, &dirty, &ahead, &outside] {
+        backdate(worktree);
+    }
+
+    let merged = fixture_worktree_with_a_commit(&root, "feature/merged");
+    git_in(&root, &["merge", "--no-ff", "-m", "land", "feature/merged"]);
+    let cleanup = node_in(&root)
+        .env("HOME", &home)
+        .arg(&ops)
+        .args(["cleanup-worktree", "--worktree", merged.to_str().unwrap()])
+        .output()
+        .expect("node が見つかりません");
+    let branches = git_in(&root, &["branch", "--list"]);
+    let survivors = [&fresh, &dirty, &ahead, &outside].map(|worktree| worktree.exists());
+    let leftover_survived = leftover.exists();
+    discard_worktree_fixture(&root);
+    let _ = fs::remove_dir_all(&home);
+
+    assert!(
+        cleanup.status.success(),
+        "cleanup が失敗しました: {}",
+        both_streams(&cleanup)
+    );
+    assert!(
+        !leftover_survived && !branches.contains("subagent-Leftover"),
+        "放置された subagent の worktree が残っています: {branches}\n{}",
+        both_streams(&cleanup)
+    );
+    assert_eq!(
+        survivors,
+        [true; 4],
+        "消してはいけない worktree を消しました（fresh, dirty, ahead, outside）: {}",
+        both_streams(&cleanup)
+    );
+    for kept in [
+        "subagent-Fresh",
+        "subagent-Dirty",
+        "subagent-Ahead",
+        "subagent-Outside",
+    ] {
+        assert!(
+            branches.contains(kept),
+            "{kept} のブランチを消しました: {branches}"
+        );
+    }
+}
+
 /// `node_in`, but carrying the repository pointers a session exports — which
 /// `node_in` exists to drop, and which is why no test above saw the scripts
 /// follow them. Not `Command::env`: `run_command_with_output_limit` drops the

@@ -20,23 +20,23 @@
 
 state:
   route: "bugfix"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "paused"
   risk: "high"
-  readiness: "pending"
+  readiness: "conditional"
   screen: "n/a"
 
-resume: "Write the failing test cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else, then the sweep in ops.mjs."
+resume: "Have empirical-verifier try to break the sweep, then push and land."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  failing-test-first: "machine pending the new test fails on the unedited ops.mjs"
+  bands: "machine passed bash scripts/check-bands.sh: warn and diagnose rows only, none moved by this diff"
+  failing-test-first: "machine passed cleanup_sweeps_leftover_subagent_worktrees_and_nothing_else failed on the unedited ops.mjs (subagent-Leftover still listed)"
   release-binary: "machine waived touches .claude/scripts, docs/sdlc and src/tests.rs only"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/296-subagent-worktrees-outlive-the-change/mutations.py"
+  guards-verified-by-mutation: "machine passed 5 of 5 caught: python3 docs/sdlc/changes/296-subagent-worktrees-outlive-the-change/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
