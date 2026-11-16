@@ -1,0 +1,69 @@
+# Change 304. Bug report, as the bugfix route takes it in place of an intent:
+#
+# A session whose Bash working directory cannot persist between calls (Claude
+# Code's CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=1, which a person may set or
+# inherit from a parent process) and that starts in the main checkout has no
+# spelling of a branch push that both Bash guards admit:
+#  1. `git push -u origin fix/x` from the main checkout is refused by the trunk
+#     allowlist (.claude/config/worktree-policy.json#trunk_bash_allowlist,
+#     which admitted only `git push origin main`); its refusal points at
+#     `cd <worktree> && …` or `git -C <worktree> …`.
+#  2. `cd <worktree> && git push …` and `git -C <worktree> push …` are refused
+#     by the Publishing gate in .claude/hooks/guard-bash.sh (nothing joined,
+#     nothing before `push`).
+# Each refusal points at a form the other refuses. Observed 2026-11-16 in
+# change 301's session (transcript 742dd4d0-1056-4664-bb87-0bf8c4642161): the
+# session then pushed from a script file, which no guard reads. Measured: of
+# the Bash hooks only the trunk allowlist refuses a plain branch push from main
+# (guard-bash.sh, gate-merge.sh, commit-guard, destructive-git-guard and
+# worktree-session-owner-guard all pass it). sdlc 084: a recoverable step a
+# guard refuses is a gap in the guard.
+#
+# Reproduce: the trunk allowlist judges `git push -u origin feature/x` on a
+# trunk fixture; it is denied.
+#
+# Decision (person, option A; see approvals.log): the trunk allowlist admits
+# the Publishing gate's plain push for any branch, with the same character set
+# as guard-bash.sh's plain_push. Rejected: B, the Publishing gate admitting
+# `git -C <worktree> push` (widens the gate every session goes through); C, no
+# guard change and delegation discipline only (leaves the dead end in place).
+# Why it is safe: a push only uploads a ref and does not touch the main
+# checkout's working tree; there is no pre-push hook (.git/hooks holds only
+# reference-transaction); the same push is already admitted from any worktree;
+# the Publishing gate still refuses every non-plain push (force, refspecs,
+# another remote, redirects, chains).
+#
+# Residual, accepted (empirical verifier): the trunk allowlist alone admits a
+# push behind git's global options (-c, --git-dir), behind HOME= or env HOME=,
+# or chained with another allowlisted command — as it already did for the
+# main-only push. The Publishing gate refuses all of them, now pinned in
+# a_plain_push_to_origin_is_not_asked_about. Tags, HEAD and other refs within
+# the branch character set pass both guards alike, as before.
+
+state:
+  route: "bugfix"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "conditional"
+  screen: "n/a"
+
+resume: "Done. The trunk allowlist admits the plain branch push; the Publishing gate is pinned as the layer refusing every other spelling. No bundle swap: nothing in the app changed."
+
+contract:
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked the_trunk_allowlist_and_the_ownership_check_are_switched_on_here a_plain_push_to_origin_is_not_asked_about 2 passed; filter trunk policy worktree push landing ship 68 passed; full suite in CI"
+  failing-test-first: "machine passed the trunk test failed against the old pattern (git push -q origin main denied); the Publishing gate pins passed at once, being evidence of an existing layer, and are watched failing by mutation"
+  release-binary: "machine waived touches .claude/config, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine passed 8 of 8 caught: python3 docs/sdlc/changes/304-branch-push-refused-from-main-and-worktree/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
