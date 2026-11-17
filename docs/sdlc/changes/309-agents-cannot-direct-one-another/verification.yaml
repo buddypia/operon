@@ -1,5 +1,5 @@
 # The evidence for change 309. Format: docs/sdlc/templates/verification.yaml.
-digest: "e0755dfd89f0bb95"
+digest: "8b63de2b13c90d78"
 
 obligations:
   - R1 empirical-test :: cargo test --locked agents_309_snapshot_names_each_live_session_with_its_state
@@ -17,4 +17,6 @@ obligations:
   - I1 empirical-test :: cargo test --locked agents_309_snapshot_is_due_on_change_or_heartbeat_only
   - I2 empirical-test :: cargo test --locked agents_309_send_rechecks_the_screen_before_typing
   - I3 empirical-test :: cargo test --locked agents_309_wait_options_are_checked
+  - F1 empirical-test :: cargo test --locked agents_309_f1_control_characters_at_the_edges_are_refused
+  - I5 empirical-test :: cargo test --locked agents_309_parsing_edges_hold
   - I4 empirical-mutation :: python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations.py

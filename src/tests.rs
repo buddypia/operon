@@ -91330,3 +91330,52 @@ fn agents_309_usage_names_every_verb() {
             && main.contains("run_agents_cli(&arguments[1..])")
     );
 }
+
+#[test]
+fn agents_309_f1_control_characters_at_the_edges_are_refused() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let peer8 = peer.simple().to_string()[..8].to_owned();
+    // R8: a control character at the edge of the text is still a control character.
+    for text in ["hello\n", "\thello", "hello\r"] {
+        let mut host = Agents309Host::new(Some(snapshot.clone()));
+        let outcome = agents_309_run(&mut host, &caller, &["send", &peer8, text]);
+        assert_eq!(
+            outcome.code, AGENTS_EXIT_USAGE,
+            "{text:?} sent as {:?}",
+            host.sent
+        );
+        assert!(host.sent.is_empty(), "{text:?}");
+    }
+}
+
+#[test]
+fn agents_309_parsing_edges_hold() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let hyphenated = peer.hyphenated().to_string().to_uppercase();
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["read", &hyphenated[..13]]).code,
+        0
+    );
+    let twice = agents_309_run(
+        &mut host,
+        &caller,
+        &["read", "2222", "--lines", "3", "--lines", "4"],
+    );
+    assert_eq!(twice.code, AGENTS_EXIT_USAGE);
+    let json = agents_309_run(&mut host, &caller, &["list", "--json", "--json"]);
+    assert_eq!(json.code, AGENTS_EXIT_USAGE);
+    let empty = AgentCaller {
+        tmux_name: None,
+        directory: PathBuf::from("/work/a/sub"),
+    };
+    assert_eq!(agents_309_run(&mut host, &empty, &["list"]).code, 0);
+    let w = agents_309_run(
+        &mut host,
+        &caller,
+        &["wait", "2222", "--timeout", "3", "--timeout", "0"],
+    );
+    assert_eq!(w.code, AGENTS_EXIT_USAGE);
+}

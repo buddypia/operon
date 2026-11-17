@@ -414,8 +414,8 @@ fn agents_list_row(entry: &AgentEntry, own: bool) -> String {
     format!(
         "{}  {:<8}  {:<8}  {}  {}{}\n",
         short_id(entry.id),
-        entry.state,
-        entry.agent,
+        without_controls(&entry.state),
+        without_controls(&entry.agent),
         without_controls(entry.branch.as_deref().unwrap_or("-")),
         without_controls(&entry.name),
         mark
@@ -480,6 +480,9 @@ fn agents_send(
         return fail(AGENTS_EXIT_USAGE, agents_usage());
     };
     let joined = words.join(" ");
+    // Judged before trimming: a newline or a tab at either end is still a
+    // control character, and trimming it away would hide it (change 309, F1).
+    let has_control = joined.chars().any(char::is_control);
     let text = joined.trim();
     if text.is_empty() {
         return fail(AGENTS_EXIT_USAGE, tr("送信する内容が空です。"));
@@ -493,7 +496,7 @@ fn agents_send(
             ),
         );
     }
-    if text.chars().any(char::is_control) {
+    if has_control {
         return fail(
             AGENTS_EXIT_USAGE,
             tr("改行や制御文字を含む内容は送信できません。1 行にまとめてください。"),

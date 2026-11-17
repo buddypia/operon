@@ -80,6 +80,14 @@ what the plan had not:
    comment, the manuals, and the READMEs now say so: letting an agent run
    `agents send` lets it prompt the project's other agents with their
    permissions.
+5. **A control character at either end slipped through.** empirical-verifier
+   af4a0fab reproduced `send <id> "hello\n"` typing `hello` with exit 0: the
+   text was trimmed before it was judged. It is now judged before trimming.
+   `agents_309_f1_control_characters_at_the_edges_are_refused` failed at
+   0a49f72 and passes; mutation `control-judged-after-trim`. Its parsing
+   probes (`--lines` twice, `--json` twice, an uppercase hyphenated prefix, no
+   session) held and are kept as `agents_309_parsing_edges_hold`. `list` also
+   drops control characters from the agent and state columns.
 
 Left as they are, and why:
 
