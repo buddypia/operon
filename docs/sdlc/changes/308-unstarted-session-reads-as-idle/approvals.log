@@ -1,0 +1,4 @@
+2026-11-17T10:34:59Z auto intent intent.md a215b67de29b87c5 approve Restates the person's quoted request and pair choice; no new direction and no store change.
+2026-11-17T10:34:59Z auto spec spec.md 769bb408b1cc1462 approve Meets the intent; hook, stale-sweep, broadcast, and group claims verified in code.
+2026-11-17T10:34:59Z auto screen screen.md 510c76434446eafb approve One state's badge, word, and hover inside existing palette roles with no layout change.
+2026-11-17T10:34:59Z auto plan plan.md ced5494944325ef1 approve Files, order, and risks cover every spec requirement with a test or mutation per risk; both large modules stay under 10000 lines.

@@ -2,16 +2,16 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Have an evaluator judge intent, spec, screen, and plan, then commit them before any source edit."
+resume: "Write the six unstarted_308_ tests, watch them fail, then build per plan.md."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
