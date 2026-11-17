@@ -8587,6 +8587,7 @@ pub(crate) fn saves_the_local_store_atomically_and_loads_it_back() {
         cli_handoffs: Vec::new(),
         agent_launch_presets: Vec::new(),
         search_engine_mode: SearchEngineMode::default(),
+        diff_layout: DiffLayout::default(),
     };
     save_store(&path, &store).unwrap();
     assert_eq!(load_store(&path).unwrap().projects, store.projects);
@@ -13514,7 +13515,13 @@ pub(crate) fn shortens_legacy_mechanism_names_into_a_title() {
 pub(crate) fn reports_what_a_session_is_actually_doing() {
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let sessions = vec![session.clone()];
-    let working = session_status_view(&sessions, &session, false, Some(AgentActivity::Working));
+    let working = session_status_view(
+        &sessions,
+        &session,
+        false,
+        Some(AgentActivity::Working),
+        false,
+    );
     // The kind, not the word: four words name fourteen states (change 090),
     // and the distinction this test guards is the state's.
     assert_eq!(working.kind, SessionStatusKind::Working);
@@ -13523,13 +13530,21 @@ pub(crate) fn reports_what_a_session_is_actually_doing() {
         &session,
         false,
         Some(AgentActivity::AwaitingInput),
+        false,
     );
     assert_eq!(awaiting.kind, SessionStatusKind::Waiting);
     assert!(awaiting.hint.contains("ターミナルを開いて"));
     assert_ne!(working.tone, awaiting.tone);
     // A stop that has been asked for outranks whatever the screen shows.
     assert_eq!(
-        session_status_view(&sessions, &session, true, Some(AgentActivity::Working)).kind,
+        session_status_view(
+            &sessions,
+            &session,
+            true,
+            Some(AgentActivity::Working),
+            false
+        )
+        .kind,
         SessionStatusKind::Stopping
     );
 
@@ -13537,7 +13552,7 @@ pub(crate) fn reports_what_a_session_is_actually_doing() {
     let mut blocked = test_session(Uuid::new_v4(), SessionStatus::Queued);
     blocked.depends_on = vec![parent.id];
     let queued = vec![parent, blocked.clone()];
-    let blocked_view = session_status_view(&queued, &blocked, false, None);
+    let blocked_view = session_status_view(&queued, &blocked, false, None, false);
     assert_eq!(blocked_view.kind, SessionStatusKind::Blocked);
     assert!(blocked_view.hint.contains("test"));
 }
@@ -14486,7 +14501,13 @@ pub(crate) fn a_poll_that_loses_a_terminal_persists_it_without_reporting_a_failu
         load_store(&app.data_file).unwrap().sessions[0].status,
         SessionStatus::Lost
     );
-    let view = session_status_view(&app.store.sessions, &app.store.sessions[0], false, None);
+    let view = session_status_view(
+        &app.store.sessions,
+        &app.store.sessions[0],
+        false,
+        None,
+        false,
+    );
     assert_eq!(view.kind, SessionStatusKind::Lost);
     assert_ne!(view.tone, StatusTone::Failed);
     fs::remove_dir_all(root).unwrap();
@@ -33458,6 +33479,7 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
             | SessionStatusKind::Working
             | SessionStatusKind::Waiting
             | SessionStatusKind::Idle
+            | SessionStatusKind::NotStarted
             | SessionStatusKind::Running
             | SessionStatusKind::Blocked
             | SessionStatusKind::Ready
@@ -33504,9 +33526,17 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
             Some(AgentActivity::AwaitingInput),
             Some(AgentActivity::Idle),
         ] {
-            for cancellation_pending in [false, true] {
+            for (cancellation_pending, awaiting_first_request) in
+                [(false, false), (true, false), (false, true), (true, true)]
+            {
                 let session = test_session(Uuid::new_v4(), status.clone());
-                let kind = session_status_kind(&[], &session, cancellation_pending, activity);
+                let kind = session_status_kind(
+                    &[],
+                    &session,
+                    cancellation_pending,
+                    activity,
+                    awaiting_first_request,
+                );
                 assert!(
                     SessionStatusKind::ALL.contains(&kind),
                     "{kind:?} is reachable but missing from SessionStatusKind::ALL"
@@ -33524,7 +33554,7 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
     blocked.depends_on = vec![dead.id];
     let others = [finished, dead];
     for session in [&ready, &blocked] {
-        let kind = session_status_kind(&others, session, false, None);
+        let kind = session_status_kind(&others, session, false, None, false);
         reachable.insert(format!("{kind:?}"));
     }
     assert_eq!(
@@ -35125,7 +35155,8 @@ pub(crate) fn every_pane_that_takes_a_note_offers_a_way_to_send_it() {
             }
             let source = fs::read_to_string(&path).unwrap();
             panes += source.matches("diff_pane(").count()
-                + source.matches("diff_pane_with_actions(").count();
+                + source.matches("diff_pane_with_actions(").count()
+                + source.matches("diff_pane_with_view(").count();
             footers += source.matches("ui_diff_comment_footer(").count();
         }
     }
@@ -49056,7 +49087,12 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
 #[test]
 pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
     for kind in SessionStatusKind::ALL {
-        if let Some(group) = kind.group() {
+        if kind == SessionStatusKind::NotStarted {
+            // Change 308: the one live state with a word of its own, inside
+            // the アイドル group.
+            assert_eq!(kind.label(), "未開始");
+            assert_eq!(kind.group(), Some(SessionStatusGroup::Free));
+        } else if let Some(group) = kind.group() {
             assert_eq!(kind.label(), group.message_id(), "{kind:?}");
         } else {
             assert!(
@@ -49080,6 +49116,7 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         &session,
         false,
         Some(AgentActivity::Idle),
+        false,
     );
     assert_eq!(view.label, tr("アイドル"));
     let mut ids: Vec<&str> = SessionStatusGroup::GROUPS
@@ -53128,6 +53165,7 @@ pub(crate) fn a_pinned_session_shows_what_its_agent_last_said() {
     let status = |activity| HookStatus {
         activity,
         boundary: false,
+        new_conversation: false,
         tool: None,
         last_message: Some("テストを追加しますか？".to_owned()),
         started_at: now,
@@ -53255,6 +53293,7 @@ pub(crate) fn the_palette_finds_a_session_by_what_its_agent_last_said() {
         HookStatus {
             activity: AgentActivity::Idle,
             boundary: false,
+            new_conversation: false,
             tool: None,
             last_message: Some("migration 0042 を適用しますか".to_owned()),
             started_at: now,
@@ -62877,7 +62916,7 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
     assert_eq!(translation_for(Language::Ko, "要対応"), Some("확인 필요"));
     assert_eq!(
         SessionStatusGroup::Free.hint_id(),
-        "ターンを終え、次の依頼を出せるセッション"
+        "未開始、またはターンを終えて次の依頼を出せるセッション"
     );
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let view = session_status_view(
@@ -62885,6 +62924,7 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
         &session,
         false,
         Some(AgentActivity::Idle),
+        false,
     );
     assert_eq!(view.hint, tr("ターンを終え、次の依頼を出せます"));
     for group in SessionStatusGroup::GROUPS {
@@ -62899,13 +62939,19 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
     for (id, en, ko) in [
         (
             SessionStatusGroup::Free.hint_id(),
-            "Sessions that finished their turn",
-            "턴을 마치고 다음 요청을 보낼 수 있는 세션",
+            "Sessions not started yet or that finished their turn",
+            "시작 전이거나 턴을 마치고 다음 요청을 보낼 수 있는 세션",
         ),
         (
             "ターンを終え、次の依頼を出せます",
             "Turn finished; ready for your next request",
             "턴을 마쳤습니다. 다음 요청을 보낼 수 있습니다",
+        ),
+        // Change 308: not started is idle too, and no more a wait than it.
+        (
+            "まだ最初の依頼を受けていません",
+            "No request yet",
+            "아직 첫 요청을 받지 않았습니다",
         ),
     ] {
         assert!(!id.contains('待'), "idle hint 「{id}」 reads as waiting");
@@ -62914,7 +62960,11 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
         assert_eq!(translation_for(Language::En, id), Some(en));
         assert_eq!(translation_for(Language::Ko, id), Some(ko));
     }
-    for old in ["指示待ち", "手すき"] {
+    for old in [
+        "指示待ち",
+        "手すき",
+        "ターンを終え、次の依頼を出せるセッション",
+    ] {
         assert!(
             translation_for(Language::En, old).is_none(),
             "the old idle group row 「{old}」 must be gone"
@@ -71402,6 +71452,7 @@ fn session_tab_status_badges_are_distinct_vectors() {
         (SessionStatusKind::Working, StatusMark::Progress),
         (SessionStatusKind::Waiting, StatusMark::Attention),
         (SessionStatusKind::Idle, StatusMark::Pause),
+        (SessionStatusKind::NotStarted, StatusMark::Dot),
         (SessionStatusKind::Running, StatusMark::Progress),
         (SessionStatusKind::Blocked, StatusMark::Attention),
         (SessionStatusKind::Ready, StatusMark::Play),
@@ -71533,6 +71584,7 @@ fn sidebar_251_hook(activity: AgentActivity) -> HookStatus {
     HookStatus {
         activity,
         boundary: false,
+        new_conversation: false,
         tool: None,
         last_message: None,
         started_at: Instant::now(),
@@ -80038,7 +80090,11 @@ fn broadcast_282_send_types_into_every_idle_agent() {
     app.background_tasks
         .insert(BackgroundKey::TerminalInput(other));
     let selected = app.selected_session;
-    assert_eq!(app.send_broadcast("  作業をコミットして \n"), 2);
+    // Every session ticked, the working one too: it is still left alone.
+    assert_eq!(
+        app.send_broadcast("  作業をコミットして \n", &[first, second, other]),
+        2
+    );
     for id in [first, second] {
         assert_eq!(
             reply_279_queued(&app, id),
@@ -80060,13 +80116,13 @@ fn broadcast_282_send_types_into_every_idle_agent() {
 #[test]
 fn broadcast_282_nothing_to_say_or_nobody_idle_sends_nothing() {
     let (root, mut app, first, second) = broadcast_282_app("broadcast-282-none");
-    assert_eq!(app.send_broadcast("   "), 0);
+    assert_eq!(app.send_broadcast("   ", &[first, second]), 0);
     assert!(reply_279_queued(&app, first).is_empty());
     assert_eq!(app.notice, None);
     for id in [first, second] {
         working_278_settle(&mut app, id, AgentActivity::Working);
     }
-    assert_eq!(app.send_broadcast("続けて"), 0);
+    assert_eq!(app.send_broadcast("続けて", &[first, second]), 0);
     assert!(reply_279_queued(&app, first).is_empty());
     assert_eq!(app.notice, None, "誰にも送っていないのに通知しました");
     fs::remove_dir_all(&root).ok();
@@ -80103,7 +80159,7 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
     let texts = broadcast_282_frame(&mut app, &ctx, Vec::new());
     for expected in [
         tr("アイドル中のエージェントへ送信").to_owned(),
-        tf!("{p0} · 送信先 {p1} 件", p0 = "p", p1 = 2),
+        tf!("{p0} · 選択 {p1} / {p2} 件", p0 = "p", p1 = 0, p2 = 2),
         "first".to_owned(),
         "second".to_owned(),
     ] {
@@ -80134,6 +80190,10 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
         app.broadcast_sheet.is_some(),
         "変換の確定でシートが閉じました"
     );
+    // Change 306: the line reaches the ticked sessions, so tick both.
+    if let Some(sheet) = app.broadcast_sheet.as_mut() {
+        sheet.chosen = vec![first, second];
+    }
     broadcast_282_frame(&mut app, &ctx, Vec::new());
     broadcast_282_frame(&mut app, &ctx, vec![reply_279_enter()]);
     for id in [first, second] {
@@ -83180,6 +83240,7 @@ fn status_291_groups_are_three_and_done_stopped_avoid_finished_word() {
         &done_session,
         false,
         None,
+        false,
     );
     assert_eq!(done_view.label, tr("正常終了"));
     assert_eq!(done_view.hint, tr("ターミナルは正常に終了しました"));
@@ -83190,6 +83251,7 @@ fn status_291_groups_are_three_and_done_stopped_avoid_finished_word() {
         &stopped_session,
         false,
         None,
+        false,
     );
     assert_eq!(stopped_view.label, tr("停止済み"));
     assert_eq!(stopped_view.hint, tr("停止操作による終了"));
@@ -90482,6 +90544,1546 @@ pub(crate) fn cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation() {
     fs::remove_dir_all(&root).ok();
 }
 
+/// Change 307 (R1): porcelain blame gives each line its commit, carries a
+/// commit's metadata to its later lines, marks uncommitted lines, and flags the
+/// first line of every run so only that one shows the gutter text.
+#[test]
+pub(crate) fn diff_307_blame_porcelain_parses_runs_and_uncommitted() {
+    let a = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    let zero = "0000000000000000000000000000000000000000";
+    let porcelain = format!(
+        "{a} 1 1 2\nauthor buddypia\nauthor-mail <b@x>\nauthor-time 1794800000\nauthor-tz +0900\nsummary fix(git): pass -C once\nfilename src/git.rs\n\tlet a = 1;\n\
+         {a} 2 2\n\tlet b = 2;\n\
+         {zero} 3 3 1\nauthor Not Committed Yet\nauthor-time 1794900000\nauthor-tz -0530\nsummary Version of src/git.rs from src/git.rs\nfilename src/git.rs\n\tlet c = 3;\n\
+         {a} 3 4 1\n\tlet d = 4;\n"
+    );
+    let lines = parse_blame_porcelain(&porcelain);
+    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[0].commit, a);
+    assert_eq!(lines[0].short, "a1b2c3d");
+    assert_eq!(lines[0].author, "buddypia");
+    assert_eq!(lines[0].time, 1794800000);
+    // The date is the author's own wall clock, from the offset porcelain gives.
+    assert_eq!(lines[0].date, "2026-11-16 12:33");
+    assert_eq!(lines[2].date, "2026-11-17 01:50");
+    assert_eq!(lines[0].summary, "fix(git): pass -C once");
+    assert_eq!(lines[0].text, "let a = 1;");
+    assert!(lines[0].starts_run && !lines[0].uncommitted);
+    // The second line of the run: metadata carried, gutter blank.
+    assert_eq!(lines[1].author, "buddypia");
+    assert_eq!(lines[1].summary, "fix(git): pass -C once");
+    assert!(!lines[1].starts_run);
+    assert!(lines[2].uncommitted && lines[2].starts_run);
+    // The same commit again after another one starts a new run.
+    assert!(lines[3].starts_run);
+    assert_eq!(lines[3].text, "let d = 4;");
+    assert_eq!(lines[3].author, "buddypia");
+}
+
+/// Change 307 (R2): the file log's unit-separated fields, a malformed line
+/// skipped, and the entry ceiling held.
+#[test]
+pub(crate) fn diff_307_file_log_parses_fields_and_caps() {
+    let full = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432";
+    let log = format!(
+        "{full}\u{1f}9f8e7d6\u{1f}buddypia\u{1f}2026-11-02 09:15\u{1f}feat: worktree ports\nnot a record\n"
+    );
+    let revisions = parse_file_log(&log);
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(revisions[0].commit, full);
+    assert_eq!(revisions[0].short, "9f8e7d6");
+    assert_eq!(revisions[0].author, "buddypia");
+    assert_eq!(revisions[0].date, "2026-11-02 09:15");
+    assert_eq!(revisions[0].summary, "feat: worktree ports");
+    let many: String = (0..FILE_HISTORY_MAX_ENTRIES + 5)
+        .map(|_| format!("{full}\u{1f}9f8e7d6\u{1f}a\u{1f}2026-01-01 00:00\u{1f}s\n"))
+        .collect();
+    assert_eq!(parse_file_log(&many).len(), FILE_HISTORY_MAX_ENTRIES);
+}
+
+/// Change 307 (R5): one function decides the git arguments of each comparison,
+/// and a revision that is not a full commit id never reaches git.
+#[test]
+pub(crate) fn diff_307_revision_diff_arguments_per_base() {
+    let sha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    assert_eq!(
+        revision_diff_arguments(&DiffBase::Revision(sha.into()), "src/a.rs").unwrap(),
+        [
+            "diff",
+            "--no-ext-diff",
+            "--unified=3",
+            sha,
+            "--",
+            "src/a.rs"
+        ]
+    );
+    assert_eq!(
+        revision_diff_arguments(&DiffBase::Commit(sha.into()), "src/a.rs").unwrap(),
+        [
+            "show",
+            "--no-ext-diff",
+            "--unified=3",
+            "--format=",
+            "--diff-merges=first-parent",
+            sha,
+            "--",
+            "src/a.rs"
+        ]
+    );
+    for bad in ["HEAD", "--output=/tmp/x", "a1b2c3d", ""] {
+        assert!(revision_diff_arguments(&DiffBase::Revision(bad.into()), "a").is_err());
+        assert!(revision_diff_arguments(&DiffBase::Commit(bad.into()), "a").is_err());
+    }
+    // HEAD ↔ local is the working-tree diff, not built here.
+    assert!(revision_diff_arguments(&DiffBase::Head, "a").is_err());
+}
+
+/// Change 307 (R10): a file never committed is a state of its own, and a blame
+/// past its ceiling is reported as too large instead of shown in part.
+#[test]
+pub(crate) fn diff_307_blame_reports_untracked_and_too_large() {
+    let root = temporary_root().join(format!("operon-307-blame-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let git = |args: &[&str]| {
+        let status = git_command(&root)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "tester"]);
+    fs::write(root.join("kept.txt"), "one\ntwo\n").unwrap();
+    git(&["add", "kept.txt"]);
+    git(&["commit", "-q", "-m", "first"]);
+    fs::write(root.join("kept.txt"), "one\ntwo\nthree\n").unwrap();
+    fs::write(root.join("new.txt"), "fresh\n").unwrap();
+
+    match git_blame_limited(&root, "kept.txt", GIT_BLAME_MAX_BYTES).unwrap() {
+        BlameOutcome::Lines { lines, widest } => {
+            assert_eq!(widest, 5);
+            assert_eq!(lines.len(), 3);
+            assert_eq!(lines[0].summary, "first");
+            assert!(lines[2].uncommitted);
+        }
+        other => panic!("expected lines, got {other:?}"),
+    }
+    assert!(matches!(
+        git_blame_limited(&root, "new.txt", GIT_BLAME_MAX_BYTES).unwrap(),
+        BlameOutcome::Untracked
+    ));
+    assert!(matches!(
+        git_blame_limited(&root, "kept.txt", 16).unwrap(),
+        BlameOutcome::TooLarge
+    ));
+    let history = git_file_history(&root, "kept.txt").unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].summary, "first");
+    let commit = history[0].commit.clone();
+    let since = git_revision_diff(&root, "kept.txt", &DiffBase::Revision(commit.clone())).unwrap();
+    assert!(since.contains("+three"));
+    let own = git_revision_diff(&root, "kept.txt", &DiffBase::Commit(commit)).unwrap();
+    assert!(own.contains("+one") && !own.contains("three"));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 307 (R6): the diff layout is kept in the store, and a store written
+/// before it existed loads as side by side.
+#[test]
+pub(crate) fn diff_307_diff_layout_round_trips_and_old_stores_default_to_side_by_side() {
+    let mut store = Store::default();
+    assert_eq!(store.diff_layout, DiffLayout::SideBySide);
+    store.diff_layout = DiffLayout::Unified;
+    let json = serde_json::to_string(&store).unwrap();
+    let back: Store = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.diff_layout, DiffLayout::Unified);
+    let mut old = serde_json::to_value(Store::default()).unwrap();
+    old.as_object_mut().unwrap().remove("diff_layout");
+    let old: Store = serde_json::from_value(old).unwrap();
+    assert_eq!(old.diff_layout, DiffLayout::SideBySide);
+}
+
+fn diff_307_line(
+    kind: DiffLineKind,
+    old: Option<usize>,
+    new: Option<usize>,
+    text: &str,
+) -> DiffLine {
+    DiffLine {
+        kind,
+        old_number: old,
+        new_number: new,
+        text: text.into(),
+        highlights: Vec::new(),
+    }
+}
+
+fn diff_307_sample_lines() -> Vec<DiffLine> {
+    use DiffLineKind::*;
+    vec![
+        diff_307_line(Hunk, None, None, "@@ -1,5 +1,5 @@"),
+        diff_307_line(Context, Some(1), Some(1), "keep"),
+        diff_307_line(Removed, Some(2), None, "old a"),
+        diff_307_line(Removed, Some(3), None, "old b"),
+        diff_307_line(Added, None, Some(2), "new a"),
+        diff_307_line(Context, Some(4), Some(3), "keep 2"),
+        diff_307_line(Added, None, Some(4), "only new"),
+        diff_307_line(Note, None, None, "\\ No newline at end of file"),
+        diff_307_line(Removed, Some(5), None, "gone"),
+    ]
+}
+
+/// Change 307 (R3): removals face the additions that replaced them, the longer
+/// run's remainder faces nothing, headers span both columns, and every line is
+/// drawn exactly once, in order.
+#[test]
+pub(crate) fn diff_307_side_by_side_pairs_rewrites_and_fills_gaps() {
+    let lines = diff_307_sample_lines();
+    let pairs = side_by_side_rows(&lines);
+    let got: Vec<(Option<usize>, Option<usize>)> =
+        pairs.iter().map(|pair| (pair.left, pair.right)).collect();
+    assert_eq!(
+        got,
+        [
+            (Some(0), Some(0)),
+            (Some(1), Some(1)),
+            (Some(2), Some(4)),
+            (Some(3), None),
+            (Some(5), Some(5)),
+            (None, Some(6)),
+            (Some(7), Some(7)),
+            (Some(8), None),
+        ]
+    );
+    let mut seen = Vec::new();
+    for pair in &pairs {
+        for index in [pair.left, pair.right].into_iter().flatten() {
+            if seen.last() != Some(&index) {
+                seen.push(index);
+            }
+        }
+    }
+    seen.sort_unstable();
+    assert_eq!(seen, (0..lines.len()).collect::<Vec<_>>());
+    assert!(side_by_side_rows(&[]).is_empty());
+}
+
+/// Change 307 (R4): the change blocks are the runs of changed rows, and
+/// stepping through them stops at both ends.
+#[test]
+pub(crate) fn diff_307_change_blocks_step_forward_and_back() {
+    assert_eq!(
+        change_block_starts(&[false, true, true, false, true, false]),
+        [1, 4]
+    );
+    assert_eq!(change_block_starts(&[true]), [0]);
+    assert!(change_block_starts(&[false, false]).is_empty());
+    assert_eq!(step_change(2, None, true), Some(0));
+    assert_eq!(step_change(2, Some(0), true), Some(1));
+    assert_eq!(step_change(2, Some(1), true), Some(1));
+    assert_eq!(step_change(2, Some(1), false), Some(0));
+    assert_eq!(step_change(2, Some(0), false), Some(0));
+    assert_eq!(step_change(2, None, false), Some(0));
+    assert_eq!(step_change(0, None, true), None);
+    // On the sample: the rewrite block, the lone addition, and the removal at
+    // the end are three blocks in side-by-side rows.
+    let lines = diff_307_sample_lines();
+    let changed: Vec<bool> = side_by_side_rows(&lines)
+        .iter()
+        .map(|pair| pair_is_change(&lines, pair))
+        .collect();
+    assert_eq!(change_block_starts(&changed), [2, 5, 7]);
+}
+
+/// Change 307 (R8): a pane too narrow for two readable columns draws the
+/// interleaved layout, without changing what the person chose.
+#[test]
+pub(crate) fn diff_307_side_by_side_falls_back_below_min_width() {
+    let narrow = DIFF_SIDE_BY_SIDE_MIN_WIDTH - 1.0;
+    assert_eq!(
+        effective_diff_layout(DiffLayout::SideBySide, narrow),
+        DiffLayout::Unified
+    );
+    assert_eq!(
+        effective_diff_layout(DiffLayout::SideBySide, DIFF_SIDE_BY_SIDE_MIN_WIDTH),
+        DiffLayout::SideBySide
+    );
+    assert_eq!(
+        effective_diff_layout(DiffLayout::Unified, 2000.0),
+        DiffLayout::Unified
+    );
+}
+
+fn diff_307_file(lines: Vec<DiffLine>) -> DiffFile {
+    let added = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Added)
+        .count();
+    let removed = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Removed)
+        .count();
+    DiffFile {
+        path: "src/lib.rs".into(),
+        renamed_from: None,
+        change: DiffFileChange::Modified,
+        widest: lines
+            .iter()
+            .map(|l| l.text.chars().count())
+            .max()
+            .unwrap_or(0),
+        lines,
+        added,
+        removed,
+        note: None,
+    }
+}
+
+fn diff_307_frame(files: &[DiffFile], view: &DiffPaneView) -> (egui::FullOutput, DiffPaneOutcome) {
+    let ctx = egui::Context::default();
+    let mut collapsed = HashSet::new();
+    let mut annotations = DiffAnnotations::default();
+    let mut action = None;
+    let mut outcome = None;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 500.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                outcome = Some(diff_pane_with_view(
+                    ui,
+                    files,
+                    &mut collapsed,
+                    AppTheme::Dark.palette(),
+                    420.0,
+                    Uuid::new_v4(),
+                    &mut annotations,
+                    &mut action,
+                    view,
+                ));
+            });
+        },
+    );
+    (output, outcome.unwrap())
+}
+
+/// Change 307 (R7): hunk actions and notes belong to HEAD ↔ local only; on any
+/// other comparison a staged or discarded hunk would be a patch against the
+/// wrong text, so neither the buttons nor the note marker is drawn.
+#[test]
+pub(crate) fn diff_307_only_head_comparison_offers_hunk_actions_and_notes() {
+    let files = vec![diff_307_file(diff_307_sample_lines())];
+    for layout in [DiffLayout::SideBySide, DiffLayout::Unified] {
+        let head = DiffPaneView {
+            layout,
+            labels: ("HEAD", "ローカル"),
+            editable: true,
+            scroll_to_change: None,
+        };
+        let texts = painted_text_rects(&diff_307_frame(&files, &head).0.shapes);
+        assert!(texts.iter().any(|(t, _)| t == "ステージ"), "{layout:?}");
+        assert!(texts.iter().any(|(t, _)| t == "破棄"), "{layout:?}");
+        let past = DiffPaneView {
+            editable: false,
+            ..head
+        };
+        let (output, outcome) = diff_307_frame(&files, &past);
+        let texts = painted_text_rects(&output.shapes);
+        assert!(
+            !texts.iter().any(|(t, _)| t == "ステージ" || t == "破棄"),
+            "{layout:?}"
+        );
+        assert_eq!(outcome.changes, 3, "{layout:?}");
+    }
+}
+
+/// Change 307 (R9): two columns, each labelled, each with its own side's line
+/// numbers; and a file that only adds lines draws with an empty left column.
+#[test]
+pub(crate) fn diff_307_side_by_side_pane_draws_both_columns() {
+    let files = vec![diff_307_file(diff_307_sample_lines())];
+    let view = DiffPaneView {
+        layout: DiffLayout::SideBySide,
+        labels: ("a1b2c3d", "ローカル"),
+        editable: false,
+        scroll_to_change: None,
+    };
+    let (output, _) = diff_307_frame(&files, &view);
+    let texts = painted_text_rects(&output.shapes);
+    let find = |needle: &str| {
+        texts
+            .iter()
+            .find(|(text, _)| text.contains(needle))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{needle} not painted: {texts:?}"))
+    };
+    let left_label = find("a1b2c3d");
+    let right_label = find("ローカル");
+    assert!(left_label.left() < 450.0 && right_label.left() >= 450.0);
+    // The rewrite pair sits on one row: old on the left, new on the right.
+    let old = find("old a");
+    let new = find("new a");
+    assert!((old.center().y - new.center().y).abs() < 1.0);
+    assert!(old.left() < new.left() && new.left() >= 450.0);
+    assert!(find("only new").left() >= 450.0);
+    assert!(find("gone").left() < 450.0);
+
+    let added_only = vec![diff_307_file(vec![
+        diff_307_line(DiffLineKind::Hunk, None, None, "@@ -0,0 +1,1 @@"),
+        diff_307_line(DiffLineKind::Added, None, Some(1), "fresh"),
+    ])];
+    let (output, outcome) = diff_307_frame(&added_only, &view);
+    assert_eq!(outcome.changes, 1);
+    let texts = painted_text_rects(&output.shapes);
+    assert!(texts
+        .iter()
+        .any(|(t, r)| t.contains("fresh") && r.left() >= 450.0));
+}
+
+/// Change 307 (store surface, formal-model): every sequence of choosing a
+/// layout, an older build rewriting the store without the field, and a
+/// relaunch keeps a store that loads, whose layout is the last one chosen —
+/// or side by side once an older build has dropped it.
+#[test]
+pub(crate) fn model_check_diff_307_layout_survives_saves_downgrades_and_relaunches() {
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    struct State {
+        memory: DiffLayout,
+        disk: String,
+        expected: Option<DiffLayout>,
+    }
+    #[derive(Debug, Clone)]
+    enum Event {
+        Choose(DiffLayout),
+        OlderBuildRewrites,
+        Relaunch,
+    }
+    let save = |layout: DiffLayout| {
+        let mut store = Store::default();
+        store.diff_layout = layout;
+        serde_json::to_string(&store).unwrap()
+    };
+    let initial = State {
+        memory: DiffLayout::SideBySide,
+        disk: save(DiffLayout::SideBySide),
+        expected: Some(DiffLayout::SideBySide),
+    };
+    let events = [
+        Event::Choose(DiffLayout::SideBySide),
+        Event::Choose(DiffLayout::Unified),
+        Event::OlderBuildRewrites,
+        Event::Relaunch,
+    ];
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| {
+            let mut next = state.clone();
+            match event {
+                Event::Choose(layout) => {
+                    next.memory = *layout;
+                    next.disk = save(*layout);
+                    next.expected = Some(*layout);
+                }
+                Event::OlderBuildRewrites => {
+                    let mut value: serde_json::Value = serde_json::from_str(&state.disk).ok()?;
+                    value.as_object_mut()?.remove("diff_layout");
+                    next.disk = value.to_string();
+                    next.expected = None;
+                }
+                Event::Relaunch => {
+                    next.memory = serde_json::from_str::<Store>(&state.disk).ok()?.diff_layout;
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            let loaded: Store = serde_json::from_str(&state.disk)
+                .map_err(|error| format!("store does not load: {error}"))?;
+            let want = state.expected.unwrap_or(DiffLayout::SideBySide);
+            if loaded.diff_layout != want {
+                return Err(format!("loads {:?}, want {want:?}", loaded.diff_layout));
+            }
+            Ok(())
+        },
+        64,
+    );
+    assert_eq!(coverage.states, 4, "{coverage:?}");
+}
+
+/// Change 307 (F1, found by empirical-verifier): a commit subject is the rest
+/// of the log line, so a unit separator inside it does not cut it short.
+#[test]
+pub(crate) fn diff_307_file_log_keeps_a_subject_holding_the_separator() {
+    let sha = "c".repeat(40);
+    let line = format!("{sha}\u{1f}ccccccc\u{1f}A\u{1f}2020-01-01 00:00\u{1f}fix a\u{1f}b\tc");
+    let revisions = parse_file_log(&line);
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(revisions[0].summary, "fix a\u{1f}b\tc");
+}
+
+// ── change 307: formal models ───────────────────────────────────────────────
+
+/// What the store file holds on disk in the 307 layout model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Diff307Disk {
+    Absent,
+    /// Written before 307: no `diff_layout` key.
+    Legacy,
+    /// Written by this build through `save_store`.
+    Saved(DiffLayout),
+    /// Same schema, written by a newer build that added a layout value.
+    NewerVariant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Diff307Event {
+    Seed(Diff307Disk),
+    Relaunch,
+    Choose(DiffLayout),
+    Save,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Diff307Model {
+    disk: Diff307Disk,
+    /// The running app's layout and whether it holds the project.
+    mem: Option<(DiffLayout, bool)>,
+    /// A relaunch lost the project or the layout the file held.
+    lost: bool,
+}
+
+#[test]
+/// Change 307. Bound: one store file, every sequence over {seed one of five
+/// file contents, relaunch through `load_store_safely`, choose a layout, save
+/// through `save_store`}. Invariants: a relaunch reads back the layout the
+/// last save wrote; a store from before 307 reads as side by side; a store
+/// holding a layout value this build does not know keeps its projects.
+pub(crate) fn model_check_diff_307_store_files_keep_layout_and_projects_through_load_store_safely()
+{
+    let dir = temporary_directory("diff-307-layout");
+    let path = dir.join("store.json");
+    let project_store = |layout: DiffLayout| {
+        let mut store = Store::default();
+        store.projects.push(Project {
+            id: Uuid::new_v4(),
+            path: PathBuf::from("/tmp/project"),
+            name: "project".into(),
+            added_at: now(),
+        });
+        store.diff_layout = layout;
+        store
+    };
+    let materialise = |disk: Diff307Disk| {
+        let _ = fs::remove_file(&path);
+        match disk {
+            Diff307Disk::Absent => {}
+            Diff307Disk::Legacy => {
+                let mut value = serde_json::to_value(project_store(DiffLayout::Unified)).unwrap();
+                value.as_object_mut().unwrap().remove("diff_layout");
+                fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            Diff307Disk::Saved(layout) => {
+                save_store(&path, &project_store(layout)).unwrap();
+            }
+            Diff307Disk::NewerVariant => {
+                let mut value = serde_json::to_value(project_store(DiffLayout::Unified)).unwrap();
+                value["diff_layout"] = serde_json::json!("three_pane");
+                fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+        }
+    };
+    let mut events = vec![Diff307Event::Relaunch, Diff307Event::Save];
+    for disk in [
+        Diff307Disk::Absent,
+        Diff307Disk::Legacy,
+        Diff307Disk::Saved(DiffLayout::SideBySide),
+        Diff307Disk::Saved(DiffLayout::Unified),
+        Diff307Disk::NewerVariant,
+    ] {
+        events.push(Diff307Event::Seed(disk));
+    }
+    for layout in [DiffLayout::SideBySide, DiffLayout::Unified] {
+        events.push(Diff307Event::Choose(layout));
+    }
+    let initial = Diff307Model {
+        disk: Diff307Disk::Absent,
+        mem: None,
+        lost: false,
+    };
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| {
+            let mut next = state.clone();
+            match *event {
+                Diff307Event::Seed(disk) => {
+                    materialise(disk);
+                    next = Diff307Model {
+                        disk,
+                        mem: None,
+                        lost: false,
+                    };
+                }
+                Diff307Event::Relaunch => {
+                    materialise(state.disk);
+                    let loaded = load_store_safely(&path);
+                    let has_project = !loaded.store.projects.is_empty();
+                    next.mem = Some((loaded.store.diff_layout, has_project));
+                    let expected = match state.disk {
+                        Diff307Disk::Saved(layout) => Some(layout),
+                        Diff307Disk::Legacy => Some(DiffLayout::SideBySide),
+                        _ => None,
+                    };
+                    next.lost = (state.disk != Diff307Disk::Absent && !has_project)
+                        || expected.is_some_and(|layout| loaded.store.diff_layout != layout);
+                }
+                Diff307Event::Choose(layout) => {
+                    let (_, kept) = state.mem?;
+                    next.mem = Some((layout, kept));
+                }
+                Diff307Event::Save => {
+                    let (layout, kept) = state.mem?;
+                    let mut store = if kept {
+                        project_store(layout)
+                    } else {
+                        Store::default()
+                    };
+                    store.diff_layout = layout;
+                    save_store(&path, &store).unwrap();
+                    next.disk = Diff307Disk::Saved(layout);
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            if state.lost {
+                Err("a relaunch lost the project or the layout the file held".to_owned())
+            } else {
+                Ok(())
+            }
+        },
+        10_000,
+    );
+    fs::remove_dir_all(&dir).unwrap();
+    assert!(coverage.states >= 10, "walk too small: {coverage:?}");
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Diff307Cursor {
+    Step(bool),
+    Recount(usize),
+    /// The end of `ui_editor_diff` (src/app/compare.rs), mirrored here: the
+    /// cursor is clamped to the new change count.
+    Clamp,
+    /// The bar's "land on the first change" branch, mirrored.
+    Land,
+}
+
+#[test]
+/// Change 307. Bound: change counts 0..=4, cursor None or 0..=4, every
+/// sequence of step, recount, clamp and land. Invariant: once the frame's clamp
+/// has run, the cursor is None or below the count; `step_change` alone never
+/// leaves a non-empty count and gives None for an empty one.
+pub(crate) fn model_check_diff_307_cursor_stays_inside_the_change_count() {
+    let mut events = vec![
+        Diff307Cursor::Step(true),
+        Diff307Cursor::Step(false),
+        Diff307Cursor::Clamp,
+        Diff307Cursor::Land,
+    ];
+    events.extend((0..=4).map(Diff307Cursor::Recount));
+    // (count, cursor, clamped since the cursor or count last moved)
+    let coverage = exhaustive_check(
+        (0usize, None::<usize>, true),
+        &events,
+        |&(count, cursor, clamped), event| {
+            Some(match *event {
+                Diff307Cursor::Step(forward) => (count, step_change(count, cursor, forward), true),
+                Diff307Cursor::Recount(n) => (n, cursor, false),
+                Diff307Cursor::Clamp => {
+                    let cursor = if cursor.is_some_and(|at| at >= count) {
+                        count.checked_sub(1)
+                    } else {
+                        cursor
+                    };
+                    (count, cursor, true)
+                }
+                Diff307Cursor::Land => (
+                    count,
+                    if cursor.is_none() && count > 0 {
+                        Some(0)
+                    } else {
+                        cursor
+                    },
+                    clamped,
+                ),
+            })
+        },
+        |&(count, cursor, clamped)| match cursor {
+            Some(at) if clamped && at >= count => Err(format!(
+                "cursor {at} outside {count} changes after the clamp"
+            )),
+            _ => Ok(()),
+        },
+        1_000,
+    );
+    assert!(coverage.states > 20, "{coverage:?}");
+}
+
+// ── Change 308: a session not yet given its first request reads 未開始 ──────
+
+/// Posts one hook event for a stored session as its pane would: no launch
+/// token was minted in these tests, so the event's word is taken.
+fn unstarted_308_hook(
+    app: &mut OperonApp,
+    session_id: Uuid,
+    source: CliProvider,
+    event: &str,
+    payload: serde_json::Value,
+) {
+    let tmux_name = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .map(|session| session.tmux_name.clone())
+        .expect("the test stored this session");
+    app.apply_hook_event(HookEvent {
+        source,
+        session: tmux_name,
+        launch_token: String::new(),
+        event: event.to_owned(),
+        payload,
+    });
+}
+
+fn unstarted_308_kind(app: &OperonApp, session_id: Uuid) -> SessionStatusKind {
+    let session = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("the test stored this session");
+    app.session_status_kind_for(session)
+}
+
+#[test]
+/// Only the CLI's own word that a conversation is new counts: a resume, a
+/// compaction, or a fork has history, and no other event starts anything.
+fn unstarted_308_a_new_conversation_is_read_from_session_start() {
+    let new_conversation = |source: CliProvider, event: &str, payload: serde_json::Value| {
+        normalise_hook_event(&hook_event(source, event, payload))
+            .map(|reading| reading.new_conversation)
+    };
+    for provider in [CliProvider::Claude, CliProvider::Codex] {
+        for source in ["startup", "clear"] {
+            assert_eq!(
+                new_conversation(
+                    provider,
+                    "SessionStart",
+                    serde_json::json!({ "source": source })
+                ),
+                Some(true),
+                "{provider:?} {source}"
+            );
+        }
+    }
+    assert_eq!(
+        new_conversation(
+            CliProvider::Claude,
+            "SessionStart",
+            serde_json::json!({ "source": "resume" })
+        ),
+        Some(false)
+    );
+    for payload in [
+        serde_json::json!({ "source": "resume" }),
+        serde_json::json!({ "source": "compact" }),
+        serde_json::json!({ "source": "fork" }),
+        serde_json::json!({}),
+    ] {
+        assert_eq!(
+            new_conversation(CliProvider::Codex, "SessionStart", payload.clone()),
+            Some(false),
+            "Codex {payload}"
+        );
+    }
+    for (provider, event, payload) in [
+        (
+            CliProvider::Claude,
+            "UserPromptSubmit",
+            serde_json::json!({ "prompt": "やって", "source": "startup" }),
+        ),
+        (
+            CliProvider::Claude,
+            "Stop",
+            serde_json::json!({ "source": "startup" }),
+        ),
+        (
+            CliProvider::Claude,
+            "PostCompact",
+            serde_json::json!({ "trigger": "manual", "source": "clear" }),
+        ),
+        (
+            CliProvider::Codex,
+            "Stop",
+            serde_json::json!({ "source": "startup" }),
+        ),
+        (
+            CliProvider::Gemini,
+            "Stop",
+            serde_json::json!({ "fullyIdle": true, "source": "startup" }),
+        ),
+        (
+            CliProvider::Gemini,
+            "PreInvocation",
+            serde_json::json!({ "source": "startup" }),
+        ),
+    ] {
+        assert_eq!(
+            new_conversation(provider, event, payload),
+            Some(false),
+            "{provider:?} {event}"
+        );
+    }
+}
+
+#[test]
+/// From the CLI's start to its first request the session is 未開始; every
+/// turn event ends that, a resume never begins it, and a `/clear` does.
+fn unstarted_308_a_session_is_not_started_until_its_first_request() {
+    let root = temporary_directory("unstarted-308-first-request");
+    let (mut app, claude, codex) = app_with_two_sessions(&root);
+
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "startup" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+    let session = app.store.sessions[0].clone();
+    let view = app.status_view(&session);
+    assert_eq!(view.label, tr("未開始"));
+    assert_eq!(view.hint, tr("まだ最初の依頼を受けていません"));
+
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "UserPromptSubmit",
+        serde_json::json!({ "prompt": "直して" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Working);
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "Stop",
+        serde_json::json!({}),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::Idle,
+        "一度依頼したセッションが未開始に戻りました"
+    );
+    assert_eq!(
+        app.status_view(&app.store.sessions[0].clone()).label,
+        tr("アイドル")
+    );
+
+    // A resumed conversation has history: idle, never not started.
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "resume" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Idle);
+
+    // `/clear` starts a new, empty conversation.
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "clear" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+    // A permission request is a turn under way, and so is its end.
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "PermissionRequest",
+        serde_json::json!({}),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Waiting);
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "Stop",
+        serde_json::json!({}),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Idle);
+
+    // Codex says the same thing in its own payload.
+    unstarted_308_hook(
+        &mut app,
+        codex,
+        CliProvider::Codex,
+        "SessionStart",
+        serde_json::json!({ "source": "startup" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, codex),
+        SessionStatusKind::NotStarted
+    );
+    unstarted_308_hook(
+        &mut app,
+        codex,
+        CliProvider::Codex,
+        "PreToolUse",
+        serde_json::json!({ "name": "shell" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, codex), SessionStatusKind::Working);
+
+    // The flag refines idle and nothing else.
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let sessions = std::slice::from_ref(&session);
+    for (activity, expected) in [
+        (Some(AgentActivity::Idle), SessionStatusKind::NotStarted),
+        (Some(AgentActivity::Working), SessionStatusKind::Working),
+        (
+            Some(AgentActivity::AwaitingInput),
+            SessionStatusKind::Waiting,
+        ),
+        (None, SessionStatusKind::Running),
+    ] {
+        assert_eq!(
+            session_status_kind(sessions, &session, false, activity, true),
+            expected,
+            "{activity:?}"
+        );
+    }
+    let starting = test_session(Uuid::new_v4(), SessionStatus::Starting);
+    assert_eq!(
+        session_status_kind(
+            std::slice::from_ref(&starting),
+            &starting,
+            false,
+            Some(AgentActivity::Idle),
+            true
+        ),
+        SessionStatusKind::Starting
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Thirty quiet minutes drop the hook reading, but nothing has run: the
+/// session is still not started. A turn the screen saw, a new launch, or the
+/// session's removal end it.
+fn unstarted_308_the_mark_outlives_a_stale_hook_but_not_a_turn_or_a_launch() {
+    let root = temporary_directory("unstarted-308-stale");
+    let (mut app, id, other) = app_with_two_sessions(&root);
+    let start = serde_json::json!({ "source": "startup" });
+    unstarted_308_hook(
+        &mut app,
+        id,
+        CliProvider::Claude,
+        "SessionStart",
+        start.clone(),
+    );
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::NotStarted);
+
+    if let Some(status) = app.hook_status.get_mut(&id) {
+        status.received_at = Instant::now() - Duration::from_secs(HOOK_STALE_AFTER_SECONDS + 1);
+    }
+    for _ in 0..ACTIVITY_CONFIRMATIONS {
+        app.session_activity_notifications(vec![(id, AgentActivity::Idle)]);
+    }
+    assert!(app.hook_status.is_empty(), "古いフックの状態が残っています");
+    assert_eq!(app.session_activity_for(id), Some(AgentActivity::Idle));
+    assert_eq!(
+        unstarted_308_kind(&app, id),
+        SessionStatusKind::NotStarted,
+        "何も起きていないのに 30 分でアイドルに変わりました"
+    );
+
+    // The hooks are silent and the screen sees a turn: it has started.
+    app.session_activity_notifications(vec![(id, AgentActivity::Working)]);
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::Working);
+    for _ in 0..ACTIVITY_CONFIRMATIONS {
+        app.session_activity_notifications(vec![(id, AgentActivity::Idle)]);
+    }
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::Idle);
+
+    // A new launch is a new process: what the last one said is not about it.
+    unstarted_308_hook(
+        &mut app,
+        id,
+        CliProvider::Claude,
+        "SessionStart",
+        start.clone(),
+    );
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::NotStarted);
+    app.hooks_enabled = false;
+    let _ = app.mint_hook_environment(id);
+    assert_ne!(
+        unstarted_308_kind(&app, id),
+        SessionStatusKind::NotStarted,
+        "起動し直したセッションが前回の未開始を引き継ぎました"
+    );
+
+    // Removing a session forgets it.
+    unstarted_308_hook(&mut app, other, CliProvider::Claude, "SessionStart", start);
+    assert_eq!(
+        unstarted_308_kind(&app, other),
+        SessionStatusKind::NotStarted
+    );
+    // Only an ended session can be removed; ending it is not what forgets it.
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == other) {
+        session.status = SessionStatus::Exited;
+    }
+    assert!(app.awaiting_first_request.contains(&other));
+    app.remove_session_record(other);
+    assert!(app.store.sessions.iter().all(|session| session.id != other));
+    assert!(!app.awaiting_first_request.contains(&other));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Not started is a kind of idle: counted in アイドル, shown by its filter, and
+/// reached by the instruction sent to idle agents.
+fn unstarted_308_counts_as_idle_and_receives_a_broadcast() {
+    let (root, mut app, first, second) = broadcast_282_app("unstarted-308-broadcast");
+    unstarted_308_hook(
+        &mut app,
+        second,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "startup" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, first), SessionStatusKind::Idle);
+    assert_eq!(
+        unstarted_308_kind(&app, second),
+        SessionStatusKind::NotStarted
+    );
+    assert_eq!(app.broadcast_targets(), vec![first, second]);
+    let counts = app.status_group_counts();
+    assert_eq!(counts[SessionStatusGroup::Free.index()], 2);
+    assert_eq!(counts[SessionStatusGroup::Busy.index()], 0);
+    assert_eq!(counts[SessionStatusGroup::NeedsYou.index()], 0);
+    let session = app.store.sessions[1].clone();
+    assert_eq!(session.id, second);
+    assert!(app.kind_in_status_group(
+        SessionStatusKind::NotStarted,
+        &session,
+        SessionStatusGroup::Free
+    ));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Its own shape, word, and sentence; the sentence never claims a turn ended,
+/// and the アイドル group's hover says the group holds it.
+fn unstarted_308_has_its_own_mark_word_and_hint() {
+    let kind = SessionStatusKind::NotStarted;
+    assert!(SessionStatusKind::ALL.contains(&kind));
+    assert_eq!(kind.status_mark(), StatusMark::Dot);
+    assert_eq!(kind.icon(), ICON_STATUS_NOT_STARTED);
+    assert_eq!(kind.tone(), StatusTone::Idle);
+    assert_eq!(kind.group(), Some(SessionStatusGroup::Free));
+    assert_eq!(kind.label(), "未開始");
+    for other in SessionStatusKind::ALL {
+        if other != kind {
+            assert_ne!(other.status_mark(), StatusMark::Dot, "{other:?}");
+            assert_ne!(other.icon(), ICON_STATUS_NOT_STARTED, "{other:?}");
+            assert_ne!(other.label(), "未開始", "{other:?}");
+        }
+    }
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let sessions = std::slice::from_ref(&session);
+    let view = session_status_view(sessions, &session, false, Some(AgentActivity::Idle), true);
+    assert_eq!(view.kind, kind);
+    assert_eq!(view.hint, tr("まだ最初の依頼を受けていません"));
+    assert!(!view.hint.contains("ターン"), "{}", view.hint);
+    let idle = session_status_view(sessions, &session, false, Some(AgentActivity::Idle), false);
+    assert_eq!(idle.kind, SessionStatusKind::Idle);
+    assert_eq!(idle.hint, tr("ターンを終え、次の依頼を出せます"));
+    assert_eq!(
+        SessionStatusGroup::Free.hint_id(),
+        "未開始、またはターンを終えて次の依頼を出せるセッション"
+    );
+}
+
+#[test]
+/// The manuals name the state in each language, say which CLIs show it, and
+/// say the idle broadcast reaches it.
+fn unstarted_308_the_manuals_name_the_state() {
+    for (path, word, clis, broadcast) in [
+        (
+            "docs/MANUAL.ja.md",
+            "**未開始**",
+            "（Claude Code と Codex）",
+            "まだ依頼を受けていない未開始のエージェント",
+        ),
+        (
+            "docs/MANUAL.md",
+            "**Not started**",
+            "a Claude Code or Codex session",
+            "or has not started yet",
+        ),
+        (
+            "docs/MANUAL.ko.md",
+            "**시작 전**",
+            "(Claude Code와 Codex)",
+            "아직 요청을 받지 않은 시작 전 에이전트",
+        ),
+    ] {
+        let manual = fs::read_to_string(path).unwrap();
+        for phrase in [word, clis, broadcast] {
+            assert!(manual.contains(phrase), "{path}: {phrase}");
+        }
+    }
+}
+
+#[test]
+/// A late tool post from the turn before /clear changes no state (change 301),
+/// so it must not end the wait for a first request either (change 308 R1).
+fn f308_a_late_tool_post_does_not_end_the_wait_for_a_first_request() {
+    let root = temporary_directory("f308-late-tool-post");
+    let (mut app, claude, _codex) = app_with_two_sessions(&root);
+    let tool = || {
+        serde_json::json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_1",
+            "tool_input": { "command": "ls" }
+        })
+    };
+    let go = |app: &mut OperonApp, event: &str, payload: serde_json::Value| {
+        unstarted_308_hook(app, claude, CliProvider::Claude, event, payload)
+    };
+    go(
+        &mut app,
+        "UserPromptSubmit",
+        serde_json::json!({ "prompt": "go" }),
+    );
+    go(&mut app, "PreToolUse", tool());
+    go(&mut app, "Stop", serde_json::json!({}));
+    go(
+        &mut app,
+        "SessionStart",
+        serde_json::json!({ "source": "clear" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+    go(&mut app, "PostToolUse", tool());
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+}
+
+// ── Change 306: the broadcast reaches only the tabs that were ticked ────────
+
+/// Another idle session of the broadcast app's project, named `name`, whose
+/// queued input stays to be read.
+fn broadcast_306_add_idle(app: &mut OperonApp, name: &str) -> Uuid {
+    let mut session = app.store.sessions[0].clone();
+    session.id = Uuid::new_v4();
+    session.name = name.to_owned();
+    session.status = SessionStatus::Active;
+    let id = session.id;
+    app.store.sessions.push(session);
+    working_278_settle(app, id, AgentActivity::Idle);
+    app.background_tasks
+        .insert(BackgroundKey::TerminalInput(id));
+    id
+}
+
+/// One click at `position` on the broadcast sheet, then the frame after it,
+/// whose painted output is returned.
+fn broadcast_306_click(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    position: egui::Pos2,
+) -> egui::FullOutput {
+    click_at(ctx, position, |ctx| {
+        central_panel(ctx, |_| {});
+        app.ui_broadcast_sheet(ctx);
+    });
+    broadcast_306_output(app, ctx, Vec::new())
+}
+
+fn broadcast_306_output(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+            app.ui_broadcast_sheet(ctx);
+        },
+    )
+}
+
+/// The centre of the text `wanted`, as the frame painted it.
+fn broadcast_306_at(output: &egui::FullOutput, wanted: &str) -> egui::Pos2 {
+    drawn_text_rect(output, |text| text == wanted)
+        .unwrap_or_else(|| {
+            panic!(
+                "「{wanted}」が描かれていません: {:?}",
+                painted_texts(output)
+            )
+        })
+        .center()
+}
+
+/// The send button's label, which paints after its icon.
+fn broadcast_306_button(output: &egui::FullOutput, count: usize) -> Option<egui::Pos2> {
+    let label = tf!("{p0} 件に送信", p0 = count);
+    drawn_text_rect(output, |text| text.ends_with(&label)).map(|rect| rect.center())
+}
+
+/// Whether the send button is off, as the accessibility tree reports it;
+/// `None` when no such button was drawn. Needs `enable_accesskit`.
+fn broadcast_306_button_disabled(output: &egui::FullOutput, count: usize) -> Option<bool> {
+    let label = tf!("{p0} 件に送信", p0 = count);
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label().is_some_and(|text| text.ends_with(&label)))
+        .map(|(_, node)| node.is_disabled())
+}
+
+fn broadcast_306_chosen(app: &OperonApp) -> Vec<Uuid> {
+    app.broadcast_sheet
+        .as_ref()
+        .map(|sheet| sheet.chosen.clone())
+        .unwrap_or_default()
+}
+
+fn broadcast_306_count(chosen: usize, listed: usize) -> String {
+    tf!(
+        "{p0} · 選択 {p1} / {p2} 件",
+        p0 = "p",
+        p1 = chosen,
+        p2 = listed
+    )
+}
+
+#[test]
+fn broadcast_306_sheet_opens_with_nobody_chosen_and_a_row_ticks() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-tick");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&output);
+    for expected in [
+        broadcast_306_count(0, 2),
+        tr("すべて選択").to_owned(),
+        tr("選んだ相手に送る内容を入力").to_owned(),
+        "first".to_owned(),
+        "second".to_owned(),
+    ] {
+        assert!(
+            texts.contains(&expected),
+            "シートに「{expected}」がありません: {texts:?}"
+        );
+    }
+    assert!(
+        broadcast_306_chosen(&app).is_empty(),
+        "開いた時点で送信先が選ばれています"
+    );
+    // The title chooses its session, and unchooses it again.
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    assert_eq!(broadcast_306_chosen(&app), vec![first]);
+    assert!(
+        painted_texts(&output).contains(&broadcast_306_count(1, 2)),
+        "{:?}",
+        painted_texts(&output)
+    );
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    assert!(
+        broadcast_306_chosen(&app).is_empty(),
+        "もう一度押しても外れません"
+    );
+    // The box at the row's left edge does the same.
+    let left = drawn_text_rect(&output, |text| text == broadcast_306_count(0, 2))
+        .expect("件数の行がありません")
+        .left();
+    let row = broadcast_306_at(&output, "second");
+    let boxed = egui::pos2(left + ctx.global_style().spacing.icon_width / 2.0, row.y);
+    broadcast_306_click(&mut app, &ctx, boxed);
+    assert_eq!(
+        broadcast_306_chosen(&app),
+        vec![second],
+        "チェックボックスで選べません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_send_reaches_only_the_chosen_idle_agents() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-send");
+    let third = broadcast_306_add_idle(&mut app, "third");
+    // List order, whatever order they were ticked in.
+    assert_eq!(
+        app.broadcast_recipients(&[third, first]),
+        vec![first, third]
+    );
+    // Ticked, then started working: no longer reached.
+    working_278_settle(&mut app, third, AgentActivity::Working);
+    assert_eq!(
+        app.send_broadcast("  作業をコミットして \n", &[second, third]),
+        1
+    );
+    assert_eq!(
+        reply_279_queued(&app, second),
+        reply_279_sent("作業をコミットして")
+    );
+    assert!(
+        reply_279_queued(&app, first).is_empty(),
+        "選んでいないエージェントに送りました"
+    );
+    assert!(
+        reply_279_queued(&app, third).is_empty(),
+        "作業中になったエージェントに送りました"
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tf!("{p0} 件のエージェントに送信しました", p0 = 1).as_str())
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_an_agent_idle_after_opening_is_not_chosen() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-late");
+    working_278_settle(&mut app, second, AgentActivity::Working);
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    // It finishes while the sheet is open: listed, not ticked.
+    working_278_settle(&mut app, second, AgentActivity::Idle);
+    let texts = painted_texts(&broadcast_306_output(&mut app, &ctx, Vec::new()));
+    assert!(texts.contains(&"second".to_owned()), "{texts:?}");
+    assert!(texts.contains(&broadcast_306_count(1, 2)), "{texts:?}");
+    assert_eq!(broadcast_306_chosen(&app), vec![first]);
+    if let Some(sheet) = app.broadcast_sheet.as_mut() {
+        sheet.text = "続けて".to_owned();
+        sheet.focus = true;
+    }
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![reply_279_enter()]);
+    assert_eq!(reply_279_queued(&app, first), reply_279_sent("続けて"));
+    assert!(
+        reply_279_queued(&app, second).is_empty(),
+        "あとからアイドルになったエージェントに送りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_nobody_chosen_sends_nothing_and_keeps_the_line() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-nobody");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    ctx.enable_accesskit();
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    let output = broadcast_306_output(&mut app, &ctx, vec![reply_279_enter()]);
+    let button = broadcast_306_button(&output, 0)
+        .unwrap_or_else(|| panic!("「0 件に送信」がありません: {:?}", painted_texts(&output)));
+    assert_eq!(
+        broadcast_306_button_disabled(&output, 0),
+        Some(true),
+        "誰も選んでいないのに送信ボタンが押せます"
+    );
+    broadcast_306_click(&mut app, &ctx, button);
+    for id in [first, second] {
+        assert!(
+            reply_279_queued(&app, id).is_empty(),
+            "誰も選んでいないのに送りました"
+        );
+    }
+    assert_eq!(app.notice, None, "誰にも送っていないのに通知しました");
+    assert_eq!(
+        app.broadcast_sheet
+            .as_ref()
+            .map(|sheet| sheet.text.as_str()),
+        Some("yes"),
+        "シートか入力が消えました"
+    );
+    // One ticked, with a line: the button is on.
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    assert_eq!(
+        broadcast_306_button_disabled(&output, 1),
+        Some(false),
+        "選んだのに送信ボタンが押せません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_choose_all_then_clear() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-all");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, tr("すべて選択")));
+    let mut chosen = broadcast_306_chosen(&app);
+    chosen.sort();
+    let mut both = vec![first, second];
+    both.sort();
+    assert_eq!(chosen, both, "すべて選択で全員が選ばれません");
+    let texts = painted_texts(&output);
+    for expected in [tr("選択を解除").to_owned(), broadcast_306_count(2, 2)] {
+        assert!(
+            texts.contains(&expected),
+            "「{expected}」がありません: {texts:?}"
+        );
+    }
+    assert!(broadcast_306_button(&output, 2).is_some(), "{texts:?}");
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, tr("選択を解除")));
+    assert!(
+        app.broadcast_recipients(&broadcast_306_chosen(&app))
+            .is_empty(),
+        "選択を解除しても選ばれたままです"
+    );
+    assert!(painted_texts(&output).contains(&tr("すべて選択").to_owned()));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_every_idle_agent_can_be_chosen() {
+    let (root, mut app, ..) = broadcast_282_app("broadcast-306-many");
+    for index in 3..=8 {
+        broadcast_306_add_idle(&mut app, &format!("agent {index}"));
+    }
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    assert!(
+        !painted_texts(&output)
+            .iter()
+            .any(|text| *text == tf!("ほか {p0} 件", p0 = 2)),
+        "数えて省いた送信先は選べません: {:?}",
+        painted_texts(&output)
+    );
+    let cancel = broadcast_306_at(&output, tr("キャンセル"));
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, tr("すべて選択")));
+    assert!(
+        broadcast_306_button(&output, 8).is_some(),
+        "{:?}",
+        painted_texts(&output)
+    );
+    // Past six rows the list scrolls; the sheet does not grow.
+    for index in 9..=12 {
+        broadcast_306_add_idle(&mut app, &format!("agent {index}"));
+    }
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    assert_eq!(
+        broadcast_306_at(&output, tr("キャンセル")),
+        cancel,
+        "送信先が増えるとシートが伸びます"
+    );
+    // The rows below are reached by scrolling the list.
+    assert!(!painted_texts(&output).contains(&"agent 12".to_owned()));
+    let list = broadcast_306_at(&output, "first");
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::PointerMoved(list)]);
+    broadcast_306_output(
+        &mut app,
+        &ctx,
+        vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2000.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::default(),
+        }],
+    );
+    let mut reached = false;
+    for _ in 0..8 {
+        reached |= painted_texts(&broadcast_306_output(&mut app, &ctx, Vec::new()))
+            .contains(&"agent 12".to_owned());
+    }
+    assert!(reached, "一覧をスクロールしても最後の送信先が出ません");
+    let chosen = broadcast_306_chosen(&app);
+    assert_eq!(app.send_broadcast("止めて", &chosen), 8);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 306, falsification: an Enter that sends nothing — nobody ticked —
+/// keeps the sheet and the line, and must keep the keyboard in the field too,
+/// or what is typed next goes nowhere.
+#[test]
+fn broadcast_306_f1_focus_stays_after_enter_with_nobody_chosen() {
+    let (root, mut app, ..) = broadcast_282_app("broadcast-306-f1");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    broadcast_306_output(&mut app, &ctx, vec![reply_279_enter()]);
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::Text("more".into())]);
+    assert_eq!(
+        app.broadcast_sheet
+            .as_ref()
+            .map(|sheet| sheet.text.as_str()),
+        Some("yesmore"),
+        "何も送らなかった Enter のあと、入力が欄に入りません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
 // ---- change 309: `Operon agents list|read|send|wait` ----
 
 /// A scripted world for `agents_cli`: snapshots handed out one per look (the
@@ -90635,6 +92237,19 @@ fn agents_309_snapshot_names_each_live_session_with_its_state() {
         .unwrap();
     assert_eq!(entry.tmux_name, session.tmux_name);
     assert_eq!(entry.project_id, session.project_id);
+    // Every state has a word, and only the two of history have none.
+    for kind in SessionStatusKind::ALL {
+        let token = agent_state_token(kind);
+        assert_eq!(
+            token.is_none(),
+            matches!(kind, SessionStatusKind::Done | SessionStatusKind::Stopped),
+            "{kind:?}"
+        );
+    }
+    assert_eq!(
+        agent_state_token(SessionStatusKind::NotStarted),
+        Some(AGENT_STATE_NOT_STARTED)
+    );
     // A finished session belongs to history, not to the workspace.
     app.store
         .sessions
@@ -91047,6 +92662,27 @@ fn agents_309_send_types_only_into_an_idle_agent_of_the_same_project() {
     assert!(working
         .stderr
         .contains("busy は作業中のため送信しません（状態: working）。"));
+    // A session not yet given its first request takes one too.
+    let mut fresh = agents_309_world().0;
+    fresh.sessions[1].state = AGENT_STATE_NOT_STARTED.to_owned();
+    let mut fresh_host = Agents309Host::new(Some(fresh));
+    assert_eq!(
+        agents_309_run(&mut fresh_host, &caller, &["send", &short(peer), "x"]).code,
+        0
+    );
+    assert_eq!(fresh_host.sent.len(), 1);
+    // Every state that is not free is refused.
+    for state in [
+        "working", "waiting", "starting", "queued", "blocked", "ready", "running", "stopping",
+        "checking", "failed", "lost",
+    ] {
+        let mut world = agents_309_world().0;
+        world.sessions[1].state = state.to_owned();
+        let mut refused = Agents309Host::new(Some(world));
+        let outcome = agents_309_run(&mut refused, &caller, &["send", &short(peer), "x"]);
+        assert_eq!(outcome.code, AGENTS_EXIT_BUSY, "{state}");
+        assert!(refused.sent.is_empty(), "{state}");
+    }
     let own = agents_309_run(&mut host, &caller, &["send", &short(me), "x"]);
     assert_eq!(own.code, AGENTS_EXIT_TARGET);
     assert!(own.stderr.contains("自分自身には送信できません。"));

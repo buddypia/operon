@@ -17,6 +17,99 @@ pub(crate) enum DiffRow {
     /// A note written against the line above it, drawn inside the same
     /// scrolling column so that scrolling can never separate the two.
     Comment(usize, usize),
+    /// One side-by-side row of a file: the line in the left column and the
+    /// one in the right (change 307), as `side_by_side_rows` pairs them.
+    Pair(usize, Option<usize>, Option<usize>),
+}
+
+/// One row of the side-by-side layout: the line drawn in the left column and
+/// the one in the right (change 307). A context line, a hunk header, and a
+/// note name the same line on both sides — the header and the note span the
+/// whole row — and a side with nothing facing it is `None`, drawn as filler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SidePair {
+    pub(crate) left: Option<usize>,
+    pub(crate) right: Option<usize>,
+}
+
+/// Lay one file's lines out in two columns. A run of removals followed by a
+/// run of additions is a rewrite, so the two runs are paired line by line and
+/// the longer one's remainder faces filler. One pass, no lookups: the pane
+/// does this every frame for the file rows it builds.
+pub(crate) fn side_by_side_rows(lines: &[DiffLine]) -> Vec<SidePair> {
+    let mut pairs = Vec::with_capacity(lines.len());
+    let mut index = 0;
+    while index < lines.len() {
+        match lines[index].kind {
+            DiffLineKind::Removed | DiffLineKind::Added => {
+                let removed_start = index;
+                while index < lines.len() && lines[index].kind == DiffLineKind::Removed {
+                    index += 1;
+                }
+                let added_start = index;
+                while index < lines.len() && lines[index].kind == DiffLineKind::Added {
+                    index += 1;
+                }
+                let removed = added_start - removed_start;
+                let added = index - added_start;
+                for offset in 0..removed.max(added) {
+                    pairs.push(SidePair {
+                        left: (offset < removed).then_some(removed_start + offset),
+                        right: (offset < added).then_some(added_start + offset),
+                    });
+                }
+            }
+            _ => {
+                pairs.push(SidePair {
+                    left: Some(index),
+                    right: Some(index),
+                });
+                index += 1;
+            }
+        }
+    }
+    pairs
+}
+
+/// Whether a side-by-side row shows a change: either side added or removed.
+pub(crate) fn pair_is_change(lines: &[DiffLine], pair: &SidePair) -> bool {
+    [pair.left, pair.right].into_iter().flatten().any(|index| {
+        matches!(
+            lines[index].kind,
+            DiffLineKind::Added | DiffLineKind::Removed
+        )
+    })
+}
+
+/// The rows where a block of changes begins: a changed row whose previous row
+/// is not one. These are what 前の変更 / 次の変更 move between.
+pub(crate) fn change_block_starts(changed: &[bool]) -> Vec<usize> {
+    changed
+        .iter()
+        .enumerate()
+        .filter(|&(index, &is)| is && (index == 0 || !changed[index - 1]))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// The block 次の変更 (`forward`) or 前の変更 moves to from `current`, stopping
+/// at both ends. Before any step, either direction goes to the first block.
+pub(crate) fn step_change(count: usize, current: Option<usize>, forward: bool) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    Some(match current {
+        None => 0,
+        Some(at) if forward => (at + 1).min(last),
+        Some(at) => at.saturating_sub(1).min(last),
+    })
+}
+
+/// The layout the pane actually draws: two columns need room to be read.
+pub(crate) fn effective_diff_layout(chosen: DiffLayout, width: f32) -> DiffLayout {
+    if chosen == DiffLayout::SideBySide && width < DIFF_SIDE_BY_SIDE_MIN_WIDTH {
+        DiffLayout::Unified
+    } else {
+        chosen
+    }
 }
 
 pub(crate) fn diff_pane_rows(
@@ -51,6 +144,49 @@ pub(crate) fn diff_pane_rows(
         }
     }
     rows
+}
+
+/// The pane's rows in the side-by-side layout: each file's bar, then its
+/// lines paired into two columns, with a note under the row whose right-hand
+/// line carries it.
+pub(crate) fn diff_pane_side_by_side_rows(
+    files: &[DiffFile],
+    collapsed: &HashSet<String>,
+    annotated: &dyn Fn(&str, usize) -> bool,
+) -> Vec<DiffRow> {
+    let mut rows = Vec::new();
+    for (index, file) in files.iter().enumerate() {
+        rows.push(DiffRow::File(index));
+        if collapsed.contains(&file.path) {
+            continue;
+        }
+        for pair in side_by_side_rows(&file.lines) {
+            rows.push(DiffRow::Pair(index, pair.left, pair.right));
+            if let Some(right) = pair.right {
+                if file.lines[right]
+                    .new_number
+                    .is_some_and(|number| annotated(&file.path, number))
+                {
+                    rows.push(DiffRow::Comment(index, right));
+                }
+            }
+        }
+    }
+    rows
+}
+
+/// Whether a pane row shows a change, for 前の変更 / 次の変更.
+pub(crate) fn diff_row_is_change(files: &[DiffFile], row: &DiffRow) -> bool {
+    match *row {
+        DiffRow::Line(file, line) => matches!(
+            files[file].lines[line].kind,
+            DiffLineKind::Added | DiffLineKind::Removed
+        ),
+        DiffRow::Pair(file, left, right) => {
+            pair_is_change(&files[file].lines, &SidePair { left, right })
+        }
+        DiffRow::File(_) | DiffRow::Comment(..) => false,
+    }
 }
 
 /// Where every row starts, and where the last one ends.
@@ -177,6 +313,42 @@ pub(crate) fn diff_pane(
     )
 }
 
+/// How the pane shows a diff (change 307).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DiffPaneView<'a> {
+    /// What the person chose; a pane too narrow draws `Unified` anyway.
+    pub(crate) layout: DiffLayout,
+    /// The two columns' names in the side-by-side layout: the older side, then
+    /// the newer.
+    pub(crate) labels: (&'a str, &'a str),
+    /// Whether hunk actions and notes are offered. Only HEAD ↔ local is a diff
+    /// they can act on.
+    pub(crate) editable: bool,
+    /// The change block to scroll to on this frame.
+    pub(crate) scroll_to_change: Option<usize>,
+}
+
+impl DiffPaneView<'static> {
+    /// The pane as it always was: one column, actions and notes on.
+    pub(crate) fn working_tree() -> Self {
+        Self {
+            layout: DiffLayout::Unified,
+            labels: ("", ""),
+            editable: true,
+            scroll_to_change: None,
+        }
+    }
+}
+
+/// What a frame of the pane came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct DiffPaneOutcome {
+    /// The set of notes changed and needs writing down.
+    pub(crate) notes_changed: bool,
+    /// How many change blocks the drawn rows hold.
+    pub(crate) changes: usize,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn diff_pane_with_actions(
     ui: &mut egui::Ui,
@@ -188,14 +360,52 @@ pub(crate) fn diff_pane_with_actions(
     annotations: &mut DiffAnnotations,
     hunk_action: &mut Option<DiffHunkAction>,
 ) -> bool {
+    diff_pane_with_view(
+        ui,
+        files,
+        collapsed,
+        palette,
+        height,
+        project,
+        annotations,
+        hunk_action,
+        &DiffPaneView::working_tree(),
+    )
+    .notes_changed
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_pane_with_view(
+    ui: &mut egui::Ui,
+    files: &[DiffFile],
+    collapsed: &mut HashSet<String>,
+    palette: &Palette,
+    height: f32,
+    project: Uuid,
+    annotations: &mut DiffAnnotations,
+    hunk_action: &mut Option<DiffHunkAction>,
+    view: &DiffPaneView,
+) -> DiffPaneOutcome {
     if files.is_empty() {
         ui.label(RichText::new(tr("変更はありません。")).color(palette.text_muted));
-        return false;
+        return DiffPaneOutcome::default();
     }
     let cell = monospace_cell_size(ui);
-    let rows = diff_pane_rows(files, collapsed, &|file, line| {
-        annotations.shows_row(project, file, line)
-    });
+    let side_by_side =
+        effective_diff_layout(view.layout, ui.available_width()) == DiffLayout::SideBySide;
+    let editable = view.editable;
+    let annotated =
+        |file: &str, line: usize| editable && annotations.shows_row(project, file, line);
+    let rows = if side_by_side {
+        diff_pane_side_by_side_rows(files, collapsed, &annotated)
+    } else {
+        diff_pane_rows(files, collapsed, &annotated)
+    };
+    let changed_rows: Vec<bool> = rows
+        .iter()
+        .map(|row| diff_row_is_change(files, row))
+        .collect();
+    let change_rows = change_block_starts(&changed_rows);
     let offsets = diff_row_offsets(&rows, cell.y, &|file, line| {
         let number = files[file].lines[line].new_number?;
         annotations
@@ -209,15 +419,73 @@ pub(crate) fn diff_pane_with_actions(
     // Two gutters, the sign, and a space after it, then the widest line in the
     // diff. The `max` keeps a diff of short lines from shrinking its own rows
     // to less than the pane it is drawn in.
-    let content_width =
-        ((DIFF_GUTTER_COLUMNS * 2 + 2 + widest) as f32 * cell.x + 16.0).max(ui.available_width());
+    //
+    // Side by side, the two columns share the pane's width and scroll sideways
+    // together by one offset, as an IDE's do: one horizontal scroll bar over
+    // two columns would carry the right column out of sight.
+    let mut height = height;
+    let mut column_shift = 0.0;
+    let half = (ui.available_width() / 2.0).floor();
+    let content_width = if side_by_side {
+        let label_strip = cell.y + 6.0;
+        let (strip, _) =
+            ui.allocate_exact_size(egui::vec2(half * 2.0, label_strip), egui::Sense::hover());
+        ui.painter().rect_filled(strip, 0.0, palette.raised);
+        for (x, label) in [
+            (strip.left(), view.labels.0),
+            (strip.left() + half, view.labels.1),
+        ] {
+            ui.painter().text(
+                egui::pos2(x + 8.0, strip.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(12.0),
+                palette.text_muted,
+            );
+        }
+        ui.painter().vline(
+            strip.left() + half,
+            strip.y_range(),
+            egui::Stroke::new(1.0_f32, palette.border_subtle),
+        );
+        height = (height - label_strip).max(cell.y);
+        let needed = (DIFF_GUTTER_COLUMNS + 2 + widest) as f32 * cell.x + 16.0;
+        let id = ui.scope_id().with("diff-side-by-side-shift");
+        let pane = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(half * 2.0, height));
+        let delta = if ui.rect_contains_pointer(pane) {
+            ui.input(|input| input.smooth_scroll_delta.x)
+        } else {
+            0.0
+        };
+        let stored: f32 = ui.data(|data| data.get_temp(id)).unwrap_or(0.0);
+        column_shift = (stored - delta).clamp(0.0, (needed - half).max(0.0));
+        if column_shift != stored {
+            ui.data_mut(|data| data.insert_temp(id, column_shift));
+        }
+        half * 2.0
+    } else {
+        ((DIFF_GUTTER_COLUMNS * 2 + 2 + widest) as f32 * cell.x + 16.0).max(ui.available_width())
+    };
     let mut toggled = None;
     let mut opened = None;
     let mut changed = false;
 
     ui.spacing_mut().item_spacing.y = 0.0;
-    egui::ScrollArea::both()
-        .auto_shrink([false, false])
+    let area = if side_by_side {
+        egui::ScrollArea::vertical()
+    } else {
+        egui::ScrollArea::both()
+    };
+    // A step to a change puts its first row a few lines below the top, so the
+    // context above it stays in view.
+    let area = match view
+        .scroll_to_change
+        .and_then(|block| change_rows.get(block))
+    {
+        Some(&row) => area.vertical_scroll_offset((offsets[row] - cell.y * 3.0).max(0.0)),
+        None => area,
+    };
+    area.auto_shrink([false, false])
         .max_height(height)
         .show_viewport(ui, |ui, viewport| {
             // The rows are placed at absolute offsets rather than by advancing
@@ -324,53 +592,21 @@ pub(crate) fn diff_pane_with_actions(
                         let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
                         ui.painter()
                             .galley(rect.min + egui::vec2(8.0, 0.0), galley, palette.text);
-                        if line.kind == DiffLineKind::Hunk && !path.is_empty() {
-                            let mut hunk_ui = ui.new_child(
-                                egui::UiBuilder::new()
-                                    .id_salt(("diff-hunk-actions", path, line_idx))
-                                    .max_rect(rect.shrink2(egui::vec2(6.0, 1.0)))
-                                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                        if editable && line.kind == DiffLineKind::Hunk && !path.is_empty() {
+                            diff_hunk_buttons(
+                                ui,
+                                rect,
+                                palette,
+                                path,
+                                file_idx,
+                                line_idx,
+                                hunk_action,
                             );
-                            hunk_ui.spacing_mut().item_spacing.x = 6.0;
-                            if hunk_ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new(tr("破棄")).size(11.5).color(palette.danger),
-                                    )
-                                    .fill(palette.raised)
-                                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
-                                )
-                                .on_hover_text(tr("このハンクの変更を破棄します"))
-                                .clicked()
-                            {
-                                *hunk_action = Some(DiffHunkAction::Discard {
-                                    file_index: file_idx,
-                                    hunk_line_index: line_idx,
-                                });
-                            }
-                            if hunk_ui
-                                .add(
-                                    egui::Button::new(
-                                        RichText::new(tr("ステージ"))
-                                            .size(11.5)
-                                            .color(palette.accent),
-                                    )
-                                    .fill(palette.raised)
-                                    .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
-                                )
-                                .on_hover_text(tr("このハンクをステージします"))
-                                .clicked()
-                            {
-                                *hunk_action = Some(DiffHunkAction::Stage {
-                                    file_index: file_idx,
-                                    hunk_line_index: line_idx,
-                                });
-                            }
                         }
                         // Only a line that exists after the change can carry a
                         // note: a removed line has no line number on the side
                         // the agent would go looking at.
-                        if let Some(number) = line.new_number {
+                        if let Some(number) = line.new_number.filter(|_| editable) {
                             let response = ui.interact(
                                 rect,
                                 ui.scope_id().with(("diff-line", path, number)),
@@ -402,6 +638,136 @@ pub(crate) fn diff_pane_with_actions(
                             }
                             if response.clicked() {
                                 opened = Some((path.clone(), number));
+                            }
+                        }
+                    }
+                    DiffRow::Pair(file_idx, left, right) => {
+                        let file = &files[file_idx];
+                        // A hunk header or a note spans both columns.
+                        if let (Some(at), true) = (
+                            left,
+                            left == right
+                                && matches!(
+                                    left.map(|at| file.lines[at].kind),
+                                    Some(DiffLineKind::Hunk | DiffLineKind::Note)
+                                ),
+                        ) {
+                            let line = &file.lines[at];
+                            if line.kind == DiffLineKind::Hunk {
+                                ui.painter().hline(
+                                    rect.x_range(),
+                                    rect.top(),
+                                    egui::Stroke::new(1.0_f32, palette.border_subtle),
+                                );
+                            }
+                            let galley = ui.fonts_mut(|fonts| {
+                                fonts.layout_job(diff_half_layout(line, false, palette))
+                            });
+                            ui.painter().galley(
+                                rect.min + egui::vec2(8.0, 0.0),
+                                galley,
+                                palette.text,
+                            );
+                            if editable && line.kind == DiffLineKind::Hunk {
+                                diff_hunk_buttons(
+                                    ui,
+                                    rect,
+                                    palette,
+                                    &file.path,
+                                    file_idx,
+                                    at,
+                                    hunk_action,
+                                );
+                            }
+                            continue;
+                        }
+                        let halves = [
+                            (
+                                egui::Rect::from_min_max(
+                                    rect.min,
+                                    egui::pos2(rect.left() + half, rect.bottom()),
+                                ),
+                                left,
+                                false,
+                            ),
+                            (
+                                egui::Rect::from_min_max(
+                                    egui::pos2(rect.left() + half, rect.top()),
+                                    rect.max,
+                                ),
+                                right,
+                                true,
+                            ),
+                        ];
+                        for (side, at, newer) in halves {
+                            let Some(at) = at else {
+                                ui.painter().rect_filled(side, 0.0, palette.raised);
+                                continue;
+                            };
+                            let line = &file.lines[at];
+                            match line.kind {
+                                DiffLineKind::Added => {
+                                    ui.painter().rect_filled(side, 0.0, palette.diff_added_bg);
+                                }
+                                DiffLineKind::Removed => {
+                                    ui.painter().rect_filled(side, 0.0, palette.diff_removed_bg);
+                                }
+                                _ => {}
+                            }
+                            let galley = ui.fonts_mut(|fonts| {
+                                fonts.layout_job(diff_half_layout(line, newer, palette))
+                            });
+                            ui.painter()
+                                .with_clip_rect(side.intersect(ui.clip_rect()))
+                                .galley(
+                                    side.min + egui::vec2(8.0 - column_shift, 0.0),
+                                    galley,
+                                    palette.text,
+                                );
+                        }
+                        ui.painter().vline(
+                            rect.left() + half,
+                            rect.y_range(),
+                            egui::Stroke::new(1.0_f32, palette.border_subtle),
+                        );
+                        // A note belongs to the line as it is now: the right
+                        // column's.
+                        let number = right
+                            .and_then(|at| file.lines[at].new_number)
+                            .filter(|_| editable);
+                        if let Some(number) = number {
+                            let side = halves[1].0;
+                            let response = ui.interact(
+                                side,
+                                ui.scope_id().with(("diff-line", &file.path, number)),
+                                egui::Sense::click(),
+                            );
+                            if response.hovered()
+                                || response.has_focus()
+                                || annotations.shows_row(project, &file.path, number)
+                            {
+                                ui.painter().text(
+                                    side.right_center() - egui::vec2(8.0, 0.0),
+                                    egui::Align2::RIGHT_CENTER,
+                                    ICON_COMMENT,
+                                    egui::FontId::proportional(12.0),
+                                    if annotations.find(project, &file.path, number).is_some() {
+                                        palette.accent_soft
+                                    } else {
+                                        palette.text_muted
+                                    },
+                                );
+                            }
+                            if let Some(stroke) = focus_stroke(response.has_focus(), palette) {
+                                ui.painter().rect_stroke(
+                                    side,
+                                    0.0,
+                                    stroke,
+                                    egui::StrokeKind::Inside,
+                                );
+                            }
+                            if response.clicked() {
+                                opened = Some((file.path.clone(), number));
                             }
                         }
                     }
@@ -566,7 +932,121 @@ pub(crate) fn diff_pane_with_actions(
     if let Some((path, number)) = opened {
         annotations.open(project, &path, number);
     }
-    changed
+    DiffPaneOutcome {
+        notes_changed: changed,
+        changes: change_rows.len(),
+    }
+}
+
+/// The stage and discard buttons at the right end of a hunk header row.
+fn diff_hunk_buttons(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    palette: &Palette,
+    path: &str,
+    file_index: usize,
+    hunk_line_index: usize,
+    hunk_action: &mut Option<DiffHunkAction>,
+) {
+    let mut hunk_ui = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("diff-hunk-actions", path, hunk_line_index))
+            .max_rect(rect.shrink2(egui::vec2(6.0, 1.0)))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    hunk_ui.spacing_mut().item_spacing.x = 6.0;
+    if hunk_ui
+        .add(
+            egui::Button::new(RichText::new(tr("破棄")).size(11.5).color(palette.danger))
+                .fill(palette.raised)
+                .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
+        )
+        .on_hover_text(tr("このハンクの変更を破棄します"))
+        .clicked()
+    {
+        *hunk_action = Some(DiffHunkAction::Discard {
+            file_index,
+            hunk_line_index,
+        });
+    }
+    if hunk_ui
+        .add(
+            egui::Button::new(
+                RichText::new(tr("ステージ"))
+                    .size(11.5)
+                    .color(palette.accent),
+            )
+            .fill(palette.raised)
+            .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle)),
+        )
+        .on_hover_text(tr("このハンクをステージします"))
+        .clicked()
+    {
+        *hunk_action = Some(DiffHunkAction::Stage {
+            file_index,
+            hunk_line_index,
+        });
+    }
+}
+
+/// Lay out one side of a side-by-side row: that side's line number and the
+/// line, its rewritten words marked. A hunk header or a note keeps its text
+/// after a blank gutter, as in the interleaved layout.
+pub(crate) fn diff_half_layout(line: &DiffLine, newer: bool, palette: &Palette) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    let font = FontId::monospace(MONOSPACE_SIZE);
+    let plain = Color32::TRANSPARENT;
+    let mut append = |text: &str, color: Color32, background: Color32| {
+        job.append(
+            text,
+            0.0,
+            TextFormat {
+                font_id: font.clone(),
+                color,
+                background,
+                ..Default::default()
+            },
+        );
+    };
+    match line.kind {
+        DiffLineKind::Hunk | DiffLineKind::Note => {
+            append(&" ".repeat(DIFF_GUTTER_COLUMNS + 2), plain, plain);
+            let ink = if line.kind == DiffLineKind::Hunk {
+                palette.text_muted
+            } else {
+                palette.text_faint
+            };
+            append(&line.text, ink, plain);
+            return job;
+        }
+        _ => {}
+    }
+    let number = if newer {
+        line.new_number
+    } else {
+        line.old_number
+    };
+    match number {
+        Some(value) => append(
+            &format!("{value:>DIFF_GUTTER_COLUMNS$}  "),
+            palette.text_muted,
+            plain,
+        ),
+        None => append(&" ".repeat(DIFF_GUTTER_COLUMNS + 2), plain, plain),
+    }
+    let mark = match line.kind {
+        DiffLineKind::Added => palette.diff_added_emphasis,
+        DiffLineKind::Removed => palette.diff_removed_emphasis,
+        _ => plain,
+    };
+    let mut at = 0;
+    for span in &line.highlights {
+        append(&line.text[at..span.start], palette.text, plain);
+        append(&line.text[span.clone()], palette.text, mark);
+        at = span.end;
+    }
+    append(&line.text[at..], palette.text, plain);
+    job
 }
 
 /// Lay out one diff row: the two line numbers, the sign, and the line.

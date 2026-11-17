@@ -3801,11 +3801,16 @@ impl OperonApp {
         // wrong; threading the root through would also have to re-key change
         // 020's notes, which is its own change.
         let project_rooted = self.document_may_have_a_diff(index);
-        if !project_rooted && self.editor_view == EditorView::Diff {
+        if !project_rooted && matches!(self.editor_view, EditorView::Diff | EditorView::Annotate) {
             self.editor_view = EditorView::Edit;
         }
         ui.horizontal(|ui| {
-            for view in [EditorView::Edit, EditorView::Preview, EditorView::Diff] {
+            for view in [
+                EditorView::Edit,
+                EditorView::Preview,
+                EditorView::Diff,
+                EditorView::Annotate,
+            ] {
                 // A file that is not Markdown and not an image has nothing to preview: the
                 // rendered form and the source would be the same text.
                 if view == EditorView::Preview && (viewer.is_some() || !markdown && !is_img) {
@@ -3815,7 +3820,7 @@ impl OperonApp {
                 if is_img && view != EditorView::Preview {
                     continue;
                 }
-                if view == EditorView::Diff && !project_rooted {
+                if matches!(view, EditorView::Diff | EditorView::Annotate) && !project_rooted {
                     continue;
                 }
                 // A file past the editable ceiling is read here, not edited, and
@@ -3832,6 +3837,11 @@ impl OperonApp {
                     self.editor_view = view;
                     if view == EditorView::Diff {
                         self.invalidate_open_editor_diff(project.id);
+                    }
+                    // Selecting 注釈 or 差分 reads the file's history afresh:
+                    // it may have been committed since (change 307).
+                    if matches!(view, EditorView::Diff | EditorView::Annotate) {
+                        self.forget_compare_data(project.id, &path.to_string_lossy());
                     }
                 }
             }
@@ -3869,6 +3879,8 @@ impl OperonApp {
                 .clicked()
                 {
                     self.reload_document(&document);
+                    self.forget_compare_data(project.id, &path.to_string_lossy());
+                    self.invalidate_open_editor_diff(project.id);
                 }
                 if saving {
                     ui.label(
@@ -3966,58 +3978,10 @@ impl OperonApp {
                 }
             }
             EditorView::Diff => {
-                let file = Some(path.to_string_lossy().into_owned());
-                self.ensure_diff_parsed(project, file.clone());
-                let key = (project.id, file);
-                if let Some(Err(error)) = self.git_diff_cache.get(&key) {
-                    ui.label(tf!("差分を取得できません: {error}", error = error));
-                    return;
-                }
-                if let Some(files) = self.diff_file_cache.get(&key) {
-                    if files.is_empty() {
-                        ui.add_space(12.0);
-                        ui.label(
-                            RichText::new(tr(
-                                "このファイルは、最後のコミットから変更されていません。",
-                            ))
-                            .color(palette.text_muted),
-                        );
-                        return;
-                    }
-                    // The footer takes a row when there is anything to say, so
-                    // the pane above it is measured with that row already spent.
-                    let footer = if self.diff_annotations.count(project.id) > 0 {
-                        34.0
-                    } else {
-                        0.0
-                    };
-                    let mut hunk_action = None;
-                    if diff_pane_with_actions(
-                        ui,
-                        files,
-                        &mut self.collapsed_diff_files,
-                        palette,
-                        (remaining - footer).max(120.0),
-                        project.id,
-                        &mut self.diff_annotations,
-                        &mut hunk_action,
-                    ) {
-                        self.diff_comments_dirty = true;
-                    }
-                    if let Some(action) = hunk_action {
-                        self.apply_diff_hunk_action(project, &key, action);
-                    }
-                    // Every pane that can take a note carries the way to send
-                    // one. A note written here and sendable only from the Git
-                    // tab is a note somebody writes and then cannot find.
-                    self.ui_diff_comment_footer(ui, palette, project.id);
-                } else {
-                    ui.label(
-                        RichText::new(tr("差分を読み込んでいます…"))
-                            .size(12.0)
-                            .color(palette.text_muted),
-                    );
-                }
+                self.ui_editor_diff(ui, project, &document, palette, remaining);
+            }
+            EditorView::Annotate => {
+                self.ui_editor_annotate(ui, project, &document, palette, remaining);
             }
         }
     }
@@ -7103,6 +7067,7 @@ impl OperonApp {
                                                                     session,
                                                                     self.cancellation_pending(*id),
                                                                     self.session_activity_for(*id),
+                                                                    self.awaiting_first_request.contains(id),
                                                                 );
                                                                 ui.label(&view.label);
                                                                 ui.label(self.with_working_time(
@@ -7891,6 +7856,7 @@ impl OperonApp {
                                             session,
                                             self.cancellation_pending(id),
                                             self.session_activity_for(id),
+                                            self.awaiting_first_request.contains(&id),
                                         );
                                         ui.label(&title);
                                         ui.label(&view.label);

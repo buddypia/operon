@@ -88,6 +88,15 @@ what the plan had not:
    probes (`--lines` twice, `--json` twice, an uppercase hyphenated prefix, no
    session) held and are kept as `agents_309_parsing_edges_hold`. `list` also
    drops control characters from the agent and state columns.
+6. **Main brought a new state.** Change 308 landed `未開始` (`NotStarted`):
+   a session up at its prompt that has not had its first request. It is
+   published as `not-started`, and `send` takes it as well as `idle` — the
+   window already groups both as free, and handing a fresh session its first
+   task is what a coordinating agent most needs. `wait --until idle` does not
+   count it. Tests: `agents_309_snapshot_names_each_live_session_with_its_state`
+   (every state has a word), `agents_309_send_types_only_into_an_idle_agent_of_the_same_project`
+   (not-started taken, every busy state refused); mutations `not-started-refused`,
+   `not-started-published-as-idle`.
 
 Left as they are, and why:
 

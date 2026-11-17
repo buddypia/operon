@@ -2,6 +2,8 @@ use crate::*;
 
 pub(crate) mod agent_snapshot;
 pub(crate) mod broadcast;
+pub(crate) mod compare;
+pub(crate) use compare::*;
 pub(crate) mod dock_badge;
 mod keymap;
 pub(crate) mod knowledge;
@@ -60,6 +62,11 @@ pub(crate) enum BackgroundKey {
     GitChanges(Uuid),
     GitDiff(Uuid, Option<String>),
     GitHistory(Uuid),
+    /// Change 307: one file's blame, its history, and its comparison with a
+    /// past revision.
+    Blame(Uuid, String),
+    FileHistory(Uuid, String),
+    RevisionDiff(Uuid, String, DiffBase),
     Worktrees(Uuid),
     PullRequests(Uuid),
     Files(Uuid),
@@ -169,6 +176,22 @@ pub(crate) enum BackgroundResult {
     GitHistory {
         project_id: Uuid,
         result: UiResult<String>,
+    },
+    Blame {
+        project_id: Uuid,
+        file: String,
+        result: UiResult<BlameOutcome>,
+    },
+    FileHistory {
+        project_id: Uuid,
+        file: String,
+        result: UiResult<Vec<FileRevision>>,
+    },
+    RevisionDiff {
+        project_id: Uuid,
+        file: String,
+        base: DiffBase,
+        result: UiResult<Vec<DiffFile>>,
     },
     Worktrees {
         project_id: Uuid,
@@ -565,6 +588,13 @@ pub(crate) struct OperonApp {
     /// file happened to slide into that slot.
     pub(crate) active_document: Option<DocumentId>,
     pub(crate) editor_view: EditorView,
+    /// What the 差分 view compares for the document in front (change 307).
+    pub(crate) editor_compare: EditorCompare,
+    /// Read off the frame, by (project, file): the 注釈 view's blame, the
+    /// revision picker's history, and parsed comparisons with past revisions.
+    pub(crate) blame_cache: HashMap<(Uuid, String), UiResult<BlameOutcome>>,
+    pub(crate) file_history_cache: HashMap<(Uuid, String), UiResult<Vec<FileRevision>>>,
+    pub(crate) revision_diff_cache: HashMap<(Uuid, String, DiffBase), UiResult<Vec<DiffFile>>>,
     /// The directories a person has opened in the project tree. Keyed by
     /// project, so two projects do not share one expansion.
     pub(crate) expanded_directories: HashSet<(Uuid, PathBuf)>,
@@ -663,6 +693,11 @@ pub(crate) struct OperonApp {
     /// state nobody has confirmed since the restart is a state the screen is
     /// better placed to answer for.
     pub(crate) hook_status: HashMap<Uuid, HookStatus>,
+    /// Sessions whose CLI said its conversation is new and that have had no
+    /// turn since (change 308). Apart from `hook_status` because the stale
+    /// sweep drops that, and thirty quiet minutes do not start a conversation.
+    /// In memory only, as `hook_status` is.
+    pub(crate) awaiting_first_request: HashSet<Uuid>,
     /// When each session that needs a person started needing one. In memory
     /// only: after a restart every waiting session is timed from the launch.
     pub(crate) attention_since: HashMap<Uuid, Instant>,
@@ -1170,6 +1205,10 @@ impl OperonApp {
             open_documents: Vec::new(),
             active_document: None,
             editor_view: EditorView::Edit,
+            editor_compare: EditorCompare::default(),
+            blame_cache: HashMap::new(),
+            file_history_cache: HashMap::new(),
+            revision_diff_cache: HashMap::new(),
             expanded_directories: HashSet::new(),
             collapsed_diff_files: HashSet::new(),
             file_tree_cache: None,
@@ -1208,6 +1247,7 @@ impl OperonApp {
             hook_listener: None,
             hook_events: None,
             hook_status: HashMap::new(),
+            awaiting_first_request: HashSet::new(),
             attention_since: HashMap::new(),
             working_since: HashMap::new(),
             dock_badge_shown: 0,
@@ -1699,6 +1739,38 @@ impl OperonApp {
                     self.background_tasks
                         .remove(&BackgroundKey::GitHistory(project_id));
                     self.git_history_cache.insert(project_id, result);
+                }
+                BackgroundResult::Blame {
+                    project_id,
+                    file,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::Blame(project_id, file.clone()));
+                    self.blame_cache.insert((project_id, file), result);
+                }
+                BackgroundResult::FileHistory {
+                    project_id,
+                    file,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::FileHistory(project_id, file.clone()));
+                    self.file_history_cache.insert((project_id, file), result);
+                }
+                BackgroundResult::RevisionDiff {
+                    project_id,
+                    file,
+                    base,
+                    result,
+                } => {
+                    self.background_tasks.remove(&BackgroundKey::RevisionDiff(
+                        project_id,
+                        file.clone(),
+                        base.clone(),
+                    ));
+                    self.revision_diff_cache
+                        .insert((project_id, file, base), result);
                 }
                 BackgroundResult::Worktrees { project_id, result } => {
                     self.background_tasks
@@ -3912,7 +3984,11 @@ impl OperonApp {
             }
             let notice = {
                 let tracker = self.session_activity.entry(id).or_default();
-                observe_agent_activity(tracker, activity)
+                let notice = observe_agent_activity(tracker, activity);
+                if tracker.settled == Some(AgentActivity::Working) {
+                    self.awaiting_first_request.remove(&id);
+                }
+                notice
             };
             let Some(notice) = notice else {
                 continue;
@@ -4000,6 +4076,9 @@ impl OperonApp {
     /// `None` while the mechanism is off, which is what stops the scripts from
     /// posting at all: they exit as soon as the session variable is missing.
     pub(crate) fn mint_hook_environment(&mut self, session_id: Uuid) -> Option<HookEnvironment> {
+        // Every launch passes here, hooks on or off: a new process starts no
+        // conversation until its CLI says so.
+        self.awaiting_first_request.remove(&session_id);
         if !self.hooks_enabled {
             return None;
         }
@@ -4090,6 +4169,14 @@ impl OperonApp {
         }
         let (status, notice) =
             apply_hook_reading(self.hook_status.get(&session_id), reading, Instant::now());
+        // Read off the state the reading left, not the reading: a late tool
+        // post from the turn before a `/clear` is turned away (change 301) and
+        // must not end the wait for a first request either.
+        if status.new_conversation {
+            self.awaiting_first_request.insert(session_id);
+        } else {
+            self.awaiting_first_request.remove(&session_id);
+        }
         self.hook_status.insert(session_id, status);
         let Some(notice) = notice else {
             return;
@@ -6140,6 +6227,7 @@ impl OperonApp {
             session,
             self.cancellation_pending(session.id),
             self.session_activity_for(session.id),
+            self.awaiting_first_request.contains(&session.id),
         )
     }
 
@@ -6431,6 +6519,7 @@ impl OperonApp {
             session,
             self.cancellation_pending(session.id),
             self.session_activity_for(session.id),
+            self.awaiting_first_request.contains(&session.id),
         );
         // The CLIs name the tool they are running, and "Bash を実行中" answers
         // the question a person actually has about a working session, which
@@ -7000,6 +7089,7 @@ impl OperonApp {
         self.remove_after_close.remove(&session_id);
         self.unread_sessions.remove(&session_id);
         self.hook_status.remove(&session_id);
+        self.awaiting_first_request.remove(&session_id);
         self.hook_launch_tokens.remove(&session_id);
         if self.unread_hold == Some(session_id) {
             self.unread_hold = None;

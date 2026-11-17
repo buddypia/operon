@@ -55,7 +55,8 @@ Settings. The projects, sessions, and agent output in them are a demo.
   each with how long it has waited and what its agent last said; a row whose
   terminal is running has a one-line reply — type, press Enter, and the words
   reach that agent without opening it; `⌘K` → アイドル中のエージェントへ送信…
-  types one line into every idle agent of the project. An agent that
+  types one line into the idle agents of the project you tick (none is
+  ticked until you choose; すべて選択 ticks them all). An agent that
   has been working for a minute or more says for how long — 実行中 · 12分 — in
   its pane's heading and when you hover its state. `⌘J` opens the
   next one and puts the keyboard in its terminal, and the toolbar's **要対応 N**
@@ -171,7 +172,7 @@ Settings. The projects, sessions, and agent output in them are a demo.
   screen, `send <ID> <text>` types one line and Enter into it, and
   `wait <ID>` returns when it has finished its turn or stops on a prompt. A
   send reaches only a session of the same project whose agent has finished
-  its turn — the screen is checked again just before typing — and never
+  its turn or not yet had its first request — the screen is checked again just before typing — and never
   carries a line break or a control character; what was sent is in the
   target's terminal for you to see. The states come from what the window
   already shows, written to `agents.json` beside the local index while Operon
@@ -190,6 +191,12 @@ Settings. The projects, sessions, and agent output in them are a demo.
   actually changed are marked inside the row, so a one-argument edit in an
   eighty-column line is found by looking rather than by reading. Untracked
   files, renames, and repositories without a first commit are included.
+- A file's diff in the editor reads side by side — the older text on the left,
+  the newer on the right — or interleaved, and the choice is remembered. F7 and
+  ⇧F7 step between changes. A picker compares the file with any revision in its
+  history, and the 注釈 (annotate) view shows each line's commit, author, and
+  date; from a line, open what that commit changed or compare it with the
+  working copy.
 - Create and select isolated Git worktrees for parallel sessions; remove only
   clean, inactive worktrees after an in-app confirmation. A new worktree starts
   from the project's mainline — what `origin/HEAD` names, else `origin/main`,
@@ -449,7 +456,9 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Scans are bounded and honest about it: the editor tree caps itself (and
   skips `.git`, `node_modules`, `target`, `.next`), files beyond 128 KiB open
   read-only up to 8 MiB, diff capture shares a fixed budget with explicit truncation
-  notices, transcript search caps candidates, bytes, and lines, and the handoff
+  notices, annotate reads at most 4 MiB of blame (past it the view says the
+  file is too large), the revision picker lists the newest 200 commits,
+  transcript search caps candidates, bytes, and lines, and the handoff
   archive sweep looks at 4,096 entries and 256 KiB of each manifest per pass. Use an
   external editor for a complete view of very large repositories.
 

@@ -11,6 +11,8 @@ APP = ROOT / "src/app.rs"
 MAIN = ROOT / "src/main.rs"
 MUTATIONS = {
     "send-ignores-state": (C, "    if entry.state != AGENT_STATE_IDLE {\n        return busy(&entry.state);\n    }\n", ""),
+    "not-started-refused": (C, "if entry.state != AGENT_STATE_IDLE && entry.state != AGENT_STATE_NOT_STARTED {", "if entry.state != AGENT_STATE_IDLE {"),
+    "not-started-published-as-idle": (C, "SessionStatusKind::NotStarted => AGENT_STATE_NOT_STARTED,", "SessionStatusKind::NotStarted => AGENT_STATE_IDLE,"),
     "send-skips-screen-recheck-working": (C, "AgentActivity::Working => return busy(AGENT_STATE_WORKING),", "AgentActivity::Working => {}"),
     "send-skips-screen-recheck-prompt": (C, "AgentActivity::AwaitingInput => return busy(AGENT_STATE_WAITING),", "AgentActivity::AwaitingInput => {}"),
     "screen-failure-still-sends": (C, "        Err(error) => return terminal_failure(&error),\n    }\n    match host.send", "        Err(_) => {}\n    }\n    match host.send"),

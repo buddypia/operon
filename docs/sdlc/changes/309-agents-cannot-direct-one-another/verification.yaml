@@ -1,5 +1,5 @@
 # The evidence for change 309. Format: docs/sdlc/templates/verification.yaml.
-digest: "8b63de2b13c90d78"
+digest: "cc12f1121b257201"
 
 obligations:
   - R1 empirical-test :: cargo test --locked agents_309_snapshot_names_each_live_session_with_its_state

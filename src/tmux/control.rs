@@ -50,6 +50,8 @@ pub(crate) struct AgentEntry {
 pub(crate) const AGENT_STATE_IDLE: &str = "idle";
 pub(crate) const AGENT_STATE_WAITING: &str = "waiting";
 pub(crate) const AGENT_STATE_WORKING: &str = "working";
+/// Up, at its prompt, and not yet given a first request (change 308).
+pub(crate) const AGENT_STATE_NOT_STARTED: &str = "not-started";
 
 /// The word a state is published as, or `None` for the two that belong to
 /// history rather than to the workspace.
@@ -60,6 +62,7 @@ pub(crate) fn agent_state_token(kind: SessionStatusKind) -> Option<&'static str>
         SessionStatusKind::Working => AGENT_STATE_WORKING,
         SessionStatusKind::Waiting => AGENT_STATE_WAITING,
         SessionStatusKind::Idle => AGENT_STATE_IDLE,
+        SessionStatusKind::NotStarted => AGENT_STATE_NOT_STARTED,
         SessionStatusKind::Running => "running",
         SessionStatusKind::Blocked => "blocked",
         SessionStatusKind::Ready => "ready",
@@ -519,7 +522,8 @@ fn agents_send(
             ),
         )
     };
-    if entry.state != AGENT_STATE_IDLE {
+    // Free to take an instruction: after a turn, or before the first one.
+    if entry.state != AGENT_STATE_IDLE && entry.state != AGENT_STATE_NOT_STARTED {
         return busy(&entry.state);
     }
     // The snapshot can be a second old, or older if the window stalled: the

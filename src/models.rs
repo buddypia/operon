@@ -300,7 +300,7 @@ pub(crate) enum FileOpenOutcome {
 /// now" are routinely different, and a save that did not check would delete an
 /// agent's work without saying so. It is also what the unsaved-changes mark and
 /// the editor's own diff are computed from.
-/// The three ways the editor shows the file it has open.
+/// The ways the editor shows the file it has open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EditorView {
     Edit,
@@ -311,6 +311,8 @@ pub(crate) enum EditorView {
     /// This file's diff against the last commit, which is the question
     /// "what did the agent just do to this file" asked one file at a time.
     Diff,
+    /// Each line beside the commit that last changed it (change 307).
+    Annotate,
 }
 
 impl EditorView {
@@ -319,6 +321,7 @@ impl EditorView {
             Self::Edit => tr("編集"),
             Self::Preview => tr("プレビュー"),
             Self::Diff => tr("差分"),
+            Self::Annotate => tr("注釈"),
         }
     }
     pub(crate) fn icon(self) -> &'static str {
@@ -326,6 +329,7 @@ impl EditorView {
             Self::Edit => ICON_EDIT,
             Self::Preview => ICON_PREVIEW,
             Self::Diff => ICON_DIFF,
+            Self::Annotate => ICON_ANNOTATE,
         }
     }
 }
@@ -595,6 +599,18 @@ pub(crate) struct PromptTemplate {
     pub(crate) title: String,
     pub(crate) content: String,
     pub(crate) is_custom: bool,
+}
+
+/// How a file's diff is laid out (change 307). Kept in the store so the
+/// choice outlives a relaunch, as an IDE's does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DiffLayout {
+    /// The older text on the left, the newer on the right, row-aligned.
+    #[default]
+    SideBySide,
+    /// One interleaved column, removals above the additions that replace them.
+    Unified,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

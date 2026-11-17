@@ -1,0 +1,20 @@
+# The evidence for change 306. Format: docs/sdlc/templates/verification.yaml.
+digest: "e2ae795b3124de7a"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked broadcast_306_sheet_opens_with_nobody_chosen_and_a_row_ticks
+  - R2 empirical-test :: cargo test --locked broadcast_306_send_reaches_only_the_chosen_idle_agents
+  - R3 empirical-test :: cargo test --locked broadcast_306_an_agent_idle_after_opening_is_not_chosen
+  - R4 empirical-test :: cargo test --locked broadcast_306_nobody_chosen_sends_nothing_and_keeps_the_line
+  - R5 empirical-test :: cargo test --locked broadcast_306_choose_all_then_clear
+  - R6 empirical-test :: cargo test --locked broadcast_306_every_idle_agent_can_be_chosen
+  # Reproduced by empirical-verifier: an Enter that sent nothing left the field
+  # without the keyboard, so the next keystrokes were lost.
+  - F1 empirical-test :: cargo test --locked broadcast_306_f1_focus_stays_after_enter_with_nobody_chosen
+  # Change 282's behaviour besides the choice: who may be chosen, the trim and
+  # Enter, the IME rule, Escape, and the chords held back.
+  - I1 empirical-test :: cargo test --locked broadcast_282_
+  # The four new strings have rows in both tables, sorted; the two retired ones are gone.
+  - I2 empirical-test :: cargo test --locked every_message
+  - I3 empirical-test :: cargo test --locked every_translation
+  - I4 empirical-mutation :: python3 docs/sdlc/changes/306-broadcast-reaches-tabs-not-chosen/mutations.py

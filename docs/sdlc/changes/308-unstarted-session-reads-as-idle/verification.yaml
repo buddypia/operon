@@ -1,0 +1,16 @@
+# The evidence for change 308. Format: docs/sdlc/templates/verification.yaml.
+# F1 is the empirical verifier's reproduction: a late Claude PostToolUse after
+# a /clear cleared 未開始 although apply_hook_reading turned the post away.
+digest: "2d458e0a4fff7fd6"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked unstarted_308_a_new_conversation_is_read_from_session_start
+  - R2 empirical-test :: cargo test --locked unstarted_308_a_session_is_not_started_until_its_first_request
+  - R3 empirical-test :: cargo test --locked unstarted_308_the_mark_outlives_a_stale_hook_but_not_a_turn_or_a_launch
+  - R4 empirical-test :: cargo test --locked unstarted_308_counts_as_idle_and_receives_a_broadcast
+  - R5 empirical-test :: cargo test --locked unstarted_308_has_its_own_mark_word_and_hint
+  - R6 empirical-test :: cargo test --locked unstarted_308_the_manuals_name_the_state
+  - F1 empirical-test :: cargo test --locked f308_a_late_tool_post_does_not_end_the_wait_for_a_first_request
+  - I1 empirical-test :: cargo test --locked the_idle_group_word_does_not_read_as_waiting_on_you
+  - I2 empirical-test :: cargo test --locked session_tab_status_badges_are_distinct_vectors
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/308-unstarted-session-reads-as-idle/mutations.py
