@@ -1,0 +1,31 @@
+# Change 307. The person's request: 「差分って二つあって、ローカルとGit状態の差分と
+# git blameに差分を選んで比較する機能が欲しい。通常よくあるIntelliJの感覚でUI/UXと
+# 体験ができると良い」. Intent in intent.md; the layout awaits the person in screen.md.
+
+state:
+  route: "feature"
+  stage: "plan"
+  status: "awaiting-user"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "pending"
+
+resume: "Ask the person to approve screen.md, then write spec.md and plan.md."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending required - touches src/git.rs, src/ui/diff.rs, src/app; package from main after landing"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
