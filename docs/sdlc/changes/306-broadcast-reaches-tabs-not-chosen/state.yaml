@@ -3,8 +3,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -12,13 +12,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the six broadcast_306_ tests, watch them fail, then change src/app/broadcast.rs per plan.md."
+resume: "Done. Package from main after landing; two carried review points are in review.yaml."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked broadcast_"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app/broadcast.rs changes; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/306-broadcast-reaches-tabs-not-chosen/mutations.py"
+  three-gates: "machine passed make q.fast and cargo test --locked broadcast_ (14 passed)"
+  bands: "machine passed bash scripts/check-bands.sh (no propose tier reached)"
+  release-binary: "machine passed required - src/app/broadcast.rs changes; packaged from main after landing"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/306-broadcast-reaches-tabs-not-chosen/mutations.py (18 of 18 caught)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

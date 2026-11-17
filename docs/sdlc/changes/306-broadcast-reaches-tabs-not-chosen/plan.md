@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-17
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -54,4 +54,17 @@
 
 ## Departures from the plan
 
-None yet.
+- **Two mutations escaped the first sweep** — the send button left enabled with
+  nobody ticked, and the rows capped at six. Neither changes what is sent, so
+  the tests had not looked. Requirement 4's test now reads the button's state
+  from the accessibility tree (with a ticked positive control), and
+  requirement 6's scrolls the list until its last row paints.
+- **Finding F1** (empirical-verifier): an Enter that sent nothing — nobody
+  ticked — kept the sheet and the line but left the field without the keyboard,
+  so the next keystrokes were lost. The sheet now hands the keyboard back after
+  such an Enter; `broadcast_306_f1_focus_stays_after_enter_with_nobody_chosen`
+  pins it, and the sweep has a mutation for it.
+- **The draw path filters the targets it already holds** instead of calling
+  `broadcast_recipients`, which walked the sessions a second time each frame
+  (rust-reviewer). The send path still calls it.
+- Proof count: `cargo test --locked broadcast_` is 14 with F1.

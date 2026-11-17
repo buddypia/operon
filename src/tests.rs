@@ -80038,7 +80038,11 @@ fn broadcast_282_send_types_into_every_idle_agent() {
     app.background_tasks
         .insert(BackgroundKey::TerminalInput(other));
     let selected = app.selected_session;
-    assert_eq!(app.send_broadcast("  作業をコミットして \n"), 2);
+    // Every session ticked, the working one too: it is still left alone.
+    assert_eq!(
+        app.send_broadcast("  作業をコミットして \n", &[first, second, other]),
+        2
+    );
     for id in [first, second] {
         assert_eq!(
             reply_279_queued(&app, id),
@@ -80060,13 +80064,13 @@ fn broadcast_282_send_types_into_every_idle_agent() {
 #[test]
 fn broadcast_282_nothing_to_say_or_nobody_idle_sends_nothing() {
     let (root, mut app, first, second) = broadcast_282_app("broadcast-282-none");
-    assert_eq!(app.send_broadcast("   "), 0);
+    assert_eq!(app.send_broadcast("   ", &[first, second]), 0);
     assert!(reply_279_queued(&app, first).is_empty());
     assert_eq!(app.notice, None);
     for id in [first, second] {
         working_278_settle(&mut app, id, AgentActivity::Working);
     }
-    assert_eq!(app.send_broadcast("続けて"), 0);
+    assert_eq!(app.send_broadcast("続けて", &[first, second]), 0);
     assert!(reply_279_queued(&app, first).is_empty());
     assert_eq!(app.notice, None, "誰にも送っていないのに通知しました");
     fs::remove_dir_all(&root).ok();
@@ -80103,7 +80107,7 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
     let texts = broadcast_282_frame(&mut app, &ctx, Vec::new());
     for expected in [
         tr("アイドル中のエージェントへ送信").to_owned(),
-        tf!("{p0} · 送信先 {p1} 件", p0 = "p", p1 = 2),
+        tf!("{p0} · 選択 {p1} / {p2} 件", p0 = "p", p1 = 0, p2 = 2),
         "first".to_owned(),
         "second".to_owned(),
     ] {
@@ -80134,6 +80138,10 @@ fn broadcast_282_sheet_names_who_it_reaches_and_sends_on_enter() {
         app.broadcast_sheet.is_some(),
         "変換の確定でシートが閉じました"
     );
+    // Change 306: the line reaches the ticked sessions, so tick both.
+    if let Some(sheet) = app.broadcast_sheet.as_mut() {
+        sheet.chosen = vec![first, second];
+    }
     broadcast_282_frame(&mut app, &ctx, Vec::new());
     broadcast_282_frame(&mut app, &ctx, vec![reply_279_enter()]);
     for id in [first, second] {
@@ -90477,6 +90485,384 @@ pub(crate) fn cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation() {
         &mut app,
         &BackgroundKey::SessionStart(custom_id),
         Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+// ── Change 306: the broadcast reaches only the tabs that were ticked ────────
+
+/// Another idle session of the broadcast app's project, named `name`, whose
+/// queued input stays to be read.
+fn broadcast_306_add_idle(app: &mut OperonApp, name: &str) -> Uuid {
+    let mut session = app.store.sessions[0].clone();
+    session.id = Uuid::new_v4();
+    session.name = name.to_owned();
+    session.status = SessionStatus::Active;
+    let id = session.id;
+    app.store.sessions.push(session);
+    working_278_settle(app, id, AgentActivity::Idle);
+    app.background_tasks
+        .insert(BackgroundKey::TerminalInput(id));
+    id
+}
+
+/// One click at `position` on the broadcast sheet, then the frame after it,
+/// whose painted output is returned.
+fn broadcast_306_click(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    position: egui::Pos2,
+) -> egui::FullOutput {
+    click_at(ctx, position, |ctx| {
+        central_panel(ctx, |_| {});
+        app.ui_broadcast_sheet(ctx);
+    });
+    broadcast_306_output(app, ctx, Vec::new())
+}
+
+fn broadcast_306_output(
+    app: &mut OperonApp,
+    ctx: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |_| {});
+            app.ui_broadcast_sheet(ctx);
+        },
+    )
+}
+
+/// The centre of the text `wanted`, as the frame painted it.
+fn broadcast_306_at(output: &egui::FullOutput, wanted: &str) -> egui::Pos2 {
+    drawn_text_rect(output, |text| text == wanted)
+        .unwrap_or_else(|| {
+            panic!(
+                "「{wanted}」が描かれていません: {:?}",
+                painted_texts(output)
+            )
+        })
+        .center()
+}
+
+/// The send button's label, which paints after its icon.
+fn broadcast_306_button(output: &egui::FullOutput, count: usize) -> Option<egui::Pos2> {
+    let label = tf!("{p0} 件に送信", p0 = count);
+    drawn_text_rect(output, |text| text.ends_with(&label)).map(|rect| rect.center())
+}
+
+/// Whether the send button is off, as the accessibility tree reports it;
+/// `None` when no such button was drawn. Needs `enable_accesskit`.
+fn broadcast_306_button_disabled(output: &egui::FullOutput, count: usize) -> Option<bool> {
+    let label = tf!("{p0} 件に送信", p0 = count);
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()?
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label().is_some_and(|text| text.ends_with(&label)))
+        .map(|(_, node)| node.is_disabled())
+}
+
+fn broadcast_306_chosen(app: &OperonApp) -> Vec<Uuid> {
+    app.broadcast_sheet
+        .as_ref()
+        .map(|sheet| sheet.chosen.clone())
+        .unwrap_or_default()
+}
+
+fn broadcast_306_count(chosen: usize, listed: usize) -> String {
+    tf!(
+        "{p0} · 選択 {p1} / {p2} 件",
+        p0 = "p",
+        p1 = chosen,
+        p2 = listed
+    )
+}
+
+#[test]
+fn broadcast_306_sheet_opens_with_nobody_chosen_and_a_row_ticks() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-tick");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&output);
+    for expected in [
+        broadcast_306_count(0, 2),
+        tr("すべて選択").to_owned(),
+        tr("選んだ相手に送る内容を入力").to_owned(),
+        "first".to_owned(),
+        "second".to_owned(),
+    ] {
+        assert!(
+            texts.contains(&expected),
+            "シートに「{expected}」がありません: {texts:?}"
+        );
+    }
+    assert!(
+        broadcast_306_chosen(&app).is_empty(),
+        "開いた時点で送信先が選ばれています"
+    );
+    // The title chooses its session, and unchooses it again.
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    assert_eq!(broadcast_306_chosen(&app), vec![first]);
+    assert!(
+        painted_texts(&output).contains(&broadcast_306_count(1, 2)),
+        "{:?}",
+        painted_texts(&output)
+    );
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    assert!(
+        broadcast_306_chosen(&app).is_empty(),
+        "もう一度押しても外れません"
+    );
+    // The box at the row's left edge does the same.
+    let left = drawn_text_rect(&output, |text| text == broadcast_306_count(0, 2))
+        .expect("件数の行がありません")
+        .left();
+    let row = broadcast_306_at(&output, "second");
+    let boxed = egui::pos2(left + ctx.global_style().spacing.icon_width / 2.0, row.y);
+    broadcast_306_click(&mut app, &ctx, boxed);
+    assert_eq!(
+        broadcast_306_chosen(&app),
+        vec![second],
+        "チェックボックスで選べません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_send_reaches_only_the_chosen_idle_agents() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-send");
+    let third = broadcast_306_add_idle(&mut app, "third");
+    // List order, whatever order they were ticked in.
+    assert_eq!(
+        app.broadcast_recipients(&[third, first]),
+        vec![first, third]
+    );
+    // Ticked, then started working: no longer reached.
+    working_278_settle(&mut app, third, AgentActivity::Working);
+    assert_eq!(
+        app.send_broadcast("  作業をコミットして \n", &[second, third]),
+        1
+    );
+    assert_eq!(
+        reply_279_queued(&app, second),
+        reply_279_sent("作業をコミットして")
+    );
+    assert!(
+        reply_279_queued(&app, first).is_empty(),
+        "選んでいないエージェントに送りました"
+    );
+    assert!(
+        reply_279_queued(&app, third).is_empty(),
+        "作業中になったエージェントに送りました"
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tf!("{p0} 件のエージェントに送信しました", p0 = 1).as_str())
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_an_agent_idle_after_opening_is_not_chosen() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-late");
+    working_278_settle(&mut app, second, AgentActivity::Working);
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    // It finishes while the sheet is open: listed, not ticked.
+    working_278_settle(&mut app, second, AgentActivity::Idle);
+    let texts = painted_texts(&broadcast_306_output(&mut app, &ctx, Vec::new()));
+    assert!(texts.contains(&"second".to_owned()), "{texts:?}");
+    assert!(texts.contains(&broadcast_306_count(1, 2)), "{texts:?}");
+    assert_eq!(broadcast_306_chosen(&app), vec![first]);
+    if let Some(sheet) = app.broadcast_sheet.as_mut() {
+        sheet.text = "続けて".to_owned();
+        sheet.focus = true;
+    }
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![reply_279_enter()]);
+    assert_eq!(reply_279_queued(&app, first), reply_279_sent("続けて"));
+    assert!(
+        reply_279_queued(&app, second).is_empty(),
+        "あとからアイドルになったエージェントに送りました"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_nobody_chosen_sends_nothing_and_keeps_the_line() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-nobody");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    ctx.enable_accesskit();
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    let output = broadcast_306_output(&mut app, &ctx, vec![reply_279_enter()]);
+    let button = broadcast_306_button(&output, 0)
+        .unwrap_or_else(|| panic!("「0 件に送信」がありません: {:?}", painted_texts(&output)));
+    assert_eq!(
+        broadcast_306_button_disabled(&output, 0),
+        Some(true),
+        "誰も選んでいないのに送信ボタンが押せます"
+    );
+    broadcast_306_click(&mut app, &ctx, button);
+    for id in [first, second] {
+        assert!(
+            reply_279_queued(&app, id).is_empty(),
+            "誰も選んでいないのに送りました"
+        );
+    }
+    assert_eq!(app.notice, None, "誰にも送っていないのに通知しました");
+    assert_eq!(
+        app.broadcast_sheet
+            .as_ref()
+            .map(|sheet| sheet.text.as_str()),
+        Some("yes"),
+        "シートか入力が消えました"
+    );
+    // One ticked, with a line: the button is on.
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    assert_eq!(
+        broadcast_306_button_disabled(&output, 1),
+        Some(false),
+        "選んだのに送信ボタンが押せません"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_choose_all_then_clear() {
+    let (root, mut app, first, second) = broadcast_282_app("broadcast-306-all");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, "first"));
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, tr("すべて選択")));
+    let mut chosen = broadcast_306_chosen(&app);
+    chosen.sort();
+    let mut both = vec![first, second];
+    both.sort();
+    assert_eq!(chosen, both, "すべて選択で全員が選ばれません");
+    let texts = painted_texts(&output);
+    for expected in [tr("選択を解除").to_owned(), broadcast_306_count(2, 2)] {
+        assert!(
+            texts.contains(&expected),
+            "「{expected}」がありません: {texts:?}"
+        );
+    }
+    assert!(broadcast_306_button(&output, 2).is_some(), "{texts:?}");
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, tr("選択を解除")));
+    assert!(
+        app.broadcast_recipients(&broadcast_306_chosen(&app))
+            .is_empty(),
+        "選択を解除しても選ばれたままです"
+    );
+    assert!(painted_texts(&output).contains(&tr("すべて選択").to_owned()));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn broadcast_306_every_idle_agent_can_be_chosen() {
+    let (root, mut app, ..) = broadcast_282_app("broadcast-306-many");
+    for index in 3..=8 {
+        broadcast_306_add_idle(&mut app, &format!("agent {index}"));
+    }
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    assert!(
+        !painted_texts(&output)
+            .iter()
+            .any(|text| *text == tf!("ほか {p0} 件", p0 = 2)),
+        "数えて省いた送信先は選べません: {:?}",
+        painted_texts(&output)
+    );
+    let cancel = broadcast_306_at(&output, tr("キャンセル"));
+    let output = broadcast_306_click(&mut app, &ctx, broadcast_306_at(&output, tr("すべて選択")));
+    assert!(
+        broadcast_306_button(&output, 8).is_some(),
+        "{:?}",
+        painted_texts(&output)
+    );
+    // Past six rows the list scrolls; the sheet does not grow.
+    for index in 9..=12 {
+        broadcast_306_add_idle(&mut app, &format!("agent {index}"));
+    }
+    let output = broadcast_306_output(&mut app, &ctx, Vec::new());
+    assert_eq!(
+        broadcast_306_at(&output, tr("キャンセル")),
+        cancel,
+        "送信先が増えるとシートが伸びます"
+    );
+    // The rows below are reached by scrolling the list.
+    assert!(!painted_texts(&output).contains(&"agent 12".to_owned()));
+    let list = broadcast_306_at(&output, "first");
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::PointerMoved(list)]);
+    broadcast_306_output(
+        &mut app,
+        &ctx,
+        vec![egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2000.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: egui::Modifiers::default(),
+        }],
+    );
+    let mut reached = false;
+    for _ in 0..8 {
+        reached |= painted_texts(&broadcast_306_output(&mut app, &ctx, Vec::new()))
+            .contains(&"agent 12".to_owned());
+    }
+    assert!(reached, "一覧をスクロールしても最後の送信先が出ません");
+    let chosen = broadcast_306_chosen(&app);
+    assert_eq!(app.send_broadcast("止めて", &chosen), 8);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 306, falsification: an Enter that sends nothing — nobody ticked —
+/// keeps the sheet and the line, and must keep the keyboard in the field too,
+/// or what is typed next goes nowhere.
+#[test]
+fn broadcast_306_f1_focus_stays_after_enter_with_nobody_chosen() {
+    let (root, mut app, ..) = broadcast_282_app("broadcast-306-f1");
+    let ctx = egui::Context::default();
+    app.apply_appearance(&ctx);
+    app.open_broadcast_sheet();
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::Text("yes".into())]);
+    broadcast_306_output(&mut app, &ctx, vec![reply_279_enter()]);
+    broadcast_306_output(&mut app, &ctx, Vec::new());
+    broadcast_306_output(&mut app, &ctx, vec![egui::Event::Text("more".into())]);
+    assert_eq!(
+        app.broadcast_sheet
+            .as_ref()
+            .map(|sheet| sheet.text.as_str()),
+        Some("yesmore"),
+        "何も送らなかった Enter のあと、入力が欄に入りません"
     );
     fs::remove_dir_all(&root).ok();
 }
