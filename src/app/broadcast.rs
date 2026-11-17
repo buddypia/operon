@@ -1,25 +1,30 @@
-//! One instruction to every idle agent of a project (change 282): the sheet
-//! the command palette opens, who it will reach, and the send.
+//! One instruction to the idle agents of a project that the person ticks
+//! (changes 282 and 306): the sheet the command palette opens, who may be
+//! chosen, and the send.
 
 use crate::app::waiting_reply::reply_enter_sends;
 use crate::*;
 
-/// The open sheet: what has been typed, and whether its field still has to
-/// take the keyboard.
+/// The open sheet: what has been typed, whether its field still has to take
+/// the keyboard, and the sessions ticked. Nobody is ticked on opening (change
+/// 306): an agent that has only just started reads as idle, and a line it was
+/// never meant for would become its first instruction.
 #[derive(Default)]
 pub(crate) struct BroadcastSheet {
     pub(crate) text: String,
     pub(crate) focus: bool,
+    pub(crate) chosen: Vec<Uuid>,
 }
 
-/// How many recipients the sheet names before it counts the rest.
-pub(crate) const BROADCAST_NAMED: usize = 6;
+/// How many recipient rows show before the list scrolls.
+pub(crate) const BROADCAST_VISIBLE_ROWS: usize = 6;
 
 impl OperonApp {
     pub(crate) fn open_broadcast_sheet(&mut self) {
         self.broadcast_sheet = Some(BroadcastSheet {
             text: String::new(),
             focus: true,
+            chosen: Vec::new(),
         });
     }
 
@@ -29,9 +34,9 @@ impl OperonApp {
         self.store.projects.iter().find(|project| project.id == id)
     }
 
-    /// Who an instruction would reach: that project's sessions in アイドル —
-    /// an agent that has finished its turn or has not been asked anything yet
-    /// (change 308) — which only a running terminal's can be. An agent that
+    /// Who may be chosen: that project's sessions in アイドル — an agent that
+    /// has finished its turn or has not been asked anything yet (change 308) —
+    /// which only a running terminal's can be. An agent that
     /// works, waits on a prompt, or has ended is left alone.
     pub(crate) fn broadcast_targets(&self) -> Vec<Uuid> {
         let Some(project) = self.broadcast_project().map(|project| project.id) else {
@@ -49,15 +54,23 @@ impl OperonApp {
             .collect()
     }
 
-    /// Types `text` and Enter into every target's terminal and says how many
-    /// it reached. Nothing is sent, and nothing said, for an empty text or
-    /// with nobody idle.
-    pub(crate) fn send_broadcast(&mut self, text: &str) -> usize {
+    /// Who an instruction reaches: the targets that were ticked, in list
+    /// order. A ticked session that has started working since is not one.
+    pub(crate) fn broadcast_recipients(&self, chosen: &[Uuid]) -> Vec<Uuid> {
+        let mut targets = self.broadcast_targets();
+        targets.retain(|id| chosen.contains(id));
+        targets
+    }
+
+    /// Types `text` and Enter into every recipient's terminal and says how
+    /// many it reached. Nothing is sent, and nothing said, for an empty text
+    /// or with nobody chosen and idle.
+    pub(crate) fn send_broadcast(&mut self, text: &str, chosen: &[Uuid]) -> usize {
         let text = text.trim();
         if text.is_empty() {
             return 0;
         }
-        let targets = self.broadcast_targets();
+        let targets = self.broadcast_recipients(chosen);
         for session_id in &targets {
             self.queue_terminal_input(
                 *session_id,
@@ -95,12 +108,22 @@ impl OperonApp {
             return;
         }
         let targets = self.broadcast_targets();
+        // `broadcast_recipients` without a second pass over the sessions.
+        let recipients: Vec<Uuid> = targets
+            .iter()
+            .copied()
+            .filter(|id| sheet.chosen.contains(id))
+            .collect();
+        let every_chosen = !targets.is_empty() && recipients.len() == targets.len();
         let project = self
             .broadcast_project()
             .map(|project| project.name.clone())
             .unwrap_or_default();
         let mut close = false;
         let mut send = false;
+        // Applied after the rows are drawn, which borrow the sessions.
+        let mut toggled = None;
+        let mut choose_all = None;
         const WIDTH: f32 = 460.0;
         egui::Area::new(egui::Id::unique("broadcast-sheet"))
             .order(egui::Order::Foreground)
@@ -130,46 +153,69 @@ impl OperonApp {
                                     .color(palette.text_muted),
                             );
                         } else {
-                            ui.label(
-                                RichText::new(tf!(
-                                    "{p0} · 送信先 {p1} 件",
-                                    p0 = project,
-                                    p1 = targets.len()
-                                ))
-                                .color(palette.text_muted),
-                            );
-                        }
-                        for session in targets.iter().take(BROADCAST_NAMED).filter_map(|id| {
-                            self.store.sessions.iter().find(|session| session.id == *id)
-                        }) {
                             ui.horizontal(|ui| {
-                                agent_chip(ui, &session.agent, 12.0, palette);
-                                ui.add(
-                                    egui::Label::new(session_list_title(
-                                        session,
-                                        self.session_prompt_turns
-                                            .get(&session.id)
-                                            .and_then(|turns| turns.first())
-                                            .map(|turn| turn.prompt.as_str()),
+                                ui.label(
+                                    RichText::new(tf!(
+                                        "{p0} · 選択 {p1} / {p2} 件",
+                                        p0 = project,
+                                        p1 = recipients.len(),
+                                        p2 = targets.len()
                                     ))
-                                    .truncate(),
+                                    .color(palette.text_muted),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let label = if every_chosen {
+                                            tr("選択を解除")
+                                        } else {
+                                            tr("すべて選択")
+                                        };
+                                        if quiet_button(ui, palette, label).clicked() {
+                                            choose_all = Some(!every_chosen);
+                                        }
+                                    },
                                 );
                             });
                         }
-                        if targets.len() > BROADCAST_NAMED {
-                            ui.label(
-                                RichText::new(tf!(
-                                    "ほか {p0} 件",
-                                    p0 = targets.len() - BROADCAST_NAMED
-                                ))
-                                .color(palette.text_muted),
-                            );
-                        }
+                        let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+                        egui::ScrollArea::vertical()
+                            .id_salt("broadcast-recipients")
+                            .auto_shrink([false, true])
+                            .max_height(row * BROADCAST_VISIBLE_ROWS as f32)
+                            .show(ui, |ui| {
+                                for session in targets.iter().filter_map(|id| {
+                                    self.store.sessions.iter().find(|session| session.id == *id)
+                                }) {
+                                    ui.horizontal(|ui| {
+                                        let mut ticked = sheet.chosen.contains(&session.id);
+                                        let boxed = ui.checkbox(&mut ticked, "").changed();
+                                        agent_chip(ui, &session.agent, 12.0, palette);
+                                        let title = ui
+                                            .add(
+                                                egui::Label::new(session_list_title(
+                                                    session,
+                                                    self.session_prompt_turns
+                                                        .get(&session.id)
+                                                        .and_then(|turns| turns.first())
+                                                        .map(|turn| turn.prompt.as_str()),
+                                                ))
+                                                .truncate()
+                                                .sense(egui::Sense::click()),
+                                            )
+                                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                            .clicked();
+                                        if boxed || title {
+                                            toggled = Some(session.id);
+                                        }
+                                    });
+                                }
+                            });
                         ui.add_space(SPACE_SM);
                         let field = ui.add_enabled(
                             !targets.is_empty(),
                             egui::TextEdit::singleline(&mut sheet.text)
-                                .hint_text(tr("全員に送る内容を入力"))
+                                .hint_text(tr("選んだ相手に送る内容を入力"))
                                 .desired_width(f32::INFINITY),
                         );
                         if std::mem::take(&mut sheet.focus) {
@@ -187,13 +233,13 @@ impl OperonApp {
                         }
                         ui.add_space(SPACE_SM);
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let ready = !targets.is_empty() && !sheet.text.trim().is_empty();
+                            let ready = !recipients.is_empty() && !sheet.text.trim().is_empty();
                             ui.add_enabled_ui(ready, |ui| {
                                 send |= primary_button(
                                     ui,
                                     palette,
                                     ICON_START,
-                                    &tf!("{p0} 件に送信", p0 = targets.len()),
+                                    &tf!("{p0} 件に送信", p0 = recipients.len()),
                                 )
                                 .clicked();
                             });
@@ -204,9 +250,25 @@ impl OperonApp {
         if close {
             return;
         }
-        // The sheet stays, with its text, when there was nothing to send.
-        if send && self.send_broadcast(&sheet.text) > 0 {
-            return;
+        if let Some(id) = toggled {
+            if sheet.chosen.contains(&id) {
+                sheet.chosen.retain(|chosen| *chosen != id);
+            } else {
+                sheet.chosen.push(id);
+            }
+        }
+        match choose_all {
+            Some(true) => sheet.chosen = targets,
+            Some(false) => sheet.chosen.clear(),
+            None => {}
+        }
+        // The sheet stays, with its text, when there was nothing to send —
+        // and the field keeps the keyboard, which the Enter took from it.
+        if send {
+            if self.send_broadcast(&sheet.text, &sheet.chosen) > 0 {
+                return;
+            }
+            sheet.focus = true;
         }
         self.broadcast_sheet = Some(sheet);
     }

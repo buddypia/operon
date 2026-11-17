@@ -295,11 +295,15 @@ picks a prompt's second option. Open the session instead when the question
 needs reading. A reply left half typed is dropped when the session stops
 waiting.
 
-To tell every idle agent of the current project the same thing, open the
-command palette (⌘K) and choose アイドル中のエージェントへ送信…. The sheet names
-the sessions it will reach — those whose terminal is running and whose agent
-has finished its turn or has not started yet — and one line, then Enter, is typed into each. Agents
-that are working or waiting on a prompt are left alone.
+To tell idle agents of the current project the same thing, open the command
+palette (⌘K) and choose アイドル中のエージェントへ送信…. The sheet lists the
+sessions that can be chosen — those whose terminal is running and whose agent
+has finished its turn or has not started yet — each with a checkbox, and none is ticked when it opens:
+an agent that has only just started also counts as idle, and a line meant for
+others would become its first instruction. Tick the ones to tell, or すべて選択
+for all of them; one line, then Enter, is typed into each ticked session. A
+session that becomes idle while the sheet is open appears unticked. Agents that
+are working or waiting on a prompt are left alone, even when ticked.
 
 A session whose agent is working says for how long once a minute has passed:
 実行中 · 12分 in the heading of its open pane and on its row in the per-project

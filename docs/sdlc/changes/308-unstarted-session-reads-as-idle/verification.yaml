@@ -1,7 +1,7 @@
 # The evidence for change 308. Format: docs/sdlc/templates/verification.yaml.
 # F1 is the empirical verifier's reproduction: a late Claude PostToolUse after
 # a /clear cleared 未開始 although apply_hook_reading turned the post away.
-digest: "737b71917c45abd9"
+digest: "2d458e0a4fff7fd6"
 
 obligations:
   - R1 empirical-test :: cargo test --locked unstarted_308_a_new_conversation_is_read_from_session_start
