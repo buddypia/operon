@@ -90957,3 +90957,14 @@ pub(crate) fn model_check_diff_307_layout_survives_saves_downgrades_and_relaunch
     );
     assert_eq!(coverage.states, 4, "{coverage:?}");
 }
+
+/// Change 307 (F1, found by empirical-verifier): a commit subject is the rest
+/// of the log line, so a unit separator inside it does not cut it short.
+#[test]
+pub(crate) fn diff_307_file_log_keeps_a_subject_holding_the_separator() {
+    let sha = "c".repeat(40);
+    let line = format!("{sha}\u{1f}ccccccc\u{1f}A\u{1f}2020-01-01 00:00\u{1f}fix a\u{1f}b\tc");
+    let revisions = parse_file_log(&line);
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(revisions[0].summary, "fix a\u{1f}b\tc");
+}

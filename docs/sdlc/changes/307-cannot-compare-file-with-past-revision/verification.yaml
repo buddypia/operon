@@ -1,6 +1,8 @@
 # Change 307: side-by-side diff, compare a file with a past revision, and the
-# 注釈 (annotate) view.
-digest: "a0c6bfb48e49485b"
+# 注釈 (annotate) view. F1 came from empirical-verifier. Its CRLF finding was
+# not taken: blame text is drawn, and the diff parser drops a trailing CR the
+# same way, so a drawn line never carries one.
+digest: "3b11ab71d0534604"
 
 obligations:
   - R1 empirical-test :: cargo test --locked diff_307_blame_porcelain_parses_runs_and_uncommitted
@@ -13,6 +15,7 @@ obligations:
   - R8 empirical-test :: cargo test --locked diff_307_side_by_side_falls_back_below_min_width
   - R9 empirical-test :: cargo test --locked diff_307_side_by_side_pane_draws_both_columns
   - R10 empirical-test :: cargo test --locked diff_307_blame_reports_untracked_and_too_large
+  - F1 empirical-test :: cargo test --locked diff_307_file_log_keeps_a_subject_holding_the_separator
   - I1 formal-model :: cargo test --locked model_check_diff_307_layout_survives_saves_downgrades_and_relaunches
   - I2 empirical-mutation :: python3 docs/sdlc/changes/307-cannot-compare-file-with-past-revision/mutations.py
   - I3 empirical-test :: cargo test --locked ide_261_diff_pane_hunk_buttons_emit_stage_and_discard

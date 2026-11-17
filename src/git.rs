@@ -2688,7 +2688,9 @@ pub(crate) fn parse_file_log(output: &str) -> Vec<FileRevision> {
     output
         .lines()
         .filter_map(|line| {
-            let mut fields = line.split('\u{1f}');
+            // Five fields at most: a subject is the rest of the line, unit
+            // separators and all.
+            let mut fields = line.splitn(5, '\u{1f}');
             let commit = fields.next()?;
             let short = fields.next()?;
             let author = fields.next()?;
