@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 RUN_SECONDS = 1800
-TESTS = ["diff_307_", "model_check_diff_307_"]
+TESTS = ["diff_307_"]
 CHECKS = [
     ["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]
 ]
@@ -20,8 +20,14 @@ MUTATIONS = {
     # An old store no longer loads once the field is required.
     "layout-field-not-defaulted": (
         STORE,
-        "    #[serde(default)]\n    pub(crate) diff_layout: DiffLayout,\n",
-        "    pub(crate) diff_layout: DiffLayout,\n",
+        "    #[serde(default, deserialize_with = \"lenient_diff_layout\")]\n",
+        "    #[serde(deserialize_with = \"lenient_diff_layout\")]\n",
+    ),
+    # A newer build's layout value sets the whole store aside (formal-verifier).
+    "unknown-layout-rejects-store": (
+        STORE,
+        "    #[serde(default, deserialize_with = \"lenient_diff_layout\")]\n",
+        "    #[serde(default)]\n",
     ),
     # Anything, an option included, reaches git as a revision.
     "revision-not-checked": (

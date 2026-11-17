@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-17 (evaluator)
-- **Status**: in progress
+- **Status**: departed from (see below)
 
 ## Files that change
 
@@ -53,3 +53,19 @@
 
 ## Departures from the plan
 
+- `src/app/compare.rs` is new: the 差分 and 注釈 views moved out of
+  `src/app/screens.rs` rather than growing it (module line in `CLAUDE.md`,
+  paid for by trimming three other lines under the always-loaded band).
+- The side-by-side columns scroll sideways together by one shared offset, not
+  by the pane's horizontal scroll bar: one bar over two columns carried the
+  right column out of sight.
+- Dates come from git (`%ad`) and from blame's `author-tz` through
+  `civil_date_time`; the crate has no date library.
+- F1 (empirical-verifier): a commit subject holding a unit separator was cut;
+  `parse_file_log` now splits into at most five fields.
+- F2 (formal-verifier): an unknown `diff_layout` value rejected the whole
+  store; `lenient_diff_layout` reads it as the default. Lesson 117.
+- Not done: the running app was not driven on screen — the debug build's
+  accessibility tree could not be read and physical input was not permitted;
+  layout is pinned by `diff_307_side_by_side_pane_draws_both_columns` and the
+  person is asked to look after packaging.

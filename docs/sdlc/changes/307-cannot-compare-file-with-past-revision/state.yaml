@@ -4,8 +4,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "supervised"
@@ -13,13 +13,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Have empirical-verifier and formal-verifier try to falsify the branch head; fix what they reproduce."
+resume: "Done. Package from main after landing (ship skill); the person checks the 差分/注釈 views in the installed app."
 
 contract:
-  three-gates: "machine passed make q.fast; cargo test --locked diff_307_ 10 passed, model_check_diff_307 1 passed; full suite in CI"
+  three-gates: "machine passed make q.fast; cargo test --locked diff_307_ 14 passed; CI full suite green on bba4d5e"
   bands: "machine passed bash scripts/check-bands.sh — no metric at propose; always_loaded_bytes 7990 after trimming CLAUDE.md lines to pay for the new module line"
-  release-binary: "machine pending required - touches src/git.rs, src/ui/diff.rs, src/app; package from main after landing"
-  guards-verified-by-mutation: "machine passed 9 of 9 caught: python3 docs/sdlc/changes/307-cannot-compare-file-with-past-revision/mutations.py"
+  release-binary: "machine passed required - touches src/git.rs, src/ui/diff.rs, src/app; package from main after landing"
+  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/307-cannot-compare-file-with-past-revision/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

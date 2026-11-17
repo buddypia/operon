@@ -90968,3 +90968,212 @@ pub(crate) fn diff_307_file_log_keeps_a_subject_holding_the_separator() {
     assert_eq!(revisions.len(), 1);
     assert_eq!(revisions[0].summary, "fix a\u{1f}b\tc");
 }
+
+// ── change 307: formal models ───────────────────────────────────────────────
+
+/// What the store file holds on disk in the 307 layout model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Diff307Disk {
+    Absent,
+    /// Written before 307: no `diff_layout` key.
+    Legacy,
+    /// Written by this build through `save_store`.
+    Saved(DiffLayout),
+    /// Same schema, written by a newer build that added a layout value.
+    NewerVariant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Diff307Event {
+    Seed(Diff307Disk),
+    Relaunch,
+    Choose(DiffLayout),
+    Save,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct Diff307Model {
+    disk: Diff307Disk,
+    /// The running app's layout and whether it holds the project.
+    mem: Option<(DiffLayout, bool)>,
+    /// A relaunch lost the project or the layout the file held.
+    lost: bool,
+}
+
+#[test]
+/// Change 307. Bound: one store file, every sequence over {seed one of five
+/// file contents, relaunch through `load_store_safely`, choose a layout, save
+/// through `save_store`}. Invariants: a relaunch reads back the layout the
+/// last save wrote; a store from before 307 reads as side by side; a store
+/// holding a layout value this build does not know keeps its projects.
+pub(crate) fn model_check_diff_307_store_files_keep_layout_and_projects_through_load_store_safely()
+{
+    let dir = temporary_directory("diff-307-layout");
+    let path = dir.join("store.json");
+    let project_store = |layout: DiffLayout| {
+        let mut store = Store::default();
+        store.projects.push(Project {
+            id: Uuid::new_v4(),
+            path: PathBuf::from("/tmp/project"),
+            name: "project".into(),
+            added_at: now(),
+        });
+        store.diff_layout = layout;
+        store
+    };
+    let materialise = |disk: Diff307Disk| {
+        let _ = fs::remove_file(&path);
+        match disk {
+            Diff307Disk::Absent => {}
+            Diff307Disk::Legacy => {
+                let mut value = serde_json::to_value(project_store(DiffLayout::Unified)).unwrap();
+                value.as_object_mut().unwrap().remove("diff_layout");
+                fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+            Diff307Disk::Saved(layout) => {
+                save_store(&path, &project_store(layout)).unwrap();
+            }
+            Diff307Disk::NewerVariant => {
+                let mut value = serde_json::to_value(project_store(DiffLayout::Unified)).unwrap();
+                value["diff_layout"] = serde_json::json!("three_pane");
+                fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+            }
+        }
+    };
+    let mut events = vec![Diff307Event::Relaunch, Diff307Event::Save];
+    for disk in [
+        Diff307Disk::Absent,
+        Diff307Disk::Legacy,
+        Diff307Disk::Saved(DiffLayout::SideBySide),
+        Diff307Disk::Saved(DiffLayout::Unified),
+        Diff307Disk::NewerVariant,
+    ] {
+        events.push(Diff307Event::Seed(disk));
+    }
+    for layout in [DiffLayout::SideBySide, DiffLayout::Unified] {
+        events.push(Diff307Event::Choose(layout));
+    }
+    let initial = Diff307Model {
+        disk: Diff307Disk::Absent,
+        mem: None,
+        lost: false,
+    };
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| {
+            let mut next = state.clone();
+            match *event {
+                Diff307Event::Seed(disk) => {
+                    materialise(disk);
+                    next = Diff307Model {
+                        disk,
+                        mem: None,
+                        lost: false,
+                    };
+                }
+                Diff307Event::Relaunch => {
+                    materialise(state.disk);
+                    let loaded = load_store_safely(&path);
+                    let has_project = !loaded.store.projects.is_empty();
+                    next.mem = Some((loaded.store.diff_layout, has_project));
+                    let expected = match state.disk {
+                        Diff307Disk::Saved(layout) => Some(layout),
+                        Diff307Disk::Legacy => Some(DiffLayout::SideBySide),
+                        _ => None,
+                    };
+                    next.lost = (state.disk != Diff307Disk::Absent && !has_project)
+                        || expected.is_some_and(|layout| loaded.store.diff_layout != layout);
+                }
+                Diff307Event::Choose(layout) => {
+                    let (_, kept) = state.mem?;
+                    next.mem = Some((layout, kept));
+                }
+                Diff307Event::Save => {
+                    let (layout, kept) = state.mem?;
+                    let mut store = if kept {
+                        project_store(layout)
+                    } else {
+                        Store::default()
+                    };
+                    store.diff_layout = layout;
+                    save_store(&path, &store).unwrap();
+                    next.disk = Diff307Disk::Saved(layout);
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            if state.lost {
+                Err("a relaunch lost the project or the layout the file held".to_owned())
+            } else {
+                Ok(())
+            }
+        },
+        10_000,
+    );
+    fs::remove_dir_all(&dir).unwrap();
+    assert!(coverage.states >= 10, "walk too small: {coverage:?}");
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Diff307Cursor {
+    Step(bool),
+    Recount(usize),
+    /// The end of `ui_editor_diff` (src/app/compare.rs), mirrored here: the
+    /// cursor is clamped to the new change count.
+    Clamp,
+    /// The bar's "land on the first change" branch, mirrored.
+    Land,
+}
+
+#[test]
+/// Change 307. Bound: change counts 0..=4, cursor None or 0..=4, every
+/// sequence of step, recount, clamp and land. Invariant: once the frame's clamp
+/// has run, the cursor is None or below the count; `step_change` alone never
+/// leaves a non-empty count and gives None for an empty one.
+pub(crate) fn model_check_diff_307_cursor_stays_inside_the_change_count() {
+    let mut events = vec![
+        Diff307Cursor::Step(true),
+        Diff307Cursor::Step(false),
+        Diff307Cursor::Clamp,
+        Diff307Cursor::Land,
+    ];
+    events.extend((0..=4).map(Diff307Cursor::Recount));
+    // (count, cursor, clamped since the cursor or count last moved)
+    let coverage = exhaustive_check(
+        (0usize, None::<usize>, true),
+        &events,
+        |&(count, cursor, clamped), event| {
+            Some(match *event {
+                Diff307Cursor::Step(forward) => (count, step_change(count, cursor, forward), true),
+                Diff307Cursor::Recount(n) => (n, cursor, false),
+                Diff307Cursor::Clamp => {
+                    let cursor = if cursor.is_some_and(|at| at >= count) {
+                        count.checked_sub(1)
+                    } else {
+                        cursor
+                    };
+                    (count, cursor, true)
+                }
+                Diff307Cursor::Land => (
+                    count,
+                    if cursor.is_none() && count > 0 {
+                        Some(0)
+                    } else {
+                        cursor
+                    },
+                    clamped,
+                ),
+            })
+        },
+        |&(count, cursor, clamped)| match cursor {
+            Some(at) if clamped && at >= count => Err(format!(
+                "cursor {at} outside {count} changes after the clamp"
+            )),
+            _ => Ok(()),
+        },
+        1_000,
+    );
+    assert!(coverage.states > 20, "{coverage:?}");
+}

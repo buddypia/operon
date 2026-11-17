@@ -28,8 +28,9 @@ pub(crate) struct Store {
     #[serde(default)]
     pub(crate) search_engine_mode: SearchEngineMode,
     /// Change 307: side by side or interleaved; a store from before it reads
-    /// as side by side.
-    #[serde(default)]
+    /// as side by side, and so does a layout a newer build added — one
+    /// unknown preference must not reject the whole store.
+    #[serde(default, deserialize_with = "lenient_diff_layout")]
     pub(crate) diff_layout: DiffLayout,
 }
 
@@ -52,6 +53,17 @@ impl Default for Store {
             diff_layout: DiffLayout::default(),
         }
     }
+}
+
+/// Read `diff_layout`, taking a value this build does not know as the
+/// default (change 307, found by formal-verifier): a strict enum would make
+/// a downgrade set every project aside as a corrupt store.
+fn lenient_diff_layout<'de, D>(deserializer: D) -> std::result::Result<DiffLayout, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
 }
 
 pub(crate) fn store_schema_version() -> u32 {
