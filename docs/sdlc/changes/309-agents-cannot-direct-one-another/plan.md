@@ -97,6 +97,10 @@ what the plan had not:
    (every state has a word), `agents_309_send_types_only_into_an_idle_agent_of_the_same_project`
    (not-started taken, every busy state refused); mutations `not-started-refused`,
    `not-started-published-as-idle`.
+7. **The sweep outgrew one obligation.** CI gives each obligation 900 s, and
+   37 mutations in one file ran past it. They are split by what they break —
+   the send (`mutations.py`), the rest of the command (`mutations-cli.py`), the
+   snapshot and its wiring (`mutations-snapshot.py`) — each its own obligation.
 
 Left as they are, and why:
 

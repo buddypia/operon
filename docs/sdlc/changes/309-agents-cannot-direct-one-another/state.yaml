@@ -22,10 +22,10 @@ state:
 resume: "Push the branch, let CI run the verification, then land and package."
 
 contract:
-  three-gates: "machine passed make q.fast; cargo test --locked agents_309_: 17 passed"
+  three-gates: "machine passed make q.fast; cargo test --locked agents_309_: 17 passed; full suite passed locally except two tmux tests that pass alone (shared tmux server under load)"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7989 after trimming CLAUDE.md for the two map lines"
   release-binary: "machine pending yes: src/main.rs, src/app.rs, src/tmux/control.rs change; package and ship from main after landing"
-  guards-verified-by-mutation: "machine passed 33 of 34 in the sweep, the 34th (unchanged-rewritten-every-check) caught by hand after its test was added:  python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations.py"
+  guards-verified-by-mutation: "machine passed 37 of 37 caught across mutations.py (13), mutations-cli.py (13), mutations-snapshot.py (11), split so each fits the 900 s obligation ceiling"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
