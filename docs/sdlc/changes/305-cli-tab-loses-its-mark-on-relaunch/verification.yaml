@@ -1,0 +1,9 @@
+# Change 305: an unresumable CLI tab keeps its kind and conversation; only a
+# tab with no CLI falls back to a plain shell.
+digest: "2763a2e790b10cc6"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation
+  - I1 empirical-test :: cargo test --locked pane_303_
+  - I2 formal-model :: cargo test --locked model_check_pane_303_missing_pane_recovery_and_output_guard
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/305-cli-tab-loses-its-mark-on-relaunch/mutations.py

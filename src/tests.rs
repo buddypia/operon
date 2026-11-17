@@ -88632,12 +88632,21 @@ pub(crate) fn pane_303_unresumable_open_tab_falls_back_to_plain_terminal_with_co
     app.workspace.open(WorkspaceTab::Session(open_two_id));
     app.workspace.open(WorkspaceTab::Session(dep_parent_id));
 
-    // 1. Single open unresumable `Failed` tab falls back to `"terminal"`, keeps
-    //    failure notification, stamps cooldown, and shows singular toast.
+    // 1. An open unresumable `Failed` CLI tab stays a `Failed` CLI tab with its
+    //    failure notification (change 305); a single open unresumable custom
+    //    tab falls back to `"terminal"`, stamps cooldown, and shows the
+    //    singular toast.
     app.apply_session_poll(
         vec![
             (
                 open_one_id,
+                TmuxObservation {
+                    state: TmuxState::Dead,
+                    exit_status: Some(1),
+                },
+            ),
+            (
+                open_two_id,
                 TmuxObservation {
                     state: TmuxState::Dead,
                     exit_status: Some(1),
@@ -88663,20 +88672,27 @@ pub(crate) fn pane_303_unresumable_open_tab_falls_back_to_plain_terminal_with_co
         Vec::new(),
     );
     let one_after = relaunch_270_find(&app, open_one_id);
-    assert_eq!(one_after.agent, "terminal");
-    assert_eq!(one_after.status, SessionStatus::Starting);
-    assert!(app
+    assert_eq!(one_after.agent, "claude");
+    assert_eq!(one_after.status, SessionStatus::Failed);
+    assert!(one_after.native_session_id.is_some());
+    assert!(!app
         .background_tasks
         .contains(&BackgroundKey::SessionStart(open_one_id)));
+    let two_after = relaunch_270_find(&app, open_two_id);
+    assert_eq!(two_after.agent, "terminal");
+    assert_eq!(two_after.status, SessionStatus::Starting);
+    assert!(app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(open_two_id)));
     assert_eq!(
         app.notice.as_deref(),
-        Some("会話を復元できなかったため、ターミナルとして開き直しました: alpha-tab")
+        Some("会話を復元できなかったため、ターミナルとして開き直しました: beta-custom")
     );
     assert!(
         app.background_tasks
             .iter()
             .any(|k| matches!(k, BackgroundKey::Notification(_))),
-        "fallback shell recovery must still emit macOS failure notification for a Failed CLI"
+        "a Failed CLI tab must still emit its macOS failure notification"
     );
     assert_eq!(relaunch_270_find(&app, closed_id).agent, "claude");
     assert_eq!(
@@ -88707,10 +88723,10 @@ pub(crate) fn pane_303_unresumable_open_tab_falls_back_to_plain_terminal_with_co
     // 2. Immediate repeat disappearance within 15s cooldown settles in `Lost`
     //    without falling back a second time.
     app.notice = None;
-    relaunch_270_find_mut(&mut app, open_one_id).status = SessionStatus::Active;
+    relaunch_270_find_mut(&mut app, open_two_id).status = SessionStatus::Active;
     app.apply_session_poll(
         vec![(
-            open_one_id,
+            open_two_id,
             TmuxObservation {
                 state: TmuxState::Gone,
                 exit_status: None,
@@ -88721,17 +88737,20 @@ pub(crate) fn pane_303_unresumable_open_tab_falls_back_to_plain_terminal_with_co
         Vec::new(),
     );
     assert_eq!(
-        relaunch_270_find(&app, open_one_id).status,
+        relaunch_270_find(&app, open_two_id).status,
         SessionStatus::Lost
     );
     assert!(!app
         .background_tasks
-        .contains(&BackgroundKey::SessionStart(open_one_id)));
+        .contains(&BackgroundKey::SessionStart(open_two_id)));
 
-    // 3. Two open unresumable tabs in the same poll emit the plural toast.
-    app.clear_auto_restore_cooldown(open_one_id);
-    relaunch_270_find_mut(&mut app, open_one_id).agent = "claude".into();
-    relaunch_270_find_mut(&mut app, open_one_id).status = SessionStatus::Active;
+    // 3. Two open unresumable tabs with no CLI in the same poll emit the
+    //    plural toast.
+    for (id, agent) in [(open_one_id, "existing terminal"), (open_two_id, "custom")] {
+        app.clear_auto_restore_cooldown(id);
+        relaunch_270_find_mut(&mut app, id).agent = agent.into();
+        relaunch_270_find_mut(&mut app, id).status = SessionStatus::Active;
+    }
     app.apply_session_poll(
         vec![
             (
@@ -88880,11 +88899,15 @@ pub(crate) fn pane_303_lost_or_failed_open_tab_from_previous_run_recovers_on_loa
         relaunch_270_find(&app, resumable_id).status,
         SessionStatus::Starting
     );
-    assert_eq!(relaunch_270_find(&app, fallback_id).agent, "terminal");
+    // Change 305: an unresumable CLI tab stays a stopped CLI tab.
+    assert_eq!(relaunch_270_find(&app, fallback_id).agent, "claude");
     assert_eq!(
         relaunch_270_find(&app, fallback_id).status,
-        SessionStatus::Starting
+        SessionStatus::Failed
     );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(fallback_id)));
     assert_eq!(relaunch_270_find(&app, stale_id).agent, "claude");
     assert_eq!(
         relaunch_270_find(&app, stale_id).status,
@@ -88896,13 +88919,11 @@ pub(crate) fn pane_303_lost_or_failed_open_tab_from_previous_run_recovers_on_loa
     );
     assert!(app.lost_tabs_on_load.is_empty());
 
-    for id in [resumable_id, fallback_id] {
-        wait_for_background_task(
-            &mut app,
-            &BackgroundKey::SessionStart(id),
-            Duration::from_secs(15),
-        );
-    }
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(resumable_id),
+        Duration::from_secs(15),
+    );
 
     fs::remove_dir_all(&root).ok();
 }
@@ -89179,7 +89200,8 @@ pub(crate) fn pane_303_f2_refused_relaunch_preserves_resumable_cli_metadata_inst
         .as_deref()
         .is_some_and(|msg| msg.contains("PATH")));
 
-    // Ambiguous un-ID'd Claude tab falls back to shell while preserving persistent ambiguity notice.
+    // Ambiguous un-ID'd Claude tab stays a stopped Claude tab (change 305)
+    // with the persistent ambiguity notice.
     app.notice = None;
     app.brief_notice = None;
     app.apply_session_poll(
@@ -89194,22 +89216,20 @@ pub(crate) fn pane_303_f2_refused_relaunch_preserves_resumable_cli_metadata_inst
         Vec::new(),
         Vec::new(),
     );
-    assert_eq!(relaunch_270_find(&app, claude_id).agent, "terminal");
+    assert_eq!(relaunch_270_find(&app, claude_id).agent, "claude");
     assert_eq!(
         relaunch_270_find(&app, claude_id).status,
-        SessionStatus::Starting
+        SessionStatus::Lost
     );
+    assert!(!app
+        .background_tasks
+        .contains(&BackgroundKey::SessionStart(claude_id)));
     assert!(app
         .notice
         .as_deref()
         .is_some_and(|msg| msg.contains("同時に開始された Claude ターミナル")));
     assert!(app.brief_notice.is_none());
 
-    wait_for_background_task(
-        &mut app,
-        &BackgroundKey::SessionStart(claude_id),
-        Duration::from_secs(15),
-    );
     fs::remove_dir_all(&root).ok();
 }
 
@@ -89656,6 +89676,10 @@ pub(crate) fn model_check_pane_303_missing_pane_recovery_and_output_guard() {
                             || (cfg.kind == Pane303CaseKind::ResumableMissingAcct
                                 && !state.agent_is_terminal)
                             || (cfg.kind == Pane303CaseKind::HasDep && !state.agent_is_terminal)
+                            // Change 305: an unresumable CLI settles where it
+                            // is, with nothing to persist.
+                            || (cfg.kind == Pane303CaseKind::Unresumable
+                                && !state.agent_is_terminal)
                             || cfg.kind == Pane303CaseKind::SetupSession
                     } else {
                         true
@@ -89719,6 +89743,10 @@ pub(crate) fn model_check_pane_303_missing_pane_recovery_and_output_guard() {
                     "missing-account resumable CLI wiped into terminal or launched".into()
                 });
             }
+            // Change 305: a CLI tab is never turned into a plain terminal.
+            if !state.agent_is_terminal && after.agent == "terminal" {
+                violation.get_or_insert_with(|| "CLI session converted to terminal".into());
+            }
 
             let after_launched = app
                 .background_tasks
@@ -89758,7 +89786,9 @@ pub(crate) fn model_check_pane_303_missing_pane_recovery_and_output_guard() {
         100_000,
     );
     fs::remove_dir_all(&root).ok();
-    assert_eq!(coverage.states, 305, "unexpected state space: {coverage:?}");
+    // 305 before change 305: the five states of an unresumable CLI turned
+    // into a terminal are no longer reachable.
+    assert_eq!(coverage.states, 300, "unexpected state space: {coverage:?}");
 }
 
 fn project_id_of(store: &Store) -> Uuid {
@@ -90334,4 +90364,119 @@ fn sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap() {
         top_selected_rect.bottom()
     );
     fs::remove_dir_all(root).ok();
+}
+
+#[test]
+/// Change 305: an open CLI tab whose conversation cannot be resumed keeps its
+/// CLI — kind, saved conversation, mark and state dot — and stays stopped with
+/// 「再試行」 instead of being reopened as a plain shell. Only a tab with no
+/// CLI behind it falls back to a shell. 303 turned every such Claude tab into
+/// a terminal at a relaunch, for good.
+pub(crate) fn cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation() {
+    let root = temporary_directory("cli-305-keeps-kind");
+    let data_file = root.join("store.json");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let project = relaunch_270_project(&workspace);
+
+    // `claude` typed into a terminal: no saved ID, nothing left to recover it.
+    let mut typed = relaunch_270_session(
+        project.id,
+        "claude",
+        SessionStatus::Lost,
+        Some(SessionOrigin::PlainTerminal),
+    );
+    typed.agent_command.clear();
+    typed.worktree_path = Some(workspace.clone());
+    let typed_id = typed.id;
+
+    // A launched CLI whose saved conversation never reached its transcript.
+    let saved_id = Uuid::new_v4().to_string();
+    let mut unwritten = relaunch_270_session(project.id, "codex", SessionStatus::Failed, None);
+    unwritten.worktree_path = Some(workspace.clone());
+    unwritten.native_session_id = Some(saved_id.clone());
+    unwritten.native_session_path = Some(root.join("never-written.jsonl"));
+    let unwritten_id = unwritten.id;
+
+    let mut custom = relaunch_270_session(project.id, "custom", SessionStatus::Lost, None);
+    custom.name = "custom-tab".into();
+    custom.worktree_path = Some(workspace.clone());
+    let custom_id = custom.id;
+
+    let mut tabs = WorkspaceTabs::default();
+    for id in [typed_id, unwritten_id, custom_id] {
+        tabs.open(WorkspaceTab::Session(id));
+    }
+    save_workspace_layout(
+        &data_file,
+        &WorkspaceLayout {
+            project: Some(project.id),
+            workspaces: vec![tabs.to_saved(project.id, Some(typed_id))],
+            placed: vec![typed_id, unwritten_id, custom_id],
+        },
+    )
+    .unwrap();
+
+    let mut store = Store::default();
+    store.projects.push(project);
+    store.sessions.extend([typed, unwritten, custom]);
+    let tools = ToolStatus {
+        tmux: true,
+        claude: true,
+        codex: true,
+        ..ToolStatus::default()
+    };
+    let mut app = OperonApp::from_state(data_file, store, tools, None);
+    app.cli_recovery_roots = Some(CliRecoveryRoots::default());
+    app.apply_session_poll(
+        [typed_id, unwritten_id, custom_id]
+            .into_iter()
+            .map(|id| {
+                (
+                    id,
+                    TmuxObservation {
+                        state: TmuxState::Gone,
+                        exit_status: None,
+                    },
+                )
+            })
+            .collect(),
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+    );
+
+    let typed = relaunch_270_find(&app, typed_id);
+    assert_eq!(typed.agent, "claude");
+    assert_eq!(typed.status, SessionStatus::Lost);
+    let unwritten = relaunch_270_find(&app, unwritten_id);
+    assert_eq!(unwritten.agent, "codex");
+    assert_eq!(unwritten.status, SessionStatus::Failed);
+    assert_eq!(
+        unwritten.native_session_id.as_deref(),
+        Some(saved_id.as_str())
+    );
+    assert!(unwritten.native_session_path.is_some());
+    for id in [typed_id, unwritten_id] {
+        assert!(!app
+            .background_tasks
+            .contains(&BackgroundKey::SessionStart(id)));
+    }
+    // The column and the tab draw the CLI's mark, with the state on it.
+    assert!(session_mark_speaks(
+        &typed.agent,
+        SessionStatusKind::Stopped
+    ));
+
+    assert_eq!(relaunch_270_find(&app, custom_id).agent, "terminal");
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("会話を復元できなかったため、ターミナルとして開き直しました: custom-tab")
+    );
+    wait_for_background_task(
+        &mut app,
+        &BackgroundKey::SessionStart(custom_id),
+        Duration::from_secs(15),
+    );
+    fs::remove_dir_all(&root).ok();
 }

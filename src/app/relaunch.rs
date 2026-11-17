@@ -425,9 +425,14 @@ impl OperonApp {
                 && self.session_workspace_path(session).is_dir())
     }
 
+    /// Whether an open tab that could not be restored may be reopened as a
+    /// plain shell. A CLI tab may not (change 305): the shell would take its
+    /// kind, its saved conversation, and its mark for good, so it stays
+    /// stopped with 「再試行」 instead.
     pub(crate) fn can_fallback_open_tab_to_shell(&self, session: &Session) -> bool {
         self.session_has_a_tab(session.id)
             && is_interactive_terminal_session(session)
+            && cli_provider_for_agent(&session.agent).is_none()
             && queued_dependency_count(&self.store.sessions, session.id) == 0
     }
 

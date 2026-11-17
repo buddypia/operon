@@ -2,7 +2,7 @@
 
 - **Spec**: n/a (`bugfix` route — the bug report is in `./state.yaml`)
 - **Approved**: 2026-11-17
-- **Status**: in-progress
+- **Status**: done
 
 ## Root cause
 
@@ -52,3 +52,11 @@ the shell fallback and its toast.
 
 The named tests pass, `mutations.py` catches every mutation, CI green on the
 branch head, `/Applications/Operon.app` replaced after landing.
+
+## Departures from the plan
+
+- `model_check_pane_303_missing_pane_recovery_and_output_guard` gained the
+  invariant that a CLI session never becomes a terminal, admits an unresumable
+  CLI leaving `lost_tabs_on_load` with nothing to persist, and covers 300
+  states instead of 305: the five of a CLI turned into a terminal are gone.
+  The F2 test now expects an ambiguous Claude tab to stay a stopped Claude tab.

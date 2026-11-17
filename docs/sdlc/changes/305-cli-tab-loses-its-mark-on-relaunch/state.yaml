@@ -33,22 +33,22 @@
 
 state:
   route: "bugfix"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "medium"
-  readiness: "pending"
+  readiness: "conditional"
   screen: "n/a"
 
-resume: "Write the failing test, then narrow can_fallback_open_tab_to_shell to tabs with no CLI."
+resume: "Done. A CLI tab whose conversation cannot be resumed stays a stopped CLI tab; package from main after landing."
 
 contract:
-  three-gates: "machine pending make q.fast and the named tests"
-  failing-test-first: "machine pending the new test fails on main's code"
-  release-binary: "machine pending required - src/app/relaunch.rs changes; package from main after landing with the ship skill"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/305-cli-tab-loses-its-mark-on-relaunch/mutations.py"
+  three-gates: "machine passed make q.fast (fmt, clippy -D warnings); cargo test --locked cli_305_ pane_303_ model_check_pane_303 relaunch_270 pane_288_ status_291_ terminal_276_ i18n 36 passed; full suite in CI"
+  failing-test-first: "machine passed cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation failed on main's code (agent terminal, expected claude)"
+  release-binary: "machine passed required - src/app/relaunch.rs changes; package from main after landing with the ship skill"
+  guards-verified-by-mutation: "machine passed 2 of 2 caught: python3 docs/sdlc/changes/305-cli-tab-loses-its-mark-on-relaunch/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
