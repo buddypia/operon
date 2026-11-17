@@ -1,0 +1,22 @@
+# Review record for change 306. Format: docs/sdlc/templates/review.yaml.
+#
+# rust-reviewer, round 1 (digest 7790b08b80c9b7ed): approve-with-nits 0 3.
+# Its first point — the draw path walked the sessions twice a frame — was taken
+# together with the fix for F1, which empirical-verifier reproduced (an Enter
+# that sent nothing left the field without the keyboard). Round 2 re-read the
+# landing diff and found the fix sound; the other two points are carried.
+# empirical-verifier also tried a ticked session that only works now, and
+# すべて選択 with a stale id ticked; both held.
+
+digest: "e2ae795b3124de7a"
+
+rounds: 2
+
+carried:
+  - rust-reviewer/2 · the ScrollArea loop builds session_list_title and does a linear session lookup for every target row each frame, uncapped; ScrollArea::show_rows would limit it to the visible rows
+    person: "送信シートを開いている間、アイドル中のセッションが何十件もあると描画が少し重くなります。普段の件数では体感できず、対応は不要です。"
+  - rust-reviewer/3 · ui.checkbox(&mut ticked, "") has no accessible name; the row title sits outside the widget
+    person: "VoiceOver などの読み上げでは、送信先のチェックボックスが名前なしで読まれます。マウスとキーボードでの操作には影響せず、今は対応不要です。"
+
+verdicts:
+  rust-reviewer: "approve-with-nits 0 2"
