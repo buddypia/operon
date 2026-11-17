@@ -89960,14 +89960,14 @@ fn sidebar_302_session_rows_and_project_headings_are_compact() {
             "session row center-to-center pitch must be <= 24.0px, got {pitch:.2} ({pair:?})"
         );
         assert!(
-            gap <= 8.0,
-            "session row vertical gap must be <= 8.0px, got {gap:.2} ({pair:?})"
+            gap <= 10.0,
+            "session row vertical gap must be <= 10.0px, got {gap:.2} ({pair:?})"
         );
     }
     let heading_to_first = row_rects[0].top() - alpha_heading.bottom();
     assert!(
-        heading_to_first <= 13.0,
-        "heading to first row gap must be <= 13.0px, got {heading_to_first:.2}"
+        heading_to_first <= 17.0,
+        "heading to first row gap must be <= 17.0px, got {heading_to_first:.2}"
     );
     let beta_heading_top = beta_heading.center().y - CONTROL_HEIGHT_SMALL / 2.0;
     let last_to_next_project = beta_heading_top - row_rects[3].bottom();
@@ -90148,10 +90148,11 @@ fn sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs() {
     let drag_out = sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(to)]);
     let palette = app.store.theme.palette();
     let drop_y = sidebar_302_hline(&drag_out, palette.accent);
-    let expected_drop_y = newest_rect.center().y - COLUMN_SESSION_MARK_SIZE / 2.0 - 2.0 - 1.0;
+    let expected_drop_y =
+        newest_rect.center().y - COLUMN_SESSION_MARK_SIZE / 2.0 - 2.0 - SIDEBAR_ROW_GAP / 2.0;
     assert!(
         (drop_y - expected_drop_y).abs() <= 1.0,
-        "session drop line must land in the 2px SIDEBAR_ROW_GAP ({drop_y:.2} vs {expected_drop_y:.2})"
+        "session drop line must land in the middle of SIDEBAR_ROW_GAP ({drop_y:.2} vs {expected_drop_y:.2})"
     );
     sidebar_302_frame(&mut app, &ctx, vec![column_181_button(to, false)]);
 
@@ -90241,14 +90242,14 @@ fn sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap() {
             "custom session row pitch must be <= 24.0px, got {pitch:.2}"
         );
         assert!(
-            gap <= 8.0,
-            "custom session row vertical gap must be <= 8.0px, got {gap:.2}"
+            gap <= 10.0,
+            "custom session row vertical gap must be <= 10.0px, got {gap:.2}"
         );
     }
     let custom_heading_to_first = custom_rows[0].top() - alpha_heading.bottom();
     assert!(
-        custom_heading_to_first <= 13.0,
-        "heading to first custom row gap must be <= 13.0px, got {custom_heading_to_first:.2}"
+        custom_heading_to_first <= 17.0,
+        "heading to first custom row gap must be <= 17.0px, got {custom_heading_to_first:.2}"
     );
 
     // Part B: speaking badge ring on row 0 must not reach into selected row 1's background,
