@@ -1,6 +1,6 @@
 # Intent: a file cannot be compared with any past revision, nor read side by side
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-17
 
 ## Problem

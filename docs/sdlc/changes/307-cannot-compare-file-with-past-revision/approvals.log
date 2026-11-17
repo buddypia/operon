@@ -1,0 +1,5 @@
+2026-11-17T10:24:33Z person screen screen.md 2cf1008e3dcb9b28 approve person answered 「この構成で進める (Recommended)」 to the layout question showing side-by-side diff, compare bar, revision picker and the 注釈 view with its gutter menu — exactly screen.md
+2026-11-17T10:33:36Z person store spec.md 7ace22c4ef4ac5e2 approve person answered 「追加して覚える (Recommended)」 to "差分の「左右／統合」の選択を再起動後も覚えるには、Operon の保存データ（store）に項目を1つ追加します…追加してよいですか？" — covers the additive diff_layout store field in spec.md
+2026-11-17T10:34:10Z auto intent intent.md 2db1e6da349f491d approve evaluator (fresh general-purpose subagent) 2026-11-17: intent judged against its referent after one revise round on schema version and store approval
+2026-11-17T10:34:10Z auto spec spec.md 7ace22c4ef4ac5e2 approve evaluator (fresh general-purpose subagent) 2026-11-17: spec judged against its referent after one revise round on schema version and store approval
+2026-11-17T10:34:10Z auto plan plan.md fd3b5a7fdae755e4 approve evaluator (fresh general-purpose subagent) 2026-11-17: plan judged against its referent after one revise round on schema version and store approval
