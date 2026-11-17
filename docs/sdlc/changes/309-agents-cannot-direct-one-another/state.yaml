@@ -1,0 +1,37 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: feature (a command agents run; new behaviour). Risk: medium —
+# risk.yaml `subprocess` (src/tmux.rs gains a module that runs tmux) and
+# `unsafe-and-path` for a one-line dispatch in src/main.rs, which
+# approval.md gives to the evaluator ("any other edit": no unsafe, no PATH).
+# Supervised. Nothing paints: src/app.rs gains one call in `logic` and no
+# drawing, so screen is n/a.
+
+state:
+  route: "feature"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Write spec.md and plan.md, get them approved, then build."
+
+contract:
+  three-gates: "machine pending make q.fast and cargo test --locked agents_309_"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending yes: src/main.rs, src/app.rs, src/tmux/control.rs change; package and ship from main after landing"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
