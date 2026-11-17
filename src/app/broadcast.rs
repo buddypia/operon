@@ -34,8 +34,9 @@ impl OperonApp {
         self.store.projects.iter().find(|project| project.id == id)
     }
 
-    /// Who may be chosen: that project's sessions whose agent has finished
-    /// its turn, which only a running terminal's can have. An agent that
+    /// Who may be chosen: that project's sessions in アイドル — an agent that
+    /// has finished its turn or has not been asked anything yet (change 308) —
+    /// which only a running terminal's can be. An agent that
     /// works, waits on a prompt, or has ended is left alone.
     pub(crate) fn broadcast_targets(&self) -> Vec<Uuid> {
         let Some(project) = self.broadcast_project().map(|project| project.id) else {
@@ -46,7 +47,8 @@ impl OperonApp {
             .iter()
             .filter(|session| {
                 session.project_id == project
-                    && self.session_status_kind_for(session) == SessionStatusKind::Idle
+                    && self.session_status_kind_for(session).group()
+                        == Some(SessionStatusGroup::Free)
             })
             .map(|session| session.id)
             .collect()

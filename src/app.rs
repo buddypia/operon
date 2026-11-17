@@ -662,6 +662,11 @@ pub(crate) struct OperonApp {
     /// state nobody has confirmed since the restart is a state the screen is
     /// better placed to answer for.
     pub(crate) hook_status: HashMap<Uuid, HookStatus>,
+    /// Sessions whose CLI said its conversation is new and that have had no
+    /// turn since (change 308). Apart from `hook_status` because the stale
+    /// sweep drops that, and thirty quiet minutes do not start a conversation.
+    /// In memory only, as `hook_status` is.
+    pub(crate) awaiting_first_request: HashSet<Uuid>,
     /// When each session that needs a person started needing one. In memory
     /// only: after a restart every waiting session is timed from the launch.
     pub(crate) attention_since: HashMap<Uuid, Instant>,
@@ -1202,6 +1207,7 @@ impl OperonApp {
             hook_listener: None,
             hook_events: None,
             hook_status: HashMap::new(),
+            awaiting_first_request: HashSet::new(),
             attention_since: HashMap::new(),
             working_since: HashMap::new(),
             dock_badge_shown: 0,
@@ -3903,7 +3909,11 @@ impl OperonApp {
             }
             let notice = {
                 let tracker = self.session_activity.entry(id).or_default();
-                observe_agent_activity(tracker, activity)
+                let notice = observe_agent_activity(tracker, activity);
+                if tracker.settled == Some(AgentActivity::Working) {
+                    self.awaiting_first_request.remove(&id);
+                }
+                notice
             };
             let Some(notice) = notice else {
                 continue;
@@ -3991,6 +4001,9 @@ impl OperonApp {
     /// `None` while the mechanism is off, which is what stops the scripts from
     /// posting at all: they exit as soon as the session variable is missing.
     pub(crate) fn mint_hook_environment(&mut self, session_id: Uuid) -> Option<HookEnvironment> {
+        // Every launch passes here, hooks on or off: a new process starts no
+        // conversation until its CLI says so.
+        self.awaiting_first_request.remove(&session_id);
         if !self.hooks_enabled {
             return None;
         }
@@ -4081,6 +4094,14 @@ impl OperonApp {
         }
         let (status, notice) =
             apply_hook_reading(self.hook_status.get(&session_id), reading, Instant::now());
+        // Read off the state the reading left, not the reading: a late tool
+        // post from the turn before a `/clear` is turned away (change 301) and
+        // must not end the wait for a first request either.
+        if status.new_conversation {
+            self.awaiting_first_request.insert(session_id);
+        } else {
+            self.awaiting_first_request.remove(&session_id);
+        }
         self.hook_status.insert(session_id, status);
         let Some(notice) = notice else {
             return;
@@ -6131,6 +6152,7 @@ impl OperonApp {
             session,
             self.cancellation_pending(session.id),
             self.session_activity_for(session.id),
+            self.awaiting_first_request.contains(&session.id),
         )
     }
 
@@ -6422,6 +6444,7 @@ impl OperonApp {
             session,
             self.cancellation_pending(session.id),
             self.session_activity_for(session.id),
+            self.awaiting_first_request.contains(&session.id),
         );
         // The CLIs name the tool they are running, and "Bash を実行中" answers
         // the question a person actually has about a working session, which
@@ -6991,6 +7014,7 @@ impl OperonApp {
         self.remove_after_close.remove(&session_id);
         self.unread_sessions.remove(&session_id);
         self.hook_status.remove(&session_id);
+        self.awaiting_first_request.remove(&session_id);
         self.hook_launch_tokens.remove(&session_id);
         if self.unread_hold == Some(session_id) {
             self.unread_hold = None;

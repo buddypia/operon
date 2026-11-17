@@ -261,6 +261,12 @@ Live and actionable sessions carry one of three status groups, with a hover that
 | **Running** | Starting, working, stopping, or queued |
 | **Idle** | Finished its turn; ready for your next request |
 
+Among idle sessions, a Claude Code or Codex session that has started but not yet
+received its first request reads **Not started**, and its status mark shows a
+centred dot instead of the pause bars. Sending the first request ends it, and a
+`/clear` that starts a new conversation brings it back. A resumed conversation
+stays **Idle**.
+
 Completed or cancelled sessions show **Exited normally** or **Stopped** on their own records in **History** (or on a pinned/reopened tab). When an unpinned session exits cleanly or is stopped, its workspace tab closes automatically and the record remains in **History**; if a running session crashes or its terminal disappears unexpectedly, Operon restores it in the same tab from its saved conversation ID or shell (with a 15-second cooldown per session to stop immediate crash loops).
 
 The **Session** page lists each project's live sessions in the order you act on
@@ -292,7 +298,7 @@ waiting.
 To tell idle agents of the current project the same thing, open the command
 palette (⌘K) and choose アイドル中のエージェントへ送信…. The sheet lists the
 sessions that can be chosen — those whose terminal is running and whose agent
-has finished its turn — each with a checkbox, and none is ticked when it opens:
+has finished its turn or has not started yet — each with a checkbox, and none is ticked when it opens:
 an agent that has only just started also counts as idle, and a line meant for
 others would become its first instruction. Tick the ones to tell, or すべて選択
 for all of them; one line, then Enter, is typed into each ticked session. A

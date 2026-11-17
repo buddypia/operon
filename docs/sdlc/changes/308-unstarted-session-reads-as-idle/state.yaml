@@ -1,0 +1,29 @@
+# The state of change 308. Format: docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing, then check a Claude Code tab opened without a prompt shows the dot and hovers 未開始, and turns to アイドル after one request."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked unstarted_308_: 6 passed; f308_: 1 passed; status, hook, sidebar, waiting, pinned filters ok"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9907 at diagnose"
+  release-binary: "machine passed required - src/tmux/hooks.rs, src/app.rs, src/app/broadcast.rs, src/app/screens.rs, src/ui/widgets.rs, src/glyphs.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 18 of 18 caught: python3 docs/sdlc/changes/308-unstarted-session-reads-as-idle/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
