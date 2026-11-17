@@ -2508,3 +2508,294 @@ pub(crate) fn git_discard_hunk(
     }
     apply_git_hunk_patch(worktree, &patch, &["--reverse", "--cached"])
 }
+
+/// One line of a file as `git blame` attributes it (change 307).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BlameLine {
+    pub(crate) commit: String,
+    pub(crate) short: String,
+    pub(crate) author: String,
+    /// Author time, seconds since the epoch.
+    pub(crate) time: i64,
+    /// The author's wall clock at that time, `YYYY-MM-DD HH:MM`.
+    pub(crate) date: String,
+    pub(crate) summary: String,
+    pub(crate) text: String,
+    /// Not committed yet: git reports these against the all-zero commit.
+    pub(crate) uncommitted: bool,
+    /// The first line of a run of lines from one commit. Only that line shows
+    /// the gutter text, as an IDE's annotate does, so a run reads as one block.
+    pub(crate) starts_run: bool,
+}
+
+/// What reading a file's blame came to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BlameOutcome {
+    /// The lines, shared with the frame that draws them, and the widest one's
+    /// length in characters — measured here so the view does not walk every
+    /// line on every frame.
+    Lines {
+        lines: Arc<Vec<BlameLine>>,
+        widest: usize,
+    },
+    /// The repository has never committed this path.
+    Untracked,
+    /// The output passed `GIT_BLAME_MAX_BYTES`.
+    TooLarge,
+}
+
+/// One commit in a file's history, as the revision picker lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileRevision {
+    pub(crate) commit: String,
+    pub(crate) short: String,
+    pub(crate) author: String,
+    /// The author's wall clock, `YYYY-MM-DD HH:MM`, as git formats it.
+    pub(crate) date: String,
+    pub(crate) summary: String,
+}
+
+/// What a file's diff compares (change 307).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub(crate) enum DiffBase {
+    /// The last commit against the working copy: the diff the editor has
+    /// always shown, and the only one hunk actions and notes apply to.
+    #[default]
+    Head,
+    /// A past revision against the working copy.
+    Revision(String),
+    /// What one commit changed: its first parent against it.
+    Commit(String),
+}
+
+impl DiffBase {
+    pub(crate) fn is_head(&self) -> bool {
+        matches!(self, DiffBase::Head)
+    }
+}
+
+/// The seven-character form git shows for a commit.
+pub(crate) fn short_commit(commit: &str) -> &str {
+    commit.get(..7).unwrap_or(commit)
+}
+
+/// Parse `git blame --porcelain`. Each line opens with `<sha> <orig> <final>
+/// [<count>]`; the commit's metadata follows only the first time that commit
+/// appears, so it is remembered and carried to the commit's later lines. The
+/// line itself is the one starting with a tab.
+pub(crate) fn parse_blame_porcelain(output: &str) -> Vec<BlameLine> {
+    #[derive(Default, Clone)]
+    struct Meta {
+        author: String,
+        time: i64,
+        offset_minutes: i64,
+        summary: String,
+    }
+    let mut metas: HashMap<String, Meta> = HashMap::new();
+    let mut lines: Vec<BlameLine> = Vec::new();
+    let mut current: Option<String> = None;
+    for raw in output.lines() {
+        if let Some(text) = raw.strip_prefix('\t') {
+            let Some(commit) = current.take() else {
+                continue;
+            };
+            let meta = metas.get(&commit).cloned().unwrap_or_default();
+            let starts_run = lines.last().is_none_or(|last| last.commit != commit);
+            lines.push(BlameLine {
+                short: short_commit(&commit).to_string(),
+                uncommitted: commit.bytes().all(|byte| byte == b'0'),
+                commit,
+                author: meta.author,
+                time: meta.time,
+                date: civil_date_time(meta.time, meta.offset_minutes),
+                summary: meta.summary,
+                text: text.to_string(),
+                starts_run,
+            });
+            continue;
+        }
+        let mut words = raw.split(' ');
+        let first = words.next().unwrap_or_default();
+        if current.is_none() && is_commit_id(first) && words.next().is_some() {
+            metas.entry(first.to_string()).or_default();
+            current = Some(first.to_string());
+            continue;
+        }
+        let Some(commit) = current.as_ref() else {
+            continue;
+        };
+        let (key, value) = raw.split_once(' ').unwrap_or((raw, ""));
+        let meta = metas.entry(commit.clone()).or_default();
+        match key {
+            "author" => meta.author = value.to_string(),
+            "author-time" => meta.time = value.parse().unwrap_or(0),
+            "author-tz" => meta.offset_minutes = parse_utc_offset(value),
+            "summary" => meta.summary = value.to_string(),
+            _ => {}
+        }
+    }
+    lines
+}
+
+/// `+0900` / `-0530` as minutes east of UTC; anything else is UTC.
+fn parse_utc_offset(value: &str) -> i64 {
+    let (sign, digits) = match value.split_at_checked(1) {
+        Some(("+", digits)) => (1, digits),
+        Some(("-", digits)) => (-1, digits),
+        _ => return 0,
+    };
+    if digits.len() != 4 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return 0;
+    }
+    let hours: i64 = digits[..2].parse().unwrap_or(0);
+    let minutes: i64 = digits[2..].parse().unwrap_or(0);
+    sign * (hours * 60 + minutes)
+}
+
+/// `YYYY-MM-DD HH:MM` for a moment at a fixed offset. The crate has no date
+/// library (a dependency is a paused surface) and blame hands over the
+/// author's offset, so the civil date is computed here: Howard Hinnant's
+/// days-to-civil, exact for the proleptic Gregorian calendar.
+pub(crate) fn civil_date_time(epoch: i64, offset_minutes: i64) -> String {
+    let local = epoch + offset_minutes * 60;
+    let days = local.div_euclid(86_400);
+    let seconds = local.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
+        seconds / 3_600,
+        seconds % 3_600 / 60
+    )
+}
+
+/// Parse `git log --format=%H%x1f%h%x1f%an%x1f%ad%x1f%s`, keeping at most
+/// `FILE_HISTORY_MAX_ENTRIES`. A line without five fields — the cut-off last
+/// line of a truncated read among them — is dropped.
+pub(crate) fn parse_file_log(output: &str) -> Vec<FileRevision> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split('\u{1f}');
+            let commit = fields.next()?;
+            let short = fields.next()?;
+            let author = fields.next()?;
+            let date = fields.next()?;
+            let summary = fields.next()?;
+            is_commit_id(commit).then(|| FileRevision {
+                commit: commit.to_string(),
+                short: short.to_string(),
+                author: author.to_string(),
+                date: date.to_string(),
+                summary: summary.to_string(),
+            })
+        })
+        .take(FILE_HISTORY_MAX_ENTRIES)
+        .collect()
+}
+
+/// The git arguments of a comparison against a revision. HEAD ↔ local is not
+/// built here: it is `git_working_tree_diff`, which also covers untracked
+/// files. A revision must be a full commit id, so nothing a person or a parser
+/// handed over can reach git as an option.
+pub(crate) fn revision_diff_arguments(base: &DiffBase, file: &str) -> Result<Vec<String>> {
+    let (mut arguments, commit): (Vec<&str>, &str) = match base {
+        DiffBase::Head => anyhow::bail!("HEAD is the working-tree diff"),
+        DiffBase::Revision(commit) => (vec!["diff", "--no-ext-diff", "--unified=3"], commit),
+        DiffBase::Commit(commit) => (
+            vec![
+                "show",
+                "--no-ext-diff",
+                "--unified=3",
+                "--format=",
+                "--diff-merges=first-parent",
+            ],
+            commit,
+        ),
+    };
+    if !is_commit_id(commit) {
+        anyhow::bail!(tr("無効なコミット SHA です"));
+    }
+    arguments.extend([commit, "--", file]);
+    Ok(arguments.into_iter().map(str::to_string).collect())
+}
+
+/// The diff of one file against a revision, with today's truncation notice.
+pub(crate) fn git_revision_diff(path: &Path, file: &str, base: &DiffBase) -> Result<String> {
+    let arguments = revision_diff_arguments(base, file)?;
+    let arguments: Vec<&str> = arguments.iter().map(String::as_str).collect();
+    let (mut diff, truncated) =
+        git_output_allowing_limited(path, &arguments, &[], GIT_DIFF_MAX_BYTES)?;
+    if truncated {
+        diff.push_str(&tf!(
+            "\n\n… 差分を {p0} KiB で切り詰めました",
+            p0 = GIT_DIFF_MAX_BYTES / 1024
+        ));
+    }
+    Ok(diff)
+}
+
+/// The commits that touched a file, newest first, following renames.
+pub(crate) fn git_file_history(path: &Path, file: &str) -> Result<Vec<FileRevision>> {
+    let count = FILE_HISTORY_MAX_ENTRIES.to_string();
+    let (output, _truncated) = git_output_allowing_limited(
+        path,
+        &[
+            "log",
+            "--follow",
+            "--date=format:%Y-%m-%d %H:%M",
+            "--format=%H%x1f%h%x1f%an%x1f%ad%x1f%s",
+            "-n",
+            &count,
+            "--",
+            file,
+        ],
+        &[],
+        GIT_FILE_HISTORY_MAX_BYTES,
+    )?;
+    Ok(parse_file_log(&output))
+}
+
+/// Blame the working copy of a file.
+pub(crate) fn git_blame(path: &Path, file: &str) -> Result<BlameOutcome> {
+    git_blame_limited(path, file, GIT_BLAME_MAX_BYTES)
+}
+
+pub(crate) fn git_blame_limited(path: &Path, file: &str, max_bytes: usize) -> Result<BlameOutcome> {
+    match git_output_allowing_limited(path, &["blame", "--porcelain", "--", file], &[], max_bytes) {
+        Ok((_, true)) => Ok(BlameOutcome::TooLarge),
+        Ok((output, false)) => {
+            let lines = parse_blame_porcelain(&output);
+            let widest = lines
+                .iter()
+                .map(|line| line.text.chars().count())
+                .max()
+                .unwrap_or(0);
+            Ok(BlameOutcome::Lines {
+                lines: Arc::new(lines),
+                widest,
+            })
+        }
+        // git's own words, kept as emitted: a path HEAD does not have, or a
+        // repository with no commit at all.
+        Err(error)
+            if error.to_string().contains("no such path")
+                || error.to_string().contains("no such ref") =>
+        {
+            Ok(BlameOutcome::Untracked)
+        }
+        Err(error) => Err(error),
+    }
+}

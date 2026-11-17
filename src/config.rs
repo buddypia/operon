@@ -156,6 +156,18 @@ pub(crate) const DIRECTORY_ENTRY_BUFFER_LIMIT: usize = 10_000;
 pub(crate) const COMMAND_OUTPUT_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const COMMAND_ERROR_MAX_BYTES: usize = 256 * 1024;
 pub(crate) const GIT_DIFF_MAX_BYTES: usize = 180_000;
+/// How much `git blame --porcelain` output the 注釈 view reads (change 307).
+/// Porcelain repeats a header per line, so this is roughly a 40 000-line file.
+/// Past it the view says the file is too large rather than annotating part of
+/// it: a gutter that stops halfway reads as "the rest is uncommitted".
+pub(crate) const GIT_BLAME_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// How much of `git log --follow` the revision picker reads, and how many
+/// revisions it lists (change 307).
+pub(crate) const GIT_FILE_HISTORY_MAX_BYTES: usize = 64 * 1024;
+pub(crate) const FILE_HISTORY_MAX_ENTRIES: usize = 200;
+/// Below this width the side-by-side diff would give each column too little
+/// room to read code, and the pane draws the interleaved layout instead.
+pub(crate) const DIFF_SIDE_BY_SIDE_MIN_WIDTH: f32 = 560.0;
 /// How much of a file the editor opens. Past this it is shown read-only with a
 /// notice.
 ///

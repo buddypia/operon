@@ -174,6 +174,12 @@ Settings. The projects, sessions, and agent output in them are a demo.
   actually changed are marked inside the row, so a one-argument edit in an
   eighty-column line is found by looking rather than by reading. Untracked
   files, renames, and repositories without a first commit are included.
+- A file's diff in the editor reads side by side — the older text on the left,
+  the newer on the right — or interleaved, and the choice is remembered. F7 and
+  ⇧F7 step between changes. A picker compares the file with any revision in its
+  history, and the 注釈 (annotate) view shows each line's commit, author, and
+  date; from a line, open what that commit changed or compare it with the
+  working copy.
 - Create and select isolated Git worktrees for parallel sessions; remove only
   clean, inactive worktrees after an in-app confirmation. A new worktree starts
   from the project's mainline — what `origin/HEAD` names, else `origin/main`,
@@ -433,7 +439,9 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Scans are bounded and honest about it: the editor tree caps itself (and
   skips `.git`, `node_modules`, `target`, `.next`), files beyond 128 KiB open
   read-only up to 8 MiB, diff capture shares a fixed budget with explicit truncation
-  notices, transcript search caps candidates, bytes, and lines, and the handoff
+  notices, annotate reads at most 4 MiB of blame (past it the view says the
+  file is too large), the revision picker lists the newest 200 commits,
+  transcript search caps candidates, bytes, and lines, and the handoff
   archive sweep looks at 4,096 entries and 256 KiB of each manifest per pass. Use an
   external editor for a complete view of very large repositories.
 

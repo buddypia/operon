@@ -1,6 +1,8 @@
 use crate::*;
 
 pub(crate) mod broadcast;
+pub(crate) mod compare;
+pub(crate) use compare::*;
 pub(crate) mod dock_badge;
 mod keymap;
 pub(crate) mod knowledge;
@@ -59,6 +61,11 @@ pub(crate) enum BackgroundKey {
     GitChanges(Uuid),
     GitDiff(Uuid, Option<String>),
     GitHistory(Uuid),
+    /// Change 307: one file's blame, its history, and its comparison with a
+    /// past revision.
+    Blame(Uuid, String),
+    FileHistory(Uuid, String),
+    RevisionDiff(Uuid, String, DiffBase),
     Worktrees(Uuid),
     PullRequests(Uuid),
     Files(Uuid),
@@ -168,6 +175,22 @@ pub(crate) enum BackgroundResult {
     GitHistory {
         project_id: Uuid,
         result: UiResult<String>,
+    },
+    Blame {
+        project_id: Uuid,
+        file: String,
+        result: UiResult<BlameOutcome>,
+    },
+    FileHistory {
+        project_id: Uuid,
+        file: String,
+        result: UiResult<Vec<FileRevision>>,
+    },
+    RevisionDiff {
+        project_id: Uuid,
+        file: String,
+        base: DiffBase,
+        result: UiResult<Vec<DiffFile>>,
     },
     Worktrees {
         project_id: Uuid,
@@ -564,6 +587,13 @@ pub(crate) struct OperonApp {
     /// file happened to slide into that slot.
     pub(crate) active_document: Option<DocumentId>,
     pub(crate) editor_view: EditorView,
+    /// What the 差分 view compares for the document in front (change 307).
+    pub(crate) editor_compare: EditorCompare,
+    /// Read off the frame, by (project, file): the 注釈 view's blame, the
+    /// revision picker's history, and parsed comparisons with past revisions.
+    pub(crate) blame_cache: HashMap<(Uuid, String), UiResult<BlameOutcome>>,
+    pub(crate) file_history_cache: HashMap<(Uuid, String), UiResult<Vec<FileRevision>>>,
+    pub(crate) revision_diff_cache: HashMap<(Uuid, String, DiffBase), UiResult<Vec<DiffFile>>>,
     /// The directories a person has opened in the project tree. Keyed by
     /// project, so two projects do not share one expansion.
     pub(crate) expanded_directories: HashSet<(Uuid, PathBuf)>,
@@ -1164,6 +1194,10 @@ impl OperonApp {
             open_documents: Vec::new(),
             active_document: None,
             editor_view: EditorView::Edit,
+            editor_compare: EditorCompare::default(),
+            blame_cache: HashMap::new(),
+            file_history_cache: HashMap::new(),
+            revision_diff_cache: HashMap::new(),
             expanded_directories: HashSet::new(),
             collapsed_diff_files: HashSet::new(),
             file_tree_cache: None,
@@ -1690,6 +1724,38 @@ impl OperonApp {
                     self.background_tasks
                         .remove(&BackgroundKey::GitHistory(project_id));
                     self.git_history_cache.insert(project_id, result);
+                }
+                BackgroundResult::Blame {
+                    project_id,
+                    file,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::Blame(project_id, file.clone()));
+                    self.blame_cache.insert((project_id, file), result);
+                }
+                BackgroundResult::FileHistory {
+                    project_id,
+                    file,
+                    result,
+                } => {
+                    self.background_tasks
+                        .remove(&BackgroundKey::FileHistory(project_id, file.clone()));
+                    self.file_history_cache.insert((project_id, file), result);
+                }
+                BackgroundResult::RevisionDiff {
+                    project_id,
+                    file,
+                    base,
+                    result,
+                } => {
+                    self.background_tasks.remove(&BackgroundKey::RevisionDiff(
+                        project_id,
+                        file.clone(),
+                        base.clone(),
+                    ));
+                    self.revision_diff_cache
+                        .insert((project_id, file, base), result);
                 }
                 BackgroundResult::Worktrees { project_id, result } => {
                     self.background_tasks

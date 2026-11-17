@@ -50,6 +50,11 @@ pub(crate) const ICON_FOLDER_OPEN: &str = icons::FOLDER_OPEN;
 pub(crate) const ICON_EDIT: &str = icons::PENCIL_SIMPLE;
 pub(crate) const ICON_PREVIEW: &str = icons::EYE;
 pub(crate) const ICON_DIFF: &str = icons::GIT_DIFF;
+/// The 注釈 view: who last changed each line (change 307).
+pub(crate) const ICON_ANNOTATE: &str = icons::USER_LIST;
+/// 前の変更 / 次の変更 in a diff, as an IDE's change navigation draws them.
+pub(crate) const ICON_CHANGE_PREVIOUS: &str = icons::ARROW_UP;
+pub(crate) const ICON_CHANGE_NEXT: &str = icons::ARROW_DOWN;
 pub(crate) const ICON_SAVE: &str = icons::FLOPPY_DISK;
 /// A file the change creates, and one it deletes. A file it merely edits keeps
 /// `ICON_FILE`: a modified file is still just a file, and inventing a fourth
@@ -153,6 +158,9 @@ pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[
     ("ICON_EDIT", ICON_EDIT),
     ("ICON_PREVIEW", ICON_PREVIEW),
     ("ICON_DIFF", ICON_DIFF),
+    ("ICON_ANNOTATE", ICON_ANNOTATE),
+    ("ICON_CHANGE_PREVIOUS", ICON_CHANGE_PREVIOUS),
+    ("ICON_CHANGE_NEXT", ICON_CHANGE_NEXT),
     ("ICON_SAVE", ICON_SAVE),
     ("ICON_FILE_ADDED", ICON_FILE_ADDED),
     ("ICON_FILE_REMOVED", ICON_FILE_REMOVED),

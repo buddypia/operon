@@ -8587,6 +8587,7 @@ pub(crate) fn saves_the_local_store_atomically_and_loads_it_back() {
         cli_handoffs: Vec::new(),
         agent_launch_presets: Vec::new(),
         search_engine_mode: SearchEngineMode::default(),
+        diff_layout: DiffLayout::default(),
     };
     save_store(&path, &store).unwrap();
     assert_eq!(load_store(&path).unwrap().projects, store.projects);
@@ -35125,7 +35126,8 @@ pub(crate) fn every_pane_that_takes_a_note_offers_a_way_to_send_it() {
             }
             let source = fs::read_to_string(&path).unwrap();
             panes += source.matches("diff_pane(").count()
-                + source.matches("diff_pane_with_actions(").count();
+                + source.matches("diff_pane_with_actions(").count()
+                + source.matches("diff_pane_with_view(").count();
             footers += source.matches("ui_diff_comment_footer(").count();
         }
     }
@@ -90479,4 +90481,479 @@ pub(crate) fn cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation() {
         Duration::from_secs(15),
     );
     fs::remove_dir_all(&root).ok();
+}
+
+/// Change 307 (R1): porcelain blame gives each line its commit, carries a
+/// commit's metadata to its later lines, marks uncommitted lines, and flags the
+/// first line of every run so only that one shows the gutter text.
+#[test]
+pub(crate) fn diff_307_blame_porcelain_parses_runs_and_uncommitted() {
+    let a = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    let zero = "0000000000000000000000000000000000000000";
+    let porcelain = format!(
+        "{a} 1 1 2\nauthor buddypia\nauthor-mail <b@x>\nauthor-time 1794800000\nauthor-tz +0900\nsummary fix(git): pass -C once\nfilename src/git.rs\n\tlet a = 1;\n\
+         {a} 2 2\n\tlet b = 2;\n\
+         {zero} 3 3 1\nauthor Not Committed Yet\nauthor-time 1794900000\nauthor-tz -0530\nsummary Version of src/git.rs from src/git.rs\nfilename src/git.rs\n\tlet c = 3;\n\
+         {a} 3 4 1\n\tlet d = 4;\n"
+    );
+    let lines = parse_blame_porcelain(&porcelain);
+    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[0].commit, a);
+    assert_eq!(lines[0].short, "a1b2c3d");
+    assert_eq!(lines[0].author, "buddypia");
+    assert_eq!(lines[0].time, 1794800000);
+    // The date is the author's own wall clock, from the offset porcelain gives.
+    assert_eq!(lines[0].date, "2026-11-16 12:33");
+    assert_eq!(lines[2].date, "2026-11-17 01:50");
+    assert_eq!(lines[0].summary, "fix(git): pass -C once");
+    assert_eq!(lines[0].text, "let a = 1;");
+    assert!(lines[0].starts_run && !lines[0].uncommitted);
+    // The second line of the run: metadata carried, gutter blank.
+    assert_eq!(lines[1].author, "buddypia");
+    assert_eq!(lines[1].summary, "fix(git): pass -C once");
+    assert!(!lines[1].starts_run);
+    assert!(lines[2].uncommitted && lines[2].starts_run);
+    // The same commit again after another one starts a new run.
+    assert!(lines[3].starts_run);
+    assert_eq!(lines[3].text, "let d = 4;");
+    assert_eq!(lines[3].author, "buddypia");
+}
+
+/// Change 307 (R2): the file log's unit-separated fields, a malformed line
+/// skipped, and the entry ceiling held.
+#[test]
+pub(crate) fn diff_307_file_log_parses_fields_and_caps() {
+    let full = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432";
+    let log = format!(
+        "{full}\u{1f}9f8e7d6\u{1f}buddypia\u{1f}2026-11-02 09:15\u{1f}feat: worktree ports\nnot a record\n"
+    );
+    let revisions = parse_file_log(&log);
+    assert_eq!(revisions.len(), 1);
+    assert_eq!(revisions[0].commit, full);
+    assert_eq!(revisions[0].short, "9f8e7d6");
+    assert_eq!(revisions[0].author, "buddypia");
+    assert_eq!(revisions[0].date, "2026-11-02 09:15");
+    assert_eq!(revisions[0].summary, "feat: worktree ports");
+    let many: String = (0..FILE_HISTORY_MAX_ENTRIES + 5)
+        .map(|_| format!("{full}\u{1f}9f8e7d6\u{1f}a\u{1f}2026-01-01 00:00\u{1f}s\n"))
+        .collect();
+    assert_eq!(parse_file_log(&many).len(), FILE_HISTORY_MAX_ENTRIES);
+}
+
+/// Change 307 (R5): one function decides the git arguments of each comparison,
+/// and a revision that is not a full commit id never reaches git.
+#[test]
+pub(crate) fn diff_307_revision_diff_arguments_per_base() {
+    let sha = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    assert_eq!(
+        revision_diff_arguments(&DiffBase::Revision(sha.into()), "src/a.rs").unwrap(),
+        [
+            "diff",
+            "--no-ext-diff",
+            "--unified=3",
+            sha,
+            "--",
+            "src/a.rs"
+        ]
+    );
+    assert_eq!(
+        revision_diff_arguments(&DiffBase::Commit(sha.into()), "src/a.rs").unwrap(),
+        [
+            "show",
+            "--no-ext-diff",
+            "--unified=3",
+            "--format=",
+            "--diff-merges=first-parent",
+            sha,
+            "--",
+            "src/a.rs"
+        ]
+    );
+    for bad in ["HEAD", "--output=/tmp/x", "a1b2c3d", ""] {
+        assert!(revision_diff_arguments(&DiffBase::Revision(bad.into()), "a").is_err());
+        assert!(revision_diff_arguments(&DiffBase::Commit(bad.into()), "a").is_err());
+    }
+    // HEAD ↔ local is the working-tree diff, not built here.
+    assert!(revision_diff_arguments(&DiffBase::Head, "a").is_err());
+}
+
+/// Change 307 (R10): a file never committed is a state of its own, and a blame
+/// past its ceiling is reported as too large instead of shown in part.
+#[test]
+pub(crate) fn diff_307_blame_reports_untracked_and_too_large() {
+    let root = temporary_root().join(format!("operon-307-blame-{}", Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    let git = |args: &[&str]| {
+        let status = git_command(&root)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "t@example.com"]);
+    git(&["config", "user.name", "tester"]);
+    fs::write(root.join("kept.txt"), "one\ntwo\n").unwrap();
+    git(&["add", "kept.txt"]);
+    git(&["commit", "-q", "-m", "first"]);
+    fs::write(root.join("kept.txt"), "one\ntwo\nthree\n").unwrap();
+    fs::write(root.join("new.txt"), "fresh\n").unwrap();
+
+    match git_blame_limited(&root, "kept.txt", GIT_BLAME_MAX_BYTES).unwrap() {
+        BlameOutcome::Lines { lines, widest } => {
+            assert_eq!(widest, 5);
+            assert_eq!(lines.len(), 3);
+            assert_eq!(lines[0].summary, "first");
+            assert!(lines[2].uncommitted);
+        }
+        other => panic!("expected lines, got {other:?}"),
+    }
+    assert!(matches!(
+        git_blame_limited(&root, "new.txt", GIT_BLAME_MAX_BYTES).unwrap(),
+        BlameOutcome::Untracked
+    ));
+    assert!(matches!(
+        git_blame_limited(&root, "kept.txt", 16).unwrap(),
+        BlameOutcome::TooLarge
+    ));
+    let history = git_file_history(&root, "kept.txt").unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].summary, "first");
+    let commit = history[0].commit.clone();
+    let since = git_revision_diff(&root, "kept.txt", &DiffBase::Revision(commit.clone())).unwrap();
+    assert!(since.contains("+three"));
+    let own = git_revision_diff(&root, "kept.txt", &DiffBase::Commit(commit)).unwrap();
+    assert!(own.contains("+one") && !own.contains("three"));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 307 (R6): the diff layout is kept in the store, and a store written
+/// before it existed loads as side by side.
+#[test]
+pub(crate) fn diff_307_diff_layout_round_trips_and_old_stores_default_to_side_by_side() {
+    let mut store = Store::default();
+    assert_eq!(store.diff_layout, DiffLayout::SideBySide);
+    store.diff_layout = DiffLayout::Unified;
+    let json = serde_json::to_string(&store).unwrap();
+    let back: Store = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.diff_layout, DiffLayout::Unified);
+    let mut old = serde_json::to_value(Store::default()).unwrap();
+    old.as_object_mut().unwrap().remove("diff_layout");
+    let old: Store = serde_json::from_value(old).unwrap();
+    assert_eq!(old.diff_layout, DiffLayout::SideBySide);
+}
+
+fn diff_307_line(
+    kind: DiffLineKind,
+    old: Option<usize>,
+    new: Option<usize>,
+    text: &str,
+) -> DiffLine {
+    DiffLine {
+        kind,
+        old_number: old,
+        new_number: new,
+        text: text.into(),
+        highlights: Vec::new(),
+    }
+}
+
+fn diff_307_sample_lines() -> Vec<DiffLine> {
+    use DiffLineKind::*;
+    vec![
+        diff_307_line(Hunk, None, None, "@@ -1,5 +1,5 @@"),
+        diff_307_line(Context, Some(1), Some(1), "keep"),
+        diff_307_line(Removed, Some(2), None, "old a"),
+        diff_307_line(Removed, Some(3), None, "old b"),
+        diff_307_line(Added, None, Some(2), "new a"),
+        diff_307_line(Context, Some(4), Some(3), "keep 2"),
+        diff_307_line(Added, None, Some(4), "only new"),
+        diff_307_line(Note, None, None, "\\ No newline at end of file"),
+        diff_307_line(Removed, Some(5), None, "gone"),
+    ]
+}
+
+/// Change 307 (R3): removals face the additions that replaced them, the longer
+/// run's remainder faces nothing, headers span both columns, and every line is
+/// drawn exactly once, in order.
+#[test]
+pub(crate) fn diff_307_side_by_side_pairs_rewrites_and_fills_gaps() {
+    let lines = diff_307_sample_lines();
+    let pairs = side_by_side_rows(&lines);
+    let got: Vec<(Option<usize>, Option<usize>)> =
+        pairs.iter().map(|pair| (pair.left, pair.right)).collect();
+    assert_eq!(
+        got,
+        [
+            (Some(0), Some(0)),
+            (Some(1), Some(1)),
+            (Some(2), Some(4)),
+            (Some(3), None),
+            (Some(5), Some(5)),
+            (None, Some(6)),
+            (Some(7), Some(7)),
+            (Some(8), None),
+        ]
+    );
+    let mut seen = Vec::new();
+    for pair in &pairs {
+        for index in [pair.left, pair.right].into_iter().flatten() {
+            if seen.last() != Some(&index) {
+                seen.push(index);
+            }
+        }
+    }
+    seen.sort_unstable();
+    assert_eq!(seen, (0..lines.len()).collect::<Vec<_>>());
+    assert!(side_by_side_rows(&[]).is_empty());
+}
+
+/// Change 307 (R4): the change blocks are the runs of changed rows, and
+/// stepping through them stops at both ends.
+#[test]
+pub(crate) fn diff_307_change_blocks_step_forward_and_back() {
+    assert_eq!(
+        change_block_starts(&[false, true, true, false, true, false]),
+        [1, 4]
+    );
+    assert_eq!(change_block_starts(&[true]), [0]);
+    assert!(change_block_starts(&[false, false]).is_empty());
+    assert_eq!(step_change(2, None, true), Some(0));
+    assert_eq!(step_change(2, Some(0), true), Some(1));
+    assert_eq!(step_change(2, Some(1), true), Some(1));
+    assert_eq!(step_change(2, Some(1), false), Some(0));
+    assert_eq!(step_change(2, Some(0), false), Some(0));
+    assert_eq!(step_change(2, None, false), Some(0));
+    assert_eq!(step_change(0, None, true), None);
+    // On the sample: the rewrite block, the lone addition, and the removal at
+    // the end are three blocks in side-by-side rows.
+    let lines = diff_307_sample_lines();
+    let changed: Vec<bool> = side_by_side_rows(&lines)
+        .iter()
+        .map(|pair| pair_is_change(&lines, pair))
+        .collect();
+    assert_eq!(change_block_starts(&changed), [2, 5, 7]);
+}
+
+/// Change 307 (R8): a pane too narrow for two readable columns draws the
+/// interleaved layout, without changing what the person chose.
+#[test]
+pub(crate) fn diff_307_side_by_side_falls_back_below_min_width() {
+    let narrow = DIFF_SIDE_BY_SIDE_MIN_WIDTH - 1.0;
+    assert_eq!(
+        effective_diff_layout(DiffLayout::SideBySide, narrow),
+        DiffLayout::Unified
+    );
+    assert_eq!(
+        effective_diff_layout(DiffLayout::SideBySide, DIFF_SIDE_BY_SIDE_MIN_WIDTH),
+        DiffLayout::SideBySide
+    );
+    assert_eq!(
+        effective_diff_layout(DiffLayout::Unified, 2000.0),
+        DiffLayout::Unified
+    );
+}
+
+fn diff_307_file(lines: Vec<DiffLine>) -> DiffFile {
+    let added = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Added)
+        .count();
+    let removed = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Removed)
+        .count();
+    DiffFile {
+        path: "src/lib.rs".into(),
+        renamed_from: None,
+        change: DiffFileChange::Modified,
+        widest: lines
+            .iter()
+            .map(|l| l.text.chars().count())
+            .max()
+            .unwrap_or(0),
+        lines,
+        added,
+        removed,
+        note: None,
+    }
+}
+
+fn diff_307_frame(files: &[DiffFile], view: &DiffPaneView) -> (egui::FullOutput, DiffPaneOutcome) {
+    let ctx = egui::Context::default();
+    let mut collapsed = HashSet::new();
+    let mut annotations = DiffAnnotations::default();
+    let mut action = None;
+    let mut outcome = None;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 500.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                outcome = Some(diff_pane_with_view(
+                    ui,
+                    files,
+                    &mut collapsed,
+                    AppTheme::Dark.palette(),
+                    420.0,
+                    Uuid::new_v4(),
+                    &mut annotations,
+                    &mut action,
+                    view,
+                ));
+            });
+        },
+    );
+    (output, outcome.unwrap())
+}
+
+/// Change 307 (R7): hunk actions and notes belong to HEAD ↔ local only; on any
+/// other comparison a staged or discarded hunk would be a patch against the
+/// wrong text, so neither the buttons nor the note marker is drawn.
+#[test]
+pub(crate) fn diff_307_only_head_comparison_offers_hunk_actions_and_notes() {
+    let files = vec![diff_307_file(diff_307_sample_lines())];
+    for layout in [DiffLayout::SideBySide, DiffLayout::Unified] {
+        let head = DiffPaneView {
+            layout,
+            labels: ("HEAD", "ローカル"),
+            editable: true,
+            scroll_to_change: None,
+        };
+        let texts = painted_text_rects(&diff_307_frame(&files, &head).0.shapes);
+        assert!(texts.iter().any(|(t, _)| t == "ステージ"), "{layout:?}");
+        assert!(texts.iter().any(|(t, _)| t == "破棄"), "{layout:?}");
+        let past = DiffPaneView {
+            editable: false,
+            ..head
+        };
+        let (output, outcome) = diff_307_frame(&files, &past);
+        let texts = painted_text_rects(&output.shapes);
+        assert!(
+            !texts.iter().any(|(t, _)| t == "ステージ" || t == "破棄"),
+            "{layout:?}"
+        );
+        assert_eq!(outcome.changes, 3, "{layout:?}");
+    }
+}
+
+/// Change 307 (R9): two columns, each labelled, each with its own side's line
+/// numbers; and a file that only adds lines draws with an empty left column.
+#[test]
+pub(crate) fn diff_307_side_by_side_pane_draws_both_columns() {
+    let files = vec![diff_307_file(diff_307_sample_lines())];
+    let view = DiffPaneView {
+        layout: DiffLayout::SideBySide,
+        labels: ("a1b2c3d", "ローカル"),
+        editable: false,
+        scroll_to_change: None,
+    };
+    let (output, _) = diff_307_frame(&files, &view);
+    let texts = painted_text_rects(&output.shapes);
+    let find = |needle: &str| {
+        texts
+            .iter()
+            .find(|(text, _)| text.contains(needle))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{needle} not painted: {texts:?}"))
+    };
+    let left_label = find("a1b2c3d");
+    let right_label = find("ローカル");
+    assert!(left_label.left() < 450.0 && right_label.left() >= 450.0);
+    // The rewrite pair sits on one row: old on the left, new on the right.
+    let old = find("old a");
+    let new = find("new a");
+    assert!((old.center().y - new.center().y).abs() < 1.0);
+    assert!(old.left() < new.left() && new.left() >= 450.0);
+    assert!(find("only new").left() >= 450.0);
+    assert!(find("gone").left() < 450.0);
+
+    let added_only = vec![diff_307_file(vec![
+        diff_307_line(DiffLineKind::Hunk, None, None, "@@ -0,0 +1,1 @@"),
+        diff_307_line(DiffLineKind::Added, None, Some(1), "fresh"),
+    ])];
+    let (output, outcome) = diff_307_frame(&added_only, &view);
+    assert_eq!(outcome.changes, 1);
+    let texts = painted_text_rects(&output.shapes);
+    assert!(texts
+        .iter()
+        .any(|(t, r)| t.contains("fresh") && r.left() >= 450.0));
+}
+
+/// Change 307 (store surface, formal-model): every sequence of choosing a
+/// layout, an older build rewriting the store without the field, and a
+/// relaunch keeps a store that loads, whose layout is the last one chosen —
+/// or side by side once an older build has dropped it.
+#[test]
+pub(crate) fn model_check_diff_307_layout_survives_saves_downgrades_and_relaunches() {
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    struct State {
+        memory: DiffLayout,
+        disk: String,
+        expected: Option<DiffLayout>,
+    }
+    #[derive(Debug, Clone)]
+    enum Event {
+        Choose(DiffLayout),
+        OlderBuildRewrites,
+        Relaunch,
+    }
+    let save = |layout: DiffLayout| {
+        let mut store = Store::default();
+        store.diff_layout = layout;
+        serde_json::to_string(&store).unwrap()
+    };
+    let initial = State {
+        memory: DiffLayout::SideBySide,
+        disk: save(DiffLayout::SideBySide),
+        expected: Some(DiffLayout::SideBySide),
+    };
+    let events = [
+        Event::Choose(DiffLayout::SideBySide),
+        Event::Choose(DiffLayout::Unified),
+        Event::OlderBuildRewrites,
+        Event::Relaunch,
+    ];
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, event| {
+            let mut next = state.clone();
+            match event {
+                Event::Choose(layout) => {
+                    next.memory = *layout;
+                    next.disk = save(*layout);
+                    next.expected = Some(*layout);
+                }
+                Event::OlderBuildRewrites => {
+                    let mut value: serde_json::Value = serde_json::from_str(&state.disk).ok()?;
+                    value.as_object_mut()?.remove("diff_layout");
+                    next.disk = value.to_string();
+                    next.expected = None;
+                }
+                Event::Relaunch => {
+                    next.memory = serde_json::from_str::<Store>(&state.disk).ok()?.diff_layout;
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            let loaded: Store = serde_json::from_str(&state.disk)
+                .map_err(|error| format!("store does not load: {error}"))?;
+            let want = state.expected.unwrap_or(DiffLayout::SideBySide);
+            if loaded.diff_layout != want {
+                return Err(format!("loads {:?}, want {want:?}", loaded.diff_layout));
+            }
+            Ok(())
+        },
+        64,
+    );
+    assert_eq!(coverage.states, 4, "{coverage:?}");
 }

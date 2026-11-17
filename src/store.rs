@@ -27,6 +27,10 @@ pub(crate) struct Store {
     pub(crate) agent_launch_presets: Vec<AgentLaunchPreset>,
     #[serde(default)]
     pub(crate) search_engine_mode: SearchEngineMode,
+    /// Change 307: side by side or interleaved; a store from before it reads
+    /// as side by side.
+    #[serde(default)]
+    pub(crate) diff_layout: DiffLayout,
 }
 
 impl Default for Store {
@@ -45,6 +49,7 @@ impl Default for Store {
             cli_handoffs: Vec::new(),
             agent_launch_presets: Vec::new(),
             search_engine_mode: SearchEngineMode::default(),
+            diff_layout: DiffLayout::default(),
         }
     }
 }
