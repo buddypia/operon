@@ -10,7 +10,7 @@ S = ROOT / "src/app/agent_snapshot.rs"
 APP = ROOT / "src/app.rs"
 MAIN = ROOT / "src/main.rs"
 MUTATIONS = {
-    "send-ignores-state": (C, "    if entry.state != AGENT_STATE_IDLE {\n        return busy(&entry.state);\n    }\n", ""),
+    "send-ignores-state": (C, "        return busy(&entry.state);\n", ""),
     "not-started-refused": (C, "if entry.state != AGENT_STATE_IDLE && entry.state != AGENT_STATE_NOT_STARTED {", "if entry.state != AGENT_STATE_IDLE {"),
     "not-started-published-as-idle": (C, "SessionStatusKind::NotStarted => AGENT_STATE_NOT_STARTED,", "SessionStatusKind::NotStarted => AGENT_STATE_IDLE,"),
     "send-skips-screen-recheck-working": (C, "AgentActivity::Working => return busy(AGENT_STATE_WORKING),", "AgentActivity::Working => {}"),
