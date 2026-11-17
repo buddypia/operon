@@ -1,0 +1,31 @@
+# Change 307. The person's request: 「差分って二つあって、ローカルとGit状態の差分と
+# git blameに差分を選んで比較する機能が欲しい。通常よくあるIntelliJの感覚でUI/UXと
+# 体験ができると良い」. Intent in intent.md; the layout awaits the person in screen.md.
+
+state:
+  route: "feature"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing (ship skill); the person checks the 差分/注釈 views in the installed app."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked diff_307_ 14 passed; CI full suite green on bba4d5e"
+  bands: "machine passed bash scripts/check-bands.sh — no metric at propose; always_loaded_bytes 7990 after trimming CLAUDE.md lines to pay for the new module line"
+  release-binary: "machine passed required - touches src/git.rs, src/ui/diff.rs, src/app; package from main after landing"
+  guards-verified-by-mutation: "machine passed 10 of 10 caught: python3 docs/sdlc/changes/307-cannot-compare-file-with-past-revision/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

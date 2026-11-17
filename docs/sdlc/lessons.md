@@ -1662,3 +1662,22 @@ forced-ref, other-remote, redirected, chained and trailing-flag spellings;
 refuses the spellings the trunk allowlist alone lets through (`git -c … push`,
 `--git-dir`, `HOME=` prefixes, `&`, `||`). Each watched failing in
 `docs/sdlc/changes/304-branch-push-refused-from-main-and-worktree/mutations.py`.
+
+## 117 — A preference added to the store is one a newer build can widen
+
+Change 307 added `diff_layout`, an enum, to the store with `#[serde(default)]`,
+and checked that a store without the field loads. It did not ask what a store
+*with* a value this build does not know does: serde rejects the whole file, and
+`load_store_safely` sets every project aside as a corrupt store. A newer build
+that adds a third layout would empty the window of anyone who went back one
+version. Found by formal-verifier, which modelled the file through the real
+load path rather than through `serde_json` alone. **The rule:** a preference
+added to the store reads an unknown value as its default; and a model of a
+store change runs through `load_store_safely` and `save_store`, with a file a
+newer build could write among its states.
+
+**Guard.** `model_check_diff_307_store_files_keep_layout_and_projects_through_load_store_safely`
+seeds a newer build's value and relaunches through `load_store_safely`;
+`unknown-layout-rejects-store` in
+`docs/sdlc/changes/307-cannot-compare-file-with-past-revision/mutations.py`
+removes the lenient reader; watched failing there (10 of 10 caught).

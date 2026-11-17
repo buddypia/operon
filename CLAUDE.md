@@ -20,10 +20,11 @@ alternatives; commit `plan.md` before editing source files.
     `src/app/knowledge.rs` holds the knowledge tab, model block, run wiring.
     `src/app/dock_badge.rs` badges the Dock icon.
     `src/app/broadcast.rs` messages idle agents.
-    `src/app/relaunch.rs` keeps tabs across a relaunch, restarts gone sessions.
-    `src/app/session_order.rs` keeps the column and the tabs one list, and pins.
+    `src/app/compare.rs` diff compare bar, 注釈.
+    `src/app/relaunch.rs` keeps tabs across relaunch.
+    `src/app/session_order.rs` orders the column, tabs, and pins.
     `src/app/launch_menu.rs` holds the tab strip's + menu and quick launch.
-    `src/app/launch_projects.rs` adds and picks the launch sheet's project.
+    `src/app/launch_projects.rs` picks the launch project.
     `src/app/terminal_output.rs` lays terminal text out off the frame.
     `src/app/terminal_paths.rs` opens terminal paths.
     `src/app/toast.rs` draws corner notices.
