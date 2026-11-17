@@ -1,0 +1,60 @@
+# Change 305. Bug report, as the bugfix route takes it in place of an intent:
+#
+# The session column and the session tabs showed which CLI each session runs
+# (its vendor mark) with its state as a dot on the mark. After Operon was
+# relaunched at 2026-11-17 04:03 JST, every open tab — Claude conversations
+# among them — shows Operon's terminal mark with no dot. The store says why:
+# all seven open tabs were relaunched in the same second (launched_at
+# 1794855783-4) as agent "terminal" with native_session_id cleared, and every
+# pane now runs only zsh.
+#
+# Cause: change 303 (R4/R5) reopens an open Lost/Failed tab whose conversation
+# cannot be resumed as a plain shell through reopen_exited_session_as_shell,
+# which rewrites agent to "terminal" and clears native_session_id/_path. For a
+# CLI that was typed into a terminal (origin PlainTerminal, no saved ID) the
+# no-ID recovery cannot succeed once the CLI is gone: Claude Code's registry
+# entry dies with the process and recover_managed_claude_session_in needs a
+# goal, which a terminal has not got. So every such CLI tab fell to a shell,
+# losing its kind for good; a CLI whose transcript was missing lost its saved
+# ID the same way.
+#
+# Reproduce: an open claude tab, Lost on load (or Gone mid-run), with no
+# resumable conversation; after the first poll its agent is "terminal".
+#
+# Decision (recoverable, taken without asking): a Claude/Codex/Antigravity tab
+# whose conversation cannot be resumed is not reopened as a shell. It stays
+# Lost/Failed with its CLI kind, its saved conversation pointers, its mark and
+# state dot, and 「再試行」 — the behaviour before 303. The shell fallback stays
+# for interactive tabs with no CLI behind them (custom, existing terminal).
+# Rejected: keep the shell but leave the CLI kind on it — the mark and dot
+# would claim a CLI that is not running.
+# Not repaired: the seven records 303 already rewrote; which CLI each ran was
+# not kept anywhere.
+
+state:
+  route: "bugfix"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Write the failing test, then narrow can_fallback_open_tab_to_shell to tabs with no CLI."
+
+contract:
+  three-gates: "machine pending make q.fast and the named tests"
+  failing-test-first: "machine pending the new test fails on main's code"
+  release-binary: "machine pending required - src/app/relaunch.rs changes; package from main after landing with the ship skill"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/305-cli-tab-loses-its-mark-on-relaunch/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
