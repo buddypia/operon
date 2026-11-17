@@ -1160,6 +1160,8 @@ pub(crate) enum SessionStatusKind {
     Working,
     Waiting,
     Idle,
+    /// Idle before the conversation's first request (change 308).
+    NotStarted,
     Running,
     Blocked,
     Ready,
@@ -1176,12 +1178,13 @@ impl SessionStatusKind {
     /// the app draws iterates the states — a session is in one of them — so
     /// this list exists for the tests and is compiled only for them.
     #[cfg(test)]
-    pub(crate) const ALL: [SessionStatusKind; 14] = [
+    pub(crate) const ALL: [SessionStatusKind; 15] = [
         SessionStatusKind::Stopping,
         SessionStatusKind::Starting,
         SessionStatusKind::Working,
         SessionStatusKind::Waiting,
         SessionStatusKind::Idle,
+        SessionStatusKind::NotStarted,
         SessionStatusKind::Running,
         SessionStatusKind::Blocked,
         SessionStatusKind::Ready,
@@ -1200,6 +1203,7 @@ impl SessionStatusKind {
             SessionStatusKind::Working => ICON_STATUS_RUNNING,
             SessionStatusKind::Waiting => ICON_ATTENTION,
             SessionStatusKind::Idle => ICON_STATUS_IDLE,
+            SessionStatusKind::NotStarted => ICON_STATUS_NOT_STARTED,
             SessionStatusKind::Running => ICON_STATUS_RUNNING,
             SessionStatusKind::Blocked => ICON_ATTENTION,
             SessionStatusKind::Ready => ICON_STATUS_QUEUED,
@@ -1219,6 +1223,7 @@ impl SessionStatusKind {
             SessionStatusKind::Working | SessionStatusKind::Running => StatusMark::Progress,
             SessionStatusKind::Waiting | SessionStatusKind::Blocked => StatusMark::Attention,
             SessionStatusKind::Idle => StatusMark::Pause,
+            SessionStatusKind::NotStarted => StatusMark::Dot,
             SessionStatusKind::Ready => StatusMark::Play,
             SessionStatusKind::Queued => StatusMark::Hourglass,
             SessionStatusKind::Done => StatusMark::Check,
@@ -1230,11 +1235,14 @@ impl SessionStatusKind {
 
     /// The word a person reads for this state: its group's word for live or
     /// actionable states, or its own exit word for clean exit and explicit stop
-    /// now that the fourth `終了` filter group is retired (change 291).
+    /// now that the fourth `終了` filter group is retired (change 291). Not
+    /// started has a word of its own inside アイドル: the group says the session
+    /// can take work, the word says nothing has been asked of it (change 308).
     pub(crate) fn label(self) -> &'static str {
         match self {
             SessionStatusKind::Done => "正常終了",
             SessionStatusKind::Stopped => "停止済み",
+            SessionStatusKind::NotStarted => "未開始",
             _ => self
                 .group()
                 .expect("every live or failed state belongs to one of the three status groups")
@@ -1248,7 +1256,7 @@ impl SessionStatusKind {
             SessionStatusKind::Starting => StatusTone::Info,
             SessionStatusKind::Working => StatusTone::Running,
             SessionStatusKind::Waiting => StatusTone::Attention,
-            SessionStatusKind::Idle => StatusTone::Idle,
+            SessionStatusKind::Idle | SessionStatusKind::NotStarted => StatusTone::Idle,
             SessionStatusKind::Running => StatusTone::Running,
             SessionStatusKind::Blocked => StatusTone::Attention,
             SessionStatusKind::Ready => StatusTone::Info,
@@ -1272,8 +1280,10 @@ impl SessionStatusKind {
             | SessionStatusKind::Blocked
             | SessionStatusKind::Failed
             | SessionStatusKind::Lost => Some(SessionStatusGroup::NeedsYou),
-            // Live, with nothing to do.
-            SessionStatusKind::Idle => Some(SessionStatusGroup::Free),
+            // Live, with nothing to do — after a turn, or before the first.
+            SessionStatusKind::Idle | SessionStatusKind::NotStarted => {
+                Some(SessionStatusGroup::Free)
+            }
             // In flight, including queued and stopping states.
             SessionStatusKind::Starting
             | SessionStatusKind::Working
@@ -1392,7 +1402,7 @@ impl SessionStatusGroup {
     pub(crate) fn hint_id(self) -> &'static str {
         match self {
             Self::NeedsYou => "回答待ち・異常終了・前提が壊れて止まっているセッション",
-            Self::Free => "ターンを終え、次の依頼を出せるセッション",
+            Self::Free => "未開始、またはターンを終えて次の依頼を出せるセッション",
             Self::Busy => "実行中・起動中・順番待ちのセッション",
         }
     }
@@ -1411,11 +1421,16 @@ pub(crate) struct SessionStatusView {
 
 /// Which state a session is in, and nothing else. No `String` is built here,
 /// which is what lets the list count its filter groups every frame.
+///
+/// `awaiting_first_request` is whether the CLI said its current conversation
+/// is new and nothing has been asked of it since (change 308); it turns idle
+/// into not started and changes no other state.
 pub(crate) fn session_status_kind(
     sessions: &[Session],
     session: &Session,
     cancellation_pending: bool,
     activity: Option<AgentActivity>,
+    awaiting_first_request: bool,
 ) -> SessionStatusKind {
     if cancellation_pending {
         return SessionStatusKind::Stopping;
@@ -1428,6 +1443,7 @@ pub(crate) fn session_status_kind(
             // The CLI is up and has nothing to do: the state every agent
             // terminal calls idle. IDLE names the session's own state,
             // leaving the hint to describe what the reader may do next.
+            Some(AgentActivity::Idle) if awaiting_first_request => SessionStatusKind::NotStarted,
             Some(AgentActivity::Idle) => SessionStatusKind::Idle,
             None => SessionStatusKind::Running,
         },
@@ -1453,14 +1469,22 @@ pub(crate) fn session_status_view(
     session: &Session,
     cancellation_pending: bool,
     activity: Option<AgentActivity>,
+    awaiting_first_request: bool,
 ) -> SessionStatusView {
-    let kind = session_status_kind(sessions, session, cancellation_pending, activity);
+    let kind = session_status_kind(
+        sessions,
+        session,
+        cancellation_pending,
+        activity,
+        awaiting_first_request,
+    );
     let hint = match kind {
         SessionStatusKind::Stopping => tr("ターミナルの終了待ち").to_owned(),
         SessionStatusKind::Starting => tr("tmux と CLI を準備中").to_owned(),
         SessionStatusKind::Working => tr("応答を生成中").to_owned(),
         SessionStatusKind::Waiting => tr("ターミナルを開いて回答してください").to_owned(),
         SessionStatusKind::Idle => tr("ターンを終え、次の依頼を出せます").to_owned(),
+        SessionStatusKind::NotStarted => tr("まだ最初の依頼を受けていません").to_owned(),
         SessionStatusKind::Running => tr("ターミナル稼働中").to_owned(),
         // The only hint that is not a constant: it names the prerequisite,
         // which is data, and is why `hint` lives on the view and not on the

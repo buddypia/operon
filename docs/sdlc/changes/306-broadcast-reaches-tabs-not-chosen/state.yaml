@@ -1,0 +1,30 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing; two carried review points are in review.yaml."
+
+contract:
+  three-gates: "machine passed make q.fast and cargo test --locked broadcast_ (14 passed)"
+  bands: "machine passed bash scripts/check-bands.sh (no propose tier reached)"
+  release-binary: "machine passed required - src/app/broadcast.rs changes; packaged from main after landing"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/306-broadcast-reaches-tabs-not-chosen/mutations.py (18 of 18 caught)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

@@ -55,7 +55,8 @@ Settings. The projects, sessions, and agent output in them are a demo.
   each with how long it has waited and what its agent last said; a row whose
   terminal is running has a one-line reply — type, press Enter, and the words
   reach that agent without opening it; `⌘K` → アイドル中のエージェントへ送信…
-  types one line into every idle agent of the project. An agent that
+  types one line into the idle agents of the project you tick (none is
+  ticked until you choose; すべて選択 ticks them all). An agent that
   has been working for a minute or more says for how long — 実行中 · 12分 — in
   its pane's heading and when you hover its state. `⌘J` opens the
   next one and puts the keyboard in its terminal, and the toolbar's **要対応 N**

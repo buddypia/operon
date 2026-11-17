@@ -3,7 +3,7 @@
 # not taken: blame text is drawn, and the diff parser drops a trailing CR the
 # same way, so a drawn line never carries one. F2 came from formal-verifier:
 # a newer build's layout value made this build set the whole store aside.
-digest: "38a88775cd3d0f7e"
+digest: "6500a7781d756709"
 
 obligations:
   - R1 empirical-test :: cargo test --locked diff_307_blame_porcelain_parses_runs_and_uncommitted

@@ -380,8 +380,10 @@ colour.
 
 - `info` — starting, or about to start.
 - `success` — working right now.
-- `calm` — finished its turn, ready for the next request. Deliberately quieter
-  than `success`: it is a state, not an achievement.
+- `calm` — finished its turn, ready for the next request, or not yet given its
+  first one. Deliberately quieter than `success`: it is a state, not an
+  achievement. The two share the ink and differ in shape: pause bars after a
+  turn, a centred dot before the first request (change 308).
 - `warning` — waiting on the person reading the screen. The one status worth
   interrupting for.
 - `danger` — ended badly, or a destructive button. Reserved for an outcome the
@@ -535,8 +537,8 @@ it may not carry it alone.
 
 Session tabs use the generated `StatusMark` vector family in `src/glyphs.rs`:
 circular enclosures drawn on an 18px grid with 1.5px strokes and distinct
-progress, pause, exclamation, power, play, hourglass, check, cross, stop, minus
-and question centres, shown at 14px in a tab (`TAB_STATUS_MARK_SIZE`) so the
+progress, pause, dot, exclamation, power, play, hourglass, check, cross, stop,
+minus and question centres, shown at 14px in a tab (`TAB_STATUS_MARK_SIZE`) so the
 tab fits its 28px strip; the whole mark scales, strokes included. Geometry
 stays sharp across display scales and all three themes;
 `Palette::status` supplies the ink. These passive indicators show no permanent
