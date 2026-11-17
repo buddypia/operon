@@ -12,8 +12,8 @@ state from the CLIs' own hooks, a 要対応 queue, parallel runs in worktrees,
 diff notes sent back to an agent, setup scripts, port maps, checkpoints. What
 it lacks is the idea at the centre of both: **the agents themselves can drive
 the workspace.** Herdr gives agents a socket API to see every pane's state,
-prompt another agent, and wait until another agent is idle or blocked; Orca's
-CLI lets a coordinating agent hand work to worker agents and collect what they
+prompt another agent, and wait until another agent is idle or blocked; the second
+product's CLI lets a coordinating agent hand work to worker agents and collect what they
 did. In Operon only the person can look across sessions. An agent running in
 one session cannot tell that its sibling in another worktree finished, cannot
 read what that sibling last printed, and cannot hand it the next step — so the
@@ -56,12 +56,12 @@ already computes), `src/config.rs`, `src/i18n_tables.rs`, the manuals.
 
 ## Open questions
 
-None left for the person: the choice of which Herdr/Orca idea to bring in was
+None left for the person: the choice of which of the two products' ideas to bring in was
 delegated by the request above (「できる限りこのプロジェクトに合わせて良い機能を」).
 
 ## Not in scope
 
-- Starting new sessions from the command (Orca's worker spawn): it needs the
+- Starting new sessions from the command (the second product's worker spawn): it needs the
   app to create a record, a worktree, and a launch, and is its own change.
 - Remote machines over SSH, plugins, a mobile app, scheduled automations.
 - Any change to what the person sees in the window.
