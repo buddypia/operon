@@ -1,7 +1,7 @@
 # Spec: the idle agents an instruction reaches are the ones ticked
 
 - **Intent**: `./intent.md`
-- **Status**: draft
+- **Status**: approved
 
 ## Requirements
 
@@ -117,7 +117,7 @@ Placement: **EXTEND** — `src/app/broadcast.rs` already owns the sheet
 ## Acceptance
 
 - `cargo test --locked broadcast_` passes: the six `broadcast_306_` tests and
-  change 282's eight.
+  change 282's seven, thirteen in all.
 - `make q.fast` passes; the message-table, button-height, type-scale and
   three-language guards pass.
 - `python3 docs/sdlc/changes/306-broadcast-reaches-tabs-not-chosen/mutations.py`

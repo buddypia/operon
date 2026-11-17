@@ -44,7 +44,7 @@
 
 - `cargo fmt --check` — no output.
 - `cargo clippy --locked -- -D warnings` — no output past the compile lines.
-- `cargo test --locked broadcast_` — `14 passed; 0 failed`.
+- `cargo test --locked broadcast_` — `13 passed; 0 failed`.
 - `python3 docs/sdlc/changes/306-broadcast-reaches-tabs-not-chosen/mutations.py`
   — every mutation caught.
 - The full suite on the branch push in CI.

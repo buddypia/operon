@@ -1,6 +1,6 @@
 # Intent: an instruction to idle agents reaches tabs nobody chose
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-17
 
 ## Problem

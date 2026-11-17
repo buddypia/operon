@@ -3,16 +3,16 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Write spec.md and screen.md from intent.md, then run the readiness gate."
+resume: "Write the six broadcast_306_ tests, watch them fail, then change src/app/broadcast.rs per plan.md."
 
 contract:
   three-gates: "machine pending make q.fast and cargo test --locked broadcast_"
