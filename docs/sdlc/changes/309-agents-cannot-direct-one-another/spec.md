@@ -10,33 +10,50 @@
    agent, branch, folder, tmux name, and state token, plus every project's id,
    name, and path and the time it was written. It is rewritten when that
    content changes (checked at most once a second) and otherwise every 15
-   seconds, never from the draw path's thread, and removed when Operon quits.
-   — `agents_309_snapshot_names_each_live_session_with_its_state`,
+   seconds, never on the frame's thread. —
+   `agents_309_snapshot_names_each_live_session_with_its_state`,
    `agents_309_snapshot_is_due_on_change_or_heartbeat_only`
-2. The caller is the session whose tmux name is in `OPERON_SESSION`; failing
-   that, the project whose folder holds the current directory. Neither →
-   exit 2 with a message. — `agents_309_caller_is_found_by_session_then_folder`
-3. A missing snapshot, or one older than 60 seconds, means Operon is not
-   running: every verb exits 3 and says so. —
+2. One writer thread applies writes and the removal in the order they were
+   asked for; quitting Operon removes the file after every earlier write, so a
+   write still in flight cannot bring it back. —
+   `agents_309_writer_applies_in_order_and_removal_is_last`
+3. The caller is the session whose tmux name is in `OPERON_SESSION`. When that
+   variable is unset, or names no session in the snapshot, the caller's project
+   is the nearest registered project folder at or above the current directory;
+   the caller's own terminal is still recognised by that tmux name. Neither →
+   exit 2. — `agents_309_caller_is_found_by_session_then_folder`
+4. A missing or unreadable snapshot, one larger than 1 MiB, or one older than
+   60 seconds means Operon is not running: every verb exits 3 and says so. —
    `agents_309_stale_or_missing_snapshot_says_operon_is_not_running`
-4. `list [--json]` shows only the caller's project's sessions, the caller's own
+5. `list [--json]` shows only the caller's project's sessions, the caller's own
    marked. — `agents_309_list_shows_only_the_callers_project`
-5. A target is an id prefix of at least 4 characters naming exactly one session
-   of the caller's project; unknown, ambiguous, or another project's → exit 2
-   naming why. — `agents_309_target_prefix_must_name_exactly_one_session`
-6. `send <id> <text…>` types the text and Enter into the target's terminal only
-   when its state is `idle` (the agent finished its turn); never into the
-   caller itself; text empty or over 4 000 characters is refused. —
-   `agents_309_send_types_only_into_an_idle_agent_of_the_same_project`
-7. `read <id> [--lines N]` prints the last N lines (default 40, at most 200) of
-   the target's screen and scrollback, without colour codes. —
+6. A target is an id prefix of at least 4 characters naming exactly one session
+   of the caller's project; shorter, unknown, ambiguous, or another project's →
+   exit 2 naming why. A snapshot tmux name that fails `is_safe_tmux_name` is
+   refused before tmux is run. —
+   `agents_309_target_prefix_must_name_exactly_one_session`
+7. `send <id> <text…>` types the text and Enter into the target only when the
+   snapshot says `idle` **and** a capture of the target's visible screen taken
+   just before typing does not read as working or as a prompt; otherwise exit
+   5 and nothing is typed. Never into the caller itself (exit 2). —
+   `agents_309_send_types_only_into_an_idle_agent_of_the_same_project`,
+   `agents_309_send_rechecks_the_screen_before_typing`
+8. `send` refuses text that is empty, longer than 4 000 characters, or holds a
+   control character (newline, tab, escape, …) with exit 64; nothing is typed.
+   — `agents_309_send_refuses_empty_long_or_control_text`
+9. `read <id> [--lines N]` prints the last N lines (default 40, 1–200) of the
+   target's screen and scrollback, without colour codes; a bad N is exit 64. —
    `agents_309_read_returns_the_tail_within_its_ceiling`
-8. `wait <id> [--until idle|waiting|either] [--timeout S]` returns 0 as soon as
-   the target's state is the one asked for (default `either`), and 4 at the
-   timeout (default 600 s, at most 3 600 s); a target that disappears or ends
-   returns 2. — `agents_309_wait_returns_when_the_state_arrives_or_times_out`
-9. No arguments, `help`, or an unknown verb prints the usage (exit 64 for the
-   unknown). — `agents_309_usage_names_every_verb`
+10. A tmux failure (missing binary, gone pane) is exit 1 with tmux's own words.
+    — `agents_309_tmux_failure_is_reported_with_its_reason`
+11. `wait <id> [--until idle|waiting|either] [--timeout S]` returns 0 as soon as
+    the target's state is the one asked for (default `either`), and 4 at the
+    timeout (default 600 s, 1–3 600 s); a target that leaves the snapshot or
+    ends returns 2; a bad option is exit 64. —
+    `agents_309_wait_returns_when_the_state_arrives_or_times_out`,
+    `agents_309_wait_options_are_checked`
+12. No arguments or `help` prints the usage (exit 0); an unknown verb prints it
+    with exit 64. — `agents_309_usage_names_every_verb`
 
 ## Behaviour
 
@@ -59,7 +76,8 @@ Messages (stderr):
 - 「Operon が起動していないため、エージェントの状態を取得できません。」 (exit 3)
 - 「{path} は Operon に登録されたプロジェクトではありません。」 (exit 2)
 - 「{id} に一致するセッションがありません。」 / 「{id} は複数のセッションに一致します: {list}」 / 「セッション ID は 4 文字以上で指定してください。」 (exit 2)
-- 「{name} は作業中のため送信しません（状態: {state}）。」 (exit 5) — send to a non-idle target
+- 「{name} は作業中のため送信しません（状態: {state}）。」 (exit 5) — send to a non-idle target, or one whose screen shows a running turn or a prompt
+- 「改行や制御文字を含む内容は送信できません。1 行にまとめてください。」 (exit 64)
 - 「自分自身には送信できません。」 (exit 2)
 - 「送信する内容が空です。」 / 「送信する内容が長すぎます（最大 {max} 文字）。」 (exit 64)
 - 「{name} に送信しました。」 (stdout, exit 0)
@@ -80,13 +98,22 @@ knowledge CLI (157) is the precedent for a windowless subcommand.
   `ProjectEntry` (serde); `agents_cli(arguments, caller_env, directory,
   snapshot, now, terminal: &mut dyn AgentTerminal) -> CliOutcome`;
   `agents_wait(…)` with injected loader and sleeper; `AgentTerminal` trait
-  with the tmux implementation (`tmux_send_input`, and a capture `capture-pane
-  -p -J -S -N` through `run_command_with_output_limit`); `run_agents_cli` entry.
+  (`visible_screen`, `tail`, `send`) with the tmux implementation
+  (`tmux_capture_screen` for the recheck, judged by the existing
+  `detect_agent_activity`; `capture-pane -p -J -S -N` through
+  `run_command_with_output_limit` for `read`; `tmux_send_input`);
+  `run_agents_cli` entry. tmux is found on the caller's own `PATH` (the
+  dispatch runs before `configure_command_path`, like `knowledge`); when it is
+  missing the exit-1 message carries the OS error.
 - `src/app/agent_snapshot.rs`: `OperonApp::agent_snapshot()` from
   `self.store` and `session_status_kind_for`; `track_agent_snapshot(now)`
-  called from `logic`, comparing the serialised content (without the time)
-  to the last written and handing a due write to `thread::spawn` with
-  `write_file_atomically`; `on_exit` removes the file.
+  called from `logic`, at most once a second, comparing the serialised content
+  (without the time) to the last written and sending a due write over a
+  channel to one lazily started writer thread (`write_file_atomically`);
+  `on_exit` sends the removal, drops the sender, and joins the thread, so the
+  removal is the last thing done to the file. The file lives in the
+  per-user application-support directory beside the store, like the hook
+  socket.
 - `src/config.rs`: `AGENTS_CLI_SUBCOMMAND`, `AGENTS_SNAPSHOT_FILE`, the
   interval, heartbeat, staleness, line, text, and timeout ceilings.
 - `src/main.rs`: dispatch beside `knowledge`.
@@ -127,6 +154,7 @@ knowledge CLI (157) is the precedent for a windowless subcommand.
 
 - A request socket into the app (Herdr's model): more moving parts in the
   draw-adjacent thread; the snapshot plus direct tmux needs no app round trip.
-- Reading the screen in the CLI to judge state: the app already merges hook
-  reports with the screen; a second judge would disagree with the window.
+- The CLI judging state from the screen on its own: the app already merges
+  hook reports with the screen. The CLI never overrides the app's state; its
+  screen recheck (R7) can only withhold a send.
 - Spawning sessions now: needs the app to create records; separate change.

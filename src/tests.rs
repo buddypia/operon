@@ -90481,3 +90481,852 @@ pub(crate) fn cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation() {
     );
     fs::remove_dir_all(&root).ok();
 }
+
+// ---- change 309: `Operon agents list|read|send|wait` ----
+
+/// A scripted world for `agents_cli`: snapshots handed out one per look (the
+/// last repeats), a clock that moves a second per pause, and every terminal
+/// call recorded.
+struct Agents309Host {
+    snapshots: Vec<Option<AgentSnapshot>>,
+    looks: usize,
+    clock: u64,
+    screen: Result<String, String>,
+    tail: Result<String, String>,
+    send_fails: Option<String>,
+    sent: Vec<(String, String)>,
+    tails: Vec<(String, usize)>,
+    screens: usize,
+}
+
+impl Agents309Host {
+    fn new(snapshot: Option<AgentSnapshot>) -> Self {
+        Self {
+            snapshots: vec![snapshot],
+            looks: 0,
+            clock: 1_000,
+            screen: Ok("✻ Crunched for 21s\n❯\n? for shortcuts".to_owned()),
+            tail: Ok(String::new()),
+            send_fails: None,
+            sent: Vec::new(),
+            tails: Vec::new(),
+            screens: 0,
+        }
+    }
+}
+
+impl AgentHost for Agents309Host {
+    fn snapshot(&mut self) -> Option<AgentSnapshot> {
+        let index = self.looks.min(self.snapshots.len() - 1);
+        self.looks += 1;
+        self.snapshots[index].clone().map(|mut snapshot| {
+            snapshot.written_at = self.clock;
+            snapshot
+        })
+    }
+    fn now(&mut self) -> u64 {
+        self.clock
+    }
+    fn pause(&mut self) {
+        self.clock += 1;
+    }
+    fn visible_screen(&mut self, _tmux_name: &str) -> Result<String> {
+        self.screens += 1;
+        self.screen.clone().map_err(|error| anyhow!(error))
+    }
+    fn tail(&mut self, tmux_name: &str, lines: usize) -> Result<String> {
+        self.tails.push((tmux_name.to_owned(), lines));
+        self.tail.clone().map_err(|error| anyhow!(error))
+    }
+    fn send(&mut self, tmux_name: &str, text: &str) -> Result<()> {
+        if let Some(error) = &self.send_fails {
+            return Err(anyhow!(error.clone()));
+        }
+        self.sent.push((tmux_name.to_owned(), text.to_owned()));
+        Ok(())
+    }
+}
+
+/// Project A at `/work/a` with sessions me (idle), peer (idle), busy
+/// (working); project B at `/work/b` with one idle session.
+fn agents_309_world() -> (AgentSnapshot, [Uuid; 4]) {
+    let a = Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000000").unwrap();
+    let b = Uuid::parse_str("bbbbbbbb-0000-0000-0000-000000000000").unwrap();
+    let me = Uuid::parse_str("11110000-0000-0000-0000-000000000001").unwrap();
+    let peer = Uuid::parse_str("22220000-0000-0000-0000-000000000002").unwrap();
+    let busy = Uuid::parse_str("33330000-0000-0000-0000-000000000003").unwrap();
+    let other = Uuid::parse_str("44440000-0000-0000-0000-000000000004").unwrap();
+    let entry = |id: Uuid, project: Uuid, name: &str, state: &str| AgentEntry {
+        id,
+        project_id: project,
+        name: name.to_owned(),
+        agent: "claude".to_owned(),
+        branch: Some(format!("feature/{name}")),
+        folder: PathBuf::from("/work/a"),
+        tmux_name: managed_tmux_name(id),
+        state: state.to_owned(),
+    };
+    let snapshot = AgentSnapshot {
+        written_at: 0,
+        projects: vec![
+            AgentProject {
+                id: a,
+                name: "A".into(),
+                path: PathBuf::from("/work/a"),
+            },
+            AgentProject {
+                id: b,
+                name: "B".into(),
+                path: PathBuf::from("/work/b"),
+            },
+        ],
+        sessions: vec![
+            entry(me, a, "me", "idle"),
+            entry(peer, a, "peer", "idle"),
+            entry(busy, a, "busy", "working"),
+            entry(other, b, "other", "idle"),
+        ],
+    };
+    (snapshot, [me, peer, busy, other])
+}
+
+fn agents_309_caller(me: Uuid) -> AgentCaller {
+    AgentCaller {
+        tmux_name: Some(managed_tmux_name(me)),
+        directory: PathBuf::from("/nowhere"),
+    }
+}
+
+fn agents_309_run(
+    host: &mut Agents309Host,
+    caller: &AgentCaller,
+    arguments: &[&str],
+) -> CliOutcome {
+    let arguments: Vec<String> = arguments.iter().map(|word| (*word).to_owned()).collect();
+    agents_cli(&arguments, caller, host)
+}
+
+#[test]
+fn agents_309_snapshot_names_each_live_session_with_its_state() {
+    let (root, mut app, first, second) = broadcast_282_app("agents-309-snapshot");
+    working_278_settle(&mut app, second, AgentActivity::Working);
+    let snapshot = app.agent_snapshot(77);
+    assert_eq!(snapshot.written_at, 77);
+    assert_eq!(snapshot.projects.len(), app.store.projects.len());
+    let state = |id: Uuid| {
+        snapshot
+            .sessions
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.state.clone())
+    };
+    assert_eq!(state(first).as_deref(), Some(AGENT_STATE_IDLE));
+    assert_eq!(state(second).as_deref(), Some(AGENT_STATE_WORKING));
+    let entry = snapshot
+        .sessions
+        .iter()
+        .find(|entry| entry.id == first)
+        .unwrap();
+    let session = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == first)
+        .unwrap();
+    assert_eq!(entry.tmux_name, session.tmux_name);
+    assert_eq!(entry.project_id, session.project_id);
+    // A finished session belongs to history, not to the workspace.
+    app.store
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == first)
+        .unwrap()
+        .status = SessionStatus::Exited;
+    assert!(app
+        .agent_snapshot(78)
+        .sessions
+        .iter()
+        .all(|entry| entry.id != first));
+    // The round trip: what the window writes, under the name it writes it,
+    // is what the command reads.
+    let path = agents_snapshot_path(&app.data_file);
+    assert_eq!(path.file_name().unwrap(), AGENTS_SNAPSHOT_FILE);
+    fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    assert_eq!(read_agent_snapshot(&path), Some(snapshot));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn agents_309_snapshot_is_due_on_change_or_heartbeat_only() {
+    // The heartbeat is well inside the staleness the command allows.
+    assert!(AGENTS_SNAPSHOT_HEARTBEAT_SECONDS * 2 < AGENTS_SNAPSHOT_STALE_SECONDS);
+    // `logic` hands the writer a snapshot, nothing within a second, nothing
+    // while it is unchanged, and the next one once it changes.
+    let (root, mut app, _, _) = broadcast_282_app("agents-309-due");
+    let start = Instant::now();
+    app.track_agent_snapshot(start);
+    let written = app.agent_snapshot_written.clone();
+    assert!(written.is_some());
+    assert!(
+        !written.as_deref().unwrap().contains("\"written_at\":1"),
+        "比較に時刻が入っています"
+    );
+    // An unchanged snapshot is not written again: the file keeps its inode
+    // (every write is a rename over it).
+    use std::os::unix::fs::MetadataExt;
+    let path = agents_snapshot_path(&app.data_file);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !path.exists() {
+        assert!(
+            Instant::now() < deadline,
+            "スナップショットが書き出されません"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let inode = fs::metadata(&path).unwrap().ino();
+    app.track_agent_snapshot(start + Duration::from_secs(AGENTS_SNAPSHOT_CHECK_SECONDS));
+    assert_eq!(app.agent_snapshot_written, written);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(
+        fs::metadata(&path).unwrap().ino(),
+        inode,
+        "変わっていないスナップショットを書き直しました"
+    );
+    let first = app.store.sessions[0].id;
+    working_278_settle(&mut app, first, AgentActivity::Working);
+    app.track_agent_snapshot(
+        start + Duration::from_secs(AGENTS_SNAPSHOT_CHECK_SECONDS) + Duration::from_millis(500),
+    );
+    assert_eq!(
+        app.agent_snapshot_written, written,
+        "1 秒以内に再確認しました"
+    );
+    app.track_agent_snapshot(start + Duration::from_secs(AGENTS_SNAPSHOT_CHECK_SECONDS * 2));
+    assert_ne!(
+        app.agent_snapshot_written, written,
+        "変化が書き出されません"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while read_agent_snapshot(&path).is_none_or(|snapshot| {
+        snapshot
+            .sessions
+            .iter()
+            .all(|entry| entry.state != AGENT_STATE_WORKING)
+    }) {
+        assert!(
+            Instant::now() < deadline,
+            "書き出されたスナップショットに変化がありません"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    app.finish_agent_snapshot();
+    assert!(!path.exists());
+    // The window looks every frame and removes the file as it quits.
+    let wiring = include_str!("app.rs");
+    assert!(wiring.contains("        self.track_agent_snapshot(Instant::now());\n"));
+    let on_exit = &wiring[wiring.find("fn on_exit").unwrap()..];
+    let on_exit = &on_exit[..on_exit.find("\n    }\n").unwrap()];
+    assert!(on_exit.contains("self.finish_agent_snapshot();"));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn agents_309_writer_applies_in_order_and_removal_is_last() {
+    use crate::app::agent_snapshot::{
+        apply_agent_snapshot_writes, AgentSnapshotWrite, AgentSnapshotWriter,
+    };
+    let root = temporary_directory("agents-309-writer");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join(AGENTS_SNAPSHOT_FILE);
+    let (base, _) = agents_309_world();
+    let at = |written_at: u64| AgentSnapshot {
+        written_at,
+        ..base.clone()
+    };
+    let long = Duration::from_secs(60);
+    let mut clock = || 0;
+    let (sender, receiver) = std::sync::mpsc::channel();
+    sender.send(AgentSnapshotWrite::Write(at(1))).unwrap();
+    sender.send(AgentSnapshotWrite::Write(at(2))).unwrap();
+    drop(sender);
+    apply_agent_snapshot_writes(&path, receiver, long, &mut clock);
+    assert_eq!(read_agent_snapshot(&path).unwrap().written_at, 2);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    sender.send(AgentSnapshotWrite::Write(at(3))).unwrap();
+    sender.send(AgentSnapshotWrite::Remove).unwrap();
+    drop(sender);
+    apply_agent_snapshot_writes(&path, receiver, long, &mut clock);
+    assert!(!path.exists());
+    // The heartbeat rewrites the last snapshot under a new time, and stops
+    // once the file has been removed.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let beating = path.clone();
+    let heart = thread::spawn(move || {
+        let mut tick = 100;
+        let mut clock = move || {
+            tick += 1;
+            tick
+        };
+        apply_agent_snapshot_writes(&beating, receiver, Duration::from_millis(20), &mut clock);
+    });
+    sender.send(AgentSnapshotWrite::Write(at(4))).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while read_agent_snapshot(&path).is_none_or(|snapshot| snapshot.written_at <= 100) {
+        assert!(
+            Instant::now() < deadline,
+            "ハートビートが時刻を更新しません"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(read_agent_snapshot(&path).unwrap().sessions, base.sessions);
+    sender.send(AgentSnapshotWrite::Remove).unwrap();
+    thread::sleep(Duration::from_millis(120));
+    assert!(
+        !path.exists(),
+        "削除の後にハートビートがファイルを戻しました"
+    );
+    drop(sender);
+    heart.join().unwrap();
+    // Through the writer itself: writes queued before quitting cannot bring
+    // the file back after the removal.
+    let writer = AgentSnapshotWriter::start(path.clone());
+    for round in 0..20 {
+        writer.write(at(round));
+    }
+    writer.finish();
+    assert!(!path.exists());
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn agents_309_caller_is_found_by_session_then_folder() {
+    let (snapshot, [me, peer, _, other]) = agents_309_world();
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    // By its own session, wherever it stands.
+    let listed = agents_309_run(&mut host, &agents_309_caller(me), &["list", "--json"]);
+    assert_eq!(listed.code, 0, "{}", listed.stderr);
+    assert!(listed.stdout.contains("\"project\":\"A\""));
+    // A session the snapshot does not know: the folder decides, and the
+    // nearest registered project wins.
+    let root = temporary_directory("agents-309-caller");
+    let outer = root.join("outer");
+    let inner = outer.join("inner");
+    fs::create_dir_all(inner.join("src")).unwrap();
+    let mut nested = snapshot.clone();
+    nested.projects[0].path = outer.clone();
+    nested.projects[1].path = inner.clone();
+    let mut host = Agents309Host::new(Some(nested));
+    let caller = AgentCaller {
+        tmux_name: Some("operon-gone0000".into()),
+        directory: inner.join("src"),
+    };
+    let listed = agents_309_run(&mut host, &caller, &["list"]);
+    assert_eq!(listed.code, 0, "{}", listed.stderr);
+    assert!(listed.stdout.contains(&other.simple().to_string()[..8]));
+    assert!(!listed.stdout.contains(&peer.simple().to_string()[..8]));
+    let caller = AgentCaller {
+        tmux_name: None,
+        directory: outer.clone(),
+    };
+    let listed = agents_309_run(&mut host, &caller, &["list"]);
+    assert!(listed.stdout.contains(&peer.simple().to_string()[..8]));
+    // Neither: refused, naming where it stood.
+    let caller = AgentCaller {
+        tmux_name: None,
+        directory: root.clone(),
+    };
+    let refused = agents_309_run(&mut host, &caller, &["list"]);
+    assert_eq!(refused.code, AGENTS_EXIT_TARGET);
+    assert!(refused
+        .stderr
+        .contains("登録されたプロジェクトではありません"));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn agents_309_stale_or_missing_snapshot_says_operon_is_not_running() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let peer8 = peer.simple().to_string()[..8].to_owned();
+    for verb in [
+        vec!["list"],
+        vec!["read", &peer8],
+        vec!["send", &peer8, "x"],
+        vec!["wait", &peer8],
+    ] {
+        let mut host = Agents309Host::new(None);
+        let outcome = agents_309_run(&mut host, &caller, &verb);
+        assert_eq!(outcome.code, AGENTS_EXIT_NOT_RUNNING, "{verb:?}");
+        assert!(outcome.stderr.contains("Operon が起動していない"));
+        assert!(host.sent.is_empty());
+    }
+    // Old: the clock is ahead of the time it was written.
+    struct Old(Agents309Host);
+    impl AgentHost for Old {
+        fn snapshot(&mut self) -> Option<AgentSnapshot> {
+            self.0.snapshot().map(|mut snapshot| {
+                snapshot.written_at -= AGENTS_SNAPSHOT_STALE_SECONDS + 1;
+                snapshot
+            })
+        }
+        fn now(&mut self) -> u64 {
+            self.0.now()
+        }
+        fn pause(&mut self) {
+            self.0.pause()
+        }
+        fn visible_screen(&mut self, name: &str) -> Result<String> {
+            self.0.visible_screen(name)
+        }
+        fn tail(&mut self, name: &str, lines: usize) -> Result<String> {
+            self.0.tail(name, lines)
+        }
+        fn send(&mut self, name: &str, text: &str) -> Result<()> {
+            self.0.send(name, text)
+        }
+    }
+    let mut old = Old(Agents309Host::new(Some(snapshot.clone())));
+    let arguments = vec!["send".to_owned(), peer8.clone(), "x".to_owned()];
+    let outcome = agents_cli(&arguments, &caller, &mut old);
+    assert_eq!(outcome.code, AGENTS_EXIT_NOT_RUNNING);
+    assert!(old.0.sent.is_empty());
+    // Exactly at the limit it still speaks for a running Operon.
+    struct Edge(Agents309Host);
+    impl AgentHost for Edge {
+        fn snapshot(&mut self) -> Option<AgentSnapshot> {
+            self.0.snapshot().map(|mut snapshot| {
+                snapshot.written_at -= AGENTS_SNAPSHOT_STALE_SECONDS;
+                snapshot
+            })
+        }
+        fn now(&mut self) -> u64 {
+            self.0.now()
+        }
+        fn pause(&mut self) {
+            self.0.pause()
+        }
+        fn visible_screen(&mut self, name: &str) -> Result<String> {
+            self.0.visible_screen(name)
+        }
+        fn tail(&mut self, name: &str, lines: usize) -> Result<String> {
+            self.0.tail(name, lines)
+        }
+        fn send(&mut self, name: &str, text: &str) -> Result<()> {
+            self.0.send(name, text)
+        }
+    }
+    let mut edge = Edge(Agents309Host::new(Some(snapshot)));
+    assert_eq!(agents_cli(&["list".to_owned()], &caller, &mut edge).code, 0);
+    // A file too large, or not a snapshot, is no snapshot.
+    let root = temporary_directory("agents-309-file");
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join(AGENTS_SNAPSHOT_FILE);
+    assert_eq!(read_agent_snapshot(&path), None);
+    fs::write(&path, b"{not json").unwrap();
+    assert_eq!(read_agent_snapshot(&path), None);
+    let (snapshot, _) = agents_309_world();
+    let mut large = serde_json::to_vec(&snapshot).unwrap();
+    large.truncate(large.len() - 1);
+    large.extend(std::iter::repeat_n(
+        b' ',
+        AGENTS_SNAPSHOT_MAX_BYTES as usize,
+    ));
+    large.push(b'}');
+    fs::write(&path, &large).unwrap();
+    assert_eq!(read_agent_snapshot(&path), None);
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn agents_309_list_shows_only_the_callers_project() {
+    let (snapshot, [me, peer, busy, other]) = agents_309_world();
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    let listed = agents_309_run(&mut host, &agents_309_caller(me), &["list"]);
+    assert_eq!(listed.code, 0);
+    let short = |id: Uuid| id.simple().to_string()[..8].to_owned();
+    for id in [me, peer, busy] {
+        assert!(listed.stdout.contains(&short(id)), "{}", listed.stdout);
+    }
+    assert!(!listed.stdout.contains(&short(other)));
+    let own = listed
+        .stdout
+        .lines()
+        .find(|line| line.contains(&short(me)))
+        .unwrap();
+    assert!(own.ends_with(" (自分)"), "{own}");
+    assert!(listed
+        .stdout
+        .lines()
+        .any(|line| line.contains(&short(busy)) && line.contains("working")));
+    let json: serde_json::Value = serde_json::from_str(
+        &agents_309_run(&mut host, &agents_309_caller(me), &["list", "--json"]).stdout,
+    )
+    .unwrap();
+    let rows = json["sessions"].as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.iter().filter(|row| row["self"] == true).count(), 1);
+    // Another program's text cannot redraw the caller's terminal or forge a row.
+    let mut forged = snapshot.clone();
+    forged.sessions[1].name = "peer\u{1b}[2J\r\n00000000  idle  fake".into();
+    let mut host_forged = Agents309Host::new(Some(forged));
+    let listed = agents_309_run(&mut host_forged, &agents_309_caller(me), &["list"]);
+    assert_eq!(listed.stdout.lines().count(), 3, "{}", listed.stdout);
+    assert!(!listed.stdout.contains('\u{1b}') && !listed.stdout.contains('\r'));
+    // Alone in its project: says so.
+    let mut alone = snapshot;
+    alone
+        .sessions
+        .retain(|entry| entry.id == me || entry.id == other);
+    let mut host = Agents309Host::new(Some(alone));
+    let listed = agents_309_run(&mut host, &agents_309_caller(me), &["list"]);
+    assert!(listed
+        .stdout
+        .contains("このプロジェクトに他のセッションはありません。"));
+    assert_eq!(
+        agents_309_run(&mut host, &agents_309_caller(me), &["list", "x"]).code,
+        AGENTS_EXIT_USAGE
+    );
+}
+
+#[test]
+fn agents_309_target_prefix_must_name_exactly_one_session() {
+    let (mut snapshot, [me, peer, _, other]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    let read = |host: &mut Agents309Host, id: &str| agents_309_run(host, &caller, &["read", id]);
+    let short = read(&mut host, "222");
+    assert_eq!(short.code, AGENTS_EXIT_TARGET);
+    assert!(short.stderr.contains("4 文字以上"));
+    let unknown = read(&mut host, "9999");
+    assert_eq!(unknown.code, AGENTS_EXIT_TARGET);
+    assert!(unknown.stderr.contains("一致するセッションがありません"));
+    // Another project's session is not a target, even by its full id.
+    let elsewhere = read(&mut host, &other.to_string());
+    assert_eq!(elsewhere.code, AGENTS_EXIT_TARGET);
+    assert!(host.tails.is_empty());
+    // A full hyphenated id and a prefix both name the peer.
+    assert_eq!(read(&mut host, &peer.to_string()).code, 0);
+    assert_eq!(read(&mut host, "2222").code, 0);
+    assert_eq!(host.tails.last().unwrap().0, managed_tmux_name(peer));
+    // Ambiguous: refused, listing both.
+    let mut twin = snapshot.sessions[1].clone();
+    twin.id = Uuid::parse_str("22229999-0000-0000-0000-000000000009").unwrap();
+    twin.tmux_name = managed_tmux_name(twin.id);
+    snapshot.sessions.push(twin);
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    let ambiguous = read(&mut host, "2222");
+    assert_eq!(ambiguous.code, AGENTS_EXIT_TARGET);
+    assert!(ambiguous.stderr.contains("22220000") && ambiguous.stderr.contains("22229999"));
+    // A tmux name the gate does not admit never reaches tmux.
+    snapshot.sessions[1].tmux_name = "victim; kill-server".into();
+    let mut host = Agents309Host::new(Some(snapshot));
+    let unsafe_name = read(&mut host, "22220000");
+    assert_eq!(unsafe_name.code, AGENTS_EXIT_TARGET);
+    assert!(host.tails.is_empty());
+}
+
+#[test]
+fn agents_309_send_types_only_into_an_idle_agent_of_the_same_project() {
+    let (snapshot, [me, peer, busy, other]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let mut host = Agents309Host::new(Some(snapshot));
+    let short = |id: Uuid| id.simple().to_string()[..8].to_owned();
+    let sent = agents_309_run(
+        &mut host,
+        &caller,
+        &["send", &short(peer), "レビューして", "ください;"],
+    );
+    assert_eq!(sent.code, 0, "{}", sent.stderr);
+    assert!(sent.stdout.contains("peer に送信しました。"));
+    assert_eq!(
+        host.sent,
+        vec![(managed_tmux_name(peer), "レビューして ください;".to_owned())]
+    );
+    let working = agents_309_run(&mut host, &caller, &["send", &short(busy), "x"]);
+    assert_eq!(working.code, AGENTS_EXIT_BUSY);
+    assert!(working
+        .stderr
+        .contains("busy は作業中のため送信しません（状態: working）。"));
+    let own = agents_309_run(&mut host, &caller, &["send", &short(me), "x"]);
+    assert_eq!(own.code, AGENTS_EXIT_TARGET);
+    assert!(own.stderr.contains("自分自身には送信できません。"));
+    let elsewhere = agents_309_run(&mut host, &caller, &["send", &short(other), "x"]);
+    assert_eq!(elsewhere.code, AGENTS_EXIT_TARGET);
+    assert_eq!(host.sent.len(), 1, "送ってはいけない相手に送りました");
+}
+
+#[test]
+fn agents_309_send_rechecks_the_screen_before_typing() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let peer8 = peer.simple().to_string()[..8].to_owned();
+    for (screen, state) in [
+        ("╭───╮\n│ > \n╰───╯\n  esc to interrupt", "working"),
+        ("  Do you want to proceed?\n❯ 1. Yes\n  2. No", "waiting"),
+    ] {
+        let mut host = Agents309Host::new(Some(snapshot.clone()));
+        host.screen = Ok(screen.to_owned());
+        let outcome = agents_309_run(&mut host, &caller, &["send", &peer8, "x"]);
+        assert_eq!(outcome.code, AGENTS_EXIT_BUSY, "{screen}");
+        assert!(outcome.stderr.contains(&format!("状態: {state}")));
+        assert!(host.sent.is_empty());
+        assert_eq!(host.screens, 1);
+    }
+    let mut host = Agents309Host::new(Some(snapshot));
+    host.screen = Err("can't find pane".into());
+    let outcome = agents_309_run(&mut host, &caller, &["send", &peer8, "x"]);
+    assert_eq!(outcome.code, AGENTS_EXIT_TERMINAL);
+    assert!(host.sent.is_empty());
+}
+
+#[test]
+fn agents_309_send_refuses_empty_long_or_control_text() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let peer8 = peer.simple().to_string()[..8].to_owned();
+    let long = "あ".repeat(AGENTS_SEND_MAX_CHARS + 1);
+    let fits = "あ".repeat(AGENTS_SEND_MAX_CHARS);
+    for (text, needle) in [
+        ("   ", "送信する内容が空です。"),
+        (long.as_str(), "長すぎます"),
+        ("one\ntwo", "制御文字"),
+        ("tab\there", "制御文字"),
+        ("\u{1b}[2J", "制御文字"),
+        ("stop\u{3}", "制御文字"),
+    ] {
+        let mut host = Agents309Host::new(Some(snapshot.clone()));
+        let outcome = agents_309_run(&mut host, &caller, &["send", &peer8, text]);
+        assert_eq!(outcome.code, AGENTS_EXIT_USAGE, "{text:?}");
+        assert!(
+            outcome.stderr.contains(needle),
+            "{text:?}: {}",
+            outcome.stderr
+        );
+        assert!(host.sent.is_empty());
+    }
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["send", &peer8, &fits]).code,
+        0
+    );
+    let mut host = Agents309Host::new(Some(snapshot));
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["send", &peer8]).code,
+        AGENTS_EXIT_USAGE
+    );
+}
+
+#[test]
+fn agents_309_read_returns_the_tail_within_its_ceiling() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let peer8 = peer.simple().to_string()[..8].to_owned();
+    let mut host = Agents309Host::new(Some(snapshot));
+    host.tail = Ok((1..=300)
+        .map(|n| format!("\u{1b}[31mline {n}\u{1b}[0m\n"))
+        .collect());
+    let read = agents_309_run(&mut host, &caller, &["read", &peer8]);
+    assert_eq!(read.code, 0);
+    assert_eq!(host.tails.last().unwrap().1, AGENTS_READ_LINES_DEFAULT);
+    let lines: Vec<&str> = read.stdout.lines().collect();
+    assert_eq!(lines.len(), AGENTS_READ_LINES_DEFAULT);
+    assert_eq!(lines.last(), Some(&"line 300"));
+    assert!(!read.stdout.contains('\u{1b}'));
+    let five = agents_309_run(&mut host, &caller, &["read", &peer8, "--lines", "5"]);
+    assert_eq!(
+        five.stdout,
+        "line 296\nline 297\nline 298\nline 299\nline 300\n"
+    );
+    let max = AGENTS_READ_LINES_MAX.to_string();
+    let over = (AGENTS_READ_LINES_MAX + 1).to_string();
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["read", &peer8, "--lines", &max]).code,
+        0
+    );
+    assert_eq!(host.tails.last().unwrap().1, AGENTS_READ_LINES_MAX);
+    for bad in ["0", over.as_str(), "x"] {
+        let outcome = agents_309_run(&mut host, &caller, &["read", &peer8, "--lines", bad]);
+        assert_eq!(outcome.code, AGENTS_EXIT_USAGE, "{bad}");
+    }
+    let mut raw = Agents309Host::new(Some(agents_309_world().0));
+    raw.tail = Ok("progress 10%\rprogress 99%\u{7}\n\tindented\n".into());
+    let controls = agents_309_run(&mut raw, &caller, &["read", &peer8]);
+    assert_eq!(controls.stdout, "progress 10%progress 99%\n\tindented\n");
+}
+
+#[test]
+fn agents_309_tmux_failure_is_reported_with_its_reason() {
+    let (snapshot, [me, peer, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let peer8 = peer.simple().to_string()[..8].to_owned();
+    let mut host = Agents309Host::new(Some(snapshot.clone()));
+    host.tail = Err("no server running on /private/tmp/tmux-501/default".into());
+    let read = agents_309_run(&mut host, &caller, &["read", &peer8]);
+    assert_eq!(read.code, AGENTS_EXIT_TERMINAL);
+    assert!(read
+        .stderr
+        .contains("ターミナルを操作できませんでした: no server running"));
+    let mut host = Agents309Host::new(Some(snapshot));
+    host.send_fails = Some("can't find session".into());
+    let sent = agents_309_run(&mut host, &caller, &["send", &peer8, "x"]);
+    assert_eq!(sent.code, AGENTS_EXIT_TERMINAL);
+    assert!(sent.stderr.contains("can't find session"));
+}
+
+#[test]
+fn agents_309_wait_returns_when_the_state_arrives_or_times_out() {
+    let (snapshot, [me, _, busy, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let busy8 = busy.simple().to_string()[..8].to_owned();
+    let with_state = |state: &str| {
+        let mut next = snapshot.clone();
+        next.sessions[2].state = state.to_owned();
+        Some(next)
+    };
+    // Working, working, then idle: returns on the third look.
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![
+        with_state("working"),
+        with_state("working"),
+        with_state("idle"),
+    ];
+    let outcome = agents_309_run(&mut host, &caller, &["wait", &busy8]);
+    assert_eq!(outcome.code, 0, "{}", outcome.stderr);
+    assert!(outcome.stdout.contains("busy は idle になりました。"));
+    assert_eq!(host.clock, 1_002);
+    // Waiting on a prompt counts for `either` and `waiting`, not for `idle`.
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![with_state("working"), with_state("waiting")];
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["wait", &busy8, "--until", "waiting"]).code,
+        0
+    );
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![with_state("working"), with_state("waiting")];
+    let timed = agents_309_run(
+        &mut host,
+        &caller,
+        &["wait", &busy8, "--until", "idle", "--timeout", "5"],
+    );
+    assert_eq!(timed.code, AGENTS_EXIT_TIMEOUT);
+    assert!(timed
+        .stderr
+        .contains("5 秒待ちましたが busy は waiting のままです。"));
+    assert_eq!(host.clock, 1_005);
+    // `either` is the default and a prompt satisfies it.
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![with_state("working"), with_state("waiting")];
+    let prompted = agents_309_run(&mut host, &caller, &["wait", &busy8]);
+    assert_eq!(prompted.code, 0);
+    assert!(prompted.stdout.contains("busy は waiting になりました。"));
+    // Right after a send the snapshot still says idle: the wait sees the turn
+    // start and returns when it ends, not at once.
+    let mut host = Agents309Host::new(with_state("idle"));
+    host.snapshots = vec![
+        with_state("idle"),
+        with_state("idle"),
+        with_state("working"),
+        with_state("working"),
+        with_state("idle"),
+    ];
+    let after_send = agents_309_run(&mut host, &caller, &["wait", &busy8]);
+    assert_eq!(after_send.code, 0);
+    assert_eq!(host.clock, 1_004, "ターンの開始を待たずに戻りました");
+    // Idle and nothing starts: accepted once it has held for the settle time.
+    let mut host = Agents309Host::new(with_state("idle"));
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["wait", &busy8]).code,
+        0
+    );
+    assert_eq!(host.clock, 1_000 + AGENTS_WAIT_SETTLE_SECONDS);
+    // A timeout shorter than that accepts a state that held all along.
+    let mut host = Agents309Host::new(with_state("idle"));
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["wait", &busy8, "--timeout", "2"]).code,
+        0
+    );
+    assert_eq!(host.clock, 1_002);
+    // Gone from the snapshot, or failed: ended.
+    let mut gone = snapshot.clone();
+    gone.sessions.remove(2);
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![with_state("working"), Some(gone)];
+    let ended = agents_309_run(&mut host, &caller, &["wait", &busy8]);
+    assert_eq!(ended.code, AGENTS_EXIT_TARGET);
+    assert!(ended.stderr.contains("busy は終了しました。"));
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![with_state("working"), with_state("failed")];
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["wait", &busy8]).code,
+        AGENTS_EXIT_TARGET
+    );
+    // Operon quits mid-wait.
+    let mut host = Agents309Host::new(with_state("working"));
+    host.snapshots = vec![with_state("working"), None];
+    assert_eq!(
+        agents_309_run(&mut host, &caller, &["wait", &busy8]).code,
+        AGENTS_EXIT_NOT_RUNNING
+    );
+}
+
+#[test]
+fn agents_309_wait_options_are_checked() {
+    let (snapshot, [me, _, busy, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    let busy8 = busy.simple().to_string()[..8].to_owned();
+    let over = (AGENTS_WAIT_SECONDS_MAX + 1).to_string();
+    for bad in [
+        vec!["wait"],
+        vec!["wait", &busy8, "--until", "done"],
+        vec!["wait", &busy8, "--timeout", "0"],
+        vec!["wait", &busy8, "--timeout", &over],
+        vec!["wait", &busy8, "--timeout"],
+        vec!["wait", &busy8, "--other", "1"],
+    ] {
+        let mut host = Agents309Host::new(Some(snapshot.clone()));
+        assert_eq!(
+            agents_309_run(&mut host, &caller, &bad).code,
+            AGENTS_EXIT_USAGE,
+            "{bad:?}"
+        );
+        assert_eq!(host.clock, 1_000, "{bad:?}: 待ち始めました");
+    }
+    let max = AGENTS_WAIT_SECONDS_MAX.to_string();
+    let mut host = Agents309Host::new(Some(snapshot));
+    let outcome = agents_309_run(&mut host, &caller, &["wait", &busy8, "--timeout", &max]);
+    assert_eq!(outcome.code, AGENTS_EXIT_TIMEOUT);
+    assert_eq!(host.clock, 1_000 + AGENTS_WAIT_SECONDS_MAX);
+}
+
+#[test]
+fn agents_309_usage_names_every_verb() {
+    let (snapshot, [me, _, _, _]) = agents_309_world();
+    let caller = agents_309_caller(me);
+    for arguments in [vec![], vec!["help"]] {
+        let mut host = Agents309Host::new(None);
+        let outcome = agents_309_run(&mut host, &caller, &arguments);
+        assert_eq!(outcome.code, 0);
+        for verb in [
+            "list",
+            "read",
+            "send",
+            "wait",
+            "--json",
+            "--lines",
+            "--until",
+            "--timeout",
+        ] {
+            assert!(outcome.stdout.contains(verb), "{verb}");
+        }
+    }
+    let mut host = Agents309Host::new(Some(snapshot));
+    let unknown = agents_309_run(&mut host, &caller, &["spawn"]);
+    assert_eq!(unknown.code, AGENTS_EXIT_USAGE);
+    assert!(unknown.stderr.contains("使い方"));
+    assert_eq!(AGENTS_CLI_SUBCOMMAND, "agents");
+    let main = include_str!("main.rs");
+    assert!(
+        main.contains("Some(AGENTS_CLI_SUBCOMMAND)")
+            && main.contains("run_agents_cli(&arguments[1..])")
+    );
+}

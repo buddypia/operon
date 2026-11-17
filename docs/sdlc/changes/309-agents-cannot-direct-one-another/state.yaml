@@ -10,22 +10,22 @@
 
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
-  questions: "0 7"
+  questions: "1 7"
   autonomy: "supervised"
   risk: "medium"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 
-resume: "Write spec.md and plan.md, get them approved, then build."
+resume: "Push the branch, let CI run the verification, then land and package."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked agents_309_"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast; cargo test --locked agents_309_: 15 passed"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7989 after trimming CLAUDE.md for the two map lines"
   release-binary: "machine pending yes: src/main.rs, src/app.rs, src/tmux/control.rs change; package and ship from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations.py"
+  guards-verified-by-mutation: "machine passed 33 of 34 in the sweep, the 34th (unchanged-rewritten-every-check) caught by hand after its test was added:  python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

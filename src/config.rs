@@ -615,6 +615,32 @@ pub(crate) const KNOWLEDGE_EMBED_GOLDEN_SUBCOMMAND: &str = "embed-golden";
 pub(crate) const KNOWLEDGE_SEARCH_SUBCOMMAND: &str = "search";
 /// `Operon knowledge brief`, which the SessionStart hook runs (change 258).
 pub(crate) const KNOWLEDGE_BRIEF_SUBCOMMAND: &str = "brief";
+/// `Operon agents list|read|send|wait`: what one agent may ask about, and
+/// type into, the other agents of its project (change 309).
+pub(crate) const AGENTS_CLI_SUBCOMMAND: &str = "agents";
+/// The snapshot the window writes and that subcommand reads, beside the store.
+pub(crate) const AGENTS_SNAPSHOT_FILE: &str = "agents.json";
+/// How often the window may look at whether the snapshot changed.
+pub(crate) const AGENTS_SNAPSHOT_CHECK_SECONDS: u64 = 1;
+/// How often an unchanged snapshot is written again, so its age says Operon
+/// is still running.
+pub(crate) const AGENTS_SNAPSHOT_HEARTBEAT_SECONDS: u64 = 15;
+/// Older than this, the snapshot speaks for an Operon that is no longer there.
+pub(crate) const AGENTS_SNAPSHOT_STALE_SECONDS: u64 = 60;
+/// The most of a snapshot the command reads before calling it unreadable.
+pub(crate) const AGENTS_SNAPSHOT_MAX_BYTES: u64 = 1024 * 1024;
+/// The shortest id prefix that may name a session.
+pub(crate) const AGENTS_ID_PREFIX_MIN: usize = 4;
+pub(crate) const AGENTS_READ_LINES_DEFAULT: usize = 40;
+pub(crate) const AGENTS_READ_LINES_MAX: usize = 200;
+/// What one `read` capture may return from tmux.
+pub(crate) const AGENTS_READ_MAX_BYTES: usize = 256 * 1024;
+pub(crate) const AGENTS_SEND_MAX_CHARS: usize = 4_000;
+pub(crate) const AGENTS_WAIT_SECONDS_DEFAULT: u64 = 600;
+pub(crate) const AGENTS_WAIT_SECONDS_MAX: u64 = 3_600;
+/// How long `wait` lets a state it started in stand before accepting it: a
+/// turn a `send` just started takes this long, at most, to be reported.
+pub(crate) const AGENTS_WAIT_SETTLE_SECONDS: u64 = 5;
 /// Titles a brief lists at most: pinned, then verified, then freshest.
 pub(crate) const KNOWLEDGE_BRIEF_ENTRIES: usize = 10;
 /// Under Codex's ~2,500-token hook-context cap even at one token per Japanese

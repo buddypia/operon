@@ -1,5 +1,6 @@
 use crate::*;
 
+pub(crate) mod agent_snapshot;
 pub(crate) mod broadcast;
 pub(crate) mod dock_badge;
 mod keymap;
@@ -669,6 +670,11 @@ pub(crate) struct OperonApp {
     pub(crate) working_since: HashMap<Uuid, Instant>,
     /// The waiting count the Dock badge was last set for (change 281).
     pub(crate) dock_badge_shown: usize,
+    /// When `track_agent_snapshot` last looked (change 309).
+    pub(crate) agent_snapshot_checked: Option<Instant>,
+    /// The snapshot content last handed to the writer, without its time.
+    pub(crate) agent_snapshot_written: Option<String>,
+    pub(crate) agent_snapshot_writer: Option<agent_snapshot::AgentSnapshotWriter>,
     /// The sheet that sends one instruction to every idle agent (change 282).
     pub(crate) broadcast_sheet: Option<broadcast::BroadcastSheet>,
     /// The reply being typed on each 要対応 row (change 279); never stored.
@@ -1205,6 +1211,9 @@ impl OperonApp {
             attention_since: HashMap::new(),
             working_since: HashMap::new(),
             dock_badge_shown: 0,
+            agent_snapshot_checked: None,
+            agent_snapshot_written: None,
+            agent_snapshot_writer: None,
             broadcast_sheet: None,
             waiting_reply_drafts: HashMap::new(),
             attention_order: Vec::new(),
@@ -7383,6 +7392,7 @@ impl eframe::App for OperonApp {
         self.terminal_streams.shutdown_all();
         self.save_workspace_layout_if_changed();
         self.stop_model_download_for_exit();
+        self.finish_agent_snapshot();
         release_shared_embedder();
     }
 
@@ -7414,6 +7424,7 @@ impl eframe::App for OperonApp {
         self.track_attention(Instant::now());
         self.track_working(Instant::now());
         self.track_dock_badge();
+        self.track_agent_snapshot(Instant::now());
         if self.last_session_refresh.elapsed() >= SESSION_POLL_INTERVAL {
             self.retry_pending_store();
             self.save_workspace_layout_if_changed();

@@ -163,6 +163,22 @@ Settings. The projects, sessions, and agent output in them are a demo.
 - Recover running tmux sessions if the local index is ever lost.
 - Persist session metadata locally and search sessions across projects.
 
+- **Agents that direct agents.** An agent in one of Operon's sessions can see
+  and steer the others of its project with Operon's own executable, whose path
+  every managed session has in `$OPERON_EXECUTABLE`:
+  `"$OPERON_EXECUTABLE" agents list` names each session and its state
+  (`working`, `waiting`, `idle`, …), `read <ID>` prints the last lines of its
+  screen, `send <ID> <text>` types one line and Enter into it, and
+  `wait <ID>` returns when it has finished its turn or stops on a prompt. A
+  send reaches only a session of the same project whose agent has finished
+  its turn — the screen is checked again just before typing — and never
+  carries a line break or a control character; what was sent is in the
+  target's terminal for you to see. The states come from what the window
+  already shows, written to `agents.json` beside the local index while Operon
+  runs; with Operon closed the command says so. These limits are guardrails,
+  not a security boundary: allowing an agent to run `agents send` lets it
+  prompt the project's other agents with their permissions.
+
 ### Git, diffs, and files
 
 - Inspect working-tree changes, commit history, repository files, skills, and
