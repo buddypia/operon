@@ -2,8 +2,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Write the six unstarted_308_ tests, watch them fail, then build per plan.md."
+resume: "Done. Package from main after landing, then check a Claude Code tab opened without a prompt shows the dot and hovers 未開始, and turns to アイドル after one request."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/tmux/hooks.rs, src/app.rs, src/app/broadcast.rs, src/app/relaunch.rs, src/app/screens.rs, src/ui/widgets.rs, src/glyphs.rs, and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/308-unstarted-session-reads-as-idle/mutations.py"
+  three-gates: "machine passed make q.fast; cargo test --locked unstarted_308_: 6 passed; f308_: 1 passed; status, hook, sidebar, waiting, pinned filters ok"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9907 at diagnose"
+  release-binary: "machine passed required - src/tmux/hooks.rs, src/app.rs, src/app/broadcast.rs, src/app/screens.rs, src/ui/widgets.rs, src/glyphs.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 18 of 18 caught: python3 docs/sdlc/changes/308-unstarted-session-reads-as-idle/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

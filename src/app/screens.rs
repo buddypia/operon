@@ -7103,6 +7103,7 @@ impl OperonApp {
                                                                     session,
                                                                     self.cancellation_pending(*id),
                                                                     self.session_activity_for(*id),
+                                                                    self.awaiting_first_request.contains(id),
                                                                 );
                                                                 ui.label(&view.label);
                                                                 ui.label(self.with_working_time(
@@ -7891,6 +7892,7 @@ impl OperonApp {
                                             session,
                                             self.cancellation_pending(id),
                                             self.session_activity_for(id),
+                                            self.awaiting_first_request.contains(&id),
                                         );
                                         ui.label(&title);
                                         ui.label(&view.label);

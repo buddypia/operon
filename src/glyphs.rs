@@ -83,6 +83,10 @@ pub(crate) const ICON_PENDING: &str = icons::HOURGLASS_MEDIUM;
 /// the size a chip is drawn, which is a smudge rather than a state.
 pub(crate) const ICON_STATUS_RUNNING: &str = icons::ARROWS_CLOCKWISE;
 pub(crate) const ICON_STATUS_IDLE: &str = icons::PAUSE_CIRCLE;
+/// Idle with no request yet (change 308): a ring holding a dot, the chip form
+/// of `StatusMark::Dot`. Its dot is filled and its ring is the enclosure, so
+/// it does not smudge the way the bare `dot` above does.
+pub(crate) const ICON_STATUS_NOT_STARTED: &str = icons::RECORD;
 pub(crate) const ICON_STATUS_STARTING: &str = icons::POWER;
 pub(crate) const ICON_STATUS_QUEUED: &str = icons::PLAY_CIRCLE;
 pub(crate) const ICON_STATUS_DONE: &str = icons::CHECK_CIRCLE;
@@ -163,6 +167,7 @@ pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[
     ("ICON_PENDING", ICON_PENDING),
     ("ICON_STATUS_RUNNING", ICON_STATUS_RUNNING),
     ("ICON_STATUS_IDLE", ICON_STATUS_IDLE),
+    ("ICON_STATUS_NOT_STARTED", ICON_STATUS_NOT_STARTED),
     ("ICON_STATUS_STARTING", ICON_STATUS_STARTING),
     ("ICON_STATUS_QUEUED", ICON_STATUS_QUEUED),
     ("ICON_STATUS_DONE", ICON_STATUS_DONE),
@@ -254,6 +259,8 @@ pub(crate) const TAB_STATUS_MARK_SIZE: f32 = 14.0;
 pub(crate) enum StatusMark {
     Progress,
     Pause,
+    /// Idle with no request yet (change 308): a dot where the pause bars are.
+    Dot,
     Attention,
     Power,
     Play,
@@ -323,6 +330,9 @@ impl StatusMark {
             Self::Pause => {
                 line([-2.0, -3.5], [-2.0, 3.5]);
                 line([2.0, -3.5], [2.0, 3.5]);
+            }
+            Self::Dot => {
+                painter.circle_filled(center, 2.2 * scale, ink);
             }
             Self::Attention => {
                 line([0.0, -4.0], [0.0, 0.5]);

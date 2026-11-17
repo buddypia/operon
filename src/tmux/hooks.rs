@@ -2226,6 +2226,10 @@ pub(crate) struct HookReading {
     /// manual compaction rather than the end of a turn. It shows as idle and
     /// never notifies: nothing was finished.
     pub(crate) boundary: bool,
+    /// The boundary is the start of a new, empty conversation — a fresh start
+    /// or a `/clear` — rather than a resume, a fork, or a compaction, which
+    /// all carry history (change 308).
+    pub(crate) new_conversation: bool,
     pub(crate) tool: Option<String>,
     pub(crate) last_message: Option<String>,
     pub(crate) session_id: Option<String>,
@@ -2247,6 +2251,16 @@ fn payload_string(payload: &serde_json::Value, keys: &[&str]) -> Option<String> 
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
     })
+}
+
+/// Whether a `SessionStart` opens a conversation with nothing in it yet. Claude
+/// Code and Codex both name the reason in `source`, in the same words; any
+/// other reason, or none, has history behind it or says nothing (change 308).
+fn starts_a_new_conversation(payload: &serde_json::Value) -> bool {
+    matches!(
+        payload_string(payload, &["source"]).as_deref(),
+        Some("startup" | "clear")
+    )
 }
 
 /// Whether a tool name is the one a CLI uses to put a question to the person.
@@ -2292,6 +2306,7 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
     let last_message = payload_string(payload, &["last_assistant_message", "lastAssistantMessage"])
         .map(|message| message.chars().take(HOOK_LAST_MESSAGE_MAX_CHARS).collect());
     let mut boundary = false;
+    let mut new_conversation = false;
     let (tool_use_id, tool_call) = match event.source {
         CliProvider::Claude => (
             payload_string(payload, &["tool_use_id"]),
@@ -2334,6 +2349,7 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
                     return None;
                 }
                 boundary = true;
+                new_conversation = starts_a_new_conversation(payload);
                 AgentActivity::Idle
             }
             "PostCompact" => {
@@ -2358,6 +2374,7 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
             "Stop" => AgentActivity::Idle,
             "SessionStart" => {
                 boundary = true;
+                new_conversation = starts_a_new_conversation(payload);
                 AgentActivity::Idle
             }
             _ => return None,
@@ -2392,6 +2409,7 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
         source: event.source,
         activity,
         boundary,
+        new_conversation,
         tool: tool.filter(|_| activity == AgentActivity::Working),
         last_message,
         session_id,
@@ -2407,6 +2425,10 @@ pub(crate) fn normalise_hook_event(event: &HookEvent) -> Option<HookReading> {
 pub(crate) struct HookStatus {
     pub(crate) activity: AgentActivity,
     pub(crate) boundary: bool,
+    /// The reading that set this state opened a new, empty conversation
+    /// (change 308). A late post this state turned away keeps it, which is
+    /// why the app reads it here and not off the reading.
+    pub(crate) new_conversation: bool,
     pub(crate) tool: Option<String>,
     pub(crate) last_message: Option<String>,
     /// When this activity began, which is not when the last event arrived. Tool
@@ -2476,6 +2498,7 @@ pub(crate) fn apply_hook_reading(
         HookStatus {
             activity: reading.activity,
             boundary: reading.boundary,
+            new_conversation: reading.new_conversation,
             tool: reading.tool.or_else(|| {
                 previous
                     .filter(|_| same_activity)

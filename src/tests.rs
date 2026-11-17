@@ -13514,7 +13514,13 @@ pub(crate) fn shortens_legacy_mechanism_names_into_a_title() {
 pub(crate) fn reports_what_a_session_is_actually_doing() {
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let sessions = vec![session.clone()];
-    let working = session_status_view(&sessions, &session, false, Some(AgentActivity::Working));
+    let working = session_status_view(
+        &sessions,
+        &session,
+        false,
+        Some(AgentActivity::Working),
+        false,
+    );
     // The kind, not the word: four words name fourteen states (change 090),
     // and the distinction this test guards is the state's.
     assert_eq!(working.kind, SessionStatusKind::Working);
@@ -13523,13 +13529,21 @@ pub(crate) fn reports_what_a_session_is_actually_doing() {
         &session,
         false,
         Some(AgentActivity::AwaitingInput),
+        false,
     );
     assert_eq!(awaiting.kind, SessionStatusKind::Waiting);
     assert!(awaiting.hint.contains("ターミナルを開いて"));
     assert_ne!(working.tone, awaiting.tone);
     // A stop that has been asked for outranks whatever the screen shows.
     assert_eq!(
-        session_status_view(&sessions, &session, true, Some(AgentActivity::Working)).kind,
+        session_status_view(
+            &sessions,
+            &session,
+            true,
+            Some(AgentActivity::Working),
+            false
+        )
+        .kind,
         SessionStatusKind::Stopping
     );
 
@@ -13537,7 +13551,7 @@ pub(crate) fn reports_what_a_session_is_actually_doing() {
     let mut blocked = test_session(Uuid::new_v4(), SessionStatus::Queued);
     blocked.depends_on = vec![parent.id];
     let queued = vec![parent, blocked.clone()];
-    let blocked_view = session_status_view(&queued, &blocked, false, None);
+    let blocked_view = session_status_view(&queued, &blocked, false, None, false);
     assert_eq!(blocked_view.kind, SessionStatusKind::Blocked);
     assert!(blocked_view.hint.contains("test"));
 }
@@ -14486,7 +14500,13 @@ pub(crate) fn a_poll_that_loses_a_terminal_persists_it_without_reporting_a_failu
         load_store(&app.data_file).unwrap().sessions[0].status,
         SessionStatus::Lost
     );
-    let view = session_status_view(&app.store.sessions, &app.store.sessions[0], false, None);
+    let view = session_status_view(
+        &app.store.sessions,
+        &app.store.sessions[0],
+        false,
+        None,
+        false,
+    );
     assert_eq!(view.kind, SessionStatusKind::Lost);
     assert_ne!(view.tone, StatusTone::Failed);
     fs::remove_dir_all(root).unwrap();
@@ -33458,6 +33478,7 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
             | SessionStatusKind::Working
             | SessionStatusKind::Waiting
             | SessionStatusKind::Idle
+            | SessionStatusKind::NotStarted
             | SessionStatusKind::Running
             | SessionStatusKind::Blocked
             | SessionStatusKind::Ready
@@ -33504,9 +33525,17 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
             Some(AgentActivity::AwaitingInput),
             Some(AgentActivity::Idle),
         ] {
-            for cancellation_pending in [false, true] {
+            for (cancellation_pending, awaiting_first_request) in
+                [(false, false), (true, false), (false, true), (true, true)]
+            {
                 let session = test_session(Uuid::new_v4(), status.clone());
-                let kind = session_status_kind(&[], &session, cancellation_pending, activity);
+                let kind = session_status_kind(
+                    &[],
+                    &session,
+                    cancellation_pending,
+                    activity,
+                    awaiting_first_request,
+                );
                 assert!(
                     SessionStatusKind::ALL.contains(&kind),
                     "{kind:?} is reachable but missing from SessionStatusKind::ALL"
@@ -33524,7 +33553,7 @@ pub(crate) fn every_session_status_kind_belongs_to_exactly_one_group() {
     blocked.depends_on = vec![dead.id];
     let others = [finished, dead];
     for session in [&ready, &blocked] {
-        let kind = session_status_kind(&others, session, false, None);
+        let kind = session_status_kind(&others, session, false, None, false);
         reachable.insert(format!("{kind:?}"));
     }
     assert_eq!(
@@ -49056,7 +49085,12 @@ pub(crate) fn the_new_session_chord_is_bound_and_listed_first_in_the_palette() {
 #[test]
 pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
     for kind in SessionStatusKind::ALL {
-        if let Some(group) = kind.group() {
+        if kind == SessionStatusKind::NotStarted {
+            // Change 308: the one live state with a word of its own, inside
+            // the アイドル group.
+            assert_eq!(kind.label(), "未開始");
+            assert_eq!(kind.group(), Some(SessionStatusGroup::Free));
+        } else if let Some(group) = kind.group() {
             assert_eq!(kind.label(), group.message_id(), "{kind:?}");
         } else {
             assert!(
@@ -49080,6 +49114,7 @@ pub(crate) fn every_status_label_is_one_of_the_four_group_words() {
         &session,
         false,
         Some(AgentActivity::Idle),
+        false,
     );
     assert_eq!(view.label, tr("アイドル"));
     let mut ids: Vec<&str> = SessionStatusGroup::GROUPS
@@ -53128,6 +53163,7 @@ pub(crate) fn a_pinned_session_shows_what_its_agent_last_said() {
     let status = |activity| HookStatus {
         activity,
         boundary: false,
+        new_conversation: false,
         tool: None,
         last_message: Some("テストを追加しますか？".to_owned()),
         started_at: now,
@@ -53255,6 +53291,7 @@ pub(crate) fn the_palette_finds_a_session_by_what_its_agent_last_said() {
         HookStatus {
             activity: AgentActivity::Idle,
             boundary: false,
+            new_conversation: false,
             tool: None,
             last_message: Some("migration 0042 を適用しますか".to_owned()),
             started_at: now,
@@ -62877,7 +62914,7 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
     assert_eq!(translation_for(Language::Ko, "要対応"), Some("확인 필요"));
     assert_eq!(
         SessionStatusGroup::Free.hint_id(),
-        "ターンを終え、次の依頼を出せるセッション"
+        "未開始、またはターンを終えて次の依頼を出せるセッション"
     );
     let session = test_session(Uuid::new_v4(), SessionStatus::Active);
     let view = session_status_view(
@@ -62885,6 +62922,7 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
         &session,
         false,
         Some(AgentActivity::Idle),
+        false,
     );
     assert_eq!(view.hint, tr("ターンを終え、次の依頼を出せます"));
     for group in SessionStatusGroup::GROUPS {
@@ -62899,13 +62937,19 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
     for (id, en, ko) in [
         (
             SessionStatusGroup::Free.hint_id(),
-            "Sessions that finished their turn",
-            "턴을 마치고 다음 요청을 보낼 수 있는 세션",
+            "Sessions not started yet or that finished their turn",
+            "시작 전이거나 턴을 마치고 다음 요청을 보낼 수 있는 세션",
         ),
         (
             "ターンを終え、次の依頼を出せます",
             "Turn finished; ready for your next request",
             "턴을 마쳤습니다. 다음 요청을 보낼 수 있습니다",
+        ),
+        // Change 308: not started is idle too, and no more a wait than it.
+        (
+            "まだ最初の依頼を受けていません",
+            "No request yet",
+            "아직 첫 요청을 받지 않았습니다",
         ),
     ] {
         assert!(!id.contains('待'), "idle hint 「{id}」 reads as waiting");
@@ -62914,7 +62958,11 @@ pub(crate) fn the_idle_group_word_does_not_read_as_waiting_on_you() {
         assert_eq!(translation_for(Language::En, id), Some(en));
         assert_eq!(translation_for(Language::Ko, id), Some(ko));
     }
-    for old in ["指示待ち", "手すき"] {
+    for old in [
+        "指示待ち",
+        "手すき",
+        "ターンを終え、次の依頼を出せるセッション",
+    ] {
         assert!(
             translation_for(Language::En, old).is_none(),
             "the old idle group row 「{old}」 must be gone"
@@ -71402,6 +71450,7 @@ fn session_tab_status_badges_are_distinct_vectors() {
         (SessionStatusKind::Working, StatusMark::Progress),
         (SessionStatusKind::Waiting, StatusMark::Attention),
         (SessionStatusKind::Idle, StatusMark::Pause),
+        (SessionStatusKind::NotStarted, StatusMark::Dot),
         (SessionStatusKind::Running, StatusMark::Progress),
         (SessionStatusKind::Blocked, StatusMark::Attention),
         (SessionStatusKind::Ready, StatusMark::Play),
@@ -71533,6 +71582,7 @@ fn sidebar_251_hook(activity: AgentActivity) -> HookStatus {
     HookStatus {
         activity,
         boundary: false,
+        new_conversation: false,
         tool: None,
         last_message: None,
         started_at: Instant::now(),
@@ -83180,6 +83230,7 @@ fn status_291_groups_are_three_and_done_stopped_avoid_finished_word() {
         &done_session,
         false,
         None,
+        false,
     );
     assert_eq!(done_view.label, tr("正常終了"));
     assert_eq!(done_view.hint, tr("ターミナルは正常に終了しました"));
@@ -83190,6 +83241,7 @@ fn status_291_groups_are_three_and_done_stopped_avoid_finished_word() {
         &stopped_session,
         false,
         None,
+        false,
     );
     assert_eq!(stopped_view.label, tr("停止済み"));
     assert_eq!(stopped_view.hint, tr("停止操作による終了"));
@@ -90480,4 +90532,471 @@ pub(crate) fn cli_305_unresumable_cli_tab_keeps_its_kind_and_conversation() {
         Duration::from_secs(15),
     );
     fs::remove_dir_all(&root).ok();
+}
+
+// ── Change 308: a session not yet given its first request reads 未開始 ──────
+
+/// Posts one hook event for a stored session as its pane would: no launch
+/// token was minted in these tests, so the event's word is taken.
+fn unstarted_308_hook(
+    app: &mut OperonApp,
+    session_id: Uuid,
+    source: CliProvider,
+    event: &str,
+    payload: serde_json::Value,
+) {
+    let tmux_name = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .map(|session| session.tmux_name.clone())
+        .expect("the test stored this session");
+    app.apply_hook_event(HookEvent {
+        source,
+        session: tmux_name,
+        launch_token: String::new(),
+        event: event.to_owned(),
+        payload,
+    });
+}
+
+fn unstarted_308_kind(app: &OperonApp, session_id: Uuid) -> SessionStatusKind {
+    let session = app
+        .store
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .expect("the test stored this session");
+    app.session_status_kind_for(session)
+}
+
+#[test]
+/// Only the CLI's own word that a conversation is new counts: a resume, a
+/// compaction, or a fork has history, and no other event starts anything.
+fn unstarted_308_a_new_conversation_is_read_from_session_start() {
+    let new_conversation = |source: CliProvider, event: &str, payload: serde_json::Value| {
+        normalise_hook_event(&hook_event(source, event, payload))
+            .map(|reading| reading.new_conversation)
+    };
+    for provider in [CliProvider::Claude, CliProvider::Codex] {
+        for source in ["startup", "clear"] {
+            assert_eq!(
+                new_conversation(
+                    provider,
+                    "SessionStart",
+                    serde_json::json!({ "source": source })
+                ),
+                Some(true),
+                "{provider:?} {source}"
+            );
+        }
+    }
+    assert_eq!(
+        new_conversation(
+            CliProvider::Claude,
+            "SessionStart",
+            serde_json::json!({ "source": "resume" })
+        ),
+        Some(false)
+    );
+    for payload in [
+        serde_json::json!({ "source": "resume" }),
+        serde_json::json!({ "source": "compact" }),
+        serde_json::json!({ "source": "fork" }),
+        serde_json::json!({}),
+    ] {
+        assert_eq!(
+            new_conversation(CliProvider::Codex, "SessionStart", payload.clone()),
+            Some(false),
+            "Codex {payload}"
+        );
+    }
+    for (provider, event, payload) in [
+        (
+            CliProvider::Claude,
+            "UserPromptSubmit",
+            serde_json::json!({ "prompt": "やって", "source": "startup" }),
+        ),
+        (
+            CliProvider::Claude,
+            "Stop",
+            serde_json::json!({ "source": "startup" }),
+        ),
+        (
+            CliProvider::Claude,
+            "PostCompact",
+            serde_json::json!({ "trigger": "manual", "source": "clear" }),
+        ),
+        (
+            CliProvider::Codex,
+            "Stop",
+            serde_json::json!({ "source": "startup" }),
+        ),
+        (
+            CliProvider::Gemini,
+            "Stop",
+            serde_json::json!({ "fullyIdle": true, "source": "startup" }),
+        ),
+        (
+            CliProvider::Gemini,
+            "PreInvocation",
+            serde_json::json!({ "source": "startup" }),
+        ),
+    ] {
+        assert_eq!(
+            new_conversation(provider, event, payload),
+            Some(false),
+            "{provider:?} {event}"
+        );
+    }
+}
+
+#[test]
+/// From the CLI's start to its first request the session is 未開始; every
+/// turn event ends that, a resume never begins it, and a `/clear` does.
+fn unstarted_308_a_session_is_not_started_until_its_first_request() {
+    let root = temporary_directory("unstarted-308-first-request");
+    let (mut app, claude, codex) = app_with_two_sessions(&root);
+
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "startup" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+    let session = app.store.sessions[0].clone();
+    let view = app.status_view(&session);
+    assert_eq!(view.label, tr("未開始"));
+    assert_eq!(view.hint, tr("まだ最初の依頼を受けていません"));
+
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "UserPromptSubmit",
+        serde_json::json!({ "prompt": "直して" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Working);
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "Stop",
+        serde_json::json!({}),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::Idle,
+        "一度依頼したセッションが未開始に戻りました"
+    );
+    assert_eq!(
+        app.status_view(&app.store.sessions[0].clone()).label,
+        tr("アイドル")
+    );
+
+    // A resumed conversation has history: idle, never not started.
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "resume" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Idle);
+
+    // `/clear` starts a new, empty conversation.
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "clear" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+    // A permission request is a turn under way, and so is its end.
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "PermissionRequest",
+        serde_json::json!({}),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Waiting);
+    unstarted_308_hook(
+        &mut app,
+        claude,
+        CliProvider::Claude,
+        "Stop",
+        serde_json::json!({}),
+    );
+    assert_eq!(unstarted_308_kind(&app, claude), SessionStatusKind::Idle);
+
+    // Codex says the same thing in its own payload.
+    unstarted_308_hook(
+        &mut app,
+        codex,
+        CliProvider::Codex,
+        "SessionStart",
+        serde_json::json!({ "source": "startup" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, codex),
+        SessionStatusKind::NotStarted
+    );
+    unstarted_308_hook(
+        &mut app,
+        codex,
+        CliProvider::Codex,
+        "PreToolUse",
+        serde_json::json!({ "name": "shell" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, codex), SessionStatusKind::Working);
+
+    // The flag refines idle and nothing else.
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let sessions = std::slice::from_ref(&session);
+    for (activity, expected) in [
+        (Some(AgentActivity::Idle), SessionStatusKind::NotStarted),
+        (Some(AgentActivity::Working), SessionStatusKind::Working),
+        (
+            Some(AgentActivity::AwaitingInput),
+            SessionStatusKind::Waiting,
+        ),
+        (None, SessionStatusKind::Running),
+    ] {
+        assert_eq!(
+            session_status_kind(sessions, &session, false, activity, true),
+            expected,
+            "{activity:?}"
+        );
+    }
+    let starting = test_session(Uuid::new_v4(), SessionStatus::Starting);
+    assert_eq!(
+        session_status_kind(
+            std::slice::from_ref(&starting),
+            &starting,
+            false,
+            Some(AgentActivity::Idle),
+            true
+        ),
+        SessionStatusKind::Starting
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Thirty quiet minutes drop the hook reading, but nothing has run: the
+/// session is still not started. A turn the screen saw, a new launch, or the
+/// session's removal end it.
+fn unstarted_308_the_mark_outlives_a_stale_hook_but_not_a_turn_or_a_launch() {
+    let root = temporary_directory("unstarted-308-stale");
+    let (mut app, id, other) = app_with_two_sessions(&root);
+    let start = serde_json::json!({ "source": "startup" });
+    unstarted_308_hook(
+        &mut app,
+        id,
+        CliProvider::Claude,
+        "SessionStart",
+        start.clone(),
+    );
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::NotStarted);
+
+    if let Some(status) = app.hook_status.get_mut(&id) {
+        status.received_at = Instant::now() - Duration::from_secs(HOOK_STALE_AFTER_SECONDS + 1);
+    }
+    for _ in 0..ACTIVITY_CONFIRMATIONS {
+        app.session_activity_notifications(vec![(id, AgentActivity::Idle)]);
+    }
+    assert!(app.hook_status.is_empty(), "古いフックの状態が残っています");
+    assert_eq!(app.session_activity_for(id), Some(AgentActivity::Idle));
+    assert_eq!(
+        unstarted_308_kind(&app, id),
+        SessionStatusKind::NotStarted,
+        "何も起きていないのに 30 分でアイドルに変わりました"
+    );
+
+    // The hooks are silent and the screen sees a turn: it has started.
+    app.session_activity_notifications(vec![(id, AgentActivity::Working)]);
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::Working);
+    for _ in 0..ACTIVITY_CONFIRMATIONS {
+        app.session_activity_notifications(vec![(id, AgentActivity::Idle)]);
+    }
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::Idle);
+
+    // A new launch is a new process: what the last one said is not about it.
+    unstarted_308_hook(
+        &mut app,
+        id,
+        CliProvider::Claude,
+        "SessionStart",
+        start.clone(),
+    );
+    assert_eq!(unstarted_308_kind(&app, id), SessionStatusKind::NotStarted);
+    app.hooks_enabled = false;
+    let _ = app.mint_hook_environment(id);
+    assert_ne!(
+        unstarted_308_kind(&app, id),
+        SessionStatusKind::NotStarted,
+        "起動し直したセッションが前回の未開始を引き継ぎました"
+    );
+
+    // Removing a session forgets it.
+    unstarted_308_hook(&mut app, other, CliProvider::Claude, "SessionStart", start);
+    assert_eq!(
+        unstarted_308_kind(&app, other),
+        SessionStatusKind::NotStarted
+    );
+    // Only an ended session can be removed; ending it is not what forgets it.
+    if let Some(session) = app.store.sessions.iter_mut().find(|s| s.id == other) {
+        session.status = SessionStatus::Exited;
+    }
+    assert!(app.awaiting_first_request.contains(&other));
+    app.remove_session_record(other);
+    assert!(app.store.sessions.iter().all(|session| session.id != other));
+    assert!(!app.awaiting_first_request.contains(&other));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Not started is a kind of idle: counted in アイドル, shown by its filter, and
+/// reached by the instruction sent to idle agents.
+fn unstarted_308_counts_as_idle_and_receives_a_broadcast() {
+    let (root, mut app, first, second) = broadcast_282_app("unstarted-308-broadcast");
+    unstarted_308_hook(
+        &mut app,
+        second,
+        CliProvider::Claude,
+        "SessionStart",
+        serde_json::json!({ "source": "startup" }),
+    );
+    assert_eq!(unstarted_308_kind(&app, first), SessionStatusKind::Idle);
+    assert_eq!(
+        unstarted_308_kind(&app, second),
+        SessionStatusKind::NotStarted
+    );
+    assert_eq!(app.broadcast_targets(), vec![first, second]);
+    let counts = app.status_group_counts();
+    assert_eq!(counts[SessionStatusGroup::Free.index()], 2);
+    assert_eq!(counts[SessionStatusGroup::Busy.index()], 0);
+    assert_eq!(counts[SessionStatusGroup::NeedsYou.index()], 0);
+    let session = app.store.sessions[1].clone();
+    assert_eq!(session.id, second);
+    assert!(app.kind_in_status_group(
+        SessionStatusKind::NotStarted,
+        &session,
+        SessionStatusGroup::Free
+    ));
+    fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+/// Its own shape, word, and sentence; the sentence never claims a turn ended,
+/// and the アイドル group's hover says the group holds it.
+fn unstarted_308_has_its_own_mark_word_and_hint() {
+    let kind = SessionStatusKind::NotStarted;
+    assert!(SessionStatusKind::ALL.contains(&kind));
+    assert_eq!(kind.status_mark(), StatusMark::Dot);
+    assert_eq!(kind.icon(), ICON_STATUS_NOT_STARTED);
+    assert_eq!(kind.tone(), StatusTone::Idle);
+    assert_eq!(kind.group(), Some(SessionStatusGroup::Free));
+    assert_eq!(kind.label(), "未開始");
+    for other in SessionStatusKind::ALL {
+        if other != kind {
+            assert_ne!(other.status_mark(), StatusMark::Dot, "{other:?}");
+            assert_ne!(other.icon(), ICON_STATUS_NOT_STARTED, "{other:?}");
+            assert_ne!(other.label(), "未開始", "{other:?}");
+        }
+    }
+    let session = test_session(Uuid::new_v4(), SessionStatus::Active);
+    let sessions = std::slice::from_ref(&session);
+    let view = session_status_view(sessions, &session, false, Some(AgentActivity::Idle), true);
+    assert_eq!(view.kind, kind);
+    assert_eq!(view.hint, tr("まだ最初の依頼を受けていません"));
+    assert!(!view.hint.contains("ターン"), "{}", view.hint);
+    let idle = session_status_view(sessions, &session, false, Some(AgentActivity::Idle), false);
+    assert_eq!(idle.kind, SessionStatusKind::Idle);
+    assert_eq!(idle.hint, tr("ターンを終え、次の依頼を出せます"));
+    assert_eq!(
+        SessionStatusGroup::Free.hint_id(),
+        "未開始、またはターンを終えて次の依頼を出せるセッション"
+    );
+}
+
+#[test]
+/// The manuals name the state in each language, say which CLIs show it, and
+/// say the idle broadcast reaches it.
+fn unstarted_308_the_manuals_name_the_state() {
+    for (path, word, clis, broadcast) in [
+        (
+            "docs/MANUAL.ja.md",
+            "**未開始**",
+            "（Claude Code と Codex）",
+            "まだ依頼を受けていない未開始のエージェント",
+        ),
+        (
+            "docs/MANUAL.md",
+            "**Not started**",
+            "a Claude Code or Codex session",
+            "or has not started yet",
+        ),
+        (
+            "docs/MANUAL.ko.md",
+            "**시작 전**",
+            "(Claude Code와 Codex)",
+            "아직 요청을 받지 않은 시작 전 에이전트",
+        ),
+    ] {
+        let manual = fs::read_to_string(path).unwrap();
+        for phrase in [word, clis, broadcast] {
+            assert!(manual.contains(phrase), "{path}: {phrase}");
+        }
+    }
+}
+
+#[test]
+/// A late tool post from the turn before /clear changes no state (change 301),
+/// so it must not end the wait for a first request either (change 308 R1).
+fn f308_a_late_tool_post_does_not_end_the_wait_for_a_first_request() {
+    let root = temporary_directory("f308-late-tool-post");
+    let (mut app, claude, _codex) = app_with_two_sessions(&root);
+    let tool = || {
+        serde_json::json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_1",
+            "tool_input": { "command": "ls" }
+        })
+    };
+    let go = |app: &mut OperonApp, event: &str, payload: serde_json::Value| {
+        unstarted_308_hook(app, claude, CliProvider::Claude, event, payload)
+    };
+    go(
+        &mut app,
+        "UserPromptSubmit",
+        serde_json::json!({ "prompt": "go" }),
+    );
+    go(&mut app, "PreToolUse", tool());
+    go(&mut app, "Stop", serde_json::json!({}));
+    go(
+        &mut app,
+        "SessionStart",
+        serde_json::json!({ "source": "clear" }),
+    );
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
+    go(&mut app, "PostToolUse", tool());
+    assert_eq!(
+        unstarted_308_kind(&app, claude),
+        SessionStatusKind::NotStarted
+    );
 }

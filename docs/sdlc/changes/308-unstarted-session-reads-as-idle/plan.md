@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-17
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -71,3 +71,23 @@
   `/clear` brings the dot back.
 
 ## Departures from the plan
+
+- **`src/app/relaunch.rs` is not touched.** Every launch, the relaunch's
+  included, mints its hook environment through `mint_hook_environment`, and the
+  flag is cleared there before the `hooks_enabled` early return (the evaluator's
+  note: the launch-time `hook_status.remove` sits after that return, so a flag
+  set before hooks were switched off would otherwise ride into the next
+  launch). A second removal in `relaunch.rs` would restate it.
+- **`HookStatus` gains `new_conversation` (F1).** The empirical verifier showed
+  that a late Claude `PostToolUse` from the turn before a `/clear` — turned away
+  by `is_late_tool_event` (change 301) — cleared the flag, because
+  `apply_hook_event` read it off the reading before `apply_hook_reading` ran.
+  The flag is now read off the state the reading left: a turned-away post
+  returns the previous state, flag and all. Guarded by
+  `f308_a_late_tool_post_does_not_end_the_wait_for_a_first_request` and two
+  more mutations (18 in all).
+- **`the_idle_group_word_does_not_read_as_waiting_on_you` and
+  `every_session_status_kind_belongs_to_exactly_one_group` widened in place.**
+  The first pinned the old アイドル group hint and now also checks the new hint
+  does not read as waiting; the second's reachability loop drives the new
+  argument so `NotStarted` is reachable.
