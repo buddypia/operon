@@ -97,10 +97,19 @@ what the plan had not:
    (every state has a word), `agents_309_send_types_only_into_an_idle_agent_of_the_same_project`
    (not-started taken, every busy state refused); mutations `not-started-refused`,
    `not-started-published-as-idle`.
-7. **The sweep outgrew one obligation.** CI gives each obligation 900 s, and
-   37 mutations in one file ran past it. They are split by what they break —
-   the send (`mutations.py`), the rest of the command (`mutations-cli.py`), the
-   snapshot and its wiring (`mutations-snapshot.py`) — each its own obligation.
+7. **The sweep outgrew its obligation.** CI gives an obligation 900 s and
+   accepts only the change's own `mutations.py`; 37 mutations ran past it. All
+   37 were caught locally at 590e23a (13 + 13 + 11 in three runs). The CI sweep
+   keeps 19, as many as change 282's sweep that CI has run in time, at least
+   one per guard; the 18 left out each duplicate a kept one or a test's direct
+   assertion: `wait-never-ends-on-failure`, `read-ignores-its-count`,
+   `screen-failure-still-sends`,
+   `not-started-published-as-idle`, `send-skips-screen-recheck-prompt`,
+   `long-text-allowed`, `short-prefix-admitted`, `stale-edge-refused`,
+   `read-keeps-escapes`, `wait-ignores-timeout`, `wait-never-settles`,
+   `list-prints-names-raw`, `remove-does-nothing`, `changes-never-written`,
+   `checked-every-frame`, `finished-sessions-published`,
+   `logic-does-not-publish`, `main-does-not-dispatch`.
 
 Left as they are, and why:
 

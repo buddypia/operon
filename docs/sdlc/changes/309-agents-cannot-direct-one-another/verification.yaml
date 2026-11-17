@@ -20,5 +20,3 @@ obligations:
   - F1 empirical-test :: cargo test --locked agents_309_f1_control_characters_at_the_edges_are_refused
   - I5 empirical-test :: cargo test --locked agents_309_parsing_edges_hold
   - I4 empirical-mutation :: python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations.py
-  - I6 empirical-mutation :: python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations-cli.py
-  - I7 empirical-mutation :: python3 docs/sdlc/changes/309-agents-cannot-direct-one-another/mutations-snapshot.py
