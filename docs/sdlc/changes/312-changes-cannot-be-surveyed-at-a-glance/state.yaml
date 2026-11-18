@@ -1,0 +1,37 @@
+# Change 312. The person asked whether "the feature map" guides the work and is
+# fused with the process, and for a view that shows every change at a glance and
+# its documents on demand. No feature map exists, so this change builds the view
+# from the records the pipeline already keeps.
+#
+# Decisions taken by the managing session, not by the person (recorded as such):
+# build it although docs/sdlc/README.md lists a domain map and HTML review decks
+# under "Not built" — a revert undoes it; and stop before landing, because the
+# person's premise (a map already exists) is unconfirmed.
+
+state:
+  route: "feature"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+
+resume: "Write spec.md, pass the readiness gate, then plan.md before any script is written."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine waived touches scripts/, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/312-changes-cannot-be-surveyed-at-a-glance/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
