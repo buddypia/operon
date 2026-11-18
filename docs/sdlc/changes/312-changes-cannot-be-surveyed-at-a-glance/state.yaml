@@ -10,8 +10,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "awaiting-user"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -19,13 +19,16 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Have the empirical verifier try to break the map at the branch head, fix what it reproduces, then push and stop at awaiting-user."
+resume: "Ask the person whether a feature map of their own exists elsewhere and whether this one should land; on yes, merge main in, land per feature-pilot section 4, and open the separate change that removes the leftover deck scripts."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked change_map_ 9 passed; full suite in CI on the pushed branch"
   bands: "machine passed bash scripts/check-bands.sh: the same five breaches at the same tiers as main (steering_bytes 267393 to 268147, diagnose)"
   release-binary: "machine waived touches scripts/, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
   guards-verified-by-mutation: "machine passed 33 of 33 caught: python3 docs/sdlc/changes/312-changes-cannot-be-surveyed-at-a-glance/mutations.py"
+  page-exercised-in-a-browser: "human passed headless Chrome on this repository's page: overview, detail, every tab kind, deep links, search, filter, no console error (plan.md Departures)"
+  the-person-opens-the-page: "human pending the person opens .tmp/change-map.html and says whether it is what they asked for"
+  landing: "human pending not merged and not packaged: the person's premise that a map already existed is unconfirmed (managing-session decision)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

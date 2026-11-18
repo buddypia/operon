@@ -796,7 +796,9 @@ function inline(text) {
   s = esc(s);
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+  // No `[` inside the label: the search then restarts at the next bracket
+  // instead of rescanning to the end from every one (quadratic on a wall of them).
+  s = s.replace(/\[([^\]\[]+)\]\((https?:\/\/[^\s)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => "<code>" + esc(codes[Number(i)]) + "</code>");
 }
@@ -962,7 +964,11 @@ function renderDetail() {
     let h = '<div class="tools"><code>' + esc(d.name) + "</code>" + (isMd ? '<button id="raw-toggle">' +
       (rawView ? "整形して表示" : "原文") + "</button>" : "") + "</div>";
     if (d.truncated) h += '<p class="warn">長いため途中まで表示しています</p>';
-    h += isMd && !rawView ? '<div class="md">' + markdown(d.text) + "</div>" : '<pre class="raw">' + esc(d.text) + "</pre>";
+    let rendered = null;
+    // A document the renderer cannot take (nesting past the stack) is still
+    // shown, as written.
+    if (isMd && !rawView) { try { rendered = markdown(d.text); } catch (error) { rendered = null; } }
+    h += rendered !== null ? '<div class="md">' + rendered + "</div>" : '<pre class="raw">' + esc(d.text) + "</pre>";
     body.innerHTML = h;
   }
   body.scrollTop = 0;

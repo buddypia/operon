@@ -1,6 +1,6 @@
 # The evidence for change 312. One test per requirement of spec.md, and the
 # sweep that watched each of them go red (33 of 33 caught).
-digest: "aeba25045421ccfa"
+digest: "5257b31483179179"
 
 obligations:
   - R1 empirical-test :: cargo test --locked change_map_carries_every_change_with_its_recorded_position

@@ -86,3 +86,14 @@ the nine tests, the sweep, and the page opened in a browser.
   rows, a word with no match showed 「該当する変更はありません」; all 716
   Markdown documents rendered without an exception or an injected element; no
   console error.
+- **Two renderer weaknesses the empirical verifier reproduced** (under node,
+  outside the suite, so no failing test came back to record): a paragraph of
+  262,144 `[` took 33.9 s in the link pattern, and a quote nested 5,000 deep
+  overflowed the stack and left the detail empty. The link label no longer
+  spans a `[` (the same input now takes 1 ms), and a document the renderer
+  throws on is shown as written instead. Neither is held by a `cargo` test:
+  the suite has no JavaScript runtime, and adding one for this was not worth
+  a dependency. What held under the same attempt: CRLF records, worktree paths
+  with spaces and non-ASCII, a deleted worktree, the substitution tokens
+  inside a document, the cut at a partial character, and no unescaped path
+  from a document to markup.
