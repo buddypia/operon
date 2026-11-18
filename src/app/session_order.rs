@@ -307,7 +307,7 @@ impl OperonApp {
             .sessions
             .retain(|id| sessions.iter().any(|session| session.id == *id));
         arrangement
-            .folded
+            .unfolded
             .retain(|id| projects.iter().any(|project| project.id == *id));
         arrangement
             .pinned

@@ -1,0 +1,11 @@
+# The evidence for change 311. Format: docs/sdlc/templates/verification.yaml.
+digest: "cc651a154c6c85f0"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked column_311_projects_start_folded_and_unfold_on_click
+  - R2 empirical-test :: cargo test --locked column_311_an_older_order_file_keeps_its_order_and_folds_every_project
+  - R3 empirical-test :: cargo test --locked column_311_folded_projects_sit_closer_together
+  - R4 empirical-test :: cargo test --locked column_311_a_filter_lists_matches_of_a_folded_project
+  - R5 empirical-test :: cargo test --locked sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs
+  - I1 empirical-test :: cargo test --locked session_285_dragging_a_tab_reorders_the_rows
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/311-session-column-opens-every-project-unfolded/mutations.py

@@ -115,10 +115,12 @@ pub(crate) struct SessionArrangement {
     pub(crate) projects: Vec<Uuid>,
     #[serde(default)]
     pub(crate) sessions: Vec<Uuid>,
-    /// Projects folded in the session page's column (change 237). A file
-    /// written before the field existed unfolds everything.
+    /// Projects unfolded in the session page's column (change 311): a
+    /// project is folded until the person opens it, so one added later, and
+    /// every project of a file written before the field existed, is folded.
+    /// The `folded` list such a file carries (change 237) is not read.
     #[serde(default)]
-    pub(crate) folded: Vec<Uuid>,
+    pub(crate) unfolded: Vec<Uuid>,
     /// Sessions pinned on the session page (change 285): first in the column
     /// and in their tab group, and not closed until unpinned. A file written
     /// before the field existed pins nothing.

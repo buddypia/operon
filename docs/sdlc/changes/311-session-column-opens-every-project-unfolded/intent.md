@@ -1,6 +1,6 @@
 # Intent: the session column opens every project unfolded, so the projects themselves are pushed out of sight
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-18
 
 ## Problem

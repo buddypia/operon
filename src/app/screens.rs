@@ -7596,24 +7596,33 @@ impl OperonApp {
                     else {
                         continue;
                     };
-                    let folded = self.session_arrangement.folded.contains(&project_id);
+                    // Folded until opened (change 311); a filter lists its
+                    // matches whatever the fold, and does not change it.
+                    let unfolded =
+                        filtering || self.session_arrangement.unfolded.contains(&project_id);
                     let selected = self.selected_project == Some(project_id);
                     // A heading, not a card (change 245): the project groups
                     // its sessions here, and is a destination only on the
                     // Projects page, so no fill makes it look like one.
                     let card = egui::Frame::new()
-                        .inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 2))
+                        .inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 0))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.spacing_mut().item_spacing.y = SIDEBAR_ROW_GAP;
                             ui.spacing_mut().interact_size.y = CONTROL_HEIGHT_SMALL;
                             ui.horizontal(|ui| {
-                                let (icon, tip) = if folded {
-                                    (ICON_DISCLOSURE_CLOSED, tr("展開する"))
-                                } else {
+                                // The app's button padding makes a 14px
+                                // icon 25px tall; the heading is 24.
+                                ui.spacing_mut().button_padding.y = SPACE_XS;
+                                let (icon, tip) = if filtering {
+                                    (ICON_DISCLOSURE_OPEN, tr("フィルタ中はすべて表示されます"))
+                                } else if unfolded {
                                     (ICON_DISCLOSURE_OPEN, tr("折りたたむ"))
+                                } else {
+                                    (ICON_DISCLOSURE_CLOSED, tr("展開する"))
                                 };
-                                if small_icon_button(ui, palette, icon, tip).clicked() {
+                                if small_icon_button(ui, palette, icon, tip).clicked() && !filtering
+                                {
                                     fold = Some(project_id);
                                 }
                                 ui.with_layout(
@@ -7705,10 +7714,12 @@ impl OperonApp {
                                     },
                                 );
                             });
-                            hairline(ui, palette);
-                            if folded {
+                            // A folded project is its heading alone: the
+                            // rule parts a heading from its rows.
+                            if !unfolded {
                                 return;
                             }
+                            hairline(ui, palette);
                             let mut any = false;
                             for &(_, _, kind, id) in
                                 live.iter().filter(|(owner, ..)| *owner == project_id)
@@ -7960,18 +7971,18 @@ impl OperonApp {
         }
     }
 
-    /// Folds or unfolds one project in the session page's column, and saves
+    /// Unfolds or folds one project in the session page's column, and saves
     /// it with the column's order. A failed write leaves the fold in effect
     /// for this run and says so.
     pub(crate) fn toggle_project_fold(&mut self, project: Uuid) {
-        let folded = &mut self.session_arrangement.folded;
-        if let Some(at) = folded.iter().position(|id| *id == project) {
-            folded.remove(at);
+        let unfolded = &mut self.session_arrangement.unfolded;
+        if let Some(at) = unfolded.iter().position(|id| *id == project) {
+            unfolded.remove(at);
         } else {
-            folded.push(project);
+            unfolded.push(project);
         }
         let projects = &self.store.projects;
-        folded.retain(|id| projects.iter().any(|project| project.id == *id));
+        unfolded.retain(|id| projects.iter().any(|project| project.id == *id));
         if let Err(error) = save_session_arrangement(&self.data_file, &self.session_arrangement) {
             self.notice = Some(tf!("並び順を保存できませんでした: {error}", error = error));
         }

@@ -1,0 +1,7 @@
+2026-11-18T05:02:18Z auto intent intent.md dcc197927c88d4ab approve Independent evaluator ad84ccd0b523b2d27: restates the person's quoted request, concrete who/when, observable outcomes, no mechanism.
+2026-11-18T05:02:18Z auto spec spec.md a40005214b8fc6f2 approve Independent evaluator ad84ccd0b523b2d27: after one revise (today's pitch is 37px, requirement 5 names the unfolded margin), matches intent and source.
+2026-11-18T05:02:18Z person screen screen.md 03d927e9951756ae approve The request asks for this layout: 「プロジェクト内では折り畳みUIでセッション一覧が表示される。デフォルトは折り畳んだ状態」「プロジェクトとの間隔は少し縮める」 — the screen folds every project by default and tightens the gap, nothing else moves; evaluator ad84ccd0b523b2d27 also approved it after one revise.
+2026-11-18T05:02:18Z auto plan plan.md 3b3ff108dc851d9a approve Independent evaluator ad84ccd0b523b2d27: files, order, risks and proof match the spec and the source.
+2026-11-18T05:20:16Z auto spec spec.md 734cc60eafa9c199 approve Independent evaluator ad84ccd0b523b2d27: the tooltip takes the app's existing spelling フィルタ; nothing else changed.
+2026-11-18T05:20:16Z person screen screen.md 7b184de4010cfa67 approve The request asks for this layout: 「プロジェクト内では折り畳みUIでセッション一覧が表示される。デフォルトは折り畳んだ状態」「プロジェクトとの間隔は少し縮める」 — only the tooltip's spelling changed since the line above; evaluator ad84ccd0b523b2d27 approved it.
+2026-11-18T05:20:16Z auto plan plan.md fcacb6b71d6fc47a approve Independent evaluator ad84ccd0b523b2d27: the tooltip takes the app's existing spelling フィルタ; nothing else changed.

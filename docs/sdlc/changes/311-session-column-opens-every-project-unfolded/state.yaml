@@ -12,22 +12,22 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Have the intent evaluated, then write spec.md, screen.md and plan.md."
+resume: "Built and committed. Next: the empirical verifier on the branch head, fix what it reproduces, close (status done), push, wait for CI, merge on main, ship /Applications/Operon.app."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast; cargo test --locked: 1496 run, 0 failed locally after the five fixtures unfolded their project"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose (9962, src/app.rs); src/app/screens.rs 9879"
   release-binary: "machine pending yes: touches src/app/screens.rs and src/ui/session_tree.rs; package and ship from main after landing"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "human passed mutations.py: 9 of 9 caught, the tooltip sentence among them"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

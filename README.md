@@ -72,7 +72,10 @@ Settings. The projects, sessions, and agent output in them are a demo.
   closes its tab and moves to **履歴**, while an unrecovered crash stays open so
   its output can be read.
   Right-click a row or a tab to pin it: a pinned session stays first in both
-  and cannot be closed until it is unpinned. The order and the pins are kept
+  and cannot be closed until it is unpinned. Each project starts folded to
+  its name and its counts: the mark beside the name opens its sessions, and
+  a filter lists the sessions that match either way. The order, the pins,
+  and the projects you opened are kept
   in `session-order.json`, in the same folder as the local index, and a
   project or session added later appears at the top, after the pinned ones.
 - Quitting and reopening Operon puts the workspace back: every project's
