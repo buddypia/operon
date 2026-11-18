@@ -65,6 +65,13 @@
   `transcript_searched = None` beside the clear. Guarded by
   `f310_matches_cleared_by_an_empty_submit_are_not_answered_with_none` and one
   more mutation (16 in all).
+- **The agent is searched as its chip writes it (F2).** The verifier showed a
+  custom-command row reads 「カスタム CLI」 while the match read only the
+  picker's 「別のコマンド」, and that the picker's fallback 「不明な AI」 would
+  find a plain terminal that shows no such word. The match now reads
+  `agent_short_label`, and the picker's product name only for the three CLIs
+  the picker lists. Guarded by `f310_the_agent_chip_on_the_row_is_searched`
+  and three mutations in place of one (18 in all).
 - **`session_search_needle` is its own function.** The plan had each call site
   trim and lower-case; one function is what lets a test and a mutation hold
   both views to the same text.

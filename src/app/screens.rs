@@ -4587,7 +4587,9 @@ impl OperonApp {
         has(&session.name)
             || has(&session.goal)
             || has(&session.agent)
-            || has(agent_choice_copy(&session.agent).0)
+            || has(agent_short_label(&session.agent))
+            || (matches!(session.agent.as_str(), "codex" | "claude" | "gemini")
+                && has(agent_choice_copy(&session.agent).0))
             || session.branch.as_deref().is_some_and(has)
             || projects
                 .iter()

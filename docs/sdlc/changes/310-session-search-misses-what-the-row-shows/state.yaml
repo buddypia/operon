@@ -2,8 +2,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "awaiting-user"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -11,13 +11,13 @@ state:
   readiness: "go"
   screen: "approved"
 
-resume: "Build and verify on the branch, but do not land until the person approves intent.md, which the evaluator escalated as agent-originated and the person has not yet answered."
+resume: "Ask the person whether intent.md is what they want (the evaluator escalated it as agent-originated and they had not answered), record their words as a person line in approvals.log, set done, then land and package."
 
 contract:
-  three-gates: "machine pending make q.fast and cargo test --locked search_310_"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast; cargo test --locked search_310_ f310_: 6 passed; catalog and history-notice tests ok"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9968 at diagnose"
   release-binary: "machine pending required - src/app.rs, src/app/screens.rs, and src/i18n_tables.rs change; package from main after landing"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/310-session-search-misses-what-the-row-shows/mutations.py"
+  guards-verified-by-mutation: "machine passed 18 of 18 caught: python3 docs/sdlc/changes/310-session-search-misses-what-the-row-shows/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

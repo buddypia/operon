@@ -27,10 +27,21 @@ MUTATIONS = {
         "            || has(&session.agent)\n",
         "",
     ),
-    "the-agent-as-written-is-not-searched": (
+    "the-agent-chip-is-not-searched": (
         SCREENS,
-        "            || has(agent_choice_copy(&session.agent).0)\n",
+        "            || has(agent_short_label(&session.agent))\n",
         "",
+    ),
+    "the-product-name-is-not-searched": (
+        SCREENS,
+        "                && has(agent_choice_copy(&session.agent).0))\n",
+        "                && false)\n",
+    ),
+    # F2: the picker's word for an agent it does not list is not on the row.
+    "an-unlisted-agent-is-found-by-the-pickers-word": (
+        SCREENS,
+        '            || (matches!(session.agent.as_str(), "codex" | "claude" | "gemini")\n',
+        "            || (true\n",
     ),
     "the-branch-is-not-searched": (
         SCREENS,

@@ -93284,3 +93284,41 @@ pub(crate) fn f310_matches_cleared_by_an_empty_submit_are_not_answered_with_none
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+/// F2, the empirical verifier's reproduction: the row writes the agent as its
+/// chip does (「カスタム CLI」, 「ターミナル」), and a search for that finds it —
+/// while the picker's word for an agent it does not list finds nothing.
+#[test]
+pub(crate) fn f310_the_agent_chip_on_the_row_is_searched() {
+    let root = temporary_directory("f310-chip");
+    let (mut app, _unnamed, _other) = search_310_app(&root);
+    app.store.sessions[0].agent = "custom".to_owned();
+    app.store.sessions[0].name = "first".to_owned();
+    app.store.sessions[1].agent = "terminal".to_owned();
+    for (text, kept, why) in [
+        (
+            "カスタム cli",
+            (true, false),
+            "カスタム CLI のチップで見つかりません",
+        ),
+        (
+            "ターミナル",
+            (false, true),
+            "ターミナルのチップで見つかりません",
+        ),
+        (
+            "不明な",
+            (false, false),
+            "行に出ていない「不明な AI」で見つかっています",
+        ),
+    ] {
+        assert_eq!(search_310_kept(&mut app, text), kept, "{why}: {text:?}");
+    }
+    app.store.sessions[0].agent = "claude".to_owned();
+    assert_eq!(
+        search_310_kept(&mut app, "claude code"),
+        (true, false),
+        "製品名「Claude Code」で見つかりません"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
