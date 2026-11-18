@@ -29,8 +29,8 @@ state:
 resume: "The managing session reviews the page, then lands."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed fmt and clippy at each commit through gate-commit.sh; full suite green in CI run 44371749667 on 978ff24"
+  bands: "machine passed bash scripts/check-bands.sh: the same five breaches at the same tiers as main after 312 (steering_bytes 268147 to 270708, diagnose)"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
   guards-verified-by-mutation: "human pending each new guard watched failing"
   page-exercised-in-a-browser: "human pending headless Chrome: overview, a feature in each tab, progress, change list, no console error"
