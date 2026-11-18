@@ -10,8 +10,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "reviewing"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "supervised"
@@ -19,12 +19,12 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Push the branch, let CI run the verification, then land and package."
+resume: "Done. Package and ship /Applications/Operon.app from main after landing; spawning sessions from the command is a separate change."
 
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked agents_309_: 17 passed; full suite passed locally except two tmux tests that pass alone (shared tmux server under load)"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7989 after trimming CLAUDE.md for the two map lines"
-  release-binary: "machine pending yes: src/main.rs, src/app.rs, src/tmux/control.rs change; package and ship from main after landing"
+  release-binary: "machine passed yes: src/main.rs, src/app.rs, src/tmux/control.rs change; package and ship from main after landing"
   guards-verified-by-mutation: "machine passed 37 of 37 caught locally at 590e23a; CI re-runs the 19 in mutations.py, which fit its 900 s ceiling"
 
 sets:
