@@ -107,6 +107,11 @@ MUTATIONS = {
         'or word in feature["title"].lower()',
         "or False",
     ),
+    "a short keyword matches the start of a longer word": (
+        MAP,
+        'r"(?:s|es|ed|ing)?(?![a-z0-9])"',
+        'r""',
+    ),
     # Requirement 7: the claims a person reads.
     "the empty history says something else": (
         MAP,

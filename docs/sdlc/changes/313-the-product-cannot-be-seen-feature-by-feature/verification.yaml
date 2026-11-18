@@ -1,6 +1,6 @@
 # The evidence for change 313. One test per requirement of spec.md, and the
 # sweep that watched each of them go red.
-digest: "4fb8f003aeb8223e"
+digest: "869836e56f616f75"
 
 obligations:
   - R1 empirical-test :: cargo test --locked feature_catalogue_is_complete_and_every_entry_resolves
@@ -12,4 +12,5 @@ obligations:
   - R7 empirical-test :: cargo test --locked change_map_page_is_feature_first_with_the_change_list_second
   - R8 empirical-test :: cargo test --locked change_map_survives_missing_feature_documents_and_an_unreadable_catalogue
   - R9 empirical-test :: cargo test --locked the_pipeline_reads_and_updates_the_feature_documents
+  - F1 empirical-test :: cargo test --locked change_map_keyword_does_not_tie_a_change_through_a_longer_word
   - I1 empirical-mutation :: python3 docs/sdlc/changes/313-the-product-cannot-be-seen-feature-by-feature/mutations.py

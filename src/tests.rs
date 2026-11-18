@@ -95109,3 +95109,48 @@ pub(crate) fn the_pipeline_reads_and_updates_the_feature_documents() {
         "見直しの理由がありません"
     );
 }
+
+/// Found by the empirical verifier (change 313, F1): a short keyword matched as
+/// the start of any longer word, so `pr` tied "problem" and "process" to a feature.
+#[test]
+pub(crate) fn change_map_keyword_does_not_tie_a_change_through_a_longer_word() {
+    let index = "\
+# Screens:
+#   session      セッション
+
+features:
+  - id: reviewing
+    title: 確認
+    screen: session
+    summary: 差分を確認する。
+    paths: src/git.rs
+    keywords: pr diff pin
+    manual: 確認
+";
+    let root = feature_map_fixture("feature-map-keyword", Some(index));
+    feature_map_change(
+        &root,
+        "001-problem-with-a-different-address",
+        "done",
+        "deploy",
+        "",
+        "",
+    );
+    feature_map_change(&root, "002-pinpoint-the-process", "done", "deploy", "", "");
+    feature_map_change(&root, "003-pr-is-pinned", "done", "deploy", "", "");
+    let (_page, map) = change_map_page(&root);
+    let reviewing = feature_entry(&map, "reviewing");
+    let names: Vec<&str> = reviewing["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        ["003-pr-is-pinned"],
+        "「pr」は語として現れたときだけ結び付きます: {}",
+        reviewing["changes"]
+    );
+    let _ = fs::remove_dir_all(root);
+}

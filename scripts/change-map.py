@@ -394,7 +394,8 @@ def manual_section(manual, heading):
 def keyword_hit(keyword, text):
     if re.search(r"[^\x00-\x7f]", keyword):
         return keyword in text
-    return re.search(r"(?<![a-z0-9])" + re.escape(keyword.lower()), text) is not None
+    # A whole word, or the word with an ending: `pr` is not the start of `problem`.
+    return re.search(r"(?<![a-z0-9])" + re.escape(keyword.lower()) + r"(?:s|es|ed|ing)?(?![a-z0-9])", text) is not None
 
 
 def read_features(root):
