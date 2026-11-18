@@ -55,6 +55,11 @@ fn main() -> eframe::Result<()> {
         release_shared_embedder();
         std::process::exit(code);
     }
+    // `Operon agents list|read|send|wait`, for agents (change 309): the same
+    // windowless path as `knowledge`.
+    if arguments.first().map(String::as_str) == Some(AGENTS_CLI_SUBCOMMAND) {
+        std::process::exit(run_agents_cli(&arguments[1..]));
+    }
     configure_command_path();
     let data_file = app_data_file();
     let instance_locks = match acquire_instance_locks(&data_file) {

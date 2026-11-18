@@ -1,7 +1,9 @@
 use crate::prelude::*;
 use crate::*;
 
+pub(crate) mod control;
 pub(crate) mod hooks;
+pub(crate) use control::*;
 pub(crate) use hooks::*;
 
 /// Every tmux this crate runs starts here, so this is the one place the test

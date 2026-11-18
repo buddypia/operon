@@ -1,0 +1,37 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: feature (a command agents run; new behaviour). Risk: medium —
+# risk.yaml `subprocess` (src/tmux.rs gains a module that runs tmux) and
+# `unsafe-and-path` for a one-line dispatch in src/main.rs, which
+# approval.md gives to the evaluator ("any other edit": no unsafe, no PATH).
+# Supervised. Nothing paints: src/app.rs gains one call in `logic` and no
+# drawing, so screen is n/a.
+
+state:
+  route: "feature"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "n/a"
+
+resume: "Done. Package and ship /Applications/Operon.app from main after landing; spawning sessions from the command is a separate change."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked agents_309_: 17 passed; full suite passed locally except two tmux tests that pass alone (shared tmux server under load)"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7989 after trimming CLAUDE.md for the two map lines"
+  release-binary: "machine passed yes: src/main.rs, src/app.rs, src/tmux/control.rs change; package and ship from main after landing"
+  guards-verified-by-mutation: "machine passed 37 of 37 caught locally at 590e23a; CI re-runs the 19 in mutations.py, which fit its 900 s ceiling"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

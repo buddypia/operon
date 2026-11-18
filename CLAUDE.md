@@ -11,14 +11,14 @@ alternatives; commit `plan.md` before editing source files.
 
 - One crate, one module per concern. `src/main.rs` is the entry point (startup,
   `PATH`, fonts, window options) and re-exports all modules below with
-  `pub(crate) use`. Locate symbols with `rg` and edit where defined.
+  `pub(crate) use`.
 
-  <!-- Checked by harness_documents_only_name_paths_that_exist and
-       claude_md_maps_every_module_that_exists. Add a module, add its line. -->
+  <!-- claude_md_maps_every_module_that_exists: add a module, add its line. -->
   - `src/app.rs` — `OperonApp`: app state, background tasks, top-level UI wiring.
     `src/app/screens.rs` holds toolbar through terminal workspace drawing.
     `src/app/knowledge.rs` holds the knowledge tab, model block, run wiring.
     `src/app/dock_badge.rs` badges the Dock icon.
+    `src/app/agent_snapshot.rs` writes `agents.json`.
     `src/app/broadcast.rs` messages idle agents.
     `src/app/compare.rs` diff compare bar, 注釈.
     `src/app/relaunch.rs` keeps tabs across relaunch.
@@ -40,6 +40,7 @@ alternatives; commit `plan.md` before editing source files.
     `recent-agent-settings.json`.
   - `src/tmux.rs` — tmux session lifecycle (create, respawn, stop, retry).
     `src/tmux/hooks.rs` manages CLI status hooks, their socket, and states.
+    `src/tmux/control.rs` is the `Operon agents` CLI.
   - `src/git.rs` — git status, diffs, branches, worktrees.
     `src/git/setup.rs` handles `.operon/setup.sh` digests, previews, and
     approvals. `src/git/comments.rs` handles diff review notes.

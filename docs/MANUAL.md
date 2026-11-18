@@ -358,6 +358,43 @@ exits. macOS asks for permission the first time you turn it on.
   no request for it; it reads what Claude Code already reports. The number turns
   amber past 80% and fades, with its age, after 30 minutes without an update.
 
+### Agents that direct agents
+
+An agent running in one of Operon's sessions can look at and steer the other
+sessions of its project. Every managed session has Operon's executable in
+`$OPERON_EXECUTABLE`; outside one, use
+`/Applications/Operon.app/Contents/MacOS/Operon`.
+
+```sh
+"$OPERON_EXECUTABLE" agents list [--json]
+"$OPERON_EXECUTABLE" agents read <ID> [--lines N]       # 1–200, default 40
+"$OPERON_EXECUTABLE" agents send <ID> <text>
+"$OPERON_EXECUTABLE" agents wait <ID> [--until idle|waiting|either] [--timeout S]   # 1–3600, default 600
+```
+
+- `ID` is the 8-character id `list` prints; any prefix of at least 4 that
+  names one session works.
+- Only the caller's own project is visible: the project of the session named
+  in `$OPERON_SESSION`, else the registered project folder nearest above the
+  current directory.
+- `send` types one line and Enter only into an agent that has finished its
+  turn (`idle`) or has not been given its first request yet (`not-started`). The screen is captured again just before typing, and a running
+  turn or a prompt on it stops the send. Line breaks and control characters are
+  refused, and a session cannot send to itself.
+- `wait` returns as soon as the state is the one asked for. A state the
+  session was already in counts once it has been left — so `send` then `wait`
+  waits for the turn the send started — or after it has held for 5 seconds.
+- These limits are guardrails, not a security boundary: a command names its
+  own session and folder. Allowing an agent to run `agents send` lets it
+  prompt the other agents of the project, with their permissions.
+- Exit codes: `0` done, `1` tmux failed, `2` no such session / not a project /
+  ended, `3` Operon is not running, `4` wait timed out, `5` the target is busy,
+  `64` usage.
+- The states are the ones the window shows, written to `agents.json` beside
+  the local index on a change and every 15 seconds while Operon runs, and
+  removed when it quits. A file older than 60 seconds counts as Operon not
+  running.
+
 ---
 
 ## 5. Git, diffs, files, and the editor
