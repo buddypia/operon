@@ -2,16 +2,16 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
-  questions: "0 7"
+  questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
 
-resume: "Write spec.md and screen.md, pass check-readiness.sh, and have an evaluator judge intent, spec, screen, and plan."
+resume: "Build and verify on the branch, but do not land until the person approves intent.md, which the evaluator escalated as agent-originated and the person has not yet answered."
 
 contract:
   three-gates: "machine pending make q.fast and cargo test --locked search_310_"
