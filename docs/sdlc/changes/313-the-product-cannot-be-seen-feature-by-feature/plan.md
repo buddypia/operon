@@ -87,3 +87,11 @@ opened in a browser.
 - **Not done:** the leftover scripts that expect a domain-map.json are untouched;
   `cargo test --locked -- --ignored` was not run (restore and the shared-session
   archive did not move).
+- **F2, found after the push, by the coordinator rather than a verifier.** One line of
+  the page script opened a string with a double quote and went on with single
+  quotes, so the script failed to parse and the product tab rendered empty at head
+  `fd528a7`. Every test and CI stayed green because nothing parsed the script, and
+  the screenshots had been taken before that line was written. Fixed, and
+  `change_map_page_script_parses` now runs `node --check` on the page's script (it
+  fails loudly where node is absent); it was watched failing on the broken line
+  first. The page is re-checked in a browser after every edit to its script.

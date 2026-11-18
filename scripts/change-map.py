@@ -1379,7 +1379,7 @@ function renderProduct() {
   const shown = M.screens.map(sc => ({ sc, fs: FEATURES.filter(f => f.screen === sc.id && featureMatches(f)) })).filter(x => x.fs.length);
   $("p-screens-n").textContent = FEATURES.length ? "(" + FEATURES.length + " 機能)" : "";
   $("p-screen-list").innerHTML = shown.length ? shown.map(({ sc, fs }) =>
-    '<div class="screen' + (sc.image && M.images[sc.image] ? "" : " noshot") + '">' + (sc.image && M.images[sc.image] ? '<div class="shot" data-shot="' + esc(sc.id) + '"></div>' : "") + "<div><h3>' + esc(sc.label) +
+    '<div class="screen' + (sc.image && M.images[sc.image] ? "" : " noshot") + '">' + (sc.image && M.images[sc.image] ? '<div class="shot" data-shot="' + esc(sc.id) + '"></div>' : "") + '<div><h3>' + esc(sc.label) +
     ' <small style="font-weight:400;color:var(--soft)">' + fs.length + ' 機能</small></h3><div class="fcards">' +
     fs.map(featureCard).join("") + "</div></div></div>").join("") :
     (FEATURES.length ? '<div class="empty">該当する機能はありません</div>' : '<div class="empty">機能の一覧がありません</div>');

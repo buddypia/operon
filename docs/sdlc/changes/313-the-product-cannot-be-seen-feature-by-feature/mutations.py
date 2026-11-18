@@ -112,6 +112,11 @@ MUTATIONS = {
         'r"(?:s|es|ed|ing)?(?![a-z0-9])"',
         'r""',
     ),
+    "the page script opens a string with one quote and ends it with another": (
+        MAP,
+        "+ '<div><h3>' + esc(sc.label) +",
+        "+ \"<div><h3>' + esc(sc.label) +",
+    ),
     # Requirement 7: the claims a person reads.
     "the empty history says something else": (
         MAP,

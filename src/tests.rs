@@ -95154,3 +95154,41 @@ features:
     );
     let _ = fs::remove_dir_all(root);
 }
+
+/// Found by the coordinator at the pushed head (change 313, F2): a line that
+/// opened a string with `"` and went on with `'` made the page's whole script
+/// fail to parse, so the product tab rendered empty while every test stayed
+/// green. The page's script is now syntax-checked by node. A runner without
+/// node fails here, loudly, rather than skipping: CI runners have it.
+#[test]
+pub(crate) fn change_map_page_script_parses() {
+    let scratch = temporary_directory("page-script");
+    let out = scratch.join("map.html");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let (ok, _, err) = change_map_run(&root, &["--out", out.to_str().unwrap()]);
+    assert!(ok, "change-map.py: {err}");
+    let page = fs::read_to_string(&out).unwrap();
+    let data_open = "<script id=\"map-data\" type=\"application/json\">";
+    let after_data = page.find(data_open).unwrap() + data_open.len();
+    let after_data = after_data + page[after_data..].find("</script>").unwrap();
+    let open = "<script>";
+    let start = after_data + page[after_data..].find(open).unwrap() + open.len();
+    let end = start + page[start..].find("</script>").unwrap();
+    let script = scratch.join("page.js");
+    fs::write(&script, &page[start..end]).unwrap();
+    let mut command = Command::new("node");
+    command.arg("--check").arg(&script);
+    let result = run_command_with_output_limit(
+        &mut command,
+        Duration::from_secs(60),
+        64 * 1024,
+        64 * 1024,
+    )
+    .expect("node がありません: ページの script を構文検査できません。CI の runner には node があります");
+    assert!(
+        result.output.status.success(),
+        "ページの script が構文エラーです: {}",
+        String::from_utf8_lossy(&result.output.stderr)
+    );
+    let _ = fs::remove_dir_all(scratch);
+}
