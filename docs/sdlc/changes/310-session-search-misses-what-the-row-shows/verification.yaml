@@ -1,0 +1,14 @@
+# The evidence for change 310. Format: docs/sdlc/templates/verification.yaml.
+# F1 is the empirical verifier's reproduction: an empty submit cleared the
+# matches and the word they were found for then read "none". F2 is its
+# second: the row's agent chip (カスタム CLI) was not searched.
+digest: "83905244a1c99e41"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked search_310_finds_a_session_by_what_its_row_shows
+  - R2 empirical-test :: cargo test --locked search_310_the_list_and_the_grid_keep_the_same_sessions
+  - R3 empirical-test :: cargo test --locked search_310_history_says_none_only_after_a_finished_search
+  - R4 empirical-test :: cargo test --locked search_310_history_says_it_is_searching_while_it_runs
+  - F1 empirical-test :: cargo test --locked f310_matches_cleared_by_an_empty_submit_are_not_answered_with_none
+  - F2 empirical-test :: cargo test --locked f310_the_agent_chip_on_the_row_is_searched
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/310-session-search-misses-what-the-row-shows/mutations.py
