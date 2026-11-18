@@ -1,0 +1,39 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (the session column's existing fold changes its default, and
+# the gap between projects tightens). Risk: low — it paints (risk.yaml
+# `drawing`); full autonomy. The arrangement file is a per-machine preference
+# beside the store, not the store.
+#
+# Observed before starting: the running app was again the stale
+# /Applications/Operon Stable.app (2026-10-24), started 2026-11-18 13:53,
+# which is why pinning, tab moving and the centre-top tab strip looked lost.
+
+state:
+  route: "modify"
+  stage: "deploy"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package and ship /Applications/Operon.app from main after landing; the person still decides whether the October bundle /Applications/Operon Stable.app goes to the Trash."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked: 1496 run, 0 failed locally after the five fixtures unfolded their project"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose (9962, src/app.rs); src/app/screens.rs 9879"
+  release-binary: "machine passed yes: touches src/app/screens.rs and src/ui/session_tree.rs; package and ship from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py: 9 of 9 caught, the tooltip sentence among them"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

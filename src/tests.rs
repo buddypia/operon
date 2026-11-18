@@ -33354,6 +33354,9 @@ fn app_with_two_sessions(root: &Path) -> (OperonApp, Uuid, Uuid) {
     let first = make("first");
     let second = make("second");
     app.page = Page::Sessions;
+    // Change 311 folds a project until it is opened; the tests built on this
+    // read its rows, so it starts opened here.
+    app.session_arrangement.unfolded = vec![project_id];
     (app, first, second)
 }
 
@@ -60047,7 +60050,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
     let arrangement = SessionArrangement {
         projects: vec![projects[2].id, projects[0].id],
         sessions: Vec::new(),
-        folded: Vec::new(),
+        unfolded: Vec::new(),
         pinned: Vec::new(),
     };
     sort_column_projects(&mut projects, &arrangement);
@@ -60070,7 +60073,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
     let arrangement = SessionArrangement {
         projects: Vec::new(),
         sessions: vec![one.id, three.id],
-        folded: Vec::new(),
+        unfolded: Vec::new(),
         pinned: Vec::new(),
     };
     sort_column_sessions(&mut sessions, &arrangement);
@@ -60092,7 +60095,7 @@ pub(crate) fn test_change_181_column_keeps_todays_order_until_arranged() {
     column.app.session_arrangement = SessionArrangement {
         projects: vec![column.beta, column.alpha],
         sessions: vec![column.second, column.first, column.third],
-        folded: Vec::new(),
+        unfolded: Vec::new(),
         pinned: Vec::new(),
     };
     let texts = column_181_settled(&mut column.app, &context, 700.0);
@@ -60408,7 +60411,7 @@ pub(crate) fn test_change_181_arrangement_file_is_bounded_and_fails_towards_defa
     let arrangement = SessionArrangement {
         projects: vec![Uuid::new_v4()],
         sessions: vec![Uuid::new_v4(), Uuid::new_v4()],
-        folded: vec![Uuid::new_v4()],
+        unfolded: vec![Uuid::new_v4()],
         pinned: Vec::new(),
     };
     save_session_arrangement(&data_file, &arrangement).unwrap();
@@ -68807,7 +68810,9 @@ fn workspace_project_count_click_opens_first_session_of_its_group() {
 #[test]
 fn workspace_project_rows_keep_the_tab_order_and_open_on_click() {
     let root = temporary_directory("workspace-status-rows");
-    let (mut app, _populated, _empty, first, second) = status_column_fixture(&root);
+    let (mut app, _populated, empty, first, second) = status_column_fixture(&root);
+    // Unfolded, so the empty project says so (change 311).
+    app.session_arrangement.unfolded.push(empty);
     // The newer of the two, so the one order lists it first.
     app.store.sessions[0].created_at += 10;
     app.select_session(second);
@@ -68871,14 +68876,7 @@ fn workspace_project_fold_hides_rows_and_survives_reload() {
     workspace_pointer_frame(&mut app, &ctx, Vec::new());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert!(column_rect(&output, "first").is_some());
-    let header = column_rect(&output, "p").unwrap();
-    let disclosure = drawn_text_rects(&output, |text| text == ICON_DISCLOSURE_OPEN)
-        .into_iter()
-        .find(|rect| {
-            rect.left() < header.left()
-                && (rect.center().y - header.center().y).abs() < CONTROL_HEIGHT / 2.0
-        })
-        .expect("p's fold control");
+    let disclosure = column_311_disclosure(&output, "p", ICON_DISCLOSURE_OPEN);
     workspace_click_position(&mut app, &ctx, disclosure.center());
     let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
     assert!(
@@ -68886,18 +68884,20 @@ fn workspace_project_fold_hides_rows_and_survives_reload() {
         "a folded project lists no sessions"
     );
     assert!(drawn_text_rect(&output, |text| text == ICON_DISCLOSURE_CLOSED).is_some());
-    assert_eq!(app.session_arrangement.folded, vec![populated]);
-    assert_eq!(
-        load_session_arrangement(&app.data_file).folded,
-        vec![populated],
+    assert!(app.session_arrangement.unfolded.is_empty());
+    assert!(
+        load_session_arrangement(&app.data_file).unfolded.is_empty(),
         "the fold is written with the column's order"
     );
+    assert!(test_app(app.data_file.clone())
+        .session_arrangement
+        .unfolded
+        .is_empty());
+    app.toggle_project_fold(populated);
     assert_eq!(
-        test_app(app.data_file.clone()).session_arrangement.folded,
+        load_session_arrangement(&app.data_file).unfolded,
         vec![populated]
     );
-    app.toggle_project_fold(populated);
-    assert!(load_session_arrangement(&app.data_file).folded.is_empty());
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -68914,9 +68914,299 @@ fn session_arrangement_without_folded_projects_still_loads() {
     let arrangement = load_session_arrangement(&data_file);
     assert_eq!(arrangement.projects, vec![project]);
     assert!(
-        arrangement.folded.is_empty(),
-        "an older file unfolds everything"
+        arrangement.unfolded.is_empty(),
+        "an older file folds everything (change 311)"
     );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// The disclosure on the heading line of the project named `name`.
+#[cfg(test)]
+fn column_311_disclosure(output: &egui::FullOutput, name: &str, glyph: &str) -> egui::Rect {
+    let header = column_rect(output, name).unwrap_or_else(|| panic!("heading `{name}`"));
+    drawn_text_rects(output, |text| text == glyph)
+        .into_iter()
+        .find(|rect| {
+            rect.left() < header.left()
+                && (rect.center().y - header.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .unwrap_or_else(|| panic!("`{name}` has no disclosure drawn as {glyph}"))
+}
+
+/// The 1px rules the column fills between two heights.
+#[cfg(test)]
+fn column_311_rules(output: &egui::FullOutput, right: f32, top: f32, bottom: f32) -> usize {
+    fn visit(shape: &egui::epaint::Shape, right: f32, top: f32, bottom: f32, found: &mut usize) {
+        match shape {
+            egui::epaint::Shape::Rect(rect)
+                if (rect.rect.height() - 1.0).abs() < 0.01
+                    && rect.rect.width() > 40.0
+                    && rect.rect.right() <= right
+                    && rect.rect.top() > top
+                    && rect.rect.top() < bottom =>
+            {
+                *found += 1;
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    visit(child, right, top, bottom, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = 0;
+    for clipped in &output.shapes {
+        visit(&clipped.shape, right, top, bottom, &mut found);
+    }
+    found
+}
+
+/// Change 311, requirement 1: a project is folded until the person opens it,
+/// the choice is written with the column's order, and it survives a relaunch.
+#[test]
+fn column_311_projects_start_folded_and_unfold_on_click() {
+    let root = temporary_directory("column-311-default");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    // As a first start finds it: nothing was ever unfolded.
+    app.session_arrangement = SessionArrangement::default();
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let right = column_right(&output);
+    let in_column = |output: &egui::FullOutput, glyph: &str| {
+        drawn_text_rects(output, |text| text == glyph)
+            .into_iter()
+            .filter(|rect| rect.left() < right)
+            .count()
+    };
+    assert!(
+        column_rect(&output, "first").is_none() && column_rect(&output, "second").is_none(),
+        "a project nobody opened lists no sessions"
+    );
+    assert!(
+        column_rect(&output, "開いているセッションはありません").is_none(),
+        "a folded empty project is its heading alone"
+    );
+    assert_eq!(
+        (
+            in_column(&output, ICON_DISCLOSURE_CLOSED),
+            in_column(&output, ICON_DISCLOSURE_OPEN)
+        ),
+        (2, 0),
+        "both projects draw the closed mark"
+    );
+    assert_eq!(
+        in_column(&output, ICON_ADD),
+        2,
+        "a folded project keeps its start"
+    );
+    assert!(
+        !count_284_marks(&output, column_rect(&output, "p").unwrap()).is_empty(),
+        "a folded project keeps its counts"
+    );
+
+    let closed = column_311_disclosure(&output, "p", ICON_DISCLOSURE_CLOSED);
+    workspace_click_position(&mut app, &ctx, closed.center());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "first").is_some() && column_rect(&output, "second").is_some(),
+        "the opened project lists its sessions"
+    );
+    assert_eq!(
+        (
+            in_column(&output, ICON_DISCLOSURE_CLOSED),
+            in_column(&output, ICON_DISCLOSURE_OPEN)
+        ),
+        (1, 1),
+        "the other project stays folded"
+    );
+    assert_eq!(app.session_arrangement.unfolded, vec![populated]);
+    assert_eq!(
+        load_session_arrangement(&app.data_file).unfolded,
+        vec![populated],
+        "the choice is written with the column's order"
+    );
+    assert_eq!(
+        test_app(app.data_file.clone()).session_arrangement.unfolded,
+        vec![populated],
+        "and is read back at the next start"
+    );
+
+    // A project added later starts folded.
+    let later = Project {
+        id: Uuid::new_v4(),
+        path: root.join("later"),
+        name: "later".to_owned(),
+        added_at: now(),
+    };
+    app.store.projects.insert(0, later);
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    column_311_disclosure(&output, "later", ICON_DISCLOSURE_CLOSED);
+
+    let open = column_311_disclosure(&output, "p", ICON_DISCLOSURE_OPEN);
+    workspace_click_position(&mut app, &ctx, open.center());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "first").is_none(),
+        "clicking it again hides them"
+    );
+    assert!(load_session_arrangement(&app.data_file).unfolded.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 311, requirement 2: the file an earlier build wrote keeps its order
+/// and its pins, and folds every project; a save drops a project that is gone.
+#[test]
+fn column_311_an_older_order_file_keeps_its_order_and_folds_every_project() {
+    let root = temporary_directory("column-311-older-file");
+    let (mut app, populated, empty, _first, second) = status_column_fixture(&root);
+    fs::write(
+        session_arrangement_path(&app.data_file),
+        format!(
+            "{{\"projects\":[\"{empty}\",\"{populated}\"],\"sessions\":[\"{second}\"],\
+             \"folded\":[\"{empty}\"],\"pinned\":[\"{second}\"]}}\n"
+        ),
+    )
+    .unwrap();
+    let loaded = load_session_arrangement(&app.data_file);
+    assert_eq!(loaded.projects, vec![empty, populated], "the order is kept");
+    assert_eq!(loaded.sessions, vec![second]);
+    assert_eq!(loaded.pinned, vec![second], "the pins are kept");
+    assert!(loaded.unfolded.is_empty(), "every project is folded");
+
+    app.session_arrangement = loaded;
+    let ctx = egui::Context::default();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "first").is_none() && column_rect(&output, "second").is_none(),
+        "the project the older build drew unfolded is folded"
+    );
+    assert!(
+        column_rect(&output, "q").unwrap().top() < column_rect(&output, "p").unwrap().top(),
+        "and the projects keep the order of the file"
+    );
+
+    let mut arrangement = app.session_arrangement.clone();
+    arrangement.unfolded = vec![populated, Uuid::new_v4()];
+    app.commit_session_arrangement(arrangement);
+    let saved = fs::read_to_string(session_arrangement_path(&app.data_file)).unwrap();
+    assert_eq!(
+        load_session_arrangement(&app.data_file).unfolded,
+        vec![populated],
+        "a project the store no longer holds leaves the list"
+    );
+    assert!(
+        saved.contains("\"unfolded\"") && !saved.contains("\"folded\""),
+        "the file names the unfolded projects only: {saved}"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 311, requirement 3: folded projects are a heading each, 28px apart,
+/// with no rule under them; an opened one keeps the rule above its rows.
+#[test]
+fn column_311_folded_projects_sit_closer_together() {
+    let root = temporary_directory("column-311-pitch");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    app.session_arrangement = SessionArrangement::default();
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let right = project_column_right(&app);
+    let (p, q) = (
+        column_rect(&output, "p").expect("p's heading"),
+        column_rect(&output, "q").expect("q's heading"),
+    );
+    let (upper, lower) = if p.top() < q.top() { (p, q) } else { (q, p) };
+    let pitch = lower.top() - upper.top();
+    assert!(
+        pitch <= 28.0,
+        "one folded project's name to the next must be <= 28.0px, got {pitch:.2}"
+    );
+    assert!(
+        pitch >= CONTROL_HEIGHT_SMALL,
+        "the headings keep their height: {pitch:.2}"
+    );
+    assert_eq!(
+        column_311_rules(&output, right, upper.top(), lower.bottom() + pitch),
+        0,
+        "no rule under a folded heading"
+    );
+
+    app.toggle_project_fold(populated);
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let p = column_rect(&output, "p").expect("p's heading");
+    let rows_top = ["first", "second"]
+        .iter()
+        .filter_map(|name| column_rect(&output, name))
+        .map(|rect| rect.top())
+        .fold(f32::INFINITY, f32::min);
+    assert!(rows_top.is_finite(), "the opened project lists its rows");
+    assert_eq!(
+        column_311_rules(&output, right, p.top(), rows_top),
+        1,
+        "an opened project keeps the rule between its heading and its rows"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 311, requirement 4: a filter lists its matches whatever the fold,
+/// and neither changes the fold nor writes it.
+#[test]
+fn column_311_a_filter_lists_matches_of_a_folded_project() {
+    let root = temporary_directory("column-311-filter");
+    let (mut app, ..) = status_column_fixture(&root);
+    app.session_arrangement = SessionArrangement::default();
+    // `second` waits on the person; `first` does not.
+    app.status_filter[SessionStatusGroup::NeedsYou.index()] = true;
+    let ctx = egui::Context::default();
+    ctx.global_style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "second").is_some(),
+        "the match is listed though its project is folded"
+    );
+    assert!(
+        column_rect(&output, "first").is_none(),
+        "only the match is listed"
+    );
+    let open = column_311_disclosure(&output, "p", ICON_DISCLOSURE_OPEN);
+    let rest = || vec![egui::Event::PointerMoved(open.center())];
+    workspace_pointer_frame(&mut app, &ctx, rest());
+    workspace_pointer_frame(&mut app, &ctx, rest());
+    let hovered = painted_texts(&workspace_pointer_frame(&mut app, &ctx, rest()));
+    assert!(
+        hovered
+            .iter()
+            .any(|text| text == "フィルタ中はすべて表示されます"),
+        "the disclosure says why it does nothing: {hovered:?}"
+    );
+    workspace_click_position(&mut app, &ctx, open.center());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "second").is_some(),
+        "the disclosure does nothing while the filter is on"
+    );
+    assert!(
+        app.session_arrangement.unfolded.is_empty()
+            && !session_arrangement_path(&app.data_file).exists(),
+        "the filter neither changes the fold nor writes it"
+    );
+
+    app.clear_session_filters();
+    workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    let output = workspace_pointer_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        column_rect(&output, "first").is_none() && column_rect(&output, "second").is_none(),
+        "clearing the filter folds it back"
+    );
+    column_311_disclosure(&output, "p", ICON_DISCLOSURE_CLOSED);
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -80925,6 +81215,8 @@ fn session_285_a_new_session_in_another_project_gets_a_tab_and_a_row() {
         name: "q".to_owned(),
         added_at: now(),
     });
+    // Unfolded, so its rows are listed (change 311).
+    app.session_arrangement.unfolded.push(other);
     let ctx = egui::Context::default();
     session_285_frame(&mut app, &ctx);
     let mut newcomer = app.store.sessions[0].clone();
@@ -81179,6 +81471,8 @@ fn session_285_a_pinned_tab_does_not_close() {
         name: "q".to_owned(),
         added_at: now(),
     });
+    // Unfolded, so its rows are listed (change 311).
+    app.session_arrangement.unfolded.push(other);
     let mut away = app.store.sessions[0].clone();
     away.id = Uuid::new_v4();
     away.project_id = other;
@@ -81426,6 +81720,8 @@ fn session_286_closing_a_row_of_another_project_keeps_the_shown_one() {
         name: "q".to_owned(),
         added_at: now(),
     });
+    // Unfolded, so its rows are listed (change 311).
+    app.session_arrangement.unfolded.push(other);
     let ctx = egui::Context::default();
     session_285_frame(&mut app, &ctx);
     let mut away = app.store.sessions[0].clone();
@@ -90257,8 +90553,8 @@ fn sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs() {
     }
     let proj_drag_out = sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(proj_to)]);
     let proj_drop_y = sidebar_302_hline(&proj_drag_out, palette.accent);
-    let expected_proj_drop_y =
-        p_heading.center().y - CONTROL_HEIGHT_SMALL / 2.0 - 2.0 - SPACE_XS / 2.0;
+    // The frame's 2px margin above the heading went with change 311.
+    let expected_proj_drop_y = p_heading.center().y - CONTROL_HEIGHT_SMALL / 2.0 - SPACE_XS / 2.0;
     assert!(
         (proj_drop_y - expected_proj_drop_y).abs() <= 1.0,
         "project drop line must land in the 4px SPACE_XS gap ({proj_drop_y:.2} vs {expected_proj_drop_y:.2})"
