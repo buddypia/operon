@@ -58,3 +58,31 @@ the nine tests, the sweep, and the page opened in a browser.
   readable, no console error.
 
 ## Departures from the plan
+
+- **Areas for a change with no plan table.** The spec filed such a change as
+  未分類. Measured on this repository that was 93 of 308, most of them bug
+  fixes, whose route writes no intent or spec. A third source was added: the
+  repository paths named in the comment at the head of `state.yaml` (the bug
+  report), in `bug.md`, `plan.md`, `spec.md`, `verification.yaml`, and
+  `mutations.py` — minus the template pointer every state file carries and the
+  sweep runner every sweep names. 42 remain 未分類; their records name no
+  path, and the map says so rather than guessing.
+- **Page size.** 6.6 MB, not the 5 MB estimated: the page also carries
+  `state.yaml`, `review.yaml`, `verification.yaml`, and `approvals.log`.
+- **No commit id in the header.** The spec's sketch showed one; reading it is
+  a second `git` call, and the Design allows one. The header shows when the
+  page was generated.
+- **Three guards were weaker than their requirement**, found by the sweep and
+  tightened before the first commit: the unquoted table path was also reached
+  by the new third source (the fixture now uses a path only the table rule
+  reads); a change with no state file was still found through a sibling
+  worktree (the test now requires it to be read from this checkout); and the
+  README check accepted the change number in either of two rows (it now reads
+  the domain-map row).
+- **Seen in a browser** (headless Chrome, 1440×900, this repository's page):
+  308 changes; 312 in the 実装 column; its detail opened with 概要, 意図, 仕様,
+  計画, 承認の記録, 状態の記録; `#312/spec` opened the spec rendered and
+  `#295/findings` the three open findings in Japanese; search `tmux` left 22
+  rows, a word with no match showed 「該当する変更はありません」; all 716
+  Markdown documents rendered without an exception or an injected element; no
+  console error.

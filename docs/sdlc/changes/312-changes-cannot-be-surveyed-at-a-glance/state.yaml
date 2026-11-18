@@ -10,8 +10,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "in-progress"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
@@ -19,13 +19,13 @@ state:
   readiness: "go"
   screen: "n/a"
 
-resume: "Write the nine change_map_ tests, watch them fail, then build scripts/change-map.py."
+resume: "Have the empirical verifier try to break the map at the branch head, fix what it reproduces, then push and stop at awaiting-user."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh: the same five breaches at the same tiers as main (steering_bytes 267393 to 268147, diagnose)"
   release-binary: "machine waived touches scripts/, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/312-changes-cannot-be-surveyed-at-a-glance/mutations.py"
+  guards-verified-by-mutation: "machine passed 33 of 33 caught: python3 docs/sdlc/changes/312-changes-cannot-be-surveyed-at-a-glance/mutations.py"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

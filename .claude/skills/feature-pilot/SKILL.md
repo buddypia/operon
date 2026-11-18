@@ -23,9 +23,11 @@ and the hooks read only the first.
 
 ## 0. Before anything is written
 
-1. **Resume or new.** `ls docs/sdlc/changes/`. If a directory matches the
-   request, read its `state.yaml` first, find its tree with `git worktree list`,
-   and continue from `resume` there. Skip the rest of this step.
+1. **Resume or new.** `python3 scripts/change-map.py` lists what waits for a
+   person and what is under way, including a change that so far exists only in
+   another worktree. If one matches the request, read its `state.yaml` first
+   and continue from `resume` in the tree the map names. Skip the rest of this
+   step.
 2. **Open the worktree.** From the main checkout:
    `make wt.new BR=feature/<NNN-slug>` (`fix/` for a bug), where `NNN` is the next
    number free under `docs/sdlc/changes/` and among every local and remote
@@ -47,7 +49,9 @@ and the hooks read only the first.
   `docs/sdlc/routes.yaml` and `docs/sdlc/risk.yaml`. A request that is two routes
   is two changes.
 - **Placement** (routes `feature` and `modify`): `git grep -n` the nouns of the
-  request and read the module map in `CLAUDE.md` ("Shape of this codebase").
+  request, read the module map in `CLAUDE.md` ("Shape of this codebase"), and
+  run `python3 scripts/change-map.py --find <module or noun>` for the earlier
+  changes there, whose specs say what was already decided.
   Record one verdict, with the evidence, in `spec.md` **Design**:
 
   | Verdict | Meaning | Then |

@@ -1,0 +1,15 @@
+# The evidence for change 312. One test per requirement of spec.md, and the
+# sweep that watched each of them go red (33 of 33 caught).
+digest: "aeba25045421ccfa"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked change_map_carries_every_change_with_its_recorded_position
+  - R2 empirical-test :: cargo test --locked change_map_puts_what_waits_for_the_person_first
+  - R3 empirical-test :: cargo test --locked change_map_reads_changes_under_way_in_other_worktrees
+  - R4 empirical-test :: cargo test --locked change_map_embeds_the_documents_and_open_findings_as_written
+  - R5 empirical-test :: cargo test --locked change_map_groups_changes_by_the_area_their_plan_names
+  - R6 empirical-test :: cargo test --locked change_map_page_loads_nothing_from_outside
+  - R7 empirical-test :: cargo test --locked change_map_shows_a_change_whose_record_cannot_be_read
+  - R8 empirical-test :: cargo test --locked change_map_knows_every_status_the_pipeline_defines
+  - R9 empirical-test :: cargo test --locked change_map_is_named_where_a_request_starts
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/312-changes-cannot-be-surveyed-at-a-glance/mutations.py
