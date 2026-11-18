@@ -318,14 +318,15 @@ Built:
 | evidence instead of verdicts | `docs/sdlc/verification-methods.yaml`, `scripts/run-obligations.sh`, the CI `verify` job, and `exhaustive_check` in `src/tests.rs` (change 242) |
 | a stop gate on completion claims | `.claude/hooks/gate-stop.sh`, against each change's `state.yaml` contract |
 | path-scoped rules | `.claude/rules/` with `paths:` frontmatter, plus a guard that no rule may omit `paths:` |
+| every change at a glance | `scripts/change-map.py` — one page generated on demand from each change's records, what waits for a person first and the documents a click away; never committed (change 312) |
 
 Not built:
 
 | What | Why not |
 |---|---|
 | a business and discovery half — market research, pricing, GTM, betting tables | Operon is a terminal manager that already exists; there is no brief to turn into a project |
-| a JSON project-config, domain map, and ownership index | path indirection and a state machine for a feature-folder layout. Here `git` and the six-stage artifacts are the state, and one crate with a module map needs no ownership index |
-| HTML review decks | thousands of lines of Node per checkpoint. Reviewing before everything is built is the real aim, and the routes table gets at it by making stages mandatory per kind |
+| a JSON project-config, domain map, and ownership index | path indirection and a state machine for a feature-folder layout. Here `git` and the six-stage artifacts are the state, and one crate with a module map needs no ownership index. Past 300 changes a person could no longer read that state from a file listing, so change 312 generates a view of it: no second record of any position, and still no config, map file, or index to keep |
+| HTML review decks | thousands of lines of Node per checkpoint. Reviewing before everything is built is the real aim, and the routes table gets at it by making stages mandatory per kind. The page change 312 writes is one Python script over existing records, not a deck built at each checkpoint |
 | more Node hooks, beyond the six worktree and git guards in `.cli/hooks/` (sdlc 051, 073) | each would cost more than it returns; the guards exist because nothing else stopped a commit on `main` |
 | enforced pre-flight and post-flight checklists, outside the `create-pr` skill (which does not run here) | an agent printing a checklist to itself is prose with no guard, and the gates already run at the commit and stop boundaries |
 
