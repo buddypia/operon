@@ -2,7 +2,7 @@
 # F1 is the empirical verifier's reproduction: an empty submit cleared the
 # matches and the word they were found for then read "none". F2 is its
 # second: the row's agent chip (カスタム CLI) was not searched.
-digest: "55656ef4ee5196a3"
+digest: "83905244a1c99e41"
 
 obligations:
   - R1 empirical-test :: cargo test --locked search_310_finds_a_session_by_what_its_row_shows
