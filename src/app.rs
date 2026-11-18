@@ -5410,6 +5410,7 @@ impl OperonApp {
         let query = self.transcript_search_input.trim().to_owned();
         if query.is_empty() {
             self.transcript_matches.clear();
+            self.transcript_searched = None;
             return;
         }
         if self

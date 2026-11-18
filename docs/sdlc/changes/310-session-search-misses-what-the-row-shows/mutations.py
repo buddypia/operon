@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 RUN_SECONDS = 1800
-TESTS = ["search_310_"]
+TESTS = ["search_310_", "f310_"]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
 APP = ROOT / "src/app.rs"
@@ -74,6 +74,12 @@ MUTATIONS = {
         APP,
         "                    self.transcript_searched = Some(query.clone());\n",
         "",
+    ),
+    # F1: matches an empty submit cleared are not a search that found nothing.
+    "an-empty-submit-leaves-the-search-remembered": (
+        APP,
+        "            self.transcript_matches.clear();\n            self.transcript_searched = None;\n",
+        "            self.transcript_matches.clear();\n",
     ),
     # R4
     "a-running-scan-reads-none": (

@@ -58,4 +58,13 @@
 
 ## Departures from the plan
 
-None yet.
+- **`search_local_transcripts` forgets the finished query on an empty submit
+  (F1).** The empirical verifier showed that submitting an emptied field
+  clears the matches while `transcript_searched` kept the word they were found
+  for, so typing that word again read "none". The empty-query branch now sets
+  `transcript_searched = None` beside the clear. Guarded by
+  `f310_matches_cleared_by_an_empty_submit_are_not_answered_with_none` and one
+  more mutation (16 in all).
+- **`session_search_needle` is its own function.** The plan had each call site
+  trim and lower-case; one function is what lets a test and a mutation hold
+  both views to the same text.

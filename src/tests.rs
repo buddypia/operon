@@ -93247,3 +93247,40 @@ pub(crate) fn search_310_history_says_it_is_searching_while_it_runs() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+
+/// F1, the empirical verifier's reproduction: an empty submit clears the
+/// matches, and the word they were found for must not then read "none".
+#[test]
+pub(crate) fn f310_matches_cleared_by_an_empty_submit_are_not_answered_with_none() {
+    const NONE: &str = "一致する履歴はありませんでした。";
+    let root = temporary_directory("f310-cleared");
+    let (mut app, _unnamed, _other) = search_310_app(&root);
+    app.transcript_search_input = "余白".to_owned();
+    app.background_tasks.insert(BackgroundKey::TranscriptSearch);
+    let mut scan = TranscriptSearchSnapshot::default();
+    scan.matches.push(TranscriptMatch {
+        provider: "Codex".to_owned(),
+        session_id: "s1".to_owned(),
+        title: Some("t".to_owned()),
+        path: root.join("x.jsonl"),
+        snippet: "余白".to_owned(),
+        score: None,
+    });
+    app.background_sender
+        .send(BackgroundResult::TranscriptSearch {
+            query: "余白".to_owned(),
+            scan,
+        })
+        .unwrap();
+    app.process_background_results();
+    assert!(!app.transcript_matches.is_empty());
+    // Empty submit clears the matches; the person types the same word again.
+    app.transcript_search_input.clear();
+    app.search_local_transcripts();
+    app.transcript_search_input = "余白".to_owned();
+    assert!(
+        !search_310_history_paints(&mut app, NONE),
+        "一致のあった検索語に、空の送信のあとで一致なしと言っています"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
