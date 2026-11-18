@@ -1,6 +1,6 @@
 # Intent: a person cannot see where every change stands, or reach its documents, without opening files one by one
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-18
 
 ## Problem
@@ -13,12 +13,16 @@ The request, as the person wrote it (2026-11-18):
 > 알아보고 인간이 원할때 상세페이지로 보는 방식이 좋을것 같아. 더 좋은 방식이
 > 있으면 그걸 채용해도 좋아.
 
-The first two questions have a plain answer: there is no feature map in this
-repository. Nothing by that name exists on `main`, on any branch, or in any
-worktree, and no skill, script, or test refers to one. So it guides nothing and
-is fused with nothing. The rest of the request describes what is missing.
+The first two questions have a plain answer: no feature map is committed in
+this repository. Nothing by that name is on `main` or in the history of any
+branch, and no skill, script, or test refers to one. One branch carries the
+name — `feature/feature-map-review-surface` — and it holds no commit beyond
+`main`; the managing session reports it as the empty working copy it opened
+for this same request. Whether it holds uncommitted files was not read. So
+nothing committed guides the work or is fused with the process. The rest of
+the request describes what is missing.
 
-Today the repository holds 307 changes. Each one keeps its position in its own
+Before this one the repository holds 307 changes. Each one keeps its position in its own
 state file and its reasoning in up to five documents. Nothing shows them
 together:
 
@@ -72,8 +76,8 @@ None of the application's modules. `scripts/` (a new generator),
 ## Open questions
 
 - Does the person have a feature map somewhere else — another repository, an
-  uncommitted file — that this should have been built on? Asked on 2026-11-18,
-  unanswered. Adopted default: none exists, build from the records; the change
+  uncommitted file, the working copy of `feature/feature-map-review-surface`
+  — that this should have been built on? Asked on 2026-11-18, unanswered. Adopted default: none exists, build from the records; the change
   stops before landing so the person can say otherwise.
 
 ## Not in scope

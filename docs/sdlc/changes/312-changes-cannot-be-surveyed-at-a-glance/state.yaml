@@ -10,16 +10,16 @@
 
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
 
-resume: "Write spec.md, pass the readiness gate, then plan.md before any script is written."
+resume: "Write the nine change_map_ tests, watch them fail, then build scripts/change-map.py."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
