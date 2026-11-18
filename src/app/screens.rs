@@ -4532,7 +4532,17 @@ impl OperonApp {
                         ui.add_space(4.0);
                     }
                 });
-        } else if !self.transcript_search_input.trim().is_empty()
+        } else if self.transcript_search_input.trim().is_empty() {
+        } else if self
+            .background_tasks
+            .contains(&BackgroundKey::TranscriptSearch)
+            || self
+                .background_tasks
+                .contains(&BackgroundKey::KnowledgeSessionSearch)
+        {
+            ui.add_space(4.0);
+            ui.label(RichText::new(tr("履歴を検索しています…")).weak());
+        } else if self.transcript_searched.as_deref() == Some(self.transcript_search_input.trim())
             && self.knowledge.session_hits.is_empty()
         {
             ui.add_space(4.0);
@@ -4560,10 +4570,41 @@ impl OperonApp {
         self.ui_terminal_session_tabs(ui);
     }
 
+    /// 「セッションを検索」 as the match reads it: trimmed, lower-cased.
+    pub(crate) fn session_search_needle(&self) -> String {
+        self.search.trim().to_lowercase()
+    }
+
+    /// Whether `needle` — from `session_search_needle` — is in what the
+    /// session's row shows: its listed title, name, request, agent, project,
+    /// or branch. Lower-cases only while a search is on, the title last.
+    pub(crate) fn session_matches_search(&self, session: &Session, needle: &str) -> bool {
+        if needle.is_empty() {
+            return true;
+        }
+        let has = |text: &str| text.to_lowercase().contains(needle);
+        let projects = &self.store.projects;
+        has(&session.name)
+            || has(&session.goal)
+            || has(&session.agent)
+            || has(agent_choice_copy(&session.agent).0)
+            || session.branch.as_deref().is_some_and(has)
+            || projects
+                .iter()
+                .any(|project| project.id == session.project_id && has(&project.name))
+            || has(&session_list_title(
+                session,
+                self.session_prompt_turns
+                    .get(&session.id)
+                    .and_then(|turns| turns.first())
+                    .map(|turn| turn.prompt.as_str()),
+            ))
+    }
+
     fn ui_session_grid(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
         ui.label(tr("エージェント一覧"));
-        let needle = self.search.to_lowercase();
+        let needle = self.session_search_needle();
         let projects = self.store.projects.clone();
         let sessions = self.store.sessions.clone();
         let session_names = sessions
@@ -4588,10 +4629,7 @@ impl OperonApp {
                     .filter(|session| self.session_matches_filters(session))
                     .filter(|session| {
                         session.project_id == project.id
-                            && (needle.is_empty()
-                                || format!("{} {} {}", session.name, session.goal, session.agent)
-                                    .to_lowercase()
-                                    .contains(&needle))
+                            && self.session_matches_search(session, &needle)
                     })
                     .cloned()
                     .collect::<Vec<_>>();
@@ -5309,18 +5347,13 @@ impl OperonApp {
         let palette = self.store.theme.palette();
         let mut projects = self.store.projects.clone();
         sort_column_projects(&mut projects, &self.session_arrangement);
-        let needle = self.search.trim().to_lowercase();
+        let needle = self.session_search_needle();
         let sessions = self
             .store
             .sessions
             .iter()
             .filter(|session| self.session_matches_agent_filter(session))
-            .filter(|session| {
-                needle.is_empty()
-                    || format!("{} {} {}", session.name, session.goal, session.agent)
-                        .to_lowercase()
-                        .contains(&needle)
-            })
+            .filter(|session| self.session_matches_search(session, &needle))
             .cloned()
             .collect::<Vec<_>>();
         // One pass over the sessions for all three numbers. `status_view` would

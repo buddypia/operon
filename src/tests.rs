@@ -93015,3 +93015,235 @@ fn agents_309_parsing_edges_hold() {
     );
     assert_eq!(w.code, AGENTS_EXIT_USAGE);
 }
+
+// --- Change 310: the search finds what the row shows, and the history search
+// says "none" only after it looked ------------------------------------------
+
+/// A project 「Webshop」 with an unnamed Claude Code session on
+/// `feature/Login-Form`, listed by its first prompt line, and an Antigravity
+/// session named 「second」.
+fn search_310_app(root: &Path) -> (OperonApp, Uuid, Uuid) {
+    let (mut app, unnamed, other) = app_with_two_sessions(root);
+    app.store.projects[0].name = "Webshop".to_owned();
+    app.store.sessions[0].name = "Webshop · Claude Code".to_owned();
+    app.store.sessions[0].branch = Some("feature/Login-Form".to_owned());
+    app.store.sessions[1].agent = "gemini".to_owned();
+    app.session_prompt_turns.insert(
+        unnamed,
+        vec![PromptTurn {
+            turn: 1,
+            prompt: "\nログイン画面の余白を直して\n二行目の補足".to_owned(),
+            timestamp: Instant::now(),
+            line: 0,
+            completed: true,
+        }],
+    );
+    app.session_library_open = true;
+    (app, unnamed, other)
+}
+
+/// Which of the two sessions 「セッションを検索」 keeps for `text`.
+fn search_310_kept(app: &mut OperonApp, text: &str) -> (bool, bool) {
+    app.search = text.to_owned();
+    let needle = app.session_search_needle();
+    (
+        app.session_matches_search(&app.store.sessions[0], &needle),
+        app.session_matches_search(&app.store.sessions[1], &needle),
+    )
+}
+
+#[test]
+pub(crate) fn search_310_finds_a_session_by_what_its_row_shows() {
+    let root = temporary_directory("search-310-fields");
+    let (mut app, _unnamed, _other) = search_310_app(&root);
+    for (text, kept, why) in [
+        ("", (true, true), "空の検索語がセッションを隠しています"),
+        (
+            "   ",
+            (true, true),
+            "空白だけの検索語がセッションを隠しています",
+        ),
+        (
+            "ログイン画面",
+            (true, false),
+            "一覧のタイトル（最初の依頼の1行目）で見つかりません",
+        ),
+        (
+            "二行目",
+            (false, false),
+            "行に出ていない2行目で見つかっています",
+        ),
+        ("second", (false, true), "名前で見つかりません"),
+        (
+            "  LOGIN-form ",
+            (true, false),
+            "ブランチで見つかりません（大文字・前後の空白）",
+        ),
+        (
+            "claude code",
+            (true, false),
+            "画面に書かれたエージェント名で見つかりません",
+        ),
+        (
+            "antigravity",
+            (false, true),
+            "画面に書かれたエージェント名で見つかりません",
+        ),
+        (
+            "gemini",
+            (false, true),
+            "保存されたエージェント名で見つかりません",
+        ),
+        ("webSHOP", (true, true), "プロジェクト名で見つかりません"),
+        (
+            "どこにもない語",
+            (false, false),
+            "どこにもない語で見つかっています",
+        ),
+    ] {
+        assert_eq!(search_310_kept(&mut app, text), kept, "{why}: {text:?}");
+    }
+    app.store.sessions[1].goal = "APIの型を整理".to_owned();
+    assert_eq!(
+        search_310_kept(&mut app, "apiの型"),
+        (false, true),
+        "依頼の文で見つかりません"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn search_310_the_list_and_the_grid_keep_the_same_sessions() {
+    let root = temporary_directory("search-310-views");
+    let (mut app, _unnamed, _other) = search_310_app(&root);
+    let grid_title = session_title(&app.store.sessions[0]);
+    for (view, kept_title) in [
+        (SessionView::List, "ログイン画面の余白を直して".to_owned()),
+        (SessionView::Grid, grid_title),
+    ] {
+        app.session_view = view;
+        let count = |app: &mut OperonApp, search: &str, title: &str| {
+            app.search = search.to_owned();
+            workspace_texts_at_click_size(app, &egui::Context::default())
+                .iter()
+                .filter(|(text, _)| text == title)
+                .count()
+        };
+        let (kept_before, hidden_before) = (
+            count(&mut app, "", &kept_title),
+            count(&mut app, "", "second"),
+        );
+        assert!(
+            kept_before > 0 && hidden_before > 0,
+            "{view:?}: 検索前の行が描かれていません"
+        );
+        // A trailing space, as a word typed and then spaced leaves it.
+        assert_eq!(
+            count(&mut app, "ログイン画面 ", &kept_title),
+            kept_before,
+            "{view:?}: 行に出ている語で検索したセッションが隠れました"
+        );
+        assert!(
+            count(&mut app, "ログイン画面 ", "second") < hidden_before,
+            "{view:?}: 一致しないセッションが残っています"
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Whether the page under 「ローカル履歴」 paints `text`.
+fn search_310_history_paints(app: &mut OperonApp, text: &str) -> bool {
+    workspace_texts_at_click_size(app, &egui::Context::default())
+        .iter()
+        .any(|(painted, _)| painted == text)
+}
+
+/// A history scan for `query` that found nothing, delivered as the worker does.
+fn search_310_finish_empty_search(app: &mut OperonApp, query: &str) {
+    app.background_tasks.insert(BackgroundKey::TranscriptSearch);
+    app.background_sender
+        .send(BackgroundResult::TranscriptSearch {
+            query: query.to_owned(),
+            scan: TranscriptSearchSnapshot::default(),
+        })
+        .unwrap();
+    app.process_background_results();
+}
+
+#[test]
+pub(crate) fn search_310_history_says_none_only_after_a_finished_search() {
+    const NONE: &str = "一致する履歴はありませんでした。";
+    let root = temporary_directory("search-310-none");
+    let (mut app, _unnamed, _other) = search_310_app(&root);
+    assert!(
+        !search_310_history_paints(&mut app, NONE),
+        "空欄で一致なしと言っています"
+    );
+    app.transcript_search_input = "余白".to_owned();
+    assert!(
+        !search_310_history_paints(&mut app, NONE),
+        "検索していない語に一致なしと言っています"
+    );
+    search_310_finish_empty_search(&mut app, "余白");
+    assert!(
+        search_310_history_paints(&mut app, NONE),
+        "終わった検索が一致なしと言っていません"
+    );
+    app.transcript_search_input = " 余白  ".to_owned();
+    assert!(
+        search_310_history_paints(&mut app, NONE),
+        "前後の空白だけの違いで一致なしが消えました"
+    );
+    app.transcript_search_input = "余白を".to_owned();
+    assert!(
+        !search_310_history_paints(&mut app, NONE),
+        "書き換えた語に、前の検索の一致なしが残っています"
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+pub(crate) fn search_310_history_says_it_is_searching_while_it_runs() {
+    const NONE: &str = "一致する履歴はありませんでした。";
+    const SEARCHING: &str = "履歴を検索しています…";
+    let root = temporary_directory("search-310-searching");
+    let (mut app, _unnamed, _other) = search_310_app(&root);
+    for language in [Language::En, Language::Ko] {
+        assert!(
+            translation_for(language, SEARCHING).is_some(),
+            "{language:?} に検索中の文がありません"
+        );
+    }
+    search_310_finish_empty_search(&mut app, "余白");
+    app.transcript_search_input = "余白".to_owned();
+    assert!(
+        !search_310_history_paints(&mut app, SEARCHING),
+        "検索していないのに検索中と言っています"
+    );
+    for running in [
+        BackgroundKey::TranscriptSearch,
+        BackgroundKey::KnowledgeSessionSearch,
+    ] {
+        app.background_tasks.insert(running.clone());
+        assert!(
+            search_310_history_paints(&mut app, SEARCHING),
+            "{running:?}: 検索中と言っていません"
+        );
+        assert!(
+            !search_310_history_paints(&mut app, NONE),
+            "{running:?}: 検索中に一致なしと言っています"
+        );
+        app.transcript_search_input.clear();
+        assert!(
+            !search_310_history_paints(&mut app, SEARCHING),
+            "{running:?}: 空にした欄の下で検索中と言っています"
+        );
+        app.transcript_search_input = "余白".to_owned();
+        app.background_tasks.remove(&running);
+    }
+    assert!(
+        search_310_history_paints(&mut app, NONE),
+        "検索が終わっても一致なしに戻りません"
+    );
+    fs::remove_dir_all(root).unwrap();
+}

@@ -565,6 +565,9 @@ pub(crate) struct OperonApp {
     pub(crate) file_search: String,
     pub(crate) transcript_search_input: String,
     pub(crate) transcript_matches: Vec<TranscriptMatch>,
+    /// The query of the last 「ローカル履歴」 scan that finished: "none" is an
+    /// answer to that text and to no other.
+    pub(crate) transcript_searched: Option<String>,
     /// The knowledge base and its model (change 157).
     pub(crate) knowledge: KnowledgeState,
     pub(crate) cli_sessions: HashMap<Uuid, Vec<CliSession>>,
@@ -1190,6 +1193,7 @@ impl OperonApp {
             file_search: String::new(),
             transcript_search_input: String::new(),
             transcript_matches: Vec::new(),
+            transcript_searched: None,
             cli_sessions: HashMap::new(),
             handoff_note_input: String::new(),
             handoff_target_inputs: HashMap::new(),
@@ -1917,6 +1921,7 @@ impl OperonApp {
                         .remove(&BackgroundKey::TranscriptSearch);
                     let count = scan.matches.len();
                     self.transcript_matches = scan.matches;
+                    self.transcript_searched = Some(query.clone());
                     self.notice = Some(if scan.truncated || scan.unreadable_entries > 0 {
                         tf!(
                             "検索の上限内で “{query}” に一致するローカル履歴を {count} 件見つけました（{files} ファイル、{mebibytes} MiB、{lines} 行を走査）。一部の履歴は省略されています{unreadable}。",
