@@ -1,0 +1,29 @@
+# The state of change 310. Format: docs/sdlc/templates/state.yaml.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "2 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "approved"
+
+resume: "Done. Package from main after landing, then check that a word from an unnamed session's listed title keeps its row and that ローカル履歴 says nothing until Enter."
+
+contract:
+  three-gates: "machine passed make q.fast; cargo test --locked search_310_ f310_: 6 passed; catalog and history-notice tests ok"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9968 at diagnose"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs, and src/i18n_tables.rs change; package from main after landing"
+  guards-verified-by-mutation: "machine passed 18 of 18 caught: python3 docs/sdlc/changes/310-session-search-misses-what-the-row-shows/mutations.py"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
