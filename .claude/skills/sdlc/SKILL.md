@@ -104,6 +104,10 @@ a taken one), then a hyphenated slug **from the problem, not the
 solution**: `002-restore-loses-first-turn`, not `002-add-retry-loop`. Fill
 `state.yaml` with the route, the risk, and the autonomy just decided.
 
+Name the product features the change touches in the `state:` block,
+`features: "id id"` with ids from `docs/features/index.yaml`, or `none` for a
+change no feature of the product shows (process, tooling).
+
 Keep it current from here on. A stale `state.yaml` is worse than none — an absent
 one is obviously absent, and a wrong one is read and believed.
 
@@ -220,6 +224,10 @@ without recording one is indistinguishable from finishing.
 
 ## 10. Close the loop
 
+- If the change altered what a feature does, update that feature's
+  `docs/features/<id>/spec.md` — and its `brief.md` when what a person sees
+  changed — in this branch, and list them under "Files that change" in
+  `plan.md`. Never write progress into them: it is derived.
 - If anything went wrong in a way that could recur, add an entry to
   `docs/sdlc/lessons.md` — including the **Guard** column. An entry with no guard
   is unfinished.

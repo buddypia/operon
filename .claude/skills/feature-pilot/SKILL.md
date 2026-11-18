@@ -16,10 +16,15 @@ produces is written where the pipeline already keeps it, and nowhere else.
 | order of work, proof, departures | `plan.md` |
 | who approved what | `approvals.log`, as `.claude/skills/sdlc/references/approval.md` decides |
 | review verdicts and carried findings | `review.yaml`, checked by `scripts/check-review.sh` |
+| what the product does now, by feature | `docs/features/<id>/brief.md` (Japanese, for the person) and `spec.md` (English, for you), listed in `docs/features/index.yaml` |
 
-Do not start a second copy of any of these — no feature folder, no context JSON,
-no separate feature spec, no project config. Two records of one position drift,
-and the hooks read only the first.
+Do not start a second copy of any of the first six — no context JSON, no
+separate change spec, no project config. Two records of one position drift, and
+the hooks read only the first. The feature documents are not a second copy: they
+hold a different fact, what the product does now, which a change's own spec (a
+difference) cannot say. They never hold a change's position — progress is
+derived from the change records by `scripts/change-map.py` — and a change that
+alters behaviour updates them in the same branch (change 313).
 
 ## 0. Before anything is written
 
@@ -48,11 +53,15 @@ and the hooks read only the first.
 - **Route, risk, autonomy, screen**: `.claude/skills/sdlc/SKILL.md` §1–2, from
   `docs/sdlc/routes.yaml` and `docs/sdlc/risk.yaml`. A request that is two routes
   is two changes.
-- **Placement** (routes `feature` and `modify`): `git grep -n` the nouns of the
+- **Placement** (routes `feature` and `modify`): read `docs/features/index.yaml`
+  for the feature the request is about, then that feature's `brief.md` and
+  `spec.md`, which say what it does now. `git grep -n` the nouns of the
   request, read the module map in `CLAUDE.md` ("Shape of this codebase"), and
   run `python3 scripts/change-map.py --find <module or noun>` for the earlier
   changes there, whose specs say what was already decided.
-  Record one verdict, with the evidence, in `spec.md` **Design**:
+  Record one verdict, with the evidence and the feature it cites, in `spec.md`
+  **Design**, and name the features the change touches in `state.yaml`
+  (`features: "id id"`, or `none`):
 
   | Verdict | Meaning | Then |
   |---|---|---|
@@ -116,7 +125,11 @@ the earlier sections stay as they were.
   set `status: done` and settle contract verdicts in `state.yaml` (and add a
   lesson with its guard when the mistake could recur) — `.claude/hooks/gate-merge.sh`
   refuses a branch whose `state.yaml` is still in-flight, and `main` refuses
-  direct edits after `cleanup-worktree`.
+  direct edits after `cleanup-worktree`. A change that altered a feature's
+  behaviour has updated that feature's `docs/features/<id>/spec.md` (and
+  `brief.md`, when what a person sees changed) in this branch and lists them in
+  `plan.md`; the suite refuses a `feature` or `modify` plan that names a feature
+  and omits its spec.
 - **Commit** in the worktree directory — never `git -C` from elsewhere.
 - **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
   for CI with `bash scripts/wait-ci.sh` in the background (about five minutes):

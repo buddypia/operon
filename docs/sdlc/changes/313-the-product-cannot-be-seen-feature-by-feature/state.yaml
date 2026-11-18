@@ -16,8 +16,8 @@
 
 state:
   route: "feature"
-  stage: "design"
-  status: "ready"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -26,7 +26,7 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Write the failing tests in src/tests.rs, then the feature documents and the page."
+resume: "The managing session reviews the page, then lands."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"

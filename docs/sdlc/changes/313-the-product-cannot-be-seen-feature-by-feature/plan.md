@@ -65,3 +65,25 @@ opened in a browser.
   list, no console error.
 
 ## Departures from the plan
+
+- **Catalogue field added.** `index.yaml` gained `shared:` for files that serve the
+  whole product (strings, colours, drawing parts, the suite): claimed so no module
+  is nobody's, never used to tie a change to a feature. Without it every change
+  that touched `src/i18n_tables.rs` showed as a change to 設定.
+- **Order of the document tests.** The tests of requirements 1–5 and 9 were written
+  after the 21 briefs and specs, so they passed on their first run; their red is
+  shown by the sweep instead (each mutation removes a heading, a claim, a test
+  name, a path or a sentence and a test goes red). Tests 6–8 were watched failing.
+  The first sweep caught 22 of 24: two page sentences were asserted against the
+  whole page, where the documents' own text satisfied them, and are now asserted
+  against the page without its data block.
+- **Screenshots live once.** A screen carries an image file name and the model holds
+  one `images` map of data URIs, so a screenshot shown on a screen and again under
+  a feature's 画面 tab is stored once. The page is about 10 MB (the seven images are
+  3.7 MB of it, not the 1.5 MB the spec estimated).
+- **The first commit carried the paper trail only**: a commit that lands
+  `docs/features/` is judged as code by the review gate and needs
+  `verification.yaml`, so `index.yaml` went with the commit that holds the evidence.
+- **Not done:** the leftover scripts that expect a domain-map.json are untouched;
+  `cargo test --locked -- --ignored` was not run (restore and the shared-session
+  archive did not move).

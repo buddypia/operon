@@ -20,6 +20,7 @@ Ceilings: 256 KiB per document, 40 records per change, 64 working copies.
 exit 0 written or printed, 2 usage or no docs/sdlc/changes
 """
 import argparse
+import base64
 import datetime
 import json
 import os
@@ -30,6 +31,8 @@ import tempfile
 from pathlib import Path
 
 DOC_BYTES = 256 * 1024
+IMAGE_BYTES = 2 * 1024 * 1024
+FEATURES = 64
 DOCS_PER_CHANGE = 40
 WORKTREES = 64
 GIT_SECONDS = 10
@@ -329,6 +332,8 @@ def read_change(directory, where, statuses):
         "risk": state.get("risk", ""),
         "readiness": state.get("readiness", ""),
         "screen": state.get("screen", ""),
+        "features_named": state.get("features", ""),
+        "plan_paths": plan_paths(name, texts),
         "resume": resume.group(1) if resume else "",
         "contract": contract,
         "where": where,
@@ -338,6 +343,200 @@ def read_change(directory, where, statuses):
         "omitted": omitted,
         "docs": docs,
     }
+
+
+def parse_catalogue(text):
+    """The catalogue's flat `- id:` entries and its screens, as
+    docs/features/index.yaml describes itself; no YAML library."""
+    entries, screens, inside = [], [], False
+    for line in text.splitlines():
+        if line.startswith("# Screens"):
+            inside = True
+            continue
+        if inside:
+            row = re.match(r"^#   (\S+)\s+(.*)$", line)
+            if row:
+                screens.append({"id": row.group(1), "label": row.group(2).strip()})
+                continue
+            inside = False
+        if not line.strip() or line.startswith("#"):
+            continue
+        start = re.match(r"^  - id:\s*(\S+)\s*$", line)
+        if start:
+            entries.append({"id": start.group(1)})
+            continue
+        field = re.match(r"^    ([\w-]+):\s*(.*?)\s*$", line)
+        if field and entries:
+            entries[-1][field.group(1)] = field.group(2)
+    return entries, screens
+
+
+def manual_section(manual, heading):
+    """The manual's text under the heading, to the next heading of its level
+    or above."""
+    lines, start, level = manual.splitlines(), None, 0
+    for index, line in enumerate(lines):
+        found = re.match(r"^(#+)\s+(.*?)\s*$", line)
+        if found and found.group(2) == heading:
+            start, level = index, len(found.group(1))
+            break
+    if start is None:
+        return ""
+    out = []
+    for line in lines[start + 1:]:
+        found = re.match(r"^(#+)\s", line)
+        if found and len(found.group(1)) <= level:
+            break
+        out.append(line)
+    return "\n".join(out).strip()
+
+
+def keyword_hit(keyword, text):
+    if re.search(r"[^\x00-\x7f]", keyword):
+        return keyword in text
+    return re.search(r"(?<![a-z0-9])" + re.escape(keyword.lower()), text) is not None
+
+
+def read_features(root):
+    """The feature layer: the catalogue, each feature's documents, the
+    screens with their images. Nothing here reads a change."""
+    text, _ = read_text(Path(root) / "docs/features/index.yaml")
+    base = {"catalogue_error": "", "features": [], "features_omitted": [],
+            "screens": [], "images": {}}
+    if text is None:
+        base["catalogue_error"] = "機能の一覧を読めません: docs/features/index.yaml がありません"
+        return base
+    entries, screens = parse_catalogue(text)
+    if not entries:
+        base["catalogue_error"] = "機能の一覧を読めません: 項目がありません"
+        return base
+    omitted = [entry["id"] for entry in entries[FEATURES:]]
+    manual, _ = read_text(Path(root) / "docs/MANUAL.ja.md")
+    images, features = {}, []
+    for entry in entries[:FEATURES]:
+        folder = Path(root) / "docs/features" / entry["id"]
+        problems, documents = [], {}
+        for name in ("brief.md", "spec.md"):
+            body, cut = read_text(folder / name)
+            if body is None:
+                problems.append("文書がありません: " + name)
+                documents[name] = None
+            else:
+                documents[name] = {"text": body, "truncated": cut}
+        image = entry.get("image", "")
+        if image:
+            data = None
+            try:
+                with open(Path(root) / "docs/images" / image, "rb") as handle:
+                    data = handle.read(IMAGE_BYTES + 1)
+            except OSError:
+                problems.append("画像がありません: " + image)
+            if data is not None and len(data) > IMAGE_BYTES:
+                problems.append("画像が大きすぎます: " + image)
+                data = None
+            if data is None:
+                image = ""
+            elif image not in images:
+                kind = "jpeg" if image.lower().endswith((".jpg", ".jpeg")) else (
+                    "webp" if image.lower().endswith(".webp") else "png")
+                images[image] = "data:image/%s;base64,%s" % (
+                    kind, base64.b64encode(data).decode("ascii"))
+        features.append({
+            "id": entry["id"],
+            "title": entry.get("title", entry["id"]),
+            "screen": entry.get("screen", ""),
+            "summary": entry.get("summary", ""),
+            "paths": entry.get("paths", "").split(),
+            "shared": entry.get("shared", "").split(),
+            "keywords": entry.get("keywords", "").split(),
+            "manual": entry.get("manual", ""),
+            "manual_text": manual_section(manual or "", entry.get("manual", "")),
+            "image": image,
+            "brief": documents["brief.md"],
+            "spec": documents["spec.md"],
+            "problems": problems,
+            "badge": "steady",
+            "stage": "",
+            "changes": [],
+        })
+    for feature in features:
+        if feature["screen"] and feature["screen"] not in [s["id"] for s in screens]:
+            feature["problems"].append("画面「%s」が一覧にありません" % feature["screen"])
+    for screen in screens:
+        members = [f for f in features if f["screen"] == screen["id"]]
+        screen["features"] = [f["id"] for f in members]
+        screen["image"] = next((f["image"] for f in members if f["image"]), "")
+    base.update({"features": features, "features_omitted": omitted,
+                 "screens": screens, "images": images})
+    return base
+
+
+def plan_paths(change, docs):
+    """The repository paths a change's plan names, without the paths that say
+    nothing about what it is about."""
+    found = []
+    for line in section(docs.get("plan.md", ""), "Files that change"):
+        tokens = re.findall(r"`([^`]+)`", line)
+        if line.startswith("|"):
+            cells = line.split("|")
+            if len(cells) > 1:
+                tokens.append(cells[1].replace("`", "").strip())
+        for token in tokens:
+            token = token.strip().rstrip(".,")
+            if (looks_like_path(token) and token != "src/tests.rs"
+                    and not token.startswith("docs/sdlc/changes/" + change)):
+                found.append(token)
+    return found
+
+
+def link_features(model_features, changes):
+    """Tie each change to the features it touches, strongest link first:
+    `recorded` (its state.yaml names the feature), `inferred` (its plan lists a
+    file the feature claims, unless more than two features claim it), and
+    `estimated` (a keyword of the feature in its name or title, only when
+    nothing else tied it)."""
+    claims = {}
+    for feature in model_features:
+        for path in feature["paths"]:
+            claims.setdefault(path, []).append(feature["id"])
+    by_id = {feature["id"]: feature for feature in model_features}
+    unmapped = []
+    for change in changes:
+        links = {}
+        named = change["features_named"].split()
+        for word in named:
+            if word in by_id:
+                links[word] = "recorded"
+        if named != ["none"]:
+            for token in change["plan_paths"]:
+                for path, owners in claims.items():
+                    if len(owners) > 2:
+                        continue
+                    if token == path or (path.endswith("/") and token.startswith(path)):
+                        for owner in owners:
+                            links.setdefault(owner, "inferred")
+            if not links:
+                text = (change["name"] + " " + change["title"]).lower()
+                for feature in model_features:
+                    if any(keyword_hit(word, text) for word in feature["keywords"]):
+                        links[feature["id"]] = "estimated"
+        change["features"] = [{"id": key, "link": value} for key, value in links.items()]
+        if not links and named != ["none"]:
+            unmapped.append(change["name"])
+        for key, value in links.items():
+            by_id[key]["changes"].append({"name": change["name"], "link": value})
+    lookup = {change["name"]: change for change in changes}
+    for feature in model_features:
+        feature["changes"].sort(key=lambda item: item["name"], reverse=True)
+        open_ones = [lookup[c["name"]] for c in feature["changes"]
+                     if c["link"] != "estimated" and lookup[c["name"]]["group"] in ("needs", "flight")]
+        if any(c["group"] == "needs" for c in open_ones):
+            feature["badge"] = "waiting"
+        elif open_ones:
+            feature["badge"] = "changing"
+        if open_ones:
+            feature["stage"] = open_ones[0]["stage"]
+    return sorted(unmapped, reverse=True)
 
 
 def other_worktrees(root):
@@ -399,6 +598,10 @@ def build(root):
                         key=lambda c: c["name"], reverse=True)
                + sorted((c for c in ordered if c["group"] in ("done", "archived")),
                         key=lambda c: c["name"], reverse=True))
+    layer = read_features(root)
+    unmapped = link_features(layer["features"], ordered)
+    for change in ordered:
+        del change["plan_paths"]
     counts = {group: sum(1 for c in ordered if c["group"] == group) for group in GROUP_ORDER}
     counts["total"] = len(ordered)
     descriptions = module_descriptions(root)
@@ -423,7 +626,18 @@ def build(root):
         "counts": counts,
         "areas": areas,
         "changes": ordered,
+        "unmapped": unmapped,
+        "catalogue_error": layer["catalogue_error"],
+        "features": layer["features"],
+        "features_omitted": layer["features_omitted"],
+        "screens": layer["screens"],
+        "images": layer["images"],
     }
+
+
+BADGE = {"steady": "安定", "changing": "変更中", "waiting": "判断待ち"}
+STAGE_WORDS = {"plan": "計画", "design": "設計", "build": "実装", "test": "テスト",
+               "deploy": "出荷", "maintain": "保守"}
 
 
 def headline(model):
@@ -454,6 +668,16 @@ def summary(model, out):
                 lines.append("    記録を読めません: " + change["problem"])
             elif change["resume"]:
                 lines.append("    次にすること: " + change["resume"])
+    if model["catalogue_error"]:
+        lines.append(model["catalogue_error"])
+    moving = [f for f in model["features"] if f["badge"] != "steady"]
+    lines.append("動いている機能")
+    if not moving:
+        lines.append("  なし")
+    for feature in moving:
+        lines.append("  %s  %s  %s%s" % (
+            feature["id"], feature["title"], BADGE[feature["badge"]],
+            " · " + STAGE_WORDS.get(feature["stage"], feature["stage"]) if feature["stage"] else ""))
     lines.append("地図: %s" % out)
     return "\n".join(lines) + "\n"
 
@@ -465,10 +689,17 @@ def find(model, word):
         labels = [AREA_LABELS.get(area, area) for area in change["areas"]]
         if (word in change["name"].lower() or word in change["title"].lower()
                 or word in (area.lower() for area in change["areas"])
-                or word in labels):
+                or word in labels
+                or any(word in link["id"] for link in change["features"])):
             lines.append("%s  %s  %s  %s  — %s" % (
                 change["name"], change["status"] or "?", change["stage"] or "?",
                 ",".join(labels), change["title"]))
+    for feature in model["features"]:
+        if (word in feature["id"].lower() or word in feature["title"].lower()
+                or word in feature["screen"].lower() or word in feature["summary"].lower()):
+            lines.insert(0, "機能 %s  %s  %s  %s  — %s" % (
+                feature["id"], feature["title"], feature["screen"],
+                BADGE[feature["badge"]], feature["summary"]))
     return "\n".join(lines) + "\n" if lines else "該当する変更はありません\n"
 
 
@@ -532,7 +763,7 @@ PAGE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Operon 変更地図</title>
+<title>Operon 製品地図</title>
 <style>
 :root {
   --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --soft: #5c5a55; --line: #dcd9d1;
@@ -669,6 +900,72 @@ ul.check li:first-child { border-top: 0; }
 ul.check .key { font-weight: 600; } ul.check .what { color: var(--soft); font-size: .88rem; }
 .finding { border-top: 1px solid var(--line); padding: 12px 0; max-width: 820px; }
 .finding .person { font-size: 1rem; } .finding .raw { color: var(--soft); font-size: .84rem; margin-top: 4px; }
+
+header.top .brand { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+nav.views { display: inline-flex; gap: 4px; margin-left: 18px; }
+nav.views button { border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+  padding: 3px 16px; font-weight: 600; }
+nav.views button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.lead { color: var(--soft); margin: 2px 0 14px; max-width: 900px; }
+.tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); margin-top: 18px; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+.tile b { display: block; font-size: 1.9rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.tile span { color: var(--soft); font-size: .88rem; }
+.tile.waiting b { color: var(--needs); } .tile.changing b { color: var(--flight); } .tile.steady b { color: var(--done); }
+.badge { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: .8rem; font-weight: 600;
+  white-space: nowrap; background: var(--done-bg); color: var(--done); }
+.badge.changing { background: var(--flight-bg); color: var(--flight); }
+.badge.waiting { background: var(--needs-bg); color: var(--needs); }
+.screen { display: grid; grid-template-columns: minmax(260px, 420px) 1fr; gap: 20px; align-items: start;
+  padding: 18px 0; border-top: 1px solid var(--line); }
+.screen:first-of-type { border-top: 0; }
+.screen.noshot { grid-template-columns: 1fr; }
+.screen h3 { margin: 0 0 2px; font-size: 1.12rem; }
+.screen .about { color: var(--soft); font-size: .88rem; margin-bottom: 10px; }
+.shot { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.shot img { display: block; width: 100%; height: auto; }
+.shot .none { padding: 38px 16px; color: var(--soft); text-align: center; font-size: .9rem; }
+.fcards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.fcard { text-align: left; background: var(--panel); border: 1px solid var(--line);
+  border-top: 4px solid var(--done); border-radius: 10px; padding: 10px 14px 12px; width: 100%; }
+.fcard.changing { border-top-color: var(--flight); } .fcard.waiting { border-top-color: var(--needs); }
+.fcard:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fcard .t { font-weight: 700; display: block; }
+.fcard .s { color: var(--soft); font-size: .86rem; display: block; margin: 3px 0 8px; line-height: 1.45; }
+.fcard .b { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: .82rem; color: var(--soft); }
+.fview .fhead { margin: 18px 0 6px; }
+.fview .back { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 3px 12px; }
+.fview h2 { font-size: 1.5rem; margin: 12px 0 4px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.fview .meta2 { color: var(--soft); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.fview .tabs { border-bottom: 1px solid var(--line); margin-top: 14px; }
+.fview .tabs button { font-size: 1rem; padding: 9px 18px; }
+#f-body { padding: 18px 2px 60px; }
+.note { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px;
+  color: var(--soft); font-size: .88rem; margin: 0 0 14px; max-width: 820px; }
+ol.timeline { list-style: none; margin: 14px 0; padding: 0 0 0 20px; border-left: 3px solid var(--line); max-width: 860px; }
+ol.timeline li { position: relative; padding: 0 0 14px 18px; }
+ol.timeline li::before { content: ""; position: absolute; left: -29px; top: 6px; width: 13px; height: 13px;
+  border-radius: 50%; background: var(--rest); border: 2px solid var(--bg); }
+ol.timeline li.needs::before { background: var(--needs); } ol.timeline li.flight::before { background: var(--flight); }
+ol.timeline li.done::before { background: var(--done); }
+ol.timeline button { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 8px 12px; width: 100%; display: block; }
+ol.timeline button:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+ol.timeline .head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+ol.timeline .num { font-weight: 700; font-variant-numeric: tabular-nums; }
+ol.timeline .ttl { font-weight: 600; flex: 1 1 260px; }
+ol.timeline .how { color: var(--soft); font-size: .8rem; margin-top: 3px; }
+.shotbig { max-width: 980px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.shotbig img { display: block; width: 100%; height: auto; }
+.paths { color: var(--soft); font-size: .86rem; max-width: 820px; }
+.fchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.fchip { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 0 10px; font-size: .84rem; }
+.fchip:hover { outline: 2px solid var(--accent); }
+.progress { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+.progress .col { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-height: 70px; }
+.progress .col h4 { margin: 0 0 6px; font-size: .82rem; color: var(--soft); font-weight: 600; }
+.progress .col.has { border-color: var(--flight); }
+@media (max-width: 900px) { .screen { grid-template-columns: 1fr; } .progress { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 900px) {
   .area { grid-template-columns: 1fr; gap: 4px; } .track { grid-template-columns: repeat(2, 1fr); }
   main, header.top { padding-left: 14px; padding-right: 14px; }
@@ -677,18 +974,37 @@ ul.check .key { font-weight: 600; } ul.check .what { color: var(--soft); font-si
 </head>
 <body>
 <header class="top">
-  <h1>Operon 変更地図</h1><span class="counts">__HEADLINE__</span>
+  <div class="brand"><h1>Operon 製品地図</h1><span class="counts">__HEADLINE__</span>
+    <nav class="views" aria-label="表示"><button data-view="product" aria-pressed="true">製品</button><button data-view="changes" aria-pressed="false">変更一覧</button></nav></div>
   <div class="row">
-    <input id="q" type="search" placeholder="検索: 番号・題・領域・状態" aria-label="変更を検索">
+    <input id="q" type="search" placeholder="検索: 機能・画面・変更の番号や題" aria-label="検索">
     <span class="meta" id="meta"></span>
   </div>
 </header>
 <main>
-  <section id="needs"><h2>あなたの判断を待っています <small id="needs-n"></small></h2><div id="needs-list"></div></section>
-  <section id="flight"><h2>進行中 <small id="flight-n"></small></h2><div id="flight-list"></div></section>
-  <section id="areas"><h2>領域ごとの変更 <small>どの部分に、これまで何をしてきたか</small></h2><div id="area-list"></div></section>
-  <section id="all"><h2>すべての変更 <small id="all-n"></small></h2>
-    <div class="filters" id="filters"></div><div id="all-list"></div></section>
+  <div id="v-product">
+    <p class="lead">Operon を画面ごとに見渡します。機能を選ぶと、何をするものか・今できること・これまでの変更を読めます。</p>
+    <div id="p-catalogue-error"></div>
+    <section id="p-needs"><h2>あなたの判断を待っています <small id="p-needs-n"></small></h2><div id="p-needs-list"></div></section>
+    <div class="tiles" id="p-tiles"></div>
+    <section id="p-flight"><h2>いま進めている変更 <small>どの段階にあるか</small></h2><div id="p-flight-list"></div></section>
+    <section id="p-screens"><h2>画面と機能 <small id="p-screens-n"></small></h2><div id="p-screen-list"></div></section>
+    <section id="p-unmapped"></section>
+  </div>
+  <div id="v-feature" class="fview" hidden>
+    <div class="fhead"><button class="back" data-view="product">← 製品に戻る</button>
+      <h2><span id="f-title"></span><span id="f-badge"></span></h2>
+      <div class="meta2" id="f-meta"></div></div>
+    <div class="tabs" id="f-tabs" role="tablist"></div>
+    <div id="f-body"></div>
+  </div>
+  <div id="v-changes" hidden>
+    <section id="needs"><h2>あなたの判断を待っています <small id="needs-n"></small></h2><div id="needs-list"></div></section>
+    <section id="flight"><h2>進行中 <small id="flight-n"></small></h2><div id="flight-list"></div></section>
+    <section id="areas"><h2>領域ごとの変更 <small>どの部分に、これまで何をしてきたか</small></h2><div id="area-list"></div></section>
+    <section id="all"><h2>すべての変更 <small id="all-n"></small></h2>
+      <div class="filters" id="filters"></div><div id="all-list"></div></section>
+  </div>
 </main>
 <div id="shade" hidden></div>
 <aside id="detail" hidden aria-label="変更の詳細">
@@ -713,6 +1029,16 @@ const TAB = { "intent.md": "意図", "spec.md": "仕様", "plan.md": "計画", "
   "bug.md": "不具合の報告", "handoff.md": "引き継ぎ", "state.yaml": "状態の記録", "review.yaml": "レビューの記録",
   "verification.yaml": "検証の記録" };
 const VERDICT = { passed: "済", pending: "未", waived: "免除" };
+const BADGE = { steady: "安定", changing: "変更中", waiting: "判断待ち" };
+const ROUTE = { feature: "新機能", modify: "変更", bugfix: "不具合の修正", refactor: "整理",
+  security: "安全性", docs: "文書", trivial: "軽微な修正" };
+const LINK = { recorded: "記録", inferred: "計画のファイルから推定", estimated: "題から推定" };
+const FTABS = [["brief", "BRIEF", "人向けの説明"], ["spec", "SPEC", "AI 向けの仕様"], ["progress", "進捗", "変更の履歴"], ["screen", "画面", "画面とマニュアル"]];
+const FEATURES = M.features;
+const featureById = new Map(FEATURES.map(f => [f.id, f]));
+const screenLabel = id => { const s = M.screens.find(x => x.id === id); return s ? s.label : id; };
+const routeWord = c => ROUTE[c.route] || c.route;
+const stageWord = s => STAGE[s] || s;
 const byName = new Map(M.changes.map(c => [c.name, c]));
 const $ = id => document.getElementById(id);
 
@@ -723,16 +1049,22 @@ function esc(text) {
 function statusWord(c) { return c.problem ? "読めない記録" : (STATUS[c.status] || c.status); }
 function pill(c) { return '<span class="pill ' + c.group + '">' + esc(statusWord(c)) + "</span>"; }
 function place(c) { return c.where.branch || (c.where.here ? "" : c.where.path); }
+function featuresOf(c) {
+  const titles = (c.features || []).map(l => (featureById.get(l.id) || { title: l.id }).title);
+  if (titles.length) return titles.slice(0, 3).join("、") + (titles.length > 3 ? " ほか" : "");
+  return c.features_named.trim() === "none" ? "（製品の機能ではありません）" : "（機能未設定）";
+}
 function areaLabel(name) { const a = M.areas.find(x => x.name === name); return a ? a.label : name; }
 function haystack(c) {
   return [c.name, c.title, statusWord(c), c.status, c.route, STAGE[c.stage] || "", c.stage,
-    c.areas.map(areaLabel).join(" "), c.areas.join(" "), place(c)].join(" ").toLowerCase();
+    c.areas.map(areaLabel).join(" "), c.areas.join(" "), place(c),
+    (c.features || []).map(l => (featureById.get(l.id) || {}).title + " " + l.id).join(" ")].join(" ").toLowerCase();
 }
 
 function card(c, small) {
   let h = '<button class="card ' + c.group + '" data-open="' + esc(c.name) + '"><div class="head">' +
     '<span class="num">' + esc(c.number) + '</span><span class="title">' + esc(c.title) + "</span>" + pill(c) + "</div>";
-  const sub = [STAGE[c.stage] || c.stage, c.route, place(c)].filter(Boolean).join(" · ");
+  const sub = [STAGE[c.stage] || c.stage, routeWord(c), place(c)].filter(Boolean).join(" · ");
   if (!small) h += '<div class="sub">' + esc(sub) + "</div>";
   else if (place(c)) h += '<div class="sub">' + esc(place(c)) + "</div>";
   if (c.problem) h += '<div class="next"><b>記録を読めません: </b>' + esc(c.problem) + "</div>";
@@ -781,10 +1113,10 @@ function renderOverview() {
   listed = M.changes.filter(c => matches(c) && (!groupFilter || c.group === groupFilter));
   $("all-n").textContent = "(" + listed.length + " / " + M.counts.total + ")";
   $("all-list").innerHTML = listed.length ? '<table class="all"><thead><tr><th>番号</th><th>題</th><th>状態</th>' +
-    "<th>段階</th><th>経路</th><th>領域</th></tr></thead><tbody>" + listed.map(c =>
+    "<th>段階</th><th>種類</th><th>機能</th></tr></thead><tbody>" + listed.map(c =>
       '<tr class="pick" data-open="' + esc(c.name) + '"><td class="num">' + esc(c.number) + "</td><td>" +
       esc(c.title) + "</td><td>" + pill(c) + "</td><td>" + esc(STAGE[c.stage] || c.stage) + "</td><td>" +
-      esc(c.route) + "</td><td>" + esc(c.areas.map(areaLabel).join("、")) + "</td></tr>").join("") +
+      esc(routeWord(c)) + "</td><td>" + esc(featuresOf(c)) + "</td></tr>").join("") +
     "</tbody></table>" : '<div class="empty">該当する変更はありません</div>';
 }
 
@@ -906,6 +1238,13 @@ function tabsOf(c) {
 }
 function docFor(c, tab) { return c.docs.find(d => d.name === tab || d.name === tab + ".md"); }
 
+function featureChips(c) {
+  const links = c.features || [];
+  if (!links.length) return esc(featuresOf(c));
+  return '<span class="fchips">' + links.map(l => '<button class="fchip" data-feature="' + esc(l.id) + '" title="' +
+    esc(LINK[l.link]) + '">' + esc((featureById.get(l.id) || { title: l.id }).title) + (l.link === "recorded" ? "" : "（推定）") +
+    "</button>").join("") + "</span>";
+}
 function overview(c) {
   let h = "";
   if (c.problem) h += '<div class="box needs"><h3>記録を読めません</h3>' + esc(c.problem) + "</div>";
@@ -914,7 +1253,8 @@ function overview(c) {
   const used = v => { const p = String(v).split(" "); return p.length === 2 ? p[0] + " / " + p[1] : v; };
   h += '<dl class="kv"><dt>状態</dt><dd>' + pill(c) + " <code>" + esc(c.status) + "</code></dd>" +
     "<dt>段階</dt><dd>" + esc(STAGE[c.stage] || c.stage) + " <code>" + esc(c.stage) + "</code></dd>" +
-    "<dt>経路</dt><dd><code>" + esc(c.route) + "</code></dd>" +
+    "<dt>種類</dt><dd>" + esc(routeWord(c)) + " <code>" + esc(c.route) + "</code></dd>" +
+    "<dt>機能</dt><dd>" + featureChips(c) + "</dd>" +
     "<dt>リスク / 自律</dt><dd>" + esc(c.risk) + " / " + esc(c.autonomy) + "</dd>" +
     "<dt>やり直し</dt><dd>" + esc(used(c.attempts)) + "</dd><dt>質問</dt><dd>" + esc(used(c.questions)) + "</dd>" +
     "<dt>仕様の準備</dt><dd>" + esc(c.readiness) + "</dd><dt>画面の合意</dt><dd>" + esc(c.screen) + "</dd>" +
@@ -936,7 +1276,7 @@ function overview(c) {
 function renderDetail() {
   const c = current;
   $("d-title").textContent = c.number + "  " + c.title;
-  $("d-facts").innerHTML = pill(c) + "<span>" + esc([c.route, c.risk ? "リスク " + c.risk : "", place(c)].filter(Boolean).join(" · ")) + "</span>";
+  $("d-facts").innerHTML = pill(c) + "<span>" + esc([routeWord(c), place(c)].filter(Boolean).join(" · ")) + "</span>";
   const route = (M.routes[c.route] || []).slice();
   if (c.stage && !route.includes(c.stage)) route.push(c.stage);
   const at = route.indexOf(c.stage);
@@ -977,6 +1317,16 @@ function renderDetail() {
   $("d-next").disabled = at2 < 0 || at2 >= listed.length - 1;
 }
 
+let view = "product";
+let feature = null;
+let featureTab = "brief";
+let baseHash = "";
+
+function setHash(hash, replace) {
+  if (location.hash === hash) { route(); return; }
+  if (replace) { history.replaceState(null, "", hash || location.pathname + location.search); route(); }
+  else location.hash = hash;
+}
 function show(name, tab) {
   const c = byName.get(name);
   if (!c) return;
@@ -989,19 +1339,157 @@ function show(name, tab) {
 }
 function hide() {
   current = null; $("detail").hidden = true; $("shade").hidden = true;
-  history.replaceState(null, "", location.pathname + location.search);
-}
-function fromHash() {
-  const m = decodeURIComponent(location.hash.slice(1)).match(/^([^/]+)(?:\/(.+))?$/);
-  if (!m) return;
-  const c = M.changes.find(x => x.number === m[1] || x.name === m[1]);
-  if (c) show(c.name, m[2]);
+  history.replaceState(null, "", baseHash || location.pathname + location.search);
 }
 
+function renderFeatureBadge(f) {
+  const stage = f.stage ? " · " + stageWord(f.stage) : "";
+  return '<span class="badge ' + f.badge + '">' + BADGE[f.badge] + esc(f.badge === "steady" ? "" : stage) + "</span>";
+}
+function featureCard(f) {
+  const open = f.changes.filter(l => l.link !== "estimated" && ["needs", "flight"].includes(byName.get(l.name).group));
+  return '<button class="fcard ' + f.badge + '" data-feature="' + esc(f.id) + '"><span class="t">' + esc(f.title) +
+    '</span><span class="s">' + esc(f.summary) + '</span><span class="b">' + renderFeatureBadge(f) +
+    (open.length ? "<span>変更 " + esc(open.map(l => byName.get(l.name).number).join("・")) + "</span>" : "") + "</span></button>";
+}
+function featureMatches(f) {
+  if (!query) return true;
+  return [f.title, f.id, f.summary, screenLabel(f.screen), BADGE[f.badge]].join(" ").toLowerCase().includes(query);
+}
+
+function renderProduct() {
+  $("p-catalogue-error").innerHTML = M.catalogue_error ? '<div class="box needs"><h3>' + esc(M.catalogue_error) +
+    "</h3>製品の見方は出せません。変更一覧は読めます。</div>" : "";
+  const needs = M.changes.filter(c => c.group === "needs");
+  $("p-needs-n").textContent = "(" + needs.length + ")";
+  $("p-needs-list").innerHTML = needs.length ? '<div class="cards">' + needs.map(c => card(c)).join("") + "</div>"
+    : '<div class="empty">判断を待っている変更はありません</div>';
+  const count = b => FEATURES.filter(f => f.badge === b).length;
+  $("p-tiles").innerHTML = FEATURES.length ? ["waiting", "changing", "steady"].map(b => '<div class="tile ' + b + '"><b>' + count(b) +
+    "</b><span>" + BADGE[b] + "の機能" + (b === "waiting" ? "（あなたの判断を待つ変更がある）" : b === "changing" ? "（変更が進んでいる）" : "（いま動いている変更はない）") +
+    "</span></div>").join("") : "";
+  const flight = M.changes.filter(c => c.group === "flight");
+  $("p-flight-list").innerHTML = !flight.length ? '<div class="empty">進行中の変更はありません</div>' :
+    '<div class="progress">' + M.stages.map(s => {
+      const here = flight.filter(c => c.stage === s);
+      return '<div class="col' + (here.length ? " has" : "") + '"><h4>' + stageWord(s) + "</h4>" +
+        here.map(c => card(c, true)).join("") + "</div>";
+    }).join("") + "</div>";
+  const shown = M.screens.map(sc => ({ sc, fs: FEATURES.filter(f => f.screen === sc.id && featureMatches(f)) })).filter(x => x.fs.length);
+  $("p-screens-n").textContent = FEATURES.length ? "(" + FEATURES.length + " 機能)" : "";
+  $("p-screen-list").innerHTML = shown.length ? shown.map(({ sc, fs }) =>
+    '<div class="screen' + (sc.image && M.images[sc.image] ? "" : " noshot") + '">' + (sc.image && M.images[sc.image] ? '<div class="shot" data-shot="' + esc(sc.id) + '"></div>' : "") + "<div><h3>' + esc(sc.label) +
+    ' <small style="font-weight:400;color:var(--soft)">' + fs.length + ' 機能</small></h3><div class="fcards">' +
+    fs.map(featureCard).join("") + "</div></div></div>").join("") :
+    (FEATURES.length ? '<div class="empty">該当する機能はありません</div>' : '<div class="empty">機能の一覧がありません</div>');
+  for (const holder of document.querySelectorAll("[data-shot]")) {
+    const sc = M.screens.find(x => x.id === holder.dataset.shot);
+    if (sc && sc.image && M.images[sc.image]) {
+      const picture = document.createElement("img");
+      picture.src = M.images[sc.image]; picture.alt = sc.label + "の画面"; picture.loading = "lazy";
+      holder.appendChild(picture);
+    } else holder.innerHTML = '<div class="none">この画面の写真はありません</div>';
+  }
+  const loose = M.unmapped.length;
+  $("p-unmapped").innerHTML = loose ? '<p class="lead">' + (M.changes.length - loose) + " 件の変更は機能に結び付いています。残りの " + loose +
+    " 件は、開発の進め方や道具の変更など、機能に紐づかないもの（または記録に機能名がない古い変更）です。" +
+    ' <button class="fchip" data-view="changes">変更一覧で見る</button></p>' : "";
+  if (M.features_omitted.length) $("p-unmapped").innerHTML += '<p class="warn">機能が多すぎるため、載せていません: ' + esc(M.features_omitted.join(", ")) + "</p>";
+}
+
+function featureDoc(f, which) {
+  const d = f[which];
+  if (!d) return '<div class="box needs"><h3>文書がありません</h3>' + esc(which === "brief" ? "brief.md" : "spec.md") + " が見つかりません。</div>";
+  let out = d.truncated ? '<p class="warn">長いため途中まで表示しています</p>' : "";
+  let rendered = null;
+  try { rendered = markdown(d.text); } catch (error) { rendered = null; }
+  return out + (rendered !== null ? '<div class="md">' + rendered + "</div>" : '<pre class="raw">' + esc(d.text) + "</pre>");
+}
+function featureProgress(f) {
+  const link = k => f.changes.filter(l => l.link === k).length;
+  let h = '<div class="box ' + (f.badge === "waiting" ? "needs" : "") + '"><h3>いまの状態: ' + renderFeatureBadge(f) + "</h3>" +
+    (f.badge === "steady" ? "この機能に手を入れている変更は、いまありません。" :
+     f.badge === "changing" ? "この機能に手を入れている変更が進んでいます。" : "この機能に触れる変更が、あなたの判断を待っています。") + "</div>";
+  if (!f.changes.length) return h + '<p class="empty">この機能に触れた変更の記録はありません</p>';
+  h += "<p>これまでにこの機能へ触れた変更 " + f.changes.length + " 件（記録 " + link("recorded") + " · 計画のファイルから推定 " +
+    link("inferred") + " · 題から推定 " + link("estimated") + "）。新しい順です。</p>";
+  h += '<div class="note">「推定」は、変更の記録に機能名がないため、計画に書かれたファイルや題の言葉から割り出したものです。外れていることがあります。' +
+    "機能名の記録は、変更 313 以降の変更に必ず付きます。</div>";
+  h += '<ol class="timeline">' + f.changes.map(l => {
+    const c = byName.get(l.name);
+    return '<li class="' + c.group + '"><button data-open="' + esc(c.name) + '"><div class="head"><span class="num">' + esc(c.number) +
+      '</span><span class="ttl">' + esc(c.title) + "</span>" + pill(c) + "<span>" + esc(stageWord(c.stage)) + "</span></div>" +
+      '<div class="how">' + esc(LINK[l.link]) + " · " + esc(routeWord(c)) + (place(c) ? " · " + esc(place(c)) : "") + "</div></button></li>";
+  }).join("") + "</ol>";
+  return h;
+}
+function featureScreen(f) {
+  let h = "";
+  if (f.image && M.images[f.image]) h += '<div class="shotbig" id="f-shot"></div>';
+  else h += '<p class="empty">この機能を写した画面写真はありません（画面は「' + esc(screenLabel(f.screen)) + "」です）</p>";
+  h += "<h3>マニュアルの説明: " + esc(f.manual) + "</h3>";
+  if (f.manual_text) { let m = null; try { m = markdown(f.manual_text); } catch (error) { m = null; } h += m !== null ? '<div class="md">' + m + "</div>" : '<pre class="raw">' + esc(f.manual_text) + "</pre>"; }
+  else h += '<p class="empty">マニュアルに該当する節がありません</p>';
+  h += '<p class="paths">この機能を実現しているコード: ' + f.paths.map(p => "<code>" + esc(p) + "</code>").join(" ") + "</p>";
+  return h;
+}
+function renderFeature() {
+  const f = feature;
+  $("f-title").textContent = f.title;
+  $("f-badge").innerHTML = renderFeatureBadge(f);
+  $("f-meta").innerHTML = "<span>画面: <b>" + esc(screenLabel(f.screen)) + "</b></span><span>" + esc(f.summary) + "</span>";
+  $("f-tabs").innerHTML = FTABS.map(t => '<button role="tab" data-ftab="' + t[0] + '" aria-selected="' + (t[0] === featureTab) +
+    '" title="' + esc(t[2]) + '">' + t[1] + (t[0] === "progress" && f.changes.length ? " " + f.changes.length : "") + "</button>").join("");
+  const body = $("f-body");
+  if (featureTab === "brief") body.innerHTML = featureDoc(f, "brief");
+  else if (featureTab === "spec") body.innerHTML = '<div class="note">AI が従い、最新に保つための仕様です（英語）。人が読む説明は BRIEF にあります。</div>' + featureDoc(f, "spec");
+  else if (featureTab === "progress") body.innerHTML = featureProgress(f);
+  else {
+    body.innerHTML = featureScreen(f);
+    const holder = $("f-shot");
+    if (holder) { const picture = document.createElement("img"); picture.src = M.images[f.image]; picture.alt = f.title + "の画面"; holder.appendChild(picture); }
+  }
+}
+
+function route() {
+  const raw = decodeURIComponent(location.hash.slice(1));
+  const featureRoute = raw.match(/^feature\/([^/]+)(?:\/(.+))?$/);
+  const changeRoute = raw.match(/^(\d+|[\w-]+)(?:\/(.+))?$/);
+  if (featureRoute && featureById.has(featureRoute[1])) {
+    baseHash = "#" + raw; view = "feature"; feature = featureById.get(featureRoute[1]);
+    featureTab = FTABS.some(t => t[0] === featureRoute[2]) ? featureRoute[2] : "brief";
+    if (current) { current = null; $("detail").hidden = true; $("shade").hidden = true; }
+  } else if (raw === "changes") {
+    baseHash = "#changes"; view = "changes";
+    if (current) { current = null; $("detail").hidden = true; $("shade").hidden = true; }
+  } else if (raw === "" || raw === "product" || featureRoute) {
+    baseHash = ""; view = "product";
+    if (current) { current = null; $("detail").hidden = true; $("shade").hidden = true; }
+  } else if (changeRoute) {
+    const c = M.changes.find(x => x.number === changeRoute[1] || x.name === changeRoute[1]);
+    if (c) { show(c.name, changeRoute[2]); }
+  }
+  renderViews();
+}
+function renderViews() {
+  $("v-product").hidden = view !== "product";
+  $("v-feature").hidden = view !== "feature";
+  $("v-changes").hidden = view !== "changes";
+  for (const b of document.querySelectorAll("nav.views button")) b.setAttribute("aria-pressed", String((b.dataset.view === "changes") === (view === "changes")));
+  if (view === "product") renderProduct();
+  else if (view === "feature") renderFeature();
+  else renderOverview();
+  if (view !== "feature") window.scrollTo(0, 0);
+}
+function fromHash() { route(); }
+
 document.addEventListener("click", event => {
-  const target = event.target.closest("[data-open],[data-more],[data-group],[data-tab]");
+  const target = event.target.closest("[data-open],[data-more],[data-group],[data-tab],[data-feature],[data-view],[data-ftab]");
   if (!target) return;
-  if (target.dataset.open) show(target.dataset.open);
+  if (target.dataset.feature) { setHash("#feature/" + target.dataset.feature + (current ? "" : ""), false); }
+  else if (target.dataset.ftab) { setHash("#feature/" + feature.id + "/" + target.dataset.ftab, true); }
+  else if (target.dataset.view) { setHash(target.dataset.view === "changes" ? "#changes" : "", false); }
+  else if (target.dataset.open) show(target.dataset.open);
   else if (target.dataset.more) { expanded.add(target.dataset.more); renderOverview(); }
   else if (target.dataset.group !== undefined) { groupFilter = target.dataset.group; renderOverview(); }
   else if (target.dataset.tab) { show(current.name, target.dataset.tab); }
@@ -1009,7 +1497,7 @@ document.addEventListener("click", event => {
 $("body").addEventListener("click", event => {
   if (event.target.id === "raw-toggle") { rawView = !rawView; renderDetail(); }
 });
-$("q").addEventListener("input", event => { query = event.target.value.trim().toLowerCase(); renderOverview(); });
+$("q").addEventListener("input", event => { query = event.target.value.trim().toLowerCase(); if (view === "feature") { view = "product"; baseHash = ""; history.replaceState(null, "", location.pathname + location.search); } renderViews(); });
 $("shade").addEventListener("click", hide);
 $("d-close").addEventListener("click", hide);
 $("d-prev").addEventListener("click", () => { const n = listed.indexOf(current); if (n > 0) show(listed[n - 1].name, currentTab); });
@@ -1018,8 +1506,7 @@ document.addEventListener("keydown", event => { if (event.key === "Escape" && cu
 window.addEventListener("hashchange", fromHash);
 
 $("meta").innerHTML = "生成 " + esc(M.generated) + (M.worktrees_read ? "" : ' · <span class="warn">他の作業コピーを読めませんでした</span>');
-renderOverview();
-fromHash();
+route();
 </script>
 </body>
 </html>
