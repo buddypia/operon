@@ -3,15 +3,15 @@
 state:
   route: "modify"
   stage: "test"
-  status: "awaiting-user"
+  status: "done"
   attempts: "0 3"
-  questions: "1 7"
+  questions: "2 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
   screen: "approved"
 
-resume: "Ask the person whether intent.md is what they want (the evaluator escalated it as agent-originated and they had not answered), record their words as a person line in approvals.log, set done, then land and package."
+resume: "Done. Package from main after landing, then check that a word from an unnamed session's listed title keeps its row and that ローカル履歴 says nothing until Enter."
 
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked search_310_ f310_: 6 passed; catalog and history-notice tests ok"

@@ -1,6 +1,6 @@
 # Intent: the session search says nothing matches words that are on the row, and the history search says so before it has looked
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-18
 
 ## Problem
