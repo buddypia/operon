@@ -16,7 +16,7 @@ resume: "Done. Package from main after landing, then check that a word from an u
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked search_310_ f310_: 6 passed; catalog and history-notice tests ok"
   bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines 9968 at diagnose"
-  release-binary: "machine pending required - src/app.rs, src/app/screens.rs, and src/i18n_tables.rs change; package from main after landing"
+  release-binary: "machine passed required - src/app.rs, src/app/screens.rs, and src/i18n_tables.rs change; package from main after landing"
   guards-verified-by-mutation: "machine passed 18 of 18 caught: python3 docs/sdlc/changes/310-session-search-misses-what-the-row-shows/mutations.py"
 
 sets:
