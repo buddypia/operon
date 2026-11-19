@@ -1,6 +1,7 @@
 # The evidence for change 313. One test per requirement of spec.md, and the
-# sweep that watched each of them go red.
-digest: "7fedeed79e5fe5d1"
+# sweep that watched each of them go red. Every obligation below held again on
+# 04a6528 in CI run 44446449355; the digest is the whole landing diff's.
+digest: "46bdd2f4d748c91c"
 
 obligations:
   - R1 empirical-test :: cargo test --locked feature_catalogue_is_complete_and_every_entry_resolves
