@@ -11,13 +11,13 @@
 # feature-pilot's "no feature folder" line for the one fact it did not hold, what
 # the product does now; (2) the page becomes feature-first and the change list is
 # its second tab; (3) each change from 313 on names its features in state.yaml.
-# A revert undoes all three. Landing is left to the managing session, which holds
-# the three decisions for the person: nobody but them has approved them.
+# A revert undoes all three. The person approved them and the landing with
+# 「進めて」 on 2026-11-19 (approvals.log).
 
 state:
   route: "feature"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -26,15 +26,15 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "The managing session reviews the page, then lands."
+resume: "Landed on the person's 「進めて」 (2026-11-19)."
 
 contract:
   three-gates: "machine passed fmt and clippy at each commit through gate-commit.sh; full suite green in CI run 44371749667 on 978ff24"
   bands: "machine passed bash scripts/check-bands.sh: the same five breaches at the same tiers as main after 312 (steering_bytes 268147 to 270708, diagnose)"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  page-exercised-in-a-browser: "human pending headless Chrome: overview, a feature in each tab, progress, change list, no console error"
-  landing: "human pending the managing session reviews the page, then lands"
+  guards-verified-by-mutation: "human passed mutations.py: 26 of 26 mutants caught by the new tests"
+  page-exercised-in-a-browser: "human passed headless Chrome on 978ff24: overview, a feature's tabs, progress, change list; no console error; then opened in the person's browser"
+  landing: "human passed the person replied 「進めて」 to the question whether 313 may land"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
