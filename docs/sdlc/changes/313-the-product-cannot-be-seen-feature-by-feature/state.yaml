@@ -1,0 +1,46 @@
+# Change 313. After seeing change 312's page, the person wrote (2026-11-19):
+# 「画面構成のUI/UXもわからないし、人間がレビューし、AIがSPECとかBRIEFと進捗が追える
+# 文章とかもない。これで人間が全体像を掴めないし、レビューもできないし、開発の進捗も
+# 追えない」. 312 answered with a change-centric ticket view; this change adds the
+# product view: feature documents (BRIEF for a person, SPEC for an AI), a
+# feature-first page, and the process rules that keep the documents true.
+#
+# Decisions taken by the managing session, not by the person (recorded as such):
+# the person was asked and did not answer within ten minutes, so the recommended
+# defaults were adopted: (1) docs/features/ holds the living documents, reversing
+# feature-pilot's "no feature folder" line for the one fact it did not hold, what
+# the product does now; (2) the page becomes feature-first and the change list is
+# its second tab; (3) each change from 313 on names its features in state.yaml.
+# A revert undoes all three. The person approved them and the landing with
+# 「進めて」 on 2026-11-19 (approvals.log).
+
+state:
+  route: "feature"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+  features: "none"
+
+resume: "Landed on the person's 「進めて」 (2026-11-19)."
+
+contract:
+  three-gates: "machine passed fmt and clippy at each commit through gate-commit.sh; full suite green in CI run 44371749667 on 978ff24"
+  bands: "machine passed bash scripts/check-bands.sh: the same five breaches at the same tiers as main after 312 (steering_bytes 268147 to 270708, diagnose)"
+  release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human passed mutations.py: 26 of 26 mutants caught by the new tests"
+  page-exercised-in-a-browser: "human passed headless Chrome on 978ff24: overview, a feature's tabs, progress, change list; no console error; then opened in the person's browser"
+  landing: "human passed the person replied 「進めて」 to the question whether 313 may land"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

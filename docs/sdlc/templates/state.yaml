@@ -37,6 +37,10 @@
 #   readiness — go | conditional | no-go | pending, from scripts/check-readiness.sh
 #   screen   — approved | pending | n/a. Not n/a when the change touches a
 #              `screen yes` surface in docs/sdlc/risk.yaml.
+#   features — the product features the change touches: ids from
+#              docs/features/index.yaml separated by spaces, or `none`. Required
+#              from change 313 (`every_change_from_313_names_features_that_exist`).
+#              A feature/modify change that names one lists its spec.md in the plan.
 
 state:
   route: "modify"
@@ -48,6 +52,7 @@ state:
   risk: "low"
   readiness: "pending"
   screen: "n/a"
+  features: "none"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
