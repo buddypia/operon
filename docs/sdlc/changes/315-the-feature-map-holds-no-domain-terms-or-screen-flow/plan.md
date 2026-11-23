@@ -75,3 +75,27 @@ against the code, and the page opened in a browser.
   no console error.
 
 ## Departures from the plan
+
+- **A way may be a click.** `flow.yaml` gained `click:` beside `key:` and
+  `label:`: some ways are a click on a row that has no word of its own (a project
+  row opens its overview). The Japanese text says what is clicked; requirement 4
+  requires one of the three.
+- **Floors in the tests.** The glossary and spec tests also hold lower bounds
+  (40 terms, 30 screen words, 30 code names, 10 avoided words, 50 pinned lines)
+  so a file emptied by mistake does not pass by having nothing to check.
+- **Arrowheads drawn by hand.** An SVG `<marker>` is referenced through `url(`,
+  which the page's no-external-load check refuses; each arrowhead is a small
+  polygon instead.
+- **どこからでも.** A key way that leaves every page (⌘K and the page keys) would
+  draw an arrow from each of 27 boxes. Those ways are listed once as a tag, and
+  only the chosen screen's ways are drawn as arrows.
+- **The data files ride the landing commit.** The plan commit could not carry
+  `domains.yaml`, `glossary.yaml` and `flow.yaml` before the tests existed; the
+  catalogue test reads the working tree, so they were written then and committed
+  with the code.
+- **Written by agents, read by me.** The glossary (three drafts merged, one
+  duplicate replaced by 前提), the flow and the 224 `Pinned by` lines were
+  drafted by subagents from the code; every entry is held by requirements 2, 4,
+  5 and 6, and a 順番待ち entry duplicated across drafts was the one fix the tests
+  did not force.
+- **The sweep.** 26 mutations, 26 caught on the first run.

@@ -1,0 +1,525 @@
+# The screen flow of Operon: every screen, sheet and overlay a person reaches,
+# and the ways between them.
+#
+# Written by hand, because egui has no route table, and kept true by
+# `screen_flow_reaches_every_page_and_every_way_resolves` and
+# `every_navigation_key_is_a_way_in_the_flow` in src/tests.rs, which check it
+# against the `Page` and `ProjectTab` enums of src/app.rs, the action ids of
+# src/app/keymap.rs and the message ids of src/i18n_tables.rs (change 315).
+# Read by scripts/change-map.py for the 画面の流れ view.
+#
+# Flat on purpose, like index.yaml. Two lists: `screens:` entries open with
+# `- id:`, `ways:` entries with `- from:`.
+#
+# Screens:
+#   id        kebab-case
+#   title     the screen as the UI names it (Japanese)
+#   kind      one of the set below
+#   screen    the catalogue screen (docs/features/index.yaml) it is drawn under
+#   features  ids of the features shown on it, space separated
+#   parent    the screen it sits inside, for drawing only; not a way (optional)
+#   page      the `Page` variant it is, when it is one (optional)
+#   tab       the `ProjectTab` variant it is, when it is one (optional)
+#   image     a file in docs/images/ that shows it (optional)
+#   note      one Japanese line (optional)
+#
+# Kinds (the test reads this set from here):
+#   page     a page of the window (⌘1, ⌘2, ⌘3, ⌘,)
+#   tab      a tab inside a page
+#   panel    a pane or side panel inside a page
+#   sheet    a sheet over the window that a person fills in and closes
+#   overlay  a floating layer over the window
+#   cli      the command line, outside the window
+#
+# Ways:
+#   from, to  screen ids
+#   key       an action id of src/app/keymap.rs that takes it (optional)
+#   label     the word on the button or menu item that takes it; part of a
+#             Japanese message id (optional)
+#   click     what is clicked when the control has no word of its own, such as
+#             a row (Japanese; optional). A way has a key, a label, or a click
+#   note      one Japanese line (optional)
+
+screens:
+
+  - id: home
+    title: ホーム
+    kind: page
+    screen: home
+    features: home needs-you app-shell
+    page: Home
+    image: 01-home.png
+    note: ツールバーとウィンドウ全体の土台もここから見える。
+
+  - id: projects
+    title: プロジェクト
+    kind: page
+    screen: projects
+    features: project-list
+    page: Projects
+    note: 一覧。フォルダの追加・スキャン・削除。
+
+  - id: project-overview
+    title: 概要
+    kind: tab
+    screen: projects
+    features: project-overview
+    parent: projects
+    tab: Overview
+
+  - id: project-git
+    title: 変更
+    kind: tab
+    screen: projects
+    features: git-changes diff-notes
+    parent: projects
+    tab: Git
+    image: 04-diff.png
+
+  - id: project-worktrees
+    title: worktree の一覧
+    kind: tab
+    screen: projects
+    features: worktrees
+    parent: projects
+    tab: Worktrees
+
+  - id: project-prs
+    title: PR の一覧
+    kind: tab
+    screen: projects
+    features: git-changes
+    parent: projects
+    tab: PullRequests
+
+  - id: project-files
+    title: ファイル
+    kind: tab
+    screen: projects
+    features: files-editor
+    parent: projects
+    tab: Files
+
+  - id: project-agent-settings
+    title: エージェント設定
+    kind: tab
+    screen: projects
+    features: project-overview
+    parent: projects
+    tab: AgentSettings
+
+  - id: project-knowledge
+    title: ナレッジ
+    kind: tab
+    screen: projects
+    features: knowledge
+    parent: projects
+    tab: Knowledge
+
+  - id: sessions
+    title: セッション
+    kind: page
+    screen: session
+    features: session-column needs-you status-detection session-lifecycle
+    page: Sessions
+    image: 02-needs-you.png
+    note: 左の一覧と、要対応を先頭に固定する行。
+
+  - id: terminal-group
+    title: ターミナル
+    kind: panel
+    screen: session
+    features: terminal-pane session-lifecycle
+    parent: sessions
+    image: 03-session-claude.png
+    note: タブと最大 4 分割。
+
+  - id: side-panel
+    title: サイドパネル
+    kind: panel
+    screen: session
+    features: terminal-pane
+    parent: sessions
+
+  - id: side-files
+    title: サイドパネルのファイル
+    kind: panel
+    screen: session
+    features: files-editor
+    parent: side-panel
+
+  - id: side-conversation
+    title: サイドパネルの会話
+    kind: panel
+    screen: session
+    features: history-handoff
+    parent: side-panel
+
+  - id: side-changes
+    title: サイドパネルの変更
+    kind: panel
+    screen: session
+    features: git-changes diff-notes
+    parent: side-panel
+
+  - id: history-library
+    title: 履歴
+    kind: panel
+    screen: session
+    features: history-handoff session-lifecycle session-column
+    parent: sessions
+    note: 過去の会話の検出と復元、セッションの一覧。
+
+  - id: new-session
+    title: 新しいセッション
+    kind: sheet
+    screen: new-session
+    features: new-session
+    image: 06-new-session.png
+
+  - id: palette
+    title: 検索・操作
+    kind: overlay
+    screen: palette
+    features: palette
+    image: 05-palette.png
+
+  - id: broadcast
+    title: アイドル中のエージェントへ送信
+    kind: sheet
+    screen: session
+    features: agents-cli
+
+  - id: settings
+    title: 設定
+    kind: page
+    screen: settings
+    features: settings
+    page: Settings
+
+  - id: settings-appearance
+    title: 外観
+    kind: panel
+    screen: settings
+    features: settings
+    parent: settings
+
+  - id: settings-agents
+    title: エージェント
+    kind: panel
+    screen: settings
+    features: settings status-detection
+    parent: settings
+    note: 起動に必要なツールと状態の検知方法。
+
+  - id: settings-notifications
+    title: 通知
+    kind: panel
+    screen: settings
+    features: settings
+    parent: settings
+
+  - id: settings-data
+    title: データと復旧
+    kind: panel
+    screen: settings
+    features: local-data settings
+    parent: settings
+
+  - id: settings-keys
+    title: キー割り当て
+    kind: panel
+    screen: settings
+    features: keybindings
+    parent: settings
+
+  - id: cli-agents
+    title: Operon agents コマンド
+    kind: cli
+    screen: cli
+    features: agents-cli
+    note: セッション内のエージェントが他のセッションを操作する。
+
+  - id: cli-knowledge
+    title: Operon knowledge コマンド
+    kind: cli
+    screen: cli
+    features: knowledge
+    note: エージェントがナレッジを検索する。
+
+ways:
+
+  - from: projects
+    to: project-overview
+    click: プロジェクトの行
+    note: 行を押すとそのプロジェクトの概要タブが開く。
+
+  - from: new-session
+    to: terminal-group
+    label: を起動
+    note: ⌘↩ でも同じ。セッションのページに移り、起動したセッションのターミナルを開く。
+
+  - from: home
+    to: projects
+    key: page.projects
+    label: プロジェクト
+
+  - from: home
+    to: sessions
+    key: page.sessions
+    label: セッション
+
+  - from: home
+    to: settings
+    key: page.settings
+    label: 設定
+
+  - from: home
+    to: palette
+    key: palette.open
+    label: 検索・操作
+
+  - from: home
+    to: new-session
+    key: session.new
+    label: 新しいセッション
+
+  - from: home
+    to: terminal-group
+    key: attention.next
+    label: 要対応
+
+  - from: projects
+    to: home
+    key: page.home
+    label: ホーム
+
+  - from: projects
+    to: sessions
+    key: page.sessions
+    label: セッション
+
+  - from: projects
+    to: settings
+    key: page.settings
+    label: 設定
+
+  - from: projects
+    to: palette
+    key: palette.open
+    label: 検索・操作
+
+  - from: projects
+    to: new-session
+    key: session.new
+    label: 新しいセッション
+
+  - from: projects
+    to: terminal-group
+    key: attention.next
+    label: 要対応
+
+  - from: sessions
+    to: home
+    key: page.home
+    label: ホーム
+
+  - from: sessions
+    to: projects
+    key: page.projects
+    label: プロジェクト
+
+  - from: sessions
+    to: settings
+    key: page.settings
+    label: 設定
+
+  - from: sessions
+    to: palette
+    key: palette.open
+    label: 検索・操作
+
+  - from: sessions
+    to: new-session
+    key: session.new
+    label: 新しいセッション
+
+  - from: sessions
+    to: terminal-group
+    key: attention.next
+    label: 要対応
+
+  - from: settings
+    to: home
+    key: page.home
+    label: ホーム
+
+  - from: settings
+    to: projects
+    key: page.projects
+    label: プロジェクト
+
+  - from: settings
+    to: sessions
+    key: page.sessions
+    label: セッション
+
+  - from: settings
+    to: palette
+    key: palette.open
+    label: 検索・操作
+
+  - from: settings
+    to: new-session
+    key: session.new
+    label: 新しいセッション
+
+  - from: settings
+    to: terminal-group
+    key: attention.next
+    label: 要対応
+
+  - from: home
+    to: history-library
+    label: 要対応のセッションを見る
+
+  - from: home
+    to: sessions
+    label: すべて表示
+
+  - from: home
+    to: terminal-group
+    label: 開く
+
+  - from: home
+    to: new-session
+    label: セッション
+    note: プロジェクトごとの開始ボタン。
+
+  - from: project-overview
+    to: project-git
+    label: 変更
+
+  - from: project-overview
+    to: project-worktrees
+    label: worktree
+
+  - from: project-overview
+    to: project-prs
+    label: PR
+
+  - from: project-overview
+    to: project-files
+    label: ファイル
+
+  - from: project-overview
+    to: project-agent-settings
+    label: エージェント設定
+
+  - from: project-overview
+    to: project-knowledge
+    label: ナレッジ
+
+  - from: project-git
+    to: project-overview
+    label: 概要
+
+  - from: project-overview
+    to: projects
+    label: プロジェクト
+    note: パンくず。
+
+  - from: project-overview
+    to: new-session
+    label: 新しいセッション
+
+  - from: project-worktrees
+    to: new-session
+    label: この場所で新規セッション
+
+  - from: history-library
+    to: project-overview
+    label: プロジェクトを開く
+    note: 最後に開いていたタブで開く。
+
+  - from: history-library
+    to: sessions
+    label: ターミナルに戻る
+
+  - from: history-library
+    to: terminal-group
+    label: 開く
+
+  - from: sessions
+    to: history-library
+    label: 履歴
+
+  - from: sessions
+    to: side-panel
+    key: panel.toggle
+    label: サイドパネルを表示
+
+  - from: side-panel
+    to: side-files
+    label: ファイル
+
+  - from: side-panel
+    to: side-conversation
+    label: 会話
+
+  - from: side-panel
+    to: side-changes
+    label: 変更
+
+  - from: new-session
+    to: terminal-group
+    label: ターミナルだけ開く
+
+  - from: new-session
+    to: settings-agents
+    label: 設定を開く
+    note: tmux や CLI が未準備のとき。
+
+  - from: palette
+    to: projects
+    label: プロジェクトを開く
+
+  - from: palette
+    to: sessions
+    label: セッションを開く
+
+  - from: palette
+    to: settings
+    label: 設定を開く
+
+  - from: palette
+    to: history-library
+    label: 履歴を開く
+
+  - from: palette
+    to: new-session
+    label: 新しいセッション
+
+  - from: palette
+    to: broadcast
+    label: アイドル中のエージェントへ送信
+
+  - from: settings
+    to: settings-appearance
+    label: 外観
+
+  - from: settings
+    to: settings-agents
+    label: エージェント
+
+  - from: settings
+    to: settings-notifications
+    label: 通知
+
+  - from: settings
+    to: settings-data
+    label: データと復旧
+
+  - from: settings
+    to: settings-keys
+    label: キー割り当て

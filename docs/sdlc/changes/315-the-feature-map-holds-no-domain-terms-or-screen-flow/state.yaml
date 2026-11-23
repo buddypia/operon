@@ -12,24 +12,24 @@
 
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "test"
+  status: "reviewing"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
   features: "none"
 
-resume: "Write spec.md from intent.md, then the readiness gate."
+resume: "Committed with the sweep green; the verifiers try to falsify it, then push, CI, and the person's word on landing."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  page-exercised-in-a-browser: "human pending headless Chrome: every view, a domain, a term, a screen of the flow, the requirement board, the work basket; no console error"
+  three-gates: "machine pending fmt and clippy at the commit through gate-commit.sh; the full suite in CI on the push"
+  bands: "machine passed bash scripts/check-bands.sh: six breaches, none new from this change; it adds 12 lines to two skills (steering_bytes 272790, diagnose as before)"
+  release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human passed mutations.py: 26 of 26 mutants caught by the ten new tests"
+  page-exercised-in-a-browser: "human passed headless Chrome: every view, a domain, a term, a screen of the flow, the requirement board, the work basket; no console error"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

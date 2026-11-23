@@ -55,7 +55,10 @@ alters behaviour updates them in the same branch (change 313).
   is two changes.
 - **Placement** (routes `feature` and `modify`): read `docs/features/index.yaml`
   for the feature the request is about, then that feature's `brief.md` and
-  `spec.md`, which say what it does now. `git grep -n` the nouns of the
+  `spec.md`, which say what it does now. Its domain in
+  `docs/features/domains.yaml` says what that area owns and does not; a new
+  label a person reads uses the words of `docs/features/glossary.yaml` and
+  none it avoids (change 315). `git grep -n` the nouns of the
   request, read the module map in `CLAUDE.md` ("Shape of this codebase"), and
   run `python3 scripts/change-map.py --find <module or noun>` for the earlier
   changes there, whose specs say what was already decided.
@@ -131,7 +134,9 @@ the earlier sections stay as they were.
   behaviour has updated that feature's `docs/features/<id>/spec.md` (and
   `brief.md`, when what a person sees changed) in this branch and lists them in
   `plan.md`; the suite refuses a `feature` or `modify` plan that names a feature
-  and omits its spec.
+  and omits its spec. A new term, page, tab, sheet or way between screens goes
+  into `docs/features/glossary.yaml` or `docs/features/flow.yaml` in the same
+  branch, and a behaviour line a new test pins names it after `Pinned by`.
 - **Commit** in the worktree directory — never `git -C` from elsewhere.
 - **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
   for CI with `bash scripts/wait-ci.sh` in the background (about five minutes):

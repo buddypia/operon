@@ -1,0 +1,16 @@
+# The evidence for change 315. One test per requirement of spec.md, and the
+# sweep that watched each of them go red (26 of 26 caught).
+digest: "a14820ba4605c7ec"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked domains_cover_every_module_once_and_every_feature
+  - R2 empirical-test :: cargo test --locked glossary_terms_resolve_to_features_screen_words_and_code
+  - R3 empirical-test :: cargo test --locked no_screen_word_uses_a_word_the_glossary_avoids
+  - R4 empirical-test :: cargo test --locked screen_flow_reaches_every_page_and_every_way_resolves
+  - R5 empirical-test :: cargo test --locked every_navigation_key_is_a_way_in_the_flow
+  - R6 empirical-test :: cargo test --locked feature_behaviours_name_tests_that_exist
+  - R7 empirical-test :: cargo test --locked change_map_carries_domains_terms_flow_and_requirements
+  - R8 empirical-test :: cargo test --locked change_map_page_has_domain_flow_glossary_and_requirement_views
+  - R9 empirical-test :: cargo test --locked change_map_survives_a_missing_domain_glossary_or_flow
+  - R10 empirical-test :: cargo test --locked the_pipeline_reads_the_domain_the_glossary_and_the_flow
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/315-the-feature-map-holds-no-domain-terms-or-screen-flow/mutations.py

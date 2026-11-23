@@ -1,0 +1,71 @@
+# The domains of Operon: the areas of responsibility the product is made of.
+#
+# A domain owns code; a feature owns behaviour. Every module the module map of
+# CLAUDE.md names belongs to exactly one domain, and every feature of
+# docs/features/index.yaml names its one domain in `domain:`. Read by
+# scripts/change-map.py for the ドメイン view and checked by
+# `domains_cover_every_module_once_and_every_feature` in src/tests.rs
+# (change 315).
+#
+# Flat on purpose, like index.yaml: `- id:` opens an entry and each `key: value`
+# line below it belongs to that entry.
+#
+#   id        kebab-case
+#   title     the domain's name (Japanese)
+#   summary   one Japanese line: what this area of the product is for
+#   owns      what belongs here (Japanese), so a new behaviour can be placed
+#   excludes  what looks as if it belongs here and does not, and where it goes
+#   adjacent  ids of the domains this one hands work to or takes it from;
+#             mutual (if a names b, b names a)
+#   modules   the src/ files this domain owns, space separated. A trailing `/`
+#             claims each .rs file directly in that directory. src/tests.rs is
+#             the suite and belongs to no domain
+
+domains:
+  - id: sessions
+    title: セッション
+    summary: エージェントが動いている tmux セッションを並べ、状態を見張り、ターミナルで向き合い、あなたを待つものを先に出す領域。
+    owns: セッションの一覧と並び順、ターミナルの表示と入力、状態（実行中・回答待ち・異常終了など）の取得、要対応の集約と通知、セッションの停止・再試行・閉じる操作、再起動をまたいだタブの復元、作業時間の計測。
+    excludes: エージェントの起動コマンドや起動オプションはエージェント連携、会話の復元と CLI をまたぐハンドオフもエージェント連携、ターミナルに映る diff やファイルを開いた先はプロジェクトとコードが担当する。
+    adjacent: agents code shell data
+    modules: src/tmux.rs src/tmux/hooks.rs src/app/waiting_reply.rs src/app/dock_badge.rs src/app/session_order.rs src/app/terminal_output.rs src/app/terminal_paths.rs src/app/working_time.rs src/app/relaunch.rs src/ui/terminal.rs src/ui/session_tree.rs
+
+  - id: agents
+    title: エージェント連携
+    summary: Claude Code・Codex CLI・Antigravity などのエージェント CLI を安全に起動し、エージェント同士・CLI 同士で仕事と会話を受け渡す領域。
+    owns: 起動コマンドの組み立てと安全性の検査、起動オプションとアカウントの記憶、新しいセッションの起動先の選択、Operon agents コマンド、待機中のエージェントへの一斉送信、各 CLI の会話記録の読み取り・復元・ハンドオフ、共有セッションアーカイブ。
+    excludes: 起動後のセッションの状態や停止はセッション、プロジェクトから学んだ知識の検索はナレッジ、起動の前提になる worktree の作成はプロジェクトとコードが担当する。
+    adjacent: sessions knowledge shell data
+    modules: src/agents.rs src/agents/settings.rs src/agents/accounts.rs src/app/launch_menu.rs src/app/launch_projects.rs src/tmux/control.rs src/app/broadcast.rs src/app/agent_snapshot.rs src/cli.rs src/history.rs src/transcript.rs
+
+  - id: code
+    title: プロジェクトとコード
+    summary: 手元のフォルダをプロジェクトとして扱い、Git の変更・diff・worktree・PR・ファイルとエディタでコードを確かめる領域。
+    owns: プロジェクトの追加・一覧・概要とエージェント設定タブ、Git の状態と diff、選んだ変更のコミット、diff へのメモと比較、worktree とセットアップスクリプト、チェックポイント、使用中のポート、ファイルツリーと内蔵エディタ、Markdown と画像の表示、構文の色付け。
+    excludes: プロジェクトでセッションを始める操作はエージェント連携、セッションのターミナルに出たパスを開く仕組みはセッション、知識の抽出と検索はナレッジが担当する。
+    adjacent: sessions knowledge shell data
+    modules: src/git.rs src/git/comments.rs src/git/setup.rs src/git/ports.rs src/app/compare.rs src/files.rs src/markdown.rs src/ui/diff.rs src/ui/files.rs src/ui/syntax.rs src/ui/markdown_view.rs
+
+  - id: knowledge
+    title: ナレッジ
+    summary: プロジェクトのエージェントの会話から学んだことを手元で蓄え、意味で検索し、地図として見せる領域。
+    owns: プロジェクトごとの知識ベース（SQLite）、埋め込みモデル（EmbeddingGemma）と Metal での計算、順位付けと検索、近さとまとまりを示す 2D の地図、ナレッジタブ、Operon knowledge search コマンド。
+    excludes: 知識の元になる会話記録の読み取りはエージェント連携、プロジェクトの一覧やファイルの表示はプロジェクトとコードが担当する。
+    adjacent: agents code data
+    modules: src/knowledge.rs src/knowledge/embed.rs src/knowledge/map.rs src/app/knowledge.rs src/ui/knowledge_map.rs
+
+  - id: shell
+    title: アプリの土台
+    summary: ウィンドウ・ツールバー・ページの切り替え・検索と操作・設定・キー割り当て・表示言語と色など、どの画面にも共通する枠組みの領域。
+    owns: 起動と PATH・フォントの準備、アプリ全体の状態と背景処理の取りまとめ、ツールバーとページの描画、⌘K の検索・操作、設定画面と設定値、複数の場所で一致させる名前の定数、キー割り当て、隅に出る通知、表示言語と文言の表、色とアイコン、共通の部品。
+    excludes: 各ページの中身はそれぞれの領域（セッション・プロジェクトとコード・ナレッジ）が、セッションとプロジェクトの記録を壊さず書く仕組みは保存と実行の基盤が担当する。
+    adjacent: sessions agents code data
+    modules: src/main.rs src/app.rs src/app/screens.rs src/app/keymap.rs src/app/toast.rs src/ui/mod.rs src/ui/widgets.rs src/theme.rs src/glyphs.rs src/i18n.rs src/i18n_tables.rs src/config.rs src/prelude.rs src/util.rs
+
+  - id: data
+    title: 保存と実行の基盤
+    summary: セッションとプロジェクトの記録を手元に壊さず保存し、外部のコマンドを時間と出力の上限つきで動かす領域。
+    owns: ローカルの記録（アトミックな書き込み・ロック・形式の移行）、保存される型、子プロセスの実行と上限、macOS の呼び出し。
+    excludes: 何を記録するかの判断は各領域が、記録の一覧や復元の画面はセッションとエージェント連携が担当する。
+    adjacent: sessions agents code knowledge shell
+    modules: src/store.rs src/models.rs src/exec.rs src/sys.rs

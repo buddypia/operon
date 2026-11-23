@@ -6,6 +6,10 @@
 # feature is changing, and the history of changes to it, is derived by
 # `python3 scripts/change-map.py` from the change records (change 313).
 #
+# Beside it (change 315): domains.yaml names the domain that owns each feature
+# and module, glossary.yaml the product's words, and flow.yaml the screens and
+# the ways between them.
+#
 # Flat on purpose, like docs/sdlc/routes.yaml: `- id:` opens an entry and each
 # `key: value` line below it belongs to that entry, so a parser in Python and
 # one in src/tests.rs read it without a YAML library.
@@ -14,6 +18,7 @@
 #             field names
 #   title     the feature as the UI names it (Japanese)
 #   screen    where a person finds it; one of the set below
+#   domain    the id of its domain in docs/features/domains.yaml (change 315)
 #   summary   one Japanese line
 #   paths     source files, space separated. A trailing `/` claims a directory.
 #             A file several features share is listed under each of them; a file
@@ -45,6 +50,7 @@ features:
   - id: home
     title: ホーム
     screen: home
+    domain: sessions
     summary: 動いているセッション、あなたを待っているもの、最近のセッション、プロジェクトごとの開始ボタンを一覧するページ。
     paths: src/app/screens.rs src/app.rs
     keywords: home ホーム
@@ -54,6 +60,7 @@ features:
   - id: needs-you
     title: 要対応
     screen: session
+    domain: sessions
     summary: 回答待ち・異常終了・前提失敗のセッションを先頭に固定し、その場で返信し、Dock とツールバーで知らせる。
     paths: src/app/waiting_reply.rs src/app/dock_badge.rs src/app/toast.rs src/app/relaunch.rs src/app/screens.rs src/app.rs
     keywords: waiting 要対応 attention reply notification toast badge unread needs-you
@@ -63,6 +70,7 @@ features:
   - id: session-column
     title: セッション一覧
     screen: session
+    domain: sessions
     summary: プロジェクトごとの稼働中セッションを、対応する順に並べ、状態や CLI で絞り込み、ピン留めと並べ替えができる左列。
     paths: src/app/session_order.rs src/ui/session_tree.rs src/ui/widgets.rs src/app/screens.rs src/app.rs
     keywords: column pin sidebar session-order sessions 一覧 filter search
@@ -72,6 +80,7 @@ features:
   - id: terminal-pane
     title: ターミナルペイン
     screen: session
+    domain: sessions
     summary: セッションのターミナルをタブと最大 4 分割で表示し、入力・検索・パスのリンク・ポート表示・パネルの配置ができる。
     paths: src/ui/terminal.rs src/app/terminal_output.rs src/app/terminal_paths.rs src/app/launch_menu.rs src/app/relaunch.rs src/ui/session_tree.rs src/app/screens.rs src/app.rs
     keywords: terminal pane tab split dock panel scrollback ime port ターミナル
@@ -81,6 +90,7 @@ features:
   - id: session-lifecycle
     title: 停止・再試行・再開
     screen: session
+    domain: sessions
     summary: セッションを停止・再試行・会話 ID から再開・削除・順番待ちにし、アプリを再起動しても tmux の作業を失わない。
     paths: src/tmux.rs src/app/relaunch.rs src/cli.rs src/ui/session_tree.rs src/app/screens.rs src/app.rs
     keywords: stop retry resume restart tmux queue lifecycle relaunch 停止 再試行 再開
@@ -89,6 +99,7 @@ features:
   - id: status-detection
     title: 状態の検知
     screen: session
+    domain: sessions
     summary: CLI のフックと画面の読み取りで、各セッションの作業中・待機・完了を判定し、作業時間と通知につなぐ。
     paths: src/tmux/hooks.rs src/tmux.rs src/app/working_time.rs src/app/agent_snapshot.rs src/app.rs
     keywords: hook status idle working state detection 状態 notification
@@ -97,6 +108,7 @@ features:
   - id: agents-cli
     title: エージェント間の連携 (Operon agents)
     screen: cli
+    domain: agents
     summary: セッション内のエージェントが同じプロジェクトの他のセッションを一覧・閲覧・送信・待機できる CLI と、アイドル中への一斉送信。
     paths: src/tmux/control.rs src/app/broadcast.rs src/app/agent_snapshot.rs
     keywords: agents-cli broadcast operon-agents agent-to-agent control
@@ -105,6 +117,7 @@ features:
   - id: history-handoff
     title: 履歴と CLI をまたぐ Handoff
     screen: session
+    domain: agents
     summary: 過去の会話を検出して再開し、Claude Code・Codex・Antigravity のどれにでも引き継ぐ。履歴の全文検索もある。
     paths: src/history.rs src/cli.rs src/transcript.rs src/app/screens.rs src/app.rs
     keywords: handoff history transcript restore codex claude antigravity shared-session archive 履歴
@@ -113,6 +126,7 @@ features:
   - id: project-list
     title: プロジェクトの追加と一覧
     screen: projects
+    domain: code
     summary: 手元のフォルダをプロジェクトとして追加・スキャン・削除し、一覧から開く。初回は不足している準備を案内する。
     paths: src/app/launch_projects.rs src/models.rs src/app/screens.rs src/app.rs
     keywords: project projects プロジェクト scan add onboarding first-launch
@@ -121,6 +135,7 @@ features:
   - id: project-overview
     title: プロジェクトの概要とエージェント設定
     screen: projects
+    domain: code
     summary: プロジェクトの概要タブと、スキルや指示ファイルを一覧するエージェント設定タブ。
     paths: src/files.rs src/app/screens.rs src/app.rs
     keywords: overview skills rules instructions 概要
@@ -129,6 +144,7 @@ features:
   - id: git-changes
     title: 変更・コミット・PR
     screen: projects
+    domain: code
     summary: 変更ファイルの差分を見て選んだものだけをコミットし、AI レビューと PR の作成・一覧ができる。
     paths: src/git.rs src/ui/diff.rs src/app/screens.rs src/app.rs
     keywords: git diff commit push pr pull-request review 変更 差分
@@ -138,6 +154,7 @@ features:
   - id: diff-notes
     title: diff へのメモと比較
     screen: projects
+    domain: code
     summary: 差分の行にメモを書き、まとめてエージェントに送る。2 つの状態の差を比較バーで確かめる。
     paths: src/git/comments.rs src/app/compare.rs src/ui/diff.rs src/app.rs
     keywords: comment note compare annotation メモ 注釈
@@ -146,6 +163,7 @@ features:
   - id: worktrees
     title: worktree とセットアップ
     screen: projects
+    domain: code
     summary: branch ごとの worktree を作り、main にマージし、セットアップと実行スクリプトを確認のうえで動かし、チェックポイントで戻せる。
     paths: src/git.rs src/git/setup.rs src/git/ports.rs src/app/screens.rs src/app.rs
     keywords: worktree checkpoint setup run-script merge ports worktree
@@ -154,6 +172,7 @@ features:
   - id: files-editor
     title: ファイルとエディタ
     screen: projects
+    domain: code
     summary: プロジェクトのツリー、内蔵エディタ、Markdown 表示、画像プレビュー。ディスク上の変更を黙って上書きしない。
     paths: src/files.rs src/markdown.rs src/ui/files.rs src/ui/syntax.rs src/ui/markdown_view.rs src/app/compare.rs src/app/screens.rs src/app.rs
     keywords: editor file files markdown syntax highlight tree viewer image エディタ ファイル
@@ -162,6 +181,7 @@ features:
   - id: knowledge
     title: ナレッジ
     screen: projects
+    domain: knowledge
     summary: 会話から決定・手順・注意点のメモを作り、一覧とマップで見て、エージェントにも検索させる。
     paths: src/knowledge.rs src/knowledge/embed.rs src/knowledge/map.rs src/app/knowledge.rs src/ui/knowledge_map.rs
     keywords: knowledge embedding map memo ナレッジ
@@ -170,6 +190,7 @@ features:
   - id: new-session
     title: 新しいセッション
     screen: new-session
+    domain: agents
     summary: エージェント・依頼・作業場所・詳しい設定を選んでセッションを起動する。危険な設定には確認を求める。
     paths: src/agents.rs src/agents/settings.rs src/app/launch_menu.rs src/app/launch_projects.rs src/app/screens.rs src/app.rs
     keywords: launch new-session sheet agent flag template issue parallel 起動 dangerous
@@ -179,6 +200,7 @@ features:
   - id: palette
     title: 検索・操作 (⌘K)
     screen: palette
+    domain: shell
     summary: セッション・プロジェクト・ファイル・シンボル・操作を 1 つの入力欄から探して開く。
     paths: src/files.rs src/app/keymap.rs src/app/screens.rs src/app.rs
     keywords: palette ⌘k search command 検索
@@ -188,6 +210,7 @@ features:
   - id: settings
     title: 設定
     screen: settings
+    domain: shell
     summary: 外観・言語・エージェントの状態とアカウント・通知・データと復旧を設定する。
     paths: src/agents/accounts.rs src/config.rs src/app/keymap.rs src/app/screens.rs src/app.rs
     shared: src/theme.rs src/i18n.rs src/i18n_tables.rs src/glyphs.rs
@@ -197,6 +220,7 @@ features:
   - id: keybindings
     title: キー割り当て
     screen: settings
+    domain: shell
     summary: ショートカットの一覧と、keybindings.json による変更。
     paths: src/app/keymap.rs src/app/screens.rs src/app.rs
     keywords: keybinding keymap shortcut keys ショートカット
@@ -205,6 +229,7 @@ features:
   - id: local-data
     title: データの保存と復旧
     screen: app
+    domain: data
     summary: セッションとプロジェクトの記録を端末内に安全に保存し、移行し、失われた tmux セッションを探し直せる。
     paths: src/store.rs src/models.rs src/config.rs src/sys.rs src/app.rs
     keywords: store migration persist schema lock data durability index 保存
@@ -213,6 +238,7 @@ features:
   - id: app-shell
     title: アプリの土台
     screen: app
+    domain: shell
     summary: 起動・PATH・フォント・ウィンドウ・単一起動ロックと、全画面が共有する描画部品。
     paths: src/main.rs src/app/toast.rs src/app.rs src/app/screens.rs
     shared: src/prelude.rs src/util.rs src/exec.rs src/ui/mod.rs src/ui/widgets.rs src/tests.rs
