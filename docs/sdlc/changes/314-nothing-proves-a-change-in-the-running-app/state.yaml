@@ -1,0 +1,42 @@
+# Change 314. The person asked (2026-11-23) that the mechanism of two sources be
+# analysed and applied to this project: the pstack plugin and Lauren Tan's talk
+# "All Code Is Slop (Except Mine)". The analysis found most of it already here
+# (evidence instead of verdicts, exhaustive models and Kani, lessons with
+# guards, the feature documents) and three layers missing. This change builds
+# the largest: nothing drives the built application and keeps what it showed.
+#
+# Decisions taken by the managing session, recorded as such: the two smaller
+# gaps (an empty lint layer; comments that carry rules nothing enforces) are
+# left for changes of their own, and the steps live in a reference of the
+# feature-pilot skill rather than a new skill, because a new skill costs a
+# When-line in AGENTS.md and the text every turn loads is 18 bytes under its cap.
+
+state:
+  route: "feature"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+  features: "none"
+
+resume: "Write spec.md and plan.md, then build scripts/verify-app.py and its tests."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  journeys-run-against-the-built-app: "human pending python3 scripts/verify-app.py run for every feature that has steps, on this machine"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
