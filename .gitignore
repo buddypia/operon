@@ -44,3 +44,6 @@
 .claude/settings.local.json
 .codex/config.toml
 .agents/config.json
+
+# Python bytecode a script run leaves beside itself.
+__pycache__/
