@@ -1,0 +1,41 @@
+# Change 315. The person asked (2026-11-23) for learn_korean's feature map to be
+# brought into Operon: domains, a glossary, per-feature documents and the screen
+# flow, built from the BRIEF/SPEC documents so the map can be used as the single
+# source of truth. Operon's map (changes 312, 313) has the per-feature documents
+# and progress; this change adds what it lacks.
+#
+# Decisions taken by the managing session (recoverable by a revert, so not put
+# to the person): learn_korean's CONTEXT.json is not ported, because Operon
+# derives a feature's state from the change records (change 313) and a second
+# record of position is what feature-pilot forbids; learn_korean has no PRD
+# either (merged into SPEC/CONTEXT), so the brief stays the person's document.
+
+state:
+  route: "feature"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+  features: "none"
+
+resume: "Write spec.md from intent.md, then the readiness gate."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine pending touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  page-exercised-in-a-browser: "human pending headless Chrome: every view, a domain, a term, a screen of the flow, the requirement board, the work basket; no console error"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
