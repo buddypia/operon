@@ -98086,3 +98086,96 @@ pub(crate) fn the_pipeline_retakes_pictures_when_a_screen_changes() {
         );
     }
 }
+
+/// The flow both tests of a hostile `screens.json` read: a photographed screen
+/// and one whose entry is the attack, with a way between them.
+const CHANGE_MAP_HOSTILE_FLOW: &str = "screens:\n  - id: good\n    title: good\n    kind: page\n    \
+    screen: session\n    features: stopping\n    reach: -\n\n  - id: bad\n    title: bad\n    kind: page\n    \
+    screen: session\n    features: stopping\n    reach: -\n\nways:\n  - from: good\n    to: bad\n    label: 行く\n";
+
+fn change_map_hostile_index(label: &str, index: &str) -> (PathBuf, serde_json::Value) {
+    let root = feature_map_fixture(label, Some(FEATURE_MAP_INDEX));
+    feature_map_change(&root, "001-something", "done", "deploy", "none", "");
+    fs::write(
+        root.join("docs/features/flow.yaml"),
+        CHANGE_MAP_HOSTILE_FLOW,
+    )
+    .unwrap();
+    let folder = root.join("docs/images/screens");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("good.jpg"), tiny_jpeg(200, 100)).unwrap();
+    fs::write(folder.join("bad.jpg"), tiny_jpeg(200, 100)).unwrap();
+    fs::write(folder.join("screens.json"), index).unwrap();
+    let (ok, said, err) = change_map_run(&root, &["--json"]);
+    assert!(
+        ok,
+        "壊れた screens.json でも地図は書かれるはずですが失敗しました: {err}"
+    );
+    let map = serde_json::from_str(&said).unwrap_or_else(|error| {
+        panic!("地図の JSON が読めません（NaN が出ていませんか）: {error}")
+    });
+    (root, map)
+}
+
+fn change_map_screen<'a>(map: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+    map["flow"]["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .unwrap()
+}
+
+/// Found by the verifier of change 316 (F1): a NUL in an entry's picture name
+/// made `open` raise `ValueError`, which the `OSError` handler let through, so
+/// one entry stopped the whole map from being written.
+#[test]
+pub(crate) fn change_map_survives_a_picture_name_with_a_nul() {
+    let (root, map) = change_map_hostile_index(
+        "map-316-nul",
+        r#"{"screens":{
+      "good":{"picture":"good.jpg","window":{"w":100,"h":50},"scale":2,"controls":[],"words":[]},
+      "bad":{"picture":"a\u0000b.jpg","window":{"w":100,"h":50},"scale":2,"controls":[],"words":[]}}}"#,
+    );
+    assert!(
+        !change_map_screen(&map, "good")["shot"].is_null(),
+        "正しい写真まで落ちました"
+    );
+    let bad = change_map_screen(&map, "bad");
+    assert!(bad["shot"].is_null());
+    assert!(
+        bad["shot_problem"]
+            .as_str()
+            .unwrap()
+            .starts_with("写真を読めませんでした"),
+        "{bad}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Found by the verifier of change 316 (F2): Python reads `NaN` in JSON, a NaN
+/// window passed the size check (every comparison with NaN is false), and the
+/// map then wrote a bare `NaN` that no JSON reader takes. A NaN in a control's
+/// bounds reached a way's area the same way.
+#[test]
+pub(crate) fn change_map_refuses_a_window_that_is_not_a_number() {
+    let (root, map) = change_map_hostile_index(
+        "map-316-nan",
+        r#"{"screens":{
+      "good":{"picture":"good.jpg","window":{"w":100,"h":50},"scale":2,
+              "controls":[{"name":"行く","x":NaN,"y":2,"w":30,"h":10}],"words":["行く"]},
+      "bad":{"picture":"bad.jpg","window":{"w":NaN,"h":50},"scale":2,"controls":[],"words":[]}}}"#,
+    );
+    let bad = change_map_screen(&map, "bad");
+    assert!(
+        bad["shot"].is_null(),
+        "窓の大きさが数でないのに写真を載せています: {bad}"
+    );
+    assert!(!change_map_screen(&map, "good")["shot"].is_null());
+    assert!(
+        map["flow"]["ways"][0]["area"].is_null(),
+        "位置が数でない部品に押せる場所を置きました: {}",
+        map["flow"]["ways"][0]
+    );
+    let _ = fs::remove_dir_all(root);
+}

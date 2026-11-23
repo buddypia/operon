@@ -24,6 +24,7 @@ import base64
 import datetime
 import importlib.util
 import json
+import math
 import os
 import re
 import subprocess
@@ -817,6 +818,11 @@ SHOT_WORDS = 400
 ORDINAL = re.compile(r"^(.*\S)\s+#(\d+)$")
 
 
+def finite(value):
+    """A number a page can place by: not a bool, not NaN, not infinite."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
 def jpeg_size(data):
     """(width, height) from a JPEG's frame header, or None — the reading
     scripts/capture-screens.py writes with."""
@@ -913,6 +919,10 @@ def read_shots(root, flow, terms):
             ww, wh = float(window["w"]), float(window["h"])
             scale = float(entry["scale"])
         except (KeyError, TypeError, ValueError):
+            ww = wh = scale = math.nan
+        # Python reads NaN and Infinity in JSON; neither is a size, and a NaN
+        # passes every comparison below by failing it.
+        if not all(math.isfinite(v) and v > 0 for v in (ww, wh, scale)):
             screen["shot_problem"] = "写真を読めませんでした: 記録に窓の大きさがありません"
             continue
         if not isinstance(picture, str) or "/" in picture or picture.startswith("."):
@@ -921,8 +931,9 @@ def read_shots(root, flow, terms):
         try:
             with open(path.parent / picture, "rb") as handle:
                 data = handle.read(SHOT_BYTES + 1)
-        except OSError:
-            screen["shot_problem"] = "写真を読めませんでした: %s がありません" % picture
+        except (OSError, ValueError):
+            # ValueError: a NUL in the name, which `open` refuses before the disk.
+            screen["shot_problem"] = "写真を読めませんでした: %s がありません" % picture.replace("\0", "")
             continue
         if len(data) > SHOT_BYTES:
             screen["shot_problem"] = "写真を読めませんでした: 600 KiB を超えています"
@@ -938,7 +949,8 @@ def read_shots(root, flow, terms):
         out["shots"][screen["id"]] = "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
         words = [w for w in entry.get("words") or [] if isinstance(w, str)][:SHOT_WORDS]
         controls = [c for c in entry.get("controls") or []
-                    if isinstance(c, dict) and isinstance(c.get("name"), str)][:SHOT_CONTROLS]
+                    if isinstance(c, dict) and isinstance(c.get("name"), str)
+                    and all(finite(c.get(k)) for k in ("x", "y", "w", "h"))][:SHOT_CONTROLS]
         screen["shot"] = {"w": ww, "h": wh, "taken": str(entry.get("taken", "")),
                           "commit": str(entry.get("commit", ""))}
         screen["words"] = words

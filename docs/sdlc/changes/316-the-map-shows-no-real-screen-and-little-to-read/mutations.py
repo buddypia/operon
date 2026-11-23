@@ -26,6 +26,8 @@ TESTS = [
     "change_map_survives_missing_or_broken_pictures",
     "the_pipeline_retakes_pictures_when_a_screen_changes",
     "change_map_page_loads_nothing_from_outside",
+    "change_map_survives_a_picture_name_with_a_nul",
+    "change_map_refuses_a_window_that_is_not_a_number",
 ]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
@@ -108,6 +110,12 @@ MUTATIONS = {
         "  `reach` or `press` in `flow.yaml` and runs `python3 scripts/capture-screens.py`",
         "  `flow.yaml`"),
     "the-readme-forgets-unseen": (ROOT / "docs/features/README.md", "- `unseen` —", "- unseen —"),
+    # F1 and F2, found by the empirical verifier.
+    "a-nul-in-a-picture-name-stops-the-map": (MAP, "except (OSError, ValueError):", "except OSError:"),
+    "a-nan-window-is-taken-for-a-size": (
+        MAP, "if not all(math.isfinite(v) and v > 0 for v in (ww, wh, scale)):", "if False:"),
+    "a-nan-control-gets-an-area": (
+        MAP, '\n                    and all(finite(c.get(k)) for k in ("x", "y", "w", "h"))]', "]"),
     # The page's pictures are only ever inlined ones.
     "a-picture-may-be-fetched": (
         PAGE, "/^data:image\\/(jpeg|png);base64,[A-Za-z0-9+\\/=]*$/", "/./"),
