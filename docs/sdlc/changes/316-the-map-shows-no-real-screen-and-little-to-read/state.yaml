@@ -13,7 +13,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "awaiting-user"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -22,16 +22,16 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Built and verified: twelve tests plus F1 and F2 from the empirical verifier, the sweep 33 of 33, the page walked in headless Chrome. CI 45260674714 passed on cc087ba. The person is asked whether 316 may land."
+resume: "Approved by the person (「承認」). Push, CI, merge --no-ff from main, cleanup."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh on 3ef645d, 03f174e and 47282bd"
   bands: "machine passed bash scripts/check-bands.sh: the six breaches main has, none new; the feature-pilot line adds 226 bytes (steering_bytes 273016, diagnose as before)"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "human passed mutations.py caught 30 of 30 (two survivors of the first sweep closed by tightening R1 and R12)"
+  guards-verified-by-mutation: "human passed mutations.py caught 33 of 33 (two survivors of the first sweep closed by tightening R1 and R12; three for F1 and F2)"
   pictures-taken: "human passed python3 scripts/capture-screens.py on this machine took 25 of 25 reachable screens at b0738f6; 2 cli screens carry noshot"
   page-exercised-in-a-browser: "human passed headless Chrome: every view drawn; すべて表示 area on ホーム opens セッション and 戻る returns; deep link survives reload; 全体図 25 pictures; glossary by screen 25 rows; theme persists; no console error; loads in about 0.2 s"
-  landing: "human pending the person is asked whether 316 may land, after opening the page"
+  landing: "human passed the person answered 「承認」 after the page was offered"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
