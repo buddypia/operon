@@ -13,7 +13,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "in-progress"
+  status: "awaiting-user"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -22,7 +22,7 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Built and verified: twelve tests plus F1 and F2 from the empirical verifier, the sweep 33 of 33, the page walked in headless Chrome. Waiting for CI, then the person is asked whether 316 may land."
+resume: "Built and verified: twelve tests plus F1 and F2 from the empirical verifier, the sweep 33 of 33, the page walked in headless Chrome. CI 45260674714 passed on cc087ba. The person is asked whether 316 may land."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh on 3ef645d, 03f174e and 47282bd"
