@@ -1,0 +1,948 @@
+# The glossary of Operon: the words the product uses, what each means, and the
+# words it avoids.
+#
+# One entry per term. It is the vocabulary a session writes a new label in and
+# the person reads a brief in. Read by scripts/change-map.py for the 用語集 view
+# and checked by `glossary_terms_resolve_to_features_screen_words_and_code` and
+# `no_screen_word_uses_a_word_the_glossary_avoids` in src/tests.rs (change 315).
+#
+# Flat on purpose, like index.yaml: `- id:` opens an entry and each `key: value`
+# line below it belongs to that entry.
+#
+#   id       kebab-case
+#   term     the word as the product writes it (Japanese, or the English word
+#            the Japanese screen keeps, such as worktree); unique
+#   meaning  what it means, in one or two Japanese sentences
+#   feature  the id of the feature in docs/features/index.yaml the term belongs to
+#   en       the English name in code and English documents (optional)
+#   ui       words the screen shows for it, separated by ` | `; each is part of a
+#            Japanese message id in src/i18n_tables.rs (optional)
+#   code     Rust names that carry it, space separated; each occurs as a whole
+#            word in a src/ file other than src/tests.rs (optional)
+#   avoid    words not to use for it, separated by ` | `; at least two
+#            characters, matched as a substring, and found in no Japanese message
+#            id and no brief (optional)
+#   see      ids of related terms, space separated (optional)
+
+terms:
+  - id: session
+    term: セッション
+    meaning: 1 つのエージェントが 1 つの tmux セッションで動いている状態。プロジェクトに属し、worktree で動かすこともできる。
+    feature: session-column
+    en: session
+    ui: 新しいセッション | セッションを削除
+    code: Session SessionStatus
+    avoid: ジョブ
+    see: needs-you busy idle
+
+  - id: needs-you
+    term: 要対応
+    meaning: 回答待ち、前提が止まってブロック中のもの、タブが開いたままの異常終了・ターミナルが消えたセッション、それに未読のセッションをまとめた状態のグループ。一覧の先頭に待ちの長い順で固定され、Dock とツールバーで知らされる。
+    feature: needs-you
+    en: needs you
+    ui: 要対応のセッションを見る
+    code: SessionStatusGroup::NeedsYou attention_count
+    avoid: 注意が必要
+    see: waiting failed blocked dock-badge
+
+  - id: waiting
+    term: 回答待ち
+    meaning: エージェントが質問や許可の確認で止まり、あなたの返事を待っている状態。要対応に数えられる。
+    feature: status-detection
+    en: waiting
+    ui: あなたを待っている
+    code: SessionStatusKind::Waiting
+    avoid: 返答待ち
+    see: needs-you reply-box
+
+  - id: busy
+    term: 実行中
+    meaning: 起動中・作業中・停止処理中・順番待ちのセッションをまとめた状態のグループ。ホームのタイルと一覧の絞り込みに使う。
+    feature: status-detection
+    en: busy
+    ui: 実行中
+    code: SessionStatusGroup::Busy
+    see: idle needs-you working-time
+
+  - id: idle
+    term: アイドル
+    meaning: ターンを終え、次の依頼を出せる状態のグループ。まだ最初の依頼を受けていないものも含む。
+    feature: status-detection
+    en: free
+    ui: アイドル
+    code: SessionStatusGroup::Free SessionStatusKind::Idle
+    avoid: 休止
+    see: not-started busy
+
+  - id: not-started
+    term: 未開始
+    meaning: 起動して、まだ最初の依頼を受けていないアイドルのセッション。状態のしるしは中央の点になる。
+    feature: status-detection
+    en: not started
+    ui: 未開始
+    code: SessionStatusKind::NotStarted
+    avoid: 未着手
+    see: idle
+
+  - id: failed
+    term: 異常終了
+    meaning: 終了コードが 0 以外で終わったセッションの状態。開いたままなら要対応に数えられる。
+    feature: status-detection
+    en: failed
+    ui: 異常終了
+    code: SessionStatus::Failed SessionStatusKind::Failed
+    avoid: クラッシュ終了 | エラー終了
+    see: needs-you done retry
+
+  - id: done
+    term: 正常終了
+    meaning: 終了コード 0 で終わったセッションの状態。履歴へ回り、要対応の数には未読の間だけ残る。
+    feature: status-detection
+    en: done
+    ui: 正常終了
+    code: SessionStatus::Exited SessionStatusKind::Done
+    avoid: 完了済み
+    see: stopped history
+
+  - id: stopped
+    term: 停止済み
+    meaning: あなたが停止操作で止めたセッションの状態。記録は残り、履歴に回る。
+    feature: session-lifecycle
+    en: stopped
+    ui: 停止済み
+    code: SessionStatus::Cancelled SessionStatusKind::Stopped
+    see: stop done
+
+  - id: queued
+    term: 順番待ち
+    meaning: 先に動かすセッションの完了を待ってから始まるよう設定されたセッションの状態。「今すぐ開始」で待たずに始められる。
+    feature: session-lifecycle
+    en: queued
+    ui: 順番待ち | 今すぐ開始 | ほかのセッションの後に開始
+    code: SessionStatus::Queued SessionStatusKind::Queued
+    avoid: キュー待機
+    see: blocked
+
+  - id: blocked
+    term: ブロック中
+    meaning: 順番待ちの前提のセッションが異常終了・停止・消失した、または削除されたため、自動では始まらなくなった状態。要対応に数えられる。
+    feature: session-lifecycle
+    en: blocked
+    ui: ブロック中
+    code: SessionStatusKind::Blocked
+    see: queued needs-you
+
+  - id: unread
+    term: 未読
+    meaning: 別のセッションを見ている間にターンの完了や入力待ちがあったセッションに付く印。開くまで残り、「未読にする」で手動でも付けられる。再起動後には残らない。
+    feature: needs-you
+    en: unread
+    ui: 未読にする
+    code: unread_sessions unread_hold
+    avoid: 既読前
+    see: needs-you
+
+  - id: reply-box
+    term: 返信欄
+    meaning: ターミナルが動いている要対応の行にある 1 行の入力欄。Enter で、その文字と Enter がセッションのターミナルに打ち込まれる。
+    feature: needs-you
+    en: waiting reply
+    ui: 返信を入力して Enter | 返信を送りました
+    code: send_waiting_reply reply_enter_sends
+    see: waiting needs-you
+
+  - id: dock-badge
+    term: Dock のバッジ
+    meaning: macOS の Dock のアイコンに出る、要対応のセッションの数。要対応がなければ消える。
+    feature: needs-you
+    en: Dock badge
+    code: dock_badge_label
+    see: needs-you
+
+  - id: home
+    term: ホーム
+    meaning: アプリを開いて最初に見るページ。待っているセッションの帯、状態ごとの件数、最近のセッション、プロジェクトごとの開始ボタンを並べる。
+    feature: home
+    en: Home
+    ui: 最近のセッション | プロジェクトから始める | すべて表示
+    code: Page::Home
+    avoid: ダッシュボード
+    see: needs-you busy idle
+
+  - id: history
+    term: 履歴
+    meaning: 過去のセッションや会話の一覧。セッションページの中央に開き、正常終了・停止済みのセッションがここに残る。
+    feature: session-column
+    en: history
+    ui: 履歴を開く | フィルタを解除
+    avoid: 履歴一覧
+    see: done stopped
+
+  - id: pin
+    term: ピン留め
+    meaning: セッションを一覧の先頭に固定し、終了してもタブを自動で閉じず、手で閉じられないようにする操作。
+    feature: session-column
+    en: pin
+    ui: ピン留め | ピン留めを外す | ピン留め中
+    avoid: ピン止め | お気に入り
+    see: session
+
+  - id: tab-group
+    term: タブグループ
+    meaning: ターミナルやファイルのタブをまとめて収める、ワークスペース中央の区画。縁へドラッグして分割でき、最大 4 グループまで。
+    feature: terminal-pane
+    en: workspace group
+    code: WorkspaceGroup WorkspaceTabs
+    avoid: タブ集合
+    see: split terminal
+
+  - id: split
+    term: 分割
+    meaning: タブを縁へドラッグしてタブグループを並べること。それぞれ 320 × 200 ポイント以上が必要で、境界線のドラッグで大きさを変えられる。
+    feature: terminal-pane
+    en: split
+    ui: 分割
+    code: PaneDrop
+    avoid: 画面分割 | ウィンドウ分割
+    see: tab-group
+
+  - id: terminal
+    term: ターミナル
+    meaning: セッションのエージェントが動いている画面。クリックすると入力でき、出力中のパスは開くリンクになる。
+    feature: terminal-pane
+    en: terminal
+    ui: ターミナルを閉じる | ターミナル内を検索
+    code: WorkspaceTab
+    see: tab-group stop
+
+  - id: side-panel
+    term: サイドパネル
+    meaning: ターミナルの右にある、ファイル・会話・変更の 3 つのタブを持つパネル。畳んだり、ワークスペースの別の縁へ配置したりできる。
+    feature: terminal-pane
+    en: inspector
+    ui: サイドパネルを表示 | パネルの配置
+    code: InspectorTab DockPanel
+    avoid: サイドペイン
+    see: terminal
+
+  - id: stop
+    term: 停止
+    meaning: 動いているセッションを止める操作。記録は残り、完了待ちの間は「停止中…」と出て、もう一度押すと再試行する。
+    feature: session-lifecycle
+    en: stop
+    ui: 停止中…
+    code: SessionStatusKind::Stopping
+    see: stopped retry
+
+  - id: retry
+    term: 再試行
+    meaning: 失敗や結果不明で、保存された会話がないセッションを、古いターミナルを片付けてからもう一度実行する操作。
+    feature: session-lifecycle
+    en: retry
+    ui: 再試行
+    code: RetryTmuxAction
+    see: resume failed
+
+  - id: resume
+    term: 会話 ID から再開
+    meaning: 保存された会話があるセッションを、その会話 ID で再開する操作。モデルやモードなどが引き継がれる。
+    feature: session-lifecycle
+    en: resume
+    ui: 会話 ID から再開
+    code: NativeResume
+    see: retry
+
+  - id: palette
+    term: 検索・操作
+    meaning: ⌘K で開く 1 つの入力欄。操作・セッション・プロジェクト・ファイル・シンボルを探して開く。
+    feature: palette
+    en: command palette
+    ui: 検索・操作 | 操作・セッション・プロジェクトを検索
+    code: PaletteEntry PaletteKind
+    avoid: 操作パネル
+    see: keybinding
+
+  - id: keybinding
+    term: キー割り当て
+    meaning: 操作ごとのキーの組み合わせ。設定のファイルで変えられ、固定のキーを除きボタンの表示にも反映される。
+    feature: keybindings
+    en: keymap
+    ui: キー割り当てファイルを開く
+    code: Keymap KEYMAP_ACTIONS
+    avoid: ショートカット設定
+    see: palette
+
+  - id: language
+    term: 表示言語
+    meaning: 画面の言語。English・日本語・한국어から選び、変更は保存される。初回はシステムの言語から決まる。
+    feature: settings
+    en: language
+    ui: 言語
+    code: Language
+    avoid: 言語設定 | ロケール
+    see: theme
+
+  - id: theme
+    term: テーマ
+    meaning: 画面の配色。ダーク・ライト・ハイコントラスト（ダーク）から選び、開いているターミナルにも即時に反映される。
+    feature: settings
+    en: theme
+    ui: テーマ | ハイコントラスト
+    code: AppTheme Palette
+    avoid: ダークモード
+    see: language
+
+  - id: notification
+    term: 通知
+    meaning: エージェントがターンを終えたとき、入力待ちで止まったとき、終了したときに出る macOS の通知。設定でオンにする。
+    feature: settings
+    en: notification
+    ui: ターンの完了
+    code: send_macos_notification
+    see: needs-you
+
+  - id: hook
+    term: フック
+    meaning: 各エージェント CLI の設定に Operon が加える小さな項目。CLI 自身が作業中・待機・完了を報告するので、状態を画面の読み取りより確かに検知できる。
+    feature: status-detection
+    en: hook
+    ui: 状態を検知
+    code: HookStatus
+    see: busy waiting
+
+  - id: working-time
+    term: 作業時間
+    meaning: エージェントが今のターンで作業している時間。1 分たつと見出しや一覧の行に出て、再起動後には引き継がれない。
+    feature: status-detection
+    en: working time
+    code: working_time_label
+    avoid: 所要時間
+    see: busy
+
+  - id: status-mark
+    term: 状態のしるし
+    meaning: セッションの状態を形と色で示す小さな印。状態の言葉は常には出さず、ポインタを置くと言葉と説明が出る。
+    feature: home
+    en: status mark
+    code: StatusMark SessionStatusKind
+    see: needs-you busy idle
+
+  - id: toolbar
+    term: ツールバー
+    meaning: ウィンドウ上端の細い帯。ページの切り替え、検索・操作、新しいセッション、設定、待っているセッションがあれば要対応の件数を置く。
+    feature: app-shell
+    en: toolbar
+    ui: ツールバー
+    code: Page
+    see: palette home
+
+  - id: settings
+    term: 設定
+    meaning: 外観・エージェント・通知・データと復旧・キー割り当ての 5 つのセクションを持つページ。⌘, で開く。
+    feature: settings
+    en: Settings
+    ui: 外観 | データと復旧
+    code: Page::Settings
+    see: theme language keybinding notification
+
+  - id: agent
+    term: エージェント
+    meaning: セッションの中で動く AI コーディングツールのことです。Claude Code・Codex CLI・Antigravity のほか、自分で決めた任意のコマンドも選べます。
+    feature: new-session
+    en: agent
+    ui: エージェント
+    code: agent_shell_command AgentLaunchSettings
+    avoid: ボット
+    see: claude-code codex-cli antigravity custom-command
+
+  - id: claude-code
+    term: Claude Code
+    meaning: Anthropic のエージェント CLI です。起動時にアカウントを選べ、ナレッジの題名がセッション開始時に渡されます。
+    feature: new-session
+    en: Claude Code
+    ui: Claude Code
+    code: CliProvider::Claude
+    see: agent account
+
+  - id: codex-cli
+    term: Codex CLI
+    meaning: OpenAI のエージェント CLI です。Claude Code と同じく、アカウントの選択とナレッジの題名の受け取りに対応します。
+    feature: new-session
+    en: Codex CLI
+    ui: Codex
+    code: CliProvider::Codex
+    see: agent account
+
+  - id: antigravity
+    term: Antigravity
+    meaning: Google のエージェント CLI で、`agy` を起動します。保存される種別名は旧来の gemini のままですが、画面と文書では Antigravity と呼びます。
+    feature: new-session
+    en: Antigravity
+    ui: Antigravity
+    code: CliProvider::Gemini
+    see: agent
+
+  - id: custom-command
+    term: 任意のコマンド
+    meaning: 既定の 3 つのエージェント以外を、自分で書いた起動コマンドで動かす選択です。危険なフラグを含む場合は、確認にチェックを入れるまで起動できません。
+    feature: new-session
+    en: custom command
+    ui: 別のコマンドを使う | 起動コマンド（必須）
+    code: is_safe_agent_command
+    see: danger-confirmation
+
+  - id: launch-options
+    term: 起動オプション
+    meaning: モデル・モード・推論の深さ・スイッチ・追加の引数など、エージェントを起動するときの設定です。最後に使った値はエージェントごとに記憶され、次回の初期値になります。
+    feature: new-session
+    en: launch options
+    ui: 詳しい設定（任意）
+    code: AgentLaunchSettings RecentAgentSettings launch_option_shapes
+    see: model mode effort pinned-launch
+
+  - id: model
+    term: モデル
+    meaning: エージェントが使う AI モデルの名前で、起動オプションとして選びます。Handoff の引き継ぎ先ごとにも別に記憶できます。
+    feature: new-session
+    en: model
+    ui: モデル
+    code: AgentLaunchSettings HandoffLaunchSettings
+    see: launch-options
+
+  - id: mode
+    term: モード
+    meaning: 権限や動き方を切り替える、その CLI 自身の選択肢です。Operon が独自のモードを作ることはありません。
+    feature: new-session
+    en: mode
+    ui: モード
+    code: LaunchOptionRole
+    see: launch-options danger-confirmation
+
+  - id: effort
+    term: 推論の深さ
+    meaning: モデルにどれだけ深く考えさせるかの選択で、その CLI が受け付ける値の中から選びます。コードでは effort と呼びます。
+    feature: new-session
+    en: effort
+    ui: 推論の深さ
+    code: AgentLaunchSettings HandoffLaunchSettings
+    see: launch-options
+
+  - id: danger-confirmation
+    term: 危険設定の確認
+    meaning: 確認なしでファイルを変更できるスイッチやモードを選ぶと、起動前にチェックを求める仕組みです。チェックを入れるまで起動ボタンは無効のままで、引数を編集すると外れます。
+    feature: new-session
+    en: danger acknowledgement
+    ui: 理解したうえで起動する
+    code: is_safe_agent_option
+    see: launch-options
+
+  - id: prompt-template
+    term: テンプレート
+    meaning: 依頼の書き出しに使える雛形です。組み込みのもののほか、リポジトリの `.operon/prompts/` にある自作のものを挿入できます。
+    feature: new-session
+    en: prompt template
+    ui: テンプレートを挿入 | GitHub Issue から取得
+    code: PromptTemplate
+
+  - id: parallel-launch
+    term: 並走
+    meaning: 同じ依頼を 2〜3 のエージェントに同時に渡し、それぞれ専用の新しい worktree と branch で動かして結果を見比べる起動方法です。Git のプロジェクトでだけ使えます。
+    feature: new-session
+    en: parallel launch
+    ui: 複数エージェントで並走
+    see: agent
+
+  - id: pinned-launch
+    term: この設定を毎回使う
+    meaning: エージェント・設定・アカウントの組み合わせを固定し、起動シートを開くたびにその値で始める機能です。
+    feature: new-session
+    en: pinned launch
+    ui: この設定を毎回使う
+    code: PinnedLaunch
+    see: launch-options account
+
+  - id: account
+    term: アカウント
+    meaning: Claude Code と Codex CLI で、登録した別のログイン先を選んで起動する仕組みです。会話を再開するときは、その会話を始めたアカウントで開き直します。
+    feature: agents-cli
+    en: account
+    ui: アカウント
+    code: AgentAccount AgentAccounts SessionAccount register_account
+    avoid: プロファイル
+    see: claude-code codex-cli
+
+  - id: prerequisite
+    term: 前提
+    meaning: 新しいセッションの起動時に「ほかのセッションの後に開始」で選ぶ、先に終わるべきセッション。前提が完了するまで順番待ちになり、前提が異常終了・停止・消失するか削除されるとブロック中になります。
+    feature: new-session
+    en: dependency
+    ui: ほかのセッションの後に開始 | 前提の完了待ち | 前提が完了しました
+    code: depends_on blocking_dependency
+    see: queued blocked
+
+  - id: native-resume
+    term: ネイティブ再開
+    meaning: その CLI が自分で持つ会話 ID を指定して、元の会話をそのまま開き直すことです。会話 ID は記憶されず、起動後に消えます。
+    feature: new-session
+    en: native resume
+    ui: 再開する会話 ID（任意）
+    code: native_session_id is_native_resume_command
+    see: session-restore
+
+  - id: operon-agents
+    term: Operon agents
+    meaning: セッションの中のエージェントが、同じプロジェクトの他のエージェントを一覧・閲覧・送信・待機できるコマンドです。人が操作する画面ではなく、ターミナルから使います。
+    feature: agents-cli
+    en: Operon agents
+    code: run_agents_cli AgentSnapshot AGENT_STATE_IDLE
+    see: broadcast
+
+  - id: broadcast
+    term: 一斉送信
+    meaning: コマンドパレットから開くシートで、手の空いているエージェントを選び、同じ 1 行をまとめて送る機能です。作業中や待ち中のエージェントには届きません。
+    feature: agents-cli
+    en: broadcast
+    ui: アイドル中のエージェントへ送信 | すべて選択
+    code: BroadcastSheet
+    avoid: ブロードキャスト | 一括送信
+    see: operon-agents
+
+  - id: session-restore
+    term: 会話の復元
+    meaning: 各 CLI が手元に残した過去の会話を見つけ、元の CLI で再開するか、別の CLI へ引き継ぐ機能です。履歴ページから、プロジェクトを選んで検出します。
+    feature: history-handoff
+    en: conversation restore
+    ui: ローカル CLI セッションを検出 | 元の CLI で再開
+    code: CliSession CliSessionScan import_full_cli_history
+    see: handoff local-history
+
+  - id: handoff
+    term: Handoff
+    meaning: ある CLI の会話の要点を別の CLI（または同じ CLI の新しい会話）へ引き継ぐことです。保存済みの記録を読んでまとめるだけで、モデルは動かさずトークンも使いません。
+    feature: history-handoff
+    en: Handoff
+    ui: Handoff
+    code: HandoffLaunchSettings
+    avoid: ハンドオフ
+    see: handoff-bundle
+
+  - id: handoff-bundle
+    term: Handoff バンドル
+    meaning: 引き継ぎ先が最初のメッセージとして受け取る、まとまった要約です。最初の依頼、直近のやり取り、最後のツール結果、あなたの Handoff メモが入り、全体は 6,000 バイトまでです。
+    feature: history-handoff
+    en: handoff bundle
+    ui: Handoff バンドルで引き継ぐ | Handoff メモ（任意）
+    code: compact_handoff_turn_text
+    see: handoff
+
+  - id: clone-same-cli
+    term: 同じ CLI に複製
+    meaning: 引き継ぎ先に元と同じ CLI を選ぶと、元の会話に影響を与えずに 2 つ目の会話が始まります。復元先の選択肢には「（同じ CLI に複製）」と表示されます。
+    feature: history-handoff
+    en: clone into the same CLI
+    ui: 同じ CLI に複製 | 復元先
+    see: handoff
+
+  - id: shared-session-archive
+    term: 共有セッションアーカイブ
+    meaning: 引き継ぎのたびに、元の会話のコピーと渡した内容を残す保存場所です。7 日間使われなかったものは削除され、あなたのアカウントだけが読める権限で作られます。
+    feature: history-handoff
+    en: shared session archive
+    code: sweep_expired_handoff_archives
+    see: handoff
+
+  - id: local-history
+    term: ローカル履歴
+    meaning: 最近の Codex と Claude の会話記録（transcript）を全文検索できる、履歴ページの一覧です。記録の中の種類は分類表で判定します。
+    feature: history-handoff
+    en: local history
+    ui: ローカル履歴
+    code: TRANSCRIPT_VOCABULARY TranscriptClass
+    see: session-restore
+
+  - id: knowledge
+    term: ナレッジ
+    meaning: プロジェクトでのエージェントとの会話から、決定・原因・手順・注意・事実を短いメモにして手元に蓄える機能と、そのメモ自体です。誰にも使われないメモは薄れて消えます。
+    feature: knowledge
+    en: knowledge
+    ui: ナレッジ | このプロジェクトでナレッジを集める
+    code: KnowledgeEntry KnowledgeDatabase KnowledgeKind
+    avoid: メモリ
+    see: embedding knowledge-map
+
+  - id: verified
+    term: 検証済み
+    meaning: ナレッジのメモに付く印で、テストやコマンドの出力、または本人の確認で裏づけられたものを指します。裏づけのないものは「未確認」と表示されます。
+    feature: knowledge
+    en: verified
+    ui: 検証済み | 未確認
+    code: KnowledgeEntry
+    see: knowledge
+
+  - id: pinned-note
+    term: ナレッジの固定
+    meaning: メモを固定すると薄れて消えなくなり、古いものを置き換える処理でも書き換えられません。セッション開始時に渡される題名でも先に選ばれます。
+    feature: knowledge
+    en: pinned note
+    ui: 固定 | 参照回数
+    code: KnowledgeEntry
+    see: knowledge
+
+  - id: embedding
+    term: 埋め込み
+    meaning: メモや検索語を、意味の近さを測れる数値の並びにすることです。EmbeddingGemma 2 モデルをこの Mac の中で動かして行い、会話の内容は外へ出ません。
+    feature: knowledge
+    en: embedding
+    ui: EmbeddingGemma 2 | 意味検索
+    code: query_input document_input
+    avoid: エンベディング
+    see: knowledge
+
+  - id: knowledge-map
+    term: 知識の地図
+    meaning: ナレッジタブの「マップ」表示で、意味の近いメモを近くに並べた 2D の図です。グループごとに囲み、点の形が種類、大きさが参照の多さ、濃さが鮮度を表します。
+    feature: knowledge
+    en: knowledge map
+    ui: マップ | 鮮度
+    code: KnowledgeMap
+    avoid: グラフ
+    see: knowledge embedding
+
+  - id: knowledge-search
+    term: ナレッジ検索
+    meaning: `Operon knowledge search` コマンドで、エージェントがナレッジを検索する機能です。順位付けした一致を返し、題名と検索方法はセッション開始時にも渡されます。
+    feature: knowledge
+    en: knowledge search
+    code: KnowledgeHit
+    see: knowledge
+
+  - id: record
+    term: 記録
+    meaning: プロジェクトとセッションなどを、この Mac の中だけに書きかけを残さず保存した store-v2.json です。コードではストア（Store）と呼びます。
+    feature: local-data
+    en: store
+    ui: データと復旧
+    code: Store save_store write_file_atomically
+    see: data-folder quarantine
+
+  - id: data-folder
+    term: データフォルダ
+    meaning: 記録・記憶した起動オプション・ナレッジ・モデルなど、Operon の手元データを置くフォルダです。消せば記録も消え、ほかの Mac とは同期されません。
+    feature: local-data
+    en: data folder
+    ui: データフォルダ | データフォルダを表示
+    code: app_data_directory
+    see: record
+
+  - id: quarantine
+    term: 壊れた記録の退避
+    meaning: 保存データが読めなかったとき、store.corrupt-…json として脇へ退避し、空の記録で起動することです。元のファイルは消さず、プロジェクトのファイルにも触れません。
+    feature: local-data
+    en: quarantine
+    code: load_store_safely
+    see: record
+
+  - id: terminal-recovery
+    term: ターミナル復旧
+    meaning: 「tmux をスキャン」で、記録から漏れた tmux セッションを手動で探し直す機能です。登録済みのプロジェクトに含まれない作業フォルダのセッションは引き継げません。
+    feature: local-data
+    en: terminal recovery
+    ui: ターミナル復旧 | tmux をスキャン
+    code: OrphanedTmuxSession
+    see: record
+
+  - id: project
+    term: プロジェクト
+    meaning: Operon に登録した手元のフォルダ。エージェントを動かす場所の単位で、登録してもフォルダの中身は変わらず、削除で消えるのは Operon の記録だけです。
+    feature: project-list
+    en: project
+    ui: フォルダを選択 | パスを手入力
+    code: Project RegisteredProject add_project register_project_folder
+    see: workspace-scan project-removal
+
+  - id: workspace-scan
+    term: ワークスペースのスキャン
+    meaning: 選んだフォルダの 3 階層下までにある Git リポジトリを、まとめてプロジェクトとして取り込む操作。登録済みのものは飛ばし、実行は一度に 1 つだけです。
+    feature: project-list
+    en: workspace scan
+    ui: ワークスペースをスキャン
+    code: choose_workspace_folder apply_workspace_folder_choice
+    see: project
+
+  - id: first-launch-guide
+    term: 初回の案内
+    meaning: プロジェクトが 1 つもないときに出る、最初のセッションに足りない準備（tmux とコーディングエージェント）を確かめるチェックリスト。
+    feature: project-list
+    en: onboarding checklist
+    ui: 最初のセッションを始める前に | セットアップ手順を開く
+    code: ui_projects
+    see: project
+
+  - id: project-removal
+    term: プロジェクトの削除
+    meaning: プロジェクトを Operon の一覧から外す操作。ファイル・ブランチ・worktree は残り、実行中のセッションがあるときや worktree の操作中は行えません。
+    feature: project-list
+    en: remove project
+    ui: Operon から削除
+    code: remove_project
+    avoid: 登録解除
+    see: project
+
+  - id: overview
+    term: 概要
+    meaning: プロジェクトを開いたとき最初に出るタブ。そのプロジェクトの状態をタイルで一目で見せます。
+    feature: project-overview
+    en: overview
+    ui: 概要
+    code: ui_overview overview_tile ProjectTab
+    see: project agent-settings
+
+  - id: agent-settings
+    term: エージェント設定
+    meaning: プロジェクトのタブの 1 つで、そのプロジェクトにあるスキルと指示ファイルを一覧する。設定ページの起動オプションとは別のものです。
+    feature: project-overview
+    en: agent settings
+    ui: エージェント設定
+    code: ui_skills request_skills
+    see: skill instruction-file
+
+  - id: skill
+    term: スキル
+    meaning: エージェントに特定の作業のやり方を教えるファイル。エージェント設定タブがプロジェクトから探して一覧します。
+    feature: project-overview
+    en: skill
+    ui: スキルを検索しています
+    code: request_skills ui_skills
+    see: agent-settings
+
+  - id: instruction-file
+    term: 指示ファイル
+    meaning: CLAUDE.md や AGENTS.md のように、エージェントへの指示を書いたプロジェクト内のファイル。エージェント設定タブで一覧されます。
+    feature: project-overview
+    en: instruction file
+    ui: 指示ファイルを検索しています | 指示ファイルは見つかりませんでした
+    code: ui_skills
+    see: agent-settings
+
+  - id: changes
+    term: 変更ファイル
+    meaning: 変更タブの最初のビューで、左に変更されたファイルの一覧、右に選んだファイルの diff を出す。次のコミットに含めるファイルにチェックを入れます。
+    feature: git-changes
+    en: changed files
+    ui: 変更ファイル
+    code: git_working_tree_diff git_stage_for_commit
+    see: diff commit
+
+  - id: diff
+    term: diff
+    meaning: 変更前と変更後の差。ファイルごとに折りたため、両側の行番号付きで、行の中の実際に変わった語をマークして描きます。
+    feature: git-changes
+    en: diff
+    ui: 差分
+    code: ui_editor_diff DiffLineKind
+    avoid: ディフ
+    see: hunk
+
+  - id: hunk
+    term: ハンク
+    meaning: diff を構成する、連続した変更のひとまとまり。各ハンクの見出しにある「ステージ」と「破棄」は、そのハンクだけに作用し、破棄は確認なしで実行されます。
+    feature: git-changes
+    en: hunk
+    ui: ハンクをステージ | ハンクの変更を破棄
+    code: DiffHunkAction apply_diff_hunk_action git_stage_hunk git_discard_hunk
+    avoid: チャンク
+    see: diff commit
+
+  - id: commit
+    term: コミット
+    meaning: チェックを入れたファイルだけをステージし直して Git に記録する操作。force push は持たず、ハンク単位の選択が index に残っているときは拒否します。
+    feature: git-changes
+    en: commit
+    ui: ファイルをコミット
+    code: git_stage_for_commit draft_commit_message ui_commit_box
+    see: changes commit-message-draft
+
+  - id: commit-message-draft
+    term: コミットメッセージの下書き
+    meaning: 「AI に書かせる」で、ローカルのエージェント CLI がステージ済みの patch から入力欄に書く下書き。勝手にコミットされることはありません。
+    feature: git-changes
+    en: commit message draft
+    ui: AI に書かせる
+    code: draft_commit_message commit_message_prompt commit_message_agent
+    see: commit
+
+  - id: ai-review
+    term: AIレビュー
+    meaning: ローカルのエージェント CLI に diff のレビューを頼む操作。結果はクリップボードへコピーでき、一定時間で打ち切られます。
+    feature: git-changes
+    en: AI review
+    ui: AIレビュー | AIレビューを実行しています
+    code: request_ai_diff_review ai_diff_review_prompt clean_generated_ai_review
+    avoid: レビュー依頼
+    see: diff
+
+  - id: pull-request
+    term: PR
+    meaning: GitHub の pull request。変更タブから gh で作成でき、PR タブにはオープン中のものがレビューと CI チェックの要約付きで並びます。
+    feature: git-changes
+    en: pull request
+    ui: PR を作成
+    code: PullRequest create_pull_request list_pull_requests ui_create_pr_modal
+    see: commit
+
+  - id: diff-note
+    term: diff へのメモ
+    meaning: 差分の変更後の行に書くメモ。ディスクに保存されて再起動後も残り、まとめて 1 通のメッセージにして、そのプロジェクトで動くエージェントへ送れます。
+    feature: diff-notes
+    en: diff comment
+    ui: この行について書く | セッションにまとめて送る | 行が変わっています
+    code: DiffComment DiffCommentStore send_diff_comments save_diff_comments
+    avoid: 行コメント
+    see: diff
+
+  - id: compare-bar
+    term: 比較バー
+    meaning: エディタで開いたファイルの上に出るバー。HEAD やほかのリビジョンとローカルの状態を比べて差を確かめます。
+    feature: diff-notes
+    en: compare bar
+    ui: HEAD とローカルを比較 | 比較:
+    code: ui_editor_compare_bar EditorCompare set_compare_base
+    see: annotate
+
+  - id: annotate
+    term: 注釈
+    meaning: ファイルの各行がどのコミットで書かれたかを行の横に出す表示。大きすぎるファイルでは出せません。
+    feature: diff-notes
+    en: annotate
+    ui: 注釈
+    code: ui_editor_annotate DiffAnnotations
+    see: compare-bar
+
+  - id: worktree
+    term: worktree
+    meaning: 同じリポジトリを別の branch でもう 1 つチェックアウトしたもの。複数のセッションが互いのファイルに触れずに並行して作業できます。
+    feature: worktrees
+    en: worktree
+    ui: この場所で新規セッション
+    code: Worktree list_worktrees create_worktree remove_worktree
+    avoid: ワーキングツリー
+    see: mainline merge
+
+  - id: mainline
+    term: メインライン
+    meaning: worktree を作る元になるプロジェクトの本流の branch。origin/HEAD、なければ origin/main などの順に検出し、どれを使ったかを表示します。
+    feature: worktrees
+    en: mainline
+    ui: メインラインブランチを検出できませんでした
+    code: WorktreeBase detect_worktree_base worktree_base_display
+    see: worktree
+
+  - id: merge
+    term: マージ
+    meaning: worktree の branch をローカルでメインラインへ git merge --no-ff で取り込む操作。未コミットの変更や実行中のセッションがあると拒否し、競合したときは取り消します。
+    feature: worktrees
+    en: land worktree
+    ui: main にマージ
+    code: land_worktree git_land_worktree ui_land_worktree_modal
+    see: worktree mainline
+
+  - id: setup-script
+    term: セットアップスクリプト
+    meaning: リポジトリの .operon/setup.sh。worktree の作成後に冒頭を見せて確認し、承認されると専用のセッションで実行します。
+    feature: worktrees
+    en: setup script
+    ui: このリポジトリのセットアップを実行しますか
+    code: SetupScript PendingSetup read_setup_script setup_script_path
+    see: setup-approval worktree
+
+  - id: setup-approval
+    term: セットアップの承認
+    meaning: セットアップスクリプトの内容に対して記憶される承認。内容が 1 文字でも変わると、再び確認されます。
+    feature: worktrees
+    en: setup approval
+    ui: 内容が変わるまで、今後は確認しない
+    code: SetupApproval SetupTrust is_setup_approved
+    see: setup-script
+
+  - id: run-script
+    term: 実行スクリプト
+    meaning: リポジトリの .operon/run.sh（dev server やビルド）。実行のたびに内容を見せて確認し、見せた内容と一致したコピーだけを専用のターミナルで動かします。
+    feature: worktrees
+    en: run script
+    ui: 実行スクリプトの確認 | 実行スクリプトを停止
+    code: PendingRunScript run_script_path decide_run_script_run
+    see: setup-script
+
+  - id: checkpoint
+    term: チェックポイント
+    meaning: worktree のセッションで依頼を送るたびに、index に触れず記録するスナップショット。手動でも作れ、最新の数件から diff のコピーやロールバックができます。
+    feature: worktrees
+    en: checkpoint
+    ui: 手動チェックポイントを作成 | チェックポイントへロールバック
+    code: Checkpoint capture_checkpoint git_restore_checkpoint git_create_checkpoint
+    avoid: 保存点
+    see: worktree
+
+  - id: port
+    term: ポート
+    meaning: セッションの worktree で待ち受けているローカルのポート。稼働中の件数を示し、持ち主を確かめられたものだけ停止できます。
+    feature: worktrees
+    en: listening port
+    ui: ポートを停止 | ポート稼働中
+    code: ListeningPort scan_listening_ports stop_listening_port ui_session_ports
+    avoid: ポート番号
+    see: worktree
+
+  - id: file-tree
+    term: ファイルツリー
+    meaning: ファイルタブの折りたためるプロジェクトツリー。変更のあるファイルには Git バッジが付き、.git や node_modules などは読み飛ばします。
+    feature: files-editor
+    en: file tree
+    ui: ツリーからファイルを開いてください
+    code: FileTreeNode build_file_tree ui_file_tree
+    see: editor
+
+  - id: editor
+    term: エディタ
+    meaning: Operon に内蔵のテキストエディタ。タブ・行番号・シンタックスハイライトがあり、⌘S で保存します。開いたあとにディスクで変わったファイルへの上書きは拒否します。
+    feature: files-editor
+    en: editor
+    ui: 未保存の変更があります
+    code: EditorView ui_editor ui_editor_tabs EditorLanguage
+    see: viewer file-tree
+
+  - id: viewer
+    term: 読み取り専用ビューア
+    meaning: 編集できる上限を超えた大きなファイルを開くときの、見えている行だけを描く読み取り専用の表示。
+    feature: files-editor
+    en: viewer
+    ui: 読み取り専用で表示しています
+    code: ui_editor_viewer viewer_chunk_layout
+    see: editor
+
+  - id: preview
+    term: プレビュー
+    meaning: Markdown を Markdown として、画像を画像として描く表示。画像は上限の大きさまでしかプレビューできません。
+    feature: files-editor
+    en: preview
+    ui: プレビュー | 画像ファイルです
+    code: MarkdownPreviewCache ui_editor_image_preview
+    see: editor
+
+  - id: external-editor
+    term: 外部エディタで開く
+    meaning: ファイル・worktree・プロジェクトのフォルダを、VS Code や Cursor など別のアプリで開くメニュー操作。
+    feature: files-editor
+    en: external editor
+    ui: 外部エディタで開く
+    code: ExternalEditor open_in_external_editor
+    see: editor
+
+  - id: send-to-agent
+    term: エージェントに送る
+    meaning: エディタで開いているファイルの抜粋を、そのプロジェクトで動いている最新のエージェントへ送る操作。動いているものがなければ新しいセッションの依頼に入れます。
+    feature: files-editor
+    en: send to agent
+    ui: エージェントに送る
+    code: send_editor_context_to_agent
+    see: editor

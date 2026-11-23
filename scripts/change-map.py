@@ -446,6 +446,7 @@ def read_features(root):
             "id": entry["id"],
             "title": entry.get("title", entry["id"]),
             "screen": entry.get("screen", ""),
+            "domain": entry.get("domain", ""),
             "summary": entry.get("summary", ""),
             "paths": entry.get("paths", "").split(),
             "shared": entry.get("shared", "").split(),
@@ -577,6 +578,279 @@ def change_directories(root):
         return []
 
 
+# Change 315: the domains, the glossary, the screen flow and the requirement
+# board. Each comes from one flat file under docs/features/ (or, for the
+# board, the specs' Behaviour lines), read here and checked by the suite.
+FILE_BYTES = 256 * 1024
+DOMAINS = 16
+TERMS = 400
+FLOW_SCREENS = 80
+FLOW_WAYS = 300
+CHORD_WORDS = (("Mod+", "⌘"), ("Shift+", "⇧"), ("Alt+", "⌥"), ("Ctrl+", "⌃"))
+
+
+def parse_flat(text, list_name, opener):
+    """The entries of `list_name:` in a flat file, each opened by
+    `  - <opener>:` and continued by `    key: value` lines; no YAML library,
+    the same reading as `parse_flat_list` in src/tests.rs."""
+    entries, inside = [], False
+    for line in text.splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        if not line.startswith(" "):
+            inside = line.rstrip() == list_name + ":"
+            continue
+        if not inside:
+            continue
+        start = re.match(r"^  - %s:\s*(.*?)\s*$" % re.escape(opener), line)
+        if start:
+            entries.append({opener: start.group(1)})
+            continue
+        field = re.match(r"^    ([\w-]+)\s*:\s*(.*?)\s*$", line)
+        if field and entries:
+            entries[-1][field.group(1)] = field.group(2)
+    return entries
+
+
+def read_flat_file(root, name, unreadable):
+    """The file's text, or the reason it cannot be used, in the words the
+    view shows."""
+    text, cut = read_text(Path(root) / "docs/features" / name, FILE_BYTES)
+    if text is None:
+        return None, "%s: docs/features/%s がありません" % (unreadable, name)
+    if cut:
+        return None, "%s: docs/features/%s が 256 KiB を超えています" % (unreadable, name)
+    return text, ""
+
+
+def phrases(value):
+    return [part.strip() for part in (value or "").split(" | ") if part.strip()]
+
+
+def capped(entries, ceiling, noun):
+    if len(entries) <= ceiling:
+        return entries, ""
+    return entries[:ceiling], "%sが多すぎます。%d 件のうち %d 件を表示しています" % (
+        noun, len(entries), ceiling)
+
+
+def module_lines(root):
+    """Every `src/` path the module map of CLAUDE.md names, with the sentence
+    that names it."""
+    text, _ = read_text(Path(root) / "CLAUDE.md")
+    text = text or ""
+    start = text.find("## Shape of this codebase")
+    end = text.find("## Policies", start)
+    found = {}
+    if start < 0:
+        return found
+    for line in text[start:end if end > 0 else len(text)].splitlines():
+        for token in re.findall(r"`(src/[^`]+)`", line):
+            if token in found:
+                continue
+            after = line.split("`" + token + "`", 1)[1]
+            said = re.sub(r"`", "", after).strip(" —-,:")
+            found[token] = re.split(r"(?<=\.)\s", said, maxsplit=1)[0]
+    return found
+
+
+def read_domains(root, features):
+    out = {"domains": [], "domains_error": "", "domains_notice": ""}
+    text, error = read_flat_file(root, "domains.yaml", "ドメインの定義を読めません")
+    if text is None:
+        out["domains_error"] = error
+        return out
+    entries = parse_flat(text, "domains", "id")
+    if not entries:
+        out["domains_error"] = "ドメインの定義を読めません: 項目がありません"
+        return out
+    entries, out["domains_notice"] = capped(entries, DOMAINS, "ドメイン")
+    lines = module_lines(root)
+    for entry in entries:
+        out["domains"].append({
+            "id": entry["id"],
+            "title": entry.get("title", entry["id"]),
+            "summary": entry.get("summary", ""),
+            "owns": entry.get("owns", ""),
+            "excludes": entry.get("excludes", ""),
+            "adjacent": entry.get("adjacent", "").split(),
+            "modules": [{"path": path, "about": lines.get(path, "")}
+                        for path in entry.get("modules", "").split()],
+            "features": [f["id"] for f in features if f.get("domain") == entry["id"]],
+            "changes": [],
+        })
+    return out
+
+
+def read_glossary(root, features):
+    out = {"terms": [], "terms_error": "", "terms_notice": ""}
+    text, error = read_flat_file(root, "glossary.yaml", "用語集を読めません")
+    if text is None:
+        out["terms_error"] = error
+        return out
+    entries = parse_flat(text, "terms", "id")
+    if not entries:
+        out["terms_error"] = "用語集を読めません: 項目がありません"
+        return out
+    entries, out["terms_notice"] = capped(entries, TERMS, "用語")
+    domain_of = {f["id"]: f.get("domain", "") for f in features}
+    for entry in entries:
+        word = entry.get("term", "")
+        out["terms"].append({
+            "id": entry["id"],
+            "term": word,
+            "meaning": entry.get("meaning", ""),
+            "feature": entry.get("feature", ""),
+            "domain": domain_of.get(entry.get("feature", ""), ""),
+            "en": entry.get("en", ""),
+            "ui": phrases(entry.get("ui")),
+            "code": entry.get("code", "").split(),
+            "avoid": phrases(entry.get("avoid")),
+            "see": entry.get("see", "").split(),
+            "used_by": [f["id"] for f in features
+                        if word and f.get("brief") and word in f["brief"]["text"]],
+        })
+    return out
+
+
+def keymap_chords(root):
+    """Each remappable action's default chord as a person reads it (⌘1)."""
+    text, _ = read_text(Path(root) / "src/app/keymap.rs")
+    chords = {}
+    for action, default in re.findall(
+            r'id:\s*"([^"]+)",\s*label:\s*"[^"]*",\s*default:\s*"([^"]+)"', text or ""):
+        for word, mark in CHORD_WORDS:
+            default = default.replace(word, mark)
+        chords[action] = default
+    return chords
+
+
+def read_flow(root, features, screens_order, terms, images):
+    out = {"flow": {"screens": [], "ways": [], "bands": [], "width": 0, "height": 0},
+           "flow_error": "", "flow_notice": ""}
+    text, error = read_flat_file(root, "flow.yaml", "画面の流れを読めません")
+    if text is None:
+        out["flow_error"] = error
+        return out
+    screens = parse_flat(text, "screens", "id")
+    ways = parse_flat(text, "ways", "from")
+    if not screens:
+        out["flow_error"] = "画面の流れを読めません: 画面がありません"
+        return out
+    screens, notice_screens = capped(screens, FLOW_SCREENS, "画面")
+    ways, notice_ways = capped(ways, FLOW_WAYS, "道")
+    out["flow_notice"] = "。".join(n for n in (notice_screens, notice_ways) if n)
+    known = {s["id"] for s in screens}
+    chords = keymap_chords(root)
+    carried_ways = []
+    for way in ways:
+        if way.get("from") not in known or way.get("to") not in known:
+            continue
+        key = way.get("key", "")
+        carried_ways.append({
+            "from": way["from"], "to": way["to"], "key": key or None,
+            "chord": chords.get(key, ""), "label": way.get("label", ""),
+            "click": way.get("click", ""), "note": way.get("note", ""),
+        })
+    # Breadth-first order from ホーム decides where a box sits in its band.
+    order, queue = {}, ["home"] if "home" in known else []
+    while queue:
+        here = queue.pop(0)
+        if here in order:
+            continue
+        order[here] = len(order)
+        queue.extend(w["to"] for w in carried_ways if w["from"] == here)
+    for s in screens:
+        order.setdefault(s["id"], len(order))
+    bands = [b for b in screens_order if any(s.get("screen") == b for s in screens)]
+    bands += sorted({s.get("screen", "") for s in screens} - set(bands))
+    box_w, box_h, gap_x, gap_y, left, per_row = 150, 54, 30, 46, 132, 5
+    widest, top, placed_bands = 0, 24, []
+    feature_terms = {}
+    for term in terms:
+        feature_terms.setdefault(term["feature"], []).append(term["id"])
+    carried = []
+    for band in bands:
+        members = sorted((s for s in screens if s.get("screen", "") == band),
+                         key=lambda s: order[s["id"]])
+        widest = max(widest, min(len(members), per_row))
+        rows = (len(members) + per_row - 1) // per_row
+        placed_bands.append({"id": band, "y": top, "height": rows * box_h + (rows - 1) * 18})
+        for index, s in enumerate(members):
+            column, line = index % per_row, index // per_row
+            on = s.get("features", "").split()
+            image = s.get("image", "")
+            if image and image not in images:
+                image = ""
+            carried.append({
+                "id": s["id"], "title": s.get("title", s["id"]), "kind": s.get("kind", ""),
+                "screen": band, "features": on, "parent": s.get("parent", ""),
+                "page": s.get("page", ""), "tab": s.get("tab", ""), "image": image,
+                "note": s.get("note", ""),
+                "x": left + column * (box_w + gap_x), "y": top + line * (box_h + 18),
+                "in": [i for i, w in enumerate(carried_ways) if w["to"] == s["id"]],
+                "out": [i for i, w in enumerate(carried_ways) if w["from"] == s["id"]],
+                "terms": sorted({t for f in on for t in feature_terms.get(f, [])}),
+            })
+        top += placed_bands[-1]["height"] + gap_y
+    by_id = {s["id"]: s for s in carried}
+    out["flow"] = {
+        "screens": [by_id[s["id"]] for s in screens],
+        "ways": carried_ways,
+        "bands": placed_bands,
+        "box": [box_w, box_h],
+        "width": left + widest * (box_w + gap_x),
+        "height": top,
+    }
+    return out
+
+
+def behaviour_items(spec):
+    """The numbered items of a spec's `## Behaviour` section with their
+    continuation lines, read as `behaviour_lines` in src/tests.rs reads them."""
+    at = spec.find("## Behaviour")
+    if at < 0:
+        return []
+    body = spec[at + len("## Behaviour"):]
+    nxt = body.find("\n## ")
+    body = body[:nxt] if nxt >= 0 else body
+    items = []
+    for line in body.splitlines():
+        found = re.match(r"^(\d+)\. (.*)$", line)
+        if found:
+            items.append([int(found.group(1)), found.group(2)])
+        elif items and line.startswith("   "):
+            items[-1][1] += " " + line.strip()
+    return items
+
+
+def read_requirements(features):
+    rows = []
+    for feature in features:
+        spec = feature.get("spec")
+        if not spec:
+            continue
+        for number, text in behaviour_items(spec["text"]):
+            at = text.find("Pinned by")
+            tests = re.findall(r"`([^`]+)`", text[at:]) if at >= 0 else []
+            said = (text[:at] if at >= 0 else text).strip()
+            rows.append({"feature": feature["id"], "domain": feature.get("domain", ""),
+                         "number": number, "text": said, "tests": tests})
+    return rows
+
+
+def link_domains(domains, features):
+    """A domain's changes are its features' changes, newest first."""
+    by_feature = {f["id"]: f for f in features}
+    for domain in domains:
+        seen = {}
+        for fid in domain["features"]:
+            for link in by_feature[fid]["changes"]:
+                if link["link"] != "estimated":
+                    seen.setdefault(link["name"], link["link"])
+        domain["changes"] = sorted(seen, reverse=True)
+
+
 def build(root):
     statuses = template_statuses(root) or list(GROUPS)
     changes = {}
@@ -601,6 +875,13 @@ def build(root):
                         key=lambda c: c["name"], reverse=True))
     layer = read_features(root)
     unmapped = link_features(layer["features"], ordered)
+    domains = read_domains(root, layer["features"])
+    link_domains(domains["domains"], layer["features"])
+    glossary = read_glossary(root, layer["features"])
+    flow = read_flow(root, layer["features"], [s["id"] for s in layer["screens"]],
+                     glossary["terms"], layer["images"])
+    for feature in layer["features"]:
+        feature["terms"] = [t["id"] for t in glossary["terms"] if t["feature"] == feature["id"]]
     for change in ordered:
         del change["plan_paths"]
     counts = {group: sum(1 for c in ordered if c["group"] == group) for group in GROUP_ORDER}
@@ -633,6 +914,16 @@ def build(root):
         "features_omitted": layer["features_omitted"],
         "screens": layer["screens"],
         "images": layer["images"],
+        "domains": domains["domains"],
+        "domains_error": domains["domains_error"],
+        "domains_notice": domains["domains_notice"],
+        "terms": glossary["terms"],
+        "terms_error": glossary["terms_error"],
+        "terms_notice": glossary["terms_notice"],
+        "flow": flow["flow"],
+        "flow_error": flow["flow_error"],
+        "flow_notice": flow["flow_notice"],
+        "requirements": read_requirements(layer["features"]),
     }
 
 
@@ -701,6 +992,18 @@ def find(model, word):
             lines.insert(0, "機能 %s  %s  %s  %s  — %s" % (
                 feature["id"], feature["title"], feature["screen"],
                 BADGE[feature["badge"]], feature["summary"]))
+    found = []
+    for domain in model["domains"]:
+        if word in domain["id"].lower() or word in domain["title"].lower():
+            found.append("ドメイン %s  %s  — %s" % (domain["id"], domain["title"], domain["summary"]))
+    for term in model["terms"]:
+        if (word in term["id"].lower() or word in term["term"].lower()
+                or word in term["en"].lower()):
+            found.append("用語 %s  %s  — %s" % (term["id"], term["term"], term["meaning"]))
+    for screen in model["flow"]["screens"]:
+        if word in screen["id"].lower() or word in screen["title"].lower():
+            found.append("画面 %s  %s" % (screen["id"], screen["title"]))
+    lines = found + lines
     return "\n".join(lines) + "\n" if lines else "該当する変更はありません\n"
 
 
@@ -966,6 +1269,77 @@ ol.timeline .how { color: var(--soft); font-size: .8rem; margin-top: 3px; }
 .progress .col { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; min-height: 70px; }
 .progress .col h4 { margin: 0 0 6px; font-size: .82rem; color: var(--soft); font-weight: 600; }
 .progress .col.has { border-color: var(--flight); }
+header.top button.basket { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 14px; }
+header.top button.basket b { margin-left: 6px; color: var(--flight); }
+.dcards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+.dcard { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+.dcard:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dcard .t { display: block; font-weight: 700; font-size: 1.08rem; }
+.dcard .s { display: block; color: var(--soft); margin: 4px 0 10px; font-size: .9rem; line-height: 1.5; }
+.dcard .b { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-size: .84rem; color: var(--soft); }
+.split2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 1100px; }
+.split2 .box { max-width: none; margin: 0; }
+#v-domain h3, #fl-panel h4 { margin: 22px 0 8px; font-size: 1rem; }
+#v-domain .box h3 { margin: 0 0 6px; }
+#v-domain h3 small, #fl-panel h4 small { color: var(--soft); font-weight: 400; }
+.fwrap { position: relative; }
+.fwrap .bk { position: absolute; right: 8px; top: 8px; }
+.bk { display: inline-flex; gap: 4px; align-items: center; font-size: .78rem; color: var(--soft); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0 8px; cursor: pointer; white-space: nowrap; }
+.bk input { margin: 0; }
+.flow { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+.flow .canvas { overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; max-height: 82vh; }
+.flow .side { position: sticky; top: 110px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 4px 16px 16px; max-height: 82vh; overflow: auto; }
+.flow .side .shot { margin: 8px 0; }
+.flow svg .band { fill: var(--bg); stroke: var(--line); }
+.flow svg .bandlabel { fill: var(--soft); font-size: 12px; font-weight: 600; }
+.flow svg .w { fill: none; stroke: var(--soft); stroke-opacity: .35; stroke-width: 1.3; }
+.flow svg .w.dim { stroke-opacity: .1; }
+.flow svg .w.in { stroke: var(--done); stroke-opacity: 1; stroke-width: 2.4; }
+.flow svg .w.out { stroke: var(--flight); stroke-opacity: 1; stroke-width: 2.4; }
+.flow svg .w.head { fill: var(--soft); fill-opacity: .5; stroke: none; }
+.flow svg .w.dim.head { fill-opacity: .12; }
+.flow svg .w.in.head { fill: var(--done); fill-opacity: 1; } .flow svg .w.out.head { fill: var(--flight); fill-opacity: 1; }
+.flow svg .node { cursor: pointer; }
+.flow svg .node rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.4; }
+.flow svg .node rect.k-page { stroke: var(--ink); stroke-width: 2; }
+.flow svg .node rect.k-sheet, .flow svg .node rect.k-overlay { stroke-dasharray: 5 3; stroke: var(--flight); }
+.flow svg .node rect.k-cli { fill: var(--code); }
+.flow svg .node:hover rect, .flow svg .node:focus rect { stroke: var(--accent); stroke-width: 2.4; }
+.flow svg .node.sel rect { fill: var(--flight-bg); stroke: var(--flight); stroke-width: 3; }
+.flow svg .nt { text-anchor: middle; font-size: 12.5px; font-weight: 700; fill: var(--ink); }
+.flow svg .nk { text-anchor: middle; font-size: 11px; fill: var(--soft); }
+.flow svg .node rect.tag { fill: var(--flight-bg); stroke: var(--flight); stroke-width: 1; stroke-dasharray: none; }
+.flow svg .tagt { text-anchor: middle; font-size: 10.5px; fill: var(--flight); font-weight: 600; }
+ul.ways { list-style: none; padding: 0; margin: 0; }
+ul.ways li { padding: 5px 0; border-top: 1px solid var(--line); }
+ul.ways li:first-child { border-top: 0; }
+ul.ways .how { color: var(--soft); font-size: .86rem; }
+.what { color: var(--soft); font-size: .86rem; }
+.terms { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); margin-bottom: 8px; }
+.term { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.term.sel { outline: 3px solid var(--flight); }
+.term .th { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.term .tw { font-weight: 700; font-size: 1.1rem; }
+.term .en { color: var(--soft); font-size: .86rem; flex: 1; }
+.term p { margin: 4px 0 8px; }
+.term .kv { grid-template-columns: 120px 1fr; font-size: .88rem; }
+.avoid { text-decoration: line-through; color: var(--needs); margin-right: 6px; }
+#rq-filters select { font: inherit; padding: 3px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+#rq-list td.md { max-width: 720px; }
+#basket { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%); z-index: 11; background: var(--panel);
+  box-shadow: var(--shadow); display: flex; flex-direction: column; }
+#basket[hidden] { display: none; }
+#basket .dhead { padding: 16px 22px 8px; border-bottom: 1px solid var(--line); }
+#basket h2 { margin: 0; font-size: 1.12rem; flex: 1; }
+#basket .nav button { border: 1px solid var(--line); background: var(--bg); border-radius: 7px; padding: 3px 11px; }
+#bk-body { padding: 14px 22px 40px; overflow: auto; }
+#bk-body textarea { width: 100%; font: .86rem/1.5 ui-monospace, "SF Mono", Menlo, monospace; background: var(--code); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-top: 8px; }
+#bk-body .tools { margin-top: 8px; }
+#bk-body button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); padding: 3px 16px; }
+@media (max-width: 1100px) { .flow { grid-template-columns: 1fr; } .flow .side { position: static; } .split2 { grid-template-columns: 1fr; } }
 @media (max-width: 900px) { .screen { grid-template-columns: 1fr; } .progress { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 900px) {
   .area { grid-template-columns: 1fr; gap: 4px; } .track { grid-template-columns: repeat(2, 1fr); }
@@ -976,9 +1350,10 @@ ol.timeline .how { color: var(--soft); font-size: .8rem; margin-top: 3px; }
 <body>
 <header class="top">
   <div class="brand"><h1>Operon 製品地図</h1><span class="counts">__HEADLINE__</span>
-    <nav class="views" aria-label="表示"><button data-view="product" aria-pressed="true">製品</button><button data-view="changes" aria-pressed="false">変更一覧</button></nav></div>
+    <nav class="views" aria-label="表示"><button data-view="product" aria-pressed="true">製品</button><button data-view="domains" aria-pressed="false">ドメイン</button><button data-view="flow" aria-pressed="false">画面の流れ</button><button data-view="glossary" aria-pressed="false">用語集</button><button data-view="requirements" aria-pressed="false">要件</button><button data-view="changes" aria-pressed="false">変更一覧</button></nav></div>
   <div class="row">
-    <input id="q" type="search" placeholder="検索: 機能・画面・変更の番号や題" aria-label="検索">
+    <input id="q" type="search" placeholder="検索: 機能・ドメイン・用語・振る舞い・変更の番号や題" aria-label="検索">
+    <button id="bk-open" class="basket">作業かご<b id="bk-n"></b></button>
     <span class="meta" id="meta"></span>
   </div>
 </header>
@@ -999,6 +1374,30 @@ ol.timeline .how { color: var(--soft); font-size: .8rem; margin-top: 3px; }
     <div class="tabs" id="f-tabs" role="tablist"></div>
     <div id="f-body"></div>
   </div>
+  <div id="v-domains" hidden>
+    <p class="lead">Operon を責任の範囲（ドメイン）で分けて見渡します。どのコードと機能がどこに属し、どこで隣と受け渡すかが分かります。</p>
+    <div id="dm-error"></div>
+    <div class="dcards" id="dm-list"></div>
+  </div>
+  <div id="v-domain" class="fview" hidden>
+    <div class="fhead"><button class="back" data-view="domains">← ドメインに戻る</button>
+      <h2 id="dd-title"></h2><div class="meta2" id="dd-summary"></div></div>
+    <div id="dd-body"></div>
+  </div>
+  <div id="v-flow" hidden>
+    <p class="lead">画面・タブ・シート・重ねて開くものと、そのあいだの道（キーとボタン）です。画面を選ぶと、入る道（緑）と出る道（青）が色付きになります。どのページからも開けるもの（⌘K など）は「どこからでも」と示し、矢印はその画面を選んだときだけ描きます。</p>
+    <div id="fl-error"></div>
+    <div class="flow"><div class="canvas" id="fl-canvas"></div><div class="side" id="fl-panel"></div></div>
+  </div>
+  <div id="v-glossary" hidden>
+    <p class="lead">Operon が使う言葉と、その意味・画面での表記・コードでの名前・使わない言葉です。新しい文言はここの言葉で書きます。</p>
+    <div id="gl-error"></div>
+    <section><h2>用語 <small id="gl-n"></small></h2><div id="gl-list"></div></section>
+  </div>
+  <div id="v-requirements" hidden>
+    <p class="lead">すべての機能の「今の振る舞い」を 1 行ずつ並べ、どのテストがそれを確かめているかを示します。テストの記録がない行が、確かめられていない振る舞いです。</p>
+    <section><h2>振る舞い <small id="rq-n"></small></h2><div class="filters" id="rq-filters"></div><div id="rq-list"></div></section>
+  </div>
   <div id="v-changes" hidden>
     <section id="needs"><h2>あなたの判断を待っています <small id="needs-n"></small></h2><div id="needs-list"></div></section>
     <section id="flight"><h2>進行中 <small id="flight-n"></small></h2><div id="flight-list"></div></section>
@@ -1018,6 +1417,11 @@ ol.timeline .how { color: var(--soft); font-size: .8rem; margin-top: 3px; }
   </div>
   <div id="body"></div>
 </aside>
+<aside id="basket" hidden aria-label="作業かご">
+  <div class="dhead"><div class="dtitle"><h2>作業かご</h2><div class="nav"><button id="bk-close">閉じる</button></div></div>
+    <p class="what">集めたものを 1 つの指示にして、CLI のセッションに貼り付けます。</p></div>
+  <div id="bk-body"></div>
+</aside>
 <script id="map-data" type="application/json">__DATA__</script>
 <script>
 "use strict";
@@ -1034,7 +1438,7 @@ const BADGE = { steady: "安定", changing: "変更中", waiting: "判断待ち"
 const ROUTE = { feature: "新機能", modify: "変更", bugfix: "不具合の修正", refactor: "整理",
   security: "安全性", docs: "文書", trivial: "軽微な修正" };
 const LINK = { recorded: "記録", inferred: "計画のファイルから推定", estimated: "題から推定" };
-const FTABS = [["brief", "BRIEF", "人向けの説明"], ["spec", "SPEC", "AI 向けの仕様"], ["progress", "進捗", "変更の履歴"], ["screen", "画面", "画面とマニュアル"]];
+const FTABS = [["brief", "BRIEF", "人向けの説明"], ["spec", "SPEC", "AI 向けの仕様"], ["progress", "進捗", "変更の履歴"], ["screen", "画面", "画面とマニュアル"], ["terms", "用語", "この機能の言葉"]];
 const FEATURES = M.features;
 const featureById = new Map(FEATURES.map(f => [f.id, f]));
 const screenLabel = id => { const s = M.screens.find(x => x.id === id); return s ? s.label : id; };
@@ -1381,7 +1785,7 @@ function renderProduct() {
   $("p-screen-list").innerHTML = shown.length ? shown.map(({ sc, fs }) =>
     '<div class="screen' + (sc.image && M.images[sc.image] ? "" : " noshot") + '">' + (sc.image && M.images[sc.image] ? '<div class="shot" data-shot="' + esc(sc.id) + '"></div>' : "") + '<div><h3>' + esc(sc.label) +
     ' <small style="font-weight:400;color:var(--soft)">' + fs.length + ' 機能</small></h3><div class="fcards">' +
-    fs.map(featureCard).join("") + "</div></div></div>").join("") :
+    fs.map(wrapCard).join("") + "</div></div></div>").join("") :
     (FEATURES.length ? '<div class="empty">該当する機能はありません</div>' : '<div class="empty">機能の一覧がありません</div>');
   for (const holder of document.querySelectorAll("[data-shot]")) {
     const sc = M.screens.find(x => x.id === holder.dataset.shot);
@@ -1434,17 +1838,28 @@ function featureScreen(f) {
   h += '<p class="paths">この機能を実現しているコード: ' + f.paths.map(p => "<code>" + esc(p) + "</code>").join(" ") + "</p>";
   return h;
 }
+function featureTerms(f) {
+  const own = TERMS.filter(t => t.feature === f.id);
+  const used = TERMS.filter(t => t.feature !== f.id && t.used_by.includes(f.id));
+  const where = FLOW.screens.filter(s => s.features.includes(f.id));
+  return "<h3>この機能の用語 <small>" + own.length + '</small></h3><div class="terms">' + (own.map(termCard).join("") || '<p class="empty">なし</p>') + "</div>" +
+    "<h3>BRIEF が使っているほかの用語</h3>" + termChips(used.map(t => t.id)) +
+    "<h3>この機能が載っている画面</h3>" + (where.length ? '<span class="fchips">' + where.map(s => chip("data-screen", s.id, s.title)).join("") + "</span>" : '<p class="empty">なし</p>') +
+    '<h3>振る舞い</h3><p><button class="fchip" data-reqs="' + esc(f.id) + '">要件の表でこの機能の ' + REQS.filter(r => r.feature === f.id).length + " 行を見る</button></p>";
+}
 function renderFeature() {
   const f = feature;
   $("f-title").textContent = f.title;
   $("f-badge").innerHTML = renderFeatureBadge(f);
-  $("f-meta").innerHTML = "<span>画面: <b>" + esc(screenLabel(f.screen)) + "</b></span><span>" + esc(f.summary) + "</span>";
+  $("f-meta").innerHTML = "<span>画面: <b>" + esc(screenLabel(f.screen)) + "</b></span><span>ドメイン: " + domainChip(f.domain) +
+    "</span>" + basketBox("feature", f.id) + "<span>" + esc(f.summary) + "</span>";
   $("f-tabs").innerHTML = FTABS.map(t => '<button role="tab" data-ftab="' + t[0] + '" aria-selected="' + (t[0] === featureTab) +
     '" title="' + esc(t[2]) + '">' + t[1] + (t[0] === "progress" && f.changes.length ? " " + f.changes.length : "") + "</button>").join("");
   const body = $("f-body");
   if (featureTab === "brief") body.innerHTML = featureDoc(f, "brief");
   else if (featureTab === "spec") body.innerHTML = '<div class="note">AI が従い、最新に保つための仕様です（英語）。人が読む説明は BRIEF にあります。</div>' + featureDoc(f, "spec");
   else if (featureTab === "progress") body.innerHTML = featureProgress(f);
+  else if (featureTab === "terms") body.innerHTML = featureTerms(f);
   else {
     body.innerHTML = featureScreen(f);
     const holder = $("f-shot");
@@ -1452,9 +1867,328 @@ function renderFeature() {
   }
 }
 
+// Change 315: domains, the screen flow, the glossary, the requirement board
+// and the work basket. Every value from the model passes through esc().
+const DOMAINS = M.domains || [];
+const TERMS = M.terms || [];
+const FLOW = M.flow || { screens: [], ways: [], bands: [], box: [168, 58], width: 0, height: 0 };
+const REQS = M.requirements || [];
+const domainById = new Map(DOMAINS.map(d => [d.id, d]));
+const termById = new Map(TERMS.map(t => [t.id, t]));
+const flowById = new Map(FLOW.screens.map(s => [s.id, s]));
+const KIND = { page: "ページ", tab: "タブ", panel: "パネル", sheet: "シート", overlay: "重ねて開く", cli: "コマンドライン" };
+const WORK = [["modify", "変更", "既存の振る舞いを変える（route modify）"],
+  ["bugfix", "不具合", "不具合を直す（route bugfix。root-cause から）"],
+  ["docs", "文書", "文書を直す（route docs）"],
+  ["test", "テスト", "テストのない振る舞いにテストを足す"]];
+const domainTitle = id => (domainById.get(id) || { title: id || "（ドメイン未設定）" }).title;
+const featureTitle = id => (featureById.get(id) || { title: id }).title;
+const termWord = id => (termById.get(id) || { term: id }).term;
+
+let domainSel = null;
+let screenSel = null;
+let termSel = null;
+let reqFeature = "";
+let reqDomain = "";
+let reqTests = "";
+const basket = new Map();
+let workType = "modify";
+let basketOpen = false;
+
+function errorBox(error, notice) {
+  return (error ? '<div class="box needs"><h3>' + esc(error) + "</h3>ほかの見方はそのまま使えます。</div>" : "") +
+    (notice ? '<p class="warn">' + esc(notice) + "</p>" : "");
+}
+function basketBox(kind, id) {
+  const key = kind + "|" + id;
+  return '<label class="bk" title="作業かごに入れる"><input type="checkbox" data-basket="' + esc(key) + '"' +
+    (basket.has(key) ? " checked" : "") + "> かご</label>";
+}
+function chip(attr, id, label) {
+  return '<button class="fchip" ' + attr + '="' + esc(id) + '">' + esc(label) + "</button>";
+}
+function domainChip(id) { return id ? chip("data-domain", id, domainTitle(id)) : ""; }
+function termChips(ids) {
+  return ids.length ? '<span class="fchips">' + ids.map(id => chip("data-term", id, termWord(id))).join("") + "</span>"
+    : '<span class="empty">なし</span>';
+}
+function featureChipsOf(ids) {
+  return ids.length ? '<span class="fchips">' + ids.map(id => chip("data-feature", id, featureTitle(id))).join("") + "</span>"
+    : '<span class="empty">なし</span>';
+}
+function wrapCard(f) { return '<div class="fwrap">' + featureCard(f) + basketBox("feature", f.id) + "</div>"; }
+
+function renderDomains() {
+  $("dm-error").innerHTML = errorBox(M.domains_error, M.domains_notice);
+  const shown = DOMAINS.filter(d => !query || [d.title, d.id, d.summary, d.owns].join(" ").toLowerCase().includes(query));
+  $("dm-list").innerHTML = shown.length ? shown.map(d => {
+    const fs = d.features.map(id => featureById.get(id)).filter(Boolean);
+    const moving = fs.filter(f => f.badge !== "steady").length;
+    const terms = TERMS.filter(t => t.domain === d.id).length;
+    return '<button class="dcard" data-domain="' + esc(d.id) + '"><span class="t">' + esc(d.title) + '</span><span class="s">' +
+      esc(d.summary) + '</span><span class="b"><span>機能 ' + fs.length + "</span><span>コード " + d.modules.length +
+      "</span><span>用語 " + terms + "</span><span>変更 " + d.changes.length + "</span>" +
+      (moving ? '<span class="badge changing">動いている機能 ' + moving + "</span>" : '<span class="badge">安定</span>') +
+      "</span></button>";
+  }).join("") : (DOMAINS.length ? '<div class="empty">該当するドメインはありません</div>' : "");
+}
+
+function renderDomain() {
+  const d = domainSel;
+  $("dd-title").textContent = d.title;
+  $("dd-summary").innerHTML = "<span>" + esc(d.summary) + "</span>" + basketBox("domain", d.id);
+  let h = '<div class="split2"><div class="box"><h3>担当すること</h3>' + esc(d.owns) + '</div><div class="box"><h3>担当しないこと</h3>' +
+    esc(d.excludes) + "</div></div>";
+  h += "<h3>隣のドメイン</h3>" + (d.adjacent.length ? '<span class="fchips">' + d.adjacent.map(domainChip).join("") + "</span>" : '<p class="empty">なし</p>');
+  h += "<h3>機能 <small>" + d.features.length + "</small></h3>" +
+    '<div class="fcards">' + d.features.map(id => featureById.get(id)).filter(Boolean).map(wrapCard).join("") + "</div>";
+  h += "<h3>コード <small>" + d.modules.length + ' ファイル</small></h3><table class="all"><tbody>' + d.modules.map(m =>
+    "<tr><td><code>" + esc(m.path) + "</code></td><td>" + esc(m.about) + "</td></tr>").join("") + "</tbody></table>";
+  h += "<h3>用語</h3>" + termChips(TERMS.filter(t => t.domain === d.id).map(t => t.id));
+  h += "<h3>変更 <small>" + d.changes.length + "</small></h3>";
+  h += d.changes.length ? '<ol class="timeline">' + d.changes.slice(0, 60).map(name => {
+    const c = byName.get(name);
+    return '<li class="' + c.group + '"><button data-open="' + esc(c.name) + '"><div class="head"><span class="num">' + esc(c.number) +
+      '</span><span class="ttl">' + esc(c.title) + "</span>" + pill(c) + "</div></button></li>";
+  }).join("") + "</ol>" + (d.changes.length > 60 ? '<p class="empty">ほか ' + (d.changes.length - 60) + " 件</p>" : "")
+    : '<p class="empty">このドメインの機能に触れた変更の記録はありません</p>';
+  $("dd-body").innerHTML = h;
+}
+
+const SVG = "http://www.w3.org/2000/svg";
+function svgNode(name, attrs, text) {
+  const node = document.createElementNS(SVG, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v));
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+function wayHow(w) {
+  const parts = [];
+  if (w.chord) parts.push(w.chord);
+  if (w.label) parts.push("「" + w.label + "」");
+  if (w.click) parts.push(w.click);
+  return parts.join(" / ");
+}
+// A way that every page offers (a page key, ⌘K, ⌘N) is one fact repeated
+// from each page; drawn once each it buries the rest, so it is marked on its
+// target as どこからでも and drawn only for the chosen box.
+const PAGES = FLOW.screens.filter(s => s.kind === "page").map(s => s.id);
+const GLOBAL = new Set();
+const EVERYWHERE = new Map();
+(function findEverywhere() {
+  const groups = new Map();
+  FLOW.ways.forEach((w, i) => {
+    if (!w.key) return;
+    const sig = w.to + "|" + w.key;
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig).push(i);
+  });
+  for (const [sig, list] of groups) {
+    const from = new Set(list.map(i => FLOW.ways[i].from));
+    const to = sig.split("|")[0];
+    if (PAGES.length > 1 && PAGES.every(p => p === to || from.has(p))) {
+      list.forEach(i => GLOBAL.add(i));
+      if (!EVERYWHERE.has(to)) EVERYWHERE.set(to, []);
+      EVERYWHERE.get(to).push(FLOW.ways[list[0]].chord || FLOW.ways[list[0]].key);
+    }
+  }
+})();
+function drawFlow() {
+  const holder = $("fl-canvas");
+  holder.textContent = "";
+  if (!FLOW.screens.length) return;
+  const [bw, bh] = FLOW.box;
+  const svg = svgNode("svg", { width: FLOW.width, height: FLOW.height, viewBox: "0 0 " + FLOW.width + " " + FLOW.height,
+    role: "img", "aria-label": "画面の流れ" });
+  FLOW.bands.forEach(band => {
+    svg.appendChild(svgNode("rect", { x: 4, y: band.y - 12, width: FLOW.width - 8, height: band.height + 24, rx: 12, class: "band" }));
+    svg.appendChild(svgNode("text", { x: 16, y: band.y + 22, class: "bandlabel" }, screenLabel(band.id)));
+  });
+  const sel = screenSel ? screenSel.id : "";
+  const plain = svgNode("g", {});
+  const lit = svgNode("g", {});
+  FLOW.ways.forEach((w, index) => {
+    const a = flowById.get(w.from), b = flowById.get(w.to);
+    if (!a || !b) return;
+    const role = w.from === sel ? "out" : w.to === sel ? "in" : "";
+    if (GLOBAL.has(index) && !role) return;
+    // Down and up between the same two boxes leave and arrive at different
+    // points, and a way that skips a band bulges to the side of the boxes it passes.
+    const down = b.y > a.y, same = a.y === b.y;
+    const x1 = a.x + bw * (same ? 0.5 : down ? 0.38 : 0.62), x2 = b.x + bw * (same ? 0.5 : down ? 0.38 : 0.62);
+    const sy = same ? a.y : a.y + (down ? bh : 0), ey = same ? b.y : b.y + (down ? 0 : bh);
+    const skip = !same && Math.abs(b.y - a.y) > bh + 80 && Math.abs(x2 - x1) < bw;
+    const side = skip ? (down ? 1 : -1) * (bw * 0.62 + 6 * (FLOW.ways.indexOf(w) % 4)) : 0;
+    const bend = same ? -34 - Math.abs(x2 - x1) / 10 : (ey - sy) / 2;
+    const c1x = x1 + side, c1y = sy + bend, c2x = x2 + side, c2y = same ? ey + bend : ey - bend;
+    const sx = x1, ex = x2;
+    const d = "M" + sx + "," + sy + " C" + c1x + "," + c1y + " " + c2x + "," + c2y + " " + ex + "," + ey;
+    const cls = "w " + role + (sel && !role ? " dim" : "");
+    const group = svgNode("g", {});
+    group.appendChild(svgNode("path", { d, class: cls }));
+    // The arrowhead, drawn along the curve's last tangent.
+    const len = Math.hypot(ex - c2x, ey - c2y) || 1, ux = (ex - c2x) / len, uy = (ey - c2y) / len;
+    const size = role ? 9 : 7;
+    const p1 = (ex - ux * size - uy * size * 0.55) + "," + (ey - uy * size + ux * size * 0.55);
+    const p2 = (ex - ux * size + uy * size * 0.55) + "," + (ey - uy * size - ux * size * 0.55);
+    group.appendChild(svgNode("path", { d: "M" + ex + "," + ey + " L" + p1 + " L" + p2 + " z", class: cls + " head" }));
+    group.appendChild(svgNode("title", {}, a.title + " → " + b.title + "  " + wayHow(w)));
+    (role ? lit : plain).appendChild(group);
+  });
+  svg.appendChild(plain);
+  svg.appendChild(lit);
+  FLOW.screens.forEach(s => {
+    const g = svgNode("g", { class: "node" + (s.id === sel ? " sel" : ""), "data-screen": s.id, tabindex: 0 });
+    g.appendChild(svgNode("rect", { x: s.x, y: s.y, width: bw, height: bh, rx: 10, class: "k-" + s.kind }));
+    g.appendChild(svgNode("text", { x: s.x + bw / 2, y: s.y + 23, class: "nt" }, s.title.length > 11 ? s.title.slice(0, 10) + "…" : s.title));
+    g.appendChild(svgNode("text", { x: s.x + bw / 2, y: s.y + 41, class: "nk" }, KIND[s.kind] || s.kind));
+    g.appendChild(svgNode("title", {}, s.title));
+    if (EVERYWHERE.has(s.id)) {
+      const tag = "どこからでも " + EVERYWHERE.get(s.id).join(" ");
+      const width = 16 + tag.length * 9;
+      g.appendChild(svgNode("rect", { x: s.x + bw - width + 6, y: s.y - 10, width, height: 18, rx: 9, class: "tag" }));
+      g.appendChild(svgNode("text", { x: s.x + bw - width / 2 + 6, y: s.y + 3, class: "tagt" }, tag));
+    }
+    svg.appendChild(g);
+  });
+  holder.appendChild(svg);
+}
+function screenPanel() {
+  const s = screenSel;
+  if (!s) return '<p class="empty">画面を選ぶと、そこに載っている機能と、そこへ入る道・そこから出る道が出ます。</p>';
+  const line = i => {
+    const w = FLOW.ways[i];
+    const other = flowById.get(w.from === s.id ? w.to : w.from);
+    return "<li>" + chip("data-screen", other.id, other.title) + ' <span class="how">' + esc(wayHow(w)) + "</span>" +
+      (w.note ? '<div class="what">' + esc(w.note) + "</div>" : "") + "</li>";
+  };
+  let h = "<h3>" + esc(s.title) + ' <small>' + esc(KIND[s.kind] || s.kind) + " · " + esc(screenLabel(s.screen)) + "</small></h3>" +
+    basketBox("screen", s.id);
+  if (s.note) h += "<p>" + esc(s.note) + "</p>";
+  if (s.parent) h += "<p>中にある場所: " + chip("data-screen", s.parent, (flowById.get(s.parent) || { title: s.parent }).title) + "</p>";
+  if (s.image && M.images[s.image]) h += '<div class="shot" id="fl-shot"></div>';
+  h += "<h4>機能</h4>" + featureChipsOf(s.features);
+  h += "<h4>入ってくる道 <small>" + s.in.length + "</small></h4>" + (s.in.length ? '<ul class="ways">' + s.in.map(line).join("") + "</ul>" : '<p class="empty">なし</p>');
+  h += "<h4>出ていく道 <small>" + s.out.length + "</small></h4>" + (s.out.length ? '<ul class="ways">' + s.out.map(line).join("") + "</ul>" : '<p class="empty">なし</p>');
+  h += "<h4>用語</h4>" + termChips(s.terms);
+  return h;
+}
+function renderFlow() {
+  $("fl-error").innerHTML = errorBox(M.flow_error, M.flow_notice);
+  drawFlow();
+  $("fl-panel").innerHTML = screenPanel();
+  const holder = $("fl-shot");
+  if (holder && screenSel) {
+    const picture = document.createElement("img");
+    picture.src = M.images[screenSel.image]; picture.alt = screenSel.title + "の画面";
+    holder.appendChild(picture);
+  }
+}
+
+function termCard(t) {
+  const row = (label, value) => value ? "<dt>" + label + "</dt><dd>" + value + "</dd>" : "";
+  return '<div class="term' + (termSel && termSel.id === t.id ? " sel" : "") + '" id="term-' + esc(t.id) + '"><div class="th"><span class="tw">' + esc(t.term) + "</span>" +
+    (t.en ? '<span class="en">' + esc(t.en) + "</span>" : "") + basketBox("term", t.id) + "</div><p>" + esc(t.meaning) + '</p><dl class="kv">' +
+    row("画面での表記", t.ui.map(u => "「" + esc(u) + "」").join(" ")) +
+    row("コード", t.code.map(c => "<code>" + esc(c) + "</code>").join(" ")) +
+    row("使わない言葉", t.avoid.map(a => '<span class="avoid">' + esc(a) + "</span>").join(" ")) +
+    row("関連語", t.see.length ? termChips(t.see) : "") +
+    row("機能", chip("data-feature", t.feature, featureTitle(t.feature)) + " " + domainChip(t.domain)) +
+    row("使っている BRIEF", t.used_by.length ? featureChipsOf(t.used_by) : "") + "</dl></div>";
+}
+function termMatches(t) {
+  return !query || [t.term, t.id, t.en, t.meaning, t.ui.join(" "), t.code.join(" "), t.avoid.join(" ")].join(" ").toLowerCase().includes(query);
+}
+function renderGlossary() {
+  $("gl-error").innerHTML = errorBox(M.terms_error, M.terms_notice);
+  const shown = TERMS.filter(termMatches);
+  $("gl-n").textContent = "(" + shown.length + " / " + TERMS.length + ")";
+  if (!shown.length) { $("gl-list").innerHTML = TERMS.length ? '<div class="empty">該当する用語はありません</div>' : ""; return; }
+  const order = DOMAINS.map(d => d.id).concat([""]);
+  const groups = order.map(id => ({ id, terms: shown.filter(t => (domainById.has(t.domain) ? t.domain : "") === id) })).filter(g => g.terms.length);
+  $("gl-list").innerHTML = groups.map(g => "<h3>" + esc(g.id ? domainTitle(g.id) : "ドメイン未設定") + " <small>" + g.terms.length + '</small></h3><div class="terms">' +
+    g.terms.map(termCard).join("") + "</div>").join("");
+  if (termSel) { const at = $("term-" + termSel.id); if (at) at.scrollIntoView({ block: "center" }); }
+}
+
+function renderRequirements() {
+  const opt = (value, label, current) => '<option value="' + esc(value) + '"' + (value === current ? " selected" : "") + ">" + esc(label) + "</option>";
+  $("rq-filters").innerHTML = '<select id="rq-domain" aria-label="ドメイン">' + opt("", "すべてのドメイン", reqDomain) + DOMAINS.map(d => opt(d.id, d.title, reqDomain)).join("") + "</select>" +
+    '<select id="rq-feature" aria-label="機能">' + opt("", "すべての機能", reqFeature) + FEATURES.filter(f => !reqDomain || f.domain === reqDomain).map(f => opt(f.id, f.title, reqFeature)).join("") + "</select>" +
+    '<select id="rq-tests" aria-label="テスト">' + opt("", "テストの有無を問わない", reqTests) + opt("yes", "テストの記録あり", reqTests) + opt("no", "テストの記録なし", reqTests) + "</select>";
+  const rows = REQS.filter(r => (!reqDomain || r.domain === reqDomain) && (!reqFeature || r.feature === reqFeature) &&
+    (!reqTests || (reqTests === "yes") === (r.tests.length > 0)) &&
+    (!query || (r.text + " " + featureTitle(r.feature) + " " + r.tests.join(" ")).toLowerCase().includes(query)));
+  const bare = REQS.filter(r => !r.tests.length).length;
+  $("rq-n").textContent = "(" + rows.length + " / " + REQS.length + " · テストの記録なし " + bare + " 件)";
+  $("rq-list").innerHTML = rows.length ? '<table class="all"><thead><tr><th></th><th>機能</th><th>番号</th><th>内容</th><th>テスト</th></tr></thead><tbody>' +
+    rows.map(r => "<tr><td>" + basketBox("behaviour", r.feature + "#" + r.number) + "</td><td>" + chip("data-feature", r.feature, featureTitle(r.feature)) +
+      '</td><td class="num">' + r.number + '</td><td class="md">' + inline(r.text) + "</td><td>" +
+      (r.tests.length ? r.tests.map(t => "<code>" + esc(t) + "</code>").join("<br>") : '<span class="pill needs">テストの記録なし</span>') + "</td></tr>").join("") +
+    "</tbody></table>" : '<div class="empty">該当する振る舞いはありません</div>';
+}
+
+function basketLine(key) {
+  const [kind, id] = key.split("|");
+  if (kind === "feature") return "- 機能「" + featureTitle(id) + "」(" + id + "): docs/features/" + id + "/brief.md と docs/features/" + id + "/spec.md";
+  if (kind === "domain") return "- ドメイン「" + domainTitle(id) + "」(" + id + "): docs/features/domains.yaml の " + id;
+  if (kind === "screen") return "- 画面「" + (flowById.get(id) || { title: id }).title + "」(" + id + "): docs/features/flow.yaml の " + id;
+  if (kind === "term") return "- 用語「" + termWord(id) + "」(" + id + "): docs/features/glossary.yaml の " + id;
+  const [feature, number] = id.split("#");
+  const row = REQS.find(r => r.feature === feature && String(r.number) === number);
+  return "- 振る舞い: 機能「" + featureTitle(feature) + "」の " + number + " 番 — docs/features/" + feature + "/spec.md の Behaviour " + number +
+    (row ? "「" + row.text + "」" : "");
+}
+function instruction() {
+  const work = WORK.find(w => w[0] === workType);
+  return "Operon の次の作業を feature-pilot で進めてください（.claude/skills/feature-pilot/SKILL.md から始める）。\n" +
+    "種類: " + work[1] + " — " + work[2] + "\n対象:\n" + Array.from(basket.keys()).map(basketLine).join("\n") +
+    "\n読むもの: docs/features/index.yaml、docs/features/domains.yaml、docs/features/glossary.yaml、docs/features/flow.yaml\n" +
+    "してほしいこと:\n（ここに書いてください）\n";
+}
+function renderBasket() {
+  $("bk-n").textContent = basket.size ? " " + basket.size : "";
+  if (!basketOpen) return;
+  $("bk-body").innerHTML = basket.size ? '<ul class="ways">' + Array.from(basket.keys()).map(key =>
+    "<li>" + esc(basketLine(key).slice(2)) + ' <button class="fchip" data-unbasket="' + esc(key) + '">外す</button></li>').join("") + "</ul>" +
+    '<div class="filters">' + WORK.map(w => '<button data-work="' + w[0] + '" aria-pressed="' + (w[0] === workType) + '" title="' + esc(w[2]) + '">' + w[1] + "</button>").join("") + "</div>" +
+    '<textarea id="bk-text" rows="14" readonly>' + esc(instruction()) + "</textarea>" +
+    '<div class="tools"><span id="bk-said"></span><button data-empty-basket="1">空にする</button><button id="bk-copy" class="primary">指示をコピー</button></div>'
+    : '<p class="empty">まだ何も入っていません</p><p class="what">機能・画面・振る舞い・用語・ドメインの「かご」に印を付けると、ここに集まります。</p>';
+}
+function copyInstruction() {
+  const area = $("bk-text");
+  const failed = () => { area.focus(); area.select(); $("bk-said").textContent = "コピーできませんでした。選択された文を手でコピーしてください"; };
+  if (!navigator.clipboard) { failed(); return; }
+  navigator.clipboard.writeText(area.value).then(() => { $("bk-said").textContent = "コピーしました"; }, failed);
+}
+
 function route() {
   const raw = decodeURIComponent(location.hash.slice(1));
   const featureRoute = raw.match(/^feature\/([^/]+)(?:\/(.+))?$/);
+  const named = raw.match(/^(domain|screen|term|requirements)(?:\/(.+))?$/);
+  const lists = { domains: "domains", flow: "flow", glossary: "glossary", requirements: "requirements" };
+  if (current && (named || lists[raw])) { current = null; $("detail").hidden = true; $("shade").hidden = true; }
+  if (named && named[1] === "domain" && domainById.has(named[2])) {
+    baseHash = "#" + raw; view = "domain"; domainSel = domainById.get(named[2]); renderViews(); return;
+  }
+  if (named && named[1] === "screen") {
+    baseHash = "#" + raw; view = "flow"; screenSel = flowById.get(named[2]) || null; renderViews(); return;
+  }
+  if (named && named[1] === "term") {
+    baseHash = "#" + raw; view = "glossary"; termSel = termById.get(named[2]) || null; renderViews(); return;
+  }
+  if (named && named[1] === "requirements") {
+    baseHash = "#" + raw; view = "requirements";
+    if (named[2] && featureById.has(named[2])) { reqFeature = named[2]; reqDomain = ""; }
+    renderViews(); return;
+  }
+  if (lists[raw]) {
+    baseHash = "#" + raw; view = lists[raw];
+    if (raw === "glossary") termSel = null;
+    if (raw === "flow") screenSel = null;
+    renderViews(); return;
+  }
   const changeRoute = raw.match(/^(\d+|[\w-]+)(?:\/(.+))?$/);
   if (featureRoute && featureById.has(featureRoute[1])) {
     baseHash = "#" + raw; view = "feature"; feature = featureById.get(featureRoute[1]);
@@ -1472,24 +2206,44 @@ function route() {
   }
   renderViews();
 }
+const VIEW_OF = { product: "product", feature: "product", domains: "domains", domain: "domains", flow: "flow",
+  glossary: "glossary", requirements: "requirements", changes: "changes" };
 function renderViews() {
-  $("v-product").hidden = view !== "product";
-  $("v-feature").hidden = view !== "feature";
-  $("v-changes").hidden = view !== "changes";
-  for (const b of document.querySelectorAll("nav.views button")) b.setAttribute("aria-pressed", String((b.dataset.view === "changes") === (view === "changes")));
+  for (const name of ["product", "feature", "domains", "domain", "flow", "glossary", "requirements", "changes"])
+    $("v-" + name).hidden = view !== name;
+  for (const b of document.querySelectorAll("nav.views button")) b.setAttribute("aria-pressed", String(b.dataset.view === VIEW_OF[view]));
   if (view === "product") renderProduct();
   else if (view === "feature") renderFeature();
+  else if (view === "domains") renderDomains();
+  else if (view === "domain") renderDomain();
+  else if (view === "flow") renderFlow();
+  else if (view === "glossary") renderGlossary();
+  else if (view === "requirements") renderRequirements();
   else renderOverview();
-  if (view !== "feature") window.scrollTo(0, 0);
+  renderBasket();
+  if (!["feature", "glossary", "flow"].includes(view)) window.scrollTo(0, 0);
 }
 function fromHash() { route(); }
 
 document.addEventListener("click", event => {
+  if (event.target.closest("label.bk")) return;
+  const node = event.target.closest("[data-screen]");
+  if (node) { setHash("#screen/" + node.dataset.screen, false); return; }
+  const extra = event.target.closest("[data-domain],[data-term],[data-reqs],[data-unbasket],[data-work],[data-empty-basket]");
+  if (extra) {
+    if (extra.dataset.domain) setHash("#domain/" + extra.dataset.domain, false);
+    else if (extra.dataset.term) setHash("#term/" + extra.dataset.term, false);
+    else if (extra.dataset.reqs) setHash("#requirements/" + extra.dataset.reqs, false);
+    else if (extra.dataset.unbasket) { basket.delete(extra.dataset.unbasket); renderViews(); }
+    else if (extra.dataset.work) { workType = extra.dataset.work; renderBasket(); }
+    else { basket.clear(); renderViews(); }
+    return;
+  }
   const target = event.target.closest("[data-open],[data-more],[data-group],[data-tab],[data-feature],[data-view],[data-ftab]");
   if (!target) return;
   if (target.dataset.feature) { setHash("#feature/" + target.dataset.feature + (current ? "" : ""), false); }
   else if (target.dataset.ftab) { setHash("#feature/" + feature.id + "/" + target.dataset.ftab, true); }
-  else if (target.dataset.view) { setHash(target.dataset.view === "changes" ? "#changes" : "", false); }
+  else if (target.dataset.view) { setHash(target.dataset.view === "product" ? "" : "#" + target.dataset.view, false); }
   else if (target.dataset.open) show(target.dataset.open);
   else if (target.dataset.more) { expanded.add(target.dataset.more); renderOverview(); }
   else if (target.dataset.group !== undefined) { groupFilter = target.dataset.group; renderOverview(); }
@@ -1498,12 +2252,39 @@ document.addEventListener("click", event => {
 $("body").addEventListener("click", event => {
   if (event.target.id === "raw-toggle") { rawView = !rawView; renderDetail(); }
 });
-$("q").addEventListener("input", event => { query = event.target.value.trim().toLowerCase(); if (view === "feature") { view = "product"; baseHash = ""; history.replaceState(null, "", location.pathname + location.search); } renderViews(); });
+$("q").addEventListener("input", event => {
+  query = event.target.value.trim().toLowerCase();
+  if (view === "feature" || view === "domain") {
+    view = view === "feature" ? "product" : "domains";
+    baseHash = view === "product" ? "" : "#domains";
+    history.replaceState(null, "", baseHash || location.pathname + location.search);
+  }
+  renderViews();
+});
+document.addEventListener("change", event => {
+  const box = event.target.closest("input[data-basket]");
+  if (box) { if (box.checked) basket.set(box.dataset.basket, true); else basket.delete(box.dataset.basket); renderBasket(); return; }
+  const id = event.target.id;
+  if (id === "rq-domain") { reqDomain = event.target.value; reqFeature = ""; renderRequirements(); }
+  else if (id === "rq-feature") { reqFeature = event.target.value; renderRequirements(); }
+  else if (id === "rq-tests") { reqTests = event.target.value; renderRequirements(); }
+});
+$("bk-open").addEventListener("click", () => { basketOpen = true; $("basket").hidden = false; renderBasket(); });
+$("bk-close").addEventListener("click", () => { basketOpen = false; $("basket").hidden = true; });
+$("basket").addEventListener("click", event => { if (event.target.id === "bk-copy") copyInstruction(); });
+document.addEventListener("keydown", event => {
+  const node = event.target.closest && event.target.closest("[data-screen]");
+  if (node && event.key === "Enter") setHash("#screen/" + node.dataset.screen, false);
+});
 $("shade").addEventListener("click", hide);
 $("d-close").addEventListener("click", hide);
 $("d-prev").addEventListener("click", () => { const n = listed.indexOf(current); if (n > 0) show(listed[n - 1].name, currentTab); });
 $("d-next").addEventListener("click", () => { const n = listed.indexOf(current); if (n >= 0 && n < listed.length - 1) show(listed[n + 1].name, currentTab); });
-document.addEventListener("keydown", event => { if (event.key === "Escape" && current) hide(); });
+document.addEventListener("keydown", event => {
+  if (event.key !== "Escape") return;
+  if (current) hide();
+  else if (basketOpen) { basketOpen = false; $("basket").hidden = true; }
+});
 window.addEventListener("hashchange", fromHash);
 
 $("meta").innerHTML = "生成 " + esc(M.generated) + (M.worktrees_read ? "" : ' · <span class="warn">他の作業コピーを読めませんでした</span>');

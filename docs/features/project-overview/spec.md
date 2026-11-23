@@ -1,17 +1,17 @@
 # Spec: プロジェクトの概要とエージェント設定
 
 ## Behaviour
-1. `ProjectTab::Overview` (「概要」) is the first tab and the one a project opens on (project list click, `try_add_project_path`). `ui_overview` draws it.
+1. `ProjectTab::Overview` (「概要」) is the first tab and the one a project opens on (project list click, `try_add_project_path`). `ui_overview` draws it. Pinned by `the_project_page_has_six_tabs`.
 2. On first draw for a project, `ui_overview` requests the git changes snapshot and the worktree list if their caches have no entry for it; it does not re-request each frame.
-3. Three tiles in three columns: 「セッション」 (count of every session record of the project, any status), 「未コミットの変更」 (number of files in the changes snapshot) and 「worktree」 (number of worktrees, main included). A tile whose cache is missing or errored shows 「—」.
+3. Three tiles in three columns: 「セッション」 (count of every session record of the project, any status), 「未コミットの変更」 (number of files in the changes snapshot) and 「worktree」 (number of worktrees, main included). A tile whose cache is missing or errored shows 「—」. Pinned by `the_overview_tab_summarises_the_project`.
 4. 「新しいセッション」 calls `open_project_session_setup(project.id)`, opening the launch sheet with this project chosen.
 5. 「このプロジェクトのセッション」 lists the project's sessions newest first (`created_at` descending), at most 8, each drawn with `home_session_row(.., "project")`. With none: 「セッションはまだありません。」.
-6. `ProjectTab::AgentSettings` (「エージェント設定」) draws `ui_agent_settings`: the skills section, a gap, then the rules section.
+6. `ProjectTab::AgentSettings` (「エージェント設定」) draws `ui_agent_settings`: the skills section, a gap, then the rules section. Pinned by `agent_settings_shows_skills_and_rules`, `agent_settings_sections_use_section_headings`.
 7. 「スキル」 lists every file named exactly `SKILL.md` found under the project folder, absolute paths in monospace, with a refresh button (「更新」) and the line 「プロジェクトと各エージェントのフォルダで見つかった SKILL.md です。」. Search limit 80 results. Empty: 「SKILL.md は見つかりませんでした。」. While running: 「スキルを検索しています…」.
 8. 「ルールと指示」 lists files named `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CODEX.md` or `INSTRUCTIONS.md` under the project folder, limit 200. Empty: 「プロジェクトの指示ファイルは見つかりませんでした。」. While running: 「指示ファイルを検索しています…」.
 9. Each listed file has an icon button 「「ファイル」タブで開く」 that sets `selected_file` to it and switches to `ProjectTab::Files`.
 10. Both lists are fetched once per project (cached in `skill_cache` / `rule_cache`) and again on 「更新」.
-11. When a scan was truncated or skipped unreadable directories, a one-line warning (`file_scan_warning`) is drawn above the list: 「スキャンの上限内で見つかったプロジェクトを表示しています。…」.
+11. When a scan was truncated or skipped unreadable directories, a one-line warning (`file_scan_warning`) is drawn above the list: 「スキャンの上限内で見つかったプロジェクトを表示しています。…」. Pinned by `file_scan_is_sorted_and_discloses_result_truncation`.
 
 ## States
 - Caches not yet filled: tiles show 「—」; lists show the searching line.

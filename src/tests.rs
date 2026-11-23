@@ -95888,3 +95888,1159 @@ pub(crate) fn verify_app_run_presses_again_when_a_press_changed_nothing() {
     );
     assert!(!running && folders.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Domains, the glossary and the screen flow (change 315): three flat files under
+// docs/features/ beside the catalogue, each checked against the code it names,
+// so the product map is a source of truth rather than a picture of one.
+// ---------------------------------------------------------------------------
+
+/// The entries of `list:` in a flat file of docs/features/, each opened by
+/// `  - <opener>:` and continued by `    key: value` lines, read without a YAML
+/// library the way `parse_feature_catalogue` reads index.yaml.
+/// The entries of `list:` and the lines inside it that are neither an opener
+/// nor a field, which a reader would drop without a word.
+fn read_flat_list(text: &str, list: &str, opener: &str) -> (Vec<FeatureEntry>, Vec<String>) {
+    let mut unread = Vec::new();
+    let header = format!("{list}:");
+    let open = format!("  - {opener}:");
+    let mut inside = false;
+    let mut entries: Vec<FeatureEntry> = Vec::new();
+    for line in text.lines() {
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            inside = line.trim_end() == header;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        if let Some(value) = line.strip_prefix(open.as_str()) {
+            let mut entry = FeatureEntry::new();
+            entry.insert(opener.to_owned(), value.trim().to_owned());
+            entries.extend([entry]);
+        } else if let Some((entry, (key, value))) = entries.last_mut().zip(flat_field(line)) {
+            entry.insert(key.to_owned(), value.to_owned());
+        } else {
+            unread.extend([line.to_owned()]);
+        }
+    }
+    (entries, unread)
+}
+
+/// `    key: value` with a key of word characters and hyphens, exactly the
+/// line `parse_flat` in scripts/change-map.py reads; any other indentation
+/// or key is not a field, so both readers drop the same lines.
+fn flat_field(line: &str) -> Option<(&str, &str)> {
+    let row = line
+        .strip_prefix("    ")
+        .filter(|row| !row.starts_with(char::is_whitespace))?;
+    let (key, value) = row.split_once(':')?;
+    let key = key.trim_end();
+    (!key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-'))
+    .then_some((key, value.trim()))
+}
+
+fn parse_flat_list(text: &str, list: &str, opener: &str) -> Vec<FeatureEntry> {
+    read_flat_list(text, list, opener).0
+}
+
+fn feature_flat_list(file: &str, list: &str, opener: &str) -> Vec<FeatureEntry> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("docs/features").join(file))
+        .unwrap_or_else(|_| panic!("docs/features/{file} を読めません"));
+    parse_flat_list(&text, list, opener)
+}
+
+fn is_kebab_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('-')
+        && !id.ends_with('-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+fn has_japanese(text: &str) -> bool {
+    text.chars()
+        .any(|c| ('\u{3040}'..='\u{30ff}').contains(&c) || ('\u{4e00}'..='\u{9fff}').contains(&c))
+}
+
+fn entry_words<'a>(entry: &'a FeatureEntry, key: &str) -> Vec<&'a str> {
+    entry
+        .get(key)
+        .map(|value| value.split_whitespace().collect())
+        .unwrap_or_default()
+}
+
+/// ` | `-separated phrases, which may hold spaces themselves.
+fn entry_phrases<'a>(entry: &'a FeatureEntry, key: &str) -> Vec<&'a str> {
+    entry
+        .get(key)
+        .map(|value| {
+            value
+                .split(" | ")
+                .map(str::trim)
+                .filter(|phrase| !phrase.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The files of the module map in CLAUDE.md, read the way
+/// `feature_catalogue_claims_every_module_of_the_map` reads them; the suite is
+/// left out, since it belongs to no domain.
+fn module_map_files() -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let claude = fs::read_to_string(root.join("CLAUDE.md")).unwrap();
+    let start = claude.find("## Shape of this codebase").unwrap();
+    let end = start + claude[start..].find("## Policies").unwrap();
+    let mut files = Vec::new();
+    for token in backticked(&claude[start..end]) {
+        if !token.starts_with("src/") || token == "src/tests.rs" {
+            continue;
+        }
+        files.extend(claimed_files(token));
+    }
+    files.sort();
+    files.dedup();
+    files
+}
+
+/// A path as a list of files: a trailing `/` stands for each `.rs` file
+/// directly in that directory.
+fn claimed_files(path: &str) -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if !path.ends_with('/') {
+        return vec![path.to_owned()];
+    }
+    let mut files: Vec<String> = fs::read_dir(root.join(path))
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| format!("{path}{}", entry.file_name().to_string_lossy()))
+                .filter(|file| file.ends_with(".rs"))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files
+}
+
+/// The Japanese message ids: every word the screen shows is one, or part of one.
+fn japanese_message_ids() -> Vec<&'static str> {
+    EN_TABLE.iter().map(|(id, _)| *id).collect()
+}
+
+/// The source the product is built from: every `src/` file but the suite.
+fn product_sources() -> Vec<String> {
+    source_files()
+        .into_iter()
+        .filter(|(path, _)| !path.ends_with("src/tests.rs"))
+        .map(|(_, text)| text)
+        .collect()
+}
+
+/// `word` occurs in `text` with no identifier character on either side.
+fn occurs_as_whole_word(text: &str, word: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    text.match_indices(word).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + word.len()..].chars().next();
+        !before.is_some_and(ident) && !after.is_some_and(ident)
+    })
+}
+
+/// The names of the `#[test]` functions of this file.
+fn test_function_names() -> std::collections::BTreeSet<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("src/tests.rs")).unwrap();
+    let mut names = std::collections::BTreeSet::new();
+    let mut pending = false;
+    for line in text.lines().map(str::trim_start) {
+        if line == "#[test]" {
+            pending = true;
+            continue;
+        }
+        if !pending || line.starts_with("#[") || line.starts_with("///") {
+            continue;
+        }
+        pending = false;
+        if let Some(rest) = line
+            .strip_prefix("pub(crate) fn ")
+            .or_else(|| line.strip_prefix("fn "))
+        {
+            if let Some(name) = rest.split('(').next() {
+                names.insert(name.to_owned());
+            }
+        }
+    }
+    names
+}
+
+/// The variants of a fieldless `pub(crate) enum` of src/app.rs.
+fn app_enum_variants(name: &str) -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let app = fs::read_to_string(root.join("src/app.rs")).unwrap();
+    let opening = format!("pub(crate) enum {name} {{");
+    let at = app
+        .find(&opening)
+        .unwrap_or_else(|| panic!("src/app.rs に enum {name} がありません"));
+    let body = &app[at + opening.len()..];
+    let body = &body[..body.find('}').unwrap()];
+    body.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .map(|line| line.trim_end_matches(',').to_owned())
+        .collect()
+}
+
+/// The action ids src/app/keymap.rs defines.
+fn keymap_action_ids() -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let keymap = fs::read_to_string(root.join("src/app/keymap.rs")).unwrap();
+    keymap
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("id: \""))
+        .filter_map(|rest| rest.split('"').next())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The closed set a header block of a flat file defines: the first word of
+/// each `#   word …` line under `# <title>`.
+fn header_set(text: &str, title: &str) -> Vec<String> {
+    let mut inside = false;
+    let mut set = Vec::new();
+    for line in text.lines() {
+        if line.starts_with(&format!("# {title}")) {
+            inside = true;
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some(row) = line.strip_prefix("#   ") else {
+            break;
+        };
+        if let Some(word) = row.split_whitespace().next() {
+            set.extend([word.to_owned()]);
+        }
+    }
+    set
+}
+
+/// Requirement 1. Every module of the map belongs to exactly one domain and
+/// every feature to one, so "which area of the product is this" has an answer.
+#[test]
+pub(crate) fn domains_cover_every_module_once_and_every_feature() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let domains = feature_flat_list("domains.yaml", "domains", "id");
+    assert!(
+        (3..=16).contains(&domains.len()),
+        "ドメインは 3〜16 件です: {}",
+        domains.len()
+    );
+    let ids: Vec<&str> = domains.iter().map(|domain| domain["id"].as_str()).collect();
+    let mut owner: std::collections::BTreeMap<String, Vec<&str>> =
+        std::collections::BTreeMap::new();
+    for domain in &domains {
+        let id = domain["id"].as_str();
+        assert!(is_kebab_id(id), "{id} は kebab-case ではありません");
+        assert_eq!(
+            ids.iter().filter(|other| **other == id).count(),
+            1,
+            "{id} が重複しています"
+        );
+        for key in ["title", "summary", "owns", "excludes"] {
+            assert!(
+                domain.get(key).is_some_and(|value| has_japanese(value)),
+                "{id}: {key} が日本語で書かれていません"
+            );
+        }
+        for adjacent in entry_words(domain, "adjacent") {
+            assert!(
+                adjacent != id && ids.contains(&adjacent),
+                "{id}: 隣のドメイン {adjacent} がありません"
+            );
+            let back = domains
+                .iter()
+                .find(|other| other["id"] == adjacent)
+                .unwrap();
+            assert!(
+                entry_words(back, "adjacent").contains(&id),
+                "{id} と {adjacent} の隣り合いが片方向です"
+            );
+        }
+        let modules = entry_words(domain, "modules");
+        assert!(!modules.is_empty(), "{id}: modules がありません");
+        for module in modules {
+            let exists = if module.ends_with('/') {
+                root.join(module).is_dir()
+            } else {
+                root.join(module).is_file()
+            };
+            assert!(exists, "{id}: modules の {module} がありません");
+            for file in claimed_files(module) {
+                owner.entry(file).or_default().extend([id]);
+            }
+        }
+    }
+    let map = module_map_files();
+    assert!(
+        map.len() >= 40,
+        "地図から読めたモジュールが少なすぎます: {}",
+        map.len()
+    );
+    for file in &map {
+        let owners = owner.get(file).cloned().unwrap_or_default();
+        assert_eq!(
+            owners.len(),
+            1,
+            "{file} はちょうど 1 つのドメインに属しません: {owners:?}"
+        );
+    }
+    let catalogue = feature_catalogue();
+    for entry in &catalogue {
+        let id = &entry["id"];
+        assert!(
+            entry
+                .get("domain")
+                .is_some_and(|domain| ids.contains(&domain.as_str())),
+            "{id}: domain がないか、domains.yaml にありません"
+        );
+    }
+    for id in &ids {
+        assert!(
+            catalogue
+                .iter()
+                .any(|entry| entry.get("domain").is_some_and(|domain| domain == id)),
+            "ドメイン {id} に機能がありません"
+        );
+    }
+}
+
+/// Requirement 2. A term belongs to a feature, and the screen words and code
+/// names it claims are the product's own.
+#[test]
+pub(crate) fn glossary_terms_resolve_to_features_screen_words_and_code() {
+    let terms = feature_flat_list("glossary.yaml", "terms", "id");
+    assert!(terms.len() >= 40, "用語が少なすぎます: {}", terms.len());
+    assert!(terms.len() <= 400, "用語が多すぎます: {}", terms.len());
+    let catalogue = feature_catalogue();
+    let ids: Vec<&str> = terms.iter().map(|term| term["id"].as_str()).collect();
+    let words: Vec<&str> = terms
+        .iter()
+        .filter_map(|term| term.get("term").map(String::as_str))
+        .collect();
+    let messages = japanese_message_ids();
+    let sources = product_sources();
+    let mut ui_checked = 0;
+    let mut code_checked = 0;
+    for term in &terms {
+        let id = term["id"].as_str();
+        assert!(is_kebab_id(id), "{id} は kebab-case ではありません");
+        assert_eq!(
+            ids.iter().filter(|other| **other == id).count(),
+            1,
+            "{id} が重複しています"
+        );
+        let word = term
+            .get("term")
+            .filter(|word| !word.is_empty())
+            .unwrap_or_else(|| panic!("{id}: term がありません"));
+        assert_eq!(
+            words.iter().filter(|other| *other == word).count(),
+            1,
+            "{id}: 「{word}」が 2 つの用語にあります"
+        );
+        assert!(
+            term.get("meaning")
+                .is_some_and(|meaning| has_japanese(meaning)),
+            "{id}: meaning が日本語で書かれていません"
+        );
+        let feature = term
+            .get("feature")
+            .unwrap_or_else(|| panic!("{id}: feature がありません"));
+        assert!(
+            catalogue.iter().any(|entry| entry["id"] == *feature),
+            "{id}: 機能 {feature} は index.yaml にありません"
+        );
+        for phrase in entry_phrases(term, "ui") {
+            ui_checked += 1;
+            assert!(
+                messages.iter().any(|message| message.contains(phrase)),
+                "{id}: 画面の言葉「{phrase}」はどのメッセージにもありません"
+            );
+        }
+        for name in entry_words(term, "code") {
+            code_checked += 1;
+            assert!(
+                sources.iter().any(|text| occurs_as_whole_word(text, name)),
+                "{id}: コードの名前 {name} は src/ にありません"
+            );
+        }
+        for see in entry_words(term, "see") {
+            assert!(
+                see != id && ids.contains(&see),
+                "{id}: 関連語 {see} は用語集にありません"
+            );
+        }
+    }
+    assert!(ui_checked >= 30, "画面の言葉が少なすぎます: {ui_checked}");
+    assert!(
+        code_checked >= 30,
+        "コードの名前が少なすぎます: {code_checked}"
+    );
+}
+
+/// Requirement 3. A word the glossary avoids is on no screen and in no brief,
+/// which is what makes the glossary the product's vocabulary rather than a list
+/// beside it.
+#[test]
+pub(crate) fn no_screen_word_uses_a_word_the_glossary_avoids() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let terms = feature_flat_list("glossary.yaml", "terms", "id");
+    let words: Vec<&str> = terms
+        .iter()
+        .filter_map(|term| term.get("term").map(String::as_str))
+        .collect();
+    let messages = japanese_message_ids();
+    let briefs: Vec<(String, String)> = feature_catalogue()
+        .iter()
+        .map(|entry| {
+            let id = entry["id"].clone();
+            let brief =
+                fs::read_to_string(root.join("docs/features").join(&id).join("brief.md")).unwrap();
+            (id, brief)
+        })
+        .collect();
+    let mut avoided = 0;
+    for term in &terms {
+        let id = term["id"].as_str();
+        for word in entry_phrases(term, "avoid") {
+            avoided += 1;
+            assert!(
+                word.chars().count() >= 2,
+                "{id}: 使わない言葉「{word}」が短すぎます"
+            );
+            assert!(
+                !words.contains(&word),
+                "{id}: 使わない言葉「{word}」は別の用語です"
+            );
+            if let Some(message) = messages.iter().find(|message| message.contains(word)) {
+                panic!("{id}: 使わない言葉「{word}」が画面の文にあります: {message}");
+            }
+            if let Some((feature, _)) = briefs.iter().find(|(_, brief)| brief.contains(word)) {
+                panic!("{id}: 使わない言葉「{word}」が {feature}/brief.md にあります");
+            }
+        }
+    }
+    assert!(avoided >= 10, "使わない言葉が少なすぎます: {avoided}");
+}
+
+/// Requirement 4. Every page and project tab is a screen of the flow, every way
+/// names a key or a word the product has, and every screen is reached from
+/// ホーム.
+#[test]
+pub(crate) fn screen_flow_reaches_every_page_and_every_way_resolves() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("docs/features/flow.yaml")).unwrap();
+    let kinds = header_set(&text, "Kinds");
+    assert!(
+        kinds.contains(&"page".to_owned()),
+        "flow.yaml に種類の一覧がありません"
+    );
+    let screens = parse_flat_list(&text, "screens", "id");
+    let ways = parse_flat_list(&text, "ways", "from");
+    assert!(
+        (10..=80).contains(&screens.len()),
+        "画面の数が範囲外です: {}",
+        screens.len()
+    );
+    assert!(
+        (10..=300).contains(&ways.len()),
+        "道の数が範囲外です: {}",
+        ways.len()
+    );
+    let ids: Vec<&str> = screens.iter().map(|screen| screen["id"].as_str()).collect();
+    let catalogue_screens = feature_screens();
+    let catalogue = feature_catalogue();
+    let pages = app_enum_variants("Page");
+    let tabs = app_enum_variants("ProjectTab");
+    let actions = keymap_action_ids();
+    let messages = japanese_message_ids();
+    for screen in &screens {
+        let id = screen["id"].as_str();
+        assert!(is_kebab_id(id), "{id} は kebab-case ではありません");
+        assert_eq!(
+            ids.iter().filter(|other| **other == id).count(),
+            1,
+            "{id} が重複しています"
+        );
+        assert!(
+            screen.get("title").is_some_and(|title| has_japanese(title)),
+            "{id}: title が日本語ではありません"
+        );
+        assert!(
+            screen.get("kind").is_some_and(|kind| kinds.contains(kind)),
+            "{id}: kind が定義された種類にありません"
+        );
+        assert!(
+            screen
+                .get("screen")
+                .is_some_and(|value| catalogue_screens.contains(value)),
+            "{id}: screen が index.yaml の画面にありません"
+        );
+        let features = entry_words(screen, "features");
+        assert!(!features.is_empty(), "{id}: features がありません");
+        for feature in features {
+            assert!(
+                catalogue.iter().any(|entry| entry["id"] == feature),
+                "{id}: 機能 {feature} は index.yaml にありません"
+            );
+        }
+        if let Some(parent) = screen.get("parent") {
+            assert!(
+                parent != id && ids.contains(&parent.as_str()),
+                "{id}: parent {parent} がありません"
+            );
+        }
+        if let Some(page) = screen.get("page") {
+            assert!(pages.contains(page), "{id}: Page::{page} はありません");
+        }
+        if let Some(tab) = screen.get("tab") {
+            assert!(tabs.contains(tab), "{id}: ProjectTab::{tab} はありません");
+        }
+        if let Some(image) = screen.get("image") {
+            assert!(
+                root.join("docs/images").join(image).is_file(),
+                "{id}: 画像 {image} がありません"
+            );
+        }
+    }
+    for page in &pages {
+        assert!(
+            screens
+                .iter()
+                .any(|screen| screen.get("page") == Some(page)),
+            "Page::{page} を表す画面がありません"
+        );
+    }
+    for tab in &tabs {
+        assert!(
+            screens.iter().any(|screen| screen.get("tab") == Some(tab)),
+            "ProjectTab::{tab} を表す画面がありません"
+        );
+    }
+    for way in &ways {
+        let from = way["from"].as_str();
+        let to = way.get("to").map(String::as_str).unwrap_or("");
+        assert!(ids.contains(&from), "道の起点 {from} は画面にありません");
+        assert!(
+            ids.contains(&to),
+            "{from} からの道の行き先 {to} は画面にありません"
+        );
+        assert!(
+            way.contains_key("key") || way.contains_key("label") || way.contains_key("click"),
+            "{from} → {to}: key も label も click もありません"
+        );
+        if let Some(click) = way.get("click") {
+            assert!(
+                has_japanese(click),
+                "{from} → {to}: click が日本語ではありません"
+            );
+        }
+        if let Some(key) = way.get("key") {
+            assert!(
+                actions.contains(key),
+                "{from} → {to}: 操作 {key} はキー割り当てにありません"
+            );
+            // A page key lands on its page and nowhere else: `page.projects`
+            // goes to the screen whose `page:` is `Projects`.
+            if let Some(name) = key.strip_prefix("page.") {
+                let landed = screens
+                    .iter()
+                    .find(|screen| screen["id"] == to)
+                    .and_then(|screen| screen.get("page"))
+                    .map(|page| page.to_lowercase());
+                assert_eq!(
+                    landed.as_deref(),
+                    Some(name),
+                    "{from} → {to}: {key} はこのページへ行きません"
+                );
+            }
+        }
+        for label in entry_phrases(way, "label") {
+            assert!(
+                messages.iter().any(|message| message.contains(label)),
+                "{from} → {to}: 「{label}」はどのメッセージにもありません"
+            );
+        }
+    }
+    let mut reached: std::collections::BTreeSet<&str> = ["home"].into_iter().collect();
+    loop {
+        let before = reached.len();
+        for way in &ways {
+            if reached.contains(way["from"].as_str()) {
+                if let Some(to) = way.get("to") {
+                    reached.insert(to.as_str());
+                }
+            }
+        }
+        if reached.len() == before {
+            break;
+        }
+    }
+    for screen in &screens {
+        let id = screen["id"].as_str();
+        if screen.get("kind").is_some_and(|kind| kind == "cli") {
+            continue;
+        }
+        assert!(reached.contains(id), "{id} にはホームから辿り着けません");
+    }
+    for entry in &catalogue {
+        let id = entry["id"].as_str();
+        assert!(
+            screens
+                .iter()
+                .any(|screen| entry_words(screen, "features").contains(&id)),
+            "機能 {id} はどの画面にも載っていません"
+        );
+    }
+}
+
+/// Requirement 5. Every key that moves a person between screens is a way of
+/// the flow, so a new page key cannot land without the flow learning it.
+#[test]
+pub(crate) fn every_navigation_key_is_a_way_in_the_flow() {
+    let ways = feature_flat_list("flow.yaml", "ways", "from");
+    let actions = keymap_action_ids();
+    let navigating: Vec<&String> = actions
+        .iter()
+        .filter(|action| {
+            action.starts_with("page.")
+                || ["palette.open", "session.new", "attention.next"].contains(&action.as_str())
+        })
+        .collect();
+    assert!(
+        navigating.len() >= 7,
+        "移動のキーが少なすぎます: {navigating:?}"
+    );
+    for action in navigating {
+        assert!(
+            ways.iter().any(|way| way.get("key") == Some(action)),
+            "キー {action} は画面の流れのどの道にもありません"
+        );
+    }
+}
+
+/// One numbered behaviour line of a feature spec, with its continuation lines.
+struct BehaviourLine {
+    number: usize,
+    text: String,
+}
+
+/// The numbered items of a spec's `## Behaviour` section.
+fn behaviour_lines(spec: &str) -> Vec<BehaviourLine> {
+    let Some(start) = spec.find("## Behaviour") else {
+        return Vec::new();
+    };
+    let section = &spec[start + "## Behaviour".len()..];
+    let section = &section[..section.find("\n## ").unwrap_or(section.len())];
+    let mut lines: Vec<BehaviourLine> = Vec::new();
+    for line in section.lines() {
+        let digits: String = line.chars().take_while(char::is_ascii_digit).collect();
+        if !digits.is_empty() && line[digits.len()..].starts_with(". ") {
+            lines.extend([BehaviourLine {
+                number: digits.parse().unwrap(),
+                text: line[digits.len() + 2..].to_owned(),
+            }]);
+        } else if let Some(last) = lines.last_mut() {
+            if line.starts_with("   ") {
+                last.text.push(' ');
+                last.text.push_str(line.trim());
+            }
+        }
+    }
+    lines
+}
+
+/// The tests a behaviour line says pin it: the backticked names after
+/// `Pinned by`.
+fn pinned_tests(text: &str) -> Vec<&str> {
+    text.find("Pinned by")
+        .map(|at| backticked(&text[at..]))
+        .unwrap_or_default()
+}
+
+/// Requirement 6. A behaviour that names the test pinning it names one that
+/// exists, and a spec with tests says which line at least one of them pins.
+#[test]
+pub(crate) fn feature_behaviours_name_tests_that_exist() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let known = test_function_names();
+    assert!(
+        known.len() > 1000,
+        "テスト関数を読めません: {}",
+        known.len()
+    );
+    let mut pinned = 0;
+    for entry in feature_catalogue() {
+        let id = &entry["id"];
+        let spec = fs::read_to_string(root.join("docs/features").join(id).join("spec.md")).unwrap();
+        let lines = behaviour_lines(&spec);
+        assert!(
+            !lines.is_empty(),
+            "{id}/spec.md に番号付きの振る舞いがありません"
+        );
+        for (index, line) in lines.iter().enumerate() {
+            assert_eq!(
+                line.number,
+                index + 1,
+                "{id}/spec.md の振る舞いの番号が 1 から続いていません"
+            );
+        }
+        let mut pinned_here = 0;
+        for line in &lines {
+            for test in pinned_tests(&line.text) {
+                pinned_here += 1;
+                assert!(
+                    known.contains(test),
+                    "{id}/spec.md {}: テスト {test} は src/tests.rs にありません",
+                    line.number
+                );
+            }
+        }
+        let section = &spec[spec.find("## Code and tests").unwrap()..];
+        let names_a_test = backticked(section)
+            .iter()
+            .any(|token| known.contains(*token));
+        assert!(
+            !names_a_test || pinned_here > 0,
+            "{id}/spec.md はテストを挙げていますが、どの振る舞いにも Pinned by がありません"
+        );
+        pinned += pinned_here;
+    }
+    assert!(pinned >= 50, "Pinned by が少なすぎます: {pinned}");
+}
+
+/// Requirement 10. The pipeline reads the domain and the glossary before it
+/// places work, and keeps the glossary and the flow true when it closes.
+#[test]
+pub(crate) fn the_pipeline_reads_the_domain_the_glossary_and_the_flow() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let skill = fs::read_to_string(root.join(".claude/skills/feature-pilot/SKILL.md")).unwrap();
+    let placement_at = skill.find("**Placement**").unwrap();
+    let placement_end = placement_at + skill[placement_at..].find("**Route `bugfix`**").unwrap();
+    let placement = &skill[placement_at..placement_end];
+    for file in ["docs/features/domains.yaml", "docs/features/glossary.yaml"] {
+        assert!(
+            placement.contains(file),
+            "配置の前に {file} を読んでいません"
+        );
+    }
+    let close_at = skill.find("- **Close**").unwrap();
+    let close = &skill[close_at..close_at + skill[close_at..].find("- **Commit**").unwrap()];
+    for file in ["docs/features/glossary.yaml", "docs/features/flow.yaml"] {
+        assert!(
+            close.contains(file),
+            "close が {file} の更新に触れていません"
+        );
+    }
+    let sdlc = fs::read_to_string(root.join(".claude/skills/sdlc/SKILL.md")).unwrap();
+    let ten = &sdlc[sdlc.find("## 10. Close the loop").unwrap()..];
+    for file in ["docs/features/glossary.yaml", "docs/features/flow.yaml"] {
+        assert!(ten.contains(file), "sdlc §10 が {file} に触れていません");
+    }
+}
+
+fn map_ids(values: &serde_json::Value) -> std::collections::BTreeSet<String> {
+    values
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Requirement 7. The model carries the domains, the terms, the flow and every
+/// behaviour line, each read here by the suite's own parsers and compared, so
+/// the page shows what the files say.
+#[test]
+pub(crate) fn change_map_carries_domains_terms_flow_and_requirements() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let map = change_map_json(&root);
+    let catalogue = feature_catalogue();
+
+    let domains = feature_flat_list("domains.yaml", "domains", "id");
+    let carried = map["domains"].as_array().expect("domains がありません");
+    assert_eq!(carried.len(), domains.len());
+    for (domain, entry) in carried.iter().zip(&domains) {
+        let id = entry["id"].as_str();
+        assert_eq!(domain["id"], id);
+        assert_eq!(domain["title"], entry["title"].as_str());
+        let expected: std::collections::BTreeSet<String> = catalogue
+            .iter()
+            .filter(|feature| feature.get("domain").map(String::as_str) == Some(id))
+            .map(|feature| feature["id"].clone())
+            .collect();
+        assert_eq!(
+            map_ids(&domain["features"]),
+            expected,
+            "{id} の機能が違います"
+        );
+        assert!(
+            !domain["modules"].as_array().unwrap().is_empty(),
+            "{id} のコードがありません"
+        );
+        assert!(domain["changes"].is_array(), "{id} の変更がありません");
+    }
+    for feature in map["features"].as_array().unwrap() {
+        let id = feature["id"].as_str().unwrap();
+        let entry = catalogue.iter().find(|entry| entry["id"] == id).unwrap();
+        assert_eq!(
+            feature["domain"],
+            entry["domain"].as_str(),
+            "{id} の domain"
+        );
+    }
+
+    let terms = feature_flat_list("glossary.yaml", "terms", "id");
+    let carried = map["terms"].as_array().expect("terms がありません");
+    assert_eq!(carried.len(), terms.len());
+    let briefs: Vec<(String, String)> = catalogue
+        .iter()
+        .map(|entry| {
+            let id = entry["id"].clone();
+            let brief =
+                fs::read_to_string(root.join("docs/features").join(&id).join("brief.md")).unwrap();
+            (id, brief)
+        })
+        .collect();
+    let mut used = 0;
+    for (term, entry) in carried.iter().zip(&terms) {
+        let id = entry["id"].as_str();
+        assert_eq!(term["id"], id);
+        assert_eq!(term["term"], entry["term"].as_str());
+        assert_eq!(term["feature"], entry["feature"].as_str());
+        let owner = catalogue
+            .iter()
+            .find(|feature| feature["id"] == entry["feature"])
+            .unwrap();
+        assert_eq!(term["domain"], owner["domain"].as_str(), "{id} のドメイン");
+        let expected: std::collections::BTreeSet<String> = briefs
+            .iter()
+            .filter(|(_, brief)| brief.contains(entry["term"].as_str()))
+            .map(|(feature, _)| feature.clone())
+            .collect();
+        used += expected.len();
+        assert_eq!(
+            map_ids(&term["used_by"]),
+            expected,
+            "{id} を使う brief が違います"
+        );
+    }
+    assert!(used >= 20, "brief に現れる用語が少なすぎます: {used}");
+
+    let text = fs::read_to_string(root.join("docs/features/flow.yaml")).unwrap();
+    let screens = parse_flat_list(&text, "screens", "id");
+    let ways = parse_flat_list(&text, "ways", "from");
+    let flow = &map["flow"];
+    let carried = flow["screens"]
+        .as_array()
+        .expect("flow.screens がありません");
+    assert_eq!(carried.len(), screens.len());
+    assert_eq!(flow["ways"].as_array().unwrap().len(), ways.len());
+    let mut places = std::collections::BTreeSet::new();
+    for (screen, entry) in carried.iter().zip(&screens) {
+        let id = entry["id"].as_str();
+        assert_eq!(screen["id"], id);
+        let into = ways
+            .iter()
+            .filter(|way| way.get("to").map(String::as_str) == Some(id))
+            .count();
+        let out = ways.iter().filter(|way| way["from"] == id).count();
+        assert_eq!(
+            screen["in"].as_array().unwrap().len(),
+            into,
+            "{id} に入る道"
+        );
+        assert_eq!(
+            screen["out"].as_array().unwrap().len(),
+            out,
+            "{id} から出る道"
+        );
+        let x = screen["x"].as_f64().expect("x がありません");
+        let y = screen["y"].as_f64().expect("y がありません");
+        assert!(
+            places.insert((x as i64, y as i64)),
+            "{id} が別の画面と同じ位置にあります"
+        );
+        assert!(screen["terms"].is_array(), "{id} の用語がありません");
+    }
+    for way in flow["ways"].as_array().unwrap() {
+        if let Some(key) = way["key"].as_str() {
+            assert!(
+                way["chord"]
+                    .as_str()
+                    .is_some_and(|chord| chord.contains('⌘')),
+                "{key} のキーが表示用になっていません"
+            );
+        }
+    }
+
+    let requirements = map["requirements"]
+        .as_array()
+        .expect("requirements がありません");
+    let mut expected = Vec::new();
+    for entry in &catalogue {
+        let id = &entry["id"];
+        let spec = fs::read_to_string(root.join("docs/features").join(id).join("spec.md")).unwrap();
+        for line in behaviour_lines(&spec) {
+            let tests: Vec<String> = pinned_tests(&line.text)
+                .into_iter()
+                .map(str::to_owned)
+                .collect();
+            expected.push((id.clone(), line.number, tests));
+        }
+    }
+    assert_eq!(requirements.len(), expected.len());
+    for (row, (feature, number, tests)) in requirements.iter().zip(&expected) {
+        assert_eq!(row["feature"], feature.as_str());
+        assert_eq!(row["number"], *number);
+        let carried: Vec<String> = row["tests"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|test| test.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(&carried, tests, "{feature} {number} のテスト");
+        let text = row["text"].as_str().unwrap();
+        assert!(
+            !text.is_empty() && !text.contains("Pinned by"),
+            "{feature} {number}"
+        );
+    }
+
+    for (word, line) in [
+        ("sessions", "ドメイン sessions"),
+        ("要対応", "用語 needs-you"),
+        ("palette", "画面 palette"),
+    ] {
+        let (ok, out, err) = change_map_run(&root, &["--find", word]);
+        assert!(ok, "{err}");
+        assert!(
+            out.contains(line),
+            "--find {word} に「{line}」がありません:\n{out}"
+        );
+    }
+}
+
+/// Requirement 8. The page has the four new views and their addresses, draws
+/// the flow itself, offers the basket, and still loads nothing from outside.
+#[test]
+pub(crate) fn change_map_page_has_domain_flow_glossary_and_requirement_views() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let (page, data) = change_map_page(&root);
+    let open = "<script id=\"map-data\" type=\"application/json\">";
+    let start = page.find(open).unwrap() + open.len();
+    let end = start + page[start..].find("</script>").unwrap();
+    let shell = format!("{}{}", &page[..start], &page[end..]);
+    let order: Vec<usize> = [
+        "data-view=\"product\"",
+        "data-view=\"domains\"",
+        "data-view=\"flow\"",
+        "data-view=\"glossary\"",
+        "data-view=\"requirements\"",
+        "data-view=\"changes\"",
+    ]
+    .iter()
+    .map(|view| {
+        shell
+            .find(view)
+            .unwrap_or_else(|| panic!("ページに {view} がありません"))
+    })
+    .collect();
+    assert!(
+        order.windows(2).all(|pair| pair[0] < pair[1]),
+        "表示の順が違います"
+    );
+    for needed in [
+        ">ドメイン<",
+        ">画面の流れ<",
+        ">用語集<",
+        ">要件<",
+        "#domain/",
+        "#screen/",
+        "#term/",
+        "#requirements",
+        "createElementNS",
+        "作業かご",
+        "指示をコピー",
+        "feature-pilot",
+        "用語",
+    ] {
+        assert!(shell.contains(needed), "ページに {needed} がありません");
+    }
+    for sentence in [
+        "担当すること",
+        "担当しないこと",
+        "隣のドメイン",
+        "入ってくる道",
+        "出ていく道",
+        "使わない言葉",
+        "画面での表記",
+        "テストの記録なし",
+        "このドメインの機能に触れた変更の記録はありません",
+        "該当する用語はありません",
+        "まだ何も入っていません",
+        "コピーできませんでした。選択された文を手でコピーしてください",
+    ] {
+        assert!(
+            shell.contains(sentence),
+            "ページに「{sentence}」がありません"
+        );
+    }
+    for fetched in [
+        "<link",
+        "<img",
+        "<iframe",
+        "@import",
+        "url(",
+        "<!--",
+        "fetch(",
+        "XMLHttpRequest",
+    ] {
+        assert!(!shell.contains(fetched), "ページに {fetched} があります");
+    }
+    assert_eq!(page.matches("<script").count(), 2);
+    assert!(
+        data["flow"]["screens"]
+            .as_array()
+            .is_some_and(|screens| !screens.is_empty()),
+        "ページのデータに画面の流れがありません"
+    );
+}
+
+/// Requirement 9. A missing, oversized or malformed file, and too many
+/// domains, each leave a page whose other views work, with the reason shown.
+#[test]
+pub(crate) fn change_map_survives_a_missing_domain_glossary_or_flow() {
+    let root = feature_map_fixture("map-315-degraded", Some(FEATURE_MAP_INDEX));
+    feature_map_change(&root, "001-something", "done", "deploy", "none", "");
+    let map = change_map_json(&root);
+    assert_eq!(map["features"].as_array().unwrap().len(), 3);
+    assert!(
+        map["domains_error"]
+            .as_str()
+            .unwrap()
+            .contains("ドメインの定義を読めません"),
+        "{}",
+        map["domains_error"]
+    );
+    assert!(map["domains"].as_array().unwrap().is_empty());
+    let (page, _) = change_map_page(&root);
+    assert!(page.contains("ドメインの定義を読めません"));
+    assert!(page.contains("data-view=\"changes\""));
+
+    let big = format!(
+        "terms:\n{}",
+        "  - id: filler\n    term: 埋め草\n    meaning: 長い。\n    feature: idle\n".repeat(4000)
+    );
+    assert!(big.len() > 256 * 1024);
+    fs::write(root.join("docs/features/glossary.yaml"), big).unwrap();
+    fs::write(
+        root.join("docs/features/flow.yaml"),
+        "screens = [home, sessions]\n",
+    )
+    .unwrap();
+    let mut domains = String::from("domains:\n");
+    for n in 0..17 {
+        domains.push_str(&format!(
+            "  - id: d{n}\n    title: 領域{n}\n    summary: 何か。\n    owns: 何か。\n    excludes: 何か。\n    modules: src/app.rs\n\n"
+        ));
+    }
+    fs::write(root.join("docs/features/domains.yaml"), domains).unwrap();
+    let map = change_map_json(&root);
+    let terms_error = map["terms_error"].as_str().unwrap();
+    assert!(
+        terms_error.contains("用語集を読めません")
+            && terms_error.contains("256 KiB を超えています"),
+        "{terms_error}"
+    );
+    assert!(map["terms"].as_array().unwrap().is_empty());
+    assert!(
+        map["flow_error"]
+            .as_str()
+            .unwrap()
+            .contains("画面の流れを読めません"),
+        "{}",
+        map["flow_error"]
+    );
+    assert!(map["flow"]["screens"].as_array().unwrap().is_empty());
+    assert_eq!(map["domains"].as_array().unwrap().len(), 16);
+    assert_eq!(
+        map["domains_notice"].as_str().unwrap(),
+        "ドメインが多すぎます。17 件のうち 16 件を表示しています"
+    );
+    assert_eq!(map["features"].as_array().unwrap().len(), 3);
+    let (page, _) = change_map_page(&root);
+    for sentence in [
+        "用語集を読めません",
+        "画面の流れを読めません",
+        "ドメインが多すぎます",
+    ] {
+        assert!(
+            page.contains(sentence),
+            "ページに「{sentence}」がありません"
+        );
+    }
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Found by the verifier of change 315: the test reader kept a mis-indented
+/// `label:` and a key with a space, which `parse_flat` in change-map.py drops,
+/// so a way passed requirement 4 and lost its label on the page. Both readers
+/// now read the same lines, and no line of the three files goes unread.
+#[test]
+pub(crate) fn flat_readers_agree_and_no_line_of_the_files_goes_unread() {
+    let text =
+        "ways:\n  - from: a\n    to: b\n      label: deep\n    two words: x\n    note: a: b\n";
+    let (rust, unread) = read_flat_list(text, "ways", "from");
+    assert_eq!(unread, ["      label: deep", "    two words: x"]);
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/change-map.py");
+    let code = "import importlib.util,json,sys;s=importlib.util.spec_from_file_location('m',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);print(json.dumps(m.parse_flat(sys.argv[2],'ways','from'),sort_keys=True))";
+    let out = std::process::Command::new("python3")
+        .args(["-I", "-c", code])
+        .arg(&script)
+        .arg(text)
+        .output()
+        .expect("python3 を起動できません");
+    let script_read: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&out.stderr)));
+    assert_eq!(serde_json::to_value(&rust).unwrap(), script_read);
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for (file, list, opener) in [
+        ("domains.yaml", "domains", "id"),
+        ("glossary.yaml", "terms", "id"),
+        ("flow.yaml", "screens", "id"),
+        ("flow.yaml", "ways", "from"),
+    ] {
+        let text = fs::read_to_string(root.join("docs/features").join(file)).unwrap();
+        let (_, unread) = read_flat_list(&text, list, opener);
+        assert!(
+            unread.is_empty(),
+            "{file} の {list} に読めない行があります: {unread:?}"
+        );
+    }
+}

@@ -1,0 +1,42 @@
+# Change 315. The person asked (2026-11-23) for learn_korean's feature map to be
+# brought into Operon: domains, a glossary, per-feature documents and the screen
+# flow, built from the BRIEF/SPEC documents so the map can be used as the single
+# source of truth. Operon's map (changes 312, 313) has the per-feature documents
+# and progress; this change adds what it lacks.
+#
+# Decisions taken by the managing session (recoverable by a revert, so not put
+# to the person): learn_korean's CONTEXT.json is not ported, because Operon
+# derives a feature's state from the change records (change 313) and a second
+# record of position is what feature-pilot forbids; learn_korean has no PRD
+# either (merged into SPEC/CONTEXT), so the brief stays the person's document.
+
+state:
+  route: "feature"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+  features: "none"
+
+resume: "Approved by the person (「進めて」). Push, CI, merge --no-ff from main, cleanup."
+
+contract:
+  three-gates: "machine passed fmt and clippy at each commit through gate-commit.sh; full suite and 12 obligations green in CI run 45219573435 on 66e6c32"
+  bands: "machine passed bash scripts/check-bands.sh: six breaches, none new from this change; it adds 12 lines to two skills (steering_bytes 272790, diagnose as before)"
+  release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human passed mutations.py: 29 of 29 mutants caught by the eleven new tests"
+  landing: "human passed the person answered 「進めて」 after the page was offered"
+  page-exercised-in-a-browser: "human passed headless Chrome: every view, a domain, a term, a screen of the flow, the requirement board, the work basket; no console error"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"

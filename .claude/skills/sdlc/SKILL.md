@@ -227,7 +227,11 @@ without recording one is indistinguishable from finishing.
 - If the change altered what a feature does, update that feature's
   `docs/features/<id>/spec.md` — and its `brief.md` when what a person sees
   changed — in this branch, and list them under "Files that change" in
-  `plan.md`. Never write progress into them: it is derived.
+  `plan.md`. Never write progress into them: it is derived. A change that
+  adds a term or a screen word updates `docs/features/glossary.yaml`, and one
+  that adds a page, tab, sheet or way between screens updates
+  `docs/features/flow.yaml`; the suite fails on a key or page the flow lacks
+  (change 315).
 - If anything went wrong in a way that could recur, add an entry to
   `docs/sdlc/lessons.md` — including the **Guard** column. An entry with no guard
   is unfinished.
