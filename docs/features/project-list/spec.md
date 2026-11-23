@@ -34,6 +34,14 @@
 - Removing a project waits for in-flight worktree work and for live sessions; it is never forced.
 - Tab counts do no work in the frame (they read caches).
 
+## Seen in the running app
+`python3 scripts/verify-app.py run project-list` starts the built application apart from the person's data, follows these steps, and keeps a picture and the window's tree for each (change 314). One `verb words` per line; the words are what the screen shows.
+
+    start project
+    click プロジェクト
+    see verify-demo
+    shot projects
+
 ## Code and tests
 - Symbols:
 - `src/app/screens.rs::ui_projects`: first-run view, list, cards, delete confirmation, manual entry, then the opened project's header and tab row.

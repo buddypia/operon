@@ -37,6 +37,19 @@
 - Every tmux session sets `remain-on-exit-format` to empty so no "Pane is dead" footer is written into a managed pane.
 - A stop of a port holder is refused for PID 0, PID 1, Operon's own PID, and when the holder changed.
 
+## Seen in the running app
+`python3 scripts/verify-app.py run terminal-pane` starts the built application apart from the person's data, follows these steps, and keeps a picture and the window's tree for each (change 314). One `verb words` per line; the words are what the screen shows.
+
+    start project
+    click プロジェクト
+    click セッション
+    see 一覧からセッションを選んでください。
+    click 検索・操作
+    click 空のターミナルを開く
+    see 空のターミナルセッションを tmux で起動しました
+    see 停止
+    shot terminal-running
+
 ## Code and tests
 - Symbols: `src/app/screens.rs::ui_tab_workspace` lays out the docks, tab groups, dividers, empty workspace and drop zones.
 - `src/app/screens.rs::ui_terminal_pane` draws one pane: header, output rows, caret, IME, 「最新へ」, links, find bar.

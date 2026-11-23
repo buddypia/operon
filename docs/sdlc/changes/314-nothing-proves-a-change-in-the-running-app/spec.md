@@ -98,9 +98,13 @@ Evidence: `target/verify/<utc>-<feature>/` holds `NN-<name>.png` per `shot`,
 `NN-tree.json` per step, `steps.txt` with each step's verdict, and
 `operon.log`. `stop` removes the scratch home, never this folder.
 
-The window appears on the person's screen while a run lasts; controls are
-pressed through the accessibility tree, so the pointer and the keyboard stay
-with the person.
+The window appears on the person's screen while a run lasts and is brought to
+the front when the run starts, and again before a press is sent a second
+time, because the application acts on a press
+only while it draws. Controls are pressed through the accessibility tree: the
+pointer is not moved and nothing is typed. A press is judged by the window
+changing; one that changed nothing is sent once more, and a press the tool
+calls undelivered has landed when the window answered it.
 
 ## Design
 
@@ -121,7 +125,7 @@ script starts the binary.
 - External commands: `agent-desktop` (each call bounded at 30 s), `cargo build
   --locked` and `cargo test --locked verify_app_seed_writes_a_store_the_app_loads` (bounded at
   1800 s), `kill` of the recorded pid, `tmux -S <scratch socket> kill-server`.
-- `src/tests.rs` — the eight tests above. The seed test writes to a temporary
+- `src/tests.rs` — the eight tests above, and one per finding of verification. The seed test writes to a temporary
   directory, or to the folder `OPERON_VERIFY_SEED` names when the script runs
   it.
 - `docs/features/<id>/spec.md` — the new section, for the features proven live.
@@ -161,7 +165,8 @@ No persisted shape changes; nothing runs in the application.
 - After a run, `pgrep -f target/debug/operon` prints nothing, the scratch
   folder is gone, and the person's `~/Library/Application Support/com.local.operon`
   has the modification time it had before.
-- `bash scripts/check-bands.sh` shows no metric in a higher tier than on main.
+- `bash scripts/check-bands.sh` shows no metric in a higher tier than on main,
+  but for `reference_bytes`, which the new reference takes into its warn tier.
 
 ## Rejected alternatives
 

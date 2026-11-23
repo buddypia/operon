@@ -39,6 +39,17 @@
 - Pruning drops session-account records whose session or account no longer exists.
 - Every child process (for example `defaults`) goes through `run_command_with_timeout` (5 s here).
 
+## Seen in the running app
+`python3 scripts/verify-app.py run settings` starts the built application apart from the person's data, follows these steps, and keeps a picture and the window's tree for each (change 314). One `verb words` per line; the words are what the screen shows.
+
+    start empty
+    click 検索・操作
+    click 設定を開く
+    see テーマ、フォント、表示言語
+    shot appearance
+    click キー割り当て
+    shot keys
+
 ## Code and tests
 - `src/app/screens.rs::ui_settings`: the left list, section header and dispatch to the five section drawers.
 - `src/app/screens.rs::ui_settings_appearance`, `ui_settings_agents`, `ui_settings_notifications`, `ui_settings_data`, `ui_settings_keys`, `ui_agent_accounts`: the section bodies.

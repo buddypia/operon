@@ -32,6 +32,15 @@
 - Home never starts a session by itself: every start goes through `open_project_session_setup` or the toolbar.
 - Drawing code reads colours from `Palette` and glyphs from `ICON_*` (policy tests); the warning card uses `palette.card` with a `palette.warning` stroke, never the selection surface.
 
+## Seen in the running app
+`python3 scripts/verify-app.py run home` starts the built application apart from the person's data, follows these steps, and keeps a picture and the window's tree for each (change 314). One `verb words` per line; the words are what the screen shows.
+
+    start project
+    see あなたを待っているセッションはありません
+    see プロジェクトから始める
+    see verify-demo
+    shot home
+
 ## Code and tests
 - Symbols: `src/app/screens.rs::ui_home` draws the header, attention card, tiles and the two columns.
 - `src/app/screens.rs::home_recent_sessions` draws 「最近のセッション」 and its empty states.

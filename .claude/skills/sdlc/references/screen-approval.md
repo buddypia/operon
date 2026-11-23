@@ -41,3 +41,11 @@ state inside existing roles goes to the evaluator. Record the verdict in
 - **approve** — set `screen: approved`, proceed to stage 3.
 - **revise** — redraw and re-evaluate (maximum three revisions, then `awaiting-user`).
 - **reject** — set `status: blocked` and record why in `resume`.
+
+## After it is built
+
+The drawing agreed above is a promise about a screen nobody had seen. Once the
+code exists, run the feature in the built application and compare the pictures
+with `screen.md`: `.claude/skills/feature-pilot/references/verify-in-the-app.md`.
+A picture that departs from the agreed layout is a finding, fixed or taken
+back to whoever approved the screen.

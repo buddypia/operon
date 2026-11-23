@@ -105,7 +105,9 @@ order is fixed:
 5. **Verify**: `make q.fast` and `cargo test --locked <filter>` for the tests the
    spec names — the whole suite runs in CI on the push (change 128);
    `cargo test --locked -- --ignored` when restore or the shared-session archive
-   moved, or say that you could not.
+   moved, or say that you could not. A change that paints, or alters what a
+   feature shows, is also run in the built application:
+   `.claude/skills/feature-pilot/references/verify-in-the-app.md`.
 
 Move `state.yaml` (stage, status, contract verdicts) as each one closes. A
 departure from the plan goes under **Departures from the plan** in `plan.md`;

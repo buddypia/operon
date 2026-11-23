@@ -62,3 +62,23 @@ The tree compiles between every step: only `src/tests.rs` changes in the crate.
   a picture of the open palette.
 
 ## Departures from the plan
+
+- `feature_catalogue_is_complete_and_every_entry_resolves` pinned a feature
+  spec's headings exactly; it now allows `## Seen in the running app`, only
+  directly before `## Code and tests`.
+- Three tests past the eight, one per finding: a driver answering nonsense left
+  the application running (found by the verifier), a refused click passed
+  (the verifier), and a press was lost or misreported (live runs). A press is
+  now judged by the window changing, not by the tool's answer.
+- A run brings the application's window to the front when it starts, and again before a press is sent a second time:
+  the application acts on a press only while it draws (measured: 16 ms
+  "delivered" and never applied behind another window; applied in 0.5 s in
+  front). The pointer is still not moved and nothing is typed. `spec.md`'s
+  sentence on this was corrected to say so.
+- Steps were written for five features, not three: home, palette, settings,
+  project-list, terminal-pane. Fifteen live runs in a row passed (three of
+  each) after the last fix; the person's data folder kept its modification
+  time and nothing was left running.
+- `reference_bytes` rises into its warn tier (the new reference). Accepted:
+  the reference is the only place a cold session learns the five parts, and it
+  was cut once already. `spec.md`'s acceptance line was corrected to name it.

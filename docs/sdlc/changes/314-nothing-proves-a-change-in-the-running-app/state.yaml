@@ -13,24 +13,24 @@
 
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "implement"
+  status: "in-progress"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
+  readiness: "go"
   screen: "n/a"
   features: "none"
 
-resume: "Write spec.md and plan.md, then build scripts/verify-app.py and its tests."
+resume: "Built and staged. Left: five live runs in a row passing, verification.yaml digest, plan departures, commit, push, CI. Landing waits for the person (intent escalated)."
 
 contract:
   three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  bands: "machine passed bash scripts/check-bands.sh; reference_bytes enters warn (recorded, no action), the rest as on main"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
-  journeys-run-against-the-built-app: "human pending python3 scripts/verify-app.py run for every feature that has steps, on this machine"
+  guards-verified-by-mutation: "human passed 30 of 30 caught, python3 docs/sdlc/changes/314-nothing-proves-a-change-in-the-running-app/mutations.py"
+  journeys-run-against-the-built-app: "human passed home, palette, settings, project-list, terminal-pane: three runs each in a row exit 0 on this machine; nothing left running, the data folder's modification time unchanged; pictures under target/verify/"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"

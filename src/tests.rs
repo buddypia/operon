@@ -94389,11 +94389,21 @@ pub(crate) fn feature_catalogue_is_complete_and_every_entry_resolves() {
         ] {
             let text = fs::read_to_string(folder.join(name))
                 .unwrap_or_else(|_| panic!("{id}/{name} がありません"));
-            assert_eq!(
-                markdown_headings(&text),
-                headings,
-                "{id}/{name} の見出しが決まりと違います"
-            );
+            // Change 314: a spec may carry the steps that prove the feature in
+            // the built application, in one place only.
+            let mut found = markdown_headings(&text);
+            if let Some(at) = found
+                .iter()
+                .position(|heading| heading == "## Seen in the running app")
+            {
+                assert!(
+                    name == "spec.md"
+                        && found.get(at + 1).is_some_and(|next| next == "## Code and tests"),
+                    "{id}/{name}: 「## Seen in the running app」は spec.md の「## Code and tests」の直前に置きます"
+                );
+                found.remove(at);
+            }
+            assert_eq!(found, headings, "{id}/{name} の見出しが決まりと違います");
         }
     }
     for entry in fs::read_dir(root.join("docs/features")).unwrap().flatten() {
@@ -95191,4 +95201,690 @@ pub(crate) fn change_map_page_script_parses() {
         String::from_utf8_lossy(&result.output.stderr)
     );
     let _ = fs::remove_dir_all(scratch);
+}
+
+/// Change 314. `scripts/verify-app.py` starts the built application apart from
+/// the person's data, follows a feature's written steps, and keeps what the
+/// window showed. These run it the way a session does, as a command.
+fn verify_app_run(arguments: &[&str], environment: &[(&str, &str)]) -> (i32, String, String) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut command = Command::new("python3");
+    command
+        .current_dir(&root)
+        .arg(root.join("scripts/verify-app.py"))
+        .args(arguments);
+    for (key, value) in environment {
+        command.env(key, value);
+    }
+    let result = run_command_with_output_limit(
+        &mut command,
+        Duration::from_secs(120),
+        16 * 1024 * 1024,
+        256 * 1024,
+    )
+    .unwrap();
+    (
+        result.output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&result.output.stdout).into_owned(),
+        String::from_utf8_lossy(&result.output.stderr).into_owned(),
+    )
+}
+
+/// Requirement 1. The launch is apart from the person's home and tmux, and the
+/// scratch folder is short enough for the two unix sockets a launch makes. The
+/// socket paths are built with the application's own functions, so a renamed
+/// hook directory or data folder moves this test with it.
+#[test]
+pub(crate) fn verify_app_plans_a_launch_apart_from_the_persons_home_and_tmux() {
+    let (code, out, err) = verify_app_run(&["launch", "--plan"], &[("TMUX", "/tmp/x,1,0")]);
+    assert_eq!(code, 0, "launch --plan: {err}");
+    let plan: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let scratch = PathBuf::from(plan["root"].as_str().unwrap());
+    let home = PathBuf::from(plan["environment"]["HOME"].as_str().unwrap());
+    let tmux = PathBuf::from(plan["environment"]["TMUX_TMPDIR"].as_str().unwrap());
+    let own_home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    assert!(
+        !scratch.starts_with(&own_home),
+        "作業フォルダが本人のホームの下です"
+    );
+    assert!(home.starts_with(&scratch) && home != scratch);
+    assert!(tmux.starts_with(&scratch) && tmux != scratch && tmux != home);
+    let unset: Vec<&str> = plan["unset"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|name| name.as_str())
+        .collect();
+    assert!(unset.contains(&"TMUX") && unset.contains(&"TMUX_PANE"));
+    assert!(!scratch.exists(), "--plan が作業フォルダを作りました");
+
+    let data_file = app_data_file();
+    let below_home = data_file
+        .strip_prefix(&own_home)
+        .expect("データファイルがホームの下にありません");
+    let hook_socket = hook_socket_path(&home.join(below_home));
+    let tmux_socket = tmux.join("tmux-4294967295").join("default");
+    for socket in [hook_socket, tmux_socket] {
+        let length = socket.as_os_str().len();
+        assert!(
+            length < 104,
+            "{} は {length} バイトで unix ソケットに収まりません",
+            socket.display()
+        );
+    }
+}
+
+/// Requirement 2. `stop` ends the recorded process only while it is still the
+/// recorded binary. A pid that now belongs to something else is left alone.
+#[test]
+pub(crate) fn verify_app_stop_refuses_a_process_it_did_not_start() {
+    let state = temporary_directory("verify-stop");
+    let mut bystander = Command::new("sleep").arg("60").spawn().unwrap();
+    let record = serde_json::json!({
+        "root": state.join("scratch"),
+        "pid": bystander.id(),
+        "binary": "/nonexistent/target/debug/operon",
+    });
+    fs::write(state.join("instance.json"), record.to_string()).unwrap();
+    let (code, _, err) = verify_app_run(&["--state", state.to_str().unwrap(), "stop"], &[]);
+    let still_running = bystander.try_wait().unwrap().is_none();
+    let _ = bystander.kill();
+    let _ = bystander.wait();
+    assert!(
+        still_running,
+        "stop が自分で起動していないプロセスを止めました"
+    );
+    assert_ne!(code, 0, "stop が別のプロセスを指す記録を受け入れました");
+    assert!(
+        err.contains("not the binary"),
+        "理由を述べていません: {err}"
+    );
+    let _ = fs::remove_dir_all(state);
+}
+
+/// A window tree as the reader prints it, for the judgement tests.
+fn verify_app_tree(nodes: &[(&str, &str, bool)]) -> String {
+    let children: Vec<serde_json::Value> = nodes
+        .iter()
+        .enumerate()
+        .map(|(index, (role, name, pressable))| {
+            let mut node = serde_json::json!({ "role": role, "name": name });
+            if *pressable {
+                node["ref_id"] = serde_json::json!(format!("@s1:e{}", index + 1));
+                node["available_actions"] = serde_json::json!(["Click"]);
+            }
+            node
+        })
+        .collect();
+    serde_json::json!({ "ok": true, "data": { "tree": { "role": "window", "children": children } } })
+        .to_string()
+}
+
+/// Requirement 5. A step is judged against the tree: absent words fail `see`,
+/// present words fail `gone`, and `click` needs exactly one control, an exact
+/// name winning over a longer one that contains it.
+#[test]
+pub(crate) fn verify_app_judges_a_step_against_what_the_window_says() {
+    let scratch = temporary_directory("verify-judge");
+    let tree = scratch.join("tree.json");
+    fs::write(
+        &tree,
+        verify_app_tree(&[
+            ("button", "  新しいセッション  ⌘N", true),
+            ("button", "新しいセッション", true),
+            ("button", "設定を開く", true),
+            ("button", "閉じる", true),
+            ("button", "閉じる", true),
+            ("statictext", "操作・セッション・プロジェクトを検索", false),
+        ]),
+    )
+    .unwrap();
+    let judge = |verb: &str, words: &str| {
+        verify_app_run(&["eval-step", verb, tree.to_str().unwrap(), words], &[])
+    };
+    assert_eq!(judge("see", "プロジェクトを検索").0, 0);
+    assert_eq!(
+        judge("see", "ターミナル").0,
+        1,
+        "無い文言を見えたとしました"
+    );
+    assert_eq!(judge("gone", "ターミナル").0, 0);
+    assert_eq!(
+        judge("gone", "設定を開く").0,
+        1,
+        "ある文言を消えたとしました"
+    );
+    let (code, out, _) = judge("click", "新しいセッション");
+    assert_eq!(code, 0, "完全一致の名前を選べませんでした");
+    assert_eq!(out.trim(), "@s1:e2");
+    assert_eq!(
+        judge("click", "設定").0,
+        0,
+        "一つだけ含む名前を選べませんでした"
+    );
+    let (code, _, err) = judge("click", "閉じる");
+    assert_eq!(code, 1, "二つある操作部品を押しました");
+    assert!(err.contains("2 controls"), "{err}");
+    assert_eq!(
+        judge("click", "ターミナル").0,
+        1,
+        "無い操作部品を押しました"
+    );
+    assert_eq!(
+        judge("click", "プロジェクトを検索").0,
+        1,
+        "押せない文言を押しました"
+    );
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// Requirement 6. The seed a run starts from is written by `save_store`, so it
+/// has the shape this build persists, and it loads with the project in it. The
+/// script points `OPERON_VERIFY_SEED_HOME` at the scratch home; the suite uses
+/// a temporary one.
+#[test]
+pub(crate) fn verify_app_seed_writes_a_store_the_app_loads() {
+    let asked = std::env::var_os("OPERON_VERIFY_SEED_HOME").map(PathBuf::from);
+    let home = asked
+        .clone()
+        .unwrap_or_else(|| temporary_directory("verify-seed"));
+    let project_path = std::env::var_os("OPERON_VERIFY_SEED_PROJECT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join("verify-demo"));
+    fs::create_dir_all(&project_path).unwrap();
+    let own_home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let data_file = home.join(app_data_file().strip_prefix(&own_home).unwrap());
+    fs::create_dir_all(data_file.parent().unwrap()).unwrap();
+    let mut store = Store::default();
+    store.projects.push(Project {
+        id: Uuid::new_v4(),
+        path: project_path.clone(),
+        name: "verify-demo".to_owned(),
+        added_at: 1,
+    });
+    save_store(&data_file, &store).unwrap();
+
+    let loaded = load_store_safely(&data_file);
+    assert!(loaded.notice.is_none(), "{:?}", loaded.notice);
+    assert_eq!(loaded.store.projects.len(), 1);
+    assert_eq!(loaded.store.projects[0].name, "verify-demo");
+    assert_eq!(loaded.store.projects[0].path, project_path);
+    if asked.is_none() {
+        let _ = fs::remove_dir_all(home);
+    }
+}
+
+/// Requirement 8. A whole run with a stand-in for the binary and for the tool
+/// that reads the window: the binary starts inside the planned home with tmux
+/// unset, every step leaves its verdict and tree, `shot` leaves a picture, and
+/// pass or fail nothing the run started is left behind while the evidence is.
+#[test]
+pub(crate) fn verify_app_run_keeps_evidence_and_leaves_nothing_running() {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = temporary_directory("verify-run");
+    let binary = scratch.join("stand-in-operon");
+    fs::write(
+        &binary,
+        "#!/bin/sh\necho \"HOME=$HOME TMUX=${TMUX-unset} TMUX_TMPDIR=$TMUX_TMPDIR\"\n\
+         trap 'kill $child 2>/dev/null; exit 0' TERM INT\nsleep 300 &\nchild=$!\nwait $child\n",
+    )
+    .unwrap();
+    let driver = scratch.join("stand-in-driver");
+    let tree = verify_app_tree(&[
+        ("button", "  検索・操作  ⌘K", true),
+        ("statictext", "操作・セッション・プロジェクトを検索", false),
+    ]);
+    let pressed = verify_app_tree(&[
+        ("button", "  検索・操作  ⌘K", true),
+        ("statictext", "操作・セッション・プロジェクトを検索", false),
+        ("statictext", "開きました", false),
+    ]);
+    fs::write(
+        &driver,
+        format!(
+            "#!/usr/bin/env python3\nimport os, sys\nverb = sys.argv[1]\n\
+             if verb == 'status':\n    print('{{\"ok\": true, \"data\": {{\"permissions\": {{\"accessibility\": {{\"state\": \"granted\"}}}}}}}}')\n\
+             elif verb == 'list-windows':\n    print('{{\"ok\": true, \"data\": [{{\"id\": \"w-1\", \"pid\": %s, \"bounds\": {{\"width\": 1280.0, \"height\": 820.0}}}}]}}' % os.environ['VERIFY_APP_PID'])\n\
+             elif verb == 'snapshot':\n    print({tree:?} if not os.path.exists(sys.argv[0] + '.pressed') else {pressed:?})\n\
+             elif verb == 'click':\n    open(sys.argv[0] + '.pressed', 'w').close()\n    print('{{\"ok\": true}}')\n\
+             elif verb == 'screenshot':\n    open(sys.argv[-1], 'wb').write(b'PNG')\n    print('{{\"ok\": true}}')\n\
+             else:\n    print('{{\"ok\": true}}')\n"
+        ),
+    )
+    .unwrap();
+    for file in [&binary, &driver] {
+        fs::set_permissions(file, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let own_home = std::env::var("HOME").unwrap();
+    for (name, steps, expected) in [
+        (
+            "pass",
+            "    start empty\n    click 検索・操作\n    see プロジェクトを検索\n    shot open\n",
+            0,
+        ),
+        (
+            "fail",
+            "    start empty\n    see プロジェクトを検索\n    see ここには無い文言\n    shot never\n",
+            1,
+        ),
+    ] {
+        let state = scratch.join(name);
+        let steps_file = scratch.join(format!("{name}.md"));
+        fs::write(
+            &steps_file,
+            format!("# Spec\n\n## Seen in the running app\n\n{steps}\n## Code and tests\n"),
+        )
+        .unwrap();
+        let (code, out, err) = verify_app_run(
+            &[
+                "--state",
+                state.to_str().unwrap(),
+                "run",
+                "--steps",
+                steps_file.to_str().unwrap(),
+                "--binary",
+                binary.to_str().unwrap(),
+                "--wait-seconds",
+                "1",
+            ],
+            &[
+                ("VERIFY_APP_DRIVER", driver.to_str().unwrap()),
+                ("TMUX", "/tmp/x,1,0"),
+            ],
+        );
+        assert_eq!(code, expected, "{name}: {out}\n{err}");
+        assert!(
+            !state.join("instance.json").exists(),
+            "{name}: 記録が残っています"
+        );
+        let evidence = fs::read_dir(&state)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .find(|path| path.is_dir())
+            .unwrap_or_else(|| panic!("{name}: 証拠フォルダがありません: {out}\n{err}"));
+        let log = fs::read_to_string(evidence.join("operon.log")).unwrap();
+        let home = log
+            .split_whitespace()
+            .find_map(|word| word.strip_prefix("HOME="))
+            .unwrap_or_else(|| panic!("{name}: 起動時の HOME が記録されていません: {log}"));
+        assert!(
+            !Path::new(home).starts_with(&own_home) && home != own_home,
+            "{name}: 本人のホームで起動しました: {home}"
+        );
+        assert!(log.contains("TMUX=unset"), "{name}: TMUX を渡しました: {log}");
+        let scratch_root = Path::new(home).parent().unwrap();
+        let scratch_left = scratch_root.exists();
+        let _ = fs::remove_dir_all(scratch_root);
+        assert!(
+            !scratch_left,
+            "{name}: 作業フォルダ {} が残っていました",
+            scratch_root.display()
+        );
+        let pattern = binary.to_str().unwrap();
+        let mut pgrep = Command::new("pgrep");
+        pgrep.args(["-f", pattern]);
+        let left = run_command_with_output_limit(&mut pgrep, Duration::from_secs(10), 4096, 4096)
+            .unwrap();
+        assert!(
+            left.output.stdout.is_empty(),
+            "{name}: 起動したプロセスが残っています"
+        );
+        let verdicts = fs::read_to_string(evidence.join("steps.txt")).unwrap();
+        if expected == 0 {
+            assert_eq!(verdicts.matches("ok ").count(), 4, "{verdicts}");
+            assert!(evidence.join("04-open.png").exists(), "{verdicts}");
+            assert!(evidence.join("03-tree.json").exists());
+        } else {
+            assert!(verdicts.contains("FAILED see ここには無い文言"), "{verdicts}");
+            assert!(!verdicts.contains("shot never"), "失敗の後も進みました");
+            assert!(evidence.join("03-failed.png").exists());
+        }
+    }
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// The steps a feature's document gives under `## Seen in the running app`, by
+/// the rule `scripts/verify-app.py` reads them with: the lines indented four
+/// spaces, up to the next heading.
+fn verify_app_steps(spec: &str) -> Option<Vec<(String, String)>> {
+    let (_, body) = spec.split_once("## Seen in the running app")?;
+    Some(
+        body.lines()
+            .skip(1)
+            .take_while(|line| !line.starts_with("## "))
+            .filter(|line| line.starts_with("    ") && !line.trim().is_empty())
+            .map(|line| {
+                let (verb, words) = line.trim().split_once(' ').unwrap_or((line.trim(), ""));
+                (verb.to_owned(), words.trim().to_owned())
+            })
+            .collect(),
+    )
+}
+
+/// A tuple of strings the runner declares, such as `VERBS = ("start", …)`:
+/// read from the script so the suite cannot hold a second copy of the list.
+fn verify_app_declared(script: &str, name: &str) -> Vec<String> {
+    let line = script
+        .lines()
+        .find(|line| line.starts_with(&format!("{name} = ")))
+        .unwrap_or_else(|| panic!("scripts/verify-app.py に {name} がありません"));
+    line.split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn verify_app_source_text(directory: &Path, text: &mut String) {
+    let mut entries: Vec<PathBuf> = fs::read_dir(directory)
+        .unwrap()
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .collect();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            verify_app_source_text(&path, text);
+        } else if path.extension().is_some_and(|extension| extension == "rs")
+            && path.file_name().is_some_and(|name| name != "tests.rs")
+        {
+            text.push_str(&fs::read_to_string(&path).unwrap());
+        }
+    }
+}
+
+/// Requirement 3. Steps go stale when a label is renamed, and a stale step
+/// would otherwise be found only by starting the application. Every verb is one
+/// the runner has, and every word a step presses or looks for is text the
+/// application's source draws (or the seed project's name).
+#[test]
+pub(crate) fn every_step_seen_in_the_running_app_uses_a_verb_the_runner_has_and_words_the_app_draws(
+) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = fs::read_to_string(root.join("scripts/verify-app.py")).unwrap();
+    let verbs = verify_app_declared(&script, "VERBS");
+    let seeds = verify_app_declared(&script, "SEEDS");
+    let seed_project = verify_app_declared(&script, "SEED_PROJECT");
+    assert!(verbs.len() >= 4 && seeds.len() == 2 && seed_project.len() == 1);
+    // The seed is written by a test of this file, which the script runs by name.
+    let seed_test = verify_app_declared(&script, "SEED_TEST");
+    let tests = fs::read_to_string(root.join("src/tests.rs")).unwrap();
+    assert!(
+        seed_test.len() == 1 && tests.contains(&format!("pub(crate) fn {}()", seed_test[0])),
+        "scripts/verify-app.py の SEED_TEST {seed_test:?} は src/tests.rs のテストではありません"
+    );
+    let mut source = String::new();
+    verify_app_source_text(&root.join("src"), &mut source);
+    let mut checked = 0;
+    for entry in feature_catalogue() {
+        let id = &entry["id"];
+        let spec = fs::read_to_string(root.join("docs/features").join(id).join("spec.md")).unwrap();
+        let Some(steps) = verify_app_steps(&spec) else {
+            continue;
+        };
+        assert!(
+            (2..=64).contains(&steps.len()),
+            "{id}: 手順は 2 行以上 64 行以下です ({} 行)",
+            steps.len()
+        );
+        for (index, (verb, words)) in steps.iter().enumerate() {
+            let step = format!("{id}: 手順 {} `{verb} {words}`", index + 1);
+            assert!(verbs.contains(verb), "{step}: runner にない動詞です");
+            assert!(!words.is_empty(), "{step}: 対象がありません");
+            assert_eq!(
+                index == 0,
+                verb == "start",
+                "{step}: start は 1 行目だけです"
+            );
+            match verb.as_str() {
+                "start" => assert!(seeds.contains(words), "{step}: 知らない開始状態です"),
+                "shot" => assert!(
+                    words
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                    "{step}: 画像名は英小文字・数字・ハイフンです"
+                ),
+                _ => {
+                    checked += 1;
+                    assert!(
+                        source.contains(words.as_str()) || seed_project.contains(words),
+                        "{step}: この文言はアプリのソースにありません。画面の文言が変わったなら手順も直してください"
+                    );
+                }
+            }
+        }
+    }
+    assert!(checked >= 10, "文言を確かめた手順が少なすぎます: {checked}");
+}
+
+/// Requirement 4. `run --list` and the documents agree on which features can
+/// be proven in the application, and there are at least three.
+#[test]
+pub(crate) fn verify_app_lists_the_features_whose_documents_carry_steps() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let with_steps: Vec<String> = feature_catalogue()
+        .iter()
+        .map(|entry| entry["id"].clone())
+        .filter(|id| {
+            fs::read_to_string(root.join("docs/features").join(id).join("spec.md"))
+                .is_ok_and(|spec| verify_app_steps(&spec).is_some())
+        })
+        .collect();
+    assert!(
+        with_steps.len() >= 3,
+        "実行中のアプリで確かめられる機能が 3 つありません: {with_steps:?}"
+    );
+    let (code, out, err) = verify_app_run(&["run", "--list"], &[]);
+    assert_eq!(code, 0, "{err}");
+    let listed: Vec<String> = out.lines().map(str::to_owned).collect();
+    assert_eq!(listed, with_steps);
+    let (code, _, err) = verify_app_run(&["run", "no-such-feature"], &[]);
+    assert_eq!(code, 2, "知らない機能を実行しようとしました");
+    assert!(err.contains("run --list"), "{err}");
+}
+
+/// Requirement 7. A session building a change that paints is sent to the
+/// running application: the entry-point skill names the reference at its verify
+/// step, the reference gives the five parts and the command, and the screen
+/// gate says the screen is looked at again once it is built.
+#[test]
+pub(crate) fn the_pipeline_sends_a_change_that_paints_to_the_running_app() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let read = |path: &str| {
+        fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("{path}: {error}"))
+    };
+    let reference_path = ".claude/skills/feature-pilot/references/verify-in-the-app.md";
+    let pilot = read(".claude/skills/feature-pilot/SKILL.md");
+    let verify_step = pilot
+        .lines()
+        .skip_while(|line| !line.starts_with("5. **Verify**"))
+        .take_while(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        verify_step.contains(reference_path),
+        "feature-pilot の Verify の手順が {reference_path} を挙げていません"
+    );
+    let reference = read(reference_path);
+    for part in [
+        "## Launch",
+        "## Doctor",
+        "## Drive",
+        "## Evidence",
+        "## Cleanup",
+    ] {
+        assert!(
+            reference.contains(part),
+            "{reference_path} に {part} がありません"
+        );
+    }
+    for command in [
+        "python3 scripts/verify-app.py run",
+        "python3 scripts/verify-app.py doctor",
+        "python3 scripts/verify-app.py stop",
+        "## Seen in the running app",
+    ] {
+        assert!(
+            reference.contains(command),
+            "{reference_path} に `{command}` がありません"
+        );
+    }
+    let screen = read(".claude/skills/sdlc/references/screen-approval.md");
+    assert!(
+        screen.contains("## After it is built") && screen.contains(reference_path),
+        "screen-approval.md が、作った後に実行中のアプリで画面を確かめるよう述べていません"
+    );
+    let pipeline = read("docs/sdlc/README.md");
+    assert!(
+        pipeline.contains("scripts/verify-app.py"),
+        "docs/sdlc/README.md の表に scripts/verify-app.py がありません"
+    );
+}
+
+/// Runs `verify-app.py run` with a stand-in binary and a stand-in driver whose
+/// body (python, after `verb = sys.argv[1]`) the test gives. Returns the exit
+/// code, whether the stand-in binary is still running, and the scratch folder
+/// this run left; stops whatever was left so the test cleans up after itself.
+fn verify_app_attack(
+    label: &str,
+    driver_body: &str,
+    steps: &str,
+) -> (i32, bool, Vec<PathBuf>, String) {
+    use std::os::unix::fs::PermissionsExt;
+    let scratch = temporary_directory(label);
+    let binary = scratch.join("stand-in-operon");
+    fs::write(
+        &binary,
+        "#!/bin/sh\ntrap 'exit 0' TERM INT\nsleep 300 &\nwait $!\n",
+    )
+    .unwrap();
+    let driver = scratch.join("stand-in-driver");
+    fs::write(
+        &driver,
+        format!("#!/usr/bin/env python3\nimport os, sys\nverb = sys.argv[1]\n{driver_body}"),
+    )
+    .unwrap();
+    for file in [&binary, &driver] {
+        fs::set_permissions(file, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let steps_file = scratch.join("steps.md");
+    fs::write(
+        &steps_file,
+        format!("# Spec\n\n## Seen in the running app\n\n{steps}\n## Code and tests\n"),
+    )
+    .unwrap();
+    let state = scratch.join("state");
+    let (code, _out, said) = verify_app_run(
+        &[
+            "--state",
+            state.to_str().unwrap(),
+            "run",
+            "--steps",
+            steps_file.to_str().unwrap(),
+            "--binary",
+            binary.to_str().unwrap(),
+            "--wait-seconds",
+            "1",
+        ],
+        &[("VERIFY_APP_DRIVER", driver.to_str().unwrap())],
+    );
+    let record: Option<serde_json::Value> = fs::read_to_string(state.join("instance.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let mut pgrep = Command::new("pgrep");
+    pgrep.args(["-f", binary.to_str().unwrap()]);
+    let left =
+        run_command_with_output_limit(&mut pgrep, Duration::from_secs(10), 4096, 4096).unwrap();
+    let running = !left.output.stdout.is_empty();
+    let folders: Vec<PathBuf> = record
+        .iter()
+        .filter_map(|r| r["root"].as_str().map(PathBuf::from))
+        .filter(|p| p.exists())
+        .collect();
+    // Clean up what this test started, by the tool's own stop.
+    let _ = verify_app_run(&["--state", state.to_str().unwrap(), "stop"], &[]);
+    let _ = fs::remove_dir_all(scratch);
+    (code, running, folders, said)
+}
+
+const VERIFY_APP_DRIVER_OK: &str = "if verb == 'status':\n    print('{\"ok\": true, \"data\": {\"permissions\": {\"accessibility\": {\"state\": \"granted\"}}}}')\nelif verb == 'list-windows':\n    print('{\"ok\": true, \"data\": [{\"id\": \"w\", \"pid\": %s, \"bounds\": {\"width\": 1, \"height\": 1}}]}' % os.environ['VERIFY_APP_PID'])\nelif verb == 'snapshot':\n    print('{\"ok\": true, \"data\": {\"tree\": {\"role\": \"window\", \"children\": [{\"role\": \"button\", \"name\": \"Go\", \"ref_id\": \"@1\", \"available_actions\": [\"Click\"]}]}}}')\nelif verb == 'screenshot':\n    open(sys.argv[-1], 'wb').write(b'P')\n    print('{\"ok\": true}')\n";
+
+/// Finding 1 of change 314's empirical verification. A driver that answers `list-windows` with JSON that is not an
+/// object (`null`) must end the run with the application stopped and the
+/// scratch folder gone, like every other failure of `run`.
+#[test]
+pub(crate) fn verify_app_run_stops_what_it_started_when_the_driver_answers_nonsense() {
+    let driver = format!("if verb == 'list-windows':\n    print('null')\nel{VERIFY_APP_DRIVER_OK}");
+    let (code, running, folders, _) =
+        verify_app_attack("attack-null", &driver, "    start empty\n    see Go\n");
+    assert!(
+        !running && folders.is_empty(),
+        "exit {code}: still running ({running}) or scratch stays ({folders:?})"
+    );
+}
+
+/// Finding 2 of change 314's empirical verification. A `click` the driver reports as failed (`ok: false`, exit 1) must
+/// not pass the run.
+#[test]
+pub(crate) fn verify_app_run_fails_a_click_the_driver_refused() {
+    let driver = format!(
+        "{VERIFY_APP_DRIVER_OK}elif verb == 'click':\n    print('{{\"ok\": false, \"error\": \"refused\"}}')\n    sys.exit(1)\n"
+    );
+    let (code, _running, _folders, said) = verify_app_attack(
+        "attack-click",
+        &driver,
+        "    start empty\n    click Go\n    shot after\n",
+    );
+    assert_eq!(code, 1, "a refused click passed the run");
+    assert!(said.contains("the press was refused"), "{said}");
+}
+
+/// Finding 3 of change 314, from a live run: the first press after a launch
+/// was reported delivered and the application never saw it, so the next step
+/// failed for a reason that was not the application's. A press is judged by
+/// the window changing; one that changed nothing is sent once more, and one
+/// that still changes nothing fails the step as that.
+#[test]
+pub(crate) fn verify_app_run_presses_again_when_a_press_changed_nothing() {
+    let changed = "print('{\"ok\": true, \"data\": {\"tree\": {\"role\": \"window\", \"children\": [{\"role\": \"statictext\", \"name\": \"Opened\"}]}}}')";
+    let counting_click = "elif verb == 'click':\n    open(sys.argv[0] + '.presses', 'a').write('x')\n    print('{\"ok\": true}')\n";
+    let presses =
+        "(os.path.exists(sys.argv[0] + '.presses') and len(open(sys.argv[0] + '.presses').read()))";
+    let steps = "    start empty\n    click Go\n    see Opened\n";
+
+    let lost_once = format!(
+        "if verb == 'snapshot' and {presses} >= 2:\n    {changed}\nel{VERIFY_APP_DRIVER_OK}{counting_click}"
+    );
+    let (code, running, folders, _) = verify_app_attack("press-lost-once", &lost_once, steps);
+    assert_eq!(code, 0, "一度届かなかった押下を押し直しませんでした");
+    assert!(!running && folders.is_empty());
+
+    // A press the tool says it did not deliver, because the control was
+    // redrawn between the read and the press, is sent again on a fresh read.
+    let stale_once = format!(
+        "if verb == 'snapshot' and {presses} >= 2:\n    {changed}\nel{VERIFY_APP_DRIVER_OK}elif verb == 'click' and not {presses}:\n    open(sys.argv[0] + '.presses', 'a').write('x')\n    print('{{\"ok\": false, \"error\": {{\"code\": \"STALE_REF\", \"disposition\": {{\"delivery\": \"not_delivered\"}}}}}}')\n{counting_click}"
+    );
+    let (code, running, folders, said) = verify_app_attack("press-stale-once", &stale_once, steps);
+    assert_eq!(code, 0, "届かなかった押下を送り直しませんでした: {said}");
+    assert!(!running && folders.is_empty());
+
+    // Seen live: the tool called a press undelivered while the application had
+    // already acted on it, so the control was gone on the fresh read. The
+    // window's answer decides, not the tool's.
+    let landed_anyway = format!(
+        "if verb == 'snapshot' and {presses} >= 1:\n    {changed}\nel{VERIFY_APP_DRIVER_OK}elif verb == 'click':\n    open(sys.argv[0] + '.presses', 'a').write('x')\n    print('{{\"ok\": false, \"error\": {{\"code\": \"STALE_REF\", \"disposition\": {{\"delivery\": \"not_delivered\"}}}}}}')\n"
+    );
+    let (code, running, folders, said) =
+        verify_app_attack("press-landed-anyway", &landed_anyway, steps);
+    assert_eq!(code, 0, "画面が応えた押下を失敗としました: {said}");
+    assert!(!running && folders.is_empty());
+
+    let never = format!("{VERIFY_APP_DRIVER_OK}{counting_click}");
+    let (code, running, folders, said) = verify_app_attack("press-never", &never, steps);
+    assert_eq!(code, 1, "画面が変わらない押下を成功としました");
+    assert!(
+        said.contains("click Go: the press changed nothing"),
+        "{said}"
+    );
+    assert!(!running && folders.is_empty());
 }
