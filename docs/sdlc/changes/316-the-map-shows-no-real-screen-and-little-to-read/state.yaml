@@ -1,0 +1,43 @@
+# Change 316. The person, on the map after 315 landed (2026-11-24): 「これだけでは
+# 物足りないよ。画面の流れは本物に近いUI/UXにしたいとわかんないよ。他も色々機能
+# 不足で使い勝手やそもそも情報量が少ない」.
+#
+# Decisions taken by the managing session (recoverable by a revert, so not put
+# to the person): the screen flow shows real pictures of the application taken
+# apart from the person's data (change 314's isolation), not drawn wireframes as
+# learn_korean does, because a picture cannot drift from the application the way
+# a drawing does; pictures are committed at window size so the map works from a
+# fresh checkout. Found while photographing and left out (not asked for): icon-
+# only buttons have no accessible name; reported to the person as a candidate.
+
+state:
+  route: "modify"
+  stage: "plan"
+  status: "planning"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "pending"
+  screen: "n/a"
+  features: "none"
+
+resume: "Write spec.md from intent.md, then readiness, screen and plan."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human pending each new guard watched failing"
+  pictures-taken: "human pending python3 scripts/capture-screens.py on this machine writes a picture for every reachable screen"
+  page-exercised-in-a-browser: "human pending headless Chrome: overview, a feature page, a domain page, the prototype walked by clicking, the canvas, glossary by screen, deep link and back; no console error"
+  landing: "human pending the person is asked whether 316 may land, after opening the page"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
