@@ -7,7 +7,7 @@ docs/sdlc/templates/mutations.py; the runner is scripts/mutation_sweep.py.
 import sys
 from pathlib import Path
 
-ROOT = Path("/Users/a13973/dev/buddypia/operon/.worktrees/feature/315-the-feature-map-holds-no-domain-terms-or-screen-flow")
+ROOT = Path(__file__).resolve().parents[4]
 
 RUN_SECONDS = 1800
 

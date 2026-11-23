@@ -114,3 +114,7 @@ against the code, and the page opened in a browser.
   six `Pinned by` lines that named a test asserting less than the line says —
   now naming the right tests, or saying what no test pins. Its claim that 終了
   sends no notification was wrong (`relaunch.rs` sends one).
+- **The sweep's root.** The template's `ROOT` placeholder was filled with this
+  worktree's absolute path, which CI does not have (the obligation run failed on
+  `import mutation_sweep`); it is now `Path(__file__).resolve().parents[4]`, as
+  in change 313.
