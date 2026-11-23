@@ -13,8 +13,8 @@
 
 state:
   route: "feature"
-  stage: "implement"
-  status: "in-progress"
+  stage: "test"
+  status: "awaiting-user"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -23,10 +23,10 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Built and staged. Left: five live runs in a row passing, verification.yaml digest, plan departures, commit, push, CI. Landing waits for the person (intent escalated)."
+resume: "Built, verified, pushed. Waiting for the person: the intent was escalated (which of the three gaps to build first was this session's choice), so nothing lands until they say yes. On yes: git merge --no-ff --no-edit on main once CI is green, push, cleanup-worktree. No ship step: nothing in the bundle changed."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
   bands: "machine passed bash scripts/check-bands.sh; reference_bytes enters warn (recorded, no action), the rest as on main"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
   guards-verified-by-mutation: "human passed 30 of 30 caught, python3 docs/sdlc/changes/314-nothing-proves-a-change-in-the-running-app/mutations.py"
