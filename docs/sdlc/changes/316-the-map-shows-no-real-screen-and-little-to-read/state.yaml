@@ -22,11 +22,11 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Built; the twelve tests pass and the sweep caught 30 of 30. Next: empirical-verifier, digest, push, CI, then ask the person about landing."
+resume: "Built and verified: twelve tests plus F1 and F2 from the empirical verifier, the sweep 33 of 33, the page walked in headless Chrome. Waiting for CI, then the person is asked whether 316 may land."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh on 3ef645d, 03f174e and 47282bd"
+  bands: "machine passed bash scripts/check-bands.sh: the six breaches main has, none new; the feature-pilot line adds 226 bytes (steering_bytes 273016, diagnose as before)"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
   guards-verified-by-mutation: "human passed mutations.py caught 30 of 30 (two survivors of the first sweep closed by tightening R1 and R12)"
   pictures-taken: "human passed python3 scripts/capture-screens.py on this machine took 25 of 25 reachable screens at b0738f6; 2 cli screens carry noshot"
