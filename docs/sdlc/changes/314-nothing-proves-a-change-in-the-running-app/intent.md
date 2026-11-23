@@ -1,6 +1,6 @@
 # Intent: nothing proves a change in the running application
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-23
 
 ## Problem

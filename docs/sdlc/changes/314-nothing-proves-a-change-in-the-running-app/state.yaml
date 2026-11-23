@@ -13,8 +13,8 @@
 
 state:
   route: "feature"
-  stage: "test"
-  status: "awaiting-user"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
@@ -23,7 +23,7 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Built, verified, pushed. Waiting for the person: the intent was escalated (which of the three gaps to build first was this session's choice), so nothing lands until they say yes. On yes: git merge --no-ff --no-edit on main once CI is green, push, cleanup-worktree. No ship step: nothing in the bundle changed."
+resume: "Landed on the person's 「승인」 (2026-11-23). No ship step: nothing in the bundle changed."
 
 contract:
   three-gates: "machine passed bash .claude/hooks/gate-commit.sh"
