@@ -28,7 +28,7 @@ contract:
   three-gates: "machine pending fmt and clippy at the commit through gate-commit.sh; the full suite in CI on the push"
   bands: "machine passed bash scripts/check-bands.sh: six breaches, none new from this change; it adds 12 lines to two skills (steering_bytes 272790, diagnose as before)"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "human passed mutations.py: 26 of 26 mutants caught by the ten new tests"
+  guards-verified-by-mutation: "human passed mutations.py: 29 of 29 mutants caught by the eleven new tests"
   page-exercised-in-a-browser: "human passed headless Chrome: every view, a domain, a term, a screen of the flow, the requirement board, the work basket; no console error"
 
 sets:

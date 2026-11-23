@@ -98,4 +98,19 @@ against the code, and the page opened in a browser.
   drafted by subagents from the code; every entry is held by requirements 2, 4,
   5 and 6, and a 順番待ち entry duplicated across drafts was the one fix the tests
   did not force.
-- **The sweep.** 26 mutations, 26 caught on the first run.
+- **The sweep.** 26 mutations, 26 caught on the first run; 29 of 29 after the
+  verifiers' findings below.
+- **What the verifiers found.** F1: the tests' flat reader kept a mis-indented
+  field and a key with a space that the page's reader drops, so a way could pass
+  requirement 4 and lose its label on the page; both readers now take the same
+  lines and no line of the three files may go unread
+  (`flat_readers_agree_and_no_line_of_the_files_goes_unread`). F2: a page key
+  could lead to the wrong screen; requirement 4 now holds `page.<name>` to the
+  screen whose `page:` is that variant. A read against the code corrected
+  meanings in the glossary (要対応 holds unread sessions and only tabbed failed
+  ones; ブロック中 and 前提 also stop on a cancelled, lost or deleted
+  prerequisite; 未読 also marks 入力待ち; the Dock badge counts all of 要対応),
+  one flow label (履歴 → ターミナルを表示), four missing `adjacent` pairs, and
+  six `Pinned by` lines that named a test asserting less than the line says —
+  now naming the right tests, or saying what no test pins. Its claim that 終了
+  sends no notification was wrong (`relaunch.rs` sends one).

@@ -95898,7 +95898,10 @@ pub(crate) fn verify_app_run_presses_again_when_a_press_changed_nothing() {
 /// The entries of `list:` in a flat file of docs/features/, each opened by
 /// `  - <opener>:` and continued by `    key: value` lines, read without a YAML
 /// library the way `parse_feature_catalogue` reads index.yaml.
-fn parse_flat_list(text: &str, list: &str, opener: &str) -> Vec<FeatureEntry> {
+/// The entries of `list:` and the lines inside it that are neither an opener
+/// nor a field, which a reader would drop without a word.
+fn read_flat_list(text: &str, list: &str, opener: &str) -> (Vec<FeatureEntry>, Vec<String>) {
+    let mut unread = Vec::new();
     let header = format!("{list}:");
     let open = format!("  - {opener}:");
     let mut inside = false;
@@ -95918,13 +95921,33 @@ fn parse_flat_list(text: &str, list: &str, opener: &str) -> Vec<FeatureEntry> {
             let mut entry = FeatureEntry::new();
             entry.insert(opener.to_owned(), value.trim().to_owned());
             entries.extend([entry]);
-        } else if let (Some(entry), Some(row)) = (entries.last_mut(), line.strip_prefix("    ")) {
-            if let Some((key, value)) = row.split_once(':') {
-                entry.insert(key.trim().to_owned(), value.trim().to_owned());
-            }
+        } else if let Some((entry, (key, value))) = entries.last_mut().zip(flat_field(line)) {
+            entry.insert(key.to_owned(), value.to_owned());
+        } else {
+            unread.extend([line.to_owned()]);
         }
     }
-    entries
+    (entries, unread)
+}
+
+/// `    key: value` with a key of word characters and hyphens, exactly the
+/// line `parse_flat` in scripts/change-map.py reads; any other indentation
+/// or key is not a field, so both readers drop the same lines.
+fn flat_field(line: &str) -> Option<(&str, &str)> {
+    let row = line
+        .strip_prefix("    ")
+        .filter(|row| !row.starts_with(char::is_whitespace))?;
+    let (key, value) = row.split_once(':')?;
+    let key = key.trim_end();
+    (!key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-'))
+    .then_some((key, value.trim()))
+}
+
+fn parse_flat_list(text: &str, list: &str, opener: &str) -> Vec<FeatureEntry> {
+    read_flat_list(text, list, opener).0
 }
 
 fn feature_flat_list(file: &str, list: &str, opener: &str) -> Vec<FeatureEntry> {
@@ -96438,6 +96461,20 @@ pub(crate) fn screen_flow_reaches_every_page_and_every_way_resolves() {
                 actions.contains(key),
                 "{from} → {to}: 操作 {key} はキー割り当てにありません"
             );
+            // A page key lands on its page and nowhere else: `page.projects`
+            // goes to the screen whose `page:` is `Projects`.
+            if let Some(name) = key.strip_prefix("page.") {
+                let landed = screens
+                    .iter()
+                    .find(|screen| screen["id"] == to)
+                    .and_then(|screen| screen.get("page"))
+                    .map(|page| page.to_lowercase());
+                assert_eq!(
+                    landed.as_deref(),
+                    Some(name),
+                    "{from} → {to}: {key} はこのページへ行きません"
+                );
+            }
         }
         for label in entry_phrases(way, "label") {
             assert!(
@@ -96968,4 +97005,42 @@ pub(crate) fn change_map_survives_a_missing_domain_glossary_or_flow() {
         );
     }
     let _ = fs::remove_dir_all(root);
+}
+
+/// Found by the verifier of change 315: the test reader kept a mis-indented
+/// `label:` and a key with a space, which `parse_flat` in change-map.py drops,
+/// so a way passed requirement 4 and lost its label on the page. Both readers
+/// now read the same lines, and no line of the three files goes unread.
+#[test]
+pub(crate) fn flat_readers_agree_and_no_line_of_the_files_goes_unread() {
+    let text =
+        "ways:\n  - from: a\n    to: b\n      label: deep\n    two words: x\n    note: a: b\n";
+    let (rust, unread) = read_flat_list(text, "ways", "from");
+    assert_eq!(unread, ["      label: deep", "    two words: x"]);
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/change-map.py");
+    let code = "import importlib.util,json,sys;s=importlib.util.spec_from_file_location('m',sys.argv[1]);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);print(json.dumps(m.parse_flat(sys.argv[2],'ways','from'),sort_keys=True))";
+    let out = std::process::Command::new("python3")
+        .args(["-I", "-c", code])
+        .arg(&script)
+        .arg(text)
+        .output()
+        .expect("python3 を起動できません");
+    let script_read: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&out.stderr)));
+    assert_eq!(serde_json::to_value(&rust).unwrap(), script_read);
+
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for (file, list, opener) in [
+        ("domains.yaml", "domains", "id"),
+        ("glossary.yaml", "terms", "id"),
+        ("flow.yaml", "screens", "id"),
+        ("flow.yaml", "ways", "from"),
+    ] {
+        let text = fs::read_to_string(root.join("docs/features").join(file)).unwrap();
+        let (_, unread) = read_flat_list(&text, list, opener);
+        assert!(
+            unread.is_empty(),
+            "{file} の {list} に読めない行があります: {unread:?}"
+        );
+    }
 }

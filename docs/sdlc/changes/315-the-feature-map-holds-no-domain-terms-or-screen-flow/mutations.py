@@ -22,6 +22,7 @@ TESTS = [
     "change_map_page_has_domain_flow_glossary_and_requirement_views",
     "change_map_survives_a_missing_domain_glossary_or_flow",
     "the_pipeline_reads_the_domain_the_glossary_and_the_flow",
+    "flat_readers_agree_and_no_line_of_the_files_goes_unread",
 ]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
@@ -41,7 +42,7 @@ MUTATIONS = {
         DOMAINS, "modules: src/store.rs src/models.rs src/exec.rs src/sys.rs",
         "modules: src/store.rs src/models.rs src/exec.rs src/sys.rs src/tmux.rs"),
     "a-neighbour-is-named-one-way": (
-        DOMAINS, "    adjacent: agents code data\n", "    adjacent: agents code\n"),
+        DOMAINS, "    adjacent: agents code shell data\n", "    adjacent: agents code data\n"),
     "a-feature-names-no-domain-that-exists": (
         INDEX, "    domain: data\n", "    domain: storage\n"),
     # Requirement 2.
@@ -62,6 +63,9 @@ MUTATIONS = {
     "a-way-names-a-key-that-does-not-exist": (FLOW, "    key: panel.toggle\n", "    key: panel.flip\n"),
     "a-screen-nothing-reaches": (
         FLOW, "  - from: settings\n    to: settings-keys\n", "  - from: settings-keys\n    to: settings\n"),
+    "a-page-key-lands-on-another-page": (
+        FLOW, "  - from: home\n    to: projects\n    key: page.projects\n",
+        "  - from: home\n    to: settings\n    key: page.projects\n"),
     # Requirement 5: a new page key that the flow has not learned.
     "a-new-page-key-without-a-way": (
         ROOT / "src/app/keymap.rs",
@@ -93,6 +97,12 @@ MUTATIONS = {
         MAP, '"%sが多すぎます。%d 件のうち %d 件を表示しています"', '"%s: %d / %d"'),
     "a-missing-domain-file-gives-no-reason": (
         MAP, '"%s: docs/features/%s がありません" % (unreadable, name)', '""'),
+    # F1: the page's reader and the tests' reader read the same lines.
+    "the-page-reads-a-line-the-tests-do-not": (
+        MAP, 'field = re.match(r"^    ([\\w-]+)\\s*:\\s*(.*?)\\s*$", line)',
+        'field = re.match(r"^\\s+([\\w-]+)\\s*:\\s*(.*?)\\s*$", line)'),
+    "a-line-of-the-files-goes-unread": (
+        GLOSSARY, "    feature: needs-you\n    en: needs you\n", "    feature: needs-you\n     en: needs you\n"),
     # Requirement 10.
     "close-forgets-the-flow": (
         ROOT / ".claude/skills/sdlc/SKILL.md", "  `docs/features/flow.yaml`; the suite fails", "  the flow file; the suite fails"),

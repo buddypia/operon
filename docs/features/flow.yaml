@@ -448,7 +448,7 @@ ways:
 
   - from: history-library
     to: terminal-group
-    label: 開く
+    label: ターミナルを表示
 
   - from: sessions
     to: history-library
@@ -483,6 +483,7 @@ ways:
   - from: palette
     to: projects
     label: プロジェクトを開く
+    note: 選択中のプロジェクトがあれば、その概要が開く。
 
   - from: palette
     to: sessions
