@@ -93632,7 +93632,8 @@ fn change_map_run(root: &Path, arguments: &[&str]) -> (bool, String, String) {
     let result = run_command_with_output_limit(
         &mut command,
         Duration::from_secs(120),
-        16 * 1024 * 1024,
+        // The pictures ride in the model as data URLs: 16 MiB of them at most.
+        64 * 1024 * 1024,
         64 * 1024,
     )
     .unwrap();
@@ -94062,10 +94063,11 @@ pub(crate) fn change_map_page_loads_nothing_from_outside() {
     );
     assert_eq!(page.matches("</script>").count(), 2);
     for fetched in [
-        "<link", "<img", "<iframe", "<object", "<embed", "@import", "url(", "<!--",
+        "<link", "<iframe", "<object", "<embed", "@import", "url(", "<!--",
     ] {
         assert!(!page.contains(fetched), "ページに {fetched} があります");
     }
+    change_map_pictures_only_inlined(&page);
     assert!(!page.contains('\u{2028}'));
     let spec = change_map_entry(&data, "001-stop-leaves-a-pane")["docs"]
         .as_array()
@@ -94083,6 +94085,22 @@ pub(crate) fn change_map_page_loads_nothing_from_outside() {
         fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(".gitignore")).unwrap();
     assert!(ignored.lines().any(|line| line == ".tmp/"));
     discard_worktree_fixture(&root);
+}
+
+/// Change 316 draws pictures, so the page has one `<img`: in the helper that
+/// takes only an inlined picture, never one fetched from a path or the network.
+fn change_map_pictures_only_inlined(page: &str) {
+    assert_eq!(
+        page.matches("<img").count(),
+        1,
+        "画像の要素が imgTag の外にあります"
+    );
+    let helper = page.find("function imgTag(").expect("imgTag がありません");
+    let at = page.find("<img").unwrap();
+    assert!(
+        at > helper && page[helper..at].contains("/^data:image\\/(jpeg|png);base64,"),
+        "imgTag が埋め込みの画像だけを通していません"
+    );
 }
 
 /// Requirement 7. A record that cannot be read puts its change first with the
@@ -94960,7 +94978,7 @@ pub(crate) fn change_map_page_is_feature_first_with_the_change_list_second() {
         "#feature/",
         "BRIEF",
         "SPEC",
-        "進捗",
+        "変更履歴",
         "画面",
         "変更一覧",
         "製品",
@@ -94979,12 +94997,14 @@ pub(crate) fn change_map_page_is_feature_first_with_the_change_list_second() {
         );
     }
     assert!(
-        shell.find("data-view=\"product\"").unwrap() < shell.find("data-view=\"changes\"").unwrap(),
+        shell.find("data-view=\"features\"").unwrap()
+            < shell.find("data-view=\"changes\"").unwrap(),
         "製品の見方が先に来ていません"
     );
-    for fetched in ["<link", "<img", "<iframe", "@import", "url(", "<!--"] {
+    for fetched in ["<link", "<iframe", "@import", "url(", "<!--"] {
         assert!(!shell.contains(fetched), "ページに {fetched} があります");
     }
+    change_map_pictures_only_inlined(&shell);
     assert_eq!(page.matches("<script").count(), 2);
     let _ = fs::remove_dir_all(scratch);
 }
@@ -96856,9 +96876,9 @@ pub(crate) fn change_map_page_has_domain_flow_glossary_and_requirement_views() {
     let end = start + page[start..].find("</script>").unwrap();
     let shell = format!("{}{}", &page[..start], &page[end..]);
     let order: Vec<usize> = [
-        "data-view=\"product\"",
+        "data-view=\"features\"",
+        "data-view=\"screen\"",
         "data-view=\"domains\"",
-        "data-view=\"flow\"",
         "data-view=\"glossary\"",
         "data-view=\"requirements\"",
         "data-view=\"changes\"",
@@ -96876,12 +96896,12 @@ pub(crate) fn change_map_page_has_domain_flow_glossary_and_requirement_views() {
     );
     for needed in [
         ">ドメイン<",
-        ">画面の流れ<",
+        ">画面<",
         ">用語集<",
         ">要件<",
-        "#domain/",
+        // Each view's link is checked by parsing it back, under node, in
+        // map_page_logic_routes_walks_searches_and_scales_areas.
         "#screen/",
-        "#term/",
         "#requirements",
         "createElementNS",
         "作業かご",
@@ -96912,7 +96932,6 @@ pub(crate) fn change_map_page_has_domain_flow_glossary_and_requirement_views() {
     }
     for fetched in [
         "<link",
-        "<img",
         "<iframe",
         "@import",
         "url(",
@@ -96922,6 +96941,7 @@ pub(crate) fn change_map_page_has_domain_flow_glossary_and_requirement_views() {
     ] {
         assert!(!shell.contains(fetched), "ページに {fetched} があります");
     }
+    change_map_pictures_only_inlined(&shell);
     assert_eq!(page.matches("<script").count(), 2);
     assert!(
         data["flow"]["screens"]
@@ -97043,4 +97063,1119 @@ pub(crate) fn flat_readers_agree_and_no_line_of_the_files_goes_unread() {
             "{file} の {list} に読めない行があります: {unread:?}"
         );
     }
+}
+
+/// Change 316. `scripts/capture-screens.py` run as a session runs it, bounded.
+fn capture_run(arguments: &[&str], environment: &[(&str, &str)]) -> (i32, String, String) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut command = Command::new("python3");
+    command
+        .current_dir(&root)
+        .arg(root.join("scripts/capture-screens.py"))
+        .args(arguments);
+    for (key, value) in environment {
+        command.env(key, value);
+    }
+    let result = run_command_with_output_limit(
+        &mut command,
+        Duration::from_secs(120),
+        4 * 1024 * 1024,
+        256 * 1024,
+    )
+    .unwrap();
+    (
+        result.output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&result.output.stdout).into_owned(),
+        String::from_utf8_lossy(&result.output.stderr).into_owned(),
+    )
+}
+
+/// A JPEG's width and height from its frame header, read here apart from the
+/// scripts' own reader.
+fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    if data.get(..2)? != [0xFF, 0xD8] {
+        return None;
+    }
+    let mut at = 2;
+    while at + 4 <= data.len() {
+        if data[at] != 0xFF {
+            return None;
+        }
+        let marker = data[at + 1];
+        let length = u16::from_be_bytes([data[at + 2], data[at + 3]]) as usize;
+        if (0xC0..=0xCF).contains(&marker) && ![0xC4, 0xC8, 0xCC].contains(&marker) {
+            let height = u16::from_be_bytes([*data.get(at + 5)?, *data.get(at + 6)?]);
+            let width = u16::from_be_bytes([*data.get(at + 7)?, *data.get(at + 8)?]);
+            return Some((u32::from(width), u32::from(height)));
+        }
+        at += 2 + length;
+    }
+    None
+}
+
+/// The smallest file both readers take for a JPEG of this size: start, one
+/// baseline frame header, end.
+fn tiny_jpeg(width: u16, height: u16) -> Vec<u8> {
+    let mut data = vec![0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x0B, 0x08];
+    data.extend(height.to_be_bytes());
+    data.extend(width.to_be_bytes());
+    data.extend([0x01, 0x01, 0x11, 0x00, 0xFF, 0xD9]);
+    data
+}
+
+/// Stand-ins for a capture: a binary that records the home it was given and
+/// waits, a window tool whose 1280 × 820 window at (100, 50) has two buttons
+/// and a line naming what was pressed in this launch, and a picture tool that
+/// writes a 2560 × 1640 JPEG (or, given `CAPTURE_STALL`, half a file and then
+/// waits). Returns (binary, driver, picture tool, the file of homes).
+fn capture_stand_ins(scratch: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let homes = scratch.join("homes.txt");
+    let binary = scratch.join("stand-in-operon");
+    fs::write(
+        &binary,
+        format!(
+            "#!/bin/sh\necho \"$$ $HOME\" >> '{}'\ntrap 'exit 0' TERM INT\nsleep 300 &\nwait $!\n",
+            homes.display()
+        ),
+    )
+    .unwrap();
+    let driver = scratch.join("stand-in-driver");
+    fs::write(
+        &driver,
+        r#"#!/usr/bin/env python3
+import json, os, sys, time
+verb = sys.argv[1]
+pid = os.environ['VERIFY_APP_PID']
+mark = sys.argv[0] + '.' + pid
+pressed = [p for p in open(mark).read().split() if p] if os.path.exists(mark) else []
+def button(name, ref, x):
+    return {"role": "button", "name": name, "ref_id": ref, "available_actions": ["Click"],
+            "bounds": {"x": x, "y": 80, "width": 100, "height": 24}}
+if verb == 'status':
+    print(json.dumps({"ok": True, "data": {"permissions": {"accessibility": {"state": "granted"}}}}))
+elif verb == 'list-windows':
+    # No window before the launch has said where its home is.
+    homes = os.environ['CAPTURE_HOMES']
+    for _ in range(100):
+        if os.path.exists(homes) and any(l.startswith(pid + ' ') for l in open(homes)):
+            break
+        time.sleep(0.05)
+    print(json.dumps({"ok": True, "data": [{"id": "w-4242", "pid": int(pid), "bounds": {"width": 1280, "height": 820}}]}))
+elif verb == 'snapshot':
+    said = {"role": "statictext", "name": "押した " + "+".join(pressed or ["なし"])}
+    tree = {"role": "window", "name": "Operon", "bounds": {"x": 100, "y": 50, "width": 1280, "height": 820},
+            "children": [button("設定を開く", "@1", 150), button("Go", "@2", 300), said]}
+    print(json.dumps({"ok": True, "data": {"tree": tree}}))
+elif verb == 'click':
+    open(mark, 'a').write(sys.argv[2] + '\n')
+    print(json.dumps({"ok": True}))
+else:
+    print(json.dumps({"ok": True}))
+"#,
+    )
+    .unwrap();
+    let picture = scratch.join("stand-in-picture");
+    let jpeg: Vec<String> = tiny_jpeg(2560, 1640)
+        .iter()
+        .map(|byte| byte.to_string())
+        .collect();
+    fs::write(
+        &picture,
+        format!(
+            "#!/usr/bin/env python3\nimport os, sys, time\nopen(sys.argv[0] + '.numbers', 'a').write(sys.argv[1] + '\\n')\n\
+             data = bytes([{}])\n\
+             if os.environ.get('CAPTURE_STALL'):\n    open(sys.argv[2], 'wb').write(data[:5])\n    open(os.environ['CAPTURE_STALL'], 'w').close()\n    time.sleep(60)\n\
+             open(sys.argv[2], 'wb').write(data)\n",
+            jpeg.join(", ")
+        ),
+    )
+    .unwrap();
+    for file in [&binary, &driver, &picture] {
+        fs::set_permissions(file, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    (binary, driver, picture, homes)
+}
+
+const CAPTURE_FLOW: &str = "screens:\n  - id: first\n    title: 最初\n    reach: -\n\n  \
+    - id: settings\n    title: 設定\n    reach: 設定を開く\n\n  \
+    - id: twice\n    title: 二度\n    reach: 設定を開く; Go\n\n  \
+    - id: cli\n    title: コマンド\n    noshot: 窓に出ません。\n";
+
+/// Whether any process whose command line names `binary` runs.
+fn capture_left_running(binary: &Path) -> bool {
+    let mut pgrep = Command::new("pgrep");
+    pgrep.args(["-f", binary.to_str().unwrap()]);
+    let left =
+        run_command_with_output_limit(&mut pgrep, Duration::from_secs(10), 4096, 4096).unwrap();
+    !left.output.stdout.is_empty()
+}
+
+/// Every home a stand-in launch was given is apart from the person's, and the
+/// scratch folder around it is gone.
+fn capture_homes_gone(homes: &Path, launches: usize) {
+    let own_home = std::env::var("HOME").unwrap();
+    let listed = fs::read_to_string(homes).unwrap_or_default();
+    let listed: Vec<&str> = listed
+        .lines()
+        .map(|line| line.split_once(' ').map_or(line, |(_, home)| home))
+        .collect();
+    assert_eq!(listed.len(), launches, "起動の回数が違います: {listed:?}");
+    for home in listed {
+        assert!(
+            !Path::new(home).starts_with(&own_home),
+            "本人のホームで起動しました: {home}"
+        );
+        let folder = Path::new(home).parent().unwrap();
+        let left = folder.exists();
+        let _ = fs::remove_dir_all(folder);
+        assert!(!left, "作業フォルダ {} が残っています", folder.display());
+    }
+}
+
+fn capture_index(out: &Path) -> serde_json::Value {
+    serde_json::from_str(&fs::read_to_string(out.join("screens.json")).unwrap()).unwrap()
+}
+
+/// Requirement 1. Each screen of the flow says how it is reached or why it is
+/// not; `--plan` lists every reached screen with its words and starts nothing;
+/// and every word pressed, there or on a way, is text the application's source
+/// draws or the demo project's name.
+#[test]
+pub(crate) fn capture_plan_reaches_every_screen_with_words_the_app_draws() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("docs/features/flow.yaml")).unwrap();
+    let screens = parse_flat_list(&text, "screens", "id");
+    let mut reached = std::collections::BTreeMap::new();
+    for screen in &screens {
+        let id = &screen["id"];
+        match (screen.get("reach"), screen.get("noshot")) {
+            (Some(reach), None) => {
+                let words: Vec<String> = if reach.trim() == "-" {
+                    Vec::new()
+                } else {
+                    reach.split(';').map(|w| w.trim().to_owned()).collect()
+                };
+                reached.insert(id.clone(), words);
+            }
+            (None, Some(reason)) => assert!(
+                reason
+                    .chars()
+                    .any(|c| ('\u{3040}'..='\u{30ff}').contains(&c)),
+                "{id} の noshot が日本語の理由ではありません: {reason}"
+            ),
+            _ => panic!("{id} は reach と noshot のどちらか 1 つを持ちます"),
+        }
+    }
+    let state = temporary_directory("capture-plan").join("state");
+    let (code, out, err) = capture_run(&["--plan", "--state", state.to_str().unwrap()], &[]);
+    assert_eq!(code, 0, "--plan: {err}");
+    assert!(!state.exists(), "--plan が何かを起動しました");
+    let plan: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let planned: std::collections::BTreeMap<String, Vec<String>> = plan["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["id"].as_str().unwrap().to_owned(),
+                s["press"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|w| w.as_str().unwrap().to_owned())
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        planned, reached,
+        "--plan の画面と言葉が flow.yaml と違います"
+    );
+    let mut source = String::new();
+    verify_app_source_text(&root.join("src"), &mut source);
+    let ways = parse_flat_list(&text, "ways", "from");
+    let pressed = ways
+        .iter()
+        .filter_map(|way| way.get("press"))
+        .map(|press| press.rsplit_once(" #").map_or(press.as_str(), |(w, _)| w));
+    for word in reached
+        .values()
+        .flatten()
+        .map(String::as_str)
+        .chain(pressed)
+    {
+        assert!(
+            word == "verify-demo" || source.contains(word),
+            "「{word}」はアプリのソースが描く文言ではありません"
+        );
+    }
+    // The plan itself refuses a screen that says both, or neither.
+    let both = state.parent().unwrap().join("both.yaml");
+    fs::write(
+        &both,
+        "screens:\n  - id: twice-said\n    title: x\n    reach: -\n    noshot: 出ません。\n\n  \
+         - id: unsaid\n    title: y\n",
+    )
+    .unwrap();
+    let (code, _, err) = capture_run(&["--plan", "--flow", both.to_str().unwrap()], &[]);
+    assert_eq!(
+        code, 2,
+        "reach と noshot の両方を持つ画面を受け入れました: {err}"
+    );
+    assert!(
+        err.contains("twice-said") && err.contains("unsaid"),
+        "{err}"
+    );
+    let _ = fs::remove_dir_all(state.parent().unwrap());
+}
+
+/// Requirement 2. The committed pictures are exactly the reached screens'; each
+/// entry gives the window, the scale, controls inside the window and the words,
+/// with when and at which commit; each picture is a JPEG of at most 600 KiB
+/// measuring the window times the scale.
+#[test]
+pub(crate) fn every_screen_of_the_flow_has_its_picture_or_says_why() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let text = fs::read_to_string(root.join("docs/features/flow.yaml")).unwrap();
+    let reached: std::collections::BTreeSet<String> = parse_flat_list(&text, "screens", "id")
+        .into_iter()
+        .filter(|screen| screen.contains_key("reach"))
+        .map(|screen| screen["id"].clone())
+        .collect();
+    let folder = root.join("docs/images/screens");
+    let index = capture_index(&folder);
+    let entries = index["screens"]
+        .as_object()
+        .expect("screens.json に screens がありません");
+    let taken: std::collections::BTreeSet<String> = entries.keys().cloned().collect();
+    assert_eq!(taken, reached, "写真のある画面が reach の画面と違います");
+    for (id, entry) in entries {
+        assert_eq!(entry["picture"], format!("{id}.jpg"), "{id}");
+        let (w, h) = (
+            entry["window"]["w"].as_f64().unwrap(),
+            entry["window"]["h"].as_f64().unwrap(),
+        );
+        let scale = entry["scale"].as_f64().unwrap();
+        let data = fs::read(folder.join(format!("{id}.jpg"))).unwrap();
+        assert!(
+            data.len() <= 600 * 1024,
+            "{id}.jpg が 600 KiB を超えています"
+        );
+        let (pw, ph) =
+            jpeg_dimensions(&data).unwrap_or_else(|| panic!("{id}.jpg は JPEG ではありません"));
+        assert!(
+            (f64::from(pw) - w * scale).abs() <= 1.0 && (f64::from(ph) - h * scale).abs() <= 1.0,
+            "{id}.jpg は {pw}x{ph} で、窓 {w}x{h} × {scale} と違います"
+        );
+        for control in entry["controls"].as_array().unwrap() {
+            let name = control["name"].as_str().unwrap();
+            let (x, y, cw, ch) = (
+                control["x"].as_f64().unwrap(),
+                control["y"].as_f64().unwrap(),
+                control["w"].as_f64().unwrap(),
+                control["h"].as_f64().unwrap(),
+            );
+            assert!(
+                !name.is_empty() && x >= 0.0 && y >= 0.0 && x + cw <= w + 0.5 && y + ch <= h + 0.5,
+                "{id} の「{name}」が窓の外です"
+            );
+        }
+        assert!(
+            !entry["words"].as_array().unwrap().is_empty(),
+            "{id} に言葉がありません"
+        );
+        for key in ["taken", "commit"] {
+            assert!(
+                entry[key].as_str().is_some_and(|v| !v.is_empty()),
+                "{id} に {key} がありません"
+            );
+        }
+    }
+}
+
+/// Requirement 3. A capture on stand-ins launches apart from the person's home
+/// once per reached screen, presses its words in order, photographs the window
+/// by its number, writes each picture and entry, exits 0 and leaves nothing.
+#[test]
+pub(crate) fn capture_writes_each_picture_and_leaves_nothing_running() {
+    let scratch = temporary_directory("capture-run");
+    let (binary, driver, picture, homes) = capture_stand_ins(&scratch);
+    let flow = scratch.join("flow.yaml");
+    fs::write(&flow, CAPTURE_FLOW).unwrap();
+    let out = scratch.join("out");
+    let state = scratch.join("state");
+    let (code, said, err) = capture_run(
+        &[
+            "--binary",
+            binary.to_str().unwrap(),
+            "--seed",
+            "empty",
+            "--flow",
+            flow.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--state",
+            state.to_str().unwrap(),
+            "--wait-seconds",
+            "1",
+        ],
+        &[
+            ("VERIFY_APP_DRIVER", driver.to_str().unwrap()),
+            ("CAPTURE_PICTURE", picture.to_str().unwrap()),
+            ("CAPTURE_HOMES", homes.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(code, 0, "{said}\n{err}");
+    assert!(
+        !capture_left_running(&binary),
+        "起動したプロセスが残っています"
+    );
+    capture_homes_gone(&homes, 3);
+    assert!(
+        !state.join("instance.json").exists(),
+        "起動の記録が残っています"
+    );
+    let numbers = fs::read_to_string(scratch.join("stand-in-picture.numbers")).unwrap();
+    assert_eq!(numbers, "4242\n4242\n4242\n", "窓の番号で撮っていません");
+    let index = capture_index(&out);
+    let entries = index["screens"].as_object().unwrap();
+    assert_eq!(
+        entries.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["first", "settings", "twice"]
+    );
+    for (id, pressed) in [("first", "なし"), ("settings", "@1"), ("twice", "@1+@2")] {
+        let entry = &entries[id];
+        assert_eq!(
+            fs::read(out.join(format!("{id}.jpg"))).unwrap(),
+            tiny_jpeg(2560, 1640)
+        );
+        assert_eq!(
+            entry["window"],
+            serde_json::json!({"w": 1280.0, "h": 820.0}),
+            "{id}"
+        );
+        assert_eq!(entry["scale"], 2.0, "{id}");
+        assert_eq!(
+            entry["controls"][0],
+            serde_json::json!({"name": "設定を開く", "x": 50.0, "y": 30.0, "w": 100.0, "h": 24.0}),
+            "{id}: 部品の位置が窓の左上からではありません"
+        );
+        assert!(
+            entry["words"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(format!("押した {pressed}"))),
+            "{id}: 押した順が違います: {}",
+            entry["words"]
+        );
+    }
+    let left: Vec<String> = fs::read_dir(&out)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains(".part.") || name.ends_with(".tmp"))
+        .collect();
+    assert!(left.is_empty(), "書きかけが残っています: {left:?}");
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// Requirement 4. A screen whose word presses nothing keeps its earlier picture
+/// and entry, the others are taken, and the run exits 1 naming screen and word.
+#[test]
+pub(crate) fn capture_keeps_the_old_picture_of_a_screen_it_could_not_reach() {
+    let scratch = temporary_directory("capture-keep");
+    let (binary, driver, picture, homes) = capture_stand_ins(&scratch);
+    let flow = scratch.join("flow.yaml");
+    fs::write(
+        &flow,
+        CAPTURE_FLOW.replace("reach: 設定を開く\n", "reach: 窓にない言葉\n"),
+    )
+    .unwrap();
+    let out = scratch.join("out");
+    fs::create_dir_all(&out).unwrap();
+    fs::write(out.join("settings.jpg"), b"the earlier picture").unwrap();
+    let earlier = serde_json::json!({"picture": "settings.jpg", "taken": "earlier"});
+    fs::write(
+        out.join("screens.json"),
+        serde_json::json!({"screens": {"settings": earlier}}).to_string(),
+    )
+    .unwrap();
+    let state = scratch.join("state");
+    let (code, said, err) = capture_run(
+        &[
+            "--binary",
+            binary.to_str().unwrap(),
+            "--seed",
+            "empty",
+            "--flow",
+            flow.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--state",
+            state.to_str().unwrap(),
+            "--wait-seconds",
+            "1",
+        ],
+        &[
+            ("VERIFY_APP_DRIVER", driver.to_str().unwrap()),
+            ("CAPTURE_PICTURE", picture.to_str().unwrap()),
+            ("CAPTURE_HOMES", homes.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(code, 1, "{said}\n{err}");
+    assert!(
+        err.contains("not taken: settings") && err.contains("窓にない言葉"),
+        "撮れなかった画面と言葉を言っていません: {err}"
+    );
+    assert!(!capture_left_running(&binary));
+    capture_homes_gone(&homes, 3);
+    assert_eq!(
+        fs::read(out.join("settings.jpg")).unwrap(),
+        b"the earlier picture"
+    );
+    let index = capture_index(&out);
+    assert_eq!(
+        index["screens"]["settings"], earlier,
+        "前の記録が消えました"
+    );
+    for id in ["first", "twice"] {
+        assert!(
+            out.join(format!("{id}.jpg")).exists(),
+            "{id} が撮られていません"
+        );
+        assert_eq!(index["screens"][id]["picture"], format!("{id}.jpg"));
+    }
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// Requirement 5. `SIGTERM` while a picture is half written: the application
+/// is stopped, the scratch folder removed, and no half picture is left.
+#[test]
+pub(crate) fn capture_interrupted_leaves_nothing_behind() {
+    let scratch = temporary_directory("capture-term");
+    let (binary, driver, picture, homes) = capture_stand_ins(&scratch);
+    let flow = scratch.join("flow.yaml");
+    fs::write(&flow, CAPTURE_FLOW).unwrap();
+    let out = scratch.join("out");
+    let state = scratch.join("state");
+    let stalled = scratch.join("stalled");
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut child = Command::new("python3")
+        .current_dir(&root)
+        .arg(root.join("scripts/capture-screens.py"))
+        .args([
+            "--binary",
+            binary.to_str().unwrap(),
+            "--seed",
+            "empty",
+            "--flow",
+            flow.to_str().unwrap(),
+            "--out",
+            out.to_str().unwrap(),
+            "--state",
+            state.to_str().unwrap(),
+            "--wait-seconds",
+            "1",
+        ])
+        .env("VERIFY_APP_DRIVER", &driver)
+        .env("CAPTURE_PICTURE", &picture)
+        .env("CAPTURE_STALL", &stalled)
+        .env("CAPTURE_HOMES", &homes)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    for _ in 0..600 {
+        if stalled.exists() || child.try_wait().unwrap().is_some() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(stalled.exists(), "撮影が始まりませんでした");
+    assert!(capture_left_running(&binary), "アプリが起動していません");
+    assert!(Command::new("/bin/kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap()
+        .success());
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(
+        !capture_left_running(&binary),
+        "止めたあともアプリが動いています"
+    );
+    capture_homes_gone(&homes, 1);
+    assert!(
+        !state.join("instance.json").exists(),
+        "起動の記録が残っています"
+    );
+    let left: Vec<String> = fs::read_dir(&out)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(left.is_empty(), "写真の書きかけが残っています: {left:?}");
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// Requirement 6. On every photographed screen, a way whose words answer to
+/// one control has an area at that control's bounds; words answering to more
+/// than one name which with `#n`; and every way out with words and no key, and
+/// nothing said about why it is unseen, has its area.
+#[test]
+pub(crate) fn every_way_with_words_lands_on_one_control_of_its_picture() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let map = change_map_json(&root);
+    let index = capture_index(&root.join("docs/images/screens"));
+    let screens = map["flow"]["screens"].as_array().unwrap();
+    let mut placed = 0;
+    for way in map["flow"]["ways"].as_array().unwrap() {
+        let from = way["from"].as_str().unwrap();
+        let screen = screens.iter().find(|s| s["id"] == from).unwrap();
+        if screen["shot"].is_null() {
+            assert!(
+                way["area"].is_null(),
+                "{from}: 写真のない画面に押せる場所があります"
+            );
+            continue;
+        }
+        let press = way["press"].as_str().unwrap();
+        let words = if press.is_empty() {
+            way["label"].as_str().unwrap()
+        } else {
+            press
+        };
+        let to = way["to"].as_str().unwrap();
+        let unseen = !way["unseen"].as_str().unwrap().is_empty();
+        if words.is_empty() {
+            continue;
+        }
+        let answers = way["answers"].as_u64().unwrap();
+        assert!(
+            answers <= 1 || press.contains(" #"),
+            "{from} → {to}: 「{words}」に {answers} 個の部品が答えます"
+        );
+        if way["key"].is_null() && !unseen {
+            assert!(
+                !way["area"].is_null(),
+                "{from} → {to}: 「{words}」が写真の部品に当たりません"
+            );
+        }
+        if let Some(area) = way["area"].as_object() {
+            let bare = words.rsplit_once(" #").map_or(words, |(w, _)| w);
+            let found = index["screens"][from]["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| {
+                    c["name"].as_str().unwrap().contains(bare)
+                        && ["x", "y", "w", "h"].iter().all(|k| c[*k] == area[*k])
+                });
+            assert!(
+                found,
+                "{from} → {to}: 押せる場所が「{bare}」の部品の位置ではありません"
+            );
+            placed += 1;
+        }
+    }
+    assert!(placed >= 30, "押せる場所が少なすぎます: {placed}");
+    let page = fs::read_to_string(root.join("scripts/change-map/page.js")).unwrap();
+    for listed in ["data-way=", "出ていく道", "入ってくる道"] {
+        assert!(page.contains(listed), "画面の横に道が並びません: {listed}");
+    }
+}
+
+/// Requirement 7. The page's logic, under node with no browser.
+#[test]
+pub(crate) fn map_page_logic_routes_walks_searches_and_scales_areas() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let check = r##"
+const assert = require("assert");
+const L = require(process.argv[2]);
+const routes = [
+  ["#overview", {view: "overview"}], ["#features", {view: "features"}],
+  ["#feature/home", {view: "feature", id: "home"}], ["#screen/palette", {view: "screen", id: "palette"}],
+  ["#canvas", {view: "canvas"}], ["#domains", {view: "domains"}], ["#domain/sessions", {view: "domain", id: "sessions"}],
+  ["#glossary", {view: "glossary"}], ["#glossary/screens", {view: "glossary-screens"}],
+  ["#term/session", {view: "term", id: "session"}], ["#requirements", {view: "requirements"}],
+  ["#changes", {view: "changes"}], ["#change/316", {view: "change", id: "316"}]];
+for (const [hash, route] of routes) {
+  assert.deepStrictEqual(L.parseRoute(hash), route, hash);
+  assert.strictEqual(L.formatRoute(route), hash, hash);
+}
+for (const unknown of ["#nothing", "#feature/", "", "#screen/a/b/c"]) assert.deepStrictEqual(L.parseRoute(unknown), {view: "overview"}, unknown);
+assert.deepStrictEqual(L.scaleArea({x: 100, y: 40, w: 200, h: 20}, {w: 1280, h: 820}, 640), {left: 50, top: 20, width: 100, height: 10});
+const p = L.areaPercent({x: 128, y: 82, w: 64, h: 41}, {w: 1280, h: 820});
+assert.deepStrictEqual([p.left, p.top, p.width, p.height], [10, 10, 5, 5]);
+const w = new L.Walk("home");
+w.visit("projects"); w.visit("project-overview");
+assert.strictEqual(w.back(), "projects"); assert.strictEqual(w.back(), "home");
+assert.strictEqual(w.forward(), "projects"); assert.ok(w.canForward()); assert.ok(!w.canBack() === false);
+w.visit("palette");
+assert.ok(!w.canForward(), "a new step drops what was ahead");
+assert.deepStrictEqual(w.stack, ["home", "projects", "palette"]);
+const items = [
+  {kind: "change", title: "ターミナルの修正", text: ""}, {kind: "feature", title: "ターミナル", text: ""},
+  {kind: "screen", title: "設定", text: "ターミナル"}, {kind: "domain", title: "x", text: "none"},
+  {kind: "term", title: "ターミナルペイン", text: ""}, {kind: "requirement", title: "r", text: "ターミナルを開く"}];
+const found = L.search(items, "ターミナル");
+assert.strictEqual(found[0].title, "ターミナル");
+assert.ok(found.findIndex(r => r.title === "ターミナル") < found.findIndex(r => r.title === "ターミナルの修正"));
+assert.deepStrictEqual(new Set(found.map(r => r.kind)), new Set(["change", "feature", "screen", "term", "requirement"]));
+assert.deepStrictEqual(L.search(items, "  "), []);
+for (const key of ["/", "j", "k", "Enter", "Escape", "?", "ArrowLeft", "ArrowRight"]) assert.ok(L.KEYS[key], key);
+console.log("ok");
+"##;
+    let scratch = temporary_directory("map-logic");
+    let script = scratch.join("check.js");
+    fs::write(&script, check).unwrap();
+    let mut command = Command::new("node");
+    command
+        .arg(&script)
+        .arg(root.join("scripts/change-map/page.js"));
+    let result =
+        run_command_with_output_limit(&mut command, Duration::from_secs(60), 64 * 1024, 64 * 1024)
+            .expect("node がありません");
+    assert!(
+        result.output.status.success(),
+        "ページの論理が違います: {}",
+        String::from_utf8_lossy(&result.output.stderr)
+    );
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// Requirement 8. The overview's numbers are counted here from the model.
+#[test]
+pub(crate) fn map_overview_counts_what_the_model_holds() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let map = change_map_json(&root);
+    let o = &map["overview"];
+    let len = |key: &str| map[key].as_array().unwrap().len() as u64;
+    let screens = map["flow"]["screens"].as_array().unwrap();
+    let requirements = map["requirements"].as_array().unwrap();
+    assert_eq!(o["features"], len("features"));
+    assert_eq!(o["domains"], len("domains"));
+    assert_eq!(o["terms"], len("terms"));
+    assert_eq!(o["screens"], screens.len() as u64);
+    assert_eq!(
+        o["photographed"],
+        screens.iter().filter(|s| !s["shot"].is_null()).count() as u64
+    );
+    assert_eq!(o["requirements"], requirements.len() as u64);
+    let pinned = |rows: &mut dyn Iterator<Item = &serde_json::Value>| {
+        rows.filter(|r| r["pinned"] == true).count() as u64
+    };
+    assert_eq!(o["pinned"], pinned(&mut requirements.iter()));
+    assert!(o["pinned"].as_u64().unwrap() > 0 && o["pinned"].as_u64() < o["requirements"].as_u64());
+    for group in ["needs", "flight", "done", "archived"] {
+        let counted = map["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["group"] == group)
+            .count();
+        assert_eq!(o["changes"][group], counted as u64, "{group}");
+    }
+    assert_eq!(o["changes_total"], len("changes"));
+    let per = o["per_domain"].as_array().unwrap();
+    assert_eq!(per.len(), map["domains"].as_array().unwrap().len());
+    for (row, domain) in per.iter().zip(map["domains"].as_array().unwrap()) {
+        let id = domain["id"].as_str().unwrap();
+        assert_eq!(row["id"], id);
+        assert_eq!(
+            row["features"],
+            domain["features"].as_array().unwrap().len() as u64,
+            "{id}"
+        );
+        let own: Vec<&serde_json::Value> =
+            requirements.iter().filter(|r| r["domain"] == id).collect();
+        assert_eq!(row["requirements"], own.len() as u64, "{id}");
+        assert_eq!(row["pinned"], pinned(&mut own.into_iter()), "{id}");
+    }
+    let least = o["least_pinned"].as_array().unwrap();
+    assert!(least.len() <= 5 && !least.is_empty());
+    let bare: Vec<u64> = least.iter().map(|x| x["bare"].as_u64().unwrap()).collect();
+    assert!(bare.windows(2).all(|pair| pair[0] >= pair[1]), "{bare:?}");
+    for row in least {
+        let counted = requirements
+            .iter()
+            .filter(|r| r["feature"] == row["feature"] && r["pinned"] == false)
+            .count() as u64;
+        assert_eq!(row["bare"], counted);
+    }
+}
+
+/// Requirement 9. A feature carries its screens, terms, its domain's modules,
+/// its changes newest first and its requirement lines; a domain its features,
+/// modules and screens — each recounted here from the model's own lists.
+#[test]
+pub(crate) fn map_feature_and_domain_gather_screens_terms_code_and_changes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let map = change_map_json(&root);
+    let ids = |value: &serde_json::Value| -> Vec<String> {
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect()
+    };
+    let screens = map["flow"]["screens"].as_array().unwrap();
+    let domains = map["domains"].as_array().unwrap();
+    let mut with_screens = 0;
+    for feature in map["features"].as_array().unwrap() {
+        let id = feature["id"].as_str().unwrap();
+        let on: Vec<String> = screens
+            .iter()
+            .filter(|s| ids(&s["features"]).iter().any(|f| f == id))
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids(&feature["flow_screens"]), on, "{id} の画面");
+        with_screens += usize::from(!on.is_empty());
+        let terms: Vec<String> = map["terms"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| t["feature"] == id)
+            .map(|t| t["id"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids(&feature["terms"]), terms, "{id} の用語");
+        let owner = domains
+            .iter()
+            .find(|d| d["id"] == feature["domain"])
+            .unwrap();
+        let modules: Vec<String> = owner["modules"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["path"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids(&feature["modules"]), modules, "{id} のコード");
+        let numbers: Vec<u64> = feature["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["name"].as_str().unwrap()[..3].parse().unwrap())
+            .collect();
+        assert!(
+            numbers.windows(2).all(|p| p[0] > p[1]),
+            "{id} の変更が新しい順ではありません"
+        );
+        let lines: Vec<u64> = map["requirements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| r["feature"] == id)
+            .map(|r| r["number"].as_u64().unwrap())
+            .collect();
+        assert_eq!(
+            feature["requirements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| n.as_u64().unwrap())
+                .collect::<Vec<_>>(),
+            lines,
+            "{id} の要件"
+        );
+    }
+    assert!(
+        with_screens >= 15,
+        "画面のある機能が少なすぎます: {with_screens}"
+    );
+    for domain in domains {
+        let id = domain["id"].as_str().unwrap();
+        let features = ids(&domain["features"]);
+        let on: Vec<String> = screens
+            .iter()
+            .filter(|s| ids(&s["features"]).iter().any(|f| features.contains(f)))
+            .map(|s| s["id"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids(&domain["screens"]), on, "{id} の画面");
+        assert!(
+            !domain["modules"].as_array().unwrap().is_empty(),
+            "{id} にコードがありません"
+        );
+    }
+}
+
+/// Requirement 10. A photographed screen lists the terms whose word, or one of
+/// whose on-screen words, is among the words on its picture.
+#[test]
+pub(crate) fn map_glossary_by_screen_lists_the_terms_its_picture_shows() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let map = change_map_json(&root);
+    let terms = map["terms"].as_array().unwrap();
+    let mut listed = 0;
+    for screen in map["flow"]["screens"].as_array().unwrap() {
+        let id = screen["id"].as_str().unwrap();
+        let on: Vec<&str> = screen["terms_on"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t.as_str().unwrap())
+            .collect();
+        if screen["shot"].is_null() {
+            assert!(on.is_empty(), "{id}: 写真のない画面に用語があります");
+            continue;
+        }
+        let words: Vec<&str> = screen["words"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w.as_str().unwrap())
+            .collect();
+        let expected: Vec<&str> = terms
+            .iter()
+            .filter(|t| {
+                std::iter::once(&t["term"])
+                    .chain(t["ui"].as_array().unwrap())
+                    .filter_map(|w| w.as_str())
+                    .any(|w| !w.is_empty() && words.iter().any(|said| said.contains(w)))
+            })
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(on, expected, "{id} の用語");
+        listed += on.len();
+    }
+    assert!(listed > 0, "どの写真にも用語がありません");
+}
+
+/// Requirement 11. Each way a picture can fail to load leaves a written map
+/// that says why per screen, and the summary counts screens with no picture.
+#[test]
+pub(crate) fn change_map_survives_missing_or_broken_pictures() {
+    let root = feature_map_fixture("map-316-pictures", Some(FEATURE_MAP_INDEX));
+    feature_map_change(&root, "001-something", "done", "deploy", "none", "");
+    let mut flow = String::from("screens:\n");
+    for id in ["gone", "odd", "big", "good", "never"] {
+        flow.push_str(&format!(
+            "  - id: {id}\n    title: {id}\n    kind: page\n    screen: session\n    features: stopping\n    reach: -\n\n"
+        ));
+    }
+    flow.push_str("ways:\n  - from: good\n    to: gone\n    label: 行く\n");
+    fs::write(root.join("docs/features/flow.yaml"), flow).unwrap();
+    let folder = root.join("docs/images/screens");
+    fs::create_dir_all(&folder).unwrap();
+    let entry = |id: &str| {
+        serde_json::json!({"picture": format!("{id}.jpg"), "window": {"w": 100, "h": 50}, "scale": 2,
+            "controls": [{"name": "行く", "x": 1, "y": 2, "w": 30, "h": 10}], "words": ["行く"],
+            "taken": "2026-11-24T00:00:00Z", "commit": "abc1234"})
+    };
+    let problem = |map: &serde_json::Value, id: &str| -> String {
+        let screen = map["flow"]["screens"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap();
+        screen["shot_problem"].as_str().unwrap().to_owned()
+    };
+
+    let (ok, said, err) =
+        change_map_run(&root, &["--out", root.join("map.html").to_str().unwrap()]);
+    assert!(ok, "{err}");
+    assert!(
+        said.contains("写真なし 5"),
+        "要約が写真のない画面を数えていません: {said}"
+    );
+    let map = change_map_json(&root);
+    assert_eq!(
+        map["shots_error"],
+        "写真がまだありません。scripts/capture-screens.py で撮れます"
+    );
+    assert_eq!(map["flow"]["screens"].as_array().unwrap().len(), 5);
+
+    fs::write(folder.join("screens.json"), "{ not json").unwrap();
+    let map = change_map_json(&root);
+    assert!(map["shots_error"]
+        .as_str()
+        .unwrap()
+        .contains("screens.json を読めません"));
+
+    fs::write(folder.join("odd.jpg"), tiny_jpeg(210, 100)).unwrap();
+    let mut big = tiny_jpeg(200, 100);
+    big.resize(600 * 1024 + 1, 0);
+    fs::write(folder.join("big.jpg"), big).unwrap();
+    fs::write(folder.join("good.jpg"), tiny_jpeg(200, 100)).unwrap();
+    let screens: serde_json::Map<String, serde_json::Value> = ["gone", "odd", "big", "good"]
+        .iter()
+        .map(|id| (id.to_string(), entry(id)))
+        .collect();
+    fs::write(
+        folder.join("screens.json"),
+        serde_json::json!({"screens": screens}).to_string(),
+    )
+    .unwrap();
+    let map = change_map_json(&root);
+    assert_eq!(map["shots_error"], "");
+    assert!(problem(&map, "gone").contains("gone.jpg がありません"));
+    assert!(problem(&map, "odd").contains("大きさが記録と違います"));
+    assert!(problem(&map, "big").contains("600 KiB を超えています"));
+    assert!(problem(&map, "never").contains("まだ撮影されていません"));
+    assert_eq!(problem(&map, "good"), "");
+    assert!(map["shots"]["good"]
+        .as_str()
+        .unwrap()
+        .starts_with("data:image/jpeg;base64,"));
+    assert_eq!(map["shots"].as_object().unwrap().len(), 1);
+    let way = &map["flow"]["ways"][0];
+    assert_eq!(
+        way["area"],
+        serde_json::json!({"x": 1, "y": 2, "w": 30, "h": 10})
+    );
+    let (ok, said, err) =
+        change_map_run(&root, &["--out", root.join("map.html").to_str().unwrap()]);
+    assert!(ok, "{err}");
+    assert!(said.contains("写真なし 4"), "{said}");
+    let page = fs::read_to_string(root.join("map.html")).unwrap();
+    assert!(page.contains("大きさが記録と違います"));
+
+    let many: serde_json::Map<String, serde_json::Value> =
+        (0..81).map(|n| (format!("s{n}"), entry("good"))).collect();
+    fs::write(
+        folder.join("screens.json"),
+        serde_json::json!({"screens": many}).to_string(),
+    )
+    .unwrap();
+    let map = change_map_json(&root);
+    assert_eq!(
+        map["shots_notice"],
+        "写真が多すぎます。81 画面のうち 80 画面を載せています"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Requirement 12. The pipeline says to retake pictures when a screen changes,
+/// and the features README says how.
+#[test]
+pub(crate) fn the_pipeline_retakes_pictures_when_a_screen_changes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let skill = fs::read_to_string(root.join(".claude/skills/feature-pilot/SKILL.md")).unwrap();
+    let close = skill
+        .split("- **Close**")
+        .nth(1)
+        .and_then(|rest| rest.split("\n- **").next())
+        .expect("feature-pilot に Close の手順がありません");
+    for needed in [
+        "`reach`",
+        "`press`",
+        "flow.yaml",
+        "scripts/capture-screens.py",
+        "docs/features/README.md",
+    ] {
+        assert!(
+            close.contains(needed),
+            "feature-pilot の Close が {needed} に触れていません"
+        );
+    }
+    let readme = fs::read_to_string(root.join("docs/features/README.md")).unwrap();
+    for needed in [
+        "- `reach` —",
+        "- `noshot` —",
+        "- `press` —",
+        "- `unseen` —",
+        "python3 scripts/capture-screens.py --plan",
+        "python3 scripts/capture-screens.py",
+        "screens.json",
+    ] {
+        assert!(
+            readme.contains(needed),
+            "docs/features/README.md に {needed} がありません"
+        );
+    }
+}
+
+/// The flow both tests of a hostile `screens.json` read: a photographed screen
+/// and one whose entry is the attack, with a way between them.
+const CHANGE_MAP_HOSTILE_FLOW: &str = "screens:\n  - id: good\n    title: good\n    kind: page\n    \
+    screen: session\n    features: stopping\n    reach: -\n\n  - id: bad\n    title: bad\n    kind: page\n    \
+    screen: session\n    features: stopping\n    reach: -\n\nways:\n  - from: good\n    to: bad\n    label: 行く\n";
+
+fn change_map_hostile_index(label: &str, index: &str) -> (PathBuf, serde_json::Value) {
+    let root = feature_map_fixture(label, Some(FEATURE_MAP_INDEX));
+    feature_map_change(&root, "001-something", "done", "deploy", "none", "");
+    fs::write(
+        root.join("docs/features/flow.yaml"),
+        CHANGE_MAP_HOSTILE_FLOW,
+    )
+    .unwrap();
+    let folder = root.join("docs/images/screens");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(folder.join("good.jpg"), tiny_jpeg(200, 100)).unwrap();
+    fs::write(folder.join("bad.jpg"), tiny_jpeg(200, 100)).unwrap();
+    fs::write(folder.join("screens.json"), index).unwrap();
+    let (ok, said, err) = change_map_run(&root, &["--json"]);
+    assert!(
+        ok,
+        "壊れた screens.json でも地図は書かれるはずですが失敗しました: {err}"
+    );
+    let map = serde_json::from_str(&said).unwrap_or_else(|error| {
+        panic!("地図の JSON が読めません（NaN が出ていませんか）: {error}")
+    });
+    (root, map)
+}
+
+fn change_map_screen<'a>(map: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+    map["flow"]["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == id)
+        .unwrap()
+}
+
+/// Found by the verifier of change 316 (F1): a NUL in an entry's picture name
+/// made `open` raise `ValueError`, which the `OSError` handler let through, so
+/// one entry stopped the whole map from being written.
+#[test]
+pub(crate) fn change_map_survives_a_picture_name_with_a_nul() {
+    let (root, map) = change_map_hostile_index(
+        "map-316-nul",
+        r#"{"screens":{
+      "good":{"picture":"good.jpg","window":{"w":100,"h":50},"scale":2,"controls":[],"words":[]},
+      "bad":{"picture":"a\u0000b.jpg","window":{"w":100,"h":50},"scale":2,"controls":[],"words":[]}}}"#,
+    );
+    assert!(
+        !change_map_screen(&map, "good")["shot"].is_null(),
+        "正しい写真まで落ちました"
+    );
+    let bad = change_map_screen(&map, "bad");
+    assert!(bad["shot"].is_null());
+    assert!(
+        bad["shot_problem"]
+            .as_str()
+            .unwrap()
+            .starts_with("写真を読めませんでした"),
+        "{bad}"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Found by the verifier of change 316 (F2): Python reads `NaN` in JSON, a NaN
+/// window passed the size check (every comparison with NaN is false), and the
+/// map then wrote a bare `NaN` that no JSON reader takes. A NaN in a control's
+/// bounds reached a way's area the same way.
+#[test]
+pub(crate) fn change_map_refuses_a_window_that_is_not_a_number() {
+    let (root, map) = change_map_hostile_index(
+        "map-316-nan",
+        r#"{"screens":{
+      "good":{"picture":"good.jpg","window":{"w":100,"h":50},"scale":2,
+              "controls":[{"name":"行く","x":NaN,"y":2,"w":30,"h":10}],"words":["行く"]},
+      "bad":{"picture":"bad.jpg","window":{"w":NaN,"h":50},"scale":2,"controls":[],"words":[]}}}"#,
+    );
+    let bad = change_map_screen(&map, "bad");
+    assert!(
+        bad["shot"].is_null(),
+        "窓の大きさが数でないのに写真を載せています: {bad}"
+    );
+    assert!(!change_map_screen(&map, "good")["shot"].is_null());
+    assert!(
+        map["flow"]["ways"][0]["area"].is_null(),
+        "位置が数でない部品に押せる場所を置きました: {}",
+        map["flow"]["ways"][0]
+    );
+    let _ = fs::remove_dir_all(root);
 }

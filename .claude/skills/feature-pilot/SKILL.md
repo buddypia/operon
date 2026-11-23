@@ -137,6 +137,9 @@ the earlier sections stay as they were.
   and omits its spec. A new term, page, tab, sheet or way between screens goes
   into `docs/features/glossary.yaml` or `docs/features/flow.yaml` in the same
   branch, and a behaviour line a new test pins names it after `Pinned by`.
+  A change that alters what a screen shows, or adds a screen or way, updates
+  `reach` or `press` in `flow.yaml` and runs `python3 scripts/capture-screens.py`
+  so the map's pictures match; `docs/features/README.md` says how.
 - **Commit** in the worktree directory — never `git -C` from elsewhere.
 - **Push** the branch from the worktree, `git push -u origin <branch>`, and wait
   for CI with `bash scripts/wait-ci.sh` in the background (about five minutes):

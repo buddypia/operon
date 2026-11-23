@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operon 製品地図</title>
+<style>
+__CSS__
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="bar1">
+    <a class="brand" href="#overview"><span class="logo" aria-hidden="true"></span><h1>Operon 製品地図</h1></a>
+    <nav class="views" aria-label="表示">
+      <button data-view="overview">概要</button><button data-view="features">機能</button><button data-view="screen">画面</button><button data-view="domains">ドメイン</button><button data-view="glossary">用語集</button><button data-view="requirements">要件</button><button data-view="changes">変更</button>
+    </nav>
+    <div class="searchwrap">
+      <input id="q" type="search" placeholder="検索（/）" aria-label="検索" autocomplete="off">
+      <div id="results" hidden role="listbox" aria-label="検索の結果"></div>
+    </div>
+    <button id="bk-open" class="basket" title="集めたものを 1 つの指示にする">作業かご<b id="bk-n"></b></button>
+    <button id="theme" class="ghost" title="明るさを切り替える"></button>
+    <button id="help-open" class="ghost" title="キー操作（?）">?</button>
+  </div>
+  <div class="bar2"><span class="counts">__HEADLINE__</span><span class="meta" id="meta"></span></div>
+</header>
+<main>
+  <div id="v-overview" hidden></div>
+  <div id="v-features" hidden>
+    <p class="lead">Operon を画面ごとに見渡します。機能を選ぶと、その機能のページ（画面・要件・用語・コード・変更履歴）が開きます。</p>
+    <div id="p-catalogue-error"></div>
+    <section id="p-screens"><h2>画面と機能 <small id="p-screens-n"></small></h2><div id="p-screen-list"></div></section>
+    <section id="p-unmapped"></section>
+  </div>
+  <div id="v-feature" class="fview" hidden></div>
+  <div id="v-screen" hidden>
+    <div class="proto">
+      <aside class="plist" id="sc-list" aria-label="画面の一覧"></aside>
+      <section class="pstage">
+        <div class="ptools">
+          <button id="sc-back" class="ghost" title="戻る（←）">← 戻る</button>
+          <button id="sc-fwd" class="ghost" title="進む（→）">進む →</button>
+          <div class="trail" id="sc-trail"></div>
+          <label class="toggle"><input type="checkbox" id="sc-areas"> 押せる場所を表示</label>
+          <a class="ghost btn" href="#canvas">全体図</a>
+        </div>
+        <div id="sc-window"></div>
+        <div id="sc-keys"></div>
+      </section>
+      <aside class="pside" id="sc-side" aria-label="画面の説明"></aside>
+    </div>
+  </div>
+  <div id="v-canvas" hidden>
+    <div class="ctools">
+      <p class="lead">すべての画面を実際の写真で並べ、画面と画面のあいだの道を矢印で結んでいます。ドラッグで動かし、⌘ を押しながらホイールで拡大・縮小します。画面を押すとその画面が開きます。</p>
+      <div class="zoom"><button id="cv-out" class="ghost" title="縮小">−</button><span id="cv-pct"></span><button id="cv-in" class="ghost" title="拡大">＋</button><button id="cv-fit" class="ghost">全体</button><a class="ghost btn" href="#screen/home">画面で歩く</a></div>
+    </div>
+    <div id="fl-error"></div>
+    <div class="cv" id="cv"></div>
+  </div>
+  <div id="v-domains" hidden>
+    <p class="lead">Operon を責任の範囲（ドメイン）で分けて見渡します。どのコードと機能がどこに属し、どこで隣と受け渡すかが分かります。</p>
+    <div id="dm-error"></div>
+    <div class="dcards" id="dm-list"></div>
+  </div>
+  <div id="v-domain" class="fview" hidden></div>
+  <div id="v-glossary" hidden>
+    <p class="lead">Operon が使う言葉と、その意味・画面での表記・コードでの名前・使わない言葉です。新しい文言はここの言葉で書きます。</p>
+    <div class="filters" id="gl-mode"></div>
+    <div id="gl-error"></div>
+    <section><h2 id="gl-h">用語 <small id="gl-n"></small></h2><div id="gl-list"></div></section>
+  </div>
+  <div id="v-requirements" hidden>
+    <p class="lead">すべての機能の「今の振る舞い」を 1 行ずつ並べ、どのテストがそれを確かめているかを示します。テストで守られていない行が、確かめられていない振る舞いです。</p>
+    <section><h2>振る舞い <small id="rq-n"></small></h2><div class="filters" id="rq-filters"></div><div id="rq-list"></div></section>
+  </div>
+  <div id="v-changes" hidden>
+    <section id="needs"><h2>あなたの判断を待っています <small id="needs-n"></small></h2><div id="needs-list"></div></section>
+    <section id="flight"><h2>進行中 <small id="flight-n"></small></h2><div id="flight-list"></div></section>
+    <section id="areas"><h2>領域ごとの変更 <small>どの部分に、これまで何をしてきたか</small></h2><div id="area-list"></div></section>
+    <section id="all"><h2>すべての変更 <small id="all-n"></small></h2>
+      <div class="filters" id="filters"></div><div id="all-list"></div></section>
+  </div>
+</main>
+<div id="shade" hidden></div>
+<aside id="detail" hidden aria-label="変更の詳細">
+  <div class="dhead">
+    <div class="dtitle"><h2 id="d-title"></h2>
+      <div class="nav"><button id="d-prev">前へ</button><button id="d-next">次へ</button><button id="d-close">閉じる</button></div></div>
+    <div class="facts" id="d-facts"></div>
+    <div class="steps" id="d-steps"></div>
+    <div class="tabs" id="d-tabs" role="tablist"></div>
+  </div>
+  <div id="body"></div>
+</aside>
+<aside id="doc" hidden aria-label="文書">
+  <div class="dhead"><div class="dtitle"><h2 id="doc-title"></h2><div class="nav"><button id="doc-close">閉じる</button></div></div></div>
+  <div id="doc-body"></div>
+</aside>
+<aside id="basket" hidden aria-label="作業かご">
+  <div class="dhead"><div class="dtitle"><h2>作業かご</h2><div class="nav"><button id="bk-close">閉じる</button></div></div>
+    <p class="what">集めたものを 1 つの指示にして、CLI のセッションに貼り付けます。</p></div>
+  <div id="bk-body"></div>
+</aside>
+<div id="help" hidden role="dialog" aria-label="キー操作">
+  <h2>キー操作</h2>
+  <dl id="help-keys"></dl>
+  <p class="what">入力欄にいるあいだは、Esc 以外は文字として入ります。</p>
+  <button id="help-close">閉じる</button>
+</div>
+<script id="map-data" type="application/json">__DATA__</script>
+<script>
+__JS__
+</script>
+</body>
+</html>

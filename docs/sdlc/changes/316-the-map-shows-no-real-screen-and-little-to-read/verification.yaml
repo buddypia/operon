@@ -1,0 +1,22 @@
+# The evidence for change 316. One test per requirement of spec.md, and the
+# sweep that watched each of them go red (33 of 33). F1 and F2 were found by
+# the empirical verifier on 3ef645d and fixed in read_shots. The digest is the
+# whole landing diff's (check-review.sh --against refs/heads/main).
+digest: "b5a3e7efd6f4fcd9"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked capture_plan_reaches_every_screen_with_words_the_app_draws
+  - R2 empirical-test :: cargo test --locked every_screen_of_the_flow_has_its_picture_or_says_why
+  - R3 empirical-test :: cargo test --locked capture_writes_each_picture_and_leaves_nothing_running
+  - R4 empirical-test :: cargo test --locked capture_keeps_the_old_picture_of_a_screen_it_could_not_reach
+  - R5 empirical-test :: cargo test --locked capture_interrupted_leaves_nothing_behind
+  - R6 empirical-test :: cargo test --locked every_way_with_words_lands_on_one_control_of_its_picture
+  - R7 empirical-test :: cargo test --locked map_page_logic_routes_walks_searches_and_scales_areas
+  - R8 empirical-test :: cargo test --locked map_overview_counts_what_the_model_holds
+  - R9 empirical-test :: cargo test --locked map_feature_and_domain_gather_screens_terms_code_and_changes
+  - R10 empirical-test :: cargo test --locked map_glossary_by_screen_lists_the_terms_its_picture_shows
+  - R11 empirical-test :: cargo test --locked change_map_survives_missing_or_broken_pictures
+  - R12 empirical-test :: cargo test --locked the_pipeline_retakes_pictures_when_a_screen_changes
+  - F1 empirical-test :: cargo test --locked change_map_survives_a_picture_name_with_a_nul
+  - F2 empirical-test :: cargo test --locked change_map_refuses_a_window_that_is_not_a_number
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/316-the-map-shows-no-real-screen-and-little-to-read/mutations.py
