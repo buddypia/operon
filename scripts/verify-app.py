@@ -154,14 +154,20 @@ def control_for(tree, words):
         and "Click" in (node.get("available_actions") or [])
         and node.get("role") != "statictext"
     ]
-    exact = [node for node in controls if plain(node.get("name")) == words]
-    partial = [node for node in controls if words in plain(node.get("name"))]
-    for matches in (exact, partial):
-        if len(matches) == 1:
-            return matches[0]["ref_id"], None
-        if len(matches) > 1:
-            return None, f"{len(matches)} controls answer to {words!r}"
+    matches = answering([plain(node.get("name")) for node in controls], words)
+    if len(matches) == 1:
+        return controls[matches[0]]["ref_id"], None
+    if matches:
+        return None, f"{len(matches)} controls answer to {words!r}"
     return None, f"no control answers to {words!r}"
+
+
+def answering(names, words):
+    """The places in `names` that answer to the words: every exact name, else
+    every name containing them. One answer is a press; more is ambiguous. The
+    product map (scripts/change-map.py) places its areas by this same rule."""
+    exact = [at for at, name in enumerate(names) if name == words]
+    return exact or [at for at, name in enumerate(names) if words in name]
 
 
 def judge(verb, tree, words):

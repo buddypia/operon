@@ -85,4 +85,30 @@ the code it asks for.
 
 ## Departures from the plan
 
-Filled in during implementation.
+- **`press` takes `words #n`, and ways take `unseen`.** Three ways press a word
+  two controls answer to (ホーム's 「セッション」 is both the toolbar page and
+  the 新しいセッション button; 「プロジェクト」 is both the page and the
+  breadcrumb). `#n` names the n-th in reading order; requirement 6's "no way's
+  words answer to two controls" is read as "none does without naming which".
+  Five ways have no control on the demo project's picture (shown only when a
+  session waits or exists, or an icon button with no name); `unseen` says why,
+  and they are listed beside the picture with that reason and no area.
+- **side-files' `reach` drops 「ファイル」.** The side panel opens on its
+  ファイル tab, so pressing it changed nothing and the capture failed; found on
+  the first full capture.
+- **The matching rule moved into `answering` in `scripts/verify-app.py`.** The
+  map had its own copy of exact-else-partial; the spec says the rule is read
+  from the runner, so `control_for` and the map both call it now.
+- **The summary counts screens without a picture** (`画面 27 · 写真なし 2`) on
+  its own line rather than in the headline, which stays about changes.
+- **Page wording kept from change 315** where its tests read it
+  (「テストの記録なし」, 「該当する用語はありません」, the 推定 note); the 315
+  tests now name the new views (`features`, `screen`) and allow one `<img`, in
+  the helper that takes only an inlined `data:image/` picture.
+- **The theme is read by the drawing script**, not a third `<script>` in the
+  head, so the page keeps exactly its data and drawing scripts.
+- **`change_map_run` reads up to 64 MiB** of output: the model now carries the
+  pictures (about 6.7 MiB as data URLs, 16 MiB at the ceiling).
+- **The stand-in driver waits for the stand-in binary** to record its home
+  before it reports a window; without that, a press failing at once stopped the
+  binary before it wrote, and R4 counted two launches of three.

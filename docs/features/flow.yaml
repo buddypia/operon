@@ -22,6 +22,10 @@
 #   tab       the `ProjectTab` variant it is, when it is one (optional)
 #   image     a file in docs/images/ that shows it (optional)
 #   note      one Japanese line (optional)
+#   reach     the words to press, `;`-separated, from a fresh launch with the
+#             demo project, that bring it up (`-` for none); read by
+#             scripts/capture-screens.py, which photographs it (change 316)
+#   noshot    instead of `reach`: a Japanese reason it cannot be photographed
 #
 # Kinds (the test reads this set from here):
 #   page     a page of the window (⌘1, ⌘2, ⌘3, ⌘,)
@@ -38,6 +42,12 @@
 #             Japanese message id (optional)
 #   click     what is clicked when the control has no word of its own, such as
 #             a row (Japanese; optional). A way has a key, a label, or a click
+#   press     the control's name on the picture, when the label alone answers
+#             to no control or to two; `words #n` takes the n-th control the
+#             words answer to, in the window's reading order (optional)
+#   unseen    a Japanese reason the way's control is not on its screen's
+#             picture (shown only in some state, or nameless); the way is
+#             then taken from the list beside the picture (optional)
 #   note      one Japanese line (optional)
 
 screens:
@@ -47,6 +57,7 @@ screens:
     kind: page
     screen: home
     features: home needs-you app-shell
+    reach: -
     page: Home
     image: 01-home.png
     note: ツールバーとウィンドウ全体の土台もここから見える。
@@ -56,6 +67,7 @@ screens:
     kind: page
     screen: projects
     features: project-list
+    reach: プロジェクト
     page: Projects
     note: 一覧。フォルダの追加・スキャン・削除。
 
@@ -64,6 +76,7 @@ screens:
     kind: tab
     screen: projects
     features: project-overview
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く
     parent: projects
     tab: Overview
 
@@ -72,6 +85,7 @@ screens:
     kind: tab
     screen: projects
     features: git-changes diff-notes
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く; 変更
     parent: projects
     tab: Git
     image: 04-diff.png
@@ -81,6 +95,7 @@ screens:
     kind: tab
     screen: projects
     features: worktrees
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く; worktree
     parent: projects
     tab: Worktrees
 
@@ -89,6 +104,7 @@ screens:
     kind: tab
     screen: projects
     features: git-changes
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く; PR
     parent: projects
     tab: PullRequests
 
@@ -97,6 +113,7 @@ screens:
     kind: tab
     screen: projects
     features: files-editor
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く; ファイル
     parent: projects
     tab: Files
 
@@ -105,6 +122,7 @@ screens:
     kind: tab
     screen: projects
     features: project-overview
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く; エージェント設定
     parent: projects
     tab: AgentSettings
 
@@ -113,6 +131,7 @@ screens:
     kind: tab
     screen: projects
     features: knowledge
+    reach: 新しいセッション; ターミナルだけ開く; 検索・操作; プロジェクトを開く; ナレッジ
     parent: projects
     tab: Knowledge
 
@@ -121,6 +140,7 @@ screens:
     kind: page
     screen: session
     features: session-column needs-you status-detection session-lifecycle
+    reach: プロジェクト; セッション
     page: Sessions
     image: 02-needs-you.png
     note: 左の一覧と、要対応を先頭に固定する行。
@@ -130,6 +150,7 @@ screens:
     kind: panel
     screen: session
     features: terminal-pane session-lifecycle
+    reach: 新しいセッション; ターミナルだけ開く
     parent: sessions
     image: 03-session-claude.png
     note: タブと最大 4 分割。
@@ -139,6 +160,7 @@ screens:
     kind: panel
     screen: session
     features: terminal-pane
+    reach: 新しいセッション; ターミナルだけ開く
     parent: sessions
 
   - id: side-files
@@ -146,6 +168,7 @@ screens:
     kind: panel
     screen: session
     features: files-editor
+    reach: 新しいセッション; ターミナルだけ開く
     parent: side-panel
 
   - id: side-conversation
@@ -153,6 +176,7 @@ screens:
     kind: panel
     screen: session
     features: history-handoff
+    reach: 新しいセッション; ターミナルだけ開く; 会話
     parent: side-panel
 
   - id: side-changes
@@ -160,6 +184,7 @@ screens:
     kind: panel
     screen: session
     features: git-changes diff-notes
+    reach: 新しいセッション; ターミナルだけ開く; 変更
     parent: side-panel
 
   - id: history-library
@@ -167,6 +192,7 @@ screens:
     kind: panel
     screen: session
     features: history-handoff session-lifecycle session-column
+    reach: 新しいセッション; ターミナルだけ開く; 履歴
     parent: sessions
     note: 過去の会話の検出と復元、セッションの一覧。
 
@@ -175,6 +201,7 @@ screens:
     kind: sheet
     screen: new-session
     features: new-session
+    reach: 新しいセッション
     image: 06-new-session.png
 
   - id: palette
@@ -182,6 +209,7 @@ screens:
     kind: overlay
     screen: palette
     features: palette
+    reach: 検索・操作
     image: 05-palette.png
 
   - id: broadcast
@@ -189,12 +217,14 @@ screens:
     kind: sheet
     screen: session
     features: agents-cli
+    reach: 検索・操作; アイドル中のエージェントへ送信
 
   - id: settings
     title: 設定
     kind: page
     screen: settings
     features: settings
+    reach: 検索・操作; 設定を開く
     page: Settings
 
   - id: settings-appearance
@@ -202,6 +232,7 @@ screens:
     kind: panel
     screen: settings
     features: settings
+    reach: 検索・操作; 設定を開く
     parent: settings
 
   - id: settings-agents
@@ -209,6 +240,7 @@ screens:
     kind: panel
     screen: settings
     features: settings status-detection
+    reach: 検索・操作; 設定を開く; エージェント
     parent: settings
     note: 起動に必要なツールと状態の検知方法。
 
@@ -217,6 +249,7 @@ screens:
     kind: panel
     screen: settings
     features: settings
+    reach: 検索・操作; 設定を開く; 通知
     parent: settings
 
   - id: settings-data
@@ -224,6 +257,7 @@ screens:
     kind: panel
     screen: settings
     features: local-data settings
+    reach: 検索・操作; 設定を開く; データと復旧
     parent: settings
 
   - id: settings-keys
@@ -231,6 +265,7 @@ screens:
     kind: panel
     screen: settings
     features: keybindings
+    reach: 検索・操作; 設定を開く; キー割り当て
     parent: settings
 
   - id: cli-agents
@@ -238,6 +273,7 @@ screens:
     kind: cli
     screen: cli
     features: agents-cli
+    noshot: コマンドラインで使うもので、ウィンドウには出ません。
     note: セッション内のエージェントが他のセッションを操作する。
 
   - id: cli-knowledge
@@ -245,6 +281,7 @@ screens:
     kind: cli
     screen: cli
     features: knowledge
+    noshot: コマンドラインで使うもので、ウィンドウには出ません。
     note: エージェントがナレッジを検索する。
 
 ways:
@@ -268,6 +305,7 @@ ways:
     to: sessions
     key: page.sessions
     label: セッション
+    press: セッション #1
 
   - from: home
     to: settings
@@ -382,6 +420,7 @@ ways:
   - from: home
     to: history-library
     label: 要対応のセッションを見る
+    unseen: 要対応のセッションがあるときだけ出ます。
 
   - from: home
     to: sessions
@@ -390,11 +429,13 @@ ways:
   - from: home
     to: terminal-group
     label: 開く
+    unseen: 最近のセッションがあるときだけ出ます。
 
   - from: home
     to: new-session
     label: セッション
     note: プロジェクトごとの開始ボタン。
+    press: セッション #2
 
   - from: project-overview
     to: project-git
@@ -428,6 +469,7 @@ ways:
     to: projects
     label: プロジェクト
     note: パンくず。
+    press: プロジェクト #2
 
   - from: project-overview
     to: new-session
@@ -441,6 +483,7 @@ ways:
     to: project-overview
     label: プロジェクトを開く
     note: 最後に開いていたタブで開く。
+    unseen: アイコンだけのボタンで、読み上げられる名前がありません。
 
   - from: history-library
     to: sessions
@@ -449,6 +492,7 @@ ways:
   - from: history-library
     to: terminal-group
     label: ターミナルを表示
+    unseen: アイコンだけのボタンで、読み上げられる名前がありません。
 
   - from: sessions
     to: history-library
@@ -479,6 +523,7 @@ ways:
     to: settings-agents
     label: 設定を開く
     note: tmux や CLI が未準備のとき。
+    unseen: tmux や CLI の準備ができていないときだけ出ます。
 
   - from: palette
     to: projects
