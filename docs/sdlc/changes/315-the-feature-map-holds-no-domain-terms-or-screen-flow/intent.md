@@ -1,6 +1,6 @@
 # Intent: the feature map names no domain, no term, and no path between screens
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-23
 
 ## Problem
