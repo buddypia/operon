@@ -13,7 +13,7 @@
 state:
   route: "feature"
   stage: "test"
-  status: "awaiting-user"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "supervised"
@@ -22,14 +22,14 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "CI green on 66e6c32 (run 45219573435). Waiting for the person's word on landing; on yes: status done, three-gates passed, landing passed, push, CI, merge --no-ff from main, cleanup."
+resume: "Approved by the person (「進めて」). Push, CI, merge --no-ff from main, cleanup."
 
 contract:
   three-gates: "machine passed fmt and clippy at each commit through gate-commit.sh; full suite and 12 obligations green in CI run 45219573435 on 66e6c32"
   bands: "machine passed bash scripts/check-bands.sh: six breaches, none new from this change; it adds 12 lines to two skills (steering_bytes 272790, diagnose as before)"
   release-binary: "machine waived touches scripts/, docs/, .claude/skills and src/tests.rs only; none is in the bundle"
   guards-verified-by-mutation: "human passed mutations.py: 29 of 29 mutants caught by the eleven new tests"
-  landing: "human pending the person is asked whether 315 may land, after opening the page"
+  landing: "human passed the person answered 「進めて」 after the page was offered"
   page-exercised-in-a-browser: "human passed headless Chrome: every view, a domain, a term, a screen of the flow, the requirement board, the work basket; no console error"
 
 sets:
