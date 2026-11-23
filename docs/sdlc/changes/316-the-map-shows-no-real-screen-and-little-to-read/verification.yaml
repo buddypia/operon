@@ -1,7 +1,8 @@
 # The evidence for change 316. One test per requirement of spec.md, and the
 # sweep that watched each of them go red (33 of 33). F1 and F2 were found by
-# the empirical verifier on 3ef645d and fixed in read_shots.
-digest: "f2cff5230bf09f14"
+# the empirical verifier on 3ef645d and fixed in read_shots. The digest is the
+# whole landing diff's (check-review.sh --against refs/heads/main).
+digest: "b5a3e7efd6f4fcd9"
 
 obligations:
   - R1 empirical-test :: cargo test --locked capture_plan_reaches_every_screen_with_words_the_app_draws
