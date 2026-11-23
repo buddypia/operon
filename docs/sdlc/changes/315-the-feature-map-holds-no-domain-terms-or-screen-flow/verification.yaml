@@ -1,6 +1,8 @@
 # The evidence for change 315. One test per requirement of spec.md, and the
-# sweep that watched each of them go red (29 of 29 caught).
-digest: "aae9882eb39e7b38"
+# sweep that watched each of them go red (29 of 29 caught). Every obligation
+# below held again on c1dc5f4 in CI run 45229665759; the digest is the whole
+# landing diff's.
+digest: "42e76b23b85a87fa"
 
 obligations:
   - R1 empirical-test :: cargo test --locked domains_cover_every_module_once_and_every_feature
