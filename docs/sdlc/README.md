@@ -320,6 +320,7 @@ Built:
 | path-scoped rules | `.claude/rules/` with `paths:` frontmatter, plus a guard that no rule may omit `paths:` |
 | every change at a glance | `scripts/change-map.py` — one page generated on demand from each change's records, what waits for a person first and the documents a click away; never committed (change 312) |
 | the product feature by feature | `docs/features/index.yaml` and, per feature, `brief.md` (Japanese, for the person) and `spec.md` (English, for the AI): what the product does now. The page `scripts/change-map.py` writes opens on the screens and their features with a state badge, derived from the change records; the change list is its second view (change 313) |
+| a feature proven in the built application | `scripts/verify-app.py` starts `target/debug/operon` apart from the person's data and tmux, follows the steps a feature's `spec.md` gives under `## Seen in the running app`, and keeps a picture and the window's tree per step; the suite fails a step whose words the source no longer draws. The second layer of the ordering in Lauren Tan's "All Code Is Slop (Except Mine)" and the pstack plugin's verification skill, as one script and a section per feature (change 314) |
 
 Not built:
 

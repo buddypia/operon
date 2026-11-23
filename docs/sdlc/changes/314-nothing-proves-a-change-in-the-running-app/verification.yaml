@@ -1,0 +1,19 @@
+# The evidence for change 314. One test per requirement of spec.md, and the
+# sweep that watched each of them go red (30 of 30 caught). The live runs of
+# the five features that have steps are not here: a hosted runner cannot
+# operate a window, so they are the contract's human item, run on this machine.
+digest: "57929286bb00a514"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked verify_app_plans_a_launch_apart_from_the_persons_home_and_tmux
+  - R2 empirical-test :: cargo test --locked verify_app_stop_refuses_a_process_it_did_not_start
+  - R3 empirical-test :: cargo test --locked every_step_seen_in_the_running_app_uses_a_verb_the_runner_has_and_words_the_app_draws
+  - R4 empirical-test :: cargo test --locked verify_app_lists_the_features_whose_documents_carry_steps
+  - R5 empirical-test :: cargo test --locked verify_app_judges_a_step_against_what_the_window_says
+  - R6 empirical-test :: cargo test --locked verify_app_seed_writes_a_store_the_app_loads
+  - R7 empirical-test :: cargo test --locked the_pipeline_sends_a_change_that_paints_to_the_running_app
+  - R8 empirical-test :: cargo test --locked verify_app_run_keeps_evidence_and_leaves_nothing_running
+  - F1 empirical-test :: cargo test --locked verify_app_run_stops_what_it_started_when_the_driver_answers_nonsense
+  - F2 empirical-test :: cargo test --locked verify_app_run_fails_a_click_the_driver_refused
+  - F3 empirical-test :: cargo test --locked verify_app_run_presses_again_when_a_press_changed_nothing
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/314-nothing-proves-a-change-in-the-running-app/mutations.py

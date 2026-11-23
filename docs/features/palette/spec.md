@@ -28,6 +28,18 @@
 - The click and Enter paths share one activation function, so a row behaves identically either way.
 - Action keys stay the English strings the dispatch matches; labels are Japanese and come from the keymap registry where a chord exists.
 
+## Seen in the running app
+`python3 scripts/verify-app.py run palette` starts the built application apart from the person's data, follows these steps, and keeps a picture and the window's tree for each (change 314). One `verb words` per line; the words are what the screen shows.
+
+    start empty
+    click 検索・操作
+    see 操作・セッション・プロジェクトを検索
+    see 空のターミナルを開く
+    shot palette-open
+    click 設定を開く
+    gone 操作・セッション・プロジェクトを検索
+    shot after-choice
+
 ## Code and tests
 - Symbols:
   - `src/app/screens.rs::palette_actions`: the fixed actions with label and keymap id.
