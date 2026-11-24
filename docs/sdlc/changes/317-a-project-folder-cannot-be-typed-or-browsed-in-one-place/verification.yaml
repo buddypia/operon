@@ -1,0 +1,28 @@
+# The evidence for change 317: one test per requirement of spec.md, the
+# launch-sheet tests whose assertions moved from the macOS dialog to the
+# picker, and the mutation sweep.
+digest: "7d5ada03d4a6c7c3"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked folder_317_input_splits_into_a_folder_and_a_partial_name
+  - R2 empirical-test :: cargo test --locked folder_317_listing_holds_child_folders_only
+  - R3 empirical-test :: cargo test --locked folder_317_listing_stops_at_its_entry_limit
+  - R4 empirical-test :: cargo test --locked folder_317_listing_says_what_the_typed_path_is
+  - R5 empirical-test :: cargo test --locked folder_317_every_entry_opens_the_picker
+  - R6 empirical-test :: cargo test --locked folder_317_opening_a_typed_folder_adds_the_project
+  - R7 empirical-test :: cargo test --locked folder_317_the_launch_sheet_takes_the_typed_folder
+  - R8 empirical-test :: cargo test --locked folder_317_a_missing_folder_is_created_only_after_confirmation
+  - R9 empirical-test :: cargo test --locked folder_317_rows_descend_and_tab_completes
+  - R10 empirical-test :: cargo test --locked folder_317_a_stale_listing_is_not_shown
+  - R11 empirical-test :: cargo test --locked folder_317_cancel_changes_nothing
+  - R12 empirical-test :: cargo test --locked folder_317_finder_is_still_reachable
+  - R13 empirical-test :: cargo test --locked folder_317_a_relative_path_or_a_file_opens_nothing
+  - R14 empirical-test :: cargo test --locked folder_317_a_dropped_folder_fills_the_path
+  - R15 empirical-test :: cargo test --locked folder_317_opens_at_home_rather_than_in_a_guarded_folder
+  - R16 empirical-test :: cargo test --locked folder_317_opens_over_no_other_modal
+  - F1 empirical-test :: cargo test --locked folder_317_tab_on_a_bare_tilde_keeps_a_path
+  - F2 empirical-test :: cargo test --locked folder_317_a_path_that_cannot_be_checked_is_not_created
+  - F3 empirical-test :: cargo test --locked folder_317_an_ime_enter_does_not_open_the_folder
+  - I1 empirical-test :: cargo test --locked launch_294_
+  - I2 empirical-test :: cargo test --locked page_shortcuts_do_not_reach_past_the_launch_sheet
+  - I3 empirical-mutation :: python3 docs/sdlc/changes/317-a-project-folder-cannot-be-typed-or-browsed-in-one-place/mutations.py

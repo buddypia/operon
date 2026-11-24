@@ -36,7 +36,7 @@
 - A stored enum variant (`AppTheme`, `Language`, `TerminalFont`, `SessionStatus`) is never renamed or removed; a schema bump accompanies any variant an older build cannot read.
 - One process per data directory, and also one per legacy directory that exists; the lock is non-blocking and fails closed.
 - Legacy snapshots are only read, never changed, so the pre-rename build remains a rollback path.
-- Scan and output limits (8 MiB stdout, 256 KiB stderr per command; 64 KiB accounts and keymap files) are fixed constants in `src/config.rs`.
+- Scan and output limits (8 MiB stdout, 256 KiB stderr per command; 64 KiB accounts and keymap files; 5 000 directory entries per folder-picker listing) are fixed constants in `src/config.rs`.
 - A raw `.output()` is not used; every external tool has a timeout.
 
 ## Code and tests
@@ -49,7 +49,7 @@
 - `src/store.rs::acquire_instance_locks`, `acquire_instance_lock`, `lock_file_exclusively`, `InstanceLockError`: single-instance flock.
 - `src/store.rs::ToolStatus`: PATH-based tool detection without running anything.
 - `src/models.rs`: persisted `Project`, `Session`, `SessionStatus`, `OrphanedTmuxSession` and related types.
-- `src/config.rs::STORE_SCHEMA_VERSION`, `EVIDENCE_BASED_FAILURE_SCHEMA_VERSION`, `COMMAND_OUTPUT_MAX_BYTES`, `COMMAND_ERROR_MAX_BYTES`, `AGENT_ACCOUNTS_FILE_MAX_BYTES`, `KEYMAP_FILE_MAX_BYTES`: versions and ceilings.
+- `src/config.rs::STORE_SCHEMA_VERSION`, `EVIDENCE_BASED_FAILURE_SCHEMA_VERSION`, `COMMAND_OUTPUT_MAX_BYTES`, `COMMAND_ERROR_MAX_BYTES`, `AGENT_ACCOUNTS_FILE_MAX_BYTES`, `KEYMAP_FILE_MAX_BYTES`, `FOLDER_PICKER_ENTRY_LIMIT`: versions and ceilings.
 - `src/exec.rs::run_command_with_timeout`, `run_command_with_output_limit`, `run_command_cancellable`, `CommandCancelled`: bounded child processes.
 - `src/sys.rs::reveal_path`, `open_path`, `open_url`, `send_macos_notification`: platform calls.
 - `src/app.rs::retry_pending_store`, `apply_persist_result`, `scan_orphaned_tmux_sessions`, `adopt_orphaned_tmux_session`: retry and recovery actions.

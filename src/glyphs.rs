@@ -47,6 +47,8 @@ pub(crate) const ICON_FILE_MARKDOWN: &str = icons::FILE_MD;
 pub(crate) const ICON_FILE_CODE: &str = icons::FILE_CODE;
 pub(crate) const ICON_FOLDER_CLOSED: &str = icons::FOLDER;
 pub(crate) const ICON_FOLDER_OPEN: &str = icons::FOLDER_OPEN;
+/// The folder above the one listed, in the folder picker.
+pub(crate) const ICON_PARENT_FOLDER: &str = icons::ARROW_UP;
 pub(crate) const ICON_EDIT: &str = icons::PENCIL_SIMPLE;
 pub(crate) const ICON_PREVIEW: &str = icons::EYE;
 pub(crate) const ICON_DIFF: &str = icons::GIT_DIFF;
@@ -159,6 +161,7 @@ pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[
     ("ICON_FILE_CODE", ICON_FILE_CODE),
     ("ICON_FOLDER_CLOSED", ICON_FOLDER_CLOSED),
     ("ICON_FOLDER_OPEN", ICON_FOLDER_OPEN),
+    ("ICON_PARENT_FOLDER", ICON_PARENT_FOLDER),
     ("ICON_EDIT", ICON_EDIT),
     ("ICON_PREVIEW", ICON_PREVIEW),
     ("ICON_DIFF", ICON_DIFF),

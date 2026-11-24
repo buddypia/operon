@@ -460,7 +460,8 @@ Settings. The projects, sessions, and agent output in them are a demo.
   skips `.git`, `node_modules`, `target`, `.next`), files beyond 128 KiB open
   read-only up to 8 MiB, diff capture shares a fixed budget with explicit truncation
   notices, annotate reads at most 4 MiB of blame (past it the view says the
-  file is too large), the revision picker lists the newest 200 commits,
+  file is too large), the revision picker lists the newest 200 commits, the folder picker reads
+  at most 5,000 directory entries of one folder (and says when it stopped there),
   transcript search caps candidates, bytes, and lines, and the handoff
   archive sweep looks at 4,096 entries and 256 KiB of each manifest per pass. Use an
   external editor for a complete view of very large repositories.

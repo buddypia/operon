@@ -49946,9 +49946,8 @@ pub(crate) fn page_shortcuts_do_not_reach_past_the_launch_sheet() {
             "{name} opens no palette over the sheet"
         );
         // Adding a project selects it, and selecting one clears the request.
-        assert_ne!(
-            app.notice.as_deref(),
-            Some("choose_project_folder_invoked"),
+        assert!(
+            app.folder_picker.is_none(),
             "{name} opens no folder picker over the sheet"
         );
         assert!(app.launch_sheet_open);
@@ -86118,8 +86117,9 @@ pub(crate) fn launch_294_project_list_ends_with_new_project() {
         app.ui_launch_sheet(ctx)
     });
     assert_eq!(
-        app.notice.as_deref(),
-        Some("choose_launch_project_folder_invoked")
+        app.folder_picker.take().map(|picker| picker.target),
+        Some(FolderPickerTarget::LaunchSheet),
+        "the sheet's folder entry opens the in-app picker (change 317)"
     );
     assert!(
         app.launch_sheet_open,
@@ -86233,8 +86233,9 @@ pub(crate) fn launch_294_without_projects_the_sheet_opens_and_offers_a_folder() 
         .expect("the sheet offers choosing a folder");
     click_at(&context, choose.center(), |ctx| app.ui_launch_sheet(ctx));
     assert_eq!(
-        app.notice.as_deref(),
-        Some("choose_launch_project_folder_invoked")
+        app.folder_picker.take().map(|picker| picker.target),
+        Some(FolderPickerTarget::LaunchSheet),
+        "the sheet's folder entry opens the in-app picker (change 317)"
     );
 
     app.apply_launch_project_folder(Some(folder.clone()));
@@ -98178,4 +98179,858 @@ pub(crate) fn change_map_refuses_a_window_that_is_not_a_number() {
         map["flow"]["ways"][0]
     );
     let _ = fs::remove_dir_all(root);
+}
+
+/// Change 317: the fixture of the launch tests, and a folder beside its
+/// project to open.
+fn folder_317_fixture(label: &str) -> (OperonApp, PathBuf, PathBuf) {
+    let (app, _project, root) = launch_screen_fixture(label);
+    let root = root.canonicalize().unwrap();
+    let other = root.join("other");
+    fs::create_dir_all(&other).unwrap();
+    (app, root, other)
+}
+
+/// Waits for the background answer `done` looks for, as the frame loop does.
+fn folder_317_wait(app: &mut OperonApp, done: impl Fn(&OperonApp) -> bool) {
+    for _ in 0..500 {
+        app.process_background_results();
+        if done(app) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the folder picker's background answer did not arrive");
+}
+
+/// Types `text` and waits for its listing.
+fn folder_317_type(app: &mut OperonApp, text: &str) {
+    app.set_folder_picker_input(text.to_owned());
+    folder_317_wait(app, |app| {
+        app.folder_picker
+            .as_ref()
+            .is_some_and(|picker| picker.listing.is_some())
+    });
+}
+
+fn folder_317_input(app: &OperonApp) -> &str {
+    &app.folder_picker.as_ref().expect("the picker shows").input
+}
+
+/// One pass of the picker alone, at the 900×600 screen `click_at` uses.
+fn folder_317_frame(
+    app: &mut OperonApp,
+    context: &egui::Context,
+    events: Vec<egui::Event>,
+) -> egui::FullOutput {
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        events,
+        ..Default::default()
+    };
+    context.run_ui(input, |ctx| app.ui_folder_picker(ctx))
+}
+
+/// Two passes, so the sheet has its size, then the frame as drawn.
+fn folder_317_laid_out(app: &mut OperonApp, context: &egui::Context) -> egui::FullOutput {
+    let _ = folder_317_frame(app, context, vec![]);
+    let _ = folder_317_frame(app, context, vec![]);
+    folder_317_frame(app, context, vec![])
+}
+
+/// Change 317, R1: a typed path is a folder to list and a name being typed.
+#[test]
+pub(crate) fn folder_317_input_splits_into_a_folder_and_a_partial_name() {
+    let home = Some(Path::new("/Users/me"));
+    let split = |text: &str| split_folder_input(text, home);
+    let input = |dir: &str, partial: &str| {
+        Some(FolderInput {
+            dir: PathBuf::from(dir),
+            partial: partial.into(),
+        })
+    };
+    assert_eq!(split("~/dev/op"), input("/Users/me/dev", "op"));
+    assert_eq!(split("~/dev/"), input("/Users/me/dev", ""));
+    assert_eq!(split("~"), input("/Users/me", ""));
+    assert_eq!(split("~/"), input("/Users/me", ""));
+    assert_eq!(split("/a/b"), input("/a", "b"));
+    assert_eq!(split("/"), input("/", ""));
+    assert_eq!(split("/a/b").unwrap().typed(), PathBuf::from("/a/b"));
+    assert_eq!(split("/a/b/").unwrap().typed(), PathBuf::from("/a/b"));
+    for refused in ["", "dev/x", "~name", "~name/x", "./x", " /a"] {
+        assert_eq!(split(refused), None, "{refused:?} is not a path");
+    }
+    assert_eq!(split_folder_input("~/x", None), None, "no home, no ~");
+    assert_eq!(split_folder_input("/x", None), input("/", "x"));
+
+    assert_eq!(
+        folder_input_text(Path::new("/Users/me/dev"), home),
+        "~/dev/"
+    );
+    assert_eq!(folder_input_text(Path::new("/Users/me"), home), "~/");
+    assert_eq!(folder_input_text(Path::new("/opt/x"), home), "/opt/x/");
+    assert_eq!(folder_input_text(Path::new("/"), home), "/");
+    assert_eq!(
+        folder_input_text(Path::new("/Users/me/dev"), None),
+        "/Users/me/dev/"
+    );
+}
+
+/// Change 317, R2: folders only, sorted without case, hidden ones on request.
+#[test]
+pub(crate) fn folder_317_listing_holds_child_folders_only() {
+    let root = temporary_directory("folder-317-r2").canonicalize().unwrap();
+    for folder in ["beta", "Alpha", "apple", ".hidden"] {
+        fs::create_dir_all(root.join(folder)).unwrap();
+    }
+    fs::write(root.join("afile"), "x").unwrap();
+    std::os::unix::fs::symlink(root.join("beta"), root.join("alink")).unwrap();
+    std::os::unix::fs::symlink(root.join("afile"), root.join("aflink")).unwrap();
+    let names = |partial: &str| {
+        let text = format!("{}/{partial}", root.display());
+        list_folder(&text, None, FOLDER_PICKER_ENTRY_LIMIT)
+            .expect("an absolute path is listed")
+            .names
+    };
+    assert_eq!(names(""), ["alink", "Alpha", "apple", "beta"]);
+    assert_eq!(names("a"), ["alink", "Alpha", "apple"]);
+    assert_eq!(names("AL"), ["alink", "Alpha"]);
+    assert_eq!(names("b"), ["beta"]);
+    assert_eq!(names("."), [".hidden"]);
+    assert!(names("zz").is_empty());
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R3: the ceiling is on entries read, and is reported.
+#[test]
+pub(crate) fn folder_317_listing_stops_at_its_entry_limit() {
+    let root = temporary_directory("folder-317-r3").canonicalize().unwrap();
+    for index in 0..6 {
+        fs::create_dir_all(root.join(format!("d{index}"))).unwrap();
+    }
+    let text = format!("{}/", root.display());
+    let short = list_folder(&text, None, 3).unwrap();
+    assert!(short.truncated, "three of six entries is not the folder");
+    assert_eq!(short.names.len(), 3);
+    let whole = list_folder(&text, None, 6).unwrap();
+    assert!(!whole.truncated, "a folder read to its end is complete");
+    assert_eq!(whole.names.len(), 6);
+    // A folder the listing never reached still opens when typed in full.
+    for index in 0..6 {
+        let typed = list_folder(&format!("{text}d{index}"), None, 1).unwrap();
+        assert_eq!(typed.target, FolderTarget::Folder);
+        assert!(typed.truncated);
+    }
+    assert_eq!(FOLDER_PICKER_ENTRY_LIMIT, 5_000);
+
+    // The sheet says so under the rows it did read.
+    let (mut app, fixture, _other) = folder_317_fixture("folder-317-r3-sheet");
+    app.choose_project_folder();
+    app.set_folder_picker_input(text.clone());
+    app.finish_folder_listing(Some(short));
+    let said = tf!(
+        "項目が多いため、先頭の {count} 件だけを読みました。パスを最後まで入力すれば開けます。",
+        count = FOLDER_PICKER_ENTRY_LIMIT
+    );
+    assert!(said.contains("5000"));
+    assert_eq!(app.folder_picker.as_ref().unwrap().note, Some(said.clone()));
+    let context = egui::Context::default();
+    let frame = folder_317_laid_out(&mut app, &context);
+    assert!(drawn_text_rect(&frame, |drawn| drawn == said).is_some());
+    // From review: Tab does not complete from a listing that was cut short.
+    app.folder_picker_complete();
+    assert_eq!(folder_317_input(&app), text);
+    app.finish_folder_listing(Some(whole.clone()));
+    assert_eq!(app.folder_picker.as_ref().unwrap().note, None);
+    app.folder_picker_complete();
+    assert_eq!(folder_317_input(&app), format!("{text}d"));
+    fs::remove_dir_all(&fixture).ok();
+    let readme = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md"))
+        .expect("README.md is read");
+    assert!(
+        readme.contains("5,000 directory entries"),
+        "README.md states the folder picker's ceiling"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R4: the listing says what the typed path is.
+#[test]
+pub(crate) fn folder_317_listing_says_what_the_typed_path_is() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory("folder-317-r4").canonicalize().unwrap();
+    fs::create_dir_all(root.join("here")).unwrap();
+    fs::write(root.join("file.txt"), "x").unwrap();
+    let list = |rest: &str| list_folder(&format!("{}/{rest}", root.display()), None, 100).unwrap();
+    let here = list("here");
+    assert_eq!(here.target, FolderTarget::Folder);
+    assert_eq!(here.dir_state, FolderDirState::Listed);
+    assert_eq!(here.typed, root.join("here"));
+    assert_eq!(list("here/").target, FolderTarget::Folder);
+    let missing = list("nothing");
+    assert_eq!(missing.target, FolderTarget::Missing);
+    assert_eq!(missing.dir_state, FolderDirState::Listed);
+    let file = list("file.txt");
+    assert_eq!(file.target, FolderTarget::NotAFolder);
+    // From review: a path under a file is not a folder waiting to be made.
+    let under_a_file = list("file.txt/inside");
+    assert_eq!(under_a_file.target, FolderTarget::Unreadable);
+    assert_ne!(under_a_file.dir_state, FolderDirState::Listed);
+    let deep = list("no/such/place");
+    assert_eq!(deep.target, FolderTarget::Missing);
+    assert_eq!(deep.dir_state, FolderDirState::Missing);
+    assert!(deep.names.is_empty());
+
+    let locked = root.join("locked");
+    fs::create_dir_all(locked.join("inside")).unwrap();
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    // A process that may read anything (root) cannot see this state.
+    if fs::read_dir(&locked).is_err() {
+        let denied = list("locked/");
+        assert_eq!(denied.dir_state, FolderDirState::Unreadable);
+        assert_eq!(denied.target, FolderTarget::Folder);
+        assert!(denied.names.is_empty());
+    }
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R5: every way to a project's folder opens the picker, and
+/// none opens the macOS dialog.
+#[test]
+pub(crate) fn folder_317_every_entry_opens_the_picker() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-r5");
+    let opened = |app: &mut OperonApp, name: &str, target: FolderPickerTarget| {
+        let picker = app
+            .folder_picker
+            .take()
+            .unwrap_or_else(|| panic!("{name} opens the picker"));
+        assert_eq!(picker.target, target, "{name}");
+        assert_eq!(app.notice, None, "{name} opens no macOS dialog");
+    };
+    app.choose_project_folder();
+    opened(&mut app, "フォルダを選択…", FolderPickerTarget::Projects);
+
+    let context = egui::Context::default();
+    let input = egui::RawInput {
+        events: vec![
+            egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+            key_press(egui::Key::O, egui::Modifiers::COMMAND),
+        ],
+        ..Default::default()
+    };
+    let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
+    opened(&mut app, "⌘O", FolderPickerTarget::Projects);
+
+    app.command_palette_open = true;
+    app.activate_palette_entry(&PaletteKind::Action("Add a project"));
+    assert!(!app.command_palette_open);
+    opened(&mut app, "the palette", FolderPickerTarget::Projects);
+
+    app.launch_sheet_open = true;
+    app.apply_launch_project_pick(LaunchProjectPick::NewFolder);
+    opened(
+        &mut app,
+        "新しいプロジェクト…",
+        FolderPickerTarget::LaunchSheet,
+    );
+    app.choose_launch_project_folder();
+    opened(
+        &mut app,
+        "the sheet's フォルダを選択…",
+        FolderPickerTarget::LaunchSheet,
+    );
+
+    // The page's own buttons call the same entry.
+    let screens =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/app/screens.rs"))
+            .expect("screens.rs is read");
+    assert_eq!(screens.matches("self.choose_project_folder()").count(), 3);
+    for source in [
+        "src/app.rs",
+        "src/app/screens.rs",
+        "src/app/launch_projects.rs",
+    ] {
+        let text = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(source)).unwrap();
+        assert!(
+            !text.contains("プロジェクトフォルダを選択\"))\n                .pick_folder"),
+            "{source} opens the macOS dialog for a project by itself"
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R6: 「開く」 on a typed folder adds it, as the dialog did.
+#[test]
+pub(crate) fn folder_317_opening_a_typed_folder_adds_the_project() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-r6");
+    app.page = Page::Home;
+    app.choose_project_folder();
+    folder_317_type(&mut app, &other.display().to_string());
+    app.submit_folder_picker();
+
+    assert!(app.folder_picker.is_none(), "opening closes the picker");
+    assert_eq!(app.store.projects.len(), 2);
+    assert_eq!(
+        app.selected_project().map(|project| project.path.clone()),
+        Some(other.clone())
+    );
+    assert_eq!(app.page, Page::Projects);
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("プロジェクトを追加しました。"))
+    );
+
+    app.page = Page::Home;
+    app.choose_project_folder();
+    folder_317_type(&mut app, &format!("{}/", other.display()));
+    app.submit_folder_picker();
+    assert!(
+        app.folder_picker.is_none(),
+        "a registered folder closes it too"
+    );
+    assert_eq!(app.store.projects.len(), 2, "and is not added twice");
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("そのプロジェクトは追加済みのため、開きました。"))
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R7: from the launch sheet the folder becomes the sheet's
+/// project in place, and the sheet waits under the picker meanwhile.
+#[test]
+pub(crate) fn folder_317_the_launch_sheet_takes_the_typed_folder() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-r7");
+    app.page = Page::Home;
+    app.launch_sheet_open = true;
+    app.goal_input = "ログインを直す".into();
+    app.choose_launch_project_folder();
+    assert!(app.launch_sheet_open, "the sheet is still open");
+    assert!(
+        !app.launch_sheet_shows(),
+        "but is not drawn under the picker"
+    );
+
+    folder_317_type(&mut app, &other.display().to_string());
+    app.submit_folder_picker();
+
+    assert!(app.folder_picker.is_none());
+    assert!(app.launch_sheet_shows(), "the sheet is back");
+    assert_eq!(
+        app.selected_project().map(|project| project.path.clone()),
+        Some(other)
+    );
+    assert_eq!(app.page, Page::Home, "the page under the sheet stays");
+    assert_eq!(app.goal_input, "ログインを直す");
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R8: a missing folder is made only after the confirmation.
+#[test]
+pub(crate) fn folder_317_a_missing_folder_is_created_only_after_confirmation() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-r8");
+    let fresh = root.join("new").join("idea");
+    let text = fresh.display().to_string();
+    app.choose_project_folder();
+    folder_317_type(&mut app, &text);
+    let context = egui::Context::default();
+    let draws = |frame: &egui::FullOutput, words: &str| {
+        drawn_text_rect(frame, |drawn| drawn.contains(words)).is_some()
+    };
+    let frame = folder_317_laid_out(&mut app, &context);
+    assert!(draws(
+        &frame,
+        tr("このフォルダはまだありません。作成して開けます。")
+    ));
+    assert!(draws(&frame, tr("フォルダを作成…")));
+    assert!(
+        !draws(&frame, tr("作成して開く")),
+        "nothing is confirmed yet"
+    );
+
+    app.submit_folder_picker();
+    let frame = folder_317_laid_out(&mut app, &context);
+    assert!(draws(&frame, tr("作成して開く")));
+    assert!(draws(
+        &frame,
+        tr("途中のフォルダも、まだなければ作成します。")
+    ));
+    assert!(draws(&frame, tr("やめる")));
+    let picker = app.folder_picker.as_ref().expect("the picker asks first");
+    assert!(picker.question.as_deref().is_some_and(|question| {
+        question.contains("idea")
+            && question.ends_with(tr("を作成しますか？").trim_start_matches("「{path}」"))
+    }));
+    assert!(!picker.creating);
+    assert!(
+        !root.join("new").exists(),
+        "the first press creates nothing"
+    );
+
+    // Editing the path withdraws the question.
+    folder_317_type(&mut app, &format!("{text}x"));
+    assert_eq!(app.folder_picker.as_ref().unwrap().question, None);
+    app.confirm_folder_creation();
+    assert!(
+        !app.folder_picker.as_ref().unwrap().creating,
+        "nothing was asked"
+    );
+    assert!(!root.join("new").exists());
+
+    folder_317_type(&mut app, &text);
+    app.submit_folder_picker();
+    app.submit_folder_picker();
+    assert!(app.folder_picker.as_ref().unwrap().creating);
+    app.submit_folder_picker();
+    app.close_folder_picker();
+    assert!(
+        app.folder_picker.is_some(),
+        "the sheet waits for the folder being made"
+    );
+    folder_317_wait(&mut app, |app| app.folder_picker.is_none());
+
+    assert!(fresh.is_dir(), "the folder and its parents exist");
+    assert_eq!(fs::read_dir(&fresh).unwrap().count(), 0, "and it is empty");
+    assert_eq!(
+        app.selected_project().map(|project| project.path.clone()),
+        Some(fresh.canonicalize().unwrap())
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("プロジェクトを追加しました。"))
+    );
+
+    // A folder that cannot be made leaves the sheet open and says why.
+    app.choose_project_folder();
+    app.folder_picker.as_mut().unwrap().creating = true;
+    app.finish_folder_creation(root.join("nope"), Some("denied".into()));
+    let picker = app.folder_picker.as_ref().expect("the sheet stays");
+    assert!(!picker.creating);
+    assert_eq!(picker.question, None);
+    assert_eq!(
+        app.notice,
+        Some(tf!(
+            "「{path}」を作成できませんでした: {error}",
+            path = friendly_path(&root.join("nope")),
+            error = "denied"
+        ))
+    );
+    assert_eq!(app.store.projects.len(), 2);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R9: a row descends, the arrow goes up, Tab completes.
+#[test]
+pub(crate) fn folder_317_rows_descend_and_tab_completes() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-r9");
+    let tree = root.join("tree");
+    for folder in ["operon", "operon-site", "zeta"] {
+        fs::create_dir_all(tree.join(folder)).unwrap();
+    }
+    let at = |rest: &str| format!("{}/{rest}", tree.display());
+    let context = egui::Context::default();
+    let tab = || vec![key_press(egui::Key::Tab, egui::Modifiers::NONE)];
+    app.choose_project_folder();
+
+    folder_317_type(&mut app, &at("o"));
+    let _ = folder_317_laid_out(&mut app, &context);
+    let _ = folder_317_frame(&mut app, &context, tab());
+    assert_eq!(
+        folder_317_input(&app),
+        at("operon"),
+        "Tab goes as far as the names agree"
+    );
+    folder_317_wait(&mut app, |app| {
+        app.folder_picker.as_ref().unwrap().listing.is_some()
+    });
+    let _ = folder_317_frame(&mut app, &context, tab());
+    assert_eq!(folder_317_input(&app), at("operon"), "and no further");
+
+    folder_317_type(&mut app, &at("z"));
+    let _ = folder_317_frame(&mut app, &context, tab());
+    assert_eq!(
+        folder_317_input(&app),
+        at("zeta/"),
+        "one name left is closed with /"
+    );
+
+    folder_317_type(&mut app, &at(""));
+    let frame = folder_317_laid_out(&mut app, &context);
+    let row =
+        drawn_text_rect(&frame, |text| text.contains("operon-site")).expect("the folder is a row");
+    click_at(&context, row.center(), |ctx| app.ui_folder_picker(ctx));
+    assert_eq!(folder_317_input(&app), at("operon-site/"));
+
+    folder_317_wait(&mut app, |app| {
+        app.folder_picker.as_ref().unwrap().listing.is_some()
+    });
+    let frame = folder_317_laid_out(&mut app, &context);
+    let up = drawn_text_rect(&frame, |text| text == ICON_PARENT_FOLDER)
+        .expect("the sheet offers the folder above");
+    click_at(&context, up.center(), |ctx| app.ui_folder_picker(ctx));
+    assert_eq!(folder_317_input(&app), at(""));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R10: a listing for text no longer in the field is not shown.
+#[test]
+pub(crate) fn folder_317_a_stale_listing_is_not_shown() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-r10");
+    fs::create_dir_all(other.join("inside")).unwrap();
+    let old = format!("{}/", root.display());
+    let now = format!("{}/", other.display());
+    app.choose_project_folder();
+    folder_317_type(&mut app, &now);
+    // The field's text changed while the old text's listing was being read.
+    app.folder_picker.as_mut().unwrap().listing = None;
+    app.folder_picker.as_mut().unwrap().rows.clear();
+
+    app.finish_folder_listing(list_folder(&old, None, 100));
+    let picker = app.folder_picker.as_ref().unwrap();
+    assert_eq!(picker.listing, None, "the old folder is not shown");
+    assert!(picker.rows.is_empty());
+    assert!(
+        app.background_tasks.contains(&BackgroundKey::FolderListing),
+        "the field's own text is asked for"
+    );
+
+    app.finish_folder_listing(list_folder(&now, None, 100));
+    let picker = app.folder_picker.as_ref().unwrap();
+    assert_eq!(picker.rows.len(), 1);
+    assert!(picker.rows[0].ends_with("inside"));
+    assert!(!app.background_tasks.contains(&BackgroundKey::FolderListing));
+
+    app.folder_picker = None;
+    app.finish_folder_listing(list_folder(&now, None, 100));
+    assert!(app.folder_picker.is_none(), "a closed picker stays closed");
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R11: cancelling changes nothing and says nothing.
+#[test]
+pub(crate) fn folder_317_cancel_changes_nothing() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-r11");
+    let context = egui::Context::default();
+    let escape = || vec![key_press(egui::Key::Escape, egui::Modifiers::NONE)];
+    let missing = root.join("not-yet");
+
+    app.launch_sheet_open = true;
+    app.choose_launch_project_folder();
+    folder_317_type(&mut app, &missing.display().to_string());
+    app.submit_folder_picker();
+    assert!(app.folder_picker.as_ref().unwrap().question.is_some());
+    let _ = folder_317_frame(&mut app, &context, escape());
+    let picker = app
+        .folder_picker
+        .as_ref()
+        .expect("Esc first withdraws the question");
+    assert_eq!(picker.question, None);
+    let _ = folder_317_frame(&mut app, &context, escape());
+    assert!(app.folder_picker.is_none(), "then closes the picker");
+    assert!(app.launch_sheet_shows(), "and the sheet is back");
+
+    for close in [tr("キャンセル"), ICON_CLOSE] {
+        app.choose_project_folder();
+        let frame = folder_317_laid_out(&mut app, &context);
+        let button = drawn_text_rect(&frame, |text| text == close)
+            .unwrap_or_else(|| panic!("the sheet draws {close}"));
+        click_at(&context, button.center(), |ctx| app.ui_folder_picker(ctx));
+        assert!(app.folder_picker.is_none(), "{close} closes the picker");
+    }
+    assert_eq!(app.store.projects.len(), 1);
+    assert!(!missing.exists());
+    assert_eq!(app.notice, None);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R12: the macOS dialog is one button away.
+#[test]
+pub(crate) fn folder_317_finder_is_still_reachable() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-r12");
+    let context = egui::Context::default();
+    for (target, name) in [
+        (FolderPickerTarget::Projects, "Projects"),
+        (FolderPickerTarget::LaunchSheet, "LaunchSheet"),
+    ] {
+        app.open_folder_picker(target);
+        let frame = folder_317_laid_out(&mut app, &context);
+        let finder = drawn_text_rect(&frame, |text| text == tr("Finder で選ぶ…"))
+            .expect("the sheet offers Finder");
+        click_at(&context, finder.center(), |ctx| app.ui_folder_picker(ctx));
+        assert!(
+            app.folder_picker.is_none(),
+            "the picker gets out of the way"
+        );
+        assert_eq!(
+            app.notice.take(),
+            Some(format!("choose_folder_in_finder_invoked {name}"))
+        );
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R13: text that is not a path, and a file, open nothing.
+#[test]
+pub(crate) fn folder_317_a_relative_path_or_a_file_opens_nothing() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-r13");
+    let file = other.join("notes.txt");
+    fs::write(&file, "x").unwrap();
+    let context = egui::Context::default();
+    let enter = || vec![key_press(egui::Key::Enter, egui::Modifiers::NONE)];
+    app.choose_project_folder();
+    folder_317_type(&mut app, &format!("{}/", root.display()));
+
+    for refused in ["other/new", "~someone/x", ""] {
+        app.set_folder_picker_input(refused.to_owned());
+        let picker = app.folder_picker.as_ref().unwrap();
+        assert!(picker.refused, "{refused:?} is refused");
+        assert!(
+            !app.background_tasks.contains(&BackgroundKey::FolderListing),
+            "no listing is asked for {refused:?}"
+        );
+        app.submit_folder_picker();
+        let _ = folder_317_frame(&mut app, &context, enter());
+        let frame = folder_317_laid_out(&mut app, &context);
+        assert!(app.folder_picker.as_ref().unwrap().question.is_none());
+        assert!(
+            drawn_text_rect(&frame, |text| text
+                == tr("/ または ~ で始まるパスを入力してください。"))
+            .is_some(),
+            "the sheet says what a path looks like"
+        );
+        assert!(
+            drawn_text_rect(&frame, |text| text == tr("読み込み中…")).is_none(),
+            "and does not pretend to be reading"
+        );
+    }
+
+    folder_317_type(&mut app, &file.display().to_string());
+    app.submit_folder_picker();
+    let _ = folder_317_frame(&mut app, &context, enter());
+    let picker = app
+        .folder_picker
+        .as_ref()
+        .expect("a file leaves the picker open");
+    assert_eq!(picker.question, None);
+    assert!(!picker.creating);
+    assert_eq!(app.store.projects.len(), 1);
+    assert!(!root.join("other").join("new").exists());
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R14: a dropped folder is typed, not opened.
+#[test]
+pub(crate) fn folder_317_a_dropped_folder_fills_the_path() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-r14");
+    let later = root.join("later");
+    fs::create_dir_all(&later).unwrap();
+    app.launch_sheet_open = true;
+    app.choose_launch_project_folder();
+    app.route_dropped_folders(vec![dropped_file(other.clone()), dropped_file(later)]);
+
+    let picker = app.folder_picker.as_ref().expect("the picker still shows");
+    assert_eq!(
+        picker.input,
+        folder_input_text(&other, picker.home.as_deref())
+    );
+    assert!(picker.input.ends_with('/'));
+    assert_eq!(
+        app.store.projects.len(),
+        1,
+        "nothing is registered by the drop"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, R15: the picker never opens inside a folder macOS guards.
+#[test]
+pub(crate) fn folder_317_opens_at_home_rather_than_in_a_guarded_folder() {
+    let home = Some(Path::new("/Users/me"));
+    let project = |path: &str, added_at: u64| Project {
+        id: Uuid::new_v4(),
+        name: "p".into(),
+        path: PathBuf::from(path),
+        added_at,
+    };
+    assert_eq!(folder_picker_start(&[], home), "~/");
+    assert_eq!(folder_picker_start(&[], None), "/");
+    assert_eq!(
+        folder_picker_start(&[project("/Users/me/dev/app", 1)], home),
+        "~/dev/"
+    );
+    assert_eq!(
+        folder_picker_start(
+            &[project("/Users/me/dev/app", 5), project("/opt/work/b", 2)],
+            home
+        ),
+        "~/dev/",
+        "the newest project decides"
+    );
+    for guarded in [
+        "/Users/me/Documents/app",
+        "/Users/me/Desktop/deep/app",
+        "/Users/me/downloads/app",
+        "/Volumes/Disk/app",
+    ] {
+        assert_eq!(
+            folder_picker_start(&[project(guarded, 1)], home),
+            "~/",
+            "{guarded}"
+        );
+    }
+}
+
+/// Change 317, R16: the picker opens over no other modal.
+#[test]
+pub(crate) fn folder_317_opens_over_no_other_modal() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-r16");
+    app.launch_progress = Some(LaunchProgress {
+        session_id: Uuid::new_v4(),
+        project_name: "repo".into(),
+        worktree_path: root.clone(),
+        agent: "claude".into(),
+        agent_command: "claude".into(),
+        goal: String::new(),
+        started_at: Instant::now(),
+        failure: None,
+        dismissed: false,
+    });
+    app.choose_project_folder();
+    assert!(
+        app.folder_picker.is_none(),
+        "a launch in progress owns the window"
+    );
+    app.launch_progress.as_mut().unwrap().dismissed = true;
+    app.choose_project_folder();
+    assert!(app.folder_picker.is_some(), "a dismissed one does not");
+    app.folder_picker = None;
+    app.launch_progress = None;
+
+    app.command_palette_open = true;
+    app.command_search = "add".into();
+    app.choose_project_folder();
+    assert!(app.folder_picker.is_some());
+    assert!(!app.command_palette_open, "the palette closes first");
+
+    // While it shows, the page shortcuts and ⌘K do nothing.
+    app.page = Page::Home;
+    let context = egui::Context::default();
+    for key in [egui::Key::Num2, egui::Key::K, egui::Key::O] {
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::COMMAND),
+                key_press(key, egui::Modifiers::COMMAND),
+            ],
+            ..Default::default()
+        };
+        let _ = context.run_ui(input, |ctx| app.handle_app_shortcuts(ctx));
+        assert_eq!(app.page, Page::Home);
+        assert!(!app.command_palette_open);
+        assert!(app.folder_picker.is_some());
+    }
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, F1 (empirical-verifier): Tab on a bare `~` wrote `~name/`,
+/// which is another person's home and not a path.
+#[test]
+pub(crate) fn folder_317_tab_on_a_bare_tilde_keeps_a_path() {
+    let (mut app, root, _other) = folder_317_fixture("folder-317-f1");
+    let context = egui::Context::default();
+    app.choose_project_folder();
+    let home = root.join("solo-home");
+    fs::create_dir_all(home.join("only-child")).unwrap();
+    app.folder_picker.as_mut().unwrap().home = Some(home.clone());
+    folder_317_type(&mut app, "~");
+    let _ = folder_317_laid_out(&mut app, &context);
+    let _ = folder_317_frame(
+        &mut app,
+        &context,
+        vec![key_press(egui::Key::Tab, egui::Modifiers::NONE)],
+    );
+    assert_eq!(folder_317_input(&app), "~/only-child/");
+    assert!(split_folder_input(folder_317_input(&app), Some(&home)).is_some());
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, F2 (review): a path the disk will not answer for is not
+/// offered for creation, and the sheet says so.
+#[test]
+pub(crate) fn folder_317_a_path_that_cannot_be_checked_is_not_created() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-f2");
+    fs::write(other.join("notes.txt"), "x").unwrap();
+    let context = egui::Context::default();
+    app.choose_project_folder();
+    folder_317_type(&mut app, &other.join("notes.txt/new").display().to_string());
+    app.submit_folder_picker();
+    let picker = app.folder_picker.as_ref().expect("the picker stays");
+    assert_eq!(picker.question, None, "creation is not offered");
+    let frame = folder_317_laid_out(&mut app, &context);
+    assert!(drawn_text_rect(&frame, |text| text == tr("このパスは確認できません。")).is_some());
+    assert!(
+        drawn_text_rect(&frame, |text| text.contains(tr("フォルダを作成…"))).is_none(),
+        "the button does not offer to make it"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 317, F3 (review): the Enter that confirms a Japanese conversion is
+/// the IME's, not a request to open the folder; the next Enter is.
+#[test]
+pub(crate) fn folder_317_an_ime_enter_does_not_open_the_folder() {
+    let (mut app, root, other) = folder_317_fixture("folder-317-f3");
+    let context = egui::Context::default();
+    let enter = || key_press(egui::Key::Enter, egui::Modifiers::NONE);
+    app.choose_project_folder();
+    folder_317_type(&mut app, &format!("{}/", other.display()));
+    let _ = folder_317_laid_out(&mut app, &context);
+
+    let preedit = egui::Event::Ime(egui::ImeEvent::Preedit {
+        text: "にほん".into(),
+        active_range_chars: None,
+    });
+    let _ = folder_317_frame(&mut app, &context, vec![preedit]);
+    // The listing for whatever the field now holds is back, as it is within
+    // a moment in the application: an Enter taken for the person's would act.
+    folder_317_wait(&mut app, |app| {
+        app.folder_picker
+            .as_ref()
+            .is_some_and(|picker| picker.listing.is_some())
+    });
+    let _ = folder_317_frame(&mut app, &context, vec![enter()]);
+    let picker = app
+        .folder_picker
+        .as_ref()
+        .expect("Enter in a conversion is the IME's");
+    assert_eq!(picker.question, None, "and asks to create nothing");
+    let _ = folder_317_frame(
+        &mut app,
+        &context,
+        vec![
+            key_press(egui::Key::Escape, egui::Modifiers::NONE),
+            key_press(egui::Key::Tab, egui::Modifiers::NONE),
+        ],
+    );
+    assert!(app.folder_picker.is_some(), "and so are Esc and Tab");
+
+    let commit = egui::Event::Ime(egui::ImeEvent::Commit("日本".into()));
+    let _ = folder_317_frame(&mut app, &context, vec![commit, enter()]);
+    assert!(
+        app.folder_picker.is_some(),
+        "the Enter that confirms the conversion opens nothing"
+    );
+    assert_eq!(app.store.projects.len(), 1);
+
+    folder_317_type(&mut app, &format!("{}/", other.display()));
+    let _ = folder_317_frame(&mut app, &context, vec![enter()]);
+    assert!(
+        app.folder_picker.is_none(),
+        "a plain Enter opens the folder"
+    );
+    assert_eq!(app.store.projects.len(), 2);
+    fs::remove_dir_all(&root).ok();
 }

@@ -128,7 +128,7 @@ features:
     screen: projects
     domain: code
     summary: 手元のフォルダをプロジェクトとして追加・スキャン・削除し、一覧から開く。初回は不足している準備を案内する。
-    paths: src/app/launch_projects.rs src/models.rs src/app/screens.rs src/app.rs
+    paths: src/app/folder_picker.rs src/app/launch_projects.rs src/models.rs src/app/screens.rs src/app.rs
     keywords: project projects プロジェクト scan add onboarding first-launch
     manual: プロジェクトを追加する
 

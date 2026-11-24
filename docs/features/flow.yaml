@@ -204,6 +204,14 @@ screens:
     reach: 新しいセッション
     image: 06-new-session.png
 
+  - id: folder-picker
+    title: プロジェクトフォルダを開く
+    kind: sheet
+    screen: projects
+    features: project-list new-session
+    reach: プロジェクト; フォルダを選択…
+    note: パスの入力とフォルダの一覧。まだ無いフォルダは確認のうえ作る。
+
   - id: palette
     title: 検索・操作
     kind: overlay
@@ -290,6 +298,21 @@ ways:
     to: project-overview
     click: プロジェクトの行
     note: 行を押すとそのプロジェクトの概要タブが開く。
+
+  - from: projects
+    to: folder-picker
+    key: project.add
+    label: フォルダを選択…
+
+  - from: new-session
+    to: folder-picker
+    label: 新しいプロジェクト…
+    unseen: プロジェクトの一覧を開いたときだけ出る。
+
+  - from: folder-picker
+    to: project-overview
+    label: 開く
+    note: 入力欄のフォルダをプロジェクトとして追加し、概要タブを開く。新しいセッションから開いたときはシートに戻る。
 
   - from: new-session
     to: terminal-group
