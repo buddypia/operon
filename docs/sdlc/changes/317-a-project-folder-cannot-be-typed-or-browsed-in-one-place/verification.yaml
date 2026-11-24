@@ -26,3 +26,5 @@ obligations:
   - I1 empirical-test :: cargo test --locked launch_294_
   - I2 empirical-test :: cargo test --locked page_shortcuts_do_not_reach_past_the_launch_sheet
   - I3 empirical-mutation :: python3 docs/sdlc/changes/317-a-project-folder-cannot-be-typed-or-browsed-in-one-place/mutations.py
+  - I4 empirical-mutation :: python3 docs/sdlc/changes/317-a-project-folder-cannot-be-typed-or-browsed-in-one-place/mutations_2.py
+  - I5 empirical-mutation :: python3 docs/sdlc/changes/317-a-project-folder-cannot-be-typed-or-browsed-in-one-place/mutations_3.py
