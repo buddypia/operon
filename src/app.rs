@@ -5,6 +5,7 @@ pub(crate) mod broadcast;
 pub(crate) mod compare;
 pub(crate) use compare::*;
 pub(crate) mod dock_badge;
+pub(crate) mod folder_picker;
 mod keymap;
 pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
@@ -20,6 +21,7 @@ pub(crate) mod working_time;
 
 // The keyboard is data this module reads and `screens.rs` draws, so it is
 // reachable by symbol name from anywhere the way every other module's is.
+pub(crate) use folder_picker::*;
 pub(crate) use keymap::*;
 pub(crate) use knowledge::*;
 pub(crate) use launch_projects::*;
@@ -59,6 +61,9 @@ pub(crate) struct PromptTurn {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum BackgroundKey {
     WorkspaceScan,
+    /// Change 317: the folder picker's listing, and the folder it makes.
+    FolderListing,
+    FolderCreate,
     GitChanges(Uuid),
     GitDiff(Uuid, Option<String>),
     GitHistory(Uuid),
@@ -162,6 +167,11 @@ pub(crate) enum BackgroundResult {
         workspace: PathBuf,
         repositories: Vec<PathBuf>,
         truncated: bool,
+    },
+    FolderListing(Option<FolderListing>),
+    FolderCreated {
+        path: PathBuf,
+        error: Option<String>,
     },
     GitChanges {
         project_id: Uuid,
@@ -715,6 +725,8 @@ pub(crate) struct OperonApp {
     pub(crate) agent_snapshot_writer: Option<agent_snapshot::AgentSnapshotWriter>,
     /// The sheet that sends one instruction to every idle agent (change 282).
     pub(crate) broadcast_sheet: Option<broadcast::BroadcastSheet>,
+    /// The in-app folder picker, while it shows (change 317).
+    pub(crate) folder_picker: Option<FolderPicker>,
     /// The reply being typed on each 要対応 row (change 279); never stored.
     pub(crate) waiting_reply_drafts: HashMap<Uuid, String>,
     /// The same sessions, longest-waiting first. Rebuilt only when someone
@@ -1259,6 +1271,7 @@ impl OperonApp {
             agent_snapshot_written: None,
             agent_snapshot_writer: None,
             broadcast_sheet: None,
+            folder_picker: None,
             waiting_reply_drafts: HashMap::new(),
             attention_order: Vec::new(),
             terminal_focus_request: None,
@@ -1711,6 +1724,10 @@ impl OperonApp {
                 } => {
                     self.background_tasks.remove(&BackgroundKey::WorkspaceScan);
                     self.finish_workspace_import(workspace, repositories, truncated);
+                }
+                BackgroundResult::FolderListing(listing) => self.finish_folder_listing(listing),
+                BackgroundResult::FolderCreated { path, error } => {
+                    self.finish_folder_creation(path, error);
                 }
                 BackgroundResult::GitChanges { project_id, result } => {
                     self.background_tasks
@@ -4471,49 +4488,6 @@ impl OperonApp {
         self.project_tab = ProjectTab::Overview;
         self.notice = Some(tr("プロジェクトを追加しました。").into());
         ProjectAddition::Added
-    }
-
-    pub(crate) fn add_project(&mut self) {
-        let path = PathBuf::from(self.project_path_input.trim());
-        self.add_project_path(path);
-    }
-
-    pub(crate) fn choose_project_folder(&mut self) {
-        #[cfg(not(test))]
-        {
-            let selection = rfd::FileDialog::new()
-                .set_title(tr("プロジェクトフォルダを選択"))
-                .pick_folder();
-            self.apply_project_folder_choice(selection);
-        }
-        #[cfg(test)]
-        {
-            self.notice = Some("choose_project_folder_invoked".into());
-        }
-    }
-
-    pub(crate) fn apply_project_folder_choice(&mut self, selection: Option<PathBuf>) {
-        if let Some(path) = selection {
-            self.add_project_path(path);
-        } else {
-            self.notice = Some(tr("プロジェクトの選択をキャンセルしました。").into());
-        }
-    }
-
-    pub(crate) fn choose_workspace_folder(&mut self) {
-        let selection = rfd::FileDialog::new()
-            .set_title(tr("スキャンするワークスペースを選択"))
-            .pick_folder();
-        self.apply_workspace_folder_choice(selection);
-    }
-
-    pub(crate) fn apply_workspace_folder_choice(&mut self, selection: Option<PathBuf>) {
-        if let Some(path) = selection {
-            self.workspace_scan_input = path.display().to_string();
-            self.import_workspace();
-        } else {
-            self.notice = Some(tr("ワークスペースの選択をキャンセルしました。").into());
-        }
     }
 
     pub(crate) fn add_dropped_folders(&mut self, dropped: Vec<egui::DroppedFileHandle>) {
@@ -7577,6 +7551,7 @@ impl eframe::App for OperonApp {
         self.ui_brief_notice_toast(ctx, palette);
         self.ui_command_palette(ctx);
         self.ui_launch_sheet(ctx);
+        self.ui_folder_picker(ctx);
         self.ui_broadcast_sheet(ctx);
         self.ui_restore_modal(ctx);
         self.ui_launch_modal(ctx);

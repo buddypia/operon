@@ -152,6 +152,9 @@ pub(crate) const PANE_MIN_W: f32 = 320.0;
 /// Least height of one terminal among several, header included.
 pub(crate) const PANE_MIN_H: f32 = 200.0;
 pub(crate) const FILE_SCAN_VISIT_LIMIT: usize = 100_000;
+/// The most directory entries one listing in the folder picker reads (change
+/// 317). A folder with more is shown as far as it was read, and says so.
+pub(crate) const FOLDER_PICKER_ENTRY_LIMIT: usize = 5_000;
 pub(crate) const DIRECTORY_ENTRY_BUFFER_LIMIT: usize = 10_000;
 pub(crate) const COMMAND_OUTPUT_MAX_BYTES: usize = 8 * 1024 * 1024;
 pub(crate) const COMMAND_ERROR_MAX_BYTES: usize = 256 * 1024;

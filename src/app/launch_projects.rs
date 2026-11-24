@@ -109,20 +109,10 @@ impl OperonApp {
         Ok(RegisteredProject::New(project_id))
     }
 
-    /// The sheet's 「新しいプロジェクト…」 and 「フォルダを選択…」: the folder
-    /// picker, called after the sheet has drawn, never inside it.
+    /// The sheet's 「新しいプロジェクト…」 and 「フォルダを選択…」: the in-app
+    /// folder picker (change 317), which takes the sheet's place while it shows.
     pub(crate) fn choose_launch_project_folder(&mut self) {
-        #[cfg(not(test))]
-        {
-            let selection = rfd::FileDialog::new()
-                .set_title(tr("プロジェクトフォルダを選択"))
-                .pick_folder();
-            self.apply_launch_project_folder(selection);
-        }
-        #[cfg(test)]
-        {
-            self.notice = Some("choose_launch_project_folder_invoked".into());
-        }
+        self.open_folder_picker(FolderPickerTarget::LaunchSheet);
     }
 
     /// A cancelled picker changes nothing and says nothing.
@@ -145,6 +135,7 @@ impl OperonApp {
     /// it shows.
     pub(crate) fn launch_sheet_shows(&self) -> bool {
         self.launch_sheet_open
+            && self.folder_picker.is_none()
             && self.launch_progress.as_ref().is_none_or(|p| p.dismissed)
             && self.restore_progress.is_none()
     }
@@ -152,6 +143,10 @@ impl OperonApp {
     /// Dropped folders: the sheet's while it shows, the projects page's
     /// otherwise.
     pub(crate) fn route_dropped_folders(&mut self, dropped: Vec<egui::DroppedFileHandle>) {
+        if self.folder_picker.is_some() {
+            self.fill_folder_picker_from_drop(&dropped);
+            return;
+        }
         if !self.launch_sheet_shows() {
             self.add_dropped_folders(dropped);
             return;

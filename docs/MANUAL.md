@@ -127,8 +127,15 @@ button, and — when available — the Claude usage indicator.
 
 ### Add a project
 
-On the **Project** page choose **Choose a project folder…** (⌘O), or drag a
-folder from Finder into the window. **Scan a workspace…** imports every Git
+On the **Project** page choose **Choose a project folder…** (⌘O) to open the
+**Open a project folder** sheet. Type a path (`~` works) and the folders that
+match are listed below; click a row to go into that folder, ↑ to go to the
+folder above. Tab completes a name and **Open** (Enter) adds the folder. A path
+that does not exist yet turns the button into **Create folder…**, which asks
+once and then creates an empty folder and adds it. **Choose in Finder…** opens
+the macOS dialog instead. The same sheet opens from **New project…** in the
+**New Session** sheet. Dragging a folder from Finder into the window also adds
+it. **Scan a workspace…** imports every Git
 repository found up to three levels below a folder. **パスを手入力** (Enter a
 path manually) lets you type an absolute path.
 

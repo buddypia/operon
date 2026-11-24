@@ -44,7 +44,7 @@ domains:
     owns: プロジェクトの追加・一覧・概要とエージェント設定タブ、Git の状態と diff、選んだ変更のコミット、diff へのメモと比較、worktree とセットアップスクリプト、チェックポイント、使用中のポート、ファイルツリーと内蔵エディタ、Markdown と画像の表示、構文の色付け。
     excludes: プロジェクトでセッションを始める操作はエージェント連携、セッションのターミナルに出たパスを開く仕組みはセッション、知識の抽出と検索はナレッジが担当する。
     adjacent: sessions agents knowledge shell data
-    modules: src/git.rs src/git/comments.rs src/git/setup.rs src/git/ports.rs src/app/compare.rs src/files.rs src/markdown.rs src/ui/diff.rs src/ui/files.rs src/ui/syntax.rs src/ui/markdown_view.rs
+    modules: src/app/folder_picker.rs src/git.rs src/git/comments.rs src/git/setup.rs src/git/ports.rs src/app/compare.rs src/files.rs src/markdown.rs src/ui/diff.rs src/ui/files.rs src/ui/syntax.rs src/ui/markdown_view.rs
 
   - id: knowledge
     title: ナレッジ

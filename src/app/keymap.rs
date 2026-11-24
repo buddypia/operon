@@ -144,7 +144,9 @@ impl OperonApp {
         // would throw the request away, so neither is live while it is open.
         // The sheet that sends to idle agents holds a line being typed too
         // (change 282).
-        let sheet_open = self.launch_sheet_open || self.broadcast_sheet.is_some();
+        let sheet_open = self.launch_sheet_open
+            || self.broadcast_sheet.is_some()
+            || self.folder_picker.is_some();
         if !sheet_open && self.chord_pressed(ctx, "palette.open") {
             self.open_command_palette();
         }

@@ -2,7 +2,7 @@
 
 ## Behaviour
 1. The Projects page (`Page::Projects`, no project selected) draws `ui_projects`. With `store.projects` empty it is the first-run view: heading 「まずはプロジェクトを開いてください」, the buttons 「プロジェクトフォルダを選択…」 and 「ワークスペースをスキャン…」, a drag hint, and a checklist 「最初のセッションを始める前に」 with two rows (tmux; at least one coding agent among Codex, Claude, Antigravity). When either is missing a 「セットアップ手順を開く」 button goes to Settings → Agents. Pinned by `starts_with_onboarding_until_a_project_exists`.
-2. With projects, the page header 「プロジェクト」 carries 「フォルダを選択…」 (primary-chord ⌘O) and 「ワークスペースをスキャン…」. Cards are listed newest-added first (`added_at` descending). Each card shows the name and the home-abbreviated path.
+2. With projects, the page header 「プロジェクト」 carries 「フォルダを選択…」 (primary-chord ⌘O) and 「ワークスペースをスキャン…」. 「フォルダを選択…」, the first-run 「プロジェクトフォルダを選択…」, ⌘O and the palette's project action open the folder picker (behaviour 14), not the macOS dialog. Cards are listed newest-added first (`added_at` descending). Each card shows the name and the home-abbreviated path. Pinned by `folder_317_every_entry_opens_the_picker`.
 3. Clicking a card calls `select_project(Some(id))` and sets `project_tab = ProjectTab::Overview`.
 4. A card has two icon buttons (「Finder で表示」, 「プロジェクトを削除」) and the same two entries in its context menu.
 5. Choosing delete sets `pending_project_removal`; that row is replaced by a danger-bordered card 「「{name}」を Operon から削除しますか？」 with 「記録だけを削除します。ファイル・ブランチ・worktree は残ります。」, 「Operon から削除」 and 「キャンセル」. The same confirmation appears on the opened project's page header via 「削除…」. Pinned by `the_project_list_offers_inline_deletion_and_confirmation`.
@@ -14,11 +14,22 @@
 11. `remove_project` deletes the project, its session records, native-session references and CLI handoffs from the store, then persists. It never touches files, branches or worktrees on disk. Selection and caches that referenced the project are cleared. Pinned by `test_remove_project_cleans_session_selection_and_path_cache`, `project_removal_waits_for_an_inflight_worktree_mutation`.
 12. The launch sheet (「新しいセッション」) shares `register_project_folder` for its 「新しいプロジェクト…」/「フォルダを選択…」 entries and for dropped folders; it neither navigates nor opens the project page (`launch_projects`).
 13. Project tabs, in order, with labels: 「概要」, 「変更」, 「worktree」, 「PR」, 「ファイル」, 「エージェント設定」, 「ナレッジ」 (`ProjectTab::all`). Counts on 変更, worktree, PR and ナレッジ come from caches only. Pinned by `the_project_page_has_six_tabs`, `tab_counts_come_from_the_caches`.
+14. The folder picker (`ui_folder_picker`, sheet 「プロジェクトフォルダを開く」, change 317) holds a path field, a location row with 「上のフォルダへ」, and the child folders of the folder the text points into. Text ending in `/` lists that folder; otherwise the last component is a partial name and the parent's folders that start with it (ignoring case) are listed. Only `/…`, `~` and `~/…` are paths. Names starting with `.` show only when the partial starts with `.`; a symlink to a folder is listed. A row click makes that folder the text; Tab extends the partial to what the matches share and closes a sole match with `/`. Pinned by `folder_317_input_splits_into_a_folder_and_a_partial_name`, `folder_317_listing_holds_child_folders_only`, `folder_317_rows_descend_and_tab_completes`.
+15. In the picker, 「開く」 (Enter) on an existing folder registers it as behaviour 7 does and closes the picker. On a path that does not exist the button is 「フォルダを作成…」: it asks 「「{path}」を作成しますか？」, and only 「作成して開く」 makes the folder and its missing parents (on a background thread, the sheet showing 「作成中…」) and registers it. 「Finder で選ぶ…」 opens the macOS dialog instead; 「キャンセル」, ✕ and Esc close with no notice. A folder dropped while the picker shows becomes its text. Pinned by `folder_317_opening_a_typed_folder_adds_the_project`, `folder_317_a_missing_folder_is_created_only_after_confirmation`, `folder_317_finder_is_still_reachable`, `folder_317_cancel_changes_nothing`, `folder_317_a_dropped_folder_fills_the_path`.
+16. The picker opens beside the most recently added project, or at `~/` when there is none or macOS guards that folder; it does not open while a launch or restore progress modal shows. Pinned by `folder_317_opens_at_home_rather_than_in_a_guarded_folder`, `folder_317_opens_over_no_other_modal`.
 
 ## States
 - Empty: first-run view above; the manual-entry group is still offered.
 - Not a folder: 「既存のフォルダを選んでください。」 and nothing is added.
-- Picker cancelled: 「プロジェクトの選択をキャンセルしました。」 / 「ワークスペースの選択をキャンセルしました。」.
+- macOS dialog cancelled (workspace scan, or a project through 「Finder で選ぶ…」): 「ワークスペースの選択をキャンセルしました。」 / 「プロジェクトの選択をキャンセルしました。」. The in-app picker cancelled: nothing is said.
+- Picker, text that is not a path: 「/ または ~ で始まるパスを入力してください。」, no listing asked, primary off. A file: 「これはフォルダではありません。」, primary off. Pinned by `folder_317_a_relative_path_or_a_file_opens_nothing`.
+- Picker, listing not back: 「読み込み中…」. No child folder: 「フォルダはありません。」 or 「一致するフォルダはありません。」. Denied: 「このフォルダは読み取れません。」. Listed folder missing: 「この場所はまだありません。」. Pinned by `folder_317_listing_says_what_the_typed_path_is`.
+- Picker, a folder with more than 5 000 entries: the rows read so far and 「項目が多いため、先頭の {count} 件だけを読みました。パスを最後まで入力すれば開けます。」. Pinned by `folder_317_listing_stops_at_its_entry_limit`.
+- Picker, a listing for text no longer in the field is dropped and the current text asked. Pinned by `folder_317_a_stale_listing_is_not_shown`.
+- Folder cannot be created: 「「{path}」を作成できませんでした: {error}」, the picker stays open, nothing is registered.
+- Picker, a path the disk will not answer for (under a file, or under a folder that may not be looked into): 「このパスは確認できません。」, primary off, creation not offered. Pinned by `folder_317_a_path_that_cannot_be_checked_is_not_created`.
+- Picker, Japanese input: while a conversion is open Enter, Esc and Tab are the IME's, and the Enter that confirms it opens nothing. Pinned by `folder_317_an_ime_enter_does_not_open_the_folder`.
+- Picker, Tab on `~` completes under the home folder (`~/name/`), and does nothing on a listing cut at the ceiling. Pinned by `folder_317_tab_on_a_bare_tilde_keeps_a_path`.
 - Scan already running: 「ワークスペースのスキャンは実行中です。」.
 - Scan found nothing: 「3 階層以内に新しい Git リポジトリは見つかりませんでした。」; when also truncated, a variant asking to narrow the folder.
 - Scan truncated with results: the import notice adds that some folders may have been omitted.
@@ -27,7 +38,8 @@
 - Persist failure on add, import or remove: the in-memory store is restored to its previous value.
 
 ## Invariants
-- Adding or removing a project never writes to the project folder.
+- Adding or removing a project never writes inside a project folder. A folder that does not exist is created, empty, only after the person confirms in the picker (change 317).
+- The picker reads the disk only on background threads (`list_folder`, at most `FOLDER_PICKER_ENTRY_LIMIT` = 5 000 entries of one folder, never recursive) and lists a macOS-guarded folder only when the person typed or clicked into it.
 - Two projects never share a canonical path.
 - The workspace scan depth is 3 and its visit budget is `FILE_SCAN_VISIT_LIMIT` (100 000 directory entries); it never follows symlinks.
 - Folder pickers are not opened from inside a draw pass on the launch sheet; the choice is applied the next frame.
@@ -41,6 +53,10 @@
     click プロジェクト
     see verify-demo
     shot projects
+    click フォルダを選択…
+    see プロジェクトフォルダを開く
+    see Finder で選ぶ…
+    shot folder-picker
 
 ## Code and tests
 - Symbols:
@@ -51,6 +67,8 @@
 - `src/app.rs::remove_project`: guarded removal of a project's records.
 - `src/app.rs::ProjectTab`: tab order, labels, `project_tab_count`.
 - `src/app/launch_projects.rs::register_project_folder`: shared folder registration (`RegisteredProject`).
+- `src/app/folder_picker.rs::ui_folder_picker`: the picker sheet; `list_folder`, `split_folder_input`, `folder_completion`, `folder_picker_start` are its pure parts; `submit_folder_picker` and `confirm_folder_creation` its two presses.
+- `src/config.rs::FOLDER_PICKER_ENTRY_LIMIT`: listing ceiling.
 - `src/git.rs::scan_git_repositories_with_limit`: the bounded repository walk.
 - `src/models.rs::Project`: persisted project (id, path, name, added_at).
 - `src/config.rs::FILE_SCAN_VISIT_LIMIT`: scan visit budget.
@@ -74,6 +92,7 @@
 - Change 158: a project with no sessions offers to start one instead of an empty page.
 - Change 166: an empty project says the start once, not twice.
 - Change 294: a folder that is not yet a project can be registered from the launch sheet through the same registration as this page.
+- Change 317: one in-app picker for typing, walking and creating a project folder, opened from this page and the launch sheet; one level listed rather than a tree, creation confirmed and never `git init`; the macOS dialog kept behind 「Finder で選ぶ…」.
 - Change 311: the session column opens projects folded; this page stays the full list.
 - Change 034: documents belong to a root, not to a project, so a project's folder is not the only place a file may live.
 - Change 092: the launch form moved out of the Overview tab into its own sheet.

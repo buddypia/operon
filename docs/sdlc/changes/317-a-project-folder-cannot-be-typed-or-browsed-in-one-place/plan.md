@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-25
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -22,6 +22,7 @@
 | `docs/MANUAL.ja.md`, `docs/MANUAL.md`, `docs/MANUAL.ko.md` | 「プロジェクトを追加する」 describes the picker, typing, walking, and creating a folder. |
 | `docs/features/project-list/spec.md`, `docs/features/project-list/brief.md` | Behaviour of the picker; the invariant about writing to a project folder reworded; the new tests under `Pinned by`; the verify steps. |
 | `docs/features/new-session/spec.md`, `docs/features/new-session/brief.md` | The sheet's two folder entries open the picker. |
+| `docs/features/local-data/spec.md` | The listing ceiling among the constants of `src/config.rs` it lists. |
 | `docs/features/index.yaml`, `docs/features/domains.yaml` | The new module claimed by `project-list` and its domain. |
 | `docs/features/flow.yaml` | A sheet `folder-picker` with its `reach`, and the ways into it from `projects` and `new-session`; pictures re-taken with `python3 scripts/capture-screens.py`. |
 | `docs/features/glossary.yaml` | Only if a suite check asks for the sheet's title as a term. |
@@ -91,4 +92,8 @@ The tree compiles after every step.
 
 ## Departures from the plan
 
-None yet.
+- **`local-data` is a third feature.** `a_change_that_alters_a_feature_updates_its_spec` ties `src/config.rs` to `local-data`, whose spec lists the scan ceilings, so `state.yaml` names it and its spec gains the picker's ceiling (the row added to the table above). The plan had read the constant as nobody's.
+- **Tests were not watched failing against stubs.** The module and its sixteen tests were written together; each test is watched failing in `mutations.py` instead, which breaks the line it guards.
+- **Three findings fixed after the build**, each with its test (`F1`–`F3` in `verification.yaml`): Tab on a bare `~` wrote `~name/` (empirical-verifier); a path the disk would not answer for was offered for creation, so `FolderTarget` gained `Unreadable` and the line 「このパスは確認できません。」 (rust-reviewer); the Enter that confirms a Japanese conversion opened the folder, so the sheet reads Enter through `find_bar_step` (rust-reviewer, lesson 016). From the same review: Tab does nothing on a listing cut at the ceiling, a row click hands the keyboard back to the field, and the creation failure names the path — 「「{path}」を作成できませんでした: {error}」 where the spec wrote 「フォルダを作成できませんでした: {error}」.
+- **Not fixed: a listing that hangs.** One listing is read at a time, so a read that never returns (a dead network mount) leaves the sheet on 「読み込み中…」 until it does; 「キャンセル」 and 「Finder で選ぶ…」 still work.
+- **`FolderPicker` holds `question: Option<String>`** where the spec wrote `confirm_create: bool`: the confirmation's sentence is built once when asked, so the frame formats nothing.
