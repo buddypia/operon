@@ -44,19 +44,19 @@
 
 state:
   route: "feature"
-  stage: "plan"
-  status: "planning"
+  stage: "build"
+  status: "in-progress"
   attempts: "0 3"
-  questions: "2 7"
+  questions: "3 7"
   autonomy: "full"
   risk: "low"
-  readiness: "pending"
-  screen: "pending"
+  readiness: "go"
+  screen: "approved"
   features: "project-list new-session"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write spec.md and screen.md, have the evaluator judge intent and spec, then show the screen to the person."
+resume: "Build from step 1 of plan.md: the pure path and listing functions with their tests first."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.

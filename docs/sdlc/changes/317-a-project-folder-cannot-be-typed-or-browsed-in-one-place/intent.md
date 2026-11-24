@@ -1,6 +1,6 @@
 # Intent: a project folder cannot be typed or browsed in one place, and a folder that does not exist cannot become a project
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-24
 
 ## Problem

@@ -1,7 +1,7 @@
 # Spec: an in-app folder picker — type a path, walk the folders, or create the folder
 
 - **Intent**: `./intent.md`
-- **Status**: draft
+- **Status**: approved
 
 ## Requirements
 
@@ -144,7 +144,7 @@ exist; no in-app listing and no folder creation exist
 The route is `feature` because folder creation is behaviour that does not
 exist.
 
-- **`src/app/folder_picker.rs`** (new, `mod` and `pub(crate) use` in
+- **`folder_picker.rs` under `src/app/`** (new, `mod` and `pub(crate) use` in
   `src/app.rs`, a line in `CLAUDE.md`'s map, the module added to
   `docs/features/index.yaml` and `docs/features/domains.yaml`):
   - `FolderPickerTarget { Projects, LaunchSheet }`.
