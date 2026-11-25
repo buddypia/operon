@@ -217,6 +217,11 @@ typography:
     fontSize: 38px
     fontWeight: 400
     lineHeight: 1.1
+  title:
+    fontFamily: Sarasa UI J
+    fontSize: 24px
+    fontWeight: 600
+    lineHeight: 1.25
   heading:
     fontFamily: Sarasa UI J
     fontSize: 20px
@@ -492,7 +497,7 @@ chooses in Settings), whose defining property is that ASCII occupies exactly
 one cell and Japanese and Korean exactly two — without that, a TUI's box
 drawing tears.
 
-The scale is narrow on purpose. Eleven levels, from a 38px empty-state mark
+The scale is narrow on purpose. Thirteen levels, from a 38px empty-state mark
 down to an 11.5px chip, and most of the app lives in three of them: `body` for
 prose, `label` for the secondary line under a title, `caption` for metadata.
 
@@ -501,6 +506,10 @@ included: a Phosphor glyph is a character in a font and sits on the same scale a
 the words beside it. A size between two levels is not a new level, it is the
 nearer one. `every_text_size_is_a_level_on_the_type_scale` reads the block and
 holds every `.size(…)` and `FontId` literal in the source to it.
+
+A page's title is `title` (24px): the shared page header draws it with room
+above, so it reads as the title of the page and not as one more heading on it
+(change 320).
 
 Weight carries hierarchy more than size does. A section heading is `section`
 semi-bold rather than a jump in size, because a list of session cards has to

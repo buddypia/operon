@@ -6,7 +6,7 @@
 ## Requirements
 
 1. A page's title — drawn by `page_header` (ホーム, プロジェクト, a project's
-   overview, a settings section) and 「ナレッジ」 — is 24px semi-bold in
+   overview, a settings section) — is 24px semi-bold in
    `text_strong`, a new `title` level in `DESIGN.md`'s typography block
    (`heading` stays 20px for what else uses it). `page_header` leaves
    `SPACE_SM` (8px) above the title, not 2px.
@@ -45,12 +45,12 @@
 Placement: `EXTEND` (route `modify`) of `session-column` (rows and heading in
 `ui_workspace_projects` in `src/app/screens.rs`) and `app-shell` (`page_header` in
 `src/ui/widgets.rs`, used by Home, Projects, a project's overview and
-Settings) and `knowledge` (its title in `src/app/knowledge.rs`).
+Settings). The 「ナレッジ」 tab's heading in `src/app/knowledge.rs` stays
+20px: it sits under a project's 24px name, one level below it.
 
 - `DESIGN.md`: typography gains `title` (Sarasa UI J, 24px, 600, line height
   1.25); the prose counts thirteen levels (it says eleven today, though the block already holds twelve) and names `title` for page titles.
 - `page_header` in `src/ui/widgets.rs`: title `.size(24.0)`; top space `SPACE_SM`.
-- `src/app/knowledge.rs`: 「ナレッジ」 `.size(24.0)`.
 - `ui_workspace_projects` in `src/app/screens.rs`: the column heading
   `.size(15.0).strong().color(palette.text_strong)`; the session row frame's
   margin becomes left `SIDEBAR_ROW_INDENT`, right `SPACE_XS`, top and bottom

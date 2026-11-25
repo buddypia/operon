@@ -14,7 +14,7 @@ Measured in the running build (change 314's harness, 2026-11-25):
 - The session column's heading 「プロジェクト」 is 13.5px in the muted ink — the
   same size as the project names under it and dimmer than them, so it reads as
   a caption, not as the heading of the column.
-- A page's title (「プロジェクト」 on the Projects page, 「ナレッジ」) is 20px,
+- A page's title (「プロジェクト」 on the Projects page) is 20px,
   one step above the 16px body, and sits right under the toolbar's rule; it
   does not read as the title of a page.
 - A session row is 20px tall (a 16px mark and 2px above and below) with 4px
@@ -25,7 +25,7 @@ Measured in the running build (change 314's harness, 2026-11-25):
 ## Who feels it, and when
 
 Anyone on the session page with a project unfolded (several sessions packed
-into 24px each), and anyone opening the Projects or Knowledge page.
+into 24px each), and anyone opening the Projects page or another page with a title.
 
 ## Desired outcome
 
@@ -52,5 +52,5 @@ None.
 ## Not in scope
 
 - The project names' size, the filter tiles, the tab strip.
-- Pages that draw their own title outside the shared page header, except
-  「ナレッジ」, which draws the same 20px title by hand.
+- Headings inside a page below its title, such as the 「ナレッジ」 tab's
+  heading under a project's name: they stay one level below the title.

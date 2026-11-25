@@ -46,7 +46,7 @@ Before                                   After
                                          ──────────────────────────────────
 ```
 
-The same title size on ホーム, a project's overview, 設定 and ナレッジ.
+The same title size on ホーム, a project's overview and 設定; the ナレッジ tab's heading stays 20px under the project's name.
 
 Other states:
 - Selected row: fill and the 2px accent bar span the 28px row.

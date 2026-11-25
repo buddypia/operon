@@ -69227,6 +69227,136 @@ fn column_311_a_filter_lists_matches_of_a_folded_project() {
     fs::remove_dir_all(root).unwrap();
 }
 
+/// The first section's font size and colour of the drawn text `needle`.
+fn heading_320_format(output: &egui::FullOutput, needle: &str) -> (f32, Color32, egui::Rect) {
+    fn visit(shape: &egui::epaint::Shape, needle: &str) -> Option<(f32, Color32, egui::Rect)> {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == needle => {
+                text.galley.job.sections.first().map(|section| {
+                    (
+                        section.format.font_id.size,
+                        section.format.color,
+                        text.galley.rect.translate(text.pos.to_vec2()),
+                    )
+                })
+            }
+            egui::epaint::Shape::Vec(children) => {
+                children.iter().find_map(|child| visit(child, needle))
+            }
+            _ => None,
+        }
+    }
+    output
+        .shapes
+        .iter()
+        .find_map(|clipped| visit(&clipped.shape, needle))
+        .unwrap_or_else(|| panic!("`{needle}` is not drawn"))
+}
+
+/// Change 320, requirement 1: a page's title is the `title` level, strong,
+/// with `SPACE_SM` above it.
+#[test]
+fn heading_320_page_titles_are_the_title_level() {
+    let palette = DARK_PALETTE;
+    let ctx = egui::Context::default();
+    let mut top = 0.0;
+    let mut pass = |ctx: &egui::Context| {
+        central_panel(ctx, |ui| {
+            top = ui.min_rect().top();
+            page_header(ui, &palette, "見出しの確認", Some("説明"), |_| {});
+        });
+    };
+    let screen = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 600.0),
+        )),
+        ..Default::default()
+    };
+    let _ = ctx.run_pass(screen.clone(), &mut pass);
+    let output = ctx.run_pass(screen, &mut pass);
+    let (size, color, rect) = heading_320_format(&output, "見出しの確認");
+    assert_eq!(size, 24.0, "a page title is the 24px title level");
+    assert_eq!(color, palette.text_strong);
+    assert!(
+        rect.top() - top >= SPACE_SM,
+        "the title has SPACE_SM above it: {:.2}",
+        rect.top() - top
+    );
+    let (subtitle, ..) = heading_320_format(&output, "説明");
+    assert!(subtitle < size);
+}
+
+/// Change 320, requirement 2: the column's heading is one level above the
+/// project names it heads, in the strong ink.
+#[test]
+fn heading_320_the_column_heading_outranks_the_project_names() {
+    let root = temporary_directory("heading-320-column");
+    let (mut app, ..) = status_column_fixture(&root);
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let (heading, color, _) = heading_320_format(&output, tr("プロジェクト"));
+    let (name, ..) = heading_320_format(&output, "p");
+    assert_eq!(heading, 15.0, "the column heading is the section level");
+    assert!(heading > name, "{heading} must outrank the names' {name}");
+    assert_eq!(color, palette.text_strong, "the heading is not muted");
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 320, requirement 3: a session row is `CONTROL_HEIGHT` tall, so one
+/// row's top to the next is that plus `SIDEBAR_ROW_GAP`.
+#[test]
+fn column_320_session_rows_have_room() {
+    let root = temporary_directory("column-320-rows");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    app.session_arrangement = SessionArrangement::default();
+    app.page = Page::Sessions;
+    app.toggle_project_fold(populated);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let first = column_rect(&output, "first").expect("first's row");
+    let second = column_rect(&output, "second").expect("second's row");
+    let pitch = (second.top() - first.top()).abs();
+    assert!(
+        (pitch - (CONTROL_HEIGHT + SIDEBAR_ROW_GAP)).abs() < 0.5,
+        "one row's top to the next must be {}px, got {pitch:.2}",
+        CONTROL_HEIGHT + SIDEBAR_ROW_GAP
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+/// Change 320, requirement 4: a session row's mark starts under its project's
+/// name, not at the column's edge.
+#[test]
+fn column_320_session_rows_sit_under_the_project_name() {
+    let root = temporary_directory("column-320-indent");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    app.session_arrangement = SessionArrangement::default();
+    app.page = Page::Sessions;
+    app.toggle_project_fold(populated);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let name = column_rect(&output, "p").expect("p's heading");
+    let row = column_rect(&output, "first").expect("first's row");
+    let agent = app.store.sessions[0].agent.clone();
+    let texture = session_mark_texture(&ctx, &agent)
+        .expect("the fixture's CLI has a mark")
+        .id();
+    let mark = sidebar_251_mesh_rects(&output, texture)
+        .into_iter()
+        .find(|rect| rect.center().y > row.top() - 4.0 && rect.center().y < row.bottom() + 4.0)
+        .expect("first's row draws its mark");
+    assert!(
+        (mark.left() - name.left()).abs() <= 1.0,
+        "the mark ({:.2}) starts under the project name ({:.2})",
+        mark.left(),
+        name.left()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 fn session_tab_status_circle(output: &egui::FullOutput, title: egui::Rect) -> Option<egui::Rect> {
     output
         .shapes
@@ -90334,19 +90464,23 @@ fn sidebar_302_session_rows_and_project_headings_are_compact() {
     for pair in row_rects.windows(2) {
         let pitch = pair[1].center().y - pair[0].center().y;
         let gap = pair[1].top() - pair[0].bottom();
+        // Change 320: a CONTROL_HEIGHT row and the gap, no more.
         assert!(
-            pitch <= 24.0,
-            "session row center-to-center pitch must be <= 24.0px, got {pitch:.2} ({pair:?})"
+            pitch <= CONTROL_HEIGHT + SIDEBAR_ROW_GAP,
+            "session row center-to-center pitch must be <= {}px, got {pitch:.2} ({pair:?})",
+            CONTROL_HEIGHT + SIDEBAR_ROW_GAP
         );
         assert!(
-            gap <= 10.0,
-            "session row vertical gap must be <= 10.0px, got {gap:.2} ({pair:?})"
+            gap <= 2.0 * SIDEBAR_ROW_PAD_Y + SIDEBAR_ROW_GAP + 8.0,
+            "session row vertical gap stays bounded, got {gap:.2} ({pair:?})"
         );
     }
     let heading_to_first = row_rects[0].top() - alpha_heading.bottom();
     assert!(
-        heading_to_first <= 17.0,
-        "heading to first row gap must be <= 17.0px, got {heading_to_first:.2}"
+        // Change 320 pads a row by SIDEBAR_ROW_PAD_Y, not 2px.
+        heading_to_first <= 15.0 + SIDEBAR_ROW_PAD_Y,
+        "heading to first row gap must be <= {}px, got {heading_to_first:.2}",
+        15.0 + SIDEBAR_ROW_PAD_Y
     );
     let beta_heading_top = beta_heading.center().y - CONTROL_HEIGHT_SMALL / 2.0;
     let last_to_next_project = beta_heading_top - row_rects[3].bottom();
@@ -90453,12 +90587,13 @@ fn sidebar_302_column_uses_compact_type_scale() {
     assert_ne!(app.selected_project, Some(unselected_project));
 
     assert_eq!(sidebar_302_font_size(&output, right, 0.0, "one"), 12.0);
-    // Change 319: names and the column's heading one level above the rows.
+    // Change 319: names one level above the rows; change 320: the column's
+    // heading one level above the names.
     assert_eq!(sidebar_302_font_size(&output, right, 0.0, "p"), 13.5);
     assert_eq!(sidebar_302_font_size(&output, right, 0.0, "q"), 13.5);
     assert_eq!(
         sidebar_302_font_size(&output, right, 0.0, tr("プロジェクト")),
-        13.5
+        15.0
     );
     assert_eq!(
         sidebar_302_font_size(&output, right, p_top - 4.0, "1"),
@@ -90528,8 +90663,10 @@ fn sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs() {
     let drag_out = sidebar_302_frame(&mut app, &ctx, vec![egui::Event::PointerMoved(to)]);
     let palette = app.store.theme.palette();
     let drop_y = sidebar_302_hline(&drag_out, palette.accent);
-    let expected_drop_y =
-        newest_rect.center().y - COLUMN_SESSION_MARK_SIZE / 2.0 - 2.0 - SIDEBAR_ROW_GAP / 2.0;
+    let expected_drop_y = newest_rect.center().y
+        - COLUMN_SESSION_MARK_SIZE / 2.0
+        - SIDEBAR_ROW_PAD_Y
+        - SIDEBAR_ROW_GAP / 2.0;
     assert!(
         (drop_y - expected_drop_y).abs() <= 1.0,
         "session drop line must land in the middle of SIDEBAR_ROW_GAP ({drop_y:.2} vs {expected_drop_y:.2})"
@@ -90618,18 +90755,21 @@ fn sidebar_302_custom_rows_and_badge_rings_stay_compact_without_overlap() {
         let pitch = pair[1].center().y - pair[0].center().y;
         let gap = pair[1].top() - pair[0].bottom();
         assert!(
-            pitch <= 24.0,
-            "custom session row pitch must be <= 24.0px, got {pitch:.2}"
+            pitch <= CONTROL_HEIGHT + SIDEBAR_ROW_GAP,
+            "custom session row pitch must be <= {}px, got {pitch:.2}",
+            CONTROL_HEIGHT + SIDEBAR_ROW_GAP
         );
         assert!(
-            gap <= 10.0,
-            "custom session row vertical gap must be <= 10.0px, got {gap:.2}"
+            gap <= 2.0 * SIDEBAR_ROW_PAD_Y + SIDEBAR_ROW_GAP + 8.0,
+            "custom session row vertical gap stays bounded, got {gap:.2}"
         );
     }
     let custom_heading_to_first = custom_rows[0].top() - alpha_heading.bottom();
     assert!(
-        custom_heading_to_first <= 17.0,
-        "heading to first custom row gap must be <= 17.0px, got {custom_heading_to_first:.2}"
+        // Change 320 pads a row by SIDEBAR_ROW_PAD_Y, not 2px.
+        custom_heading_to_first <= 15.0 + SIDEBAR_ROW_PAD_Y,
+        "heading to first custom row gap must be <= {}px, got {custom_heading_to_first:.2}",
+        15.0 + SIDEBAR_ROW_PAD_Y
     );
 
     // Part B: speaking badge ring on row 0 must not reach into selected row 1's background,
@@ -99952,14 +100092,15 @@ pub(crate) fn column_319_project_names_read_larger_than_their_rows() {
         .into_iter()
         .next()
         .expect("the session's row");
-    assert_eq!(heading.1, 13.5, "heading at the control level");
+    // Change 320: the heading is one level above the names, in the strong ink.
+    assert_eq!(heading.1, 15.0, "heading at the section level");
     assert_eq!(name.1, 13.5, "names at the control level");
     assert!(name.1 > row.1, "above the rows' {}", row.1);
     assert!(
         name.2 == palette.text || name.2 == palette.text_strong,
         "names in the plain ink, not muted"
     );
-    assert_eq!(heading.2, palette.text_muted);
+    assert_eq!(heading.2, palette.text_strong);
     fs::remove_dir_all(&root).ok();
 }
 

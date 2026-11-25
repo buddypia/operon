@@ -114,6 +114,12 @@ pub(crate) const SIDEBAR_MAX_W: f32 = 480.0;
 pub(crate) const SIDEBAR_DEFAULT_W: f32 = 268.0;
 /// Vertical gap between rows and beside the heading inside a project block in the session sidebar.
 pub(crate) const SIDEBAR_ROW_GAP: f32 = 4.0;
+/// Space above and below a session row's 16px mark in the session column, so
+/// the row is `CONTROL_HEIGHT` tall (change 320).
+pub(crate) const SIDEBAR_ROW_PAD_Y: f32 = 6.0;
+/// How far a session row's mark sits from its project block's left edge: under
+/// the project's name, past the disclosure (change 320).
+pub(crate) const SIDEBAR_ROW_INDENT: f32 = 42.0;
 /// Least width of one sidebar status filter tile: mark, the longest group
 /// word and a two-digit count. Two fit side by side in the default column and
 /// not in the narrowest, where the tiles stack (change 252).

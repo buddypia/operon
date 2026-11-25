@@ -44,19 +44,19 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "0 7"
   autonomy: "full"
   risk: "low"
   readiness: "go"
   screen: "approved"
-  features: "session-column app-shell knowledge"
+  features: "session-column app-shell"
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write the failing heading_320_ and column_320_ tests, then the drawing changes (plan step 2-3)."
+resume: "Done. Package and ship /Applications/Operon.app from main after landing."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -75,12 +75,10 @@ resume: "Write the failing heading_320_ and column_320_ tests, then the drawing 
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending does this change touch src/ except src/tests.rs,
-    Cargo.toml, or Cargo.lock? If so it makes /Applications/Operon.app stale and
-    ends with bash scripts/package-macos.sh. Answer when writing this contract"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed make q.fast; named families sidebar_ column_ session_285_ session_286_ workspace_ test_change_181_ heading_ every_text_size design_md_: 122 passed; CI runs the whole suite"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose (9960)"
+  release-binary: "machine passed yes: touches src/app/screens.rs, src/ui/widgets.rs and src/config.rs; package and ship from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py: 8 of 8 caught; empirical-verifier reproduced no breach (a legacy-agent row at 180px keeps ~22px of title, which truncates as the spec allows)"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

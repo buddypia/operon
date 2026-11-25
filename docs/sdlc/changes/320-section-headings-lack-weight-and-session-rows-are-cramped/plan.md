@@ -11,11 +11,10 @@
 | `DESIGN.md` | `title` level (24px) in typography; prose says thirteen levels and what `title` is for |
 | `src/config.rs` | `SIDEBAR_ROW_PAD_Y`, `SIDEBAR_ROW_INDENT` |
 | `src/ui/widgets.rs` | `page_header`: 24px title, `SPACE_SM` above it |
-| `src/app/knowledge.rs` | 「ナレッジ」 at 24px |
 | `src/app/screens.rs` | column heading 15px strong `text_strong`; session row margin and selected bar |
 | `src/tests.rs` | `heading_320_*`, `column_320_*`; `sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs` reads the new heading size and padding |
 | `CHANGELOG.md` | one line under Changed |
-| `docs/features/session-column/spec.md`, `docs/features/app-shell/spec.md`, `docs/features/knowledge/spec.md` | the sizes and spacing, and the tests that pin them |
+| `docs/features/session-column/spec.md`, `docs/features/app-shell/spec.md` | the sizes and spacing, and the tests that pin them |
 | `docs/sdlc/changes/320-…/` | `mutations.py`, `verification.yaml`, `state.yaml`, `approvals.log` |
 
 ## Order of work
@@ -48,3 +47,12 @@
 - verify-app pictures of the session column and the Projects page.
 
 ## Departures from the plan
+
+- Earlier versions of intent, spec and plan also raised the 「ナレッジ」 heading
+  to 24px. It is a tab's heading under a project's 24px name, so it stays 20px;
+  `knowledge` left the features. Re-approved before landing.
+- Five tests of changes 302 and 319 pinned the column as it was (rows at most
+  24px apart, the heading 13.5px and muted). They now read the new constants
+  and sizes; none was removed.
+- `SIDEBAR_ROW_INDENT` measured at 42px: the project name starts 38px into its
+  block, plus the block's 4px margin.

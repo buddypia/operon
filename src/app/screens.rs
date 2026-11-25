@@ -7531,15 +7531,15 @@ impl OperonApp {
         ui.spacing_mut().item_spacing.y = SPACE_XS;
         // One start per project, on its own header: the toolbar holds the
         // column-wide one (change 237).
-        // The column's own + (change 319): what it adds, at the size of the
-        // names it heads.
+        // The column's own + (change 319). Its heading is one level above
+        // the names it heads, in the strong ink (change 320).
         let mut column_add = None;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(tr("プロジェクト"))
-                    .size(13.5)
+                    .size(15.0)
                     .strong()
-                    .color(palette.text_muted),
+                    .color(palette.text_strong),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // 履歴 stays at the edge, where the column has always ended.
@@ -7813,7 +7813,14 @@ impl OperonApp {
                                         Color32::TRANSPARENT
                                     })
                                     .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
-                                    .inner_margin(egui::Margin::symmetric(SPACE_XS as i8, 2))
+                                    // A CONTROL_HEIGHT row, its mark under the
+                                    // project's name (change 320).
+                                    .inner_margin(egui::Margin {
+                                        left: SIDEBAR_ROW_INDENT as i8,
+                                        right: SPACE_XS as i8,
+                                        top: SIDEBAR_ROW_PAD_Y as i8,
+                                        bottom: SIDEBAR_ROW_PAD_Y as i8,
+                                    })
                                     .show(ui, |ui| {
                                         ui.set_min_width(ui.available_width());
                                         ui.spacing_mut().interact_size.y = COLUMN_SESSION_MARK_SIZE;
