@@ -44,8 +44,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "ready"
+  stage: "deploy"
+  status: "done"
   attempts: "0 3"
   questions: "2 7"
   autonomy: "full"
@@ -56,7 +56,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Add column_321_* tests first, watch them fail, then implement."
+resume: "Done. Package and ship /Applications/Operon.app from main after landing."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -75,10 +75,10 @@ resume: "Add column_321_* tests first, watch them fail, then implement."
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending make q.fast and named test families"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending yes: touches src/app/screens.rs, src/config.rs, and src/i18n_tables.rs; package and ship from main after landing"
-  guards-verified-by-mutation: "human pending each new guard watched failing and mutations.py passed"
+  three-gates: "machine passed make q.fast; 109 named tests passed; column_321_ 6 passed; CI runs the whole suite"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; largest_module_lines at diagnose (9960)"
+  release-binary: "machine passed yes: touches src/app/screens.rs, src/config.rs, and src/i18n_tables.rs; package and ship from main after landing"
+  guards-verified-by-mutation: "human passed mutations.py: 9 of 9 caught; F1 hover defect reproduced and fixed with column_321_sidebar_pin_hover_shows_tooltip; verify-app session-column exited 0 (20261125T130147Z-session-column)"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a
