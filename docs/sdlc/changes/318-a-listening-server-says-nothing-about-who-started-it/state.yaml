@@ -44,8 +44,8 @@
 
 state:
   route: "modify"
-  stage: "test"
-  status: "reviewing"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "4 7"
   autonomy: "supervised"
@@ -56,7 +56,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Get the reviews scripts/check-review.sh names for the staged diff, record them in review.yaml, then commit, push and wait for CI."
+resume: "Merge on main with git merge --no-ff --no-edit once CI is green on the branch head, then package and swap per the ship skill. A leftover server shows only from an open session of its project; a project-wide view is a possible next change."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -76,9 +76,9 @@ resume: "Get the reviews scripts/check-review.sh names for the staged diff, reco
 # is what says whether the bundle on this machine is behind.
 contract:
   three-gates: "machine passed make q.fast; cargo test --locked ports_ (40), the translation, feature-doc, glossary, type-scale and button tests pass"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/git/ports.rs, src/app.rs, src/app/screens.rs,
-    src/config.rs and src/i18n_tables.rs change; package from main after landing"
+  bands: "machine passed check-bands.sh exits 0 with nothing at propose after moving the ports drawing to src/app/ports_view.rs (largest_module_lines 9958, always_loaded_bytes 7985)"
+  release-binary: "machine passed required - src/git/ports.rs, src/app.rs, src/app/screens.rs,
+    src/app/ports_view.rs, src/config.rs and src/i18n_tables.rs change; package from main after landing"
   guards-verified-by-mutation: "human passed mutations.py 24 of 24 caught after the review round (records, duplicate PIDs, name shape, four redaction gaps); token-prefix-shown, missed on the first sweep, got literal fixtures"
   details-in-running-app: "human passed target/verify/318-0[1-5]-*.png in the debug build: a server started from セッション1's terminal showed 「セッション1」 · 11/25 10:45 · たった今 and its command; after 停止, from セッション2 the header read 終了忘れ? 1 and the row 「セッション1」(停止中) · 親は終了済み · 2分前. The confirmation was checked by its test only (the stop icon has no accessible name)"
 
