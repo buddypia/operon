@@ -1,6 +1,6 @@
 # Intent: the session column heading competes with project names, and pin marks sit after the agent mark
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-25
 
 ## Problem
