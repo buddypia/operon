@@ -48,7 +48,7 @@ Placement: `EXTEND` (route `modify`) of `session-column` (`ui_workspace_projects
 | Identifier SSOT — a string two places must agree on lives in `src/config.rs`, and the round trip is what gets tested | yes | `DockPanel::Sessions.label()` (`tr("セッション一覧")`) is reused directly as the panel label; `SESSION_PIN_SLOT_W` and `SIDEBAR_ROW_INDENT` live in `src/config.rs`. |
 | Durability — see `.claude/skills/durability-invariants/SKILL.md`; schema change means a `STORE_SCHEMA_VERSION` bump | no | Draw path and i18n only; no store or arrangement file format changes. |
 | Subprocess safety — new children go through `src/exec.rs`; new launch paths through the gates in `src/agents.rs` | no | No child process spawned or changed. |
-| Documentation — user-facing docs change in all three languages together | yes | `docs/features/session-column/{brief,spec}.md`, `docs/features/terminal-pane/{brief,spec}.md`, `CHANGELOG.md`, and `EN_TABLE` in `src/i18n_tables.rs` updated together; `README*.md` do not specify font sizes or pin icon slot order. |
+| Documentation — user-facing docs change in all three languages together | yes | `docs/features/session-column/brief.md`, `docs/features/session-column/spec.md`, `docs/features/terminal-pane/brief.md`, `docs/features/terminal-pane/spec.md`, `CHANGELOG.md`, and `EN_TABLE` in `src/i18n_tables.rs` updated together; `README*.md` do not specify font sizes or pin icon slot order. |
 | Local-first — no telemetry, accounts, cloud calls, or new `unsafe` | yes | Local UI layout change only. |
 | Budgets — any new scan or output path states its byte and item ceiling | no | No scan or output path added. |
 

@@ -23,7 +23,7 @@
 2. Add the five `column_321_*` tests in `src/tests.rs` and watch them fail (`cargo test --locked column_321_`).
 3. Add `SESSION_PIN_SLOT_W` in `src/config.rs`, update `src/i18n_tables.rs`, and apply the UI changes in `src/app/screens.rs`.
 4. Update the existing tests in `src/tests.rs` (`test_sidebar_renders_selected_tab_content`, `test_stacked_sidebar_shows_sessions_and_files_together`, `test_dock_*`, `session_column_project_is_a_heading_not_a_card`, `heading_320_the_column_heading_outranks_the_project_names`, `sidebar_302_column_uses_compact_type_scale`, `column_319_project_names_read_larger_than_their_rows`) without removing any test.
-5. Update `docs/features/session-column/{spec,brief}.md`, `docs/features/terminal-pane/{spec,brief}.md`, and `CHANGELOG.md`.
+5. Update `docs/features/session-column/spec.md`, `docs/features/session-column/brief.md`, `docs/features/terminal-pane/spec.md`, `docs/features/terminal-pane/brief.md`, and `CHANGELOG.md`.
 6. Write and run `mutations.py`, invoke an independent verifier subagent to test edge cases, run `python3 scripts/verify-app.py run session-column`, run `make q.fast` and `bash scripts/check-bands.sh`, record `verification.yaml`, commit, push, wait for CI, merge on `main`, clean up worktree, and package/ship `/Applications/Operon.app`.
 
 ## Risks
