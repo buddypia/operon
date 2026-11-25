@@ -72,7 +72,7 @@ features:
     screen: session
     domain: sessions
     summary: プロジェクトごとの稼働中セッションを、対応する順に並べ、状態や CLI で絞り込み、ピン留めと並べ替えができる左列。
-    paths: src/app/session_order.rs src/ui/session_tree.rs src/ui/widgets.rs src/app/screens.rs src/app.rs
+    paths: src/app/session_order.rs src/app/column_add.rs src/ui/session_tree.rs src/ui/widgets.rs src/app/screens.rs src/app.rs
     keywords: column pin sidebar session-order sessions 一覧 filter search
     manual: 状態
     image: 07-split.png

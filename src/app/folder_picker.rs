@@ -22,6 +22,9 @@ pub(crate) enum FolderPickerTarget {
     Projects,
     /// The launch sheet: the folder becomes the sheet's project in place.
     LaunchSheet,
+    /// The session page's column (change 319): the folder is added, and the
+    /// window stays on the session page with it unfolded and chosen.
+    SessionColumn,
 }
 
 /// A typed path, read as the folder to list and the name being typed in it.
@@ -491,6 +494,7 @@ impl OperonApp {
                 self.add_project_path(path);
             }
             FolderPickerTarget::LaunchSheet => self.apply_launch_project_folder(Some(path)),
+            FolderPickerTarget::SessionColumn => self.apply_column_project_folder(Some(path)),
         }
     }
 
@@ -574,6 +578,7 @@ impl OperonApp {
             match picker.target {
                 FolderPickerTarget::Projects => self.apply_project_folder_choice(selection),
                 FolderPickerTarget::LaunchSheet => self.apply_launch_project_folder(selection),
+                FolderPickerTarget::SessionColumn => self.apply_column_project_folder(selection),
             }
         }
         #[cfg(test)]

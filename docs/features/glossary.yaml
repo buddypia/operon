@@ -656,8 +656,8 @@ terms:
     meaning: Operon に登録した手元のフォルダ。エージェントを動かす場所の単位で、登録してもフォルダの中身は変わらず、削除で消えるのは Operon の記録だけです。
     feature: project-list
     en: project
-    ui: フォルダを選択 | パスを手入力
-    code: Project RegisteredProject add_project register_project_folder
+    ui: フォルダを選択 | パスを手入力 | プロジェクトを追加…
+    code: Project RegisteredProject add_project register_project_folder apply_column_project_folder
     see: workspace-scan project-removal
 
   - id: workspace-scan

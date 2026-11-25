@@ -1,0 +1,22 @@
+# The evidence for change 319: one test per requirement of spec.md, the
+# earlier column tests whose pinned sizes and counts moved with it, and the
+# mutation sweep.
+digest: "513ae1f84b76cbc0"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked column_319_the_heading_plus_offers_a_session_and_a_project
+  - R2 empirical-test :: cargo test --locked column_319_a_right_click_on_empty_space_offers_the_same_items
+  - R3 empirical-test :: cargo test --locked column_319_new_session_opens_the_sheet_as_command_n_does
+  - R4 empirical-test :: cargo test --locked column_319_a_project_added_from_the_column_stays_on_the_session_page
+  - R5 empirical-test :: cargo test --locked column_319_a_registered_folder_is_unfolded_and_chosen
+  - R6 empirical-test :: cargo test --locked column_319_a_heading_right_click_offers_its_project_actions
+  - R7 empirical-test :: cargo test --locked column_319_project_names_read_larger_than_their_rows
+  - R8 empirical-test :: cargo test --locked column_319_the_heading_plus_offers_a_session_and_a_project
+  - R9 empirical-test :: cargo test --locked column_319_an_empty_column_offers_to_add_a_project
+  - F1 empirical-test :: cargo test --locked column_319_escape_closing_the_plus_menu_is_not_passed_on
+  - I1 empirical-test :: cargo test --locked session_column_project_
+  - I2 empirical-test :: cargo test --locked sidebar_302_
+  - I3 empirical-test :: cargo test --locked column_311_
+  - I4 empirical-test :: cargo test --locked folder_317_
+  - I5 empirical-test :: cargo test --locked workspace_project_column_has_one_start_per_project
+  - I6 empirical-mutation :: python3 docs/sdlc/changes/319-a-workspace-cannot-be-added-from-the-session-page/mutations.py

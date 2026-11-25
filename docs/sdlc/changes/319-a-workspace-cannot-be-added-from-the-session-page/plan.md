@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-25
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -57,4 +57,27 @@
 
 ## Departures from the plan
 
-None yet.
+- 「履歴」 stays at the column's right edge and the + sits left of it, where
+  `screen.md` drew them the other way round. Many column tests measure the
+  column's right edge from 「履歴」 (`column_right`), and the edge is where the
+  column has always ended; the order of two quiet controls changes nothing a
+  person must learn.
+- Four earlier tests pinned change 245's and 302's small muted names, a
+  column with exactly one + per project, and the old call spelling; they now
+  pin this change's decision instead: `session_column_project_is_a_heading_not_a_card`,
+  `session_column_project_heading_keeps_its_operations`,
+  `column_311_projects_start_folded_and_unfold_on_click`,
+  `sidebar_302_column_uses_compact_type_scale`, and
+  `workspace_project_column_has_one_start_per_project` (five, counting the
+  last, which the plan's risk table had not named).
+- `docs/features/domains.yaml` and `docs/features/glossary.yaml` gained the
+  new module and the new words; `docs/features/session-column/spec.md`
+  gained the 「Seen in the running app」 steps it lacked.
+- The new module-map line in `CLAUDE.md` put `always_loaded_bytes` at 8043,
+  past its propose tier of 8000; five other map lines were shortened so the
+  map costs 3 bytes more than on main.
+- The empirical verifier reproduced F1: an Escape closing the column's +
+  menu was passed on to a terminal, because `take_launch_menu_escape` knew
+  only the tab strip's + menus. The menu now has a fixed id
+  (`column_add_menu_id`) that function also asks about;
+  `column_319_escape_closing_the_plus_menu_is_not_passed_on` pins it.

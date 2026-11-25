@@ -44,8 +44,8 @@
 
 state:
   route: "modify"
-  stage: "build"
-  status: "in-progress"
+  stage: "maintain"
+  status: "done"
   attempts: "0 3"
   questions: "3 7"
   autonomy: "full"
@@ -56,7 +56,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write spec, screen and plan, then build. The question on renaming プロジェクト went unanswered for ten minutes; the adopted default is to rename across the whole app as a separate change 320, so this one keeps the word プロジェクト; the ways to add default to the + and a right-click on empty space or a heading, offering creation only."
+resume: "Merge on main once CI is green on the branch head, then package and swap per the ship skill. Next is change 320, renaming プロジェクト to ワークスペース across the app (the person suggested it; the central tab area also called ワークスペース needs a new name first)."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -75,11 +75,11 @@ resume: "Write spec, screen and plan, then build. The question on renaming プ�
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
-  release-binary: "machine pending required - src/app.rs, src/app/ and src/i18n_tables.rs change; bash scripts/package-macos.sh from main after landing"
-  column-in-running-app: "human pending in the debug build the column shows screen.md sections 1-3 and a project added from it stays on the session page, unfolded"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  three-gates: "machine passed make q.fast; cargo test --locked column_319_ 9 passed; full suite 1579 passed with 7 tmux tests failing only under the parallel run and passing alone"
+  bands: "machine passed bash scripts/check-bands.sh: nothing at propose; always_loaded_bytes 7988 (main 7985) after trimming four module-map lines to pay for the new one"
+  release-binary: "machine passed required - src/app.rs, src/app/ and src/i18n_tables.rs change; bash scripts/package-macos.sh from main after landing"
+  column-in-running-app: "human passed verify-app.py run session-column exit 0, target/verify/20261125T051801Z-session-column/06-session-column.png shows the heading, + and 履歴, and verify-demo at 13.5px; the menus are pressed only in the tests, the + having no accessible name"
+  guards-verified-by-mutation: "machine passed python3 docs/sdlc/changes/319-a-workspace-cannot-be-added-from-the-session-page/mutations.py: 15 of 15 caught, F1 included"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

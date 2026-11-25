@@ -309,10 +309,20 @@ ways:
     label: 新しいプロジェクト…
     unseen: プロジェクトの一覧を開いたときだけ出る。
 
+  - from: sessions
+    to: folder-picker
+    label: プロジェクトを追加…
+    unseen: 左の列の見出しの + を押すか、列の空いた所やプロジェクト名を右クリックしたときだけ出る。
+
+  - from: sessions
+    to: new-session
+    label: 新しいセッション…
+    unseen: 左の列の見出しの + を押すか、列の空いた所を右クリックしたときだけ出る。
+
   - from: folder-picker
     to: project-overview
     label: 開く
-    note: 入力欄のフォルダをプロジェクトとして追加し、概要タブを開く。新しいセッションから開いたときはシートに戻る。
+    note: 入力欄のフォルダをプロジェクトとして追加し、概要タブを開く。新しいセッションから開いたときはシートに戻り、セッションの列から開いたときはセッションのページのまま列に開いた状態で出る。
 
   - from: new-session
     to: terminal-group
