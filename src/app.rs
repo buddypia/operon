@@ -10,6 +10,7 @@ mod keymap;
 pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
 pub(crate) mod launch_projects;
+pub(crate) mod ports_view;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
 pub(crate) mod session_order;
@@ -9567,7 +9568,21 @@ impl OperonApp {
                 .cmp(label(right))
                 .then(left.port.port.cmp(&right.port.port))
         });
-        SessionPorts { own, elsewhere }
+        let origins = own
+            .iter()
+            .chain(&elsewhere)
+            .map(|attributed| (attributed.port.pid, self.port_origin(attributed)))
+            .collect();
+        SessionPorts {
+            own,
+            elsewhere,
+            origins,
+        }
+    }
+
+    /// Who started a listener, as the store stands now (change 318).
+    pub(crate) fn port_origin(&self, attributed: &AttributedPort) -> PortOrigin {
+        port_origin(attributed.process.as_deref(), &self.store.sessions)
     }
 
     /// Stop one listener in the background. The read that confirms it is

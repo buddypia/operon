@@ -893,6 +893,15 @@ terms:
     avoid: ポート番号
     see: worktree
 
+  - id: leftover-server
+    term: 終了忘れ
+    meaning: 起動したセッションが止まったか削除されたのに、まだ待ち受けているサーバー。起動したセッションが分かるものにだけ「終了忘れ?」と印を付けます。
+    feature: worktrees
+    en: left running
+    ui: 終了忘れ? | 起動元不明
+    code: PortOrigin is_leftover port_origin
+    see: port
+
   - id: file-tree
     term: ファイルツリー
     meaning: ファイルタブの折りたためるプロジェクトツリー。変更のあるファイルには Git バッジが付き、.git や node_modules などは読み飛ばします。

@@ -1,0 +1,18 @@
+digest: "7446e357edbaf7f6"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked ports_318_reads_process_details_from_ps
+  - I2 empirical-test :: cargo test --locked ports_318_elapsed_time_forms
+  - R2 empirical-test :: cargo test --locked ports_318_reads_the_session_tag
+  - R3 empirical-test :: cargo test --locked ports_318_command_line_hides_secrets
+  - R4 empirical-test :: cargo test --locked ports_318_origin_names_the_session_and_marks_leftovers
+  - R5 empirical-test :: cargo test --locked ports_318_menu_rows_show_origin_time_and_command
+  - R6 empirical-test :: cargo test --locked ports_318_badge_counts_leftovers
+  - R7 empirical-test :: cargo test --locked ports_318_confirmation_lists_every_detail
+  - R8 empirical-test :: cargo test --locked ports_318_scan_without_ps_still_lists_ports
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/318-a-listening-server-says-nothing-about-who-started-it/mutations.py
+  - I3 empirical-test :: cargo test --locked ports_262_menu_sections_name_folders_and_offer_stop
+  - I4 empirical-test :: cargo test --locked ports_262_confirmation_names_pid_and_folder
+  - I5 empirical-test :: cargo test --locked ports_262_badge_counts_own_folder_or_names_the_project
+  - I6 empirical-test :: cargo test --locked every_translation_table_is_sorted_by_message_id
+  - I7 empirical-test :: cargo test --locked a_change_that_alters_a_feature_updates_its_spec

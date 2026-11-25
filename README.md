@@ -239,7 +239,23 @@ Settings. The projects, sessions, and agent output in them are a demo.
   muted. Each row opens the URL, copies it, or stops the server: Operon shows
   the process, PID and folder, asks first, checks the PID still holds that
   port under that name, sends SIGTERM, and says whether it stopped. A project
-  serving nothing says nothing.
+  serving nothing says nothing. Under each row, and again in the stop
+  confirmation, Operon shows which session started the server, when it started
+  and how long ago, its command line, and whether its parent has exited. The
+  session is read from the `OPERON_SESSION` variable the server inherited from
+  its session's terminal — `/bin/ps` reads it once per scan for every listed
+  PID, with a 4 MiB ceiling, and keeps nothing else of the environment — so it
+  survives the parent exiting; a process that did not inherit it (an MCP server
+  an agent launched, anything started outside Operon) says "Started by
+  unknown". A server whose session has stopped or been removed is marked "Left
+  running?" and counted in the header. The command line is redacted before it is kept (`NAME=value` and
+  `--flag value` where the name holds KEY, TOKEN, SECRET, PASSWORD, AUTH,
+  CREDENTIAL or COOKIE, the word after `Bearer`/`Basic` or after such a header
+  name, URL user information and such query values, common token prefixes) and
+  cut at 1000 characters. It is a pattern list, not a guarantee: a short flag
+  glued to its value (`-pSECRET`), a value after a flag whose name does not say
+  what it is (`-p secret`), and a quoted value with spaces in it are shown.
+  Nothing is recorded across scans.
 - `⌘F` searches a session's scrollback. Every occurrence is washed where it
   sits — columns counted in terminal cells, so the mark lands on the text even
   on a Japanese line — and Enter steps through them while the pane scrolls to

@@ -55,6 +55,352 @@ pub(crate) struct AttributedPort {
     /// Shared, because the frame clones a session's ports every time it draws
     /// them and the folder is the same for every port in it.
     pub(crate) root: Option<Arc<PortRoot>>,
+    /// What `ps` said about the process (change 318). `None` only where no
+    /// scan produced this entry; a scan whose `ps` failed still fills it, with
+    /// nothing read.
+    pub(crate) process: Option<Arc<ListenerProcess>>,
+}
+
+/// What the environment of a listener says about the Operon session that
+/// started it (change 318).
+///
+/// A managed session exports `HOOK_SESSION_ENV`, and a process started under
+/// it inherits the variable whether or not its parent is still alive — which
+/// is the point: a server left behind has usually lost its parent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SessionTag {
+    /// The value, read from a whole line of `ps -E`.
+    Found(String),
+    /// A whole line was read and carried no such variable.
+    Absent,
+    /// No whole line for this PID: `ps` failed, was cut at its ceiling, or the
+    /// process had gone. Never taken as `Absent`, so never as "not Operon's".
+    Unread,
+}
+
+/// One listener's process, as `ps` saw it during the scan (change 318).
+/// Every field is optional: a field that did not parse is left out rather
+/// than guessed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListenerProcess {
+    pub(crate) parent_pid: Option<u32>,
+    /// Seconds since the epoch, from the scan's clock minus `ps`'s `etime`.
+    pub(crate) started_at: Option<u64>,
+    /// The local wall clock `ps` printed, as `MM/DD HH:MM`.
+    pub(crate) started: Option<String>,
+    /// Already redacted (`redact_command_line`) and capped: the raw line is
+    /// never kept, so the frame cannot draw it.
+    pub(crate) command: Option<String>,
+    pub(crate) session_tag: SessionTag,
+}
+
+impl ListenerProcess {
+    pub(crate) fn unread() -> Self {
+        Self {
+            parent_pid: None,
+            started_at: None,
+            started: None,
+            command: None,
+            session_tag: SessionTag::Unread,
+        }
+    }
+}
+
+/// The columns of the details read, apart from the tag.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProcessDetails {
+    pub(crate) parent_pid: Option<u32>,
+    pub(crate) elapsed_seconds: Option<u64>,
+    pub(crate) started: Option<String>,
+    pub(crate) command: Option<String>,
+}
+
+/// Each asked-about PID's record in `ps` output: the text after the PID.
+///
+/// `ps` prints arguments and environment values raw, so one process can span
+/// several lines. A record therefore runs until the next line that opens with
+/// a PID that was asked about, and a line opening with any other number is a
+/// continuation. A PID that opens two records is dropped: text inside another
+/// process's line spelled it, and which record is real cannot be told. The
+/// record a ceiling cut is dropped whole — half a command, or half a session
+/// name, is a wrong answer where no answer is an honest one.
+fn ps_records(output: &str, truncated: bool, pids: &[u32]) -> HashMap<u32, String> {
+    let mut records: Vec<(u32, String)> = Vec::new();
+    for line in output.lines() {
+        let line = line.trim_start();
+        let (first, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        match first.parse::<u32>().ok().filter(|pid| pids.contains(pid)) {
+            Some(pid) => records.push((pid, rest.to_owned())),
+            None => {
+                if let Some((_, text)) = records.last_mut() {
+                    text.push(' ');
+                    text.push_str(line);
+                }
+            }
+        }
+    }
+    if truncated {
+        records.pop();
+    }
+    let mut opened: HashMap<u32, usize> = HashMap::new();
+    for (pid, _) in &records {
+        *opened.entry(*pid).or_default() += 1;
+    }
+    records
+        .into_iter()
+        .filter(|(pid, _)| opened.get(pid) == Some(&1))
+        .collect()
+}
+
+/// Read `ps -ww -o pid=,ppid=,etime=,lstart=,command=` run under `LC_ALL=C`.
+///
+/// `lstart` is five words under the `C` locale (`Tue Nov 24 19:30:42 2026`),
+/// so the command starts at the eighth word after the PID; its own spacing is
+/// not kept, which is fine for something shown and never run.
+pub(crate) fn parse_ps_details(
+    output: &str,
+    truncated: bool,
+    pids: &[u32],
+) -> HashMap<u32, ProcessDetails> {
+    ps_records(output, truncated, pids)
+        .into_iter()
+        .map(|(pid, record)| {
+            let words: Vec<&str> = record.split_whitespace().collect();
+            let command = words
+                .get(7..)
+                .filter(|rest| !rest.is_empty())
+                .map(|rest| redact_command_line(&rest.join(" ")));
+            let details = ProcessDetails {
+                parent_pid: words.first().and_then(|word| word.parse::<u32>().ok()),
+                elapsed_seconds: words.get(1).and_then(|word| parse_elapsed(word)),
+                started: words.get(2..7).and_then(parse_lstart),
+                command,
+            };
+            (pid, details)
+        })
+        .collect()
+}
+
+/// `ps`'s `etime`: `[[dd-]hh:]mm:ss`, to seconds.
+pub(crate) fn parse_elapsed(text: &str) -> Option<u64> {
+    let (days, clock) = match text.split_once('-') {
+        Some((days, clock)) => (days.parse::<u64>().ok()?, clock),
+        None => (0, text),
+    };
+    let parts: Vec<u64> = clock
+        .split(':')
+        .map(|part| part.parse::<u64>().ok())
+        .collect::<Option<_>>()?;
+    let (hours, minutes, seconds) = match parts.as_slice() {
+        [minutes, seconds] => (0, *minutes, *seconds),
+        [hours, minutes, seconds] => (*hours, *minutes, *seconds),
+        _ => return None,
+    };
+    if minutes >= 60 || seconds >= 60 || (text.contains('-') && hours >= 24) {
+        return None;
+    }
+    days.checked_mul(24)?
+        .checked_add(hours)?
+        .checked_mul(60)?
+        .checked_add(minutes)?
+        .checked_mul(60)?
+        .checked_add(seconds)
+}
+
+/// `Tue Nov 24 19:30:42 2026` to `11/24 19:30`.
+fn parse_lstart(words: &[&str]) -> Option<String> {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let [_, month, day, clock, _] = words else {
+        return None;
+    };
+    let month = MONTHS.iter().position(|name| name == month)? + 1;
+    let day = day
+        .parse::<u8>()
+        .ok()
+        .filter(|day| (1..=31).contains(day))?;
+    let mut clock = clock.split(':');
+    let hour = clock.next()?.parse::<u8>().ok().filter(|hour| *hour < 24)?;
+    let minute = clock
+        .next()?
+        .parse::<u8>()
+        .ok()
+        .filter(|minute| *minute < 60)?;
+    Some(format!("{month:02}/{day:02} {hour:02}:{minute:02}"))
+}
+
+/// Read `ps -E -ww -o pid=,command=`: the arguments, then the environment.
+/// Only the session tag is kept; nothing else of the environment leaves this
+/// function. The **last** token wins, because the environment follows the
+/// arguments and an argument may itself spell the variable; and only a value
+/// that passes `is_safe_tmux_name` — the gate every managed name passes —
+/// counts, so stray text naming the variable is not taken for a session.
+pub(crate) fn parse_ps_environment(
+    output: &str,
+    truncated: bool,
+    pids: &[u32],
+) -> HashMap<u32, SessionTag> {
+    let prefix = format!("{HOOK_SESSION_ENV}=");
+    ps_records(output, truncated, pids)
+        .into_iter()
+        .map(|(pid, record)| {
+            let tag = record
+                .split_whitespace()
+                .filter_map(|word| word.strip_prefix(prefix.as_str()))
+                .next_back()
+                .filter(|value| is_safe_tmux_name(value))
+                .map_or(SessionTag::Absent, |value| {
+                    SessionTag::Found(value.to_owned())
+                });
+            (pid, tag)
+        })
+        .collect()
+}
+
+/// Words that make the value beside them a secret, matched in any case.
+pub(crate) const SECRET_NAME_WORDS: [&str; 8] = [
+    "KEY",
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PASSWD",
+    "AUTH",
+    "CREDENTIAL",
+    "COOKIE",
+];
+
+/// Shapes of tokens that are secrets on their own, whatever names them.
+pub(crate) const SECRET_VALUE_PREFIXES: [&str; 10] = [
+    "sk-",
+    "ghp_",
+    "gho_",
+    "ghs_",
+    "github_pat_",
+    "glpat-",
+    "xoxb-",
+    "xoxp-",
+    "AKIA",
+    "AIza",
+];
+
+const REDACTED: &str = "***";
+
+fn names_a_secret(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    SECRET_NAME_WORDS.iter().any(|word| upper.contains(word))
+}
+
+fn looks_like_a_secret(value: &str) -> bool {
+    SECRET_VALUE_PREFIXES
+        .iter()
+        .any(|prefix| value.starts_with(prefix))
+}
+
+/// A command line with what looks like a secret replaced by `***`, cut to
+/// `PORT_COMMAND_MAX_CHARS` characters (change 318).
+///
+/// A pattern list, so it over-hides rather than under-hides: `--no-auth x`
+/// hides `x`. Something shown that should not have been is the failure; a
+/// harmless word shown as `***` is not.
+pub(crate) fn redact_command_line(command: &str) -> String {
+    let mut words: Vec<String> = Vec::new();
+    let mut hide_next = false;
+    for word in command.split_whitespace() {
+        // A hidden word is still read for what it says about the next one:
+        // `--auth Bearer x` hides `Bearer` and, through it, `x`.
+        let (shown, hides_next) = redact_word(word);
+        words.push(if hide_next {
+            REDACTED.to_owned()
+        } else {
+            shown
+        });
+        hide_next = hides_next;
+    }
+    let joined = words.join(" ");
+    if joined.chars().count() <= PORT_COMMAND_MAX_CHARS {
+        return joined;
+    }
+    let mut cut: String = joined.chars().take(PORT_COMMAND_MAX_CHARS).collect();
+    cut.push('…');
+    cut
+}
+
+/// One word, and whether the word after it is a secret.
+fn redact_word(word: &str) -> (String, bool) {
+    // `Bearer x`, `Authorization:Bearer x`, `Basic x`: the credential is next.
+    let lower = word.to_ascii_lowercase();
+    if lower.ends_with("bearer") || lower.ends_with("basic") {
+        return (word.to_owned(), true);
+    }
+    if looks_like_a_secret(word) {
+        return (REDACTED.to_owned(), false);
+    }
+    // `--api-key=x` or `--api-key x`; any other flag's value is read on its
+    // own, so `--env=API_KEY=x` and `--db=postgres://u:p@h` are caught too.
+    let body = word.trim_start_matches('-');
+    let dashes = &word[..word.len() - body.len()];
+    if !dashes.is_empty() {
+        return match body.split_once('=') {
+            Some((name, _)) if names_a_secret(name) => {
+                (format!("{dashes}{name}={REDACTED}"), false)
+            }
+            Some((name, value)) => {
+                let (value, hides_next) = redact_word(value);
+                (format!("{dashes}{name}={value}"), hides_next)
+            }
+            None => (word.to_owned(), names_a_secret(body)),
+        };
+    }
+    // `X-Api-Key: x`, `Cookie: a=b`: the header's value is the next word.
+    if word.strip_suffix(':').is_some_and(names_a_secret) {
+        return (word.to_owned(), true);
+    }
+    // `API_KEY=x`, and a header written `X-Api-Key:x`.
+    for separator in ['=', ':'] {
+        if let Some((name, value)) = word.split_once(separator) {
+            if !value.is_empty() && !value.starts_with("//") && names_a_secret(name) {
+                return (format!("{name}{separator}{REDACTED}"), false);
+            }
+            if looks_like_a_secret(value) {
+                return (format!("{name}{separator}{REDACTED}"), false);
+            }
+        }
+    }
+    (redact_url(word), false)
+}
+
+/// A URL with its user information and its secret-named query values hidden:
+/// `https://u:p@h/?a=1&token=x` to `https://***@h/?a=1&token=***`.
+fn redact_url(word: &str) -> String {
+    let word = redact_url_user(word);
+    let Some((head, query)) = word.split_once('?') else {
+        return word;
+    };
+    let pairs: Vec<String> = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((name, value)) if names_a_secret(name) || looks_like_a_secret(value) => {
+                format!("{name}={REDACTED}")
+            }
+            _ => pair.to_owned(),
+        })
+        .collect();
+    format!("{head}?{}", pairs.join("&"))
+}
+
+/// `https://user:pass@host/` to `https://***@host/`.
+fn redact_url_user(word: &str) -> String {
+    let Some(scheme_end) = word.find("://") else {
+        return word.to_owned();
+    };
+    let authority_start = scheme_end + 3;
+    let rest = &word[authority_start..];
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    match rest[..authority_end].rfind('@') {
+        Some(at) => format!("{}{REDACTED}{}", &word[..authority_start], &rest[at..]),
+        None => word.to_owned(),
+    }
 }
 
 /// Read `lsof`'s field-per-line output.
@@ -240,6 +586,7 @@ pub(crate) fn attribute_ports(
                 port: port.clone(),
                 directory,
                 root,
+                process: None,
             }
         })
         .collect()
@@ -267,7 +614,7 @@ pub(crate) fn scan_listening_ports(
     projects: &[(Uuid, PathBuf)],
     sessions: &[(Uuid, PathBuf)],
 ) -> Vec<AttributedPort> {
-    scan_listening_ports_with(PORT_SCAN_PROGRAM, projects, sessions)
+    scan_listening_ports_with(PORT_SCAN_PROGRAM, PORT_PROCESS_PROGRAM, projects, sessions)
 }
 
 /// The reading, with the program named.
@@ -278,9 +625,11 @@ pub(crate) fn scan_listening_ports(
 /// did: it took out the launch test that needs to find `tmux`.
 ///
 /// The projects' git worktrees are listed only once something is listening:
-/// a machine serving nothing costs one `lsof` and no `git`.
+/// a machine serving nothing costs one `lsof` and no `git`. `ps` is asked only
+/// about listeners credited to a folder, since nothing else is ever shown.
 pub(crate) fn scan_listening_ports_with(
     program: &str,
+    process_program: &str,
     projects: &[(Uuid, PathBuf)],
     sessions: &[(Uuid, PathBuf)],
 ) -> Vec<AttributedPort> {
@@ -325,7 +674,89 @@ pub(crate) fn scan_listening_ports_with(
         },
         |path| path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
     );
-    attribute_ports(&ports, &directories, &roots)
+    let mut attributed = attribute_ports(&ports, &directories, &roots);
+    let mut shown: Vec<u32> = attributed
+        .iter()
+        .filter(|port| port.root.is_some())
+        .map(|port| port.port.pid)
+        .collect();
+    shown.sort_unstable();
+    shown.dedup();
+    if shown.is_empty() {
+        return attributed;
+    }
+    let processes = read_listener_processes(process_program, &shown, now());
+    for port in &mut attributed {
+        if port.root.is_some() {
+            port.process = processes.get(&port.port.pid).cloned();
+        }
+    }
+    attributed
+}
+
+/// Both `ps` reads for every listed PID at once — two children per scan,
+/// however many listeners (change 318). A PID neither read answered for gets
+/// `ListenerProcess::unread()`.
+fn read_listener_processes(
+    program: &str,
+    pids: &[u32],
+    scanned_at: u64,
+) -> HashMap<u32, Arc<ListenerProcess>> {
+    let timeout = Duration::from_secs(PORT_SCAN_TIMEOUT_SECONDS);
+    let list = pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let read = |arguments: &[&str], ceiling: usize| {
+        let mut command = Command::new(program);
+        // `lstart` in the `C` locale is five fixed English words; in the
+        // person's locale it is whatever their language makes of a weekday.
+        command.env("LC_ALL", "C").args(arguments);
+        run_command_with_output_limit(&mut command, timeout, ceiling, COMMAND_ERROR_MAX_BYTES)
+            .ok()
+            .map(|limited| {
+                (
+                    String::from_utf8_lossy(&limited.output.stdout).into_owned(),
+                    limited.stdout_truncated,
+                )
+            })
+    };
+    let details = read(
+        &[
+            "-ww",
+            "-o",
+            "pid=,ppid=,etime=,lstart=,command=",
+            "-p",
+            &list,
+        ],
+        PORT_SCAN_MAX_BYTES,
+    )
+    .map(|(output, truncated)| parse_ps_details(&output, truncated, pids))
+    .unwrap_or_default();
+    let tags = read(
+        &["-E", "-ww", "-o", "pid=,command=", "-p", &list],
+        PORT_ENVIRONMENT_MAX_BYTES,
+    )
+    .map(|(output, truncated)| parse_ps_environment(&output, truncated, pids))
+    .unwrap_or_default();
+    pids.iter()
+        .map(|pid| {
+            let mut process = ListenerProcess::unread();
+            if let Some(found) = details.get(pid) {
+                process.parent_pid = found.parent_pid;
+                process.started_at = found
+                    .elapsed_seconds
+                    .map(|elapsed| scanned_at.saturating_sub(elapsed));
+                process.started = found.started.clone();
+                process.command = found.command.clone();
+            }
+            if let Some(tag) = tags.get(pid) {
+                process.session_tag = tag.clone();
+            }
+            (*pid, Arc::new(process))
+        })
+        .collect()
 }
 
 fn lsof_run(program: &str, arguments: &[&str], timeout: Duration) -> Option<Output> {
@@ -506,6 +937,69 @@ pub(crate) struct SessionPorts {
     pub(crate) own: Vec<AttributedPort>,
     /// Credited to another folder of the same project.
     pub(crate) elsewhere: Vec<AttributedPort>,
+    /// Who started each listed PID (change 318).
+    pub(crate) origins: HashMap<u32, PortOrigin>,
+}
+
+impl SessionPorts {
+    pub(crate) fn origin(&self, pid: u32) -> &PortOrigin {
+        self.origins.get(&pid).unwrap_or(&PortOrigin::Unread)
+    }
+
+    /// Listed ports, in either section, whose server looks left behind.
+    pub(crate) fn leftovers(&self) -> usize {
+        self.own
+            .iter()
+            .chain(&self.elsewhere)
+            .filter(|port| self.origin(port.port.pid).is_leftover())
+            .count()
+    }
+}
+
+/// Which Operon session started a listener, resolved against the store when
+/// it is shown (change 318): a session can stop or be removed between scans.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PortOrigin {
+    /// `running` is `Starting` or `Active`.
+    Session { name: String, running: bool },
+    /// The tag names a session the store no longer has.
+    RemovedSession,
+    /// The environment was read and named no session.
+    Unknown,
+    /// The environment could not be read.
+    Unread,
+}
+
+impl PortOrigin {
+    /// 「終了忘れ?」: claimed only from a tag that was read. A server nobody can
+    /// place is not called forgotten.
+    pub(crate) fn is_leftover(&self) -> bool {
+        matches!(
+            self,
+            PortOrigin::Session { running: false, .. } | PortOrigin::RemovedSession
+        )
+    }
+}
+
+/// Resolve a listener's tag against the sessions in the store.
+pub(crate) fn port_origin(process: Option<&ListenerProcess>, sessions: &[Session]) -> PortOrigin {
+    let Some(process) = process else {
+        return PortOrigin::Unread;
+    };
+    match &process.session_tag {
+        SessionTag::Unread => PortOrigin::Unread,
+        SessionTag::Absent => PortOrigin::Unknown,
+        SessionTag::Found(tmux_name) => sessions
+            .iter()
+            .find(|session| &session.tmux_name == tmux_name)
+            .map_or(PortOrigin::RemovedSession, |session| PortOrigin::Session {
+                name: session.name.clone(),
+                running: matches!(
+                    session.status,
+                    SessionStatus::Starting | SessionStatus::Active
+                ),
+            }),
+    }
 }
 
 /// What the person is told when a stop finishes.
