@@ -1,6 +1,6 @@
 # Intent: A listening server says nothing about who started it, when, or with what
 
-- **Status**: draft
+- **Status**: approved
 - **Opened**: 2026-11-25
 
 ## Problem
