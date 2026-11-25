@@ -2,7 +2,7 @@
 
 - **Spec**: `./spec.md`
 - **Approved**: 2026-11-25
-- **Status**: approved
+- **Status**: done
 
 ## Files that change
 
@@ -44,3 +44,5 @@
 - `python3 scripts/verify-app.py run session-column` — exit 0; screenshot verified.
 
 ## Departures from the plan
+
+- Empirical verifier `86d10a6d` reproduced F1: `ui.interact(row.rect, ...)` covered the sidebar `ICON_PIN` label's `.on_hover_text(tr("ピン留め中"))` tooltip. Added `if pinned { ui.label(tr("ピン留め中")); }` inside `row.on_hover_ui` in `src/app/screens.rs`, added regression test `column_321_sidebar_pin_hover_shows_tooltip`, and added mutation `sidebar-pin-hover-missing` to `mutations.py` (9 of 9 caught).

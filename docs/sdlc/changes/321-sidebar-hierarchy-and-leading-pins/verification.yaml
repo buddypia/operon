@@ -1,0 +1,11 @@
+# The evidence for change 321. Format: docs/sdlc/templates/verification.yaml.
+digest: "148991e3d408bbd2"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked column_321_panel_label_is_quiet_session_list
+  - R2 empirical-test :: cargo test --locked column_321_project_names_use_section_scale
+  - R3 empirical-test :: cargo test --locked column_321_sidebar_pin_sits_in_gutter_before_aligned_agent_mark
+  - R4 empirical-test :: cargo test --locked column_321_tab_pin_sits_left_of_agent_mark_without_close_button
+  - R5 empirical-test :: cargo test --locked column_321_session_list_label_is_capitalized_in_english
+  - F1 empirical-test :: cargo test --locked column_321_sidebar_pin_hover_shows_tooltip
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/321-sidebar-hierarchy-and-leading-pins/mutations.py

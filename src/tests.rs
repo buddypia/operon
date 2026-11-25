@@ -45874,7 +45874,7 @@ pub(crate) fn test_sidebar_renders_selected_tab_content() {
         .any(|s| s.contains("Initial prompt for test")));
 
     // The project-only column remains while the inspector changes views.
-    assert!(shapes_conv.iter().any(|s| s == "プロジェクト"));
+    assert!(shapes_conv.iter().any(|s| s == "セッション一覧"));
 }
 
 /// Change 122: Verify sidebar splitter resize clamping between SIDEBAR_MIN_W and SIDEBAR_MAX_W.
@@ -46102,7 +46102,7 @@ pub(crate) fn test_stacked_sidebar_shows_sessions_and_files_together() {
             .find(|(text, _)| text.contains(needle))
             .map(|(_, pos)| *pos)
     };
-    let sessions = find("プロジェクト").expect("project column drawn");
+    let sessions = find("セッション一覧").expect("project column drawn");
     let files = find("project_only.txt").expect("file tree drawn");
     assert!(
         files.y > sessions.y,
@@ -46383,7 +46383,7 @@ pub(crate) fn test_dock_every_panel_docks_on_every_edge_in_the_workspace() {
         DockEdge::Bottom => pos.y >= height - DOCK_DEFAULT_H,
     };
     for (panel, needle) in [
-        (DockPanel::Sessions, "プロジェクト"),
+        (DockPanel::Sessions, "セッション一覧"),
         (DockPanel::View(InspectorTab::Files), "project_only.txt"),
         (
             DockPanel::View(InspectorTab::Conversation),
@@ -46427,7 +46427,7 @@ pub(crate) fn test_dock_same_edge_list_and_views_share_it() {
     // Left: stacked, the list above.
     fixture.app.dock.move_panel(files, DockEdge::Left);
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
-    let list = painted_at(&texts, "プロジェクト").expect("list drawn");
+    let list = painted_at(&texts, "セッション一覧").expect("list drawn");
     let tree = painted_at(&texts, "project_only.txt").expect("tree drawn");
     assert!(
         tree.y > list.y && tree.x < SIDEBAR_DEFAULT_W,
@@ -46442,7 +46442,7 @@ pub(crate) fn test_dock_same_edge_list_and_views_share_it() {
         .move_panel(DockPanel::Sessions, DockEdge::Top);
     fixture.app.dock.move_panel(files, DockEdge::Top);
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
-    let list = painted_at(&texts, "プロジェクト").expect("list drawn");
+    let list = painted_at(&texts, "セッション一覧").expect("list drawn");
     let tree = painted_at(&texts, "project_only.txt").expect("tree drawn");
     assert!(
         list.x < SIDEBAR_DEFAULT_W && list.y >= DOCK_DEFAULT_H && tree.y < DOCK_DEFAULT_H,
@@ -46477,7 +46477,7 @@ pub(crate) fn test_dock_session_list_has_its_own_grip() {
     let mut fixture = SessionTreeTestFixture::new("dock-list-grip");
     let session = fixture.normal_session.clone();
     let texts = render_workspace_text_positions(&mut fixture.app, &session, 1400.0, 900.0);
-    assert!(painted_at(&texts, "プロジェクト").is_some_and(|pos| pos.x < SIDEBAR_DEFAULT_W));
+    assert!(painted_at(&texts, "セッション一覧").is_some_and(|pos| pos.x < SIDEBAR_DEFAULT_W));
     assert!(
         !texts
             .iter()
@@ -69287,8 +69287,8 @@ fn heading_320_page_titles_are_the_title_level() {
     assert!(subtitle < size);
 }
 
-/// Change 320, requirement 2: the column's heading is one level above the
-/// project names it heads, in the strong ink.
+/// Change 320, updated in change 321: the column's top label is the quiet
+/// `label` level (`12.5px` muted) while project names sit at `section` (`15.0px`).
 #[test]
 fn heading_320_the_column_heading_outranks_the_project_names() {
     let root = temporary_directory("heading-320-column");
@@ -69297,11 +69297,15 @@ fn heading_320_the_column_heading_outranks_the_project_names() {
     let ctx = egui::Context::default();
     let output = sidebar_302_settled(&mut app, &ctx);
     let palette = app.store.theme.palette();
-    let (heading, color, _) = heading_320_format(&output, tr("プロジェクト"));
+    let (heading, color, _) = heading_320_format(&output, tr("セッション一覧"));
     let (name, ..) = heading_320_format(&output, "p");
-    assert_eq!(heading, 15.0, "the column heading is the section level");
-    assert!(heading > name, "{heading} must outrank the names' {name}");
-    assert_eq!(color, palette.text_strong, "the heading is not muted");
+    assert_eq!(heading, 12.5, "the column panel label is the label level");
+    assert_eq!(name, 15.0, "project names use the 15.0px section level");
+    assert!(
+        name > heading,
+        "{name} must outrank the panel label {heading}"
+    );
+    assert_eq!(color, palette.text_muted, "the panel label is muted");
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -71347,15 +71351,15 @@ pub(crate) fn session_column_project_is_a_heading_not_a_card() {
         .find("RichText::new(&project.name)")
         .expect("プロジェクト名が描かれていません");
     let name_block = &column[name_at..column.len().min(name_at + 700)];
-    // Change 319: the name heads its rows at the control level, in the
-    // plain ink; still a heading, not a page title.
+    // Change 321: project names are 15.0px (`section`) above both the 12.5px
+    // panel label and the 12.0px session rows.
     assert!(
-        name_block.matches(".size(13.5)").count() == 1 && name_block.contains("palette.text"),
-        "プロジェクト名が行より一段大きい見出しになっていません"
+        name_block.matches(".size(15.0)").count() == 1 && name_block.contains("palette.text"),
+        "プロジェクト名が section 大きさの見出しになっていません"
     );
     assert!(
-        !name_block.contains(".size(15.0)") && !name_block.contains("palette.text_muted"),
-        "プロジェクト名がページ見出しの大きさか、薄いままです"
+        !name_block.contains("palette.text_muted"),
+        "プロジェクト名が薄いままです"
     );
     let title_at = column
         .find("RichText::new(&title)")
@@ -90587,13 +90591,12 @@ fn sidebar_302_column_uses_compact_type_scale() {
     assert_ne!(app.selected_project, Some(unselected_project));
 
     assert_eq!(sidebar_302_font_size(&output, right, 0.0, "one"), 12.0);
-    // Change 319: names one level above the rows; change 320: the column's
-    // heading one level above the names.
-    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "p"), 13.5);
-    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "q"), 13.5);
+    // Change 321: project names at 15.0px section level, panel label at 12.5px.
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "p"), 15.0);
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "q"), 15.0);
     assert_eq!(
-        sidebar_302_font_size(&output, right, 0.0, tr("プロジェクト")),
-        15.0
+        sidebar_302_font_size(&output, right, 0.0, tr("セッション一覧")),
+        12.5
     );
     assert_eq!(
         sidebar_302_font_size(&output, right, p_top - 4.0, "1"),
@@ -100080,7 +100083,7 @@ pub(crate) fn column_319_project_names_read_larger_than_their_rows() {
             .collect::<Vec<_>>()
     };
     let history = column_rect(&output, "履歴").unwrap();
-    let heading = in_column(column_319_texts(&output, |t| t == "プロジェクト"))
+    let heading = in_column(column_319_texts(&output, |t| t == "セッション一覧"))
         .into_iter()
         .find(|(rect, ..)| (rect.center().y - history.center().y).abs() < 4.0)
         .expect("the column's heading");
@@ -100092,15 +100095,15 @@ pub(crate) fn column_319_project_names_read_larger_than_their_rows() {
         .into_iter()
         .next()
         .expect("the session's row");
-    // Change 320: the heading is one level above the names, in the strong ink.
-    assert_eq!(heading.1, 15.0, "heading at the section level");
-    assert_eq!(name.1, 13.5, "names at the control level");
+    // Change 321: panel label is 12.5px muted, project names are 15.0px section.
+    assert_eq!(heading.1, 12.5, "panel label at the label level");
+    assert_eq!(name.1, 15.0, "names at the section level");
     assert!(name.1 > row.1, "above the rows' {}", row.1);
     assert!(
         name.2 == palette.text || name.2 == palette.text_strong,
         "names in the plain ink, not muted"
     );
-    assert_eq!(heading.2, palette.text_strong);
+    assert_eq!(heading.2, palette.text_muted);
     fs::remove_dir_all(&root).ok();
 }
 
@@ -100151,6 +100154,230 @@ pub(crate) fn column_319_escape_closing_the_plus_menu_is_not_passed_on() {
             .iter()
             .any(|t| t == tr("プロジェクトを追加…")),
         "and the menu closes"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 321, R1: the column's top label is 「セッション一覧」 at 12.5px muted ink.
+#[test]
+pub(crate) fn column_321_panel_label_is_quiet_session_list() {
+    let root = temporary_directory("column-321-r1");
+    let (mut app, ..) = status_column_fixture(&root);
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let right = column_right(&output);
+    let p_rect = column_rect(&output, "p").expect("project p heading");
+    let label = column_319_texts(&output, |t| t == tr("セッション一覧"))
+        .into_iter()
+        .find(|(rect, ..)| rect.left() < right && rect.top() < p_rect.top())
+        .expect("the column draws セッション一覧 above projects");
+    assert_eq!(label.1, 12.5, "panel label uses the 12.5px label level");
+    assert_eq!(label.2, palette.text_muted, "panel label uses muted ink");
+    let stale = column_319_texts(&output, |t| t == tr("プロジェクト"))
+        .into_iter()
+        .any(|(rect, ..)| rect.left() < right && rect.top() < p_rect.top());
+    assert!(
+        !stale,
+        "the column no longer heads itself with プロジェクト"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 321, R2: project names in the column use 15.0px (`section`) scale,
+/// outranking both the 12.5px panel label and the 12.0px session rows.
+#[test]
+pub(crate) fn column_321_project_names_use_section_scale() {
+    let root = temporary_directory("column-321-r2");
+    let (mut app, populated, ..) = status_column_fixture(&root);
+    app.session_arrangement = SessionArrangement::default();
+    app.page = Page::Sessions;
+    app.toggle_project_fold(populated);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let right = column_right(&output);
+    let name = column_319_texts(&output, |t| t == "p")
+        .into_iter()
+        .find(|(rect, ..)| rect.left() < right)
+        .expect("project p name");
+    let row = column_319_texts(&output, |t| t == "first")
+        .into_iter()
+        .find(|(rect, ..)| rect.left() < right)
+        .expect("session row first");
+    assert_eq!(name.1, 15.0, "project name uses the 15.0px section level");
+    assert!(name.1 > 12.5 && name.1 > row.1);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 321, R3: a pinned sidebar row draws `ICON_PIN` in the left gutter
+/// before the agent mark, keeping all rows' agent marks vertically aligned.
+#[test]
+pub(crate) fn column_321_sidebar_pin_sits_in_gutter_before_aligned_agent_mark() {
+    let root = temporary_directory("column-321-r3");
+    let (mut app, _project, ids) = session_285_app(&root, &["pinned-row", "plain-row"]);
+    app.page = Page::Sessions;
+    app.toggle_session_pin(ids[0]);
+    app.select_session(ids[0]);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let right = column_right(&output);
+    let proj_name = column_rect(&output, "p").expect("project p");
+    let pinned_row = column_rect(&output, "pinned-row").expect("pinned row");
+    let plain_row = column_rect(&output, "plain-row").expect("plain row");
+    let agent = app.store.sessions[0].agent.clone();
+    let texture = session_mark_texture(&ctx, &agent)
+        .expect("fixture CLI has a mark")
+        .id();
+    let marks = sidebar_251_mesh_rects(&output, texture);
+    let mark_for = |row: egui::Rect| {
+        marks
+            .iter()
+            .copied()
+            .find(|m| {
+                m.left() < right
+                    && m.center().y > row.top() - 4.0
+                    && m.center().y < row.bottom() + 4.0
+            })
+            .expect("row draws its agent mark")
+    };
+    let pinned_mark = mark_for(pinned_row);
+    let plain_mark = mark_for(plain_row);
+    let (pin_rect, _size, pin_color) = column_319_texts(&output, |t| t == ICON_PIN)
+        .into_iter()
+        .find(|(rect, ..)| rect.left() < right)
+        .expect("column draws ICON_PIN");
+    assert!(
+        pin_rect.right() <= pinned_mark.left(),
+        "sidebar pin ({pin_rect:?}) must sit to the left of the agent mark ({pinned_mark:?})"
+    );
+    assert!(
+        (pinned_mark.left() - plain_mark.left()).abs() <= 1.0
+            && (pinned_mark.left() - proj_name.left()).abs() <= 1.0,
+        "pinned mark ({:.2}), plain mark ({:.2}), and project name ({:.2}) must align",
+        pinned_mark.left(),
+        plain_mark.left(),
+        proj_name.left()
+    );
+    assert_eq!(
+        pin_color,
+        palette.selected_secondary_ink(),
+        "selected pinned row uses selected_secondary_ink for ICON_PIN"
+    );
+
+    app.select_session(ids[1]);
+    let unselected_out = sidebar_302_settled(&mut app, &ctx);
+    let (_, _, unselected_pin_color) = column_319_texts(&unselected_out, |t| t == ICON_PIN)
+        .into_iter()
+        .find(|(rect, ..)| rect.left() < right)
+        .expect("column draws ICON_PIN");
+    assert_eq!(unselected_pin_color, palette.text_muted);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 321, R4: a pinned central tab draws `ICON_PIN` to the left of its
+/// agent mark and keeps no close button.
+#[test]
+pub(crate) fn column_321_tab_pin_sits_left_of_agent_mark_without_close_button() {
+    let root = temporary_directory("column-321-r4");
+    let (mut app, _project, ids) = session_285_app(&root, &["kept", "plain"]);
+    app.page = Page::Sessions;
+    app.toggle_session_pin(ids[0]);
+    app.select_session(ids[1]);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let right = column_right(&output);
+    let tab_title = drawn_text_rects(&output, |t| t == "kept")
+        .into_iter()
+        .find(|r| r.left() > right)
+        .expect("kept tab title");
+    let agent = app.store.sessions[0].agent.clone();
+    let texture = session_mark_texture(&ctx, &agent)
+        .expect("fixture CLI has a mark")
+        .id();
+    let tab_mark = sidebar_251_mesh_rects(&output, texture)
+        .into_iter()
+        .find(|m| {
+            m.left() > right
+                && m.right() <= tab_title.left()
+                && (m.center().y - tab_title.center().y).abs() < CONTROL_HEIGHT / 2.0
+        })
+        .expect("kept tab draws its agent mark");
+    let (pin_rect, _size, pin_color) = column_319_texts(&output, |t| t == ICON_PIN)
+        .into_iter()
+        .find(|(rect, ..)| rect.left() > right)
+        .expect("central tab draws ICON_PIN");
+    assert!(
+        pin_rect.right() <= tab_mark.left(),
+        "tab pin ({pin_rect:?}) must sit to the left of the agent mark ({tab_mark:?})"
+    );
+    assert_eq!(pin_color, palette.text_muted);
+    let closes = drawn_text_rects(&output, |t| t == ICON_CLOSE)
+        .into_iter()
+        .filter(|r| r.left() > right)
+        .count();
+    assert_eq!(closes, 1, "only the unpinned tab keeps ICON_CLOSE");
+
+    app.select_session(ids[0]);
+    if let Some(group) = app.workspace.groups.first().map(|g| g.id) {
+        app.workspace.select(group, &WorkspaceTab::Session(ids[0]));
+    }
+    let active_out = sidebar_302_settled(&mut app, &ctx);
+    let (_, _, active_pin_color) = column_319_texts(&active_out, |t| t == ICON_PIN)
+        .into_iter()
+        .find(|(rect, ..)| rect.left() > right)
+        .expect("active tab draws ICON_PIN");
+    assert_eq!(active_pin_color, palette.selected_secondary_ink());
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 321, R5: English translation of 「セッション一覧」 is capitalized
+/// like the other panel headings.
+#[test]
+pub(crate) fn column_321_session_list_label_is_capitalized_in_english() {
+    assert!(
+        EN_TABLE
+            .iter()
+            .any(|&(ja, en)| ja == "セッション一覧" && en == "Session list"),
+        "EN_TABLE must translate セッション一覧 as \"Session list\""
+    );
+}
+
+/// Change 321, F1 (reproduced from empirical verifier): hovering the gutter
+/// `ICON_PIN` on a sidebar row shows 「ピン留め中」 instead of being covered
+/// by a post-frame `ui.interact`.
+#[test]
+pub(crate) fn column_321_sidebar_pin_hover_shows_tooltip() {
+    let root = temporary_directory("column-321-f1");
+    let (mut app, _project, ids) = session_285_app(&root, &["pinned-row"]);
+    app.page = Page::Sessions;
+    app.toggle_session_pin(ids[0]);
+    let ctx = egui::Context::default();
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let right = column_right(&output);
+    let pin_rect = drawn_text_rects(&output, |t| t == ICON_PIN)
+        .into_iter()
+        .find(|r| r.left() < right)
+        .expect("sidebar ICON_PIN");
+    let _ = sidebar_302_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(pin_rect.center())],
+    );
+    let hovered = sidebar_302_frame(
+        &mut app,
+        &ctx,
+        vec![egui::Event::PointerMoved(pin_rect.center())],
+    );
+    assert!(
+        painted_texts(&hovered)
+            .iter()
+            .any(|t| t == tr("ピン留め中")),
+        "hovering sidebar ICON_PIN must show ピン留め中: {:?}",
+        painted_texts(&hovered)
     );
     fs::remove_dir_all(&root).ok();
 }
