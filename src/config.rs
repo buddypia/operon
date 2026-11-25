@@ -501,6 +501,16 @@ pub(crate) const PORT_SCAN_MAX_BYTES: usize = 512 * 1024;
 /// What reads the listening sockets. macOS ships it; a machine without it gets
 /// no port line and no complaint about one.
 pub(crate) const PORT_SCAN_PROGRAM: &str = "lsof";
+/// What reads a listener's parent, start, command line and environment
+/// (change 318). Absolute, like `PORT_STOP_PROGRAM`: what it prints decides
+/// which session a server is credited to.
+pub(crate) const PORT_PROCESS_PROGRAM: &str = "/bin/ps";
+/// The ceiling on `ps -E`, whose lines carry each process's whole
+/// environment: about 200 listeners at up to 20 KiB each. A line cut here is
+/// read as not read, never as "no session".
+pub(crate) const PORT_ENVIRONMENT_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// How much of a listener's command line is kept after redaction.
+pub(crate) const PORT_COMMAND_MAX_CHARS: usize = 1000;
 /// What stops a listener the person confirmed (change 262). An absolute path:
 /// the program that delivers a signal is not one a `PATH` entry gets to choose.
 pub(crate) const PORT_STOP_PROGRAM: &str = "/bin/kill";

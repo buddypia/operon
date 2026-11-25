@@ -35648,6 +35648,7 @@ pub(crate) fn a_missing_lsof_is_a_reading_of_nothing_rather_than_an_error() {
     // one that needs to find `tmux`.
     let reading = scan_listening_ports_with(
         "operon-there-is-no-such-program",
+        PORT_PROCESS_PROGRAM,
         &[(Uuid::new_v4(), PathBuf::from("/w/project"))],
         &[],
     );
@@ -48148,6 +48149,7 @@ pub(crate) fn ui_session_ports_renders_compact_popover_button_when_active() {
         },
         directory: Some(project_path.clone()),
         root: Some(folder.clone()),
+        process: None,
     };
     app.listening_ports.push(port(8791, "node"));
     let texts = draw(&mut app);
@@ -48455,6 +48457,7 @@ pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
     let only_own = SessionPorts {
         own: ports.own.clone(),
         elsewhere: Vec::new(),
+        origins: ports.origins.clone(),
     };
     let (texts, _) = menu(&only_own, false, Vec::new());
     assert!(!texts
@@ -48463,6 +48466,7 @@ pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
     let only_elsewhere = SessionPorts {
         own: Vec::new(),
         elsewhere: ports.elsewhere.clone(),
+        origins: ports.origins.clone(),
     };
     let (texts, _) = menu(&only_elsewhere, false, Vec::new());
     assert!(!texts.iter().any(|(text, _, _)| text == "この作業フォルダ"));
@@ -48512,6 +48516,7 @@ pub(crate) fn ports_262_confirmation_names_pid_and_folder() {
         port: port_262(pid, "node", 3000),
         directory: directory.map(PathBuf::from),
         root: None,
+        process: None,
     };
     let draw = |app: &mut OperonApp, events: Vec<egui::Event>| {
         let output = ctx.run_ui(screen_262(events), |ctx| {
@@ -48627,6 +48632,7 @@ pub(crate) fn ports_262_stop_outcome_is_told_and_rescanned() {
         port: vite.clone(),
         directory: None,
         root: None,
+        process: None,
     };
     // The same process's other port, and another process, are not known to
     // have gone and stay until the rescan says otherwise.
@@ -48634,11 +48640,13 @@ pub(crate) fn ports_262_stop_outcome_is_told_and_rescanned() {
         port: port_262(4821, "vite", 24678),
         directory: None,
         root: None,
+        process: None,
     };
     let neighbour = AttributedPort {
         port: port_262(5000, "node", 3000),
         directory: None,
         root: None,
+        process: None,
     };
     app.listening_ports = vec![stale.clone(), sibling.clone(), neighbour.clone()];
     app.ports_scanned_at = Some(Instant::now());
@@ -48693,6 +48701,7 @@ pub(crate) fn ports_262_stop_outcome_is_told_and_rescanned() {
         port: port_262(5000, "node", 3000),
         directory: None,
         root: None,
+        process: None,
     };
     app.background_tasks.insert(BackgroundKey::PortScan);
     app.background_sender
@@ -99032,5 +99041,551 @@ pub(crate) fn folder_317_an_ime_enter_does_not_open_the_folder() {
         "a plain Enter opens the folder"
     );
     assert_eq!(app.store.projects.len(), 2);
+    fs::remove_dir_all(&root).ok();
+}
+
+// ── Change 318: who started each listening server, when, and with what ──────
+
+/// Change 318, requirement 1. One line per PID; `lstart` is five words in the
+/// `C` locale; a field that does not parse is left out; the line a ceiling cut
+/// gives nothing.
+#[test]
+pub(crate) fn ports_318_reads_process_details_from_ps() {
+    let output =
+        "  4242     1 01-02:03:04 Tue Nov 24 19:30:42 2026     npm run dev -- --port 5173\n\
+                  \x20 4243  4242       05:09 Wed Nov  4 10:02:00 2026     node server.js\n\
+                  \x20 4244  4242     garbage Wed Foo 25 10:02:00 2026 python3 -m http.server\n\
+                  \x20 4245  4242       00:01 Wed Nov 25 10:02:00 2026 node --api-key=sk-abc /x\n\
+                  \x20 4246  4242       00:01 Wed Nov 25 10:0";
+    let details = parse_ps_details(output, false);
+    let first = &details[&4242];
+    assert_eq!(first.parent_pid, Some(1));
+    assert_eq!(first.elapsed_seconds, Some(((24 + 2) * 60 + 3) * 60 + 4));
+    assert_eq!(first.started.as_deref(), Some("11/24 19:30"));
+    assert_eq!(first.command.as_deref(), Some("npm run dev -- --port 5173"));
+    let second = &details[&4243];
+    assert_eq!(second.parent_pid, Some(4242));
+    assert_eq!(second.elapsed_seconds, Some(5 * 60 + 9));
+    assert_eq!(second.started.as_deref(), Some("11/04 10:02"));
+    assert_eq!(second.command.as_deref(), Some("node server.js"));
+    // Unparsable `etime` and month: absent, and the command still read.
+    let third = &details[&4244];
+    assert_eq!(third.elapsed_seconds, None);
+    assert_eq!(third.started, None);
+    assert_eq!(third.command.as_deref(), Some("python3 -m http.server"));
+    // Redacted before it is kept.
+    let fourth = details[&4245].command.as_deref().unwrap_or_default();
+    assert!(fourth.contains("--api-key=***") && !fourth.contains("sk-abc"));
+    // Read whole, the short last line has no start and no command.
+    assert_eq!(details[&4246].started, None);
+    assert_eq!(details[&4246].command, None);
+
+    // Cut at the ceiling, the last line is dropped whole.
+    let cut = parse_ps_details(output, true);
+    assert!(!cut.contains_key(&4246));
+    assert_eq!(cut.len(), 4);
+    assert!(parse_ps_details("", true).is_empty());
+}
+
+/// Change 318, requirement 1: `[[dd-]hh:]mm:ss`.
+#[test]
+pub(crate) fn ports_318_elapsed_time_forms() {
+    assert_eq!(parse_elapsed("05:09"), Some(309));
+    assert_eq!(parse_elapsed("1:02:03"), Some(3723));
+    assert_eq!(parse_elapsed("2-01:00:00"), Some(2 * 86400 + 3600));
+    for bad in [
+        "",
+        "05",
+        "61:00",
+        "00:60",
+        "1-24:00:00",
+        "a:b",
+        "1:2:3:4",
+        "x-01:00:00",
+    ] {
+        assert_eq!(parse_elapsed(bad), None, "「{bad}」を時間として読みました");
+    }
+}
+
+/// Change 318, requirement 2. The last `HOOK_SESSION_ENV=` token on a whole
+/// line names the session; a whole line without it is `Absent`; a cut line is
+/// not read at all, and neither is a PID `ps` did not print.
+#[test]
+pub(crate) fn ports_318_reads_the_session_tag() {
+    let name = managed_tmux_name(Uuid::new_v4());
+    let prefix = format!("{HOOK_SESSION_ENV}=");
+    let cut_name = &name[..name.len() - 3];
+    let output = format!(
+        "10 node server.js PATH=/bin {prefix}{name} HOME=/x\n\
+         11 env {prefix}operon-wrong node x PATH=/bin {prefix}{name}\n\
+         12 python3 PATH=/bin HOME=/x\n\
+         13 x {prefix}\n\
+         14 node PATH=/bin {prefix}{cut_name}"
+    );
+    let tags = parse_ps_environment(&output, true);
+    assert_eq!(tags[&10], SessionTag::Found(name.clone()));
+    assert_eq!(
+        tags[&11],
+        SessionTag::Found(name.clone()),
+        "引数に書かれた値を環境変数より優先しました"
+    );
+    assert_eq!(tags[&12], SessionTag::Absent);
+    assert_eq!(tags[&13], SessionTag::Absent);
+    assert!(
+        !tags.contains_key(&14),
+        "上限で切れた行を読みました: {:?}",
+        tags.get(&14)
+    );
+    assert!(!tags.contains_key(&99));
+    // Read whole, the same line is an answer.
+    let whole = parse_ps_environment(&output, false);
+    assert_eq!(whole[&14], SessionTag::Found(cut_name.to_owned()));
+}
+
+/// Change 318, requirement 3. One case per rule, and the harmless stays.
+#[test]
+pub(crate) fn ports_318_command_line_hides_secrets() {
+    let cases = [
+        ("API_KEY=abc node", "API_KEY=*** node"),
+        ("node --token abc x", "node --token *** x"),
+        ("node --password=abc x", "node --password=*** x"),
+        ("-H Authorization:Bearer abc", "-H Authorization:Bearer ***"),
+        (
+            "-H Authorization: Bearer abc",
+            "-H Authorization: Bearer ***",
+        ),
+        ("curl Basic dXNlcg==", "curl Basic ***"),
+        ("X-Api-Key:abc", "X-Api-Key:***"),
+        (
+            "psql postgres://user:pass@localhost/db",
+            "psql postgres://***@localhost/db",
+        ),
+        ("app --db=postgres://u:p@h/x", "app --db=postgres://***@h/x"),
+        ("npm run dev -- --port 5173", "npm run dev -- --port 5173"),
+        ("open http://localhost:3000/", "open http://localhost:3000/"),
+    ];
+    for (raw, shown) in cases {
+        assert_eq!(redact_command_line(raw), shown, "「{raw}」");
+    }
+    for word in SECRET_NAME_WORDS {
+        let raw = format!("run my_{}=hidden", word.to_ascii_lowercase());
+        let shown = redact_command_line(&raw);
+        assert!(!shown.contains("hidden"), "「{raw}」→「{shown}」");
+        let raw = format!("run --my-{} hidden", word.to_ascii_lowercase());
+        let shown = redact_command_line(&raw);
+        assert!(!shown.contains("hidden"), "「{raw}」→「{shown}」");
+    }
+    // Real token shapes, written out: a loop over the list alone would follow
+    // the list wherever an edit took it (lesson 004).
+    for token in [
+        "sk-proj-abc123",
+        "ghp_abc123",
+        "gho_abc123",
+        "ghs_abc123",
+        "github_pat_abc123",
+        "glpat-abc123",
+        "xoxb-123-abc",
+        "xoxp-123-abc",
+        "AKIAABC123",
+        "AIzaSyAbc123",
+    ] {
+        assert_eq!(
+            redact_command_line(&format!("run {token}")),
+            "run ***",
+            "「{token}」"
+        );
+    }
+    for prefix in SECRET_VALUE_PREFIXES {
+        let raw = format!("run {prefix}0123456789 --x=y");
+        assert_eq!(redact_command_line(&raw), "run *** --x=y", "「{raw}」");
+    }
+    let long = redact_command_line(&"a ".repeat(PORT_COMMAND_MAX_CHARS));
+    assert_eq!(long.chars().count(), PORT_COMMAND_MAX_CHARS + 1);
+    assert!(long.ends_with('…'));
+}
+
+fn process_318(tag: SessionTag) -> Arc<ListenerProcess> {
+    Arc::new(ListenerProcess {
+        parent_pid: Some(1),
+        started_at: Some(now().saturating_sub(14 * 3600 + 60)),
+        started: Some("11/24 19:30".into()),
+        command: Some("npm run dev -- --port 3000".into()),
+        session_tag: tag,
+    })
+}
+
+/// Change 318, requirement 4. Only a tag that was read can call a server
+/// forgotten, and only when its session is not running or is gone.
+#[test]
+pub(crate) fn ports_318_origin_names_the_session_and_marks_leftovers() {
+    let mut running = test_session(Uuid::new_v4(), SessionStatus::Active);
+    running.name = "API 追加".into();
+    running.tmux_name = managed_tmux_name(running.id);
+    let mut starting = test_session(Uuid::new_v4(), SessionStatus::Starting);
+    starting.tmux_name = managed_tmux_name(starting.id);
+    let mut stopped = test_session(Uuid::new_v4(), SessionStatus::Exited);
+    stopped.name = "ログイン修正".into();
+    stopped.tmux_name = managed_tmux_name(stopped.id);
+    let sessions = vec![running.clone(), starting.clone(), stopped.clone()];
+    let origin = |tag: SessionTag| port_origin(Some(&process_318(tag)), &sessions);
+
+    let of_running = origin(SessionTag::Found(running.tmux_name.clone()));
+    assert_eq!(
+        of_running,
+        PortOrigin::Session {
+            name: "API 追加".into(),
+            running: true
+        }
+    );
+    assert!(!of_running.is_leftover());
+    assert!(!origin(SessionTag::Found(starting.tmux_name.clone())).is_leftover());
+    let of_stopped = origin(SessionTag::Found(stopped.tmux_name.clone()));
+    assert_eq!(
+        of_stopped,
+        PortOrigin::Session {
+            name: "ログイン修正".into(),
+            running: false
+        }
+    );
+    assert!(of_stopped.is_leftover());
+    for status in [
+        SessionStatus::Queued,
+        SessionStatus::Failed,
+        SessionStatus::Cancelled,
+    ] {
+        let mut other = stopped.clone();
+        other.status = status.clone();
+        assert!(
+            port_origin(
+                Some(&process_318(SessionTag::Found(other.tmux_name.clone()))),
+                &[other]
+            )
+            .is_leftover(),
+            "{status:?} のセッションのサーバーに印がありません"
+        );
+    }
+    let removed = origin(SessionTag::Found(managed_tmux_name(Uuid::new_v4())));
+    assert_eq!(removed, PortOrigin::RemovedSession);
+    assert!(removed.is_leftover());
+    assert_eq!(origin(SessionTag::Absent), PortOrigin::Unknown);
+    assert!(!PortOrigin::Unknown.is_leftover());
+    assert_eq!(origin(SessionTag::Unread), PortOrigin::Unread);
+    assert!(!PortOrigin::Unread.is_leftover());
+    assert_eq!(port_origin(None, &sessions), PortOrigin::Unread);
+}
+
+/// `listening_262` with every process filled in: the server on `:3000` (the
+/// one `feature-y` serves) was started by `stopped`; the rest are untagged.
+fn listening_318(project_id: Uuid, stopped: &Session) -> Vec<AttributedPort> {
+    let mut ports = listening_262(project_id, Uuid::new_v4());
+    for port in &mut ports {
+        port.process = Some(if port.port.port == 3000 {
+            process_318(SessionTag::Found(stopped.tmux_name.clone()))
+        } else {
+            Arc::new(ListenerProcess {
+                parent_pid: Some(77),
+                started_at: None,
+                started: None,
+                command: Some(format!("{} serve", port.port.process)),
+                session_tag: SessionTag::Absent,
+            })
+        });
+    }
+    ports
+}
+
+fn app_318(label: &str) -> (PathBuf, OperonApp, Session, Uuid) {
+    let root = temporary_directory(label);
+    let mut app = test_app(root.join("store.json"));
+    let project_id = Uuid::new_v4();
+    let mut stopped = test_session(Uuid::new_v4(), SessionStatus::Exited);
+    stopped.name = "ログイン修正".into();
+    stopped.project_id = project_id;
+    stopped.tmux_name = managed_tmux_name(stopped.id);
+    app.store.sessions.push(stopped.clone());
+    app.listening_ports = listening_318(project_id, &stopped);
+    let mut viewer = test_session(Uuid::new_v4(), SessionStatus::Active);
+    viewer.project_id = project_id;
+    viewer.worktree_path = Some(PathBuf::from("/real/project/.worktrees/feature-y"));
+    (root, app, viewer, project_id)
+}
+
+/// Each section of every text drawn, with its colour.
+fn section_texts_318(output: &egui::FullOutput) -> Vec<(String, Color32)> {
+    fn walk(shape: &egui::epaint::Shape, out: &mut Vec<(String, Color32)>) {
+        match shape {
+            egui::epaint::Shape::Text(text) => {
+                let job = &text.galley.job;
+                for section in &job.sections {
+                    out.push((
+                        job.text[section.byte_range.start.0..section.byte_range.end.0].to_owned(),
+                        section.format.color,
+                    ));
+                }
+            }
+            egui::epaint::Shape::Vec(children) => {
+                for child in children {
+                    walk(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// Change 318, requirement 5. Under each row: who, a gone parent, when, and
+/// the command; 「終了忘れ?」 only on the forgotten one.
+#[test]
+pub(crate) fn ports_318_menu_rows_show_origin_time_and_command() {
+    let (root, app, viewer, _) = app_318("ports-318-menu");
+    let palette = app.store.theme.palette();
+    let ports = app.session_ports(&viewer);
+    let ctx = egui::Context::default();
+    let output = ctx.run_ui(screen_262(Vec::new()), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            crate::screens::session_ports_menu(ui, palette, &ports, false);
+        });
+    });
+    let texts = frame_texts_262(&output);
+    let has = |needle: &str| texts.iter().any(|(text, _, _)| text.contains(needle));
+    for needle in [
+        "「ログイン修正」(停止中) · 親は終了済み · 11/24 19:30 · 14時間前",
+        "npm run dev -- --port 3000",
+        "起動元不明",
+        "vite serve",
+    ] {
+        assert!(has(needle), "「{needle}」がメニューにありません: {texts:?}");
+    }
+    let marks: Vec<_> = texts
+        .iter()
+        .filter(|(text, _, _)| text.contains("終了忘れ?"))
+        .collect();
+    assert_eq!(
+        marks.len(),
+        1,
+        "印は止まったセッションのサーバーだけです: {texts:?}"
+    );
+    assert_eq!(marks[0].2, palette.warning);
+    assert!(marks[0].0.contains(ICON_ATTENTION));
+    // An untagged server whose parent is gone is not called forgotten.
+    assert!(!has("親は終了済み · 起動元不明") && !has("起動元不明 · 親は終了済み"));
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 318, requirement 6. The header says how many listed servers look
+/// forgotten, in the warning colour, and says nothing when none do.
+#[test]
+pub(crate) fn ports_318_badge_counts_leftovers() {
+    let (root, mut app, mut viewer, _) = app_318("ports-318-badge");
+    let palette = app.store.theme.palette();
+    let ctx = egui::Context::default();
+    let draw = |app: &mut OperonApp, session: &Session| {
+        let output = ctx.run_ui(screen_262(Vec::new()), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| app.ui_session_ports(ui, palette, session));
+            });
+        });
+        section_texts_318(&output)
+    };
+    let sections = draw(&mut app, &viewer);
+    let segment = sections
+        .iter()
+        .find(|(text, _)| text.contains(&tf!("終了忘れ? {p0}", p0 = 1)))
+        .unwrap_or_else(|| panic!("バッジに終了忘れの数がありません: {sections:?}"));
+    assert_eq!(segment.1, palette.warning);
+
+    // Counted from the rest of the project too: a quiet worktree still sees it.
+    viewer.worktree_path = Some(PathBuf::from("/real/project/.worktrees/quiet"));
+    let sections = draw(&mut app, &viewer);
+    assert!(
+        sections
+            .iter()
+            .any(|(text, _)| text.contains("終了忘れ? 1")),
+        "ほかの場所の終了忘れを数えていません: {sections:?}"
+    );
+
+    // The session running again: no mark.
+    for session in &mut app.store.sessions {
+        session.status = SessionStatus::Active;
+    }
+    let sections = draw(&mut app, &viewer);
+    assert!(
+        !sections.iter().any(|(text, _)| text.contains("終了忘れ?")),
+        "動いているセッションのサーバーに印を付けました: {sections:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 318, requirement 7. The confirmation lists every fact, and says
+/// 「不明」 for one it does not have.
+#[test]
+pub(crate) fn ports_318_confirmation_lists_every_detail() {
+    let (root, mut app, _, _) = app_318("ports-318-confirm");
+    let palette = app.store.theme.palette();
+    let ctx = egui::Context::default();
+    let draw = |app: &mut OperonApp| {
+        let output = ctx.run_ui(screen_262(Vec::new()), |ctx| {
+            app.ui_port_stop_modal(ctx, palette);
+        });
+        frame_texts_262(&output)
+    };
+    let forgotten = app
+        .listening_ports
+        .iter()
+        .find(|port| port.port.port == 3000)
+        .cloned()
+        .expect(":3000 がありません");
+    app.pending_port_stop = Some(forgotten.clone());
+    draw(&mut app);
+    let texts = draw(&mut app);
+    for needle in [
+        "起動したセッション",
+        "「ログイン修正」(停止中)",
+        "起動時刻",
+        "11/24 19:30 (14時間前)",
+        "コマンド",
+        "npm run dev -- --port 3000",
+        "フォルダ",
+        "PID",
+        "親プロセス",
+        "終了済み (PID 1)",
+    ] {
+        assert!(
+            texts.iter().any(|(text, _, _)| text.contains(needle)),
+            "確認に「{needle}」がありません: {texts:?}"
+        );
+    }
+
+    app.pending_port_stop = Some(AttributedPort {
+        process: None,
+        ..forgotten
+    });
+    draw(&mut app);
+    let texts = draw(&mut app);
+    assert!(texts
+        .iter()
+        .any(|(text, _, _)| text == "起動元を読み取れませんでした"));
+    assert!(
+        texts.iter().filter(|(text, _, _)| text == "不明").count() >= 3,
+        "読めなかった起動時刻・コマンド・親が「不明」になっていません: {texts:?}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// A real listener working in `directory`, optionally carrying a session tag.
+fn listener_318(directory: &Path, tag: Option<&str>) -> (ListenerChild, u16) {
+    let mut command = Command::new("/usr/bin/python3");
+    command
+        .args([
+            "-c",
+            "import socket, time\n\
+             s = socket.socket()\n\
+             s.bind(('127.0.0.1', 0))\n\
+             s.listen()\n\
+             print(s.getsockname()[1], flush=True)\n\
+             time.sleep(60)\n",
+        ])
+        .current_dir(directory)
+        .env_remove(HOOK_SESSION_ENV)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Some(tag) = tag {
+        command.env(HOOK_SESSION_ENV, tag);
+    }
+    let mut child = command.spawn().expect("python3 を起動できません");
+    let stdout = child.stdout.take().expect("stdout を取れません");
+    let child = ListenerChild(child);
+    let mut line = String::new();
+    std::io::BufReader::new(stdout)
+        .read_line(&mut line)
+        .expect("ポート番号を読めません");
+    (
+        child,
+        line.trim().parse().expect("ポート番号ではありません"),
+    )
+}
+
+/// Change 318, requirement 8, with real listeners, the real `lsof` and `ps`:
+/// the tag is read off a live environment, `ps` runs twice however many
+/// listeners there are, and without `ps` the ports are still listed.
+#[test]
+pub(crate) fn ports_318_scan_without_ps_still_lists_ports() {
+    let root = temporary_directory("ports-318-scan");
+    let project = root.join("project");
+    fs::create_dir_all(&project).expect("フォルダを作れません");
+    let name = managed_tmux_name(Uuid::new_v4());
+    let (first, first_port) = listener_318(&project, Some(&name));
+    let (second, second_port) = listener_318(&project, None);
+    let projects = [(Uuid::new_v4(), project.clone())];
+    let find = |reading: &[AttributedPort], number: u16| {
+        reading
+            .iter()
+            .find(|port| port.port.port == number)
+            .cloned()
+            .unwrap_or_else(|| panic!(":{number} が読めません"))
+    };
+
+    // The real `ps`, through a wrapper that counts its calls.
+    let log = root.join("ps-calls.log");
+    let wrapper = root.join("ps-wrapper.sh");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\necho call >> '{}'\nexec {PORT_PROCESS_PROGRAM} \"$@\"\n",
+            log.display()
+        ),
+    )
+    .expect("ラッパーを書けません");
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755))
+            .expect("ラッパーを実行可能にできません");
+    }
+    let wrapper = wrapper.to_string_lossy().into_owned();
+    let reading = scan_listening_ports_with(PORT_SCAN_PROGRAM, &wrapper, &projects, &[]);
+    let tagged = find(&reading, first_port);
+    let process = tagged.process.expect("ps の結果がありません");
+    assert_eq!(process.session_tag, SessionTag::Found(name.clone()));
+    assert_eq!(process.parent_pid, Some(std::process::id()));
+    assert!(process.started.is_some() && process.started_at.is_some());
+    assert!(process
+        .command
+        .as_deref()
+        .is_some_and(|command| command.contains("import socket")));
+    let untagged = find(&reading, second_port)
+        .process
+        .expect("ps の結果がありません");
+    assert_eq!(untagged.session_tag, SessionTag::Absent);
+    let calls = fs::read_to_string(&log).unwrap_or_default();
+    assert_eq!(calls.lines().count(), 2, "ps を PID ごとに呼んでいます");
+
+    // No `ps`: the same ports, nothing read about them.
+    let reading = scan_listening_ports_with(
+        PORT_SCAN_PROGRAM,
+        "operon-there-is-no-such-ps",
+        &projects,
+        &[],
+    );
+    for number in [first_port, second_port] {
+        let port = find(&reading, number);
+        let process = port.process.expect("ps が無くても結果は埋まります");
+        assert_eq!(process.session_tag, SessionTag::Unread);
+        assert_eq!(
+            (
+                process.parent_pid,
+                process.started_at,
+                &process.started,
+                &process.command
+            ),
+            (None, None, &None, &None)
+        );
+    }
+    drop(first);
+    drop(second);
     fs::remove_dir_all(&root).ok();
 }

@@ -75,3 +75,24 @@
 
 ## Departures from the plan
 
+- **Order.** The parsers and the drawing were written before their tests, in
+  the same sitting, rather than after watching each test fail. Each guard was
+  watched failing afterwards instead: the sweep broke every requirement
+  (22 mutations) and each one turned a `ports_318_` test red.
+- **The sweep found a blind guard.** `token-prefix-shown` was not caught: the
+  test looped over `SECRET_VALUE_PREFIXES`, so a mutated prefix was also the
+  prefix tested (lesson 004). Literal token fixtures were added; it is caught
+  now, 22 of 22. `SECRET_NAME_WORDS` and `SECRET_VALUE_PREFIXES` are
+  `pub(crate)` so the test can still cover the whole list.
+- **Where things live.** `PortOrigin` and `port_origin` are in
+  `src/git/ports.rs` beside `SessionPorts`, which owns `origins`;
+  `OperonApp::port_origin` in `src/app.rs` passes it the store's sessions.
+  `ListenerProcess` keeps `started_at` (the scan's clock minus `etime`) rather
+  than the elapsed seconds, so 「…前」 stays right between scans;
+  `ProcessDetails` carries the parsed `etime`.
+- **`ps` asks only about listeners credited to a folder**, since nothing else
+  is ever shown.
+- **`docs/features/index.yaml`**: the worktrees entry gains `src/config.rs`, where
+  its port constants already were (`a_change_that_alters_a_feature_updates_its_spec`
+  read the file as only settings' and local-data's).
+

@@ -15,6 +15,8 @@
 12. Listening ports (`ui_session_ports`): the session header shows a badge counting listeners in this session's folder (「{n} ポート稼働中」, or the project's count 「プロジェクトで {n} ポート稼働中」), and a menu with sections 「この作業フォルダ」 and 「プロジェクト内のほかの場所」, each port with 「ブラウザで開く」 and a URL copy. 「停止する」 opens 「ポートを停止」 (「:{port} {process} を停止しますか？」, PID, 「フォルダ」, 「終了シグナル (SIGTERM) を送ります。…」). Pinned by `ports_262_menu_sections_name_folders_and_offer_stop`.
 13. A port is credited to the deepest of a session worktree, a project worktree or the project root that contains the listener's working directory (from `lsof`). Pinned by `attributes_a_port_to_the_deepest_worktree_that_contains_it`.
 14. Stopping re-checks that the same process still listens on that port, sends SIGTERM, then confirms it is gone; the notice is one of 「{process} を停止しました（:{port}）。」, 「…まだ :{port} で動いています。」, 「…止まったか確かめられませんでした。」, 「:{port} はもう … 何もしませんでした。」, 「ポートの持ち主を確かめられなかったため、停止しませんでした。」, 「このプロセスは停止できません。」, or 「… を停止できませんでした: …」. Pinned by `ports_262_stop_sequence_checks_before_signalling`, `ports_262_stop_never_reports_stopped_without_seeing_it_gone`, `ports_262_stop_refuses_operon_and_init`.
+15. Each listed port shows who started it, when, and with what (change 318). The scan runs `/bin/ps` twice for every listed PID at once — `-ww -o pid=,ppid=,etime=,lstart=,command=` under `LC_ALL=C`, and `-E -ww -o pid=,command=` — and keeps the parent PID, the start (`MM/DD HH:MM` and how long ago), the command line redacted (`NAME=value` and `--flag value` whose name holds KEY/TOKEN/SECRET/PASSWORD/PASSWD/AUTH/CREDENTIAL/COOKIE, the word after `Bearer`/`Basic`, URL user information and known token prefixes become `***`; cut at 1000 characters), and only the `OPERON_SESSION` value of the environment. Pinned by `ports_318_reads_process_details_from_ps`, `ports_318_elapsed_time_forms`, `ports_318_reads_the_session_tag`, `ports_318_command_line_hides_secrets`, `ports_318_scan_without_ps_still_lists_ports`.
+16. The tag names the session: 「{name}」, 「{name}」(停止中) when it is not starting or active, 削除済みのセッション, 起動元不明 (no tag), or 起動元を読み取れませんでした. A server whose session is stopped or removed is marked 「終了忘れ?」 in its row and counted in the badge as 「終了忘れ? {n}」 in the warning colour; an untagged or unread one never is. Each row shows the origin, 親は終了済み when the parent is PID 1, the start, and the command; the stop confirmation lists 起動したセッション, 起動時刻, コマンド, フォルダ, PID and 親プロセス. Pinned by `ports_318_origin_names_the_session_and_marks_leftovers`, `ports_318_menu_rows_show_origin_time_and_command`, `ports_318_badge_counts_leftovers`, `ports_318_confirmation_lists_every_detail`.
 
 ## States
 - Loading and error: 「worktree を読み込んでいます…」, 「worktree を取得できません: …」; creation while another worktree action runs says 「worktree の操作が既に実行中です。」 and the create button shows 「worktree 操作の完了待ち」.
@@ -24,6 +26,7 @@
 - Landing that cannot be undone, or that left the tree changed, says so rather than reporting unchanged.
 - Setup or run script missing: nothing is drawn. Over 64 KiB: reported as too large, not previewed.
 - No `lsof`: no ports are shown and no error.
+- No `ps`, or a line cut by its ceiling: the port is listed with 起動元を読み取れませんでした and no time or command.
 - Port stop refused for Operon itself and for init.
 
 ## Invariants
@@ -32,7 +35,8 @@
 - Landing, commit, push and draft on one project exclude one another (one `GitMutation`/`WorktreeMutation` at a time).
 - Project removal waits for in-flight worktree work.
 - Checkpoints never change the user's index; rollback never deletes files.
-- Port scan interval 30 s, timeout 8 s, at most 200 entries, 512 KiB of output; a port is signalled only after its holder is re-confirmed.
+- Port scan interval 30 s, timeout 8 s, at most 200 entries, 512 KiB of output (4 MiB for `ps -E`); a port is signalled only after its holder is re-confirmed.
+- A command line is redacted in the scan; the raw line and the rest of a process's environment are never kept.
 - The path reaches a shell quoted (a path with a space works).
 - No force or remote operation is part of landing; it is local.
 
@@ -47,7 +51,7 @@
 - `src/git.rs::git_create_checkpoint`, `git_list_checkpoints`, `git_restore_checkpoint`, `git_diff_checkpoint`: checkpoints.
 - `src/git/setup.rs::read_setup_script`, `decide_setup_run`, `keep_approved_script`, `setup_command`, `SetupTrust`: setup digest, approval and run.
 - `src/git/setup.rs::read_run_script`, `decide_run_script_run`: the run-script counterparts.
-- `src/git/ports.rs::scan_listening_ports`, `attribute_ports`, `stop_listening_port`, `port_stop_notice`: ports.
+- `src/git/ports.rs::scan_listening_ports`, `attribute_ports`, `stop_listening_port`, `port_stop_notice`: ports; `parse_ps_details`, `parse_ps_environment`, `redact_command_line`, `port_origin`, `PortOrigin`: who started each one.
 - `src/config.rs::SETUP_SCRIPT_RELATIVE_PATH`, `RUN_SCRIPT_RELATIVE_PATH`, `SETUP_SCRIPT_MAX_BYTES`, `CHECKPOINTS_REF_PREFIX`, `PORT_SCAN_MAX_ENTRIES`: names and limits.
 - Tests:
 - `lists_main_and_linked_git_worktrees`: list parsing, main flag.
@@ -86,6 +90,10 @@
 - `ports_262_stop_never_reports_stopped_without_seeing_it_gone`: stop confirmation.
 - `ports_262_stop_refuses_operon_and_init`: protected processes.
 - `ports_262_menu_sections_name_folders_and_offer_stop`: menu sections.
+- `ports_318_reads_process_details_from_ps`, `ports_318_reads_the_session_tag`, `ports_318_command_line_hides_secrets`: what `ps` says, redacted.
+- `ports_318_origin_names_the_session_and_marks_leftovers`, `ports_318_badge_counts_leftovers`: 終了忘れ?.
+- `ports_318_menu_rows_show_origin_time_and_command`, `ports_318_confirmation_lists_every_detail`: rows and confirmation.
+- `ports_318_scan_without_ps_still_lists_ports`, `ports_318_elapsed_time_forms`: scan and `etime`.
 
 ## Decisions inherited
 - Change 018: a worktree branches from the project's mainline, fully qualified and untracked, because branching from whatever was checked out gave agents the wrong starting point.
@@ -94,4 +102,5 @@
 - Change 110: landing, run scripts and checkpoints keep the agent loop local.
 - Change 115: landing refuses before it merges when the main checkout has work in it, and any failed landing is undone, so it cannot undo the main checkout's work.
 - Change 262: ports are narrowed to the session's folder, told apart from the rest of the project, and stoppable only after the holder is re-confirmed.
+- Change 318: a server is credited to the session whose `OPERON_SESSION` it inherited, read from its environment rather than its parent chain, which is gone exactly when a server has been left behind; nothing is recorded across scans.
 - Change 209: the setup script is read once under its ceiling and run from an approved copy, so a swapped file cannot run.
