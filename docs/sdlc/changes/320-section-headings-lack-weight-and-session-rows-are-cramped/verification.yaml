@@ -1,0 +1,10 @@
+# The evidence for change 320. Format: docs/sdlc/templates/verification.yaml.
+digest: "0d5d5cf34bcd59cc"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked heading_320_page_titles_are_the_title_level
+  - R2 empirical-test :: cargo test --locked heading_320_the_column_heading_outranks_the_project_names
+  - R3 empirical-test :: cargo test --locked column_320_session_rows_have_room
+  - R4 empirical-test :: cargo test --locked column_320_session_rows_sit_under_the_project_name
+  - R5 empirical-test :: cargo test --locked sidebar_302_compact_rows_still_pin_reorder_and_sync_with_top_tabs
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/320-section-headings-lack-weight-and-session-rows-are-cramped/mutations.py

@@ -321,10 +321,12 @@ pub(crate) fn page_header(
 ) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            ui.add_space(2.0);
+            // The page's title (change 320): the `title` level, with room
+            // between it and the toolbar's rule.
+            ui.add_space(SPACE_SM);
             ui.label(
                 RichText::new(title)
-                    .size(20.0)
+                    .size(24.0)
                     .strong()
                     .color(palette.text_strong),
             );
