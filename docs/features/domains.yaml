@@ -28,7 +28,7 @@ domains:
     owns: セッションの一覧と並び順、ターミナルの表示と入力、状態（実行中・回答待ち・異常終了など）の取得、要対応の集約と通知、セッションの停止・再試行・閉じる操作、再起動をまたいだタブの復元、作業時間の計測。
     excludes: エージェントの起動コマンドや起動オプションはエージェント連携、会話の復元と CLI をまたぐハンドオフもエージェント連携、ターミナルに映る diff やファイルを開いた先はプロジェクトとコードが担当する。
     adjacent: agents code shell data
-    modules: src/tmux.rs src/tmux/hooks.rs src/app/waiting_reply.rs src/app/dock_badge.rs src/app/session_order.rs src/app/terminal_output.rs src/app/terminal_paths.rs src/app/working_time.rs src/app/relaunch.rs src/ui/terminal.rs src/ui/session_tree.rs
+    modules: src/tmux.rs src/tmux/hooks.rs src/app/waiting_reply.rs src/app/dock_badge.rs src/app/session_order.rs src/app/column_add.rs src/app/terminal_output.rs src/app/terminal_paths.rs src/app/working_time.rs src/app/relaunch.rs src/ui/terminal.rs src/ui/session_tree.rs
 
   - id: agents
     title: エージェント連携

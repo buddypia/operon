@@ -115,7 +115,9 @@ The window has a toolbar and four pages:
   session terminals and files; drag a tab to an edge to split, up to four
   groups. On the right, the side panel (**Files**, **Conversation**,
   **Changes**). **History** swaps the middle for past sessions and
-  conversations.
+  conversations. The **+** beside the left column's heading, or a right-click
+  on the column's empty space or a project's name, starts a new session or
+  adds a project without leaving the page.
 - **Settings** (⌘,).
 
 The toolbar holds **New session** (⌘N), **Search & actions** (⌘K), the Settings

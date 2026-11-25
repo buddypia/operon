@@ -68703,7 +68703,13 @@ fn workspace_project_column_has_one_start_per_project() {
         .into_iter()
         .filter(|rect| rect.left() < column_right(&output))
         .count();
-    assert_eq!(starts, app.store.projects.len(), "one start per project");
+    // One start per project, and since change 319 the column's own + beside
+    // its heading, which offers a session or a project.
+    assert_eq!(
+        starts,
+        app.store.projects.len() + 1,
+        "one start per project and the heading's +"
+    );
     assert!(
         column_rect(&output, "履歴").is_some(),
         "history stays reachable"
@@ -69006,9 +69012,10 @@ fn column_311_projects_start_folded_and_unfold_on_click() {
         (2, 0),
         "both projects draw the closed mark"
     );
+    // Since change 319 the column's heading has its own + as well.
     assert_eq!(
         in_column(&output, ICON_ADD),
-        2,
+        3,
         "a folded project keeps its start"
     );
     assert!(
@@ -71210,13 +71217,15 @@ pub(crate) fn session_column_project_is_a_heading_not_a_card() {
         .find("RichText::new(&project.name)")
         .expect("プロジェクト名が描かれていません");
     let name_block = &column[name_at..column.len().min(name_at + 700)];
+    // Change 319: the name heads its rows at the control level, in the
+    // plain ink; still a heading, not a page title.
     assert!(
-        name_block.matches(".size(12.0)").count() == 2 && name_block.contains("palette.text_muted"),
-        "プロジェクト名が小さな薄い見出しになっていません"
+        name_block.matches(".size(13.5)").count() == 1 && name_block.contains("palette.text"),
+        "プロジェクト名が行より一段大きい見出しになっていません"
     );
     assert!(
-        !name_block.contains(".size(15.0)") && !name_block.contains("palette.text_strong"),
-        "プロジェクト名がまだ主役の強さです"
+        !name_block.contains(".size(15.0)") && !name_block.contains("palette.text_muted"),
+        "プロジェクト名がページ見出しの大きさか、薄いままです"
     );
     let title_at = column
         .find("RichText::new(&title)")
@@ -71245,7 +71254,7 @@ pub(crate) fn session_column_project_heading_keeps_its_operations() {
         "open_project_session_setup(project.id)",
         "Some(ColumnDrag::Project(project.id))",
         "targets.push(project.id,",
-        "select_workspace_project(project.id)",
+        "select_workspace_project(project_id)",
     ] {
         assert!(
             column.contains(needle),
@@ -90444,11 +90453,12 @@ fn sidebar_302_column_uses_compact_type_scale() {
     assert_ne!(app.selected_project, Some(unselected_project));
 
     assert_eq!(sidebar_302_font_size(&output, right, 0.0, "one"), 12.0);
-    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "p"), 12.0);
-    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "q"), 12.0);
+    // Change 319: names and the column's heading one level above the rows.
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "p"), 13.5);
+    assert_eq!(sidebar_302_font_size(&output, right, 0.0, "q"), 13.5);
     assert_eq!(
         sidebar_302_font_size(&output, right, 0.0, tr("プロジェクト")),
-        11.5
+        13.5
     );
     assert_eq!(
         sidebar_302_font_size(&output, right, p_top - 4.0, "1"),
@@ -99629,5 +99639,377 @@ pub(crate) fn ports_318_scan_without_ps_still_lists_ports() {
     }
     drop(first);
     drop(second);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319: each text shape `matches` accepts, with its size and ink.
+fn column_319_texts(
+    output: &egui::FullOutput,
+    matches: impl Fn(&str) -> bool,
+) -> Vec<(egui::Rect, f32, Color32)> {
+    fn visit(
+        shape: &egui::epaint::Shape,
+        matches: &dyn Fn(&str) -> bool,
+        found: &mut Vec<(egui::Rect, f32, Color32)>,
+    ) {
+        match shape {
+            egui::epaint::Shape::Text(text) if matches(text.galley.text()) => {
+                let format = &text.galley.job.sections[0].format;
+                found.push((
+                    text.galley.rect.translate(text.pos.to_vec2()),
+                    format.font_id.size,
+                    format.color,
+                ));
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().for_each(|shape| visit(shape, matches, found))
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        visit(&clipped.shape, &matches, &mut found);
+    }
+    found
+}
+
+/// The + beside the column's heading: the column's topmost + (change 319).
+fn column_319_heading_plus(output: &egui::FullOutput) -> egui::Pos2 {
+    let right = column_right(output);
+    drawn_text_rects(output, |text| text == ICON_ADD)
+        .into_iter()
+        .filter(|rect| rect.left() < right)
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the heading's + is drawn")
+        .center()
+}
+
+fn column_319_click(app: &mut OperonApp, ctx: &egui::Context, text: &str) {
+    let menu = sidebar_302_frame(app, ctx, Vec::new());
+    let at = drawn_text_rect(&menu, |t| t == text)
+        .unwrap_or_else(|| panic!("{text} is drawn"))
+        .center();
+    sidebar_302_click(app, ctx, at, egui::PointerButton::Primary);
+}
+
+fn column_319_target(app: &mut OperonApp) -> Option<FolderPickerTarget> {
+    app.folder_picker.take().map(|picker| picker.target)
+}
+
+/// Change 319, R1 and R8: the heading's + offers a session and a project,
+/// and 「履歴」 beside it is the quiet button, in the link ink.
+#[test]
+pub(crate) fn column_319_the_heading_plus_offers_a_session_and_a_project() {
+    let (mut app, root, _other) = folder_317_fixture("column-319-r1");
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let history = column_319_texts(&output, |t| t == "履歴");
+    assert!(
+        history.iter().any(|(_, _, ink)| *ink == palette.link),
+        "履歴 is a quiet_button: {history:?}"
+    );
+
+    let plus = column_319_heading_plus(&output);
+    sidebar_302_click(&mut app, &ctx, plus, egui::PointerButton::Primary);
+    let menu = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&menu);
+    for item in [tr("新しいセッション…"), tr("プロジェクトを追加…")] {
+        assert!(texts.iter().any(|t| t == item), "the + menu offers {item}");
+    }
+    column_319_click(&mut app, &ctx, tr("プロジェクトを追加…"));
+    assert_eq!(
+        column_319_target(&mut app),
+        Some(FolderPickerTarget::SessionColumn)
+    );
+    assert_eq!(app.page, Page::Sessions);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, R2: the column's empty space offers the same two items, and
+/// a session row keeps its own menu.
+#[test]
+pub(crate) fn column_319_a_right_click_on_empty_space_offers_the_same_items() {
+    let root = temporary_directory("column-319-r2");
+    let names = ["oldest", "newest"];
+    let (mut app, _project, _ids) = session_285_app(&root, &names);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let row = column_rect(&output, "oldest").expect("a row is drawn");
+    let below = row.center() + egui::vec2(0.0, 80.0);
+    assert!(
+        column_rect(&output, "newest").unwrap().bottom() < below.y,
+        "the point is below every row"
+    );
+
+    sidebar_302_click(&mut app, &ctx, below, egui::PointerButton::Secondary);
+    let menu = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&menu);
+    for item in [tr("新しいセッション…"), tr("プロジェクトを追加…")] {
+        assert!(texts.iter().any(|t| t == item), "empty space offers {item}");
+    }
+    column_319_click(&mut app, &ctx, tr("新しいセッション…"));
+    assert!(app.launch_sheet_open, "新しいセッション… opens the sheet");
+    app.launch_sheet_open = false;
+
+    sidebar_302_click(&mut app, &ctx, row.center(), egui::PointerButton::Secondary);
+    let menu = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&menu);
+    assert!(
+        texts.iter().any(|t| t == tr("名前を変更")),
+        "the row's menu"
+    );
+    assert!(
+        !texts.iter().any(|t| t == tr("プロジェクトを追加…")),
+        "and not the column's"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, R3: 「新しいセッション…」 is ⌘N, with a project and without.
+#[test]
+pub(crate) fn column_319_new_session_opens_the_sheet_as_command_n_does() {
+    let (mut column, root, _other) = folder_317_fixture("column-319-r3");
+    let (mut shortcut, shortcut_root, _) = folder_317_fixture("column-319-r3b");
+    for app in [&mut column, &mut shortcut] {
+        app.page = Page::Sessions;
+    }
+    column.apply_column_add(ColumnAdd::Session);
+    shortcut.open_new_session();
+    assert!(column.launch_sheet_open && shortcut.launch_sheet_open);
+    assert_eq!(
+        column.selected_project().map(|p| p.name.clone()),
+        shortcut.selected_project().map(|p| p.name.clone())
+    );
+    assert!(column.folder_picker.is_none());
+
+    let mut empty = test_app(root.join("empty-store.json"));
+    empty.apply_column_add(ColumnAdd::Session);
+    assert!(empty.launch_sheet_open, "with no project the sheet asks");
+    fs::remove_dir_all(&root).ok();
+    fs::remove_dir_all(&shortcut_root).ok();
+}
+
+/// Change 319, R4: a folder added from the column stays on the session page,
+/// unfolded (and saved so) even while a filter is on, and chosen.
+#[test]
+pub(crate) fn column_319_a_project_added_from_the_column_stays_on_the_session_page() {
+    let (mut app, root, other) = folder_317_fixture("column-319-r4");
+    app.page = Page::Sessions;
+    app.toggle_status_filter(SessionStatusGroup::Busy);
+    app.apply_column_add(ColumnAdd::Project);
+    folder_317_type(&mut app, &other.display().to_string());
+    app.submit_folder_picker();
+
+    assert!(app.folder_picker.is_none());
+    assert_eq!(app.store.projects.len(), 2);
+    let added = app
+        .store
+        .projects
+        .iter()
+        .find(|project| project.path == other)
+        .expect("the folder is a project")
+        .id;
+    assert_eq!(app.page, Page::Sessions, "the window stays");
+    assert_eq!(app.workspace_project, Some(added), "and works on it");
+    assert!(app.session_arrangement.unfolded.contains(&added));
+    assert!(
+        load_session_arrangement(&app.data_file)
+            .unfolded
+            .contains(&added),
+        "the fold is saved"
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("プロジェクトを追加しました。"))
+    );
+
+    // The macOS dialog's answer goes the same way.
+    app.apply_column_project_folder(None);
+    assert_eq!(app.store.projects.len(), 2);
+    assert_eq!(app.page, Page::Sessions);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, R5: a registered folder is not added twice, but unfolded and
+/// chosen; cancel says nothing; an unwritable order file is said.
+#[test]
+pub(crate) fn column_319_a_registered_folder_is_unfolded_and_chosen() {
+    let (mut app, root, _other) = folder_317_fixture("column-319-r5");
+    app.page = Page::Sessions;
+    let existing = app.store.projects[0].clone();
+
+    app.apply_column_add(ColumnAdd::Project);
+    app.close_folder_picker();
+    assert_eq!(app.notice, None, "cancel says nothing");
+    assert!(app.session_arrangement.unfolded.is_empty());
+
+    app.apply_column_add(ColumnAdd::Project);
+    folder_317_type(&mut app, &format!("{}/", existing.path.display()));
+    app.submit_folder_picker();
+    assert_eq!(app.store.projects.len(), 1, "not added twice");
+    assert_eq!(app.workspace_project, Some(existing.id));
+    assert!(app.session_arrangement.unfolded.contains(&existing.id));
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(tr("そのプロジェクトは追加済みのため、開きました。"))
+    );
+
+    // The order file cannot be written: the project is still there and
+    // unfolded for this run, and the person is told.
+    app.session_arrangement.unfolded.clear();
+    let order_file = session_arrangement_path(&app.data_file);
+    fs::remove_file(&order_file).unwrap();
+    fs::create_dir_all(&order_file).unwrap();
+    app.apply_column_project_folder(Some(existing.path.clone()));
+    assert!(app.session_arrangement.unfolded.contains(&existing.id));
+    let notice = app.notice.clone().unwrap_or_default();
+    assert!(
+        notice.starts_with(
+            tr("並び順を保存できませんでした: {error}")
+                .split('{')
+                .next()
+                .unwrap()
+        ),
+        "the save failure is said: {notice}"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, R6: a project heading's right-click starts a session in that
+/// project or adds a project, and offers nothing else.
+#[test]
+pub(crate) fn column_319_a_heading_right_click_offers_its_project_actions() {
+    let root = temporary_directory("column-319-r6");
+    let (mut app, project, _ids) = session_285_app(&root, &["only"]);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let name = column_rect(&output, "p").expect("the project's name");
+
+    sidebar_302_click(
+        &mut app,
+        &ctx,
+        name.center(),
+        egui::PointerButton::Secondary,
+    );
+    let menu = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    let texts = painted_texts(&menu);
+    assert!(texts.iter().any(|t| t == tr("セッションを開始")));
+    assert!(texts.iter().any(|t| t == tr("プロジェクトを追加…")));
+    assert!(
+        !texts.iter().any(|t| t == tr("新しいセッション…")),
+        "the heading's menu is its own"
+    );
+    column_319_click(&mut app, &ctx, tr("セッションを開始"));
+    assert!(app.launch_sheet_open);
+    assert_eq!(app.selected_project, Some(project));
+
+    app.launch_sheet_open = false;
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let name = column_rect(&output, "p").expect("the project's name");
+    sidebar_302_click(
+        &mut app,
+        &ctx,
+        name.center(),
+        egui::PointerButton::Secondary,
+    );
+    column_319_click(&mut app, &ctx, tr("プロジェクトを追加…"));
+    assert_eq!(
+        column_319_target(&mut app),
+        Some(FolderPickerTarget::SessionColumn)
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, R7: project names and the heading read larger than the rows,
+/// and the names in the plain ink.
+#[test]
+pub(crate) fn column_319_project_names_read_larger_than_their_rows() {
+    let root = temporary_directory("column-319-r7");
+    let (mut app, _project, _ids) = session_285_app(&root, &["only"]);
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let palette = app.store.theme.palette();
+    let right = column_right(&output);
+    let in_column = |found: Vec<(egui::Rect, f32, Color32)>| {
+        found
+            .into_iter()
+            .filter(|(rect, ..)| rect.left() < right)
+            .collect::<Vec<_>>()
+    };
+    let history = column_rect(&output, "履歴").unwrap();
+    let heading = in_column(column_319_texts(&output, |t| t == "プロジェクト"))
+        .into_iter()
+        .find(|(rect, ..)| (rect.center().y - history.center().y).abs() < 4.0)
+        .expect("the column's heading");
+    let name = in_column(column_319_texts(&output, |t| t == "p"))
+        .into_iter()
+        .min_by(|a, b| a.0.top().total_cmp(&b.0.top()))
+        .expect("the project's name");
+    let row = in_column(column_319_texts(&output, |t| t == "only"))
+        .into_iter()
+        .next()
+        .expect("the session's row");
+    assert_eq!(heading.1, 13.5, "heading at the control level");
+    assert_eq!(name.1, 13.5, "names at the control level");
+    assert!(name.1 > row.1, "above the rows' {}", row.1);
+    assert!(
+        name.2 == palette.text || name.2 == palette.text_strong,
+        "names in the plain ink, not muted"
+    );
+    assert_eq!(heading.2, palette.text_muted);
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, R9: with no project, the column offers to add one.
+#[test]
+pub(crate) fn column_319_an_empty_column_offers_to_add_a_project() {
+    let root = temporary_directory("column-319-r9");
+    let mut app = test_app(root.join("store-v2.json"));
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    assert!(painted_texts(&output)
+        .iter()
+        .any(|t| t == tr("プロジェクトがありません")));
+    column_319_click(&mut app, &ctx, tr("プロジェクトを追加…"));
+    assert_eq!(
+        column_319_target(&mut app),
+        Some(FolderPickerTarget::SessionColumn)
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 319, F1 (reproduced by the empirical verifier): the Escape that
+/// closes the column's + menu is the menu's, not a terminal's.
+#[test]
+pub(crate) fn column_319_escape_closing_the_plus_menu_is_not_passed_on() {
+    let (mut app, root, _other) = folder_317_fixture("column-319-esc");
+    app.page = Page::Sessions;
+    let ctx = egui::Context::default();
+    let output = sidebar_302_settled(&mut app, &ctx);
+    let plus = column_319_heading_plus(&output);
+    sidebar_302_click(&mut app, &ctx, plus, egui::PointerButton::Primary);
+    let menu = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    assert!(painted_texts(&menu)
+        .iter()
+        .any(|t| t == tr("プロジェクトを追加…")));
+    let closed = sidebar_302_frame(
+        &mut app,
+        &ctx,
+        vec![key_press(egui::Key::Escape, egui::Modifiers::NONE)],
+    );
+    assert!(
+        !ctx.input(|i| i.key_pressed(egui::Key::Escape)),
+        "the Escape that closes the + menu is passed on"
+    );
+    assert!(
+        !painted_texts(&closed)
+            .iter()
+            .any(|t| t == tr("プロジェクトを追加…")),
+        "and the menu closes"
+    );
     fs::remove_dir_all(&root).ok();
 }

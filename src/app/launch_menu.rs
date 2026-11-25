@@ -297,7 +297,9 @@ impl OperonApp {
     pub(crate) fn take_launch_menu_escape(&self, ui: &mut egui::Ui) {
         let launch_menu_open = std::iter::once(None)
             .chain(self.workspace.groups.iter().map(|g| Some(g.id)))
-            .any(|group| egui::Popup::is_id_open(ui, workspace_launch_menu_id(group)));
+            .any(|group| egui::Popup::is_id_open(ui, workspace_launch_menu_id(group)))
+            // The session column's + (change 319) holds its Escape too.
+            || egui::Popup::is_id_open(ui, column_add_menu_id());
         if launch_menu_open
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {

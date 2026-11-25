@@ -2,6 +2,8 @@ use crate::*;
 
 pub(crate) mod agent_snapshot;
 pub(crate) mod broadcast;
+pub(crate) mod column_add;
+pub(crate) use column_add::*;
 pub(crate) mod compare;
 pub(crate) use compare::*;
 pub(crate) mod dock_badge;

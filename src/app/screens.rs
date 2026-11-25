@@ -7531,16 +7531,26 @@ impl OperonApp {
         ui.spacing_mut().item_spacing.y = SPACE_XS;
         // One start per project, on its own header: the toolbar holds the
         // column-wide one (change 237).
+        // The column's own + (change 319): what it adds, at the size of the
+        // names it heads.
+        let mut column_add = None;
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(tr("プロジェクト"))
-                    .size(11.5)
+                    .size(13.5)
+                    .strong()
                     .color(palette.text_muted),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(tr("履歴")).clicked() {
+                // 履歴 stays at the edge, where the column has always ended.
+                if quiet_button(ui, palette, tr("履歴")).clicked() {
                     self.session_library_open = !self.session_library_open;
                 }
+                let add = small_icon_button(ui, palette, ICON_ADD, tr("追加"));
+                column_add = egui::Popup::menu(&add)
+                    .id(column_add_menu_id())
+                    .show(|ui| Self::ui_column_add_items(ui, palette))
+                    .and_then(|response| response.inner);
             });
         });
         if self.workspace_column_drag.is_some()
@@ -7562,8 +7572,12 @@ impl OperonApp {
         let mut fold = None;
         let mut pin = None;
         let mut close = None;
+        let mut start_in = None;
         if project_ids.is_empty() {
             ui.label(RichText::new(tr("プロジェクトがありません")).weak());
+            if secondary_button(ui, ColumnAdd::Project.label()).clicked() {
+                column_add = Some(ColumnAdd::Project);
+            }
         }
         egui::ScrollArea::vertical()
             .id_salt("workspace-project-scroll")
@@ -7711,16 +7725,18 @@ impl OperonApp {
                                                 let project = &self.store.projects[proj_idx];
                                                 let response = ui
                                                     .add(
-                                                        egui::Label::new(if selected {
+                                                        // Above the 12px rows it heads
+                                                        // (change 319).
+                                                        egui::Label::new(
                                                             RichText::new(&project.name)
-                                                                .size(12.0)
+                                                                .size(13.5)
                                                                 .strong()
-                                                                .color(palette.text_muted)
-                                                        } else {
-                                                            RichText::new(&project.name)
-                                                                .size(12.0)
-                                                                .color(palette.text_muted)
-                                                        })
+                                                                .color(if selected {
+                                                                    palette.text_strong
+                                                                } else {
+                                                                    palette.text
+                                                                }),
+                                                        )
                                                         .truncate()
                                                         .selectable(false)
                                                         .sense(egui::Sense::click_and_drag()),
@@ -7732,8 +7748,25 @@ impl OperonApp {
                                                         );
                                                         ui.label(tr("ドラッグで並べ替え"));
                                                     });
+                                                let project_id = project.id;
+                                                response.context_menu(|ui| {
+                                                    if quiet_button(
+                                                        ui,
+                                                        palette,
+                                                        tr("セッションを開始"),
+                                                    )
+                                                    .clicked()
+                                                    {
+                                                        start_in = Some(project_id);
+                                                        ui.close();
+                                                    }
+                                                    if Self::ui_column_add_project_item(ui, palette)
+                                                    {
+                                                        column_add = Some(ColumnAdd::Project);
+                                                    }
+                                                });
                                                 if response.clicked() {
-                                                    self.select_workspace_project(project.id);
+                                                    self.select_workspace_project(project_id);
                                                 }
                                                 if response.hovered() && drag.is_none() {
                                                     ui.ctx()
@@ -7978,6 +8011,17 @@ impl OperonApp {
                     let project = &self.store.projects[proj_idx];
                     targets.push(project.id, card.response.rect);
                 }
+                // The rest of the column, below every row, offers what the +
+                // does (change 319); the rows keep their own menus.
+                let rest = ui.available_rect_before_wrap();
+                if rest.height() > 0.0 {
+                    ui.allocate_rect(rest, egui::Sense::click())
+                        .context_menu(|ui| {
+                            if let Some(choice) = Self::ui_column_add_items(ui, palette) {
+                                column_add = Some(choice);
+                            }
+                        });
+                }
                 if let Some(drag) = drag {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                     let (targets, gap) = match drag {
@@ -7994,6 +8038,12 @@ impl OperonApp {
         }
         if let Some(project) = fold {
             self.toggle_project_fold(project);
+        }
+        if let Some(project) = start_in {
+            self.open_project_session_setup(project);
+        }
+        if let Some(choice) = column_add {
+            self.apply_column_add(choice);
         }
         if let Some(session) = pin {
             self.toggle_session_pin(session);

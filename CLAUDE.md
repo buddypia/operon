@@ -20,17 +20,18 @@ alternatives; commit `plan.md` before editing source files.
     `src/app/dock_badge.rs` badges the Dock.
     `src/app/agent_snapshot.rs` writes `agents.json`.
     `src/app/broadcast.rs` messages idle agents.
+    `src/app/column_add.rs` column + menu.
     `src/app/compare.rs` diff compare bar, 注釈.
-    `src/app/relaunch.rs` keeps tabs across relaunch.
+    `src/app/relaunch.rs` tabs across relaunch.
     `src/app/session_order.rs` orders column, tabs, pins.
-    `src/app/launch_menu.rs` holds the + menu and quick launch.
-    `src/app/launch_projects.rs` picks the launch project.
+    `src/app/launch_menu.rs` tab + menu, quick launch.
+    `src/app/launch_projects.rs` launch project.
     `src/app/ports_view.rs` draws session ports.
     `src/app/folder_picker.rs` picks a folder.
-    `src/app/terminal_output.rs` lays out terminal text.
+    `src/app/terminal_output.rs` terminal text layout.
     `src/app/terminal_paths.rs` opens terminal paths.
     `src/app/toast.rs` draws corner notices.
-    `src/app/waiting_reply.rs` draws the 要対応 rows and replies.
+    `src/app/waiting_reply.rs` 要対応 rows, replies.
     `src/app/working_time.rs` times agent turns.
   - `src/tests.rs` — the `#[cfg(test)]` suite; no other module has tests.
   - `src/cli.rs` — agent-CLI session scan and shared archive.
