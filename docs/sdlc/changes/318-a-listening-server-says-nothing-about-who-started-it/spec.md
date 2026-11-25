@@ -17,16 +17,28 @@
    variable (`Absent`) — both only from a whole line for that PID — and
    otherwise `Unread`: `ps` failed, its output was cut at the ceiling inside or
    before this PID's line, or the PID was missing from it (gone since `lsof`).
-   Pinned by `ports_318_reads_the_session_tag`.
+   `ps` prints arguments and values raw, so a process's record runs until the
+   next line opening with a PID that was asked about; a PID that opens two
+   records is not believed (no details, `Unread`). Only a value that passes
+   `is_safe_tmux_name` is `Found`; any other value is `Absent`. Pinned by
+   `ports_318_reads_the_session_tag` and, for the records,
+   `ports_318_reads_process_details_from_ps`.
 3. A command line never reaches the screen with a secret in it: values of
    `NAME=value` arguments whose name contains `KEY`, `TOKEN`, `SECRET`,
    `PASSWORD`, `PASSWD`, `AUTH`, `CREDENTIAL` or `COOKIE` (any case); the value
    after a `--flag` or in `--flag=value` whose flag name contains one of those
-   words; the word after `Bearer` or `Basic`, including inside one argument
-   (`Authorization:Bearer x`); URL user information (`scheme://user:pass@`);
-   and arguments starting with a known token prefix (`sk-`, `ghp_`, `gho_`,
-   `ghs_`, `github_pat_`, `glpat-`, `xoxb-`, `xoxp-`, `AKIA`, `AIza`) are each
-   shown as `***`. The command is cut to `PORT_COMMAND_MAX_CHARS` characters
+   words, and any other flag's value read by these same rules
+   (`--env=API_KEY=x`, `--db=postgres://u:p@h`); the word after `Bearer` or
+   `Basic`, including inside one argument (`Authorization:Bearer x`) and when
+   that word was itself hidden (`--auth Bearer x`); the word after a header
+   name ending in `:` that contains one of those words (`X-Api-Key: x`,
+   `Cookie: a=b`); URL user information (`scheme://user:pass@`) and URL query
+   values whose name contains one of those words (`?a=1&token=x`); and
+   arguments or values starting with a known token prefix (`sk-`, `ghp_`,
+   `gho_`, `ghs_`, `github_pat_`, `glpat-`, `xoxb-`, `xoxp-`, `AKIA`, `AIza`)
+   are each shown as `***`. Not covered, and said so in the README: a short
+   flag glued to its value (`-pSECRET`), a value after a flag whose name does
+   not say it (`-p secret`), and a quoted value containing spaces. The command is cut to `PORT_COMMAND_MAX_CHARS` characters
    after redaction, ending in `…` when cut. Pinned by
    `ports_318_command_line_hides_secrets`.
 4. A listener's origin, resolved against the store when it is shown: the session
@@ -159,6 +171,11 @@ Placement verdict: **EXTEND** — `src/git/ports.rs` (change 262, feature
 - **Parent PID 1 is also every launchd service.** Answered: only listeners inside
   a project folder are listed, where PID 1 means an orphan in practice; the
   text says 親は終了済み, and the modal shows the PID.
+- **A process whose environment `ps` cannot read** (another user's, a
+  hardened binary) shows only its arguments, so an argument spelling
+  `OPERON_SESSION=operon-…` in a valid name shape would be read as `Found`.
+  Answered: accepted — it needs a process that names a real session on
+  purpose, and the stop confirmation still shows PID, command and folder.
 - **Redaction is a pattern list, not a guarantee.** Answered: the patterns cover
   what was measured on this machine and common token shapes; the requirement
   names each, and the test pins each.

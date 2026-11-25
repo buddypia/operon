@@ -165,7 +165,7 @@ features:
     screen: projects
     domain: code
     summary: branch ごとの worktree を作り、main にマージし、セットアップと実行スクリプトを確認のうえで動かし、チェックポイントで戻せる。
-    paths: src/git.rs src/git/setup.rs src/git/ports.rs src/app/screens.rs src/app.rs src/config.rs
+    paths: src/git.rs src/git/setup.rs src/git/ports.rs src/app/ports_view.rs src/app/screens.rs src/app.rs src/config.rs
     keywords: worktree checkpoint setup run-script merge ports worktree
     manual: worktree
 

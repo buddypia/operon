@@ -250,9 +250,12 @@ Settings. The projects, sessions, and agent output in them are a demo.
   unknown". A server whose session has stopped or been removed is marked "Left
   running?" and counted in the header. The command line is redacted before it is kept (`NAME=value` and
   `--flag value` where the name holds KEY, TOKEN, SECRET, PASSWORD, AUTH,
-  CREDENTIAL or COOKIE, the word after `Bearer`/`Basic`, URL user information,
-  common token prefixes) and cut at 1000 characters; it is a pattern list, not
-  a guarantee. Nothing is recorded across scans.
+  CREDENTIAL or COOKIE, the word after `Bearer`/`Basic` or after such a header
+  name, URL user information and such query values, common token prefixes) and
+  cut at 1000 characters. It is a pattern list, not a guarantee: a short flag
+  glued to its value (`-pSECRET`), a value after a flag whose name does not say
+  what it is (`-p secret`), and a quoted value with spaces in it are shown.
+  Nothing is recorded across scans.
 - `⌘F` searches a session's scrollback. Every occurrence is washed where it
   sits — columns counted in terminal cells, so the mark lands on the text even
   on a Japanese line — and Enter steps through them while the pane scrolls to

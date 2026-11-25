@@ -17,11 +17,11 @@ os.environ["CARGO_INCREMENTAL"] = "1"
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
 
 PORTS = ROOT / "src/git/ports.rs"
-SCREENS = ROOT / "src/app/screens.rs"
+SCREENS = ROOT / "src/app/ports_view.rs"
 
 MUTATIONS = {
     # Requirement 1: details.
-    "cut-last-line-kept": (PORTS, "        lines.pop();\n", "        let _ = &lines;\n"),
+    "cut-last-record-kept": (PORTS, "        records.pop();\n", "        let _ = &records;\n"),
     "raw-command-kept-in-the-scan": (
         PORTS,
         ".map(|rest| redact_command_line(&rest.join(\" \")));",
@@ -30,7 +30,6 @@ MUTATIONS = {
     "etime-day-with-24-hours-accepted": (PORTS, "hours >= 24)", "hours >= 25)"),
     # Requirement 2: the tag.
     "first-tag-token-wins": (PORTS, "            .next_back()\n", "            .next()\n"),
-    "empty-tag-is-a-session": (PORTS, "            .filter(|value| !value.is_empty())\n", ""),
     "unread-pid-read-as-absent": (
         PORTS,
         "            session_tag: SessionTag::Unread,\n",
@@ -45,7 +44,7 @@ MUTATIONS = {
     ),
     "flag-then-value-shown": (
         PORTS,
-        "None => (word.to_owned(), names_a_secret(flag)),",
+        "None => (word.to_owned(), names_a_secret(body)),",
         "None => (word.to_owned(), false),",
     ),
     "bearer-credential-shown": (
@@ -61,30 +60,15 @@ MUTATIONS = {
     "url-user-shown": (PORTS, "rfind('@')", "rfind('\\u{0}')"),
     "token-prefix-shown": (PORTS, '    "sk-",\n', '    "sk-zzz",\n'),
     # Requirement 4: origin and leftover.
-    "unread-tag-is-unknown": (
-        PORTS,
-        "SessionTag::Unread => PortOrigin::Unread,",
-        "SessionTag::Unread => PortOrigin::Unknown,",
-    ),
     "unknown-is-leftover": (
         PORTS,
         "PortOrigin::Session { running: false, .. } | PortOrigin::RemovedSession\n",
         "PortOrigin::Session { running: false, .. } | PortOrigin::RemovedSession | PortOrigin::Unknown\n",
     ),
-    "unread-is-leftover": (
-        PORTS,
-        "PortOrigin::Session { running: false, .. } | PortOrigin::RemovedSession\n",
-        "PortOrigin::Session { running: false, .. } | PortOrigin::RemovedSession | PortOrigin::Unread\n",
-    ),
     "removed-session-not-leftover": (
         PORTS,
         "PortOrigin::Session { running: false, .. } | PortOrigin::RemovedSession\n",
         "PortOrigin::Session { running: false, .. }\n",
-    ),
-    "exited-counts-as-running": (
-        PORTS,
-        "SessionStatus::Starting | SessionStatus::Active\n",
-        "SessionStatus::Starting | SessionStatus::Active | SessionStatus::Exited\n",
     ),
     # Requirement 6: the badge counts the whole list.
     "badge-counts-own-folder-only": (PORTS, "            .chain(&self.elsewhere)\n", ""),
@@ -99,10 +83,38 @@ MUTATIONS = {
         'PortOrigin::RemovedSession => Some(tr("起動したセッションは削除されています")),',
         'PortOrigin::RemovedSession | PortOrigin::Unknown => Some(tr("起動したセッションは削除されています")),',
     ),
-    "confirmation-parent-never-exited": (
-        SCREENS,
-        '            Some(1) => tf!("終了済み (PID {ppid})", ppid = 1),',
-        '            Some(0) => tf!("終了済み (PID {ppid})", ppid = 1),',
+    # Review round: forged and spanning records, the session-name shape.
+    "duplicate-pid-believed": (
+        PORTS,
+        ".filter(|(pid, _)| opened.get(pid) == Some(&1))",
+        ".filter(|(pid, _)| opened.get(pid).is_some())",
+    ),
+    "continuation-line-dropped": (PORTS, "text.push_str(line);", "text.push_str(\"\");"),
+    "any-value-taken-for-a-session": (
+        PORTS,
+        ".filter(|value| is_safe_tmux_name(value))",
+        ".filter(|value| !value.is_empty())",
+    ),
+    # Review round: redaction gaps the reviewers reproduced.
+    "hidden-word-not-read": (
+        PORTS,
+        "        hide_next = hides_next;\n",
+        "        hide_next = hides_next && !hide_next;\n",
+    ),
+    "header-value-in-next-word-shown": (
+        PORTS,
+        "if word.strip_suffix(':').is_some_and(names_a_secret) {",
+        "if false {",
+    ),
+    "nested-flag-value-shown": (
+        PORTS,
+        "let (value, hides_next) = redact_word(value);",
+        "let (value, hides_next) = (value.to_owned(), false);",
+    ),
+    "query-secret-shown": (
+        PORTS,
+        "Some((name, value)) if names_a_secret(name) || looks_like_a_secret(value) =>",
+        "Some((name, value)) if false && (names_a_secret(name) || looks_like_a_secret(value)) =>",
     ),
 }
 

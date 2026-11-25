@@ -10,6 +10,7 @@ mod keymap;
 pub(crate) mod knowledge;
 pub(crate) mod launch_menu;
 pub(crate) mod launch_projects;
+pub(crate) mod ports_view;
 pub(crate) mod relaunch;
 pub(crate) mod screens;
 pub(crate) mod session_order;

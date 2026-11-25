@@ -48428,7 +48428,7 @@ pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
         let mut action = None;
         let output = ctx.run_ui(screen_262(events), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                action = crate::screens::session_ports_menu(ui, palette, ports, stopping);
+                action = crate::ports_view::session_ports_menu(ui, palette, ports, stopping);
             });
         });
         (frame_texts_262(&output), action)
@@ -48493,7 +48493,9 @@ pub(crate) fn ports_262_menu_sections_name_folders_and_offer_stop() {
     let (_, action) = menu(&ports, false, press(false));
     assert_eq!(
         action,
-        Some(crate::screens::PortMenuAction::Stop(ports.own[0].clone())),
+        Some(crate::ports_view::PortMenuAction::Stop(
+            ports.own[0].clone()
+        )),
         "停止ボタンが確認を求めていません"
     );
 
@@ -99057,7 +99059,8 @@ pub(crate) fn ports_318_reads_process_details_from_ps() {
                   \x20 4244  4242     garbage Wed Foo 25 10:02:00 2026 python3 -m http.server\n\
                   \x20 4245  4242       00:01 Wed Nov 25 10:02:00 2026 node --api-key=sk-abc /x\n\
                   \x20 4246  4242       00:01 Wed Nov 25 10:0";
-    let details = parse_ps_details(output, false);
+    let asked = [4242, 4243, 4244, 4245, 4246];
+    let details = parse_ps_details(output, false, &asked);
     let first = &details[&4242];
     assert_eq!(first.parent_pid, Some(1));
     assert_eq!(first.elapsed_seconds, Some(((24 + 2) * 60 + 3) * 60 + 4));
@@ -99081,10 +99084,22 @@ pub(crate) fn ports_318_reads_process_details_from_ps() {
     assert_eq!(details[&4246].command, None);
 
     // Cut at the ceiling, the last line is dropped whole.
-    let cut = parse_ps_details(output, true);
+    let cut = parse_ps_details(output, true, &asked);
     assert!(!cut.contains_key(&4246));
     assert_eq!(cut.len(), 4);
-    assert!(parse_ps_details("", true).is_empty());
+    assert!(parse_ps_details("", true, &asked).is_empty());
+    // A command with a newline in it stays with its process, and a line
+    // opening with a PID nobody asked about is part of the one before.
+    let spanning = "  7 1 00:01 Wed Nov 25 10:02:00 2026 bash -c echo\n  8 ok; serve\n";
+    let details = parse_ps_details(spanning, false, &[7]);
+    assert_eq!(
+        details[&7].command.as_deref(),
+        Some("bash -c echo 8 ok; serve")
+    );
+    // A PID opened twice was spelled inside another line: neither is believed.
+    let forged =
+        "  7 1 00:01 Wed Nov 25 10:02:00 2026 a\n  7 99 00:01 Wed Nov 25 10:02:00 2026 b\n";
+    assert!(parse_ps_details(forged, false, &[7]).is_empty());
 }
 
 /// Change 318, requirement 1: `[[dd-]hh:]mm:ss`.
@@ -99120,9 +99135,15 @@ pub(crate) fn ports_318_reads_the_session_tag() {
          11 env {prefix}operon-wrong node x PATH=/bin {prefix}{name}\n\
          12 python3 PATH=/bin HOME=/x\n\
          13 x {prefix}\n\
+         15 x {prefix}not-a-session-name\n\
+         16 bash -c 'one\n\
+         two' PATH=/bin {prefix}{name}\n\
+         17 node x\n\
+         17 forged {prefix}{name}\n\
          14 node PATH=/bin {prefix}{cut_name}"
     );
-    let tags = parse_ps_environment(&output, true);
+    let asked = [10, 11, 12, 13, 14, 15, 16, 17];
+    let tags = parse_ps_environment(&output, true, &asked);
     assert_eq!(tags[&10], SessionTag::Found(name.clone()));
     assert_eq!(
         tags[&11],
@@ -99137,8 +99158,23 @@ pub(crate) fn ports_318_reads_the_session_tag() {
         tags.get(&14)
     );
     assert!(!tags.contains_key(&99));
+    assert_eq!(
+        tags[&15],
+        SessionTag::Absent,
+        "名前の形でない値をセッションとしました"
+    );
+    assert_eq!(
+        tags[&16],
+        SessionTag::Found(name.clone()),
+        "改行をまたいだ環境変数を読めていません"
+    );
+    assert!(
+        !tags.contains_key(&17),
+        "二度現れた PID を信じました: {:?}",
+        tags.get(&17)
+    );
     // Read whole, the same line is an answer.
-    let whole = parse_ps_environment(&output, false);
+    let whole = parse_ps_environment(&output, false, &asked);
     assert_eq!(whole[&14], SessionTag::Found(cut_name.to_owned()));
 }
 
@@ -99150,10 +99186,7 @@ pub(crate) fn ports_318_command_line_hides_secrets() {
         ("node --token abc x", "node --token *** x"),
         ("node --password=abc x", "node --password=*** x"),
         ("-H Authorization:Bearer abc", "-H Authorization:Bearer ***"),
-        (
-            "-H Authorization: Bearer abc",
-            "-H Authorization: Bearer ***",
-        ),
+        ("-H Authorization: Bearer abc", "-H Authorization: *** ***"),
         ("curl Basic dXNlcg==", "curl Basic ***"),
         ("X-Api-Key:abc", "X-Api-Key:***"),
         (
@@ -99163,6 +99196,15 @@ pub(crate) fn ports_318_command_line_hides_secrets() {
         ("app --db=postgres://u:p@h/x", "app --db=postgres://***@h/x"),
         ("npm run dev -- --port 5173", "npm run dev -- --port 5173"),
         ("open http://localhost:3000/", "open http://localhost:3000/"),
+        ("node --auth Bearer leak1", "node --auth *** ***"),
+        ("curl -H X-Api-Key: abc123", "curl -H X-Api-Key: ***"),
+        ("curl -H Cookie: a=b", "curl -H Cookie: ***"),
+        ("node --env=API_KEY=abc", "node --env=API_KEY=***"),
+        ("node --foo=sk-abc", "node --foo=***"),
+        (
+            "open http://h/?a=1&token=abc",
+            "open http://h/?a=1&token=***",
+        ),
     ];
     for (raw, shown) in cases {
         assert_eq!(redact_command_line(raw), shown, "「{raw}」");
@@ -99348,7 +99390,7 @@ pub(crate) fn ports_318_menu_rows_show_origin_time_and_command() {
     let ctx = egui::Context::default();
     let output = ctx.run_ui(screen_262(Vec::new()), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            crate::screens::session_ports_menu(ui, palette, &ports, false);
+            crate::ports_view::session_ports_menu(ui, palette, &ports, false);
         });
     });
     let texts = frame_texts_262(&output);

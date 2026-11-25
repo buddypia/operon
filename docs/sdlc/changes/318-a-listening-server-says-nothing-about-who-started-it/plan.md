@@ -92,6 +92,27 @@
   `ProcessDetails` carries the parsed `etime`.
 - **`ps` asks only about listeners credited to a folder**, since nothing else
   is ever shown.
+- **Review round.** `empirical-verifier`, `rust-reviewer` and
+  `subprocess-safety-reviewer` reproduced secrets shown by
+  `--auth Bearer x`, `X-Api-Key: x`, `--env=API_KEY=x` and `?a=1&token=x`, and
+  a parsing gap: `ps` prints values raw, so a newline or a forged line could
+  attach text to the wrong PID, and an argument could spell a session. The
+  parsers now read records bounded by asked-about PIDs (`ps_records`), drop a
+  PID opened twice, and take only `is_safe_tmux_name`-shaped values;
+  `redact_word` reads hidden words, header names ending in `:`, nested flag
+  values and URL queries; `parse_ps_*` take the asked PIDs. Spec requirements
+  2 and 3 were revised and re-approved; each new case is an assertion in
+  `ports_318_reads_the_session_tag`, `ports_318_reads_process_details_from_ps`
+  or `ports_318_command_line_hides_secrets`, and seven mutations were added
+  (five near-duplicates dropped, 24 in all) to keep the sweep inside CI's time.
+- **A new module.** The drawing took `src/app/screens.rs` from 9917 to 10071
+  lines, past `largest_module_lines`' propose tier. The ports drawing (change
+  262's and this change's, 395 lines, unchanged) moved to
+  `src/app/ports_view.rs`; `screens.rs` is 9675. The module map in
+  `CLAUDE.md` gained its line, paid for by shortening three others so
+  `always_loaded_bytes` stays under propose (7985); `docs/features/domains.yaml`
+  and `index.yaml` place it with the ports code; two tests name
+  `crate::ports_view::` instead of `crate::screens::`.
 - **`docs/features/index.yaml`**: the worktrees entry gains `src/config.rs`, where
   its port constants already were (`a_change_that_alters_a_feature_updates_its_spec`
   read the file as only settings' and local-data's).

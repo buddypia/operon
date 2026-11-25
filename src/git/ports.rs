@@ -115,47 +115,70 @@ pub(crate) struct ProcessDetails {
     pub(crate) command: Option<String>,
 }
 
-/// The lines of an output whose last line may have been cut by a ceiling.
-/// A cut line is dropped whole: half a command, or half a session name, is a
-/// wrong answer, where no answer is an honest one.
-fn whole_lines(output: &str, truncated: bool) -> impl Iterator<Item = &str> {
-    let mut lines: Vec<&str> = output.lines().collect();
-    if truncated {
-        lines.pop();
+/// Each asked-about PID's record in `ps` output: the text after the PID.
+///
+/// `ps` prints arguments and environment values raw, so one process can span
+/// several lines. A record therefore runs until the next line that opens with
+/// a PID that was asked about, and a line opening with any other number is a
+/// continuation. A PID that opens two records is dropped: text inside another
+/// process's line spelled it, and which record is real cannot be told. The
+/// record a ceiling cut is dropped whole — half a command, or half a session
+/// name, is a wrong answer where no answer is an honest one.
+fn ps_records(output: &str, truncated: bool, pids: &[u32]) -> HashMap<u32, String> {
+    let mut records: Vec<(u32, String)> = Vec::new();
+    for line in output.lines() {
+        let line = line.trim_start();
+        let (first, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
+        match first.parse::<u32>().ok().filter(|pid| pids.contains(pid)) {
+            Some(pid) => records.push((pid, rest.to_owned())),
+            None => {
+                if let Some((_, text)) = records.last_mut() {
+                    text.push(' ');
+                    text.push_str(line);
+                }
+            }
+        }
     }
-    lines.into_iter()
+    if truncated {
+        records.pop();
+    }
+    let mut opened: HashMap<u32, usize> = HashMap::new();
+    for (pid, _) in &records {
+        *opened.entry(*pid).or_default() += 1;
+    }
+    records
+        .into_iter()
+        .filter(|(pid, _)| opened.get(pid) == Some(&1))
+        .collect()
 }
 
 /// Read `ps -ww -o pid=,ppid=,etime=,lstart=,command=` run under `LC_ALL=C`.
 ///
 /// `lstart` is five words under the `C` locale (`Tue Nov 24 19:30:42 2026`),
-/// so the command starts at the ninth; its own spacing is not kept, which is
-/// fine for something shown and never run.
-pub(crate) fn parse_ps_details(output: &str, truncated: bool) -> HashMap<u32, ProcessDetails> {
-    let mut details = HashMap::new();
-    for line in whole_lines(output, truncated) {
-        let words: Vec<&str> = line.split_whitespace().collect();
-        let Some(pid) = words.first().and_then(|word| word.parse::<u32>().ok()) else {
-            continue;
-        };
-        let parent_pid = words.get(1).and_then(|word| word.parse::<u32>().ok());
-        let elapsed_seconds = words.get(2).and_then(|word| parse_elapsed(word));
-        let started = words.get(3..8).and_then(parse_lstart);
-        let command = words
-            .get(8..)
-            .filter(|rest| !rest.is_empty())
-            .map(|rest| redact_command_line(&rest.join(" ")));
-        details.insert(
-            pid,
-            ProcessDetails {
-                parent_pid,
-                elapsed_seconds,
-                started,
+/// so the command starts at the eighth word after the PID; its own spacing is
+/// not kept, which is fine for something shown and never run.
+pub(crate) fn parse_ps_details(
+    output: &str,
+    truncated: bool,
+    pids: &[u32],
+) -> HashMap<u32, ProcessDetails> {
+    ps_records(output, truncated, pids)
+        .into_iter()
+        .map(|(pid, record)| {
+            let words: Vec<&str> = record.split_whitespace().collect();
+            let command = words
+                .get(7..)
+                .filter(|rest| !rest.is_empty())
+                .map(|rest| redact_command_line(&rest.join(" ")));
+            let details = ProcessDetails {
+                parent_pid: words.first().and_then(|word| word.parse::<u32>().ok()),
+                elapsed_seconds: words.get(1).and_then(|word| parse_elapsed(word)),
+                started: words.get(2..7).and_then(parse_lstart),
                 command,
-            },
-        );
-    }
-    details
+            };
+            (pid, details)
+        })
+        .collect()
 }
 
 /// `ps`'s `etime`: `[[dd-]hh:]mm:ss`, to seconds.
@@ -176,7 +199,12 @@ pub(crate) fn parse_elapsed(text: &str) -> Option<u64> {
     if minutes >= 60 || seconds >= 60 || (text.contains('-') && hours >= 24) {
         return None;
     }
-    Some(((days * 24 + hours) * 60 + minutes) * 60 + seconds)
+    days.checked_mul(24)?
+        .checked_add(hours)?
+        .checked_mul(60)?
+        .checked_add(minutes)?
+        .checked_mul(60)?
+        .checked_add(seconds)
 }
 
 /// `Tue Nov 24 19:30:42 2026` to `11/24 19:30`.
@@ -202,28 +230,32 @@ fn parse_lstart(words: &[&str]) -> Option<String> {
     Some(format!("{month:02}/{day:02} {hour:02}:{minute:02}"))
 }
 
-/// Read `ps -E -ww -o pid=,command=`: the arguments, then the environment, on
-/// one line. Only the session tag is kept; nothing else of the environment
-/// leaves this function. The **last** token wins, because the environment
-/// follows the arguments and an argument may itself spell the variable.
-pub(crate) fn parse_ps_environment(output: &str, truncated: bool) -> HashMap<u32, SessionTag> {
+/// Read `ps -E -ww -o pid=,command=`: the arguments, then the environment.
+/// Only the session tag is kept; nothing else of the environment leaves this
+/// function. The **last** token wins, because the environment follows the
+/// arguments and an argument may itself spell the variable; and only a value
+/// that passes `is_safe_tmux_name` — the gate every managed name passes —
+/// counts, so stray text naming the variable is not taken for a session.
+pub(crate) fn parse_ps_environment(
+    output: &str,
+    truncated: bool,
+    pids: &[u32],
+) -> HashMap<u32, SessionTag> {
     let prefix = format!("{HOOK_SESSION_ENV}=");
-    let mut tags = HashMap::new();
-    for line in whole_lines(output, truncated) {
-        let mut words = line.split_whitespace();
-        let Some(pid) = words.next().and_then(|word| word.parse::<u32>().ok()) else {
-            continue;
-        };
-        let tag = words
-            .filter_map(|word| word.strip_prefix(prefix.as_str()))
-            .next_back()
-            .filter(|value| !value.is_empty())
-            .map_or(SessionTag::Absent, |value| {
-                SessionTag::Found(value.to_owned())
-            });
-        tags.insert(pid, tag);
-    }
-    tags
+    ps_records(output, truncated, pids)
+        .into_iter()
+        .map(|(pid, record)| {
+            let tag = record
+                .split_whitespace()
+                .filter_map(|word| word.strip_prefix(prefix.as_str()))
+                .next_back()
+                .filter(|value| is_safe_tmux_name(value))
+                .map_or(SessionTag::Absent, |value| {
+                    SessionTag::Found(value.to_owned())
+                });
+            (pid, tag)
+        })
+        .collect()
 }
 
 /// Words that make the value beside them a secret, matched in any case.
@@ -275,14 +307,15 @@ pub(crate) fn redact_command_line(command: &str) -> String {
     let mut words: Vec<String> = Vec::new();
     let mut hide_next = false;
     for word in command.split_whitespace() {
-        if hide_next {
-            hide_next = false;
-            words.push(REDACTED.to_owned());
-            continue;
-        }
-        let (word, hides_next) = redact_word(word);
+        // A hidden word is still read for what it says about the next one:
+        // `--auth Bearer x` hides `Bearer` and, through it, `x`.
+        let (shown, hides_next) = redact_word(word);
+        words.push(if hide_next {
+            REDACTED.to_owned()
+        } else {
+            shown
+        });
         hide_next = hides_next;
-        words.push(word);
     }
     let joined = words.join(" ");
     if joined.chars().count() <= PORT_COMMAND_MAX_CHARS {
@@ -303,20 +336,25 @@ fn redact_word(word: &str) -> (String, bool) {
     if looks_like_a_secret(word) {
         return (REDACTED.to_owned(), false);
     }
-    // `--api-key=x` or `--api-key x`.
-    if let Some(flag) = word.strip_prefix('-') {
-        let flag = flag.trim_start_matches('-');
-        return match flag.split_once('=') {
-            Some((name, _)) if names_a_secret(name) => (
-                format!(
-                    "{}={REDACTED}",
-                    &word[..word.len() - flag.len() + name.len()]
-                ),
-                false,
-            ),
-            Some(_) => (redact_url_user(word), false),
-            None => (word.to_owned(), names_a_secret(flag)),
+    // `--api-key=x` or `--api-key x`; any other flag's value is read on its
+    // own, so `--env=API_KEY=x` and `--db=postgres://u:p@h` are caught too.
+    let body = word.trim_start_matches('-');
+    let dashes = &word[..word.len() - body.len()];
+    if !dashes.is_empty() {
+        return match body.split_once('=') {
+            Some((name, _)) if names_a_secret(name) => {
+                (format!("{dashes}{name}={REDACTED}"), false)
+            }
+            Some((name, value)) => {
+                let (value, hides_next) = redact_word(value);
+                (format!("{dashes}{name}={value}"), hides_next)
+            }
+            None => (word.to_owned(), names_a_secret(body)),
         };
+    }
+    // `X-Api-Key: x`, `Cookie: a=b`: the header's value is the next word.
+    if word.strip_suffix(':').is_some_and(names_a_secret) {
+        return (word.to_owned(), true);
     }
     // `API_KEY=x`, and a header written `X-Api-Key:x`.
     for separator in ['=', ':'] {
@@ -329,7 +367,26 @@ fn redact_word(word: &str) -> (String, bool) {
             }
         }
     }
-    (redact_url_user(word), false)
+    (redact_url(word), false)
+}
+
+/// A URL with its user information and its secret-named query values hidden:
+/// `https://u:p@h/?a=1&token=x` to `https://***@h/?a=1&token=***`.
+fn redact_url(word: &str) -> String {
+    let word = redact_url_user(word);
+    let Some((head, query)) = word.split_once('?') else {
+        return word;
+    };
+    let pairs: Vec<String> = query
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((name, value)) if names_a_secret(name) || looks_like_a_secret(value) => {
+                format!("{name}={REDACTED}")
+            }
+            _ => pair.to_owned(),
+        })
+        .collect();
+    format!("{head}?{}", pairs.join("&"))
 }
 
 /// `https://user:pass@host/` to `https://***@host/`.
@@ -675,13 +732,13 @@ fn read_listener_processes(
         ],
         PORT_SCAN_MAX_BYTES,
     )
-    .map(|(output, truncated)| parse_ps_details(&output, truncated))
+    .map(|(output, truncated)| parse_ps_details(&output, truncated, pids))
     .unwrap_or_default();
     let tags = read(
         &["-E", "-ww", "-o", "pid=,command=", "-p", &list],
         PORT_ENVIRONMENT_MAX_BYTES,
     )
-    .map(|(output, truncated)| parse_ps_environment(&output, truncated))
+    .map(|(output, truncated)| parse_ps_environment(&output, truncated, pids))
     .unwrap_or_default();
     pids.iter()
         .map(|pid| {
