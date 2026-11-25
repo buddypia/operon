@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended `.gitignore` to cover macOS metadata (`._*`, `.Spotlight-V100`, `.Trashes`), editor configurations (`.idea/`, `.vscode/`, `*.swp`), and Rust tooling artifacts (`*.rs.bk`, `*.profraw`, `*.profdata`).
 
 ### Changed
+- Session column top label is now a quiet 「セッション一覧」 (12.5px muted), project names use the 15px section scale, and pinned sessions place `ICON_PIN` to the left of the agent mark in both the sidebar gutter (keeping marks aligned) and central workspace tabs.
 - Page titles are larger (24px) with room under the toolbar; the session column's 「プロジェクト」 heading reads above the project names; session rows are 28px tall and indented under their project's name.
 - The session page's left column is a list of projects: each starts folded to its name and counts and opens from the mark beside its name, folded projects sit closer together, and a filter lists matching sessions either way.
 - Restore project selection controls around central tabs, keep live sessions out of archived-history flooding, and preserve each project's open files, focused tab and split layout when switching.

@@ -7088,6 +7088,22 @@ impl OperonApp {
                                             ui.horizontal(|ui| {
                                                 // State wording belongs in the hover, not the tab.
                                                 if let WorkspaceTab::Session(id) = tab {
+                                                    if self.is_session_pinned(*id) {
+                                                        ui.add_sized(
+                                                            egui::vec2(SESSION_PIN_SLOT_W, CONTROL_HEIGHT_SMALL),
+                                                            egui::Label::new(
+                                                                RichText::new(ICON_PIN)
+                                                                    .size(11.5)
+                                                                    .color(if active {
+                                                                        palette.selected_secondary_ink()
+                                                                    } else {
+                                                                        palette.text_muted
+                                                                    }),
+                                                            )
+                                                            .selectable(false),
+                                                        )
+                                                        .on_hover_text(tr("ピン留め中"));
+                                                    }
                                                     if let Some(session) =
                                                         self.store.sessions.iter().find(|s| s.id == *id)
                                                     {
@@ -7223,26 +7239,16 @@ impl OperonApp {
                                                             .color(palette.accent_text),
                                                     );
                                                 }
-                                                // A pinned session cannot be closed: its pin
-                                                // stands where the × would (change 285).
-                                                if matches!(tab, WorkspaceTab::Session(id) if self.is_session_pinned(*id)) {
-                                                    ui.add_sized(
-                                                        egui::vec2(CONTROL_HEIGHT_SMALL, CONTROL_HEIGHT_SMALL),
-                                                        egui::Label::new(
-                                                            RichText::new(ICON_PIN)
-                                                                .size(11.5)
-                                                                .color(palette.text_muted),
-                                                        )
-                                                        .selectable(false),
+                                                // A pinned session cannot be closed (change 285); its pin
+                                                // sits left of the agent mark (change 321), and × is omitted.
+                                                if !matches!(tab, WorkspaceTab::Session(id) if self.is_session_pinned(*id))
+                                                    && small_icon_button(
+                                                        ui,
+                                                        palette,
+                                                        ICON_CLOSE,
+                                                        tr("タブを閉じる"),
                                                     )
-                                                    .on_hover_text(tr("ピン留め中"));
-                                                } else if small_icon_button(
-                                                    ui,
-                                                    palette,
-                                                    ICON_CLOSE,
-                                                    tr("タブを閉じる"),
-                                                )
-                                                .clicked()
+                                                    .clicked()
                                                 {
                                                     close = Some(tab.clone());
                                                 }
@@ -7531,15 +7537,14 @@ impl OperonApp {
         ui.spacing_mut().item_spacing.y = SPACE_XS;
         // One start per project, on its own header: the toolbar holds the
         // column-wide one (change 237).
-        // The column's own + (change 319). Its heading is one level above
-        // the names it heads, in the strong ink (change 320).
+        // The column's own + (change 319). Its top label is a quiet eyebrow
+        // below the project names (change 321).
         let mut column_add = None;
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(tr("プロジェクト"))
-                    .size(15.0)
-                    .strong()
-                    .color(palette.text_strong),
+                RichText::new(DockPanel::Sessions.label())
+                    .size(12.5)
+                    .color(palette.text_muted),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // 履歴 stays at the edge, where the column has always ended.
@@ -7725,11 +7730,11 @@ impl OperonApp {
                                                 let project = &self.store.projects[proj_idx];
                                                 let response = ui
                                                     .add(
-                                                        // Above the 12px rows it heads
-                                                        // (change 319).
+                                                        // Section level above both the 12.5px panel
+                                                        // label and 12px rows (change 321).
                                                         egui::Label::new(
                                                             RichText::new(&project.name)
-                                                                .size(13.5)
+                                                                .size(15.0)
                                                                 .strong()
                                                                 .color(if selected {
                                                                     palette.text_strong
@@ -7814,9 +7819,15 @@ impl OperonApp {
                                     })
                                     .corner_radius(egui::CornerRadius::same(RADIUS_CARD))
                                     // A CONTROL_HEIGHT row, its mark under the
-                                    // project's name (change 320).
+                                    // project's name; pinned rows place ICON_PIN
+                                    // in the left gutter so marks stay aligned (change 321).
                                     .inner_margin(egui::Margin {
-                                        left: SIDEBAR_ROW_INDENT as i8,
+                                        left: if pinned {
+                                            (SIDEBAR_ROW_INDENT - SESSION_PIN_SLOT_W - SPACE_XS)
+                                                as i8
+                                        } else {
+                                            SIDEBAR_ROW_INDENT as i8
+                                        },
                                         right: SPACE_XS as i8,
                                         top: SIDEBAR_ROW_PAD_Y as i8,
                                         bottom: SIDEBAR_ROW_PAD_Y as i8,
@@ -7826,6 +7837,25 @@ impl OperonApp {
                                         ui.spacing_mut().interact_size.y = COLUMN_SESSION_MARK_SIZE;
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = SPACE_XS;
+                                            if pinned {
+                                                ui.add_sized(
+                                                    egui::vec2(
+                                                        SESSION_PIN_SLOT_W,
+                                                        COLUMN_SESSION_MARK_SIZE,
+                                                    ),
+                                                    egui::Label::new(
+                                                        RichText::new(ICON_PIN).size(11.5).color(
+                                                            if self.selected_session == Some(id) {
+                                                                palette.selected_secondary_ink()
+                                                            } else {
+                                                                palette.text_muted
+                                                            },
+                                                        ),
+                                                    )
+                                                    .selectable(false),
+                                                )
+                                                .on_hover_text(tr("ピン留め中"));
+                                            }
                                             if session_mark_texture(ui.ctx(), &session.agent)
                                                 .is_some()
                                             {
@@ -7874,14 +7904,6 @@ impl OperonApp {
                                                         .on_hover_text(label);
                                                     },
                                                 );
-                                            }
-                                            if pinned {
-                                                ui.label(
-                                                    RichText::new(ICON_PIN)
-                                                        .size(11.5)
-                                                        .color(palette.text_muted),
-                                                )
-                                                .on_hover_text(tr("ピン留め中"));
                                             }
                                             if self.renaming_session == Some(id)
                                                 && !self.rename_in_workspace_tab
@@ -7951,6 +7973,9 @@ impl OperonApp {
                                             id,
                                             Instant::now(),
                                         ));
+                                        if pinned {
+                                            ui.label(tr("ピン留め中"));
+                                        }
                                         ui.label(tr("ドラッグで並べ替え"));
                                     });
                                 if row.hovered() && drag.is_none() {

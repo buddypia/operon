@@ -120,6 +120,9 @@ pub(crate) const SIDEBAR_ROW_PAD_Y: f32 = 6.0;
 /// How far a session row's mark sits from its project block's left edge: under
 /// the project's name, past the disclosure (change 320).
 pub(crate) const SIDEBAR_ROW_INDENT: f32 = 42.0;
+/// Width of the pin slot drawn in the left gutter before a pinned session's
+/// mark, keeping every row's agent mark aligned at `SIDEBAR_ROW_INDENT` (change 321).
+pub(crate) const SESSION_PIN_SLOT_W: f32 = 14.0;
 /// Least width of one sidebar status filter tile: mark, the longest group
 /// word and a two-digit count. Two fit side by side in the default column and
 /// not in the narrowest, where the tiles stack (change 252).
