@@ -1,0 +1,13 @@
+# The evidence for change 322. Format: docs/sdlc/templates/verification.yaml.
+digest: "80e1ef93398e44ff"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked perf_322_r1_drag_gating_and_can_move_tab
+  - R2 empirical-test :: cargo test --locked perf_322_r2_sync_fingerprints_and_sidebar_cache
+  - R3 empirical-test :: cargo test --locked perf_322_r3_diff_render_cache_hits_and_bounded_galley_cache
+  - R4 empirical-test :: cargo test --locked perf_322_r4_editor_syntax_galley_and_viewer_cache
+  - R5 empirical-test :: cargo test --locked perf_322_r5_markdown_galley_cache_and_viewport_culling
+  - R6 empirical-test :: cargo test --locked perf_322_r6_png_tree_and_palette_caches
+  - F1 empirical-test :: cargo test --locked perf_322_f1_stale_fingerprint_and_drag_cancel_fixes
+  - I1 formal-model :: cargo test --locked model_check_perf_322_cache_equivalence_and_can_move_tab
+  - I2 empirical-mutation :: python3 docs/sdlc/changes/322-ui-and-drag-rerender-caches/mutations.py

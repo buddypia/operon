@@ -31,7 +31,9 @@ pub(crate) use launch_projects::*;
 pub(crate) use relaunch::*;
 #[cfg(test)]
 pub(crate) use terminal_output::{stream_coalesce_delay, terminal_echo_poll_wait};
-pub(crate) use terminal_output::{terminal_empty_placeholder, TerminalStreamManager};
+pub(crate) use terminal_output::{
+    terminal_empty_placeholder, terminal_search_overlay_from, TerminalStreamManager,
+};
 pub(crate) use terminal_paths::*;
 
 pub(crate) type UiResult<T> = std::result::Result<T, String>;
@@ -940,6 +942,31 @@ pub(crate) struct OperonApp {
     pub(crate) cached_prompt_templates: Option<(Option<PathBuf>, Instant, Vec<PromptTemplate>)>,
     pub(crate) arena_mode_enabled: bool,
     pub(crate) arena_agents: Vec<CliProvider>,
+    pub(crate) dock_resize_drag: bool,
+    pub(crate) workspace_sync_fingerprint: Option<u64>,
+    pub(crate) workspace_sync_generation: u64,
+    pub(crate) last_visible_sessions: HashSet<Uuid>,
+    pub(crate) sidebar_view_cache: session_order::SidebarViewCache,
+    pub(crate) file_tree_row_cache: FileTreeRowCache,
+    pub(crate) editor_cursor_line_cache: Option<(u64, usize, usize)>,
+    pub(crate) palette_cache: CachedPaletteView,
+}
+
+#[derive(Default)]
+pub(crate) struct CachedPaletteView {
+    pub(crate) fingerprint: Option<u64>,
+    pub(crate) entries: Arc<Vec<PaletteEntry>>,
+    pub(crate) overflow: usize,
+    pub(crate) builds: usize,
+    pub(crate) hits: usize,
+}
+
+impl CachedPaletteView {
+    pub(crate) fn invalidate(&mut self) {
+        self.fingerprint = None;
+        self.entries = Arc::new(Vec::new());
+        self.overflow = 0;
+    }
 }
 
 /// What became of one folder offered as a project.
@@ -1358,6 +1385,14 @@ impl OperonApp {
             cached_prompt_templates: None,
             arena_mode_enabled: false,
             arena_agents: Vec::new(),
+            dock_resize_drag: false,
+            workspace_sync_fingerprint: None,
+            workspace_sync_generation: 0,
+            last_visible_sessions: HashSet::new(),
+            sidebar_view_cache: session_order::SidebarViewCache::default(),
+            file_tree_row_cache: FileTreeRowCache::default(),
+            editor_cursor_line_cache: None,
+            palette_cache: CachedPaletteView::default(),
         };
         app.relaunch_candidates = app
             .store
@@ -2916,6 +2951,9 @@ impl OperonApp {
     /// comes to the front is compared two seconds later — the same delay the
     /// front tab already lives with.
     pub(crate) fn watch_active_document(&mut self, project: &Project) {
+        if self.is_any_drag_active() {
+            return;
+        }
         let Some(document) = self.active_document.clone() else {
             return;
         };
@@ -6178,344 +6216,13 @@ impl OperonApp {
         dependencies_finished(&self.store.sessions, dependencies)
     }
 
-    /// How many sessions want the person: the ones stopped on a question, the
-    /// ones stopped on a prerequisite that will never arrive, and the ones
-    /// that said something while nobody was reading them. One number, because
-    /// the question a reader is asking the header is "how many need me", and a
-    /// session that is two of those is still one session.
-    ///
-    /// It is the 要対応 filter group, counted — the same predicate, so the
-    /// home screen's attention banner and the chip on the session list cannot
-    /// drift into meaning two different things. Two consequences of saying it
-    /// that way: a
-    /// queued session whose prerequisite failed now counts, and one that was
-    /// waiting on an answer when a stop was asked for no longer does, because
-    /// a terminal on its way out is not waiting on anybody.
-    pub(crate) fn attention_count(&self) -> usize {
-        self.store
-            .sessions
-            .iter()
-            .filter(|session| self.session_in_status_group(session, SessionStatusGroup::NeedsYou))
-            .count()
-    }
-
-    /// Which state a session is in, without the words. This is what the
-    /// session list's filter chips count with — once per session in the
-    /// counting pass, and once more per session in the filtering pass — so it
-    /// must not allocate. `status_view` builds two `String`s and is the wrong
-    /// thing to count with.
-    pub(crate) fn session_status_kind_for(&self, session: &Session) -> SessionStatusKind {
-        session_status_kind(
-            &self.store.sessions,
-            session,
-            self.cancellation_pending(session.id),
-            self.session_activity_for(session.id),
-            self.awaiting_first_request.contains(&session.id),
-        )
-    }
-
-    /// Whether a session belongs in a group, for the purpose of the filter.
-    ///
-    /// This is where the groups stop being a partition: a session that spoke
-    /// while nobody was reading it wants a person whatever state it is in, so
-    /// an unread finished session is in 要対応 *and* in 終了. The chips are
-    /// independent filters rather than a segmented control, so that is a
-    /// property and not a contradiction — but it does mean the four counts can
-    /// sum to more than the number of sessions, and nothing claims otherwise.
-    fn session_in_status_group(&self, session: &Session, group: SessionStatusGroup) -> bool {
-        self.kind_in_status_group(self.session_status_kind_for(session), session, group)
-    }
-
-    /// The same question asked of a kind already in hand. Deciding the kind
-    /// means walking the dependency list of a queued session, so a caller that
-    /// asks about several groups computes it once and comes here.
-    pub(crate) fn kind_in_status_group(
-        &self,
-        kind: SessionStatusKind,
-        session: &Session,
-        group: SessionStatusGroup,
-    ) -> bool {
-        if group == SessionStatusGroup::NeedsYou && self.is_session_unread(session.id) {
-            return true;
-        }
-        if matches!(kind, SessionStatusKind::Failed | SessionStatusKind::Lost) {
-            return group == SessionStatusGroup::NeedsYou && self.session_has_a_tab(session.id);
-        }
-        kind.group() == Some(group)
-    }
-
-    /// How many sessions are in each group right now, indexed by
-    /// `SessionStatusGroup::index`. One pass, no allocation.
-    pub(crate) fn status_group_counts(&self) -> [usize; 3] {
-        self.status_group_counts_where(|_| true)
-    }
-
-    /// The sidebar's tile counts: what each group would show if it were chosen
-    /// alone with the current CLI choice, so a number never promises rows the
-    /// column will not draw — and the column draws only tabs (change 285).
-    pub(crate) fn status_group_counts_for_chosen_agents(&self) -> [usize; 3] {
-        self.status_group_counts_where(|session| {
-            self.session_matches_agent_filter(session) && self.session_has_a_tab(session.id)
-        })
-    }
-
-    fn status_group_counts_where(&self, keep: impl Fn(&Session) -> bool) -> [usize; 3] {
-        let mut counts = [0usize; 3];
-        for session in self.store.sessions.iter().filter(|session| keep(session)) {
-            let kind = self.session_status_kind_for(session);
-            for group in SessionStatusGroup::GROUPS {
-                if self.kind_in_status_group(kind, session, group) {
-                    counts[group.index()] += 1;
-                }
-            }
-        }
-        counts
-    }
-
-    /// Keeps the 要対応 queue in step with the sessions, once per frame before
-    /// anything draws. The pass is the shape of `status_group_counts` — no
-    /// allocation — and the ordered list is rebuilt only when a session joins
-    /// or leaves, which is a handful of times a minute rather than sixty times
-    /// a second.
-    pub(crate) fn track_attention(&mut self, now: Instant) {
-        // Taken out of `self` for the pass so the predicates can borrow the
-        // app while the map changes; `take` moves the table, it does not copy.
-        let mut since = std::mem::take(&mut self.attention_since);
-        let before = since.len();
-        since.retain(|id, _| {
-            self.store
-                .sessions
-                .iter()
-                .find(|session| session.id == *id)
-                .is_some_and(|session| {
-                    self.session_in_status_group(session, SessionStatusGroup::NeedsYou)
-                })
-        });
-        let mut changed = since.len() != before;
-        for session in &self.store.sessions {
-            if !since.contains_key(&session.id)
-                && self.session_in_status_group(session, SessionStatusGroup::NeedsYou)
-            {
-                since.insert(session.id, now);
-                changed = true;
-            }
-        }
-        self.attention_since = since;
-        if changed {
-            let mut order: Vec<(Instant, Reverse<u64>, Uuid)> = self
-                .attention_since
-                .iter()
-                .map(|(id, entered)| {
-                    let launched = self
-                        .store
-                        .sessions
-                        .iter()
-                        .find(|session| session.id == *id)
-                        .map(|session| session.launched_at.unwrap_or(session.created_at))
-                        .unwrap_or_default();
-                    (*entered, Reverse(launched), *id)
-                })
-                .collect();
-            order.sort();
-            self.attention_order = order.into_iter().map(|(_, _, id)| id).collect();
-            // A reply half typed goes with the wait it answered (change 279).
-            self.waiting_reply_drafts
-                .retain(|id, _| self.attention_since.contains_key(id));
-        }
-    }
-
-    /// ⌘J: the queued session after the one on screen, wrapping, opened with
-    /// the keyboard in its terminal when there is a live pane to type into.
-    /// With nobody waiting it says so and leaves the screen as it was.
-    pub(crate) fn open_next_waiting_session(&mut self) {
-        let Some(next) = next_in_attention_queue(&self.attention_order, self.selected_session)
-        else {
-            self.notice_briefly(tr("返事を待っているセッションはありません"));
-            return;
-        };
-        self.open_waiting_session(next);
-    }
-
-    /// Opens a session someone is waiting on, ⌘J's way or a pinned row's: the
-    /// keyboard goes to its pane when there is a live one to type into.
-    pub(crate) fn open_waiting_session(&mut self, session_id: Uuid) {
-        self.open_session_in_terminal(session_id);
-        let running = self
-            .store
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id && session.status == SessionStatus::Active);
-        self.terminal_focus_request = running.then_some(session_id);
-    }
-
-    /// What a pinned row says under its project line: the words that ended the
-    /// agent's turn, or that it is waiting on a permission or an answer. Only a
-    /// fresh hook status speaks — the message a status carries forward into a
-    /// new wait belongs to the turn before, so it is not offered as the
-    /// question.
-    pub(crate) fn session_attention_line(&self, session_id: Uuid) -> Option<&str> {
-        let status = self.fresh_hook_status(session_id)?;
-        match status.activity {
-            AgentActivity::AwaitingInput => Some(tr("許可または回答を待っています")),
-            AgentActivity::Idle => status
-                .last_message
-                .as_deref()
-                .map(str::trim)
-                .filter(|words| !words.is_empty()),
-            AgentActivity::Working => None,
-        }
-    }
-
-    /// How long a queued session has wanted a person, or `None` when it does
-    /// not.
-    pub(crate) fn attention_wait(&self, session_id: Uuid, now: Instant) -> Option<Duration> {
-        self.attention_since
-            .get(&session_id)
-            .map(|entered| now.saturating_duration_since(*entered))
-    }
-
-    /// Whether the session list should show this session. With nothing
-    /// selected everything passes, which is the list as it was before there
-    /// was a filter at all.
-    pub(crate) fn session_matches_status_filter(&self, session: &Session) -> bool {
-        if !self.status_filter.iter().any(|selected| *selected) {
-            return true;
-        }
-        // Once per session, not once per selected chip: for a queued session,
-        // deciding the kind walks its dependencies against every other
-        // session, and this runs for every row on every frame.
-        let kind = self.session_status_kind_for(session);
-        SessionStatusGroup::GROUPS.iter().any(|group| {
-            self.status_filter[group.index()] && self.kind_in_status_group(kind, session, *group)
-        })
-    }
-
-    pub(crate) fn session_matches_filters(&self, session: &Session) -> bool {
-        self.session_matches_agent_filter(session) && self.session_matches_status_filter(session)
-    }
-
-    pub(crate) fn session_matches_agent_filter(&self, session: &Session) -> bool {
-        !self.agent_filter.iter().any(|selected| *selected)
-            || self.agent_filter[session_agent_filter_index(&session.agent)]
-    }
-
-    pub(crate) fn has_session_filters(&self) -> bool {
-        self.status_filter.iter().any(|selected| *selected)
-            || self.agent_filter.iter().any(|selected| *selected)
-    }
-
-    /// How many sessions the column shows while a filter is on.
-    pub(crate) fn matching_session_count(&self) -> usize {
-        self.store
-            .sessions
-            .iter()
-            .filter(|session| self.session_matches_filters(session))
-            .count()
-    }
-
-    /// How many of 要対応's sessions, under the current CLI choice, are
-    /// waiting on a permission or an answer: the choice change 252 folded in.
-    /// Asked only while the pointer is on the tile.
-    pub(crate) fn waiting_session_count(&self) -> usize {
-        self.store
-            .sessions
-            .iter()
-            .filter(|session| {
-                self.session_matches_agent_filter(session)
-                    && self.session_status_kind_for(session) == SessionStatusKind::Waiting
-            })
-            .count()
-    }
-
-    pub(crate) fn toggle_agent_filter(&mut self, index: usize) {
-        if let Some(selected) = self.agent_filter.get_mut(index) {
-            *selected = !*selected;
-            self.forget_pending_session_close();
-        }
-    }
-
-    pub(crate) fn clear_agent_filter(&mut self) {
-        self.agent_filter = [false; 4];
-        self.forget_pending_session_close();
-    }
-
-    pub(crate) fn clear_session_filters(&mut self) {
-        self.clear_agent_filter();
-        self.clear_status_filter();
-    }
-
-    /// Turn one chip on or off.
-    pub(crate) fn toggle_status_filter(&mut self, group: SessionStatusGroup) {
-        let index = group.index();
-        self.status_filter[index] = !self.status_filter[index];
-        self.forget_pending_session_close();
-    }
-
-    pub(crate) fn clear_status_filter(&mut self) {
-        self.status_filter = [false; 3];
-        self.forget_pending_session_close();
-    }
-
-    /// The one move the home screen's attention banner offers: the session
-    /// list, already narrowed to the sessions it was counting.
-    pub(crate) fn show_sessions_needing_you(&mut self) {
-        self.show_status_group(SessionStatusGroup::NeedsYou);
-    }
-
-    /// The session list narrowed to exactly one group — what a Home tile
-    /// opens, so the tile and the chip it lands on count the same thing.
-    pub(crate) fn show_status_group(&mut self, group: SessionStatusGroup) {
-        self.page = Page::Sessions;
-        self.session_library_open = true;
-        self.session_view = SessionView::List;
-        self.search.clear();
-        self.pending_history_open = None;
-        self.clear_session_filters();
-        self.status_filter[group.index()] = true;
-        self.forget_pending_session_close();
-    }
-
     /// Open ⌘K from its chord or from the toolbar, one path so the two cannot
     /// disagree about focus or where the selection starts.
     pub(crate) fn open_command_palette(&mut self) {
         self.command_palette_open = true;
         self.command_palette_needs_focus = true;
         self.command_selection = 0;
-    }
-
-    /// Every change to what the list shows drops a removal confirmation that
-    /// has not been answered. The confirmation is drawn inside the card it
-    /// belongs to, so re-narrowing can take the question off screen with the
-    /// answer still pending, and widening later brings back a 削除しますか that
-    /// nobody remembers asking for. Nothing is lost by forgetting it: the
-    /// removal only happens on the confirm click.
-    fn forget_pending_session_close(&mut self) {
-        self.pending_session_close = None;
-        self.pending_history_open = None;
-    }
-
-    /// The state to show for a session, including the live agent activity the
-    /// poller has settled on.
-    pub(crate) fn status_view(&self, session: &Session) -> SessionStatusView {
-        let mut view = session_status_view(
-            &self.store.sessions,
-            session,
-            self.cancellation_pending(session.id),
-            self.session_activity_for(session.id),
-            self.awaiting_first_request.contains(&session.id),
-        );
-        // The CLIs name the tool they are running, and "Bash を実行中" answers
-        // the question a person actually has about a working session, which
-        // "応答を生成中" cannot.
-        if let Some(tool) = self
-            .fresh_hook_status(session.id)
-            .filter(|status| status.activity == AgentActivity::Working)
-            .and_then(|status| status.tool.as_deref())
-        {
-            view.hint = tf!("{p0} を実行中", p0 = tool);
-        }
-        view.hint = self.with_working_time(&view.hint, session.id, Instant::now());
-        view
+        self.palette_cache.invalidate();
     }
 
     /// Allocate within a project, respecting numbers saved in every UI language.
@@ -7103,358 +6810,6 @@ impl OperonApp {
             self.request_session_output(session_id);
         }
     }
-
-    pub(crate) fn open_session_in_terminal(&mut self, session_id: Uuid) {
-        if !self
-            .store
-            .sessions
-            .iter()
-            .any(|session| session.id == session_id)
-        {
-            return;
-        }
-        self.pending_history_open = None;
-        self.terminal_capture_missing.remove(&session_id);
-        self.select_session(session_id);
-        self.page = Page::Sessions;
-        self.session_library_open = false;
-        // Fetch immediately instead of making the newly selected terminal wait
-        // for the periodic two-second session poll.
-        self.refresh_session_output(session_id);
-    }
-
-    pub(crate) fn workspace_tab_project(&self, tab: &WorkspaceTab) -> Option<Uuid> {
-        match tab {
-            WorkspaceTab::Session(id) => self
-                .store
-                .sessions
-                .iter()
-                .find(|session| session.id == *id)
-                .map(|session| session.project_id),
-            WorkspaceTab::Document(id) => Some(id.project),
-        }
-    }
-
-    /// Swap only view state. Document buffers remain in open_documents, including
-    /// unsaved edits; this does not write or change a session's lifetime.
-    fn switch_workspace_project(&mut self, project: Uuid) {
-        let previous_project = self.workspace_project.or_else(|| {
-            self.workspace
-                .active()
-                .and_then(|tab| self.workspace_tab_project(tab))
-        });
-        if previous_project != Some(project) {
-            let (next, context) = self.project_workspaces.remove(&project).unwrap_or_default();
-            let context = context.or_else(|| {
-                previous_project
-                    .is_none()
-                    .then_some(self.selected_session)
-                    .flatten()
-            });
-            let previous = std::mem::replace(&mut self.workspace, next);
-            if let Some(previous_project) = previous_project {
-                self.project_workspaces
-                    .insert(previous_project, (previous, self.selected_session));
-            }
-            let context = context.filter(|id| {
-                self.store
-                    .sessions
-                    .iter()
-                    .any(|session| session.id == *id && session.project_id == project)
-            });
-            self.set_terminal_session_context(context);
-            self.workspace_drag = None;
-            self.terminal_focus_request = None;
-            self.active_document = match self.workspace.active() {
-                Some(WorkspaceTab::Document(id)) => Some(id.clone()),
-                _ => None,
-            };
-        }
-        self.workspace_project = Some(project);
-        self.selected_project = Some(project);
-        self.workspace_initialized = true;
-    }
-
-    pub(crate) fn select_workspace_project(&mut self, project: Uuid) {
-        self.pending_history_open = None;
-        self.session_library_open = false;
-        self.switch_workspace_project(project);
-        self.sync_workspace_live_sessions();
-        if let Some(tab) = self.workspace.active().cloned() {
-            self.activate_workspace_tab(&tab);
-        } else {
-            self.set_terminal_session_context(None);
-            self.active_document = None;
-        }
-    }
-
-    /// The one place terminal context changes, also used when switching to an
-    /// empty project. Merely restoring a file must not mark its session read.
-    fn set_terminal_session_context(&mut self, session_id: Option<Uuid>) {
-        if self
-            .unread_hold
-            .is_some_and(|held| Some(held) != session_id)
-        {
-            self.unread_hold = None;
-        }
-        if self
-            .terminal_focus_request
-            .is_some_and(|wanted| Some(wanted) != session_id)
-        {
-            self.terminal_focus_request = None;
-        }
-        if self.selected_session != session_id {
-            if let Some(prev_session) = self.selected_session {
-                if !self.resolved_paths.is_empty() {
-                    self.terminal_path_caches
-                        .insert(prev_session, std::mem::take(&mut self.resolved_paths));
-                }
-            } else {
-                self.resolved_paths.clear();
-            }
-
-            if let Some(new_session) = session_id {
-                if let Some(cached) = self.terminal_path_caches.get(&new_session) {
-                    self.resolved_paths = cached.clone();
-                } else {
-                    self.resolved_paths = HashMap::new();
-                }
-            } else {
-                self.resolved_paths = HashMap::new();
-            }
-
-            self.negative_path_probed_at.clear();
-            self.resolved_paths_generation += 1;
-            self.unresolved_paths.clear();
-            self.resolved_paths_session = session_id;
-        }
-        self.selected_session = session_id;
-    }
-
-    /// Opening a session selects its project's workspace and marks that visible
-    /// session read. History may explicitly open a finished record here.
-    pub(crate) fn select_session(&mut self, session_id: Uuid) {
-        let focus_requested = self.terminal_focus_request == Some(session_id);
-        if let Some(project) = self
-            .store
-            .sessions
-            .iter()
-            .find(|s| s.id == session_id)
-            .map(|s| s.project_id)
-        {
-            self.switch_workspace_project(project);
-        }
-        self.set_terminal_session_context(Some(session_id));
-        if focus_requested {
-            self.terminal_focus_request = Some(session_id);
-        }
-        self.workspace.open(WorkspaceTab::Session(session_id));
-        self.workspace_initialized = true;
-        if self.unread_hold != Some(session_id) {
-            self.unread_sessions.remove(&session_id);
-        }
-    }
-
-    /// Marks a session unread by hand, and holds it there until the person
-    /// looks at something else.
-    pub(crate) fn mark_session_unread(&mut self, session_id: Uuid) {
-        self.unread_sessions.insert(session_id);
-        self.unread_hold = Some(session_id);
-    }
-
-    pub(crate) fn is_session_unread(&self, session_id: Uuid) -> bool {
-        self.unread_sessions.contains(&session_id)
-    }
-
-    /// Whether a session is the one a person is actually looking at. Anything
-    /// else — another page, the session library over the top, another session
-    /// selected — is not reading it.
-    pub(crate) fn is_session_on_screen(&self, session_id: Uuid) -> bool {
-        self.page == Page::Sessions
-            && !self.session_library_open
-            && self.terminals_on_screen().contains(&session_id)
-    }
-
-    /// The sessions the workspace draws a terminal for: every terminal of a
-    /// split, else the selected one.
-    pub(crate) fn terminals_on_screen(&self) -> Vec<Uuid> {
-        if !self.workspace.groups.is_empty() || self.workspace_initialized {
-            self.workspace
-                .visible()
-                .into_iter()
-                .filter_map(|tab| match tab {
-                    WorkspaceTab::Session(id) => Some(id),
-                    WorkspaceTab::Document(_) => None,
-                })
-                .collect()
-        } else {
-            self.selected_session.into_iter().collect()
-        }
-    }
-
-    /// Takes a terminal off the screen; its session keeps running. Its
-    /// neighbour takes the room and, when it held the keyboard, the keyboard.
-    pub(crate) fn close_pane(&mut self, session_id: Uuid) {
-        self.close_workspace_tab(&WorkspaceTab::Session(session_id));
-    }
-
-    pub(crate) fn activate_workspace_tab(&mut self, tab: &WorkspaceTab) {
-        match tab {
-            WorkspaceTab::Session(id) => self.select_session(*id),
-            WorkspaceTab::Document(id) => {
-                self.switch_workspace_project(id.project);
-                self.workspace.open(WorkspaceTab::Document(id.clone()));
-                self.active_document = Some(id.clone());
-                self.terminal_focus_request = None;
-            }
-        }
-    }
-
-    pub(crate) fn close_workspace_tab(&mut self, tab: &WorkspaceTab) {
-        // Every close a person asks for comes through here; a move between
-        // groups and a deleted session's tab do not (change 285).
-        if let WorkspaceTab::Session(id) = tab {
-            if self.is_session_pinned(*id) {
-                self.notice_briefly(tr(
-                    "ピン留め中のセッションは閉じられません。ピン留めを外してから閉じてください。",
-                ));
-                return;
-            }
-        }
-        if let WorkspaceTab::Document(id) = tab {
-            if self
-                .document_index(id)
-                .is_some_and(|i| self.open_documents[i].modified())
-            {
-                self.notice = Some(tr("未保存の変更があります。保存するか、ディスクから読み直してから閉じてください。").into());
-                return;
-            }
-            self.close_document(id);
-            self.workspace_editor_views.remove(id);
-            self.workspace_editor_jumps.remove(id);
-        }
-        if self.workspace.close(tab) {
-            self.remember_closed_tab(tab);
-        }
-        if let Some(next) = self.workspace.active().cloned() {
-            self.activate_workspace_tab(&next);
-        }
-    }
-
-    /// Keeps a closed tab for ⇧⌘T, newest last, within `CLOSED_TAB_LIMIT`.
-    pub(crate) fn remember_closed_tab(&mut self, tab: &WorkspaceTab) {
-        self.closed_tabs.retain(|closed| closed != tab);
-        self.closed_tabs.push(tab.clone());
-        let excess = self.closed_tabs.len().saturating_sub(CLOSED_TAB_LIMIT);
-        self.closed_tabs.drain(..excess);
-    }
-
-    /// ⇧⌘T: the newest closed tab that can still be shown, shown again.
-    ///
-    /// One that is already open again by another route, whose session was
-    /// removed, or whose project was forgotten is passed over and dropped —
-    /// reopening a tab for nothing would be worse than reopening the one
-    /// before it.
-    pub(crate) fn reopen_closed_tab(&mut self) {
-        while let Some(tab) = self.closed_tabs.pop() {
-            if self
-                .workspace
-                .groups
-                .iter()
-                .any(|group| group.tabs.contains(&tab))
-            {
-                continue;
-            }
-            match &tab {
-                WorkspaceTab::Session(id) => {
-                    if !self.store.sessions.iter().any(|session| session.id == *id) {
-                        continue;
-                    }
-                    self.page = Page::Sessions;
-                    self.session_library_open = false;
-                    self.select_session(*id);
-                }
-                WorkspaceTab::Document(id) => {
-                    let Some(project) = self
-                        .store
-                        .projects
-                        .iter()
-                        .find(|project| project.id == id.project)
-                        .cloned()
-                    else {
-                        continue;
-                    };
-                    // `open_document_at` puts the tab in the workspace only
-                    // when the workspace is the page showing.
-                    self.page = Page::Sessions;
-                    self.session_library_open = false;
-                    self.open_document_at(&project, id.root.clone(), id.path.clone());
-                }
-            }
-            return;
-        }
-        self.notice_briefly(tr("開き直せるタブはありません。"));
-    }
-
-    /// ⇧⌘] / ⇧⌘[ and ⌃Tab / ⌃⇧Tab: the focused pane's next or previous tab,
-    /// wrapping round.
-    pub(crate) fn step_workspace_tab(&mut self, forward: bool) {
-        let Some(group) = self
-            .workspace
-            .groups
-            .iter()
-            .find(|group| Some(group.id) == self.workspace.focused)
-        else {
-            return;
-        };
-        let count = group.tabs.len();
-        // `settle` drops an emptied group, so this is a group nobody settled;
-        // stepping in it would divide by zero.
-        if count == 0 {
-            return;
-        }
-        let index = if forward {
-            (group.active + 1) % count
-        } else {
-            (group.active + count - 1) % count
-        };
-        let id = group.id;
-        let tab = group.tabs[index].clone();
-        self.workspace.select(id, &tab);
-        self.activate_workspace_tab(&tab);
-    }
-
-    /// Both paths that decide a session changed state call this, at the point
-    /// each already decided the change was worth a notification. A change a
-    /// person watched happen is not unread.
-    pub(crate) fn note_session_activity_change(&mut self, session_id: Uuid) {
-        if !self.is_session_on_screen(session_id) {
-            self.unread_sessions.insert(session_id);
-        }
-    }
-
-    pub(crate) fn queue_terminal_input(&mut self, session_id: Uuid, input: Vec<TerminalInput>) {
-        if input.is_empty() {
-            return;
-        }
-        let Some(session) = self
-            .store
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
-            return;
-        };
-        if session.status != SessionStatus::Active {
-            return;
-        }
-        self.terminal_input_queue
-            .entry(session_id)
-            .or_default()
-            .extend(input);
-        self.last_terminal_input = Some(Instant::now());
-        self.flush_terminal_input(session_id);
-    }
 }
 
 impl eframe::App for OperonApp {
@@ -7478,18 +6833,18 @@ impl eframe::App for OperonApp {
         if self.repaint.is_none() {
             self.repaint = Some(ctx.clone());
         }
-        if let Ok(mut visible) = self.visible_sessions.write() {
-            *visible = self.terminals_on_screen().into_iter().collect();
-        }
         let focused = ctx.input(|input| input.focused);
         self.apply_appearance(ctx);
-        self.sync_terminal_streams(focused);
+        self.sync_visible_sessions_and_streams(focused);
         self.drain_terminal_streams();
         self.ensure_hooks_started(ctx);
         self.ensure_handoff_archive_sweep_started();
         self.drain_hook_events();
         self.persist_diff_comments();
-        self.request_port_scan();
+        let dragging = self.is_any_drag_active();
+        if !dragging {
+            self.request_port_scan();
+        }
         self.resolve_terminal_paths();
         self.process_background_results();
         self.tick_knowledge();
@@ -7497,13 +6852,17 @@ impl eframe::App for OperonApp {
         self.track_attention(Instant::now());
         self.track_working(Instant::now());
         self.track_dock_badge();
-        self.track_agent_snapshot(Instant::now());
+        if !dragging {
+            self.track_agent_snapshot(Instant::now());
+        }
         if self.last_session_refresh.elapsed() >= SESSION_POLL_INTERVAL {
             self.retry_pending_store();
             self.save_workspace_layout_if_changed();
             self.last_session_refresh = Instant::now();
         }
-        self.poll_sessions_when_due(focused, Instant::now());
+        if !dragging {
+            self.poll_sessions_when_due(focused, Instant::now());
+        }
         ctx.request_repaint_after(Duration::from_secs(2));
         // A toast leaves on time even when nothing else would wake the frame.
         if let Some(remaining) = self.expire_brief_notice(Instant::now()) {
@@ -7530,6 +6889,14 @@ impl eframe::App for OperonApp {
         // A delayed history click belongs to the page where it was made.
         if self.page != Page::Sessions {
             self.pending_history_open = None;
+            if self.is_any_drag_active() {
+                self.dock_resize_drag = false;
+                self.workspace_divider_drag = false;
+                self.workspace_drag = None;
+                self.dock_drag = None;
+                self.workspace_column_drag = None;
+                self.finish_layout_drag();
+            }
         }
         self.ui_central_panel(root, palette);
         if ctx.input(|input| !input.raw.hovered_files.is_empty()) {
@@ -7562,14 +6929,21 @@ impl eframe::App for OperonApp {
         self.ui_create_pr_modal(ctx, palette);
         self.ui_run_script_modal(ctx, palette);
         self.ui_port_stop_modal(ctx, palette);
-        if let Ok(mut visible) = self.visible_sessions.write() {
-            *visible = self.terminals_on_screen().into_iter().collect();
-        }
-        self.sync_terminal_streams(focused);
+        self.sync_visible_sessions_and_streams(focused);
     }
 }
 
 impl OperonApp {
+    fn sync_visible_sessions_and_streams(&mut self, focused: bool) {
+        let on_screen: HashSet<Uuid> = self.terminals_on_screen().into_iter().collect();
+        if on_screen != self.last_visible_sessions {
+            if let Ok(mut visible) = self.visible_sessions.write() {
+                *visible = on_screen.clone();
+            }
+            self.last_visible_sessions = on_screen;
+        }
+        self.sync_terminal_streams(focused);
+    }
     pub(crate) fn ui_central_panel(&mut self, root: &mut egui::Ui, palette: &Palette) {
         egui::CentralPanel::default().show(root, |ui| {
             ui.style_mut().spacing.item_spacing = egui::vec2(10.0, 10.0);
@@ -8453,6 +7827,7 @@ impl OperonApp {
         self.command_palette_open = false;
         self.command_search.clear();
         self.command_selection = 0;
+        self.palette_cache.invalidate();
     }
 }
 

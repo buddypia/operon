@@ -53,7 +53,9 @@
 ## Code and tests
 - Symbols: `src/app/screens.rs::ui_tab_workspace` lays out the docks, tab groups, dividers, empty workspace and drop zones.
 - `src/app/screens.rs::ui_terminal_pane` draws one pane: header, output rows, caret, IME, 「最新へ」, links, find bar.
-- `src/app/screens.rs::ui_terminal_search` and `handle_terminal_search_keys` draw and drive the find bar; `ui_session_ports` draws the port badge and menu.
+- `src/app/terminal_output.rs::ui_terminal_search` and `handle_terminal_search_keys` draw and drive the find bar; `src/app/screens.rs::ui_session_ports` draws the port badge and menu.
+- `src/app/terminal_output.rs::is_layout_dragging`, `is_any_drag_active`, `finish_layout_drag`, `sync_visible_sessions_and_streams` track dock/divider/pane drags, defer `tmux resize-window` until release, and avoid redundant stream watcher clones and background polls mid-drag.
+- `src/ui/session_tree.rs::WorkspaceTabs::can_move_tab` validates pane drop fit from layout geometry alone without cloning tab groups.
 - `src/app/launch_menu.rs::ui_workspace_launch_menu`, `launch_workspace_agent`, `workspace_agent_launch` and `WORKSPACE_LAUNCH_CHOICES` are the + menu and its checked launches.
 - `src/app/terminal_paths.rs::TERMINAL_PATH_MENU`, `resolve_terminal_path_with_scan`, `open_terminal_path_menu`, `apply_terminal_path_menu_choice` are the right-click menu and bare-name resolution.
 - `src/app/terminal_output.rs::TerminalStreamManager`, `lay_out_capture`, `terminal_empty_placeholder`, `flush_terminal_input`, `request_terminal_resize` feed and size the pane.
@@ -89,3 +91,4 @@
 - Change 276 and 292: output is laid out off the frame and streamed by a watcher; unchanged snapshots wake nothing.
 - Change 288 and 303: a dead pane becomes a shell or is restored; a missing pane is not polled in a loop.
 - Change 293: ⌘/⌥-click opens in Operon, other destinations live in a four-row menu, and a bare name opens only when it is unique.
+- Change 322: `dock_resize_drag`, workspace divider drag, and workspace pane drag share unified `is_layout_dragging` / `is_any_drag_active` gating that defers `tmux resize-window` until `finish_layout_drag`, suppresses background poll/scan churn mid-drag, avoids per-frame `visible_sessions` write locks and stream name clones, and checks drop fit via zero-group-clone `WorkspaceTabs::can_move_tab` (pinned by `perf_322_r1_drag_gating_and_can_move_tab` and `model_check_perf_322_cache_equivalence_and_can_move_tab`).

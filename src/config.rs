@@ -771,3 +771,13 @@ pub(crate) const EMBEDDING_MODEL_DIRECTORY_NAME: &str = "models";
 /// session so an immediate crash loop stops and leaves the error output readable
 /// in its tab (change 291).
 pub(crate) const AUTO_RESTORE_COOLDOWN_SECONDS: u64 = 15;
+
+/// Upper bound on shaped row galleys kept inside a diff pane's frame cache so
+/// large repositories stay bounded in memory while keeping visible viewport rows
+/// and scroll neighbours hot (change 322).
+pub(crate) const MAX_CACHED_DIFF_ROW_GALLEYS: usize = 4096;
+
+/// Markdown documents with more blocks than this threshold cull off-screen
+/// blocks outside the scroll viewport instead of laying out and painting the
+/// entire file on every frame (change 322).
+pub(crate) const MARKDOWN_VIEWPORT_CULL_THRESHOLD: usize = 32;

@@ -1,5 +1,132 @@
 use crate::prelude::*;
 use crate::*;
+use std::hash::{Hash, Hasher};
+
+#[derive(Default)]
+struct DiffRowsState {
+    rows_fp: Option<u64>,
+    rows: Vec<DiffRow>,
+    change_rows: Vec<usize>,
+    offsets: Vec<f32>,
+    total_height: f32,
+    widest: usize,
+    row_builds: usize,
+}
+
+#[derive(Default)]
+struct DiffGalleysState {
+    style_key: Option<(u64, SyntaxColours, u32, u32)>,
+    galleys: HashMap<(usize, usize, i8), Arc<egui::Galley>>,
+    galley_builds: usize,
+    galley_hits: usize,
+}
+
+/// Cached diff pane row list, virtualized offsets, and bounded shaped row galleys
+/// (change 322).
+#[derive(Default)]
+pub(crate) struct DiffRenderCache {
+    rows: DiffRowsState,
+    galleys: DiffGalleysState,
+}
+
+impl DiffRenderCache {
+    #[cfg(test)]
+    pub(crate) fn row_builds(&self) -> usize {
+        self.rows.row_builds
+    }
+
+    #[cfg(test)]
+    pub(crate) fn galley_builds(&self) -> usize {
+        self.galleys.galley_builds
+    }
+
+    #[cfg(test)]
+    pub(crate) fn galley_hits(&self) -> usize {
+        self.galleys.galley_hits
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_galley_len(&self) -> usize {
+        self.galleys.galleys.len()
+    }
+}
+
+fn diff_files_fingerprint(
+    files: &[DiffFile],
+    collapsed: &HashSet<String>,
+    project: Uuid,
+    annotations: &DiffAnnotations,
+    side_by_side: bool,
+    editable: bool,
+    cell_y_bits: u32,
+) -> (u64, u64) {
+    let mut fh = std::hash::DefaultHasher::new();
+    files.len().hash(&mut fh);
+    for file in files {
+        file.path.hash(&mut fh);
+        std::mem::discriminant(&file.change).hash(&mut fh);
+        file.added.hash(&mut fh);
+        file.removed.hash(&mut fh);
+        file.widest.hash(&mut fh);
+        file.lines.len().hash(&mut fh);
+        for line in &file.lines {
+            std::mem::discriminant(&line.kind).hash(&mut fh);
+            line.old_number.hash(&mut fh);
+            line.new_number.hash(&mut fh);
+            line.text.hash(&mut fh);
+            line.highlights.len().hash(&mut fh);
+            for span in &line.highlights {
+                span.start.hash(&mut fh);
+                span.end.hash(&mut fh);
+            }
+        }
+    }
+    let files_fp = fh.finish();
+
+    let mut rh = std::hash::DefaultHasher::new();
+    files_fp.hash(&mut rh);
+    project.hash(&mut rh);
+    side_by_side.hash(&mut rh);
+    editable.hash(&mut rh);
+    cell_y_bits.hash(&mut rh);
+    let mut collapsed_sorted: Vec<&str> = collapsed.iter().map(String::as_str).collect();
+    collapsed_sorted.sort_unstable();
+    collapsed_sorted.hash(&mut rh);
+    annotations.editing.hash(&mut rh);
+    annotations.comments.len().hash(&mut rh);
+    for c in &annotations.comments {
+        if c.project == project {
+            c.file.hash(&mut rh);
+            c.line.hash(&mut rh);
+            c.body.hash(&mut rh);
+            c.sent.hash(&mut rh);
+            c.resolved.hash(&mut rh);
+        }
+    }
+    annotations.note_heights.len().hash(&mut rh);
+    if let Some((editing_file, editing_line)) = &annotations.editing {
+        if let Some(h) = annotations
+            .note_heights
+            .get(editing_file.as_str())
+            .and_then(|m| m.get(&(project, *editing_line)))
+        {
+            h.to_bits().hash(&mut rh);
+        }
+    }
+    let mut note_entries: Vec<(&str, usize, u32)> = annotations
+        .note_heights
+        .iter()
+        .flat_map(|(path, heights)| {
+            heights
+                .iter()
+                .filter(|((p, _), _)| *p == project)
+                .map(|((_, line), h)| (path.as_str(), *line, h.to_bits()))
+        })
+        .collect();
+    note_entries.sort_unstable();
+    note_entries.hash(&mut rh);
+    (files_fp, rh.finish())
+}
 
 /// How many columns each of the two line-number gutters takes. Five digits
 /// covers a hundred-thousand-line file, and a fixed width is what keeps the
@@ -374,6 +501,37 @@ pub(crate) fn diff_pane_with_actions(
     .notes_changed
 }
 
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn diff_pane_with_cache(
+    ui: &mut egui::Ui,
+    files: &[DiffFile],
+    collapsed: &mut HashSet<String>,
+    palette: &Palette,
+    height: f32,
+    project: Uuid,
+    annotations: &mut DiffAnnotations,
+    hunk_action: &mut Option<DiffHunkAction>,
+    editable: bool,
+    cache: Option<&mut DiffRenderCache>,
+) -> DiffPaneOutcome {
+    diff_pane_with_view_cached(
+        ui,
+        files,
+        collapsed,
+        palette,
+        height,
+        project,
+        annotations,
+        hunk_action,
+        &DiffPaneView {
+            editable,
+            ..DiffPaneView::working_tree()
+        },
+        cache,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn diff_pane_with_view(
     ui: &mut egui::Ui,
@@ -390,32 +548,167 @@ pub(crate) fn diff_pane_with_view(
         ui.label(RichText::new(tr("変更はありません。")).color(palette.text_muted));
         return DiffPaneOutcome::default();
     }
+    let cache_id = ui.scope_id().with(("diff-render-cache", project));
+    let cache_arc: Arc<std::sync::Mutex<DiffRenderCache>> = ui.ctx().data_mut(|data| {
+        data.get_temp_mut_or_insert_with(cache_id, || {
+            Arc::new(std::sync::Mutex::new(DiffRenderCache::default()))
+        })
+        .clone()
+    });
+    let outcome = if let Ok(mut guard) = cache_arc.lock() {
+        diff_pane_with_view_cached(
+            ui,
+            files,
+            collapsed,
+            palette,
+            height,
+            project,
+            annotations,
+            hunk_action,
+            view,
+            Some(&mut guard),
+        )
+    } else {
+        diff_pane_with_view_cached(
+            ui,
+            files,
+            collapsed,
+            palette,
+            height,
+            project,
+            annotations,
+            hunk_action,
+            view,
+            None,
+        )
+    };
+    outcome
+}
+
+#[allow(clippy::too_many_arguments)]
+fn diff_pane_with_view_cached(
+    ui: &mut egui::Ui,
+    files: &[DiffFile],
+    collapsed: &mut HashSet<String>,
+    palette: &Palette,
+    height: f32,
+    project: Uuid,
+    annotations: &mut DiffAnnotations,
+    hunk_action: &mut Option<DiffHunkAction>,
+    view: &DiffPaneView,
+    cache: Option<&mut DiffRenderCache>,
+) -> DiffPaneOutcome {
+    if files.is_empty() {
+        ui.label(RichText::new(tr("変更はありません。")).color(palette.text_muted));
+        return DiffPaneOutcome::default();
+    }
     let cell = monospace_cell_size(ui);
     let side_by_side =
         effective_diff_layout(view.layout, ui.available_width()) == DiffLayout::SideBySide;
     let editable = view.editable;
-    let annotated =
-        |file: &str, line: usize| editable && annotations.shows_row(project, file, line);
-    let rows = if side_by_side {
-        diff_pane_side_by_side_rows(files, collapsed, &annotated)
-    } else {
-        diff_pane_rows(files, collapsed, &annotated)
+    let (files_fp, rows_fp) = diff_files_fingerprint(
+        files,
+        collapsed,
+        project,
+        annotations,
+        side_by_side,
+        editable,
+        cell.y.to_bits(),
+    );
+
+    let local_rows;
+    let local_change_rows;
+    let local_offsets;
+    let style_key = (
+        files_fp,
+        SyntaxColours::from(palette),
+        ui.ctx().pixels_per_point().to_bits(),
+        cell.x.to_bits(),
+    );
+    let (rows_cache, galley_cache) = match cache {
+        Some(c) => (Some(&mut c.rows), Some(&mut c.galleys)),
+        None => (None, None),
     };
-    let changed_rows: Vec<bool> = rows
-        .iter()
-        .map(|row| diff_row_is_change(files, row))
-        .collect();
-    let change_rows = change_block_starts(&changed_rows);
-    let offsets = diff_row_offsets(&rows, cell.y, &|file, line| {
-        let number = files[file].lines[line].new_number?;
-        annotations
-            .note_heights
-            .get(files[file].path.as_str())?
-            .get(&(project, number))
-            .copied()
+    let (rows, change_rows, offsets, total_height, widest): (
+        &[DiffRow],
+        &[usize],
+        &[f32],
+        f32,
+        usize,
+    ) = if let Some(rc) = rows_cache {
+        if rc.rows_fp != Some(rows_fp) {
+            let annotated =
+                |file: &str, line: usize| editable && annotations.shows_row(project, file, line);
+            rc.rows = if side_by_side {
+                diff_pane_side_by_side_rows(files, collapsed, &annotated)
+            } else {
+                diff_pane_rows(files, collapsed, &annotated)
+            };
+            let changed_rows: Vec<bool> = rc
+                .rows
+                .iter()
+                .map(|row| diff_row_is_change(files, row))
+                .collect();
+            rc.change_rows = change_block_starts(&changed_rows);
+            rc.offsets = diff_row_offsets(&rc.rows, cell.y, &|file, line| {
+                let number = files[file].lines[line].new_number?;
+                annotations
+                    .note_heights
+                    .get(files[file].path.as_str())?
+                    .get(&(project, number))
+                    .copied()
+            });
+            rc.total_height = rc.offsets.last().copied().unwrap_or(0.0);
+            rc.widest = files.iter().map(|file| file.widest).max().unwrap_or(0);
+            rc.rows_fp = Some(rows_fp);
+            rc.row_builds += 1;
+        }
+        (
+            &rc.rows,
+            &rc.change_rows,
+            &rc.offsets,
+            rc.total_height,
+            rc.widest,
+        )
+    } else {
+        let annotated =
+            |file: &str, line: usize| editable && annotations.shows_row(project, file, line);
+        local_rows = if side_by_side {
+            diff_pane_side_by_side_rows(files, collapsed, &annotated)
+        } else {
+            diff_pane_rows(files, collapsed, &annotated)
+        };
+        let changed_rows: Vec<bool> = local_rows
+            .iter()
+            .map(|row| diff_row_is_change(files, row))
+            .collect();
+        local_change_rows = change_block_starts(&changed_rows);
+        local_offsets = diff_row_offsets(&local_rows, cell.y, &|file, line| {
+            let number = files[file].lines[line].new_number?;
+            annotations
+                .note_heights
+                .get(files[file].path.as_str())?
+                .get(&(project, number))
+                .copied()
+        });
+        let total_h = local_offsets.last().copied().unwrap_or(0.0);
+        let max_w = files.iter().map(|file| file.widest).max().unwrap_or(0);
+        (
+            &local_rows,
+            &local_change_rows,
+            &local_offsets,
+            total_h,
+            max_w,
+        )
+    };
+
+    let galley_cache = galley_cache.map(|gc| {
+        if gc.style_key != Some(style_key) {
+            gc.galleys.clear();
+            gc.style_key = Some(style_key);
+        }
+        (&mut gc.galleys, &mut gc.galley_builds, &mut gc.galley_hits)
     });
-    let total_height = offsets.last().copied().unwrap_or(0.0);
-    let widest = files.iter().map(|file| file.widest).max().unwrap_or(0);
     // Two gutters, the sign, and a space after it, then the widest line in the
     // diff. The `max` keeps a diff of short lines from shrinking its own rows
     // to less than the pane it is drawn in.
@@ -493,7 +786,93 @@ pub(crate) fn diff_pane_with_view(
             // area would believe it holds one row.
             ui.set_min_size(egui::vec2(content_width, total_height));
             let origin = ui.min_rect().min;
-            for index in diff_visible_rows(&offsets, viewport.min.y, viewport.max.y) {
+            let visible = diff_visible_rows(offsets, viewport.min.y, viewport.max.y);
+            let mut local_galleys: HashMap<(usize, usize, i8), Arc<egui::Galley>> = HashMap::new();
+            let (galleys_map, builds_ctr, hits_ctr) = match galley_cache {
+                Some((m, b, h)) => (m, Some(b), Some(h)),
+                None => (&mut local_galleys, None, None),
+            };
+            let mut jobs: Vec<((usize, usize, i8), LayoutJob)> = Vec::new();
+            for index in visible.clone() {
+                match rows[index] {
+                    DiffRow::Line(file_idx, line_idx) => {
+                        let key = (file_idx, line_idx, 0i8);
+                        if !galleys_map.contains_key(&key) {
+                            let line = &files[file_idx].lines[line_idx];
+                            jobs.push((key, diff_line_layout(line, cell.x, palette)));
+                        }
+                    }
+                    DiffRow::Pair(file_idx, left, right) => {
+                        let file = &files[file_idx];
+                        if let (Some(at), true) = (
+                            left,
+                            left == right
+                                && matches!(
+                                    left.map(|at| file.lines[at].kind),
+                                    Some(DiffLineKind::Hunk | DiffLineKind::Note)
+                                ),
+                        ) {
+                            let key = (file_idx, at, -1i8);
+                            if !galleys_map.contains_key(&key) {
+                                jobs.push((key, diff_half_layout(&file.lines[at], false, palette)));
+                            }
+                        } else {
+                            if let Some(at) = left {
+                                let key = (file_idx, at, 1i8);
+                                if !galleys_map.contains_key(&key) {
+                                    jobs.push((
+                                        key,
+                                        diff_half_layout(&file.lines[at], false, palette),
+                                    ));
+                                }
+                            }
+                            if let Some(at) = right {
+                                let key = (file_idx, at, 2i8);
+                                if !galleys_map.contains_key(&key) {
+                                    jobs.push((
+                                        key,
+                                        diff_half_layout(&file.lines[at], true, palette),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    DiffRow::File(_) | DiffRow::Comment(_, _) => {}
+                }
+            }
+            let mut overflow_galleys: HashMap<(usize, usize, i8), Arc<egui::Galley>> =
+                HashMap::new();
+            if !jobs.is_empty() {
+                let shaped: Vec<((usize, usize, i8), Arc<egui::Galley>)> = ui.fonts_mut(|fonts| {
+                    jobs.into_iter()
+                        .map(|(k, job)| (k, fonts.layout_job(job)))
+                        .collect()
+                });
+                if let Some(b) = builds_ctr {
+                    *b += shaped.len();
+                }
+                if galleys_map.len() + shaped.len() > MAX_CACHED_DIFF_ROW_GALLEYS {
+                    galleys_map.clear();
+                }
+                for (k, g) in shaped {
+                    if galleys_map.len() < MAX_CACHED_DIFF_ROW_GALLEYS {
+                        galleys_map.insert(k, g);
+                    } else {
+                        overflow_galleys.insert(k, g);
+                    }
+                }
+            } else if let Some(h) = hits_ctr {
+                *h += visible.len();
+            }
+
+            let lookup_galley = |key: (usize, usize, i8)| {
+                galleys_map
+                    .get(&key)
+                    .or_else(|| overflow_galleys.get(&key))
+                    .cloned()
+            };
+
+            for index in visible {
                 let rect = egui::Rect::from_min_size(
                     egui::pos2(origin.x, origin.y + offsets[index]),
                     egui::vec2(content_width, offsets[index + 1] - offsets[index]),
@@ -588,10 +967,13 @@ pub(crate) fn diff_pane_with_view(
                                 egui::Stroke::new(1.0_f32, palette.border_subtle),
                             );
                         }
-                        let job = diff_line_layout(line, cell.x, palette);
-                        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-                        ui.painter()
-                            .galley(rect.min + egui::vec2(8.0, 0.0), galley, palette.text);
+                        if let Some(galley) = lookup_galley((file_idx, line_idx, 0i8)) {
+                            ui.painter().galley(
+                                rect.min + egui::vec2(8.0, 0.0),
+                                galley,
+                                palette.text,
+                            );
+                        }
                         if editable && line.kind == DiffLineKind::Hunk && !path.is_empty() {
                             diff_hunk_buttons(
                                 ui,
@@ -660,14 +1042,13 @@ pub(crate) fn diff_pane_with_view(
                                     egui::Stroke::new(1.0_f32, palette.border_subtle),
                                 );
                             }
-                            let galley = ui.fonts_mut(|fonts| {
-                                fonts.layout_job(diff_half_layout(line, false, palette))
-                            });
-                            ui.painter().galley(
-                                rect.min + egui::vec2(8.0, 0.0),
-                                galley,
-                                palette.text,
-                            );
+                            if let Some(galley) = lookup_galley((file_idx, at, -1i8)) {
+                                ui.painter().galley(
+                                    rect.min + egui::vec2(8.0, 0.0),
+                                    galley,
+                                    palette.text,
+                                );
+                            }
                             if editable && line.kind == DiffLineKind::Hunk {
                                 diff_hunk_buttons(
                                     ui,
@@ -688,7 +1069,7 @@ pub(crate) fn diff_pane_with_view(
                                     egui::pos2(rect.left() + half, rect.bottom()),
                                 ),
                                 left,
-                                false,
+                                1i8,
                             ),
                             (
                                 egui::Rect::from_min_max(
@@ -696,10 +1077,10 @@ pub(crate) fn diff_pane_with_view(
                                     rect.max,
                                 ),
                                 right,
-                                true,
+                                2i8,
                             ),
                         ];
-                        for (side, at, newer) in halves {
+                        for (side, at, side_tag) in halves {
                             let Some(at) = at else {
                                 ui.painter().rect_filled(side, 0.0, palette.raised);
                                 continue;
@@ -714,16 +1095,15 @@ pub(crate) fn diff_pane_with_view(
                                 }
                                 _ => {}
                             }
-                            let galley = ui.fonts_mut(|fonts| {
-                                fonts.layout_job(diff_half_layout(line, newer, palette))
-                            });
-                            ui.painter()
-                                .with_clip_rect(side.intersect(ui.clip_rect()))
-                                .galley(
-                                    side.min + egui::vec2(8.0 - column_shift, 0.0),
-                                    galley,
-                                    palette.text,
-                                );
+                            if let Some(galley) = lookup_galley((file_idx, at, side_tag)) {
+                                ui.painter()
+                                    .with_clip_rect(side.intersect(ui.clip_rect()))
+                                    .galley(
+                                        side.min + egui::vec2(8.0 - column_shift, 0.0),
+                                        galley,
+                                        palette.text,
+                                    );
+                            }
                         }
                         ui.painter().vline(
                             rect.left() + half,

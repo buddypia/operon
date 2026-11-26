@@ -46,9 +46,9 @@
 - `src/app/screens.rs::home_recent_sessions` draws 「最近のセッション」 and its empty states.
 - `src/app/screens.rs::home_project_starts` draws 「プロジェクトから始める」.
 - `src/app/screens.rs::home_session_row` draws one session line with its action and 「⋯」 menu; `home_session_details` fills the menu's detail lines.
-- `src/app.rs::attention_count` counts the 要対応 group; `session_in_status_group` / `kind_in_status_group` decide membership.
-- `src/app.rs::status_group_counts` counts every group in one allocation-free pass for the tiles.
-- `src/app.rs::show_status_group` and `show_sessions_needing_you` open the filtered history list.
+- `src/app/session_order.rs::attention_count` counts the 要対応 group; `session_in_status_group` / `kind_in_status_group` decide membership.
+- `src/app/session_order.rs::status_group_counts` counts every group in one allocation-free pass for the tiles.
+- `src/app/session_order.rs::show_status_group` and `show_sessions_needing_you` open the filtered history list.
 - Tests: `home_always_says_whether_anything_waits` pins the always-drawn card, the two rows of one session and the unique ids.
 - `a_recent_session_is_one_line_with_its_details_behind_the_menu` pins the one-line row and the menu details.
 - `home_287_row_draws_no_state_word` and `home_287_state_word_appears_on_hover` pin the mark-only state.

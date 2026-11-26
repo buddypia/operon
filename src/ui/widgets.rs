@@ -215,10 +215,15 @@ pub(crate) enum StatusTone {
 /// A path as a person writes it rather than as the filesystem stores it. Every
 /// path in this app is under the home directory, so spelling that prefix out on
 /// every row spends the width that the part telling two projects apart needs.
+/// Caches `$HOME` lookup once so per-frame labels avoid probing user dirs.
 pub(crate) fn friendly_path(path: &Path) -> String {
+    static HOME_PREFIX: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    let home = HOME_PREFIX.get_or_init(|| {
+        directories::UserDirs::new().map(|dirs| dirs.home_dir().display().to_string())
+    });
     let display = path.display().to_string();
-    match directories::UserDirs::new().map(|dirs| dirs.home_dir().display().to_string()) {
-        Some(home) if !home.is_empty() && display.starts_with(&home) => {
+    match home.as_deref() {
+        Some(home) if !home.is_empty() && display.starts_with(home) => {
             format!("~{}", &display[home.len()..])
         }
         _ => display,
@@ -1514,6 +1519,39 @@ pub(crate) fn session_status_view(
     }
 }
 
+#[cfg(test)]
+static PNG_DECODE_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn png_decode_count() -> usize {
+    PNG_DECODE_COUNT.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Decodes one of the PNGs bundled into the binary, memoizing the decoded RGBA
+/// `ColorImage` across `egui::Context` instances so repeated test or window
+/// setups do not re-run PNG decompression (change 322).
+pub(crate) fn cached_png_color_image(
+    name: &'static str,
+    bytes: &'static [u8],
+) -> Option<Arc<egui::ColorImage>> {
+    use std::sync::{Mutex, OnceLock};
+    static DECODED: OnceLock<Mutex<HashMap<&'static str, Arc<egui::ColorImage>>>> = OnceLock::new();
+    let map = DECODED.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = map.lock() {
+        if let Some(existing) = guard.get(name) {
+            return Some(Arc::clone(existing));
+        }
+    }
+    #[cfg(test)]
+    PNG_DECODE_COUNT.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    let decoded = Arc::new(decode_png_mark(bytes)?);
+    if let Ok(mut guard) = map.lock() {
+        let entry = guard.entry(name).or_insert_with(|| Arc::clone(&decoded));
+        return Some(Arc::clone(entry));
+    }
+    Some(decoded)
+}
+
 /// Decodes one of the PNGs bundled into the binary. Every mark the app draws as
 /// a picture rather than as a glyph comes through here: the three vendor marks
 /// and Operon's own.
@@ -1545,9 +1583,10 @@ pub(crate) fn png_texture(
     if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(id)) {
         return Some(texture);
     }
+    let color_image = cached_png_color_image(name, bytes)?;
     let texture = ctx.load_texture(
         name,
-        decode_png_mark(bytes)?,
+        (*color_image).clone(),
         egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)),
     );
     ctx.data_mut(|data| data.insert_temp(id, texture.clone()));

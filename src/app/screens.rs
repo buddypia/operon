@@ -471,6 +471,85 @@ impl OperonApp {
         (entries, overflow)
     }
 
+    fn compute_palette_fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::hash::DefaultHasher::new();
+        std::mem::discriminant(&crate::i18n::active_language()).hash(&mut h);
+        std::mem::discriminant(&self.store.language).hash(&mut h);
+        self.command_search.hash(&mut h);
+        std::mem::discriminant(&self.page).hash(&mut h);
+        for action in KEYMAP_ACTIONS {
+            self.keymap.label_for(action.id).hash(&mut h);
+        }
+        self.store.projects.len().hash(&mut h);
+        for p in &self.store.projects {
+            p.id.hash(&mut h);
+            p.name.hash(&mut h);
+            p.path.hash(&mut h);
+            p.added_at.hash(&mut h);
+        }
+        self.store.sessions.len().hash(&mut h);
+        for s in &self.store.sessions {
+            s.id.hash(&mut h);
+            s.project_id.hash(&mut h);
+            s.name.hash(&mut h);
+            s.goal.hash(&mut h);
+            s.agent.hash(&mut h);
+            s.branch.hash(&mut h);
+            s.launched_at.hash(&mut h);
+            s.created_at.hash(&mut h);
+            std::mem::discriminant(&s.status).hash(&mut h);
+            self.attention_since.contains_key(&s.id).hash(&mut h);
+            self.cancellation_pending(s.id).hash(&mut h);
+            self.is_session_unread(s.id).hash(&mut h);
+            std::mem::discriminant(&self.session_status_kind_for(s)).hash(&mut h);
+            self.fresh_hook_status(s.id)
+                .map(|hs| (&hs.tool, &hs.last_message))
+                .hash(&mut h);
+            self.session_prompt_turns
+                .get(&s.id)
+                .and_then(|t| t.first())
+                .map(|t| t.prompt.as_str())
+                .hash(&mut h);
+        }
+        if let Some(proj) = self
+            .selected_project()
+            .or_else(|| self.store.projects.first())
+        {
+            proj.id.hash(&mut h);
+            if let Some(scan) = self.file_cache.get(&proj.id) {
+                scan.paths.hash(&mut h);
+            }
+        }
+        self.open_documents.len().hash(&mut h);
+        for d in &self.open_documents {
+            d.project.hash(&mut h);
+            d.path.hash(&mut h);
+            d.viewer.is_some().hash(&mut h);
+            d.buffer.hash(&mut h);
+            d.disk.hash(&mut h);
+        }
+        h.finish()
+    }
+
+    pub(crate) fn palette_visible_entries_cached(&mut self) -> (Arc<Vec<PaletteEntry>>, usize) {
+        let fp = self.compute_palette_fingerprint();
+        if self.palette_cache.fingerprint == Some(fp) {
+            self.palette_cache.hits += 1;
+            return (
+                Arc::clone(&self.palette_cache.entries),
+                self.palette_cache.overflow,
+            );
+        }
+        let (entries, overflow) = self.palette_visible_entries();
+        let entries = Arc::new(entries);
+        self.palette_cache.fingerprint = Some(fp);
+        self.palette_cache.entries = Arc::clone(&entries);
+        self.palette_cache.overflow = overflow;
+        self.palette_cache.builds += 1;
+        (entries, overflow)
+    }
+
     /// Opens one row. The click path and the `Enter` path both come here, so a
     /// row cannot behave differently depending on how it was chosen.
     pub(crate) fn activate_palette_entry(&mut self, kind: &PaletteKind) {
@@ -533,7 +612,7 @@ impl OperonApp {
         if !self.command_palette_open {
             return;
         }
-        let (entries, _) = self.palette_visible_entries();
+        let (entries, _) = self.palette_visible_entries_cached();
         if entries.is_empty() {
             self.command_selection = 0;
             return;
@@ -582,7 +661,7 @@ impl OperonApp {
                     self.command_palette_needs_focus = false;
                 }
                 let palette = self.store.theme.palette();
-                let (entries, overflow) = self.palette_visible_entries();
+                let (entries, overflow) = self.palette_visible_entries_cached();
                 if entries.is_empty() {
                     ui.add_space(SPACE_SM);
                     ui.label(RichText::new(tr("一致する項目がありません")).weak());
@@ -3667,7 +3746,11 @@ impl OperonApp {
             };
             self.file_tree_cache = Some((project.id, filter.clone(), build_file_tree(&matching)));
         }
+        let active_doc = self.tree_highlighted_document().cloned();
+        let mut row_cache = std::mem::take(&mut self.file_tree_row_cache);
+        let badges = self.git_status_badge_map(project.id);
         let Some((_, _, tree)) = &self.file_tree_cache else {
+            self.file_tree_row_cache = row_cache;
             return;
         };
         if tree.is_empty() {
@@ -3680,34 +3763,36 @@ impl OperonApp {
                 .size(12.0)
                 .color(palette.text_muted),
             );
+            self.file_tree_row_cache = row_cache;
             return;
         }
-        let badges = self.git_status_badge_map(project.id);
+        let expanded = &self.expanded_directories;
         let mut actions = Vec::new();
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .max_height(height - 44.0)
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                file_tree_rows(
+                file_tree_rows_cached(
                     ui,
                     tree,
                     project.id,
-                    &self.expanded_directories,
+                    expanded,
                     &badges,
                     // The tree shows the project, so a document rooted in a
                     // worktree highlights nothing here — it has the same
                     // relative path and is a different file.
-                    self.tree_highlighted_document(),
+                    active_doc.as_ref(),
                     // While a filter is on, every directory is open: a person
                     // filtering has asked to see the matches, not to go and
                     // find which folders they are in.
                     !filter.is_empty(),
-                    0,
                     palette,
                     &mut actions,
+                    Some(&mut row_cache),
                 );
             });
+        self.file_tree_row_cache = row_cache;
         for action in actions {
             match action {
                 FileTreeAction::Open(path) => self.open_document(project, path),
@@ -4110,13 +4195,11 @@ impl OperonApp {
                 area.show_rows(ui, cell.y, rows.len(), |ui, visible| {
                     ui.set_min_width(width);
                     for row in visible {
-                        let Some(layout) = cache.row(rows, text, language, palette, row) else {
+                        let Some(layout) = cache.row_mut(rows, text, language, palette, row) else {
                             break;
                         };
-                        ui.add(
-                            egui::Label::new(layout.job.clone())
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        );
+                        let galley = layout.galley_for(ui, palette, f32::INFINITY);
+                        ui.add(egui::Label::new(galley).wrap_mode(egui::TextWrapMode::Extend));
                     }
                 });
             });
@@ -4136,18 +4219,15 @@ impl OperonApp {
         height: f32,
     ) {
         let language = editor_language(&self.open_documents[index].path);
-        let (lines, widest, numbers) = {
+        let (lines, widest) = {
             let layout = self.editor_text_layout_cache.layout_for(
                 &self.open_documents[index].buffer,
                 language,
                 palette,
             );
-            (
-                layout.line_count,
-                layout.widest_line,
-                layout.line_numbers.clone(),
-            )
+            (layout.line_count, layout.widest_line)
         };
+        let gutter_galley = self.editor_text_layout_cache.gutter_galley_for(ui, palette);
         let cell = monospace_cell_size(ui);
         // How far the text scrolls sideways, and how wide the gutter has to be
         // for its largest number. A monospaced digit is exactly as wide as a
@@ -4156,13 +4236,14 @@ impl OperonApp {
         let digits = lines.to_string().len();
         let gutter = cell.x * digits as f32 + 8.0;
         let _text_width = (widest as f32 * cell.x + 12.0).max(ui.available_width() - gutter - 24.0);
-        let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _width: f32| {
-            let job = self
-                .editor_text_layout_cache
-                .layout_for(text.as_str(), language, palette)
-                .syntax
-                .clone();
-            ui.fonts_mut(|fonts| fonts.layout_job(job))
+        let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+            self.editor_text_layout_cache.galley_for(
+                ui,
+                text.as_str(),
+                language,
+                palette,
+                wrap_width,
+            )
         };
         // A jump asked for by a click on a stack trace. Spent by this frame, so
         // scrolling by hand afterwards is not undone on the next one; a third
@@ -4193,13 +4274,8 @@ impl OperonApp {
                             egui::Layout::top_down(egui::Align::RIGHT),
                             |ui| {
                                 ui.add(
-                                    egui::Label::new(
-                                        RichText::new(numbers)
-                                            .monospace()
-                                            .size(MONOSPACE_SIZE)
-                                            .color(palette.text_muted),
-                                    )
-                                    .wrap_mode(egui::TextWrapMode::Extend),
+                                    egui::Label::new(gutter_galley)
+                                        .wrap_mode(egui::TextWrapMode::Extend),
                                 );
                             },
                         );
@@ -4216,13 +4292,38 @@ impl OperonApp {
                         if jump.is_none() && output.response.has_focus() {
                             if let Some(range) = output.cursor_range {
                                 let char_idx = range.primary.index.0;
-                                let prefix: String = self.open_documents[index]
-                                    .buffer
-                                    .chars()
-                                    .take(char_idx)
-                                    .collect();
+                                let buf = &self.open_documents[index].buffer;
+                                let mut h = std::hash::DefaultHasher::new();
+                                std::hash::Hash::hash(buf, &mut h);
+                                let buf_hash = std::hash::Hasher::finish(&h);
                                 let cursor_line =
-                                    prefix.bytes().filter(|b| *b == b'\n').count() + 1;
+                                    if let Some((cached_hash, cached_idx, cached_line)) =
+                                        self.editor_cursor_line_cache
+                                    {
+                                        if cached_hash == buf_hash && cached_idx == char_idx {
+                                            cached_line
+                                        } else {
+                                            let line = buf
+                                                .chars()
+                                                .take(char_idx)
+                                                .filter(|&c| c == '\n')
+                                                .count()
+                                                + 1;
+                                            self.editor_cursor_line_cache =
+                                                Some((buf_hash, char_idx, line));
+                                            line
+                                        }
+                                    } else {
+                                        let line = buf
+                                            .chars()
+                                            .take(char_idx)
+                                            .filter(|&c| c == '\n')
+                                            .count()
+                                            + 1;
+                                        self.editor_cursor_line_cache =
+                                            Some((buf_hash, char_idx, line));
+                                        line
+                                    };
                                 self.editor_focus_line = Some(cursor_line);
                             }
                         }
@@ -5347,22 +5448,40 @@ impl OperonApp {
 
     pub(crate) fn ui_terminal_session_tabs(&mut self, ui: &mut egui::Ui) {
         let palette = self.store.theme.palette();
-        let mut projects = self.store.projects.clone();
-        sort_column_projects(&mut projects, &self.session_arrangement);
+        struct IndexedProject<'a>(usize, &'a Project);
+        impl std::borrow::Borrow<Project> for IndexedProject<'_> {
+            fn borrow(&self) -> &Project {
+                self.1
+            }
+        }
+        let mut indexed_projects: Vec<IndexedProject<'_>> = self
+            .store
+            .projects
+            .iter()
+            .enumerate()
+            .map(|(idx, p)| IndexedProject(idx, p))
+            .collect();
+        sort_column_projects(&mut indexed_projects, &self.session_arrangement);
+        let project_indices: Vec<(Uuid, usize)> = indexed_projects
+            .into_iter()
+            .map(|IndexedProject(idx, p)| (p.id, idx))
+            .collect();
         let needle = self.session_search_needle();
-        let sessions = self
+        let matching_indices: Vec<usize> = self
             .store
             .sessions
             .iter()
-            .filter(|session| self.session_matches_agent_filter(session))
-            .filter(|session| self.session_matches_search(session, &needle))
-            .cloned()
-            .collect::<Vec<_>>();
+            .enumerate()
+            .filter(|(_, session)| self.session_matches_agent_filter(session))
+            .filter(|(_, session)| self.session_matches_search(session, &needle))
+            .map(|(idx, _)| idx)
+            .collect();
         // One pass over the sessions for all three numbers. `status_view` would
         // have built two `String`s per session to tell us the same thing, in a
         // path that runs sixty times a second.
         let mut group_counts = [0usize; 3];
-        for session in &sessions {
+        for &idx in &matching_indices {
+            let session = &self.store.sessions[idx];
             let kind = self.session_status_kind_for(session);
             for group in SessionStatusGroup::GROUPS {
                 group_counts[group.index()] +=
@@ -5392,7 +5511,7 @@ impl OperonApp {
             if ui
                 .selectable_label(
                     !self.status_filter.iter().any(|selected| *selected),
-                    RichText::new(tf!("すべて {count}", count = sessions.len()))
+                    RichText::new(tf!("すべて {count}", count = matching_indices.len()))
                         .size(11.5)
                         .color(palette.text),
                 )
@@ -5470,17 +5589,22 @@ impl OperonApp {
                 }
             }
             if pinning && !self.attention_order.is_empty() {
-                shown += self.ui_pinned_sessions(ui, &sessions);
+                let pinned_sessions: Vec<Session> = matching_indices
+                    .iter()
+                    .map(|&idx| self.store.sessions[idx].clone())
+                    .collect();
+                shown += self.ui_pinned_sessions(ui, &pinned_sessions);
             }
             let mut project_targets = ColumnTargets::default();
-            for project in projects {
+            for (project_id, proj_idx) in project_indices {
                 // Sessions of this project drawn in the pinned section above:
                 // still the project's, so they count in its header and keep
                 // it from claiming it has none.
                 let mut pinned_here = 0;
-                let mut project_sessions = sessions
+                let mut project_sessions = matching_indices
                     .iter()
-                    .filter(|session| session.project_id == project.id)
+                    .map(|&idx| &self.store.sessions[idx])
+                    .filter(|session| session.project_id == project_id)
                     .filter(|session| self.session_matches_filters(session))
                     .filter(|session| {
                         let pinned = pinning && self.attention_since.contains_key(&session.id);
@@ -5501,7 +5625,7 @@ impl OperonApp {
                 let mut session_targets = ColumnTargets::default();
                 let dragging_here = matches!(
                     column_drag,
-                    Some(ColumnDrag::Session { project: dragged, .. }) if dragged == project.id
+                    Some(ColumnDrag::Session { project: dragged, .. }) if dragged == project_id
                 );
                 // A project and its sessions are one card (change 163). Space
                 // alone did not group them: the gap between two sessions was
@@ -5518,7 +5642,7 @@ impl OperonApp {
                 ui.horizontal(|ui| {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if small_icon_button(ui, palette, ICON_ADD, tr("セッションを開始")).clicked() {
-                            self.open_project_session_setup(project.id);
+                            self.open_project_session_setup(project_id);
                         }
                         ui.label(
                             RichText::new(tf!("{p0} 件", p0 = project_sessions.len() + pinned_here))
@@ -5527,6 +5651,7 @@ impl OperonApp {
                         );
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                             ui.label(RichText::new(ICON_PROJECT).color(palette.accent_text));
+                            let project = &self.store.projects[proj_idx];
                             // The strongest text in its card: the name used to
                             // be drawn smaller than its own sessions' titles.
                             // It is also the card's grip (change 181).
@@ -5550,7 +5675,7 @@ impl OperonApp {
                                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                             }
                             if name.drag_started() {
-                                self.column_drag = Some(ColumnDrag::Project(project.id));
+                                self.column_drag = Some(ColumnDrag::Project(project_id));
                             }
                         });
                     });
@@ -5968,7 +6093,7 @@ impl OperonApp {
                     }
                     if session_card.response.drag_started() {
                         self.column_drag = Some(ColumnDrag::Session {
-                            project: project.id,
+                            project: project_id,
                             session: candidate.id,
                         });
                     }
@@ -6029,7 +6154,7 @@ impl OperonApp {
                         self.request_session_removal(candidate.id);
                     }
                     if worktree_requested {
-                        self.open_project_worktrees(project.id);
+                        self.open_project_worktrees(project_id);
                     }
                 }
                     });
@@ -6041,7 +6166,7 @@ impl OperonApp {
                     self.ui_column_drop(ui, drag, &session_targets, slot, span, 2.0 * SPACE_XS + 1.0);
                 }
                 if matches!(column_drag, Some(ColumnDrag::Project(_))) {
-                    project_targets.push(project.id, card.response.rect);
+                    project_targets.push(project_id, card.response.rect);
                 }
                 ui.add_space(SPACE_SM);
             }
@@ -6050,7 +6175,7 @@ impl OperonApp {
                 let slot = project_targets.slot(drag.moved(), inside);
                 self.ui_column_drop(ui, drag, &project_targets, slot, view.x_range(), SPACE_SM);
             }
-            if !needle.is_empty() && sessions.is_empty() {
+            if !needle.is_empty() && matching_indices.is_empty() {
                 ui.label(RichText::new(tr("検索条件に一致するセッションはありません。")).weak());
             } else if self.store.sessions.is_empty() {
                 // A person with no sessions is not being filtered, so this
@@ -6882,6 +7007,7 @@ impl OperonApp {
         let center = rects.center;
         let mut sidebar =
             rects.edges[DockEdge::Left.index()].unwrap_or_else(|| area.with_max_x(area.left()));
+        let mut dock_resize_active = false;
         for edge in DockEdge::ALL {
             let Some(rect) = rects.edges[edge.index()] else {
                 continue;
@@ -6911,20 +7037,36 @@ impl OperonApp {
                     if active {
                         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
                     }
-                    if response.dragged() && length >= SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H {
-                        let delta = response.drag_delta().y;
-                        if delta.is_finite() {
-                            self.dock.splits[edge.index()] =
-                                ((height + delta) / length).clamp(0.0, 1.0);
+                    if response.dragged() {
+                        dock_resize_active = true;
+                        if length >= SIDEBAR_SECTION_MIN_H + SIDEBAR_PANEL_MIN_H {
+                            let delta = response.drag_delta().y;
+                            if delta.is_finite() {
+                                self.dock.splits[edge.index()] =
+                                    ((height + delta) / length).clamp(0.0, 1.0);
+                            }
                         }
                     }
                     paint_splitter_h(ui, rule, palette, active);
-                    self.ui_dock_edge(ui, edge, inspector, false, Some(view), palette);
+                    if self.ui_dock_edge(ui, edge, inspector, false, Some(view), palette) {
+                        dock_resize_active = true;
+                    }
                 }
-            } else {
-                self.ui_dock_edge(ui, edge, rect, false, view, palette);
+            } else if self.ui_dock_edge(ui, edge, rect, false, view, palette) {
+                dock_resize_active = true;
             }
-            self.ui_dock_edge_rule(ui, edge, rect, palette);
+            if self.ui_dock_edge_rule(ui, edge, rect, palette) {
+                dock_resize_active = true;
+            }
+        }
+        let escape_drag = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if escape_drag {
+            dock_resize_active = false;
+        }
+        let dock_drag_ended = self.dock_resize_drag && !dock_resize_active;
+        self.dock_resize_drag = dock_resize_active;
+        if dock_drag_ended {
+            self.finish_layout_drag();
         }
         let mut left = ui.new_child(
             egui::UiBuilder::new()
@@ -6942,6 +7084,15 @@ impl OperonApp {
         );
         body.shrink_clip_rect(center);
         if self.session_library_open {
+            if self.workspace_divider_drag
+                || self.workspace_drag.is_some()
+                || self.workspace_column_drag.is_some()
+            {
+                self.workspace_divider_drag = false;
+                self.workspace_drag = None;
+                self.workspace_column_drag = None;
+                self.finish_layout_drag();
+            }
             if body.button(tr("ターミナルに戻る")).clicked() {
                 self.session_library_open = false;
             }
@@ -7025,6 +7176,9 @@ impl OperonApp {
                     response.hovered() || response.dragged(),
                 );
             }
+        }
+        if escape_drag {
+            any_divider_dragged = false;
         }
         let drag_ended = self.workspace_divider_drag && !any_divider_dragged;
         self.workspace_divider_drag = any_divider_dragged;
@@ -7230,6 +7384,7 @@ impl OperonApp {
                                                             self.follow_tab_drop(*group);
                                                             self.activate_workspace_tab(&moved);
                                                         }
+                                                        self.finish_layout_drag();
                                                     }
                                                 }
                                                 }
@@ -7377,8 +7532,7 @@ impl OperonApp {
                         .find_map(|(id, r)| pane_drop(p, *r).map(|drop| (*id, *r, drop)))
                 });
                 if let Some((id, rect, drop)) = landing {
-                    let mut preview = self.workspace.clone();
-                    let fits = preview.move_tab(&tab, id, drop, center);
+                    let fits = self.workspace.can_move_tab(&tab, id, drop, center);
                     ui.ctx()
                         .layer_painter(egui::LayerId::new(
                             egui::Order::Foreground,
@@ -7402,8 +7556,7 @@ impl OperonApp {
                     .show(|ui| {
                         ui.label(pane_drop_hint(drop, !fits));
                     });
-                    if released && fits {
-                        self.workspace = preview;
+                    if released && fits && self.workspace.move_tab(&tab, id, drop, center) {
                         self.activate_workspace_tab(&tab);
                     }
                 }
@@ -7413,123 +7566,6 @@ impl OperonApp {
                 }
             }
         }
-    }
-
-    /// The sidebar's filters (change 252, updated in change 291): the three
-    /// actionable status groups as counted tiles (3 across when wide, 2 + 1
-    /// full-width at default width, 1 stacked when narrow), then the CLI marks
-    /// in one segment, and — only while something is filtered — how many
-    /// sessions show and the one action that clears both dimensions.
-    fn ui_sidebar_session_filters(&mut self, ui: &mut egui::Ui) {
-        let palette = self.store.theme.palette();
-        let counts = self.status_group_counts_for_chosen_agents();
-        let gap = SPACE_XS;
-        let available = ui.available_width();
-        let columns = if available >= 3.0 * STATUS_TILE_MIN_W + 2.0 * gap {
-            3
-        } else if available >= 2.0 * STATUS_TILE_MIN_W + gap {
-            2
-        } else {
-            1
-        };
-        let mut toggled = None;
-        ui.scope(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
-            for row in SessionStatusGroup::GROUPS.chunks(columns) {
-                let row_width = (available - gap * (row.len() - 1) as f32) / row.len() as f32;
-                ui.horizontal(|ui| {
-                    for &group in row {
-                        let tile = status_filter_tile(
-                            ui,
-                            palette,
-                            group,
-                            counts[group.index()],
-                            self.status_filter[group.index()],
-                            row_width,
-                        )
-                        .on_hover_ui(|ui| {
-                            ui.label(tr(group.hint_id()));
-                            // The waiting choice change 252 folded into
-                            // 要対応 keeps its number here.
-                            if group == SessionStatusGroup::NeedsYou {
-                                ui.label(tf!(
-                                    "承認・回答待ち {count} 件",
-                                    count = self.waiting_session_count()
-                                ));
-                            }
-                        });
-                        if tile.clicked() {
-                            toggled = Some(group);
-                        }
-                    }
-                });
-            }
-        });
-        if let Some(group) = toggled {
-            self.toggle_status_filter(group);
-        }
-        let filtering = self.has_session_filters();
-        let mut summarised = false;
-        ui.horizontal(|ui| {
-            self.ui_sidebar_agent_segment(ui, palette);
-            if filtering && ui.available_width() >= STATUS_TILE_MIN_W {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.ui_sidebar_filter_summary(ui, palette);
-                });
-                summarised = true;
-            }
-        });
-        if filtering && !summarised {
-            ui.horizontal(|ui| {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    self.ui_sidebar_filter_summary(ui, palette);
-                });
-            });
-        }
-        hairline(ui, palette);
-    }
-
-    /// Codex, Claude Code, Antigravity and every other CLI, as marks in one
-    /// hairline segment; the marks not chosen fade while any is.
-    fn ui_sidebar_agent_segment(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        let narrowed = self.agent_filter.iter().any(|selected| *selected);
-        let mut toggled = None;
-        egui::Frame::NONE
-            .stroke(egui::Stroke::new(1.0_f32, palette.border_subtle))
-            .corner_radius(egui::CornerRadius::same(RADIUS_CONTROL))
-            .inner_margin(egui::Margin::same(1))
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(2.0, 0.0);
-                for agent in ["codex", "claude", "gemini", "other"] {
-                    let index = session_agent_filter_index(agent);
-                    let (label, mark) = if index == 3 {
-                        (tr("その他"), None)
-                    } else {
-                        (agent_choice_copy(agent).0, Some(agent))
-                    };
-                    let selected = self.agent_filter[index];
-                    if agent_filter_toggle(ui, palette, label, mark, ICON_MORE, selected, narrowed)
-                        .clicked()
-                    {
-                        toggled = Some(index);
-                    }
-                }
-            });
-        if let Some(index) = toggled {
-            self.toggle_agent_filter(index);
-        }
-    }
-
-    /// Right to left: 「クリア」, then how many sessions the column shows.
-    fn ui_sidebar_filter_summary(&mut self, ui: &mut egui::Ui, palette: &Palette) {
-        if quiet_button(ui, palette, tr("クリア")).clicked() {
-            self.clear_session_filters();
-        }
-        ui.label(
-            RichText::new(tf!("{count} 件", count = self.matching_session_count()))
-                .size(11.5)
-                .color(palette.text_muted),
-        );
     }
 
     pub(crate) fn ui_workspace_projects(&mut self, ui: &mut egui::Ui) {
@@ -7568,17 +7604,13 @@ impl OperonApp {
         }
         let drag = self.workspace_column_drag;
         let pointer = ui.input(|i| i.pointer.latest_pos());
-        let project_ids: Vec<Uuid> = {
-            let mut refs: Vec<&Project> = self.store.projects.iter().collect();
-            sort_column_projects(&mut refs, &self.session_arrangement);
-            refs.into_iter().map(|project| project.id).collect()
-        };
+        let view_cache = self.ensure_sidebar_view_cache();
         let mut open = None;
         let mut fold = None;
         let mut pin = None;
         let mut close = None;
         let mut start_in = None;
-        if project_ids.is_empty() {
+        if !view_cache.has_any_projects {
             ui.label(RichText::new(tr("プロジェクトがありません")).weak());
             if secondary_button(ui, ColumnAdd::Project.label()).clicked() {
                 column_add = Some(ColumnAdd::Project);
@@ -7588,25 +7620,8 @@ impl OperonApp {
             .id_salt("workspace-project-scroll")
             .show(ui, |ui| {
                 self.ui_sidebar_session_filters(ui);
-                let filtering = self.has_session_filters();
-                // Every project's tabs, once per frame, in the order the tabs
-                // are put in (change 285): the column and the tab strip are one
-                // list. Only the column's own filters hide a row.
-                let live = project_ids
-                    .iter()
-                    .flat_map(|&project_id| self.project_tab_sessions(project_id))
-                    .filter(|session| self.session_matches_filters(session))
-                    .map(|session| {
-                        let kind = self.session_status_kind_for(session);
-                        let group = if self.is_session_unread(session.id) {
-                            Some(SessionStatusGroup::NeedsYou)
-                        } else {
-                            kind.group()
-                        };
-                        (session.project_id, group, kind, session.id)
-                    })
-                    .collect::<Vec<_>>();
-                if filtering && live.is_empty() && !project_ids.is_empty() {
+                let filtering = view_cache.filtering;
+                if filtering && !view_cache.has_matches && view_cache.has_any_projects {
                     ui.label(RichText::new(tr("一致するセッションはありません。")).weak());
                 }
                 let view = ui.clip_rect();
@@ -7638,22 +7653,11 @@ impl OperonApp {
                     }
                     _ => None,
                 };
-                for &project_id in &project_ids {
-                    if filtering && !live.iter().any(|(owner, ..)| *owner == project_id) {
-                        continue;
-                    }
-                    let Some(proj_idx) = self
-                        .store
-                        .projects
-                        .iter()
-                        .position(|candidate| candidate.id == project_id)
-                    else {
-                        continue;
-                    };
+                for project in &view_cache.projects {
+                    let project_id = project.id;
                     // Folded until opened (change 311); a filter lists its
                     // matches whatever the fold, and does not change it.
-                    let unfolded =
-                        filtering || self.session_arrangement.unfolded.contains(&project_id);
+                    let unfolded = project.unfolded;
                     let selected = self.selected_project == Some(project_id);
                     // A heading, not a card (change 245): the project groups
                     // its sessions here, and is a destination only on the
@@ -7690,24 +7694,14 @@ impl OperonApp {
                                         )
                                         .clicked()
                                         {
-                                            let project = &self.store.projects[proj_idx];
                                             self.open_project_session_setup(project.id);
                                         }
                                         // Drawn right to left, so 要対応
                                         // lands leftmost, nearest the name.
-                                        for group in [
-                                            SessionStatusGroup::Free,
-                                            SessionStatusGroup::Busy,
-                                            SessionStatusGroup::NeedsYou,
-                                        ] {
-                                            let mut members =
-                                                live.iter().filter(|(owner, member, _, _)| {
-                                                    *owner == project_id && *member == Some(group)
-                                                });
-                                            let Some(&(_, _, _, first)) = members.next() else {
-                                                continue;
-                                            };
-                                            let count = members.count() + 1;
+                                        for item in &project.group_counts {
+                                            let group = item.group;
+                                            let count = item.count;
+                                            let first = item.first;
                                             // Tight, so a short name stays whole
                                             // beside three counts.
                                             let chip = status_count_chip(ui, palette, group, count)
@@ -7727,7 +7721,6 @@ impl OperonApp {
                                         ui.with_layout(
                                             egui::Layout::left_to_right(egui::Align::Center),
                                             |ui| {
-                                                let project = &self.store.projects[proj_idx];
                                                 let response = ui
                                                     .add(
                                                         // Section level above both the 12.5px panel
@@ -7753,7 +7746,6 @@ impl OperonApp {
                                                         );
                                                         ui.label(tr("ドラッグで並べ替え"));
                                                     });
-                                                let project_id = project.id;
                                                 response.context_menu(|ui| {
                                                     if quiet_button(
                                                         ui,
@@ -7778,7 +7770,6 @@ impl OperonApp {
                                                         .set_cursor_icon(egui::CursorIcon::Grab);
                                                 }
                                                 if response.drag_started() {
-                                                    let project = &self.store.projects[proj_idx];
                                                     self.workspace_column_drag =
                                                         Some(ColumnDrag::Project(project.id));
                                                 }
@@ -7794,23 +7785,13 @@ impl OperonApp {
                             }
                             hairline(ui, palette);
                             let mut any = false;
-                            for &(_, _, kind, id) in
-                                live.iter().filter(|(owner, ..)| *owner == project_id)
-                            {
-                                let Some(session) = self.store.sessions.iter().find(|s| s.id == id)
-                                else {
-                                    continue;
-                                };
+                            for row_data in &project.rows {
+                                let id = row_data.id;
+                                let kind = row_data.kind;
+                                let pinned = row_data.pinned;
                                 any = true;
-                                let title = session_list_title(
-                                    session,
-                                    self.session_prompt_turns
-                                        .get(&id)
-                                        .and_then(|turns| turns.first())
-                                        .map(|turn| turn.prompt.as_str()),
-                                );
+                                let title = row_data.title.clone();
                                 let mut rename_finished = None;
-                                let pinned = self.is_session_pinned(id);
                                 let row = egui::Frame::new()
                                     .fill(if self.selected_session == Some(id) {
                                         palette.row_selected
@@ -7856,7 +7837,7 @@ impl OperonApp {
                                                 )
                                                 .on_hover_text(tr("ピン留め中"));
                                             }
-                                            if session_mark_texture(ui.ctx(), &session.agent)
+                                            if session_mark_texture(ui.ctx(), &row_data.agent)
                                                 .is_some()
                                             {
                                                 // The tab's mark and dot (change 283).
@@ -7868,13 +7849,13 @@ impl OperonApp {
                                                 session_badge(
                                                     ui,
                                                     palette,
-                                                    &session.agent,
+                                                    &row_data.agent,
                                                     kind,
                                                     COLUMN_SESSION_MARK_SIZE,
                                                     surface,
                                                 )
                                                 .on_hover_ui(|ui| {
-                                                    ui.label(agent_short_label(&session.agent));
+                                                    ui.label(agent_short_label(&row_data.agent));
                                                     ui.label(tr(kind.label()));
                                                 });
                                             } else {
@@ -7894,7 +7875,7 @@ impl OperonApp {
                                                     ),
                                                     |ui| {
                                                         let label =
-                                                            agent_short_label(&session.agent);
+                                                            agent_short_label(&row_data.agent);
                                                         ui.add(
                                                             egui::Label::new(
                                                                 RichText::new(label).size(11.5),
@@ -7959,20 +7940,26 @@ impl OperonApp {
                                         },
                                     )
                                     .on_hover_ui(|ui| {
-                                        let view = session_status_view(
-                                            &self.store.sessions,
-                                            session,
-                                            self.cancellation_pending(id),
-                                            self.session_activity_for(id),
-                                            self.awaiting_first_request.contains(&id),
-                                        );
-                                        ui.label(&title);
-                                        ui.label(&view.label);
-                                        ui.label(self.with_working_time(
-                                            &view.hint,
-                                            id,
-                                            Instant::now(),
-                                        ));
+                                        if let Some(session) =
+                                            self.store.sessions.iter().find(|s| s.id == id)
+                                        {
+                                            let view = session_status_view(
+                                                &self.store.sessions,
+                                                session,
+                                                self.cancellation_pending(id),
+                                                self.session_activity_for(id),
+                                                self.awaiting_first_request.contains(&id),
+                                            );
+                                            ui.label(&title);
+                                            ui.label(&view.label);
+                                            ui.label(self.with_working_time(
+                                                &view.hint,
+                                                id,
+                                                Instant::now(),
+                                            ));
+                                        } else {
+                                            ui.label(&title);
+                                        }
                                         if pinned {
                                             ui.label(tr("ピン留め中"));
                                         }
@@ -8020,13 +8007,15 @@ impl OperonApp {
                                 if close_row {
                                     close = Some(id);
                                 }
-                                let rename_candidate = rename.then(|| session.clone());
+                                let rename_candidate = rename.then(|| {
+                                    self.store.sessions.iter().find(|s| s.id == id).cloned()
+                                });
                                 match rename_finished {
                                     Some(true) => self.commit_session_rename(),
                                     Some(false) => self.cancel_session_rename(),
                                     None => {}
                                 }
-                                if let Some(session) = rename_candidate {
+                                if let Some(Some(session)) = rename_candidate {
                                     self.begin_session_rename(&session);
                                 } else if row.clicked() {
                                     open = Some(id);
@@ -8040,7 +8029,6 @@ impl OperonApp {
                                 );
                             }
                         });
-                    let project = &self.store.projects[proj_idx];
                     targets.push(project.id, card.response.rect);
                 }
                 // The rest of the column, below every row, offers what the +
@@ -8145,6 +8133,8 @@ impl OperonApp {
     /// One edge: the session list, a group of views, or both split by a
     /// draggable rule — stacked on the left and right, side by side on the
     /// top and bottom, the list first.
+    /// The rule between a split edge's list and views, plus both child UIs.
+    /// Returns whether any edge split divider was actively dragged this frame.
     fn ui_dock_edge(
         &mut self,
         ui: &mut egui::Ui,
@@ -8153,7 +8143,8 @@ impl OperonApp {
         has_sessions: bool,
         view: Option<(InspectorTab, &Session)>,
         palette: &Palette,
-    ) {
+    ) -> bool {
+        let mut dragged = false;
         let horizontal = edge.is_horizontal();
         let (list_rect, view_rect) = match (has_sessions, view.is_some()) {
             (true, true) => {
@@ -8216,6 +8207,7 @@ impl OperonApp {
                     });
                 }
                 if response.dragged() {
+                    dragged = true;
                     let delta = if horizontal {
                         response.drag_delta().x
                     } else {
@@ -8274,16 +8266,18 @@ impl OperonApp {
                 view_rect.height(),
             );
         }
+        dragged
     }
 
     /// The rule between `edge` and the terminal, which resizes the edge.
+    /// Returns whether the edge rule was dragged this frame.
     fn ui_dock_edge_rule(
         &mut self,
         ui: &mut egui::Ui,
         edge: DockEdge,
         rect: egui::Rect,
         palette: &Palette,
-    ) {
+    ) -> bool {
         let rule = match edge {
             DockEdge::Left => {
                 egui::Rect::from_min_size(rect.right_top(), egui::vec2(DOCK_GAP, rect.height()))
@@ -8316,7 +8310,8 @@ impl OperonApp {
                 egui::CursorIcon::ResizeHorizontal
             });
         }
-        if response.dragged() {
+        let dragged = response.dragged();
+        if dragged {
             let delta = response.drag_delta();
             // Dragging toward the terminal grows the edge. The base is the size
             // drawn, not the one stored: a narrow window may be showing less,
@@ -8336,6 +8331,7 @@ impl OperonApp {
         } else {
             paint_splitter_v(ui, rule, palette, active);
         }
+        dragged
     }
 
     /// A panel being dragged: a drop zone on each edge of `area`, the one
@@ -8435,74 +8431,6 @@ impl OperonApp {
         if let (Some(panel), Some(edge)) = (self.dock_drag.take(), target) {
             self.dock_panel_to(panel, edge);
         }
-    }
-
-    /// One level of a move inside the session column, once its targets are
-    /// drawn: the line in the gap a release would land in and, on the
-    /// release, the move. `span` is the line's width, `gap` the room between
-    /// two of the level's items.
-    fn ui_column_drop(
-        &mut self,
-        ui: &egui::Ui,
-        drag: ColumnDrag,
-        targets: &ColumnTargets,
-        slot: Option<usize>,
-        span: egui::Rangef,
-        gap: f32,
-    ) {
-        let Some(slot) = slot else {
-            return;
-        };
-        if let Some(y) = slot_line_y(&targets.rects, slot, gap) {
-            let palette = self.store.theme.palette();
-            ui.painter()
-                .hline(span, y, egui::Stroke::new(2.0_f32, palette.accent));
-        }
-        if ui.input(|i| i.pointer.primary_released()) {
-            self.finish_column_drag(drag, &targets.ids, slot);
-        }
-    }
-
-    /// Ends a move inside the session column: `drag`'s item goes to `slot`
-    /// among the `visible` items of its level, and the whole level is written
-    /// into the arrangement — on a first move the items not moved would
-    /// otherwise be unlisted and drawn ahead of it. A release that moves
-    /// nothing writes nothing.
-    pub(crate) fn finish_column_drag(&mut self, drag: ColumnDrag, visible: &[Uuid], slot: usize) {
-        let mut arrangement = self.session_arrangement.clone();
-        match drag {
-            ColumnDrag::Project(moved) => {
-                let mut projects = self.store.projects.iter().collect::<Vec<_>>();
-                sort_column_projects(&mut projects, &arrangement);
-                let mut order = projects
-                    .iter()
-                    .map(|project| project.id)
-                    .collect::<Vec<_>>();
-                if !place(&mut order, moved, visible, slot) {
-                    return;
-                }
-                arrangement.projects = order;
-            }
-            ColumnDrag::Session { project, session } => {
-                let mut sessions = self
-                    .store
-                    .sessions
-                    .iter()
-                    .filter(|candidate| candidate.project_id == project)
-                    .collect::<Vec<_>>();
-                sort_column_sessions(&mut sessions, &arrangement);
-                let mut order = sessions
-                    .iter()
-                    .map(|candidate| candidate.id)
-                    .collect::<Vec<_>>();
-                if !place(&mut order, session, visible, slot) {
-                    return;
-                }
-                arrangement.sessions.retain(|id| !order.contains(id));
-                arrangement.sessions.extend(order);
-            }
-        }
-        self.commit_session_arrangement(arrangement);
     }
 }
 
@@ -9085,266 +9013,6 @@ impl OperonApp {
             });
         if !open {
             self.pending_run_script = None;
-        }
-    }
-}
-
-/// Looking through what a session has already said.
-impl OperonApp {
-    /// Catch `⌘F` and `Esc` before the pane reads its events.
-    ///
-    /// `consume_key` removes the event, which is the whole of "the agent never
-    /// receives it": the pane reads whatever is left, and this is not left.
-    pub(crate) fn handle_terminal_search_keys(&mut self, ctx: &egui::Context) {
-        let Some(session_id) = self.selected_session else {
-            return;
-        };
-        if self.command_palette_open {
-            // The palette is in front and owns the keyboard while it is.
-            return;
-        }
-        if self.chord_consumed(ctx, "terminal.find") {
-            let search = self.terminal_search.entry(session_id).or_default();
-            search.open = true;
-            search.needs_focus = true;
-            // A closed bar is not searched when the buffer moves, so the
-            // count it kept is the one from when it closed.
-            self.refresh_terminal_search(session_id);
-        }
-        let (open, composing) = self
-            .terminal_search
-            .get(&session_id)
-            .map_or((false, false), |search| (search.open, search.composing));
-        // An Esc that cancels a conversion arrives beside the IME's own events
-        // and is the IME's, not a request to close.
-        let conversion_moved = ctx.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(
-                    event,
-                    egui::Event::Ime(egui::ImeEvent::Preedit { .. } | egui::ImeEvent::Commit(_))
-                )
-            })
-        });
-        if !open {
-            return;
-        }
-        if composing || conversion_moved {
-            // egui takes the keyboard from a focused field on any Esc, before
-            // this runs, so the field asks for it back.
-            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-                if let Some(search) = self.terminal_search.get_mut(&session_id) {
-                    search.needs_focus = true;
-                }
-            }
-        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.close_terminal_search(session_id);
-        }
-    }
-
-    /// Close the bar and give the keyboard back to the pane: the field that
-    /// held it is no longer drawn.
-    pub(crate) fn close_terminal_search(&mut self, session_id: Uuid) {
-        if let Some(search) = self.terminal_search.get_mut(&session_id) {
-            search.open = false;
-            search.composing = false;
-            search.scroll_to = None;
-        }
-        self.terminal_focus_request = Some(session_id);
-    }
-
-    /// Recompute where the query occurs.
-    ///
-    /// Called when the query changes and when the buffer does, never per frame:
-    /// the pane holds fifty thousand lines and this walks all of them.
-    pub(crate) fn refresh_terminal_search(&mut self, session_id: Uuid) {
-        let Some(search) = self.terminal_search.get(&session_id) else {
-            return;
-        };
-        if !search.open {
-            return;
-        }
-        let query = search.query.clone();
-        let matches = self
-            .terminal_layouts
-            .get(&session_id)
-            .map(|lines| terminal_search_matches(lines, &query))
-            .unwrap_or_default();
-        let Some(search) = self.terminal_search.get_mut(&session_id) else {
-            return;
-        };
-        // The current match keeps its index rather than its line number. Output
-        // arriving underneath a search moves every line; the third match is
-        // still the third match.
-        search.current = search.current.min(matches.len().saturating_sub(1));
-        search.matches = matches;
-    }
-
-    pub(crate) fn step_terminal_search(&mut self, session_id: Uuid, forward: bool) {
-        let Some(search) = self.terminal_search.get_mut(&session_id) else {
-            return;
-        };
-        if search.matches.is_empty() {
-            return;
-        }
-        let last = search.matches.len() - 1;
-        search.current = if forward {
-            if search.current >= last {
-                0
-            } else {
-                search.current + 1
-            }
-        } else if search.current == 0 {
-            last
-        } else {
-            search.current - 1
-        };
-        search.scroll_to = Some(search.matches[search.current].line);
-    }
-}
-
-pub(crate) fn terminal_search_overlay_from<'a>(
-    search: Option<&'a TerminalSearch>,
-    palette: &'a Palette,
-) -> TerminalSearchOverlay<'a> {
-    match search {
-        Some(search) if search.open && !search.matches.is_empty() => TerminalSearchOverlay {
-            matches: &search.matches,
-            current: Some(search.current),
-            scroll_to: search.scroll_to,
-            palette,
-        },
-        _ => TerminalSearchOverlay {
-            matches: &[],
-            current: None,
-            scroll_to: None,
-            palette,
-        },
-    }
-}
-
-impl OperonApp {
-    #[allow(dead_code)]
-    pub(crate) fn terminal_search_overlay<'a>(
-        &'a self,
-        session_id: Uuid,
-        palette: &'a Palette,
-    ) -> TerminalSearchOverlay<'a> {
-        terminal_search_overlay_from(self.terminal_search.get(&session_id), palette)
-    }
-
-    /// The bar: one row, under the pane, the way a browser does it.
-    pub(crate) fn ui_terminal_search(
-        &mut self,
-        ui: &mut egui::Ui,
-        palette: &Palette,
-        session_id: Uuid,
-    ) {
-        let Some(search) = self.terminal_search.get(&session_id) else {
-            return;
-        };
-        if !search.open {
-            return;
-        }
-        let mut query = search.query.clone();
-        let needs_focus = search.needs_focus;
-        let mut composing = search.composing;
-        let total = search.matches.len();
-        let current = search.current;
-        let mut changed = false;
-        let mut step = None;
-        let mut close = false;
-
-        ui.add_space(SPACE_XS);
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(ICON_SEARCH)
-                    .size(13.5)
-                    .color(palette.text_muted),
-            );
-            // No return key: a single-line field gives up the keyboard on
-            // Enter by default, and here Enter means "next", again and again.
-            let field = ui.add(
-                egui::TextEdit::singleline(&mut query)
-                    .desired_width(240.0)
-                    .hint_text(tr("スクロールバックを検索"))
-                    .return_key(None),
-            );
-            if needs_focus {
-                field.request_focus();
-            }
-            if field.changed() {
-                changed = true;
-            }
-            // Enter only means "next" once the conversion is committed: a
-            // preedit is not yet text (change 014), and the Enter that commits
-            // it is the IME's (lesson 016).
-            if field.has_focus() {
-                let (stepped, still_composing) =
-                    ui.input(|input| find_bar_step(&input.events, composing));
-                step = stepped;
-                composing = still_composing;
-                ui.input_mut(|input| {
-                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
-                    input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter);
-                });
-            } else {
-                composing = false;
-            }
-            ui.label(
-                RichText::new(if query.trim().is_empty() {
-                    String::new()
-                } else if total == 0 {
-                    tr("一致しません").into()
-                } else {
-                    tf!("{p0} / {p1}", p0 = current + 1, p1 = total)
-                })
-                .size(12.0)
-                .color(palette.text_muted),
-            );
-            if ui
-                .add_enabled_ui(total > 0, |ui| {
-                    small_icon_button(ui, palette, ICON_PREVIOUS, tr("前の一致"))
-                })
-                .inner
-                .clicked()
-            {
-                step = Some(false);
-            }
-            if ui
-                .add_enabled_ui(total > 0, |ui| {
-                    small_icon_button(ui, palette, ICON_NEXT, tr("次の一致"))
-                })
-                .inner
-                .clicked()
-            {
-                step = Some(true);
-            }
-            if small_icon_button(ui, palette, ICON_CLOSE, tr("検索を閉じる")).clicked() {
-                close = true;
-            }
-        });
-
-        if let Some(search) = self.terminal_search.get_mut(&session_id) {
-            search.query = query;
-            search.needs_focus = false;
-            search.composing = composing;
-        }
-        if changed {
-            if let Some(search) = self.terminal_search.get_mut(&session_id) {
-                search.current = 0;
-                search.scroll_to = None;
-            }
-            self.refresh_terminal_search(session_id);
-            if let Some(search) = self.terminal_search.get_mut(&session_id) {
-                search.scroll_to = search.matches.first().map(|found| found.line);
-            }
-        }
-        if let Some(forward) = step {
-            self.step_terminal_search(session_id, forward);
-        }
-        if close {
-            self.close_terminal_search(session_id);
         }
     }
 }

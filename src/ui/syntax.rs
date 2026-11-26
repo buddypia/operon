@@ -21,8 +21,9 @@ pub(crate) struct EditorTextLayoutCache {
     /// The read-only viewer's chunks. Kept here so the workspace's per-group
     /// loan of this cache loans the viewer's with it.
     pub(crate) viewer: ViewerLayoutCache,
-    #[cfg(test)]
     builds: usize,
+    galley_builds: usize,
+    galley_hits: usize,
 }
 
 #[derive(Default)]
@@ -31,6 +32,8 @@ pub(crate) struct CachedEditorTextLayout {
     pub(crate) line_count: usize,
     pub(crate) widest_line: usize,
     pub(crate) line_numbers: String,
+    syntax_galley: Option<(u32, u32, Arc<egui::Galley>)>,
+    gutter_galley: Option<(u32, Color32, Arc<egui::Galley>)>,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -44,12 +47,16 @@ struct EditorTextLayoutKey {
 /// Markdown cache next door rather than written out twice: both caches have to
 /// rebuild when the theme changes, and two lists of roles would be two lists to
 /// keep in step.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct SyntaxColours {
     text: Color32,
+    text_strong: Color32,
     text_muted: Color32,
     text_faint: Color32,
     accent_text: Color32,
+    accent_soft: Color32,
+    code_bg: Color32,
+    link: Color32,
     info: Color32,
     success: Color32,
     warning: Color32,
@@ -60,9 +67,13 @@ impl From<&Palette> for SyntaxColours {
     fn from(palette: &Palette) -> Self {
         Self {
             text: palette.text,
+            text_strong: palette.text_strong,
             text_muted: palette.text_muted,
             text_faint: palette.text_faint,
             accent_text: palette.accent_text,
+            accent_soft: palette.accent_soft,
+            code_bg: palette.code_bg,
+            link: palette.link,
             info: palette.info,
             success: palette.success,
             warning: palette.warning,
@@ -72,6 +83,66 @@ impl From<&Palette> for SyntaxColours {
 }
 
 impl EditorTextLayoutCache {
+    /// Return a cached shaped `Arc<egui::Galley>` for `(text, language, palette)`
+    /// at `(pixels_per_point, wrap_width)`, shaping once on miss.
+    pub(crate) fn galley_for(
+        &mut self,
+        ui: &egui::Ui,
+        text: &str,
+        language: EditorLanguage,
+        palette: &Palette,
+        wrap_width: f32,
+    ) -> Arc<egui::Galley> {
+        let ppp_bits = ui.ctx().pixels_per_point().to_bits();
+        let width_bits = wrap_width.to_bits();
+        let _ = self.layout_for(text, language, palette);
+        if let Some((cached_ppp, cached_width, galley)) = &self.layout.syntax_galley {
+            if *cached_ppp == ppp_bits && *cached_width == width_bits {
+                self.galley_hits += 1;
+                return Arc::clone(galley);
+            }
+        }
+        let mut job = self.layout.syntax.clone();
+        job.wrap.max_width = wrap_width;
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        self.layout.syntax_galley = Some((ppp_bits, width_bits, Arc::clone(&galley)));
+        self.galley_builds += 1;
+        galley
+    }
+
+    pub(crate) fn gutter_galley_for(
+        &mut self,
+        ui: &egui::Ui,
+        palette: &Palette,
+    ) -> Arc<egui::Galley> {
+        let ppp_bits = ui.ctx().pixels_per_point().to_bits();
+        let colour = palette.text_muted;
+        if let Some((cached_ppp, cached_colour, galley)) = &self.layout.gutter_galley {
+            if *cached_ppp == ppp_bits && *cached_colour == colour {
+                return Arc::clone(galley);
+            }
+        }
+        let mut job = LayoutJob::default();
+        job.append(
+            &self.layout.line_numbers,
+            0.0,
+            egui::TextFormat::simple(egui::FontId::monospace(MONOSPACE_SIZE), colour),
+        );
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        self.layout.gutter_galley = Some((ppp_bits, colour, Arc::clone(&galley)));
+        galley
+    }
+
+    #[cfg(test)]
+    pub(crate) fn galley_builds(&self) -> usize {
+        self.galley_builds
+    }
+
+    #[cfg(test)]
+    pub(crate) fn galley_hits(&self) -> usize {
+        self.galley_hits
+    }
+
     pub(crate) fn layout_for(
         &mut self,
         text: &str,
@@ -98,16 +169,15 @@ impl EditorTextLayoutCache {
                     .map(|number| format!("{number:>digits$}"))
                     .collect::<Vec<_>>()
                     .join("\n"),
+                syntax_galley: None,
+                gutter_galley: None,
             };
             self.key = Some(EditorTextLayoutKey {
                 text: text.to_owned(),
                 language,
                 colours,
             });
-            #[cfg(test)]
-            {
-                self.builds += 1;
-            }
+            self.builds += 1;
         }
         &self.layout
     }
@@ -239,11 +309,49 @@ impl ViewerRows {
 /// `show_rows` places every row at the height of a line.
 pub(crate) struct ViewerRowLayout {
     pub(crate) job: LayoutJob,
+    galley: Option<(u32, u32, Arc<egui::Galley>)>,
     /// Where the row's own text starts in `job.text`, after the line number
     /// (padded to the widest one, blank on a continuation row) and the gap.
     /// Only the tests take the row apart again; the frame draws `job` whole.
     #[cfg(test)]
     text_start: usize,
+}
+
+impl ViewerRowLayout {
+    pub(crate) fn galley_for(
+        &mut self,
+        ui: &egui::Ui,
+        _palette: &Palette,
+        wrap_width: f32,
+    ) -> Arc<egui::Galley> {
+        let ppp_bits = ui.ctx().pixels_per_point().to_bits();
+        let width_bits = wrap_width.to_bits();
+        if let Some((cached_ppp, cached_width, galley)) = &self.galley {
+            if *cached_ppp == ppp_bits && *cached_width == width_bits {
+                return Arc::clone(galley);
+            }
+        }
+        let mut job = self.job.clone();
+        job.wrap.max_width = wrap_width;
+        let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+        self.galley = Some((ppp_bits, width_bits, Arc::clone(&galley)));
+        galley
+    }
+
+    #[cfg(test)]
+    pub(crate) fn plain_for_test(text: &str) -> Self {
+        let mut job = LayoutJob::default();
+        job.append(
+            text,
+            0.0,
+            TextFormat::simple(FontId::monospace(MONOSPACE_SIZE), Color32::WHITE),
+        );
+        Self {
+            job,
+            galley: None,
+            text_start: 0,
+        }
+    }
 }
 
 /// Between the line number and the text.
@@ -280,14 +388,14 @@ pub(crate) struct ViewerLayoutCache {
 const VIEWER_CACHED_CHUNKS: usize = 64;
 
 impl ViewerLayoutCache {
-    pub(crate) fn row(
+    pub(crate) fn row_mut(
         &mut self,
         rows: &Arc<ViewerRows>,
         text: &str,
         language: EditorLanguage,
         palette: &Palette,
         row: usize,
-    ) -> Option<&ViewerRowLayout> {
+    ) -> Option<&mut ViewerRowLayout> {
         if row >= rows.len() {
             return None;
         }
@@ -317,8 +425,21 @@ impl ViewerLayoutCache {
             }
         }
         self.chunks
-            .get(&chunk)
-            .and_then(|layouts| layouts.get(row % VIEWER_CHUNK_ROWS))
+            .get_mut(&chunk)
+            .and_then(|layouts| layouts.get_mut(row % VIEWER_CHUNK_ROWS))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn row(
+        &mut self,
+        rows: &Arc<ViewerRows>,
+        text: &str,
+        language: EditorLanguage,
+        palette: &Palette,
+        row: usize,
+    ) -> Option<&ViewerRowLayout> {
+        self.row_mut(rows, text, language, palette, row)
+            .map(|r| &*r)
     }
 
     #[cfg(test)]
@@ -382,6 +503,7 @@ pub(crate) fn viewer_chunk_layout(
             append_slice(&mut row, &job, range.start - base..range.end - base);
             ViewerRowLayout {
                 job: row,
+                galley: None,
                 #[cfg(test)]
                 text_start: gutter.len(),
             }
@@ -520,6 +642,53 @@ fn syntax_for(syntax_set: &SyntaxSet, language: EditorLanguage) -> Option<&Synta
 }
 
 fn semantic_theme(palette: &Palette) -> Theme {
+    static PARSED: OnceLock<[(ScopeSelectors, Option<FontStyle>); 17]> = OnceLock::new();
+    let scopes_spec = PARSED.get_or_init(|| {
+        [
+            ("comment", Some(FontStyle::ITALIC)),
+            ("string", None),
+            ("string.quoted.double.json", None),
+            ("constant.numeric", None),
+            ("constant.language", None),
+            ("keyword", None),
+            ("storage", None),
+            ("meta.preprocessor", None),
+            ("entity.name", None),
+            ("support.type", None),
+            ("entity.name.tag", None),
+            ("markup.heading", Some(FontStyle::BOLD)),
+            ("markup.bold", Some(FontStyle::BOLD)),
+            ("markup.italic", Some(FontStyle::ITALIC)),
+            ("markup.raw", None),
+            ("markup.underline.link", Some(FontStyle::UNDERLINE)),
+            ("punctuation", None),
+        ]
+        .map(|(sel, style)| {
+            (
+                ScopeSelectors::from_str(sel).expect("static scope selector is valid"),
+                style,
+            )
+        })
+    });
+    let colours = [
+        palette.text_muted,
+        palette.success,
+        palette.info,
+        palette.sand,
+        palette.warning,
+        palette.accent_text,
+        palette.accent_text,
+        palette.accent_text,
+        palette.info,
+        palette.info,
+        palette.info,
+        palette.accent_text,
+        palette.accent_text,
+        palette.success,
+        palette.success,
+        palette.info,
+        palette.text_faint,
+    ];
     Theme {
         name: Some("Operon semantic palette".into()),
         author: None,
@@ -528,40 +697,18 @@ fn semantic_theme(palette: &Palette) -> Theme {
             background: Some(syntect_colour(palette.inset)),
             ..Default::default()
         },
-        scopes: vec![
-            theme_item("comment", palette.text_muted, Some(FontStyle::ITALIC)),
-            theme_item("string", palette.success, None),
-            theme_item("string.quoted.double.json", palette.info, None),
-            theme_item("constant.numeric", palette.sand, None),
-            theme_item("constant.language", palette.warning, None),
-            theme_item("keyword", palette.accent_text, None),
-            theme_item("storage", palette.accent_text, None),
-            theme_item("meta.preprocessor", palette.accent_text, None),
-            theme_item("entity.name", palette.info, None),
-            theme_item("support.type", palette.info, None),
-            theme_item("entity.name.tag", palette.info, None),
-            theme_item("markup.heading", palette.accent_text, Some(FontStyle::BOLD)),
-            theme_item("markup.bold", palette.accent_text, Some(FontStyle::BOLD)),
-            theme_item("markup.italic", palette.success, Some(FontStyle::ITALIC)),
-            theme_item("markup.raw", palette.success, None),
-            theme_item(
-                "markup.underline.link",
-                palette.info,
-                Some(FontStyle::UNDERLINE),
-            ),
-            theme_item("punctuation", palette.text_faint, None),
-        ],
-    }
-}
-
-fn theme_item(selector: &str, colour: Color32, font_style: Option<FontStyle>) -> ThemeItem {
-    ThemeItem {
-        scope: ScopeSelectors::from_str(selector).expect("static scope selector is valid"),
-        style: StyleModifier {
-            foreground: Some(syntect_colour(colour)),
-            background: None,
-            font_style,
-        },
+        scopes: scopes_spec
+            .iter()
+            .zip(colours)
+            .map(|((scope, font_style), colour)| ThemeItem {
+                scope: scope.clone(),
+                style: StyleModifier {
+                    foreground: Some(syntect_colour(colour)),
+                    background: None,
+                    font_style: *font_style,
+                },
+            })
+            .collect(),
     }
 }
 

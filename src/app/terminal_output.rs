@@ -592,12 +592,25 @@ impl OperonApp {
         self.terminal_streams
             .theme_code
             .store(app_theme_code(self.store.theme), Ordering::Release);
-        if let Ok(mut slot) = self.terminal_streams.repaint.lock() {
-            *slot = self.repaint.clone();
+        if self.repaint.is_some() {
+            let needs_bind = self
+                .terminal_streams
+                .repaint
+                .lock()
+                .ok()
+                .is_some_and(|mut slot| {
+                    if slot.is_none() {
+                        *slot = self.repaint.clone();
+                        true
+                    } else {
+                        false
+                    }
+                });
+            let _ = needs_bind;
         }
 
         let now = Instant::now();
-        let desired: Vec<(Uuid, String)> = if self.tools.tmux {
+        let desired: Vec<(Uuid, &str)> = if self.tools.tmux {
             self.terminals_on_screen()
                 .into_iter()
                 .take(PANE_MAX)
@@ -605,7 +618,7 @@ impl OperonApp {
                     let session = self.store.sessions.iter().find(|s| s.id == id)?;
                     (session.status == SessionStatus::Active
                         && is_safe_tmux_name(&session.tmux_name))
-                    .then(|| (session.id, session.tmux_name.clone()))
+                    .then_some((session.id, session.tmux_name.as_str()))
                 })
                 .collect()
         } else {
@@ -620,7 +633,7 @@ impl OperonApp {
                 let worker_done = entry.done.load(Ordering::Acquire);
                 let still_wanted = desired
                     .iter()
-                    .any(|(did, dname)| did == id && dname == &entry.tmux_name);
+                    .any(|&(did, dname)| did == *id && dname == entry.tmux_name);
                 if worker_done || !still_wanted {
                     Some((*id, worker_done))
                 } else {
@@ -650,8 +663,12 @@ impl OperonApp {
             if self
                 .terminal_streams
                 .cooldowns
-                .get(&(session_id, tmux_name.clone()))
-                .is_some_and(|at| now.saturating_duration_since(*at) < SESSION_POLL_INTERVAL)
+                .iter()
+                .any(|((cid, cname), at)| {
+                    *cid == session_id
+                        && cname == tmux_name
+                        && now.saturating_duration_since(*at) < SESSION_POLL_INTERVAL
+                })
             {
                 continue;
             }
@@ -667,8 +684,13 @@ impl OperonApp {
                     .flatten(),
             };
             let visible = Arc::clone(&self.visible_sessions);
-            self.terminal_streams
-                .spawn_watcher(session_id, tmux_name, seed, visible, now);
+            self.terminal_streams.spawn_watcher(
+                session_id,
+                tmux_name.to_owned(),
+                seed,
+                visible,
+                now,
+            );
         }
     }
 
@@ -1150,7 +1172,14 @@ impl OperonApp {
     }
 
     pub(crate) fn is_layout_dragging(&self) -> bool {
-        self.workspace_divider_drag || self.workspace_drag.is_some()
+        self.workspace_divider_drag || self.workspace_drag.is_some() || self.dock_resize_drag
+    }
+
+    pub(crate) fn is_any_drag_active(&self) -> bool {
+        self.is_layout_dragging()
+            || self.dock_drag.is_some()
+            || self.column_drag.is_some()
+            || self.workspace_column_drag.is_some()
     }
 
     pub(crate) fn finish_layout_drag(&mut self) {
@@ -1180,6 +1209,9 @@ impl OperonApp {
     }
 
     pub(crate) fn flush_terminal_resize(&mut self, session_id: Uuid) -> Option<Duration> {
+        if self.is_layout_dragging() {
+            return None;
+        }
         if self.session_launch_running(session_id)
             || self
                 .background_tasks
@@ -1214,5 +1246,288 @@ impl OperonApp {
             }
         });
         None
+    }
+
+    pub(crate) fn queue_terminal_input(&mut self, session_id: Uuid, input: Vec<TerminalInput>) {
+        if input.is_empty() {
+            return;
+        }
+        let Some(session) = self
+            .store
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if session.status != SessionStatus::Active {
+            return;
+        }
+        self.terminal_input_queue
+            .entry(session_id)
+            .or_default()
+            .extend(input);
+        self.last_terminal_input = Some(Instant::now());
+        self.flush_terminal_input(session_id);
+    }
+}
+
+/// Looking through what a session has already said.
+impl OperonApp {
+    /// Catch `⌘F` and `Esc` before the pane reads its events.
+    ///
+    /// `consume_key` removes the event, which is the whole of "the agent never
+    /// receives it": the pane reads whatever is left, and this is not left.
+    pub(crate) fn handle_terminal_search_keys(&mut self, ctx: &egui::Context) {
+        let Some(session_id) = self.selected_session else {
+            return;
+        };
+        if self.command_palette_open {
+            // The palette is in front and owns the keyboard while it is.
+            return;
+        }
+        if self.chord_consumed(ctx, "terminal.find") {
+            let search = self.terminal_search.entry(session_id).or_default();
+            search.open = true;
+            search.needs_focus = true;
+            // A closed bar is not searched when the buffer moves, so the
+            // count it kept is the one from when it closed.
+            self.refresh_terminal_search(session_id);
+        }
+        let (open, composing) = self
+            .terminal_search
+            .get(&session_id)
+            .map_or((false, false), |search| (search.open, search.composing));
+        // An Esc that cancels a conversion arrives beside the IME's own events
+        // and is the IME's, not a request to close.
+        let conversion_moved = ctx.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::Ime(egui::ImeEvent::Preedit { .. } | egui::ImeEvent::Commit(_))
+                )
+            })
+        });
+        if !open {
+            return;
+        }
+        if composing || conversion_moved {
+            // egui takes the keyboard from a focused field on any Esc, before
+            // this runs, so the field asks for it back.
+            if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+                if let Some(search) = self.terminal_search.get_mut(&session_id) {
+                    search.needs_focus = true;
+                }
+            }
+        } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.close_terminal_search(session_id);
+        }
+    }
+
+    /// Close the bar and give the keyboard back to the pane: the field that
+    /// held it is no longer drawn.
+    pub(crate) fn close_terminal_search(&mut self, session_id: Uuid) {
+        if let Some(search) = self.terminal_search.get_mut(&session_id) {
+            search.open = false;
+            search.composing = false;
+            search.scroll_to = None;
+        }
+        self.terminal_focus_request = Some(session_id);
+    }
+
+    /// Recompute where the query occurs.
+    ///
+    /// Called when the query changes and when the buffer does, never per frame:
+    /// the pane holds fifty thousand lines and this walks all of them.
+    pub(crate) fn refresh_terminal_search(&mut self, session_id: Uuid) {
+        let Some(search) = self.terminal_search.get(&session_id) else {
+            return;
+        };
+        if !search.open {
+            return;
+        }
+        let query = search.query.clone();
+        let matches = self
+            .terminal_layouts
+            .get(&session_id)
+            .map(|lines| terminal_search_matches(lines, &query))
+            .unwrap_or_default();
+        let Some(search) = self.terminal_search.get_mut(&session_id) else {
+            return;
+        };
+        // The current match keeps its index rather than its line number. Output
+        // arriving underneath a search moves every line; the third match is
+        // still the third match.
+        search.current = search.current.min(matches.len().saturating_sub(1));
+        search.matches = matches;
+    }
+
+    pub(crate) fn step_terminal_search(&mut self, session_id: Uuid, forward: bool) {
+        let Some(search) = self.terminal_search.get_mut(&session_id) else {
+            return;
+        };
+        if search.matches.is_empty() {
+            return;
+        }
+        let last = search.matches.len() - 1;
+        search.current = if forward {
+            if search.current >= last {
+                0
+            } else {
+                search.current + 1
+            }
+        } else if search.current == 0 {
+            last
+        } else {
+            search.current - 1
+        };
+        search.scroll_to = Some(search.matches[search.current].line);
+    }
+}
+
+pub(crate) fn terminal_search_overlay_from<'a>(
+    search: Option<&'a TerminalSearch>,
+    palette: &'a Palette,
+) -> TerminalSearchOverlay<'a> {
+    match search {
+        Some(search) if search.open && !search.matches.is_empty() => TerminalSearchOverlay {
+            matches: &search.matches,
+            current: Some(search.current),
+            scroll_to: search.scroll_to,
+            palette,
+        },
+        _ => TerminalSearchOverlay {
+            matches: &[],
+            current: None,
+            scroll_to: None,
+            palette,
+        },
+    }
+}
+
+impl OperonApp {
+    #[allow(dead_code)]
+    pub(crate) fn terminal_search_overlay<'a>(
+        &'a self,
+        session_id: Uuid,
+        palette: &'a Palette,
+    ) -> TerminalSearchOverlay<'a> {
+        terminal_search_overlay_from(self.terminal_search.get(&session_id), palette)
+    }
+
+    /// The bar: one row, under the pane, the way a browser does it.
+    pub(crate) fn ui_terminal_search(
+        &mut self,
+        ui: &mut egui::Ui,
+        palette: &Palette,
+        session_id: Uuid,
+    ) {
+        let Some(search) = self.terminal_search.get(&session_id) else {
+            return;
+        };
+        if !search.open {
+            return;
+        }
+        let mut query = search.query.clone();
+        let needs_focus = search.needs_focus;
+        let mut composing = search.composing;
+        let total = search.matches.len();
+        let current = search.current;
+        let mut changed = false;
+        let mut step = None;
+        let mut close = false;
+
+        ui.add_space(SPACE_XS);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(ICON_SEARCH)
+                    .size(13.5)
+                    .color(palette.text_muted),
+            );
+            // No return key: a single-line field gives up the keyboard on
+            // Enter by default, and here Enter means "next", again and again.
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut query)
+                    .desired_width(240.0)
+                    .hint_text(tr("スクロールバックを検索"))
+                    .return_key(None),
+            );
+            if needs_focus {
+                field.request_focus();
+            }
+            if field.changed() {
+                changed = true;
+            }
+            // Enter only means "next" once the conversion is committed: a
+            // preedit is not yet text (change 014), and the Enter that commits
+            // it is the IME's (lesson 016).
+            if field.has_focus() {
+                let (stepped, still_composing) =
+                    ui.input(|input| find_bar_step(&input.events, composing));
+                step = stepped;
+                composing = still_composing;
+                ui.input_mut(|input| {
+                    input.consume_key(egui::Modifiers::NONE, egui::Key::Enter);
+                    input.consume_key(egui::Modifiers::SHIFT, egui::Key::Enter);
+                });
+            } else {
+                composing = false;
+            }
+            ui.label(
+                RichText::new(if query.trim().is_empty() {
+                    String::new()
+                } else if total == 0 {
+                    tr("一致しません").into()
+                } else {
+                    tf!("{p0} / {p1}", p0 = current + 1, p1 = total)
+                })
+                .size(12.0)
+                .color(palette.text_muted),
+            );
+            if ui
+                .add_enabled_ui(total > 0, |ui| {
+                    small_icon_button(ui, palette, ICON_PREVIOUS, tr("前の一致"))
+                })
+                .inner
+                .clicked()
+            {
+                step = Some(false);
+            }
+            if ui
+                .add_enabled_ui(total > 0, |ui| {
+                    small_icon_button(ui, palette, ICON_NEXT, tr("次の一致"))
+                })
+                .inner
+                .clicked()
+            {
+                step = Some(true);
+            }
+            if small_icon_button(ui, palette, ICON_CLOSE, tr("検索を閉じる")).clicked() {
+                close = true;
+            }
+        });
+
+        if let Some(search) = self.terminal_search.get_mut(&session_id) {
+            search.query = query;
+            search.needs_focus = false;
+            search.composing = composing;
+        }
+        if changed {
+            if let Some(search) = self.terminal_search.get_mut(&session_id) {
+                search.current = 0;
+                search.scroll_to = None;
+            }
+            self.refresh_terminal_search(session_id);
+            if let Some(search) = self.terminal_search.get_mut(&session_id) {
+                search.scroll_to = search.matches.first().map(|found| found.line);
+            }
+        }
+        if let Some(forward) = step {
+            self.step_terminal_search(session_id, forward);
+        }
+        if close {
+            self.close_terminal_search(session_id);
+        }
     }
 }
