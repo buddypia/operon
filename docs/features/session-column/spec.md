@@ -49,14 +49,14 @@
 
 ## Code and tests
 - Symbols: `src/app/screens.rs::ui_workspace_projects` draws the heading, filters, project blocks, rows, drag and menus.
-- `src/app/screens.rs::ui_sidebar_session_filters`, `ui_sidebar_agent_segment` and `ui_sidebar_filter_summary` draw the tiles, CLI segment, 「クリア」 and the count.
+- `src/app/session_order.rs::ui_sidebar_session_filters`, `ui_sidebar_agent_segment` and `ui_sidebar_filter_summary` draw the tiles, CLI segment, 「クリア」 and the count.
 - `src/app/screens.rs::toggle_project_fold` saves the fold.
 - `src/app/column_add.rs::ColumnAdd`, `COLUMN_ADD_CHOICES`, `apply_column_add`, `ui_column_add_items`, `ui_column_add_project_item` and `apply_column_project_folder` are what the column adds (change 319).
-- `src/app/session_order.rs::sync_workspace_live_sessions` gives live sessions tabs and puts every workspace in the column's order.
+- `src/app/session_order.rs::sync_workspace_live_sessions` gives live sessions tabs and puts every workspace in the column's order, using content fingerprints and indexed ranks on steady frames; `SidebarViewCache` and `ensure_sidebar_view_cache` memoize sorted sidebar rows and per-project counts.
 - `src/app/session_order.rs::project_tab_sessions` yields a project's rows; `toggle_session_pin`, `close_session_tab`, `close_finished_session_tab`, `follow_tab_drop`, `commit_session_arrangement` do the edits.
 - `src/ui/session_tree.rs::SessionArrangement` holds `projects`, `sessions`, `unfolded`, `pinned`; `load_session_arrangement` and `save_session_arrangement` read and write `session-order.json`.
 - `src/ui/session_tree.rs::workspace_session_rank` and `sort_workspace_sessions` are the one order; `sort_column_projects`, `place`, `follow`, `drop_slot` support projects and drags.
-- `src/app.rs::session_matches_filters`, `toggle_status_filter`, `toggle_agent_filter`, `clear_session_filters`, `status_group_counts_for_chosen_agents` hold the filter state and counts.
+- `src/app/session_order.rs::session_matches_filters`, `toggle_status_filter`, `toggle_agent_filter`, `clear_session_filters`, `status_group_counts_for_chosen_agents` hold the filter state and indexed group counts.
 - `src/config.rs::SESSION_ARRANGEMENT_FILE_MAX_BYTES` and `SESSION_ARRANGEMENT_FILE_NAME` are the file's ceiling and name.
 - Tests: `session_285_column_lists_exactly_the_tabs` pins rows equal tabs.
 - `session_285_pin_from_row_or_tab_moves_it_first_in_both` and `session_285_pins_survive_a_relaunch` pin pinning.
@@ -84,3 +84,4 @@
 - Change 319: the column adds a session or a project itself and keeps a project added there on the session page; project names and the heading are one level above the rows, reversing change 245's small muted names at the person's request.
 - Change 310: session search must not say "nothing matches" for words the row shows.
 - Change 321: top label becomes quiet 「セッション一覧」 (12.5 px muted), project names move to 15.0 px `section`, and `ICON_PIN` moves into the left gutter before the agent mark so marks stay vertically aligned.
+- Change 322: `sync_workspace_live_sessions` short-circuits via content fingerprinting and O(S) rank lookup, `status_group_counts_for_chosen_agents` and `track_attention` run in O(S + T) indexed passes, and `SidebarViewCache` caches filtered project headers, group counts, and session row metadata across steady frames (pinned by `perf_322_r2_sync_fingerprints_and_sidebar_cache`).

@@ -999,6 +999,11 @@ pub(crate) struct PaneLayout {
 }
 
 impl PaneLayout {
+    #[cfg(test)]
+    pub(crate) fn from_root_for_test(root: PaneNode) -> Self {
+        Self { root: Some(root) }
+    }
+
     pub(crate) fn is_split(&self) -> bool {
         matches!(self.root, Some(PaneNode::Split { .. }))
     }
@@ -1326,6 +1331,52 @@ impl WorkspaceTabs {
         group.active = index;
         self.focused = Some(target);
         true
+    }
+
+    /// Returns whether dropping `tab` onto `target` with `drop` inside `area`
+    /// would be accepted by `move_tab`, without cloning `self.groups` or
+    /// mutating state (change 322).
+    pub(crate) fn can_move_tab(
+        &self,
+        tab: &WorkspaceTab,
+        target: Uuid,
+        drop: PaneDrop,
+        area: egui::Rect,
+    ) -> bool {
+        let Some(source) = self.groups.iter().find(|group| group.tabs.contains(tab)) else {
+            return false;
+        };
+        let Some(destination) = self.groups.iter().find(|group| group.id == target) else {
+            return false;
+        };
+        if drop == PaneDrop::Center {
+            if source.id == target {
+                let from = source.tabs.iter().position(|candidate| candidate == tab);
+                return from.is_some_and(|index| index != destination.tabs.len() - 1);
+            }
+            return true;
+        }
+        if source.id == target && source.tabs.len() == 1 {
+            return false;
+        }
+        let mut layout = self.layout.clone();
+        if source.tabs.len() == 1 {
+            layout.retain(|id| id != source.id);
+            let remaining = self.groups.len().saturating_sub(1);
+            if remaining == 1 && layout.single().is_none() {
+                if let Some(only) = self.groups.iter().find(|g| g.id != source.id) {
+                    layout.root = Some(PaneNode::Leaf(only.id));
+                }
+            }
+        }
+        let probe = if target == Uuid::nil() {
+            Uuid::from_u128(1)
+        } else {
+            Uuid::nil()
+        };
+        layout
+            .placed(probe, target, drop)
+            .is_some_and(|placed| placed.fits(area))
     }
 
     /// Check the complete resulting arrangement before accepting a drop.

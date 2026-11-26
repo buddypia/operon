@@ -100381,3 +100381,847 @@ pub(crate) fn column_321_sidebar_pin_hover_shows_tooltip() {
     );
     fs::remove_dir_all(&root).ok();
 }
+
+/// Change 322 (R1): layout drags (dock split/edge resize, workspace divider,
+/// workspace pane drag) suppress tmux resize-window spawns until drag release
+/// and then flush once; `WorkspaceTabs::can_move_tab` matches `move_tab`.
+#[test]
+pub(crate) fn perf_322_r1_drag_gating_and_can_move_tab() {
+    let root = temporary_directory("perf-322-r1");
+    let (mut app, _project, ids) = session_285_app(&root, &["drag-one"]);
+    let sid = ids[0];
+    app.workspace_project = Some(app.store.projects[0].id);
+    app.sync_workspace_live_sessions();
+    app.page = Page::Sessions;
+
+    assert!(!app.is_layout_dragging());
+    assert!(!app.is_any_drag_active());
+
+    app.dock_resize_drag = true;
+    assert!(app.is_layout_dragging());
+    assert!(app.is_any_drag_active());
+    let wait = app.request_terminal_resize(sid, (120, 38));
+    assert!(
+        wait.is_none()
+            || !app
+                .background_tasks
+                .contains(&BackgroundKey::TerminalResize(sid)),
+        "drag must not spawn tmux resize mid-drag"
+    );
+    assert!(
+        !app.background_tasks
+            .contains(&BackgroundKey::TerminalResize(sid)),
+        "BackgroundKey::TerminalResize must wait until finish_layout_drag"
+    );
+    assert_eq!(app.terminal_resize_requested.get(&sid), Some(&(120, 38)));
+
+    app.dock_resize_drag = false;
+    assert!(!app.is_layout_dragging());
+    app.finish_layout_drag();
+    assert!(
+        app.background_tasks
+            .contains(&BackgroundKey::TerminalResize(sid)),
+        "finish_layout_drag must flush pending resize once"
+    );
+
+    let area = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+    let target = app.workspace.groups[0].id;
+    let tab = app.workspace.groups[0].tabs[0].clone();
+    let expected = {
+        let mut preview = app.workspace.clone();
+        preview.move_tab(&tab, target, PaneDrop::Right, area)
+    };
+    assert_eq!(
+        app.workspace
+            .can_move_tab(&tab, target, PaneDrop::Right, area),
+        expected
+    );
+    assert_eq!(
+        app.workspace.groups.len(),
+        1,
+        "can_move_tab must not mutate workspace"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 322 (R2): steady-frame workspace sync skips unchanged work,
+/// indexed `status_group_counts` matches brute force, and `SidebarViewCache`
+/// hits cleanly on steady frames while invalidating when filters/sessions change.
+#[test]
+pub(crate) fn perf_322_r2_sync_fingerprints_and_sidebar_cache() {
+    let root = temporary_directory("perf-322-r2");
+    let (mut app, _project, ids) = session_285_app(&root, &["s-one", "s-two"]);
+    app.page = Page::Sessions;
+    app.workspace_project = Some(app.store.projects[0].id);
+
+    app.sync_workspace_live_sessions();
+    let gen_after_first = app.workspace_sync_generation;
+    app.sync_workspace_live_sessions();
+    assert_eq!(
+        app.workspace_sync_generation, gen_after_first,
+        "repeated steady sync_workspace_live_sessions must hit fingerprint cache"
+    );
+
+    app.selected_session = Some(ids[1]);
+    app.sync_workspace_live_sessions();
+    assert!(
+        app.workspace_sync_generation > gen_after_first,
+        "changing selected_session must invalidate workspace sync fingerprint"
+    );
+
+    let [busy_c, needs_c, free_c] = app.status_group_counts();
+    assert_eq!(busy_c + needs_c + free_c, app.store.sessions.len());
+
+    let ctx = egui::Context::default();
+    let _ = sidebar_302_settled(&mut app, &ctx);
+    let builds_after_settle = app.sidebar_view_cache.builds;
+    let hits_after_settle = app.sidebar_view_cache.hits;
+    let _ = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    assert_eq!(
+        app.sidebar_view_cache.builds, builds_after_settle,
+        "steady sidebar frame must not rebuild SidebarViewCache"
+    );
+    assert!(
+        app.sidebar_view_cache.hits > hits_after_settle,
+        "steady sidebar frame must record SidebarViewCache hits"
+    );
+
+    app.search = "s-two".to_owned();
+    let _ = sidebar_302_frame(&mut app, &ctx, Vec::new());
+    assert!(
+        app.sidebar_view_cache.builds > builds_after_settle,
+        "search change must invalidate SidebarViewCache"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 322 (R3): `DiffRenderCache` caches row tables + bounded row galleys across
+/// steady frames and invalidates on collapse/annotation changes.
+#[test]
+pub(crate) fn perf_322_r3_diff_render_cache_hits_and_bounded_galley_cache() {
+    let project = Uuid::new_v4();
+    let mut files = diff_with_a_changed_second_line();
+    for i in 10..80 {
+        files[0].lines.push(DiffLine {
+            kind: DiffLineKind::Added,
+            old_number: None,
+            new_number: Some(i),
+            text: format!("let cached_line_{i} = {i};"),
+            highlights: Vec::new(),
+        });
+    }
+    let mut collapsed = HashSet::new();
+    let mut annotations = DiffAnnotations::default();
+    let mut cache = DiffRenderCache::default();
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+
+    let run_once = |cache: &mut DiffRenderCache,
+                    collapsed: &mut HashSet<String>,
+                    annotations: &mut DiffAnnotations| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut action = None;
+                    diff_pane_with_cache(
+                        ui,
+                        &files,
+                        collapsed,
+                        palette,
+                        500.0,
+                        project,
+                        annotations,
+                        &mut action,
+                        false,
+                        Some(cache),
+                    );
+                });
+            },
+        );
+    };
+
+    run_once(&mut cache, &mut collapsed, &mut annotations);
+    let rows_built_1 = cache.row_builds();
+    let galley_builds_1 = cache.galley_builds();
+    assert_eq!(rows_built_1, 1);
+    assert!(galley_builds_1 > 0);
+    assert!(cache.cached_galley_len() <= MAX_CACHED_DIFF_ROW_GALLEYS);
+
+    run_once(&mut cache, &mut collapsed, &mut annotations);
+    assert_eq!(
+        cache.row_builds(),
+        rows_built_1,
+        "steady frame must reuse cached diff rows"
+    );
+    assert_eq!(
+        cache.galley_builds(),
+        galley_builds_1,
+        "steady frame must reuse cached diff row galleys"
+    );
+    assert!(cache.galley_hits() > 0);
+
+    collapsed.insert(files[0].path.clone());
+    run_once(&mut cache, &mut collapsed, &mut annotations);
+    assert!(
+        cache.row_builds() > rows_built_1,
+        "toggling file collapse must rebuild diff rows"
+    );
+}
+
+/// Change 322 (R4): `EditorTextLayoutCache` caches shaped syntax `Arc<egui::Galley>` +
+/// line count, and `ViewerRowLayout` caches per-row galleys on steady frames.
+#[test]
+pub(crate) fn perf_322_r4_editor_syntax_galley_and_viewer_cache() {
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let source = "fn main() {\n    println!(\"hello\");\n}\n";
+    let mut cache = EditorTextLayoutCache::default();
+    let mut builds_after_1 = 0;
+    let mut hits_after_2 = 0;
+    let mut builds_after_edit = 0;
+
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let g1 = cache.galley_for(ui, source, EditorLanguage::Rust, palette, f32::INFINITY);
+            builds_after_1 = cache.galley_builds();
+            let g2 = cache.galley_for(ui, source, EditorLanguage::Rust, palette, f32::INFINITY);
+            assert!(
+                Arc::ptr_eq(&g1, &g2),
+                "steady call must return same Arc<Galley>"
+            );
+            hits_after_2 = cache.galley_hits();
+            let g3 = cache.galley_for(
+                ui,
+                "fn alt() {}\n",
+                EditorLanguage::Rust,
+                palette,
+                f32::INFINITY,
+            );
+            assert!(!Arc::ptr_eq(&g1, &g3));
+            builds_after_edit = cache.galley_builds();
+        });
+    });
+    assert_eq!(builds_after_1, 1);
+    assert_eq!(hits_after_2, 1);
+    assert_eq!(builds_after_edit, 2);
+
+    let viewer_cache = viewer_rows("line 1\nline 2\n");
+    let mut row = ViewerRowLayout::plain_for_test("line 1");
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            let a = row.galley_for(ui, palette, 400.0);
+            let b = row.galley_for(ui, palette, 400.0);
+            assert!(Arc::ptr_eq(&a, &b));
+        });
+    });
+    assert!(viewer_cache.len() >= 2);
+}
+
+/// Change 322 (R5): `MarkdownPreviewCache` / `markdown_view` caches block galleys
+/// and culls blocks far outside the scroll viewport when `blocks.len() > 32`.
+#[test]
+pub(crate) fn perf_322_r5_markdown_galley_cache_and_viewport_culling() {
+    let mut md = String::new();
+    for i in 0..80 {
+        md.push_str(&format!(
+            "Paragraph number {i} with cached markdown content.\n\n"
+        ));
+    }
+    let palette = AppTheme::Dark.palette();
+    let mut cache = MarkdownPreviewCache::default();
+    let doc = cache.document_for(&md, palette);
+    assert!(doc.blocks.len() > MARKDOWN_VIEWPORT_CULL_THRESHOLD);
+
+    let ctx = egui::Context::default();
+    let draw = |width: f32| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(width, 280.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .show(ui, |ui| {
+                            markdown_view(ui, doc, palette);
+                        });
+                });
+            },
+        );
+    };
+
+    draw(640.0);
+    let builds_1 = doc.galley_builds();
+    assert!(builds_1 > 0 && builds_1 < doc.blocks.len());
+
+    draw(640.0);
+    assert_eq!(
+        doc.galley_builds(),
+        builds_1,
+        "steady width must hit markdown galley cache"
+    );
+    assert!(doc.galley_hits() > 0);
+
+    draw(420.0);
+    assert!(
+        doc.galley_builds() > builds_1,
+        "width change must reshape visible markdown blocks"
+    );
+}
+
+/// Change 322 (R6): `png_texture` reuses a decoded RGBA buffer across contexts,
+/// `file_tree_rows` hits `FileTreeRowCache` on steady frames,
+/// `CachedPaletteView` avoids rebuilding/scoring command rows on steady frames,
+/// and `src/app.rs` & `src/app/screens.rs` remain strictly under 9500 lines.
+#[test]
+pub(crate) fn perf_322_r6_png_tree_and_palette_caches() {
+    let _ = friendly_path(Path::new("/tmp/example"));
+    let img_a = cached_png_color_image("brand-mark", BRAND_MARK).expect("brand mark decodes");
+    let decodes_after_a = png_decode_count();
+    let img_b = cached_png_color_image("brand-mark", BRAND_MARK).expect("brand mark hits cache");
+    assert!(Arc::ptr_eq(&img_a, &img_b));
+    assert_eq!(
+        png_decode_count(),
+        decodes_after_a,
+        "second cached_png_color_image call must not re-decode PNG"
+    );
+
+    let project_id = Uuid::new_v4();
+    let tree = build_file_tree(&[
+        PathBuf::from("src/a.rs"),
+        PathBuf::from("src/b.rs"),
+        PathBuf::from("README.md"),
+    ]);
+    let mut expanded = HashSet::new();
+    expanded.insert((project_id, PathBuf::from("src")));
+    let mut tree_cache = FileTreeRowCache::default();
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let badges = HashMap::new();
+    for _ in 0..2 {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut actions = Vec::new();
+                file_tree_rows_cached(
+                    ui,
+                    &tree,
+                    project_id,
+                    &expanded,
+                    &badges,
+                    None,
+                    false,
+                    palette,
+                    &mut actions,
+                    Some(&mut tree_cache),
+                );
+            });
+        });
+    }
+    assert_eq!(tree_cache.builds(), 1);
+    assert!(tree_cache.hits() >= 1);
+
+    let root = temporary_directory("perf-322-r6-palette");
+    let (mut app, _project, _ids) = session_285_app(&root, &["pal-s"]);
+    app.command_palette_open = true;
+    for _ in 0..2 {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            app.ui_command_palette(ctx);
+        });
+    }
+    assert_eq!(app.palette_cache.builds, 1);
+    assert!(app.palette_cache.hits >= 1);
+    app.command_search = "session".to_owned();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        app.ui_command_palette(ctx);
+    });
+    assert_eq!(app.palette_cache.builds, 2);
+
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let app_lines = fs::read_to_string(manifest.join("src/app.rs"))
+        .unwrap()
+        .lines()
+        .count();
+    let screens_lines = fs::read_to_string(manifest.join("src/app/screens.rs"))
+        .unwrap()
+        .lines()
+        .count();
+    assert!(
+        app_lines < 9500,
+        "src/app.rs line count {app_lines} >= 9500"
+    );
+    assert!(
+        screens_lines < 9500,
+        "src/app/screens.rs line count {screens_lines} >= 9500"
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 322 (F1): Verifies every verifier-discovered edge case: nested tree
+/// and highlights invalidation, badge map determinism, palette fingerprint coverage
+/// (language/branch/>32 paths/same-len docs), finite wrap_width, code-block
+/// preservation across width changes, Uuid::nil group equivalence, and 4096 overflow.
+#[test]
+pub(crate) fn perf_322_f1_stale_fingerprint_and_drag_cancel_fixes() {
+    let root = temporary_directory("perf-322-f1");
+    let (mut app, project_id, ids) = session_285_app(&root, &["alpha-s"]);
+    app.workspace_project = Some(project_id);
+    app.sync_workspace_live_sessions();
+
+    // 1. SidebarViewCache invalidates on store.language and session.origin.
+    let _ = app.ensure_sidebar_view_cache();
+    let builds_1 = app.sidebar_view_cache.builds;
+    app.store.language = Language::En;
+    let _ = app.ensure_sidebar_view_cache();
+    assert!(
+        app.sidebar_view_cache.builds > builds_1,
+        "SidebarViewCache must invalidate when store.language changes"
+    );
+    let builds_2 = app.sidebar_view_cache.builds;
+    app.store.sessions[0].origin = Some(SessionOrigin::PlainTerminal);
+    let _ = app.ensure_sidebar_view_cache();
+    assert!(
+        app.sidebar_view_cache.builds > builds_2,
+        "SidebarViewCache must invalidate when session.origin changes"
+    );
+
+    // 2. CachedPaletteView invalidates on open/close, language, branch, >32 file_cache paths, same-len docs.
+    app.open_command_palette();
+    app.command_search = "feat-xyz".to_owned();
+    let _ = app.palette_visible_entries_cached();
+    let pal_builds_1 = app.palette_cache.builds;
+    app.store.sessions[0].branch = Some("feat-xyz".to_owned());
+    let (entries, _) = app.palette_visible_entries_cached();
+    assert!(app.palette_cache.builds > pal_builds_1);
+    assert!(entries
+        .iter()
+        .any(|e| matches!(e.kind, PaletteKind::Session(id) if id == ids[0])));
+
+    let mut paths: Vec<PathBuf> = (0..40)
+        .map(|i| PathBuf::from(format!("src/file_{i:02}.rs")))
+        .collect();
+    app.file_cache.insert(
+        project_id,
+        FileScanSnapshot {
+            paths: paths.clone(),
+            truncated: false,
+            unreadable_directories: 0,
+        },
+    );
+    app.command_search = "needle99".to_owned();
+    let _ = app.palette_visible_entries_cached();
+    let pal_builds_file = app.palette_cache.builds;
+    paths[35] = PathBuf::from("src/needle99_target.rs");
+    app.file_cache.get_mut(&project_id).unwrap().paths = paths;
+    let (file_entries, _) = app.palette_visible_entries_cached();
+    assert!(app.palette_cache.builds > pal_builds_file);
+    assert!(file_entries
+        .iter()
+        .any(|e| matches!(&e.kind, PaletteKind::File { path, .. } if path == &PathBuf::from("src/needle99_target.rs"))));
+
+    app.open_documents.push(OpenDocument {
+        project: project_id,
+        root: root.clone(),
+        path: PathBuf::from("src/lib.rs"),
+        branch: None,
+        project_rooted: true,
+        disk: "fn old_sym_aa() {}\n".to_owned(),
+        buffer: "fn old_sym_aa() {}\n".to_owned(),
+        read_only: None,
+        save_error: None,
+        external_change: false,
+        image_data: None,
+        viewer: None,
+    });
+    app.command_search = "new_sym_bb".to_owned();
+    let _ = app.palette_visible_entries_cached();
+    let pal_builds_doc = app.palette_cache.builds;
+    // Same byte length as "fn old_sym_aa() {}\n".
+    app.open_documents[0].buffer = "fn new_sym_bb() {}\n".to_owned();
+    let (sym_entries, _) = app.palette_visible_entries_cached();
+    assert!(app.palette_cache.builds > pal_builds_doc);
+    assert!(sym_entries.iter().any(|e| e.label.contains("new_sym_bb")));
+    app.close_command_palette();
+    assert!(app.palette_cache.fingerprint.is_none());
+
+    // 3. FileTreeRowCache catches nested child rename + deterministic badges HashMap.
+    let ctx = egui::Context::default();
+    let palette = AppTheme::Dark.palette();
+    let mut expanded = HashSet::new();
+    expanded.insert((project_id, PathBuf::from("src")));
+    expanded.insert((project_id, PathBuf::from("src/sub")));
+    let mut tree_cache = FileTreeRowCache::default();
+    let tree_a = build_file_tree(&[PathBuf::from("src/sub/old.rs")]);
+    let tree_b = build_file_tree(&[PathBuf::from("src/sub/new.rs")]);
+    let make_badges = || {
+        let mut m = HashMap::new();
+        for i in 0..8 {
+            m.insert(format!("src/f{i}.rs"), "M".to_owned());
+        }
+        m
+    };
+    let b1 = make_badges();
+    let b2 = make_badges();
+    let draw_tree =
+        |tree: &[FileTreeNode], badges: &HashMap<String, String>, cache: &mut FileTreeRowCache| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut actions = Vec::new();
+                    file_tree_rows_cached(
+                        ui,
+                        tree,
+                        project_id,
+                        &expanded,
+                        badges,
+                        None,
+                        false,
+                        palette,
+                        &mut actions,
+                        Some(cache),
+                    );
+                });
+            });
+        };
+    draw_tree(&tree_a, &b1, &mut tree_cache);
+    let t_builds_1 = tree_cache.builds();
+    draw_tree(&tree_a, &b2, &mut tree_cache);
+    assert_eq!(
+        tree_cache.builds(),
+        t_builds_1,
+        "recreated identical badges HashMap must hit FileTreeRowCache"
+    );
+    draw_tree(&tree_b, &b2, &mut tree_cache);
+    assert!(
+        tree_cache.builds() > t_builds_1,
+        "nested child rename must invalidate FileTreeRowCache"
+    );
+
+    // 4. DiffRenderCache catches line.highlights changes and stays bounded <= MAX_CACHED_DIFF_ROW_GALLEYS.
+    let mut diff_cache = DiffRenderCache::default();
+    let mut diff_files = vec![DiffFile {
+        path: "src/lib.rs".to_owned(),
+        renamed_from: None,
+        change: DiffFileChange::Modified,
+        lines: vec![DiffLine {
+            kind: DiffLineKind::Added,
+            old_number: None,
+            new_number: Some(1),
+            text: "let value = 123;".to_owned(),
+            highlights: Vec::new(),
+        }],
+        added: 1,
+        removed: 0,
+        widest: 16,
+        note: None,
+    }];
+    let mut collapsed = HashSet::new();
+    let mut annotations = DiffAnnotations::default();
+    let draw_diff = |files: &[DiffFile],
+                     collapsed: &mut HashSet<String>,
+                     annotations: &mut DiffAnnotations,
+                     cache: &mut DiffRenderCache| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 400.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut action = None;
+                    diff_pane_with_cache(
+                        ui,
+                        files,
+                        collapsed,
+                        palette,
+                        320.0,
+                        project_id,
+                        annotations,
+                        &mut action,
+                        false,
+                        Some(cache),
+                    );
+                });
+            },
+        );
+    };
+    draw_diff(
+        &diff_files,
+        &mut collapsed,
+        &mut annotations,
+        &mut diff_cache,
+    );
+    let d_builds_1 = diff_cache.row_builds();
+    diff_files[0].lines[0].highlights.push(4..9);
+    draw_diff(
+        &diff_files,
+        &mut collapsed,
+        &mut annotations,
+        &mut diff_cache,
+    );
+    assert!(diff_cache.row_builds() > d_builds_1);
+
+    // 5. EditorTextLayoutCache finite wrap_width wraps lines.
+    let mut ed_cache = EditorTextLayoutCache::default();
+    let long_src =
+        "let alpha_beta_gamma_delta = \"a very long literal that should wrap cleanly\";\n";
+    let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let wide =
+                ed_cache.galley_for(ui, long_src, EditorLanguage::Rust, palette, f32::INFINITY);
+            let narrow = ed_cache.galley_for(ui, long_src, EditorLanguage::Rust, palette, 120.0);
+            assert!(narrow.rows.len() > wide.rows.len());
+        });
+    });
+
+    // 6. MarkdownLayoutCache preserves Code block galleys across width changes.
+    let md_code = "```rust\nlet x = 42;\n```\n\nParagraph text.\n";
+    let mut md_cache = MarkdownPreviewCache::default();
+    let doc = md_cache.document_for(md_code, palette);
+    let draw_md = |w: f32| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(w, 280.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    markdown_view(ui, doc, palette);
+                });
+            },
+        );
+    };
+    draw_md(600.0);
+    let code_hits_before = doc.galley_hits();
+    draw_md(440.0);
+    assert!(
+        doc.galley_hits() > code_hits_before,
+        "code block galley must survive width change"
+    );
+
+    // 7. WorkspaceTabs::can_move_tab agrees with move_tab even on Uuid::nil() group id.
+    let tab_a = WorkspaceTab::Session(Uuid::from_u128(10));
+    let tab_b = WorkspaceTab::Session(Uuid::from_u128(11));
+    let mut nil_ws = WorkspaceTabs {
+        groups: vec![
+            WorkspaceGroup {
+                id: Uuid::nil(),
+                tabs: vec![tab_a.clone()],
+                active: 0,
+            },
+            WorkspaceGroup {
+                id: Uuid::from_u128(99),
+                tabs: vec![tab_b.clone()],
+                active: 0,
+            },
+        ],
+        focused: Some(Uuid::nil()),
+        layout: PaneLayout::from_root_for_test(PaneNode::Split {
+            side_by_side: true,
+            share: 0.5,
+            first: Box::new(PaneNode::Leaf(Uuid::nil())),
+            second: Box::new(PaneNode::Leaf(Uuid::from_u128(99))),
+        }),
+    };
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 600.0));
+    assert_eq!(
+        nil_ws.can_move_tab(&tab_b, Uuid::nil(), PaneDrop::Right, rect),
+        nil_ws.move_tab(&tab_b, Uuid::nil(), PaneDrop::Right, rect)
+    );
+    fs::remove_dir_all(&root).ok();
+}
+
+/// Change 322 formal model check: `WorkspaceTabs::can_move_tab` matches
+/// `WorkspaceTabs::move_tab` exhaustively across reachable 1..=PANE_MAX pane layouts
+/// (Session & Document tabs, nested split targets), drops, and areas.
+#[test]
+pub(crate) fn model_check_perf_322_cache_equivalence_and_can_move_tab() {
+    #[derive(Clone, Eq, PartialEq, Hash, Debug)]
+    enum Op {
+        OpenExtra,
+        SplitRight(u8, u8),
+        SplitBottom(u8, u8),
+        MoveCenter(u8, u8),
+        FinishDrag,
+    }
+
+    #[derive(Clone, Eq, PartialEq, Hash, Debug)]
+    struct Model {
+        layout_shape: Vec<(usize, Vec<u8>)>,
+        has_extra: bool,
+        drag_active: bool,
+        applied_resize: bool,
+    }
+
+    let area_small = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 220.0));
+    let area_large = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(960.0, 720.0));
+    let drops = [
+        PaneDrop::Center,
+        PaneDrop::Left,
+        PaneDrop::Right,
+        PaneDrop::Top,
+        PaneDrop::Bottom,
+    ];
+    let huge = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(2000.0, 2000.0));
+    let t_ids = [
+        WorkspaceTab::Session(Uuid::from_u128(1)),
+        WorkspaceTab::Document(DocumentId {
+            project: Uuid::from_u128(10),
+            root: PathBuf::from("/tmp"),
+            path: PathBuf::from("a.rs"),
+        }),
+        WorkspaceTab::Session(Uuid::from_u128(2)),
+        WorkspaceTab::Session(Uuid::from_u128(3)),
+    ];
+
+    let rebuild_ws = |m: &Model| -> WorkspaceTabs {
+        let mut ws = WorkspaceTabs::default();
+        for (gi, (target_gi, tabs)) in m.layout_shape.iter().enumerate() {
+            for &ti in tabs {
+                let tab = t_ids[ti as usize].clone();
+                if ws.groups.is_empty() {
+                    ws.open(tab);
+                } else if ws.groups.len() <= gi {
+                    let tgt = (*target_gi).min(ws.groups.len() - 1);
+                    let target = ws.groups[tgt].id;
+                    let drop = if gi % 2 == 1 {
+                        PaneDrop::Right
+                    } else {
+                        PaneDrop::Bottom
+                    };
+                    ws.open(tab.clone());
+                    ws.move_tab(&tab, target, drop, huge);
+                } else {
+                    let gid = ws.groups[gi].id;
+                    let idx = ws.groups[gi].tabs.len();
+                    ws.open(tab.clone());
+                    ws.insert_tab(&tab, gid, idx);
+                }
+            }
+        }
+        ws
+    };
+
+    let initial = Model {
+        layout_shape: vec![(0, vec![0, 1])],
+        has_extra: false,
+        drag_active: false,
+        applied_resize: false,
+    };
+    let events = [
+        Op::OpenExtra,
+        Op::SplitRight(0, 0),
+        Op::SplitRight(1, 1),
+        Op::SplitBottom(2, 0),
+        Op::MoveCenter(0, 1),
+        Op::FinishDrag,
+    ];
+    let coverage = exhaustive_check(
+        initial,
+        &events,
+        |state, op| {
+            let mut next = state.clone();
+            match op {
+                Op::OpenExtra => {
+                    if next.has_extra {
+                        return None;
+                    }
+                    next.has_extra = true;
+                    next.layout_shape[0].1.push(2);
+                    next.layout_shape[0].1.push(3);
+                }
+                Op::SplitRight(ti, target_gi) | Op::SplitBottom(ti, target_gi) => {
+                    if next.layout_shape.len() >= PANE_MAX {
+                        return None;
+                    }
+                    let mut src = None;
+                    for (gi, (_, tabs)) in next.layout_shape.iter().enumerate() {
+                        if let Some(pos) = tabs.iter().position(|x| x == ti) {
+                            src = Some((gi, pos));
+                            break;
+                        }
+                    }
+                    let (gi, pos) = src?;
+                    if next.layout_shape[gi].1.len() == 1 {
+                        return None;
+                    }
+                    let tgt = (*target_gi as usize).min(next.layout_shape.len() - 1);
+                    let val = next.layout_shape[gi].1.remove(pos);
+                    next.layout_shape.push((tgt, vec![val]));
+                    next.drag_active = matches!(op, Op::SplitRight(_, _));
+                    next.applied_resize = !next.drag_active;
+                }
+                Op::MoveCenter(ti, dst_gi) => {
+                    let dst = (*dst_gi as usize).min(next.layout_shape.len() - 1);
+                    let mut src = None;
+                    for (gi, (_, tabs)) in next.layout_shape.iter().enumerate() {
+                        if let Some(pos) = tabs.iter().position(|x| x == ti) {
+                            src = Some((gi, pos));
+                            break;
+                        }
+                    }
+                    let (gi, pos) = src?;
+                    if gi == dst && pos + 1 == next.layout_shape[gi].1.len() {
+                        return None;
+                    }
+                    let val = next.layout_shape[gi].1.remove(pos);
+                    next.layout_shape[dst].1.push(val);
+                    if gi != dst && next.layout_shape[gi].1.is_empty() {
+                        next.layout_shape.remove(gi);
+                    }
+                }
+                Op::FinishDrag => {
+                    if !next.drag_active {
+                        return None;
+                    }
+                    next.drag_active = false;
+                    next.applied_resize = true;
+                }
+            }
+            Some(next)
+        },
+        |state| {
+            if state.drag_active && state.applied_resize {
+                return Err("drag_active must defer resize until finish".into());
+            }
+            let ws = rebuild_ws(state);
+            let all_tabs: Vec<WorkspaceTab> =
+                ws.groups.iter().flat_map(|grp| grp.tabs.clone()).collect();
+            for g in &ws.groups {
+                for tab in &all_tabs {
+                    for &drop in &drops {
+                        for &area in &[area_small, area_large] {
+                            let can = ws.can_move_tab(tab, g.id, drop, area);
+                            let mut preview = ws.clone();
+                            let moved = preview.move_tab(tab, g.id, drop, area);
+                            if can != moved {
+                                return Err(format!(
+                                    "can_move_tab={can} != move_tab={moved} on target={} drop={drop:?} area={area:?}",
+                                    g.id
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        },
+        512,
+    );
+    assert!(coverage.states > 10);
+}

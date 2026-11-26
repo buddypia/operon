@@ -51,9 +51,10 @@
 - `src/git.rs::git_stage_hunk`, `git_discard_hunk`, `extract_single_hunk_patch`: per-hunk actions.
 - `src/git.rs::git_create_pull_request`, `list_pull_requests`, `summarize_checks`: PR calls.
 - `src/git.rs::commit_message_prompt`, `ai_diff_review_prompt`, `summarize_commit_failure`: agent prompts.
-- `src/ui/diff.rs::diff_pane_with_actions`: the virtualised diff pane and hunk buttons.
-- `src/config.rs::GIT_DIFF_MAX_BYTES`, `AI_REVIEW_TIMEOUT_SECONDS`, `COMMIT_MESSAGE_TIMEOUT_SECONDS`: the limits.
+- `src/ui/diff.rs::diff_pane_with_actions`, `diff_pane_with_cache`, `DiffRenderCache`: the virtualised diff pane, cached row/offset tables, bounded shaped row galley cache (`src/config.rs::MAX_CACHED_DIFF_ROW_GALLEYS`), and hunk buttons.
+- `src/config.rs::GIT_DIFF_MAX_BYTES`, `MAX_CACHED_DIFF_ROW_GALLEYS`, `AI_REVIEW_TIMEOUT_SECONDS`, `COMMIT_MESSAGE_TIMEOUT_SECONDS`: the limits.
 - Tests:
+- `perf_322_r3_diff_render_cache_hits_and_bounded_galley_cache`: steady-frame row/galley reuse, collapse invalidation, and bound check.
 - `parses_porcelain_changes_including_untracked_and_renames`: status parsing.
 - `git_changes_include_untracked_renamed_and_unborn_repository_content`: untracked and unborn cases.
 - `parses_the_diff_shapes_git_writes_for_a_working_tree`: diff parser shapes.

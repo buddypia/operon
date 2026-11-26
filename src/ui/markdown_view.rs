@@ -24,6 +24,22 @@ struct MarkdownPreviewKey {
     colours: SyntaxColours,
 }
 
+#[derive(Default)]
+struct MarkdownBlockLayoutSlot {
+    height: f32,
+    galley: Option<Arc<egui::Galley>>,
+}
+
+#[derive(Default)]
+struct MarkdownLayoutCache {
+    key: Option<(u32, u32, SyntaxColours)>,
+    slots: Vec<Option<MarkdownBlockLayoutSlot>>,
+    code_key: Option<(u32, SyntaxColours)>,
+    code_galleys: Vec<Option<Arc<egui::Galley>>>,
+    galley_builds: usize,
+    galley_hits: usize,
+}
+
 /// A Markdown document with everything parsed that can be parsed before there
 /// is a frame to draw it into.
 ///
@@ -35,6 +51,22 @@ struct MarkdownPreviewKey {
 #[derive(Default)]
 pub(crate) struct RenderedMarkdown {
     pub(crate) blocks: Vec<RenderedBlock>,
+    layout_cache: std::sync::Mutex<MarkdownLayoutCache>,
+}
+
+impl RenderedMarkdown {
+    #[cfg(test)]
+    pub(crate) fn galley_builds(&self) -> usize {
+        self.layout_cache
+            .lock()
+            .map(|c| c.galley_builds)
+            .unwrap_or(0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn galley_hits(&self) -> usize {
+        self.layout_cache.lock().map(|c| c.galley_hits).unwrap_or(0)
+    }
 }
 
 /// One block of a document, with its inline runs already found.
@@ -132,7 +164,27 @@ pub(crate) fn render_markdown(text: &str, palette: &Palette) -> RenderedMarkdown
             },
         })
         .collect();
-    RenderedMarkdown { blocks }
+    RenderedMarkdown {
+        blocks,
+        layout_cache: std::sync::Mutex::default(),
+    }
+}
+
+fn estimated_block_height(block: &RenderedBlock) -> f32 {
+    match block {
+        RenderedBlock::Heading { level, .. } => {
+            if *level <= 2 {
+                44.0
+            } else {
+                32.0
+            }
+        }
+        RenderedBlock::Paragraph(_) => 26.0,
+        RenderedBlock::Bullet { .. } | RenderedBlock::Quote(_) => 24.0,
+        RenderedBlock::Code { .. } => 64.0,
+        RenderedBlock::Rule => 18.0,
+        RenderedBlock::Table { rows, .. } => 28.0 + rows.len() as f32 * 24.0,
+    }
 }
 
 /// Render Markdown the way a person reads it rather than the way it is stored.
@@ -142,20 +194,70 @@ pub(crate) fn render_markdown(text: &str, palette: &Palette) -> RenderedMarkdown
 /// wrong format. It renders what agents write — headings, lists, checklists,
 /// fences, quotes, tables, links — and leaves anything else as the text it was.
 pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, palette: &Palette) {
-    for block in &document.blocks {
+    let avail_w = ui.available_width().max(1.0);
+    let width_key = (avail_w.round() as u32).max(1);
+    let ppp_bits = ui.ctx().pixels_per_point().to_bits();
+    let colours = SyntaxColours::from(palette);
+    let key = (width_key, ppp_bits, colours);
+    let cull = document.blocks.len() > MARKDOWN_VIEWPORT_CULL_THRESHOLD;
+    let clip = ui.clip_rect();
+
+    let code_key = (ppp_bits, colours);
+    if let Ok(mut cache) = document.layout_cache.lock() {
+        if cache.key.as_ref() != Some(&key) || cache.slots.len() != document.blocks.len() {
+            cache.key = Some(key);
+            cache.slots = (0..document.blocks.len()).map(|_| None).collect();
+        }
+        if cache.code_key.as_ref() != Some(&code_key)
+            || cache.code_galleys.len() != document.blocks.len()
+        {
+            cache.code_key = Some(code_key);
+            cache.code_galleys = vec![None; document.blocks.len()];
+        }
+    }
+
+    for (idx, block) in document.blocks.iter().enumerate() {
+        let (cached, cached_code) = document
+            .layout_cache
+            .lock()
+            .ok()
+            .map(|cache| {
+                (
+                    cache
+                        .slots
+                        .get(idx)
+                        .and_then(|s| s.as_ref())
+                        .map(|s| (s.height, s.galley.clone())),
+                    cache.code_galleys.get(idx).and_then(|g| g.clone()),
+                )
+            })
+            .unwrap_or((None, None));
+
+        let y = ui.cursor().top();
+        if cull {
+            if let Some((height, _)) = &cached {
+                if y + *height < clip.top() - 300.0 || y > clip.bottom() + 300.0 {
+                    ui.allocate_space(egui::vec2(avail_w, *height));
+                    continue;
+                }
+            } else if y > clip.bottom() + 300.0 {
+                ui.allocate_space(egui::vec2(avail_w, estimated_block_height(block)));
+                continue;
+            }
+        }
+
+        let y_before = ui.cursor().top();
+        let mut shaped_galley: Option<Arc<egui::Galley>> = None;
         match block {
             RenderedBlock::Heading { level, spans } => {
                 ui.add_space(if *level <= 2 { 12.0 } else { 8.0 });
-                // Weight carries the hierarchy and size only widens the top of
-                // it, the way the rest of the app does it: six sizes for six
-                // heading levels would make an outline out of a document.
                 let size = match level {
                     1 => 22.0,
                     2 => 18.0,
                     3 => 16.0,
                     _ => 14.0,
                 };
-                markdown_line(
+                shaped_galley = markdown_line_cached(
                     ui,
                     spans,
                     palette,
@@ -164,6 +266,8 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
                         strong: true,
                         color: palette.text_strong,
                     },
+                    cached.as_ref().and_then(|(_, g)| g.as_ref()),
+                    &document.layout_cache,
                 );
                 if *level <= 2 {
                     ui.add_space(2.0);
@@ -172,7 +276,14 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
             }
             RenderedBlock::Paragraph(spans) => {
                 ui.add_space(6.0);
-                markdown_line(ui, spans, palette, MarkdownInk::body(palette));
+                shaped_galley = markdown_line_cached(
+                    ui,
+                    spans,
+                    palette,
+                    MarkdownInk::body(palette),
+                    cached.as_ref().and_then(|(_, g)| g.as_ref()),
+                    &document.layout_cache,
+                );
             }
             RenderedBlock::Bullet {
                 depth,
@@ -182,17 +293,10 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
             } => {
                 ui.horizontal_top(|ui| {
                     ui.add_space(12.0 + *depth as f32 * 16.0);
-                    // An ordered checklist keeps its number: `1. [x] …` is a
-                    // step that is both first and done, and dropping the `1.`
-                    // to make room for the box loses the half a reader was
-                    // counting with.
                     if let Some(done) = task {
                         if marker != "•" {
                             ui.label(RichText::new(marker).size(14.0).color(palette.accent_soft));
                         }
-                        // The words beside either box stay body ink. A finished
-                        // plan drawn in grey is a finished plan nobody can
-                        // read, and the box already says which is which.
                         ui.label(
                             RichText::new(if *done {
                                 ICON_TASK_DONE
@@ -240,16 +344,31 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
                         if !language.is_empty() {
                             ui.label(RichText::new(language).size(11.5).color(palette.text_faint));
                         }
-                        // One clone of one fence's layout — its text and its
-                        // sections, not a re-highlight. `egui::Label` takes the
-                        // job by value and there is no borrowing form, and
-                        // egui's galley cache keys on the job, so the layout
-                        // itself is not redone. The parse and the grammar pass,
-                        // which is where the cost was, are hoisted.
-                        ui.add(
-                            egui::Label::new(egui::WidgetText::from(job.clone()))
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                        );
+                        if let Some(galley) = cached_code.as_ref() {
+                            if let Ok(mut cache) = document.layout_cache.lock() {
+                                cache.galley_hits += 1;
+                            }
+                            let (rect, _) =
+                                ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+                            ui.painter()
+                                .galley(rect.min, Arc::clone(galley), palette.text);
+                            shaped_galley = Some(Arc::clone(galley));
+                        } else {
+                            let galley = ui.fonts_mut(|fonts| fonts.layout_job(job.clone()));
+                            if let Ok(mut cache) = document.layout_cache.lock() {
+                                cache.galley_builds += 1;
+                                if cache.code_key.as_ref() == Some(&code_key) {
+                                    if let Some(slot) = cache.code_galleys.get_mut(idx) {
+                                        *slot = Some(Arc::clone(&galley));
+                                    }
+                                }
+                            }
+                            let (rect, _) =
+                                ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+                            ui.painter()
+                                .galley(rect.min, Arc::clone(&galley), palette.text);
+                            shaped_galley = Some(galley);
+                        }
                     });
             }
             RenderedBlock::Rule => {
@@ -275,7 +394,63 @@ pub(crate) fn markdown_view(ui: &mut egui::Ui, document: &RenderedMarkdown, pale
                     });
             }
         }
+        let delta = (ui.cursor().top() - y_before - ui.spacing().item_spacing.y).max(0.0);
+        if let Ok(mut cache) = document.layout_cache.lock() {
+            if cache.key.as_ref() == Some(&key) {
+                if let Some(slot) = cache.slots.get_mut(idx) {
+                    *slot = Some(MarkdownBlockLayoutSlot {
+                        height: delta,
+                        galley: shaped_galley.or_else(|| cached.and_then(|(_, g)| g)),
+                    });
+                }
+            }
+        }
     }
+}
+
+fn markdown_line_cached(
+    ui: &mut egui::Ui,
+    spans: &[MarkdownSpan],
+    palette: &Palette,
+    ink: MarkdownInk,
+    cached_galley: Option<&Arc<egui::Galley>>,
+    cache_lock: &std::sync::Mutex<MarkdownLayoutCache>,
+) -> Option<Arc<egui::Galley>> {
+    if spans
+        .iter()
+        .any(|span| matches!(span, MarkdownSpan::Link { .. }))
+    {
+        markdown_line(ui, spans, palette, ink);
+        return None;
+    }
+    let avail_w = ui.available_width();
+    if let Some(galley) = cached_galley {
+        if let Ok(mut cache) = cache_lock.lock() {
+            cache.galley_hits += 1;
+        }
+        let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+        ui.painter().galley(rect.min, Arc::clone(galley), ink.color);
+        return Some(Arc::clone(galley));
+    }
+    let mut job = LayoutJob::default();
+    for span in spans {
+        let rich = markdown_span_text(span, palette, ink);
+        rich.append_to(
+            &mut job,
+            ui.style(),
+            egui::FontSelection::Default,
+            egui::Align::LEFT,
+        );
+    }
+    job.wrap.max_width = avail_w;
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    if let Ok(mut cache) = cache_lock.lock() {
+        cache.galley_builds += 1;
+    }
+    let (rect, _) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
+    ui.painter()
+        .galley(rect.min, Arc::clone(&galley), ink.color);
+    Some(galley)
 }
 
 /// How a run of Markdown text is drawn before its own markers have their say.

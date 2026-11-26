@@ -44,11 +44,11 @@
 - Symbols:
   - `src/app/screens.rs::palette_actions`: the fixed actions with label and keymap id.
   - `src/app/screens.rs::palette_entries`: builds and sorts every row for the query.
-  - `src/app/screens.rs::palette_visible_entries`: truncates to the limit and counts the overflow.
+  - `src/app/screens.rs::palette_visible_entries`, `palette_visible_entries_cached`: truncates to the limit, counts the overflow, and caches visible rows in `src/app.rs::CachedPaletteView`.
   - `src/app/screens.rs::activate_palette_entry`: opens a row.
   - `src/app/screens.rs::handle_palette_keys`: arrows and Enter.
   - `src/app/screens.rs::ui_command_palette`: the window.
-  - `src/app.rs::PaletteKind`, `PaletteScore`, `PaletteEntry`, `palette_rank`: row types and ranking.
+  - `src/app.rs::PaletteKind`, `PaletteScore`, `PaletteEntry`, `CachedPaletteView`, `palette_rank`: row types, ranking, and steady-frame view cache.
   - `src/app.rs::open_command_palette`, `close_command_palette`: open and close state.
   - `src/files.rs::extract_file_symbols`: symbols; the caps live as `MAX_PALETTE_FILE_CANDIDATES` and `MAX_PALETTE_SYMBOL_CANDIDATES` there.
   - `src/config.rs::PALETTE_RESULT_LIMIT`: the 12-row limit.
@@ -73,3 +73,4 @@
 - Change 261: files of the selected project and symbols of open documents are searchable, with fixed caps (16 and 8) so a query stays fast and bounded.
 - Change 272: only the tab actions that start something (new terminal, reopen) are rows; closing and stepping act on the tab behind the palette.
 - Change 282: broadcasting to idle agents is an action row without a chord.
+- Change 322: `CachedPaletteView` memoizes sorted/filtered visible entries across steady open frames in `handle_palette_keys` and `ui_command_palette` without changing ranking semantics (pinned by `perf_322_r6_png_tree_and_palette_caches`).

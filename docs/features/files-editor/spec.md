@@ -49,11 +49,11 @@
   - `src/app.rs::watch_active_document`: the 2-second watch; `apply_watched_file` applies or drops its answer.
   - `src/app.rs::open_document_at`: opens a document under its root.
   - `src/app/screens.rs::ui_files`, `ui_file_tree`, `ui_editor`, `ui_editor_viewer`, `ui_editor_text`, `ui_editor_image_preview`: drawing.
-  - `src/ui/syntax.rs::viewer_rows`: splits text into viewer rows; `syntax_layout` builds a highlighted layout.
-  - `src/ui/markdown_view.rs::MarkdownPreviewCache`: builds the rendered Markdown once per text and theme.
+  - `src/ui/syntax.rs::viewer_rows`, `EditorTextLayoutCache`, `ViewerRowLayout`: splits text into viewer rows, caches `OnceLock` parsed syntect selectors, and retains shaped `Arc<egui::Galley>` instances per buffer/row.
+  - `src/ui/markdown_view.rs::MarkdownPreviewCache`, `markdown_view`: builds the rendered Markdown once per text and theme, caches block galleys by quantized width/DPI, and culls off-screen blocks above `MARKDOWN_VIEWPORT_CULL_THRESHOLD`.
   - `src/markdown.rs::parse_markdown`: Markdown blocks and spans.
-  - `src/ui/files.rs::file_tree_rows`, `git_status_badge`: tree rows and badges.
-  - `src/config.rs::EDITOR_FILE_MAX_BYTES`, `VIEWER_FILE_MAX_BYTES`, `EDITOR_IMAGE_MAX_BYTES`, `FILE_TREE_LIMIT`: the ceilings.
+  - `src/ui/files.rs::file_tree_rows`, `file_tree_rows_cached`, `FileTreeRowCache`, `git_status_badge`: tree rows, cached flattened rows, and badges.
+  - `src/config.rs::EDITOR_FILE_MAX_BYTES`, `VIEWER_FILE_MAX_BYTES`, `EDITOR_IMAGE_MAX_BYTES`, `FILE_TREE_LIMIT`, `MARKDOWN_VIEWPORT_CULL_THRESHOLD`: the ceilings and culling threshold.
 - Tests:
   - `the_editor_draws_every_view_without_a_window`: each view draws.
   - `a_save_refuses_to_overwrite_work_that_landed_after_the_file_was_opened`: guarded save.
@@ -85,3 +85,4 @@
 - Change 261: the editor and palette feed the agent loop (send to agent, symbol jump).
 - Change 293: terminal paths, including bare file names, resolve against the worktree and project and open in the editor.
 - Change 307: 「差分」 and 「注釈」 read the file's history afresh each time they are selected.
+- Change 322: syntect `ScopeSelectors` compile once via `OnceLock`, `EditorTextLayoutCache` / `ViewerRowLayout` / `RenderedMarkdown` retain shaped `Arc<egui::Galley>`s keyed by quantised width, DPI, and theme, Markdown views above `MARKDOWN_VIEWPORT_CULL_THRESHOLD` cull off-screen blocks, `file_tree_rows` drops per-node `PathBuf` clones in favour of `FileTreeRowCache`, and `friendly_path` / `png_texture` memoize home prefixes and decoded RGBA pixel buffers (pinned by `perf_322_r4_editor_syntax_galley_and_viewer_cache`, `perf_322_r5_markdown_galley_cache_and_viewport_culling`, and `perf_322_r6_png_tree_and_palette_caches`).

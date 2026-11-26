@@ -42,7 +42,7 @@
 - `src/app/waiting_reply.rs::reply_enter_sends` decides whether an Enter belongs to the person or an IME conversion.
 - `src/app/dock_badge.rs::dock_badge_label` and `dock_badge_change` / `track_dock_badge` keep the Dock badge in step.
 - `src/app/toast.rs::ui_brief_notice_toast` draws the corner overlay of brief notices, persistent notices and the durability warning.
-- `src/app.rs::track_attention` builds the queue; `attention_wait`, `session_attention_line`, `open_waiting_session`, `open_next_waiting_session`, `mark_session_unread`, `note_session_activity_change` live beside it.
+- `src/app/session_order.rs::track_attention` builds the queue; `attention_wait`, `session_attention_line`, `open_waiting_session`, `open_next_waiting_session`, `mark_session_unread`, `note_session_activity_change` live beside it.
 - `src/app.rs::next_in_attention_queue` and `attention_wait_label` are the pure helpers.
 - `src/app/screens.rs` draws the toolbar button 「要対応 {p0}」 and the Sessions page tiles.
 - `src/tmux.rs::activity_notification_body` words the macOS notification.

@@ -1,0 +1,40 @@
+# The state of one change. Field meanings and closed sets:
+# docs/sdlc/templates/state.yaml.
+#
+# Route: modify (existing UI, drag pipelines, sidebar/workspace sync, diff,
+# editor/viewer, markdown preview, file tree, and command palette stay visually
+# and behaviourally unchanged while eliminating per-frame rebuilds, cloning,
+# layout stalls, and mid-drag terminal resizes via caching and drag deferrals).
+# Risk: medium — touches drawing (`src/app.rs`, `src/app/screens.rs`,
+# `src/app/session_order.rs`, `src/app/terminal_output.rs`, `src/ui/`),
+# `src/config.rs`, and `src/tests.rs`; supervised autonomy; screen required
+# because `drawing` carries `screen: yes`.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "supervised"
+  risk: "medium"
+  readiness: "go"
+  screen: "approved"
+  features: "session-column terminal-pane git-changes files-editor palette"
+
+resume: "Done. Package and ship /Applications/Operon.app from main after landing."
+
+contract:
+  three-gates: "machine passed make q.fast; perf_322_ + model_check_perf_322_ 8 passed + test_dock_drag_by_pointer_events passed + feature_ 10 passed; CI runs full suite"
+  bands: "machine passed bash scripts/check-bands.sh: 0 propose breaches; largest_module_lines at diagnose (9425 < 9500)"
+  release-binary: "machine passed yes: touches src/ beyond src/tests.rs; package and ship from main after landing"
+  guards-verified-by-mutation: "machine passed mutations.py: 10 of 10 caught; verify-app session-column (20261126T135948Z-session-column) & palette (20261126T140019Z-palette) exited 0; F1 verifier findings fixed and pinned"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
