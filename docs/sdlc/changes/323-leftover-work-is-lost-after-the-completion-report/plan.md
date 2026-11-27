@@ -124,4 +124,7 @@ configuration is edited.
   the sweep, 52 mutations each judged by all fifteen tests, took 28 minutes
   and CI gives an obligation 900 seconds. Nothing was wrong with a guard; the
   whole sweep had passed here. Each group now names only the tests that guard
-  it and is recorded as its own obligation. One attempt of three spent.
+  it. Recording each group as its own obligation was refused by the second CI
+  run: the gate admits one sweep command, the change's own file with nothing
+  after it. So the file run bare runs the five groups in turn, four to
+  seven minutes here on a loaded machine. Two attempts of three spent.

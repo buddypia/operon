@@ -2,7 +2,7 @@
 # defects the empirical verifier reproduced (each test failed at the change's
 # head before its fix), the neighbours of the allowlist line it tried and
 # could not get past, and the sweep that watched every guard go red (52 of 52),
-# run as five groups so that each fits the time CI gives one obligation.
+# run as five groups so that the whole fits the time CI gives one obligation.
 digest: "22a34f83a6850e7f"
 
 obligations:
@@ -20,9 +20,5 @@ obligations:
   - F1 empirical-test :: cargo test --locked backlog_release_reason_cannot_forge_a_claim
   - F2 empirical-test :: cargo test --locked backlog_claim_by_number_refuses_a_closed_item
   - F3 empirical-test :: cargo test --locked backlog_list_of_exactly_one_thousand_says_nothing_of_more
-  - I1 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py filing
-  - I2 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py claiming
-  - I3 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py closing
-  - I4 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py findings
-  - I5 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py reach
-  - I6 empirical-test :: cargo test --locked backlog_allowlist_refuses_more_neighbours
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py
+  - I2 empirical-test :: cargo test --locked backlog_allowlist_refuses_more_neighbours

@@ -14,10 +14,12 @@ ROOT = Path(__file__).resolve().parents[4]
 
 RUN_SECONDS = 900
 
-# One group per run: `mutations.py filing`. The whole sweep in one run took 28
-# minutes, past the 900 seconds CI gives an obligation (the first CI run of
-# this change failed on exactly that), so each group names only the tests that
-# guard it and is its own obligation in verification.yaml.
+# The sweep runs group by group, each judged only by the tests that guard it.
+# Judging all 52 mutations by every backlog test took 28 minutes, past the 900
+# seconds CI gives an obligation (the first CI run of this change failed on
+# exactly that); grouped, the whole sweep takes about four. With no argument
+# every group runs, each as its own process because a sweep ends by exiting;
+# `mutations.py filing` runs one.
 TESTS = {
     "filing": ["backlog_add", "backlog_list_puts", "backlog_claim_hands"],
     "claiming": ["backlog_claim_hands", "backlog_claim_made"],
@@ -326,8 +328,16 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import mutation_sweep  # noqa: E402
 
 GROUPS = {"filing": FILING, "claiming": CLAIMING, "closing": CLOSING, "findings": FINDINGS, "reach": REACH}
+if len(sys.argv) == 1:
+    import subprocess
+
+    for _group in GROUPS:
+        print(f"== {_group}", flush=True)
+        if subprocess.run([sys.executable, __file__, _group], check=False).returncode != 0:
+            sys.exit(1)
+    sys.exit(0)
 if len(sys.argv) != 2 or sys.argv[1] not in GROUPS:
-    sys.exit("usage: mutations.py " + "|".join(GROUPS))
+    sys.exit("usage: mutations.py [" + "|".join(GROUPS) + "]")
 GROUP = sys.argv[1]
 CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS[GROUP]]]
 mutation_sweep.main(RUN_SECONDS, CHECKS, GROUPS[GROUP])
