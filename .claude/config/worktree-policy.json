@@ -40,7 +40,7 @@
   ],
   "trunk_bash_allowlist": {
     "enabled": true,
-    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, a plain branch push in the Publishing gate's form (change 304: a session whose working directory does not persist has no other form both guards admit), and the gates and release scripts that follow it, with quitting and reopening the installed app around the swap (change 173), and the reads change 239 counted among its refusals: rg, a remote's branches, landing's fast-forward pull, small text tools, scratch, the secret-guard redact filter, GitHub API reads. Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
+    "description": "Operon's trunk allowlist (change 058, moved here from a fork of worktree-policy-guard.mjs by change 073). On main only these commands run: worktree lifecycle, read-only inspection, the landing merge, a plain branch push in the Publishing gate's form (change 304: a session whose working directory does not persist has no other form both guards admit), and the gates and release scripts that follow it, with quitting and reopening the installed app around the swap (change 173), and the reads change 239 counted among its refusals: rg, a remote's branches, landing's fast-forward pull, small text tools, scratch, the secret-guard redact filter, GitHub API reads, and the backlog script (change 323: it files, scores, claims and closes the repository's GitHub issues and writes nothing in the checkout; the person approved this line). Each pattern is anchored by the guard as ^(?:pattern)(?=\\s|$) and judged per simple command; semantics and limits are in the header of .cli/hooks/worktree-policy-guard.mjs. Requires worktree-policy-guard on the Bash matcher in .claude/settings.json (no if).",
     "patterns": [
       "make\\s+(?:-C\\s+[\\w./-]+\\s+)?(?:wt\\.new(?:\\s+(?:BR|BASE|DRY)=[\\w./-]+)*|q\\.check|q\\.fast)(?:\\s+\\d*>\\s*(?:&\\d+|/dev/null))*\\s*$",
       "node\\s+(?:-v|(?:\\S*/)?\\.claude/scripts/(?:worktree-new|create-pr/ops)\\.mjs)",
@@ -81,7 +81,8 @@
       "(?:sleep|tr|dirname|readlink|paste|du|strings|md5|md5sum|sha256sum)",
       "mktemp(?:\\s+-d)?(?:\\s+-q)?\\s*$",
       "(?:/usr/bin/)?python3\\s+~/\\.claude/hooks/secret-guard\\.py\\s+redact\\s*$",
-      "gh\\s+api(?:\\s+(?:--jq|-q)\\s+\\S+|\\s+(?:--paginate|--slurp|--include|-i|--silent)|\\s+(?!-)\\S+)*\\s*$"
+      "gh\\s+api(?:\\s+(?:--jq|-q)\\s+\\S+|\\s+(?:--paginate|--slurp|--include|-i|--silent)|\\s+(?!-)\\S+)*\\s*$",
+      "python3\\s+scripts/backlog\\.py"
     ]
   }
 }
