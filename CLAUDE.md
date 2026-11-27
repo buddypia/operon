@@ -1,6 +1,4 @@
-# Operon — Claude Code notes
-
-Shared agent rules live in `AGENTS.md` and apply here too:
+# Operon
 
 @AGENTS.md
 

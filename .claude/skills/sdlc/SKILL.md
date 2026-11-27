@@ -256,6 +256,10 @@ without recording one is indistinguishable from finishing.
   meeting it here costs a mutation and meeting it in review costs a round.
 - If the guard can only be a prompt, add an eval under `evals/` and say so —
   `evals/007-mutate-the-claim-not-the-counter.md` is the rule above as one.
+- Work left undone, an improvement noticed, a problem found and left: each
+  becomes a backlog item before the report, per
+  `.claude/skills/backlog/SKILL.md` — a remark in the final message is lost
+  with the conversation (change 323).
 - Set `plan.md` to `done` and `state.yaml` to `status: done`, with `resume`
   rewritten to say what outlived the change, if anything.
 

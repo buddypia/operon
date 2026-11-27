@@ -1,0 +1,23 @@
+# The evidence for change 323. One test per requirement of spec.md, the three
+# defects the empirical verifier reproduced (each test failed at the change's
+# head before its fix), the neighbours of the allowlist line it tried and
+# could not get past, and the sweep that watched every guard go red (52 of 52).
+digest: "22a34f83a6850e7f"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked backlog_add_files_an_issue_with_its_kind_and_scores
+  - R2 empirical-test :: cargo test --locked backlog_add_refuses_what_it_cannot_score
+  - R3 empirical-test :: cargo test --locked backlog_add_does_not_file_the_same_item_twice
+  - R4 empirical-test :: cargo test --locked backlog_list_puts_the_highest_score_first
+  - R5 empirical-test :: cargo test --locked backlog_claim_hands_out_each_item_once
+  - R6 empirical-test :: cargo test --locked backlog_claim_made_at_the_same_moment_has_one_winner
+  - R7 empirical-test :: cargo test --locked backlog_release_frees_an_item_and_done_closes_it
+  - R8 empirical-test :: cargo test --locked backlog_score_reorders_the_list
+  - R9 empirical-test :: cargo test --locked backlog_says_why_when_github_cannot_be_reached
+  - R10 empirical-test :: cargo test --locked backlog_command_runs_on_the_main_checkout
+  - R11 empirical-test :: cargo test --locked backlog_skill_names_commands_the_script_has
+  - F1 empirical-test :: cargo test --locked backlog_release_reason_cannot_forge_a_claim
+  - F2 empirical-test :: cargo test --locked backlog_claim_by_number_refuses_a_closed_item
+  - F3 empirical-test :: cargo test --locked backlog_list_of_exactly_one_thousand_says_nothing_of_more
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py
+  - I2 empirical-test :: cargo test --locked backlog_allowlist_refuses_more_neighbours

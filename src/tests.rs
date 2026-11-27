@@ -101225,3 +101225,1276 @@ pub(crate) fn model_check_perf_322_cache_equivalence_and_can_move_tab() {
     );
     assert!(coverage.states > 10);
 }
+
+// ---- Change 323: the backlog kept as GitHub issues ---------------------------
+
+/// A stand-in for `gh`, placed first on `PATH`. It answers the `gh api` calls
+/// `scripts/backlog.py` makes and keeps issues, labels and comments in one
+/// file under a lock, so several scripts running at once see one order of
+/// events, as they would on GitHub. It knows nothing of the script's own
+/// marker lines: a rival claim is the incoming comment posted once more, ahead
+/// of it.
+const BACKLOG_STAND_IN_GH: &str = r##"#!/usr/bin/python3
+import fcntl, json, os, re, sys, time
+
+home = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+args = sys.argv[1:]
+fail = os.environ.get("STAND_IN_GH_FAIL", "")
+if fail == "refuse":
+    sys.stderr.write("gh: To get started with GitHub CLI, please run:  gh auth login\n")
+    sys.exit(4)
+if fail == "hang":
+    time.sleep(600)
+
+
+def refuse(text):
+    sys.stderr.write("stand-in gh: %s\n" % text)
+    sys.exit(64)
+
+
+if not args or args[0] != "api":
+    refuse("only api is answered")
+method, path, has_input = "GET", None, False
+rest = args[1:]
+at = 0
+while at < len(rest):
+    word = rest[at]
+    if word == "-X":
+        method = rest[at + 1]
+        at += 2
+    elif word == "--input":
+        has_input = rest[at + 1] == "-"
+        at += 2
+    elif word.startswith("-"):
+        refuse("unknown flag " + word)
+    else:
+        path = word
+        at += 1
+payload = json.load(sys.stdin) if has_input else {}
+prefix = "repos/{owner}/{repo}/"
+if not path or not path.startswith(prefix):
+    refuse("unknown path %s" % path)
+route, _, query = path[len(prefix):].partition("?")
+params = dict(part.split("=", 1) for part in query.split("&") if "=" in part)
+if fail == "comments-unreadable" and method == "GET" and route.endswith("/comments"):
+    sys.stderr.write("gh: Server Error (HTTP 502)\n")
+    sys.exit(1)
+
+
+def stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def page(rows):
+    per = int(params.get("per_page", "30"))
+    number = int(params.get("page", "1"))
+    return rows[(number - 1) * per:number * per]
+
+
+lock = open(os.path.join(home, "lock"), "w")
+fcntl.flock(lock, fcntl.LOCK_EX)
+state_path = os.path.join(home, "state.json")
+try:
+    with open(state_path) as handle:
+        state = json.load(handle)
+except FileNotFoundError:
+    state = {}
+for key, empty in (("issues", []), ("comments", []), ("labels", []), ("calls", []),
+                   ("next_issue", 1), ("next_comment", 1), ("rivals", 0)):
+    state.setdefault(key, empty)
+state["calls"].append(args)
+
+
+def shown(issue):
+    row = dict(issue)
+    row["comments"] = sum(1 for c in state["comments"] if c["issue"] == issue["number"])
+    row["html_url"] = "https://github.invalid/o/r/issues/%d" % issue["number"]
+    return row
+
+
+def find(number):
+    for issue in state["issues"]:
+        if issue["number"] == number:
+            return issue
+    return None
+
+
+def comment(number, body):
+    row = {"id": state["next_comment"], "issue": number, "body": body, "created_at": stamp(),
+           "author_association": "OWNER"}
+    state["next_comment"] += 1
+    state["comments"].append(row)
+    return row
+
+
+out, code, err = None, 0, ""
+one = re.fullmatch(r"issues/(\d+)", route)
+talk = re.fullmatch(r"issues/(\d+)/comments", route)
+gone = re.fullmatch(r"issues/comments/(\d+)", route)
+if route == "issues" and method == "GET":
+    rows = [shown(i) for i in state["issues"]
+            if i["state"] == params.get("state", "open")
+            and params.get("labels", "") in [l["name"] for l in i["labels"]]]
+    out = page(sorted(rows, key=lambda r: -r["number"]))
+elif route == "issues" and method == "POST":
+    issue = {"number": state["next_issue"], "title": payload["title"],
+             "body": payload.get("body", ""), "state": "open",
+             "labels": [{"name": name} for name in payload.get("labels", [])],
+             "created_at": stamp()}
+    state["next_issue"] += 1
+    state["issues"].append(issue)
+    out = shown(issue)
+elif one and find(int(one.group(1))) is None:
+    code, err = 1, "gh: Not Found (HTTP 404)"
+elif one and method == "GET":
+    out = shown(find(int(one.group(1))))
+elif one and method == "PATCH":
+    issue = find(int(one.group(1)))
+    for key in ("title", "body", "state", "state_reason"):
+        if key in payload:
+            issue[key] = payload[key]
+    out = shown(issue)
+elif talk and method == "GET":
+    out = page([c for c in state["comments"] if c["issue"] == int(talk.group(1))])
+elif talk and method == "POST":
+    if state["rivals"] > 0:
+        state["rivals"] -= 1
+        comment(int(talk.group(1)), payload["body"])
+    out = comment(int(talk.group(1)), payload["body"])
+elif gone and method == "DELETE":
+    before = len(state["comments"])
+    state["comments"] = [c for c in state["comments"] if c["id"] != int(gone.group(1))]
+    if len(state["comments"]) == before:
+        code, err = 1, "gh: Not Found (HTTP 404)"
+elif route == "labels" and method == "GET":
+    out = page(state["labels"])
+elif route == "labels" and method == "POST":
+    if any(l["name"] == payload["name"] for l in state["labels"]):
+        out = {"message": "Validation Failed", "errors": [{"code": "already_exists"}]}
+        code, err = 1, "gh: Validation Failed (HTTP 422)"
+    else:
+        state["labels"].append({"name": payload["name"]})
+        out = {"name": payload["name"]}
+else:
+    refuse("no answer for %s %s" % (method, route))
+
+scratch = state_path + ".next"
+with open(scratch, "w") as handle:
+    json.dump(state, handle)
+os.replace(scratch, state_path)
+if out is not None:
+    sys.stdout.write(json.dumps(out))
+if err:
+    sys.stderr.write(err + "\n")
+sys.exit(code)
+"##;
+
+/// A directory holding the stand-in `gh`; the stand-in's state lives beside it.
+fn backlog_fixture(label: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let root = temporary_directory(label);
+    let bin = root.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let gh = bin.join("gh");
+    fs::write(&gh, BACKLOG_STAND_IN_GH).unwrap();
+    fs::set_permissions(&gh, fs::Permissions::from_mode(0o755)).unwrap();
+    root
+}
+
+/// `scripts/backlog.py` run in `directory` with the fixture's `gh` first on
+/// `PATH`, bounded like every child: exit code, stdout, stderr.
+fn backlog_run_in(
+    root: &Path,
+    directory: &Path,
+    environment: &[(&str, &str)],
+    arguments: &[&str],
+) -> (i32, String, String) {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/backlog.py");
+    let mut command = Command::new("/usr/bin/python3");
+    command
+        .current_dir(directory)
+        .arg(script)
+        .args(arguments)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", root.join("bin").display()),
+        );
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+    let result =
+        run_command_with_output_limit(&mut command, Duration::from_secs(120), 1 << 20, 64 * 1024)
+            .unwrap();
+    assert!(!result.stdout_truncated && !result.stderr_truncated);
+    (
+        result.output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&result.output.stdout).into_owned(),
+        String::from_utf8_lossy(&result.output.stderr).into_owned(),
+    )
+}
+
+fn backlog_run(root: &Path, arguments: &[&str]) -> (i32, String, String) {
+    backlog_run_in(root, root, &[], arguments)
+}
+
+/// What the stand-in holds: issues, comments, labels, and every call made.
+fn backlog_stand_in_state(root: &Path) -> serde_json::Value {
+    match fs::read_to_string(root.join("state.json")) {
+        Ok(text) => serde_json::from_str(&text).unwrap(),
+        Err(_) => serde_json::json!({ "issues": [], "comments": [], "labels": [], "calls": [] }),
+    }
+}
+
+/// Changes what the stand-in holds, as something other than the script would.
+fn backlog_stand_in_edit(root: &Path, edit: impl FnOnce(&mut serde_json::Value)) {
+    let mut state = backlog_stand_in_state(root);
+    edit(&mut state);
+    fs::write(root.join("state.json"), state.to_string()).unwrap();
+}
+
+/// Files one item and returns its number, read from the `#N` the script prints.
+fn backlog_add(root: &Path, title: &str, kind: &str, scores: [u8; 3]) -> u64 {
+    let [impact, confidence, ease] = scores.map(|score| score.to_string());
+    let (code, out, err) = backlog_run(
+        root,
+        &[
+            "add",
+            "--title",
+            title,
+            "--kind",
+            kind,
+            "--impact",
+            &impact,
+            "--confidence",
+            &confidence,
+            "--ease",
+            &ease,
+        ],
+    );
+    assert_eq!(code, 0, "add: {out}{err}");
+    backlog_number_in(&out)
+}
+
+/// The first `#N` in what the script printed.
+fn backlog_number_in(text: &str) -> u64 {
+    let after = text
+        .split_once('#')
+        .unwrap_or_else(|| panic!("番号がありません: {text}"))
+        .1;
+    after
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap_or_else(|_| panic!("番号を読めません: {text}"))
+}
+
+fn backlog_list(root: &Path) -> Vec<serde_json::Value> {
+    let (code, out, err) = backlog_run(root, &["list", "--json"]);
+    assert_eq!(code, 0, "list --json: {out}{err}");
+    serde_json::from_str(&out).unwrap_or_else(|_| panic!("list --json: {out}"))
+}
+
+/// The item `claim --json` handed out, or `None` when it handed out nothing.
+fn backlog_claim(root: &Path) -> Option<u64> {
+    let (code, out, err) = backlog_run(root, &["claim", "--json"]);
+    assert_eq!(code, 0, "claim --json: {out}{err}");
+    let item: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|_| panic!("claim --json: {out}"));
+    item["number"].as_u64()
+}
+
+/// How many comments the stand-in holds on one issue.
+fn backlog_comments_on(root: &Path, number: u64) -> usize {
+    backlog_stand_in_state(root)["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|comment| comment["issue"].as_u64() == Some(number))
+        .count()
+}
+
+/// Change 323, requirement 1. An item is one open issue: labelled as backlog
+/// and as its kind, its three scores readable back through `list`, and its
+/// text sent on standard input, never on `gh`'s command line.
+#[test]
+pub(crate) fn backlog_add_files_an_issue_with_its_kind_and_scores() {
+    let root = backlog_fixture("backlog-add");
+    let title = "ドラッグ中の再描画回数を計測する";
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "add",
+            "--title",
+            title,
+            "--kind",
+            "improvement",
+            "--impact",
+            "8",
+            "--confidence",
+            "6",
+            "--ease",
+            "7",
+            "--body",
+            "計測がないので改善を確かめられない。",
+            "--source",
+            "322-ui-and-drag-rerender-caches",
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(backlog_number_in(&out), 1, "{out}");
+    assert!(
+        out.contains("336"),
+        "スコア 8×6×7 が出力にありません: {out}"
+    );
+
+    let state = backlog_stand_in_state(&root);
+    let issue = &state["issues"][0];
+    assert_eq!(issue["state"], "open");
+    assert_eq!(issue["title"], title);
+    let labels: Vec<&str> = issue["labels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|label| label["name"].as_str())
+        .collect();
+    assert!(labels.contains(&"backlog"), "{labels:?}");
+    assert_eq!(
+        labels.len(),
+        2,
+        "backlog と種類の 2 つのはずです: {labels:?}"
+    );
+    let body = issue["body"].as_str().unwrap();
+    assert!(
+        body.contains("計測がないので改善を確かめられない。"),
+        "{body}"
+    );
+    assert!(body.contains("322-ui-and-drag-rerender-caches"), "{body}");
+    for call in state["calls"].as_array().unwrap() {
+        assert!(
+            !call.to_string().contains(title) && !call.to_string().contains("計測がない"),
+            "題や本文が gh のコマンドラインに載っています: {call}"
+        );
+    }
+
+    let listed = backlog_list(&root);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["number"], 1);
+    assert_eq!(listed[0]["title"], title);
+    assert_eq!(listed[0]["kind"], "improvement");
+    assert_eq!(listed[0]["impact"], 8);
+    assert_eq!(listed[0]["confidence"], 6);
+    assert_eq!(listed[0]["ease"], 7);
+    assert_eq!(listed[0]["score"], 336);
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 2. What cannot be scored or filed is refused with
+/// the reason, and nothing reaches GitHub.
+#[test]
+pub(crate) fn backlog_add_refuses_what_it_cannot_score() {
+    let root = backlog_fixture("backlog-refuse");
+    let long_title = "あ".repeat(257);
+    let long_body = "あ".repeat(60_001);
+    let cases: [(&[&str], &str); 8] = [
+        (
+            &[
+                "--title",
+                "x",
+                "--kind",
+                "problem",
+                "--impact",
+                "0",
+                "--confidence",
+                "5",
+                "--ease",
+                "5",
+            ],
+            "impact",
+        ),
+        (
+            &[
+                "--title",
+                "x",
+                "--kind",
+                "problem",
+                "--impact",
+                "5",
+                "--confidence",
+                "11",
+                "--ease",
+                "5",
+            ],
+            "confidence",
+        ),
+        (
+            &[
+                "--title",
+                "x",
+                "--kind",
+                "problem",
+                "--impact",
+                "5",
+                "--confidence",
+                "5",
+                "--ease",
+                "多",
+            ],
+            "ease",
+        ),
+        (
+            &[
+                "--title",
+                "x",
+                "--kind",
+                "problem",
+                "--impact",
+                "5",
+                "--confidence",
+                "5",
+            ],
+            "ease",
+        ),
+        (
+            &[
+                "--title",
+                "  ",
+                "--kind",
+                "problem",
+                "--impact",
+                "5",
+                "--confidence",
+                "5",
+                "--ease",
+                "5",
+            ],
+            "タイトルが空です",
+        ),
+        (
+            &[
+                "--title",
+                &long_title,
+                "--kind",
+                "problem",
+                "--impact",
+                "5",
+                "--confidence",
+                "5",
+                "--ease",
+                "5",
+            ],
+            "タイトルが長すぎます",
+        ),
+        (
+            &[
+                "--title",
+                "x",
+                "--kind",
+                "problem",
+                "--impact",
+                "5",
+                "--confidence",
+                "5",
+                "--ease",
+                "5",
+                "--body",
+                &long_body,
+            ],
+            "本文が長すぎます",
+        ),
+        (
+            &[
+                "--title",
+                "x",
+                "--kind",
+                "idea",
+                "--impact",
+                "5",
+                "--confidence",
+                "5",
+                "--ease",
+                "5",
+            ],
+            "kind",
+        ),
+    ];
+    for (arguments, reason) in cases {
+        let mut all = vec!["add"];
+        all.extend_from_slice(arguments);
+        let (code, out, err) = backlog_run(&root, &all);
+        assert_eq!(code, 2, "{reason}: 拒否されませんでした: {out}{err}");
+        assert!(err.contains(reason), "理由 ({reason}) がありません: {err}");
+    }
+    let state = backlog_stand_in_state(&root);
+    assert!(
+        state["issues"].as_array().unwrap().is_empty()
+            && state["calls"].as_array().unwrap().is_empty(),
+        "拒否した項目が GitHub に届いています: {state}"
+    );
+    // The edges are inside: 1 and 10 are scores, 256 characters is a title.
+    let edge_title = "あ".repeat(256);
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "add",
+            "--title",
+            &edge_title,
+            "--kind",
+            "problem",
+            "--impact",
+            "1",
+            "--confidence",
+            "10",
+            "--ease",
+            "10",
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 3. The same item is one issue: a title already
+/// open is answered with its number, and of several filed at the same moment
+/// only the earliest stays open.
+#[test]
+pub(crate) fn backlog_add_does_not_file_the_same_item_twice() {
+    let root = backlog_fixture("backlog-twice");
+    let first = backlog_add(&root, "Restore loses the first turn", "problem", [9, 7, 4]);
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "add",
+            "--title",
+            "  restore  LOSES the first turn ",
+            "--kind",
+            "problem",
+            "--impact",
+            "3",
+            "--confidence",
+            "3",
+            "--ease",
+            "3",
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("既に登録されています"), "{out}");
+    assert_eq!(backlog_number_in(&out), first, "{out}");
+    assert_eq!(backlog_list(&root).len(), 1);
+    assert_eq!(
+        backlog_stand_in_state(&root)["issues"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1,
+        "既に開いている題で、閉じるための issue をもう 1 件作っています"
+    );
+    discard_worktree_fixture(&root);
+
+    let root = backlog_fixture("backlog-twice-at-once");
+    let numbers: Vec<u64> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..6)
+            .map(|_| scope.spawn(|| backlog_add(&root, "同時に見つけた問題", "problem", [5, 5, 5])))
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect()
+    });
+    let listed = backlog_list(&root);
+    assert_eq!(
+        listed.len(),
+        1,
+        "同じ題の項目が複数開いています: {listed:?}"
+    );
+    let kept = listed[0]["number"].as_u64().unwrap();
+    assert!(
+        numbers.iter().all(|number| *number == kept),
+        "残った #{kept} 以外の番号を答えた add があります: {numbers:?}"
+    );
+    let open = backlog_stand_in_state(&root)["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|issue| issue["state"] == "open")
+        .count();
+    assert_eq!(open, 1);
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 4. Highest score first, equal scores oldest first,
+/// an item whose scores cannot be read last and said so, a pull request never.
+#[test]
+pub(crate) fn backlog_list_puts_the_highest_score_first() {
+    let root = backlog_fixture("backlog-list");
+    let (code, out, err) = backlog_run(&root, &["list"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("backlog は空です"), "{out}");
+
+    let older = backlog_add(&root, "同点の古いほう", "remaining", [5, 5, 4]);
+    let top = backlog_add(&root, "いちばん価値が高い", "improvement", [8, 6, 7]);
+    let newer = backlog_add(&root, "同点の新しいほう", "problem", [10, 10, 1]);
+    backlog_stand_in_edit(&root, |state| {
+        let labelled = state["issues"][0]["labels"].clone();
+        let next = state["next_issue"].as_u64().unwrap();
+        let issues = state["issues"].as_array_mut().unwrap();
+        issues.push(serde_json::json!({
+            "number": next, "title": "手で作った項目", "body": "スコアなし",
+            "state": "open", "labels": labelled, "created_at": "2026-11-27T00:00:00Z"
+        }));
+        issues.push(serde_json::json!({
+            "number": next + 1, "title": "プルリクエスト", "body": "", "state": "open",
+            "labels": labelled, "created_at": "2026-11-27T00:00:00Z", "pull_request": {}
+        }));
+        state["next_issue"] = serde_json::json!(next + 2);
+    });
+    let listed = backlog_list(&root);
+    let order: Vec<u64> = listed
+        .iter()
+        .filter_map(|item| item["number"].as_u64())
+        .collect();
+    assert_eq!(order, vec![top, older, newer, newer + 1], "{listed:?}");
+    assert!(listed[3]["score"].is_null(), "{listed:?}");
+    let (_, out, _) = backlog_run(&root, &["list"]);
+    let unreadable = out
+        .lines()
+        .find(|line| line.contains("手で作った項目"))
+        .unwrap_or_else(|| panic!("スコアのない項目が一覧から落ちています: {out}"));
+    assert!(unreadable.contains("スコアを読めません"), "{unreadable}");
+    assert!(!out.contains("プルリクエスト"), "{out}");
+    assert!(
+        out.find("いちばん価値が高い").unwrap() < out.find("同点の古いほう").unwrap(),
+        "{out}"
+    );
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 5. Each `claim` hands out the best item nobody
+/// holds, and with none left says so without failing.
+#[test]
+pub(crate) fn backlog_claim_hands_out_each_item_once() {
+    let root = backlog_fixture("backlog-claim");
+    let low = backlog_add(&root, "低い", "remaining", [2, 2, 2]);
+    let high = backlog_add(&root, "高い", "problem", [9, 9, 9]);
+    let middle = backlog_add(&root, "中くらい", "improvement", [5, 5, 5]);
+
+    let (code, out, err) = backlog_run(&root, &["claim"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(backlog_number_in(&out), high, "{out}");
+    assert!(out.contains("高い") && out.contains("729"), "{out}");
+    assert_eq!(backlog_claim(&root), Some(middle));
+
+    let held: Vec<bool> = backlog_list(&root)
+        .iter()
+        .map(|item| item["held_by"].is_string())
+        .collect();
+    assert_eq!(held, vec![true, true, false], "着手中の印が違います");
+    let (_, out, _) = backlog_run(&root, &["list"]);
+    assert_eq!(out.matches("着手中").count(), 2, "{out}");
+
+    let number = high.to_string();
+    let (code, out, err) = backlog_run(&root, &["claim", &number]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert!(err.contains("既に着手されています"), "{err}");
+    assert_eq!(
+        backlog_comments_on(&root, high),
+        1,
+        "負けた着手が残っています"
+    );
+
+    let number = low.to_string();
+    let (code, out, err) = backlog_run(&root, &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(backlog_number_in(&out), low);
+
+    assert_eq!(backlog_claim(&root), None);
+    let (code, out, err) = backlog_run(&root, &["claim"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("着手できる項目はありません"), "{out}");
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 6. A claim that arrives second loses and removes
+/// itself, and of many made at once each item goes to one of them.
+#[test]
+pub(crate) fn backlog_claim_made_at_the_same_moment_has_one_winner() {
+    // A rival's claim lands just ahead of ours on the best item.
+    let root = backlog_fixture("backlog-rival");
+    let best = backlog_add(&root, "取り合いになる", "problem", [9, 9, 9]);
+    let second = backlog_add(&root, "次点", "problem", [5, 5, 5]);
+    backlog_stand_in_edit(&root, |state| state["rivals"] = serde_json::json!(1));
+    assert_eq!(
+        backlog_claim(&root),
+        Some(second),
+        "先に着手された項目を取ったか、次の項目に進みませんでした"
+    );
+    assert_eq!(
+        backlog_comments_on(&root, best),
+        1,
+        "負けた着手が残っています"
+    );
+    assert_eq!(backlog_comments_on(&root, second), 1);
+    discard_worktree_fixture(&root);
+
+    // The same loss when the item was named.
+    let root = backlog_fixture("backlog-rival-named");
+    let only = backlog_add(&root, "名指しで取り合う", "problem", [9, 9, 9]);
+    backlog_stand_in_edit(&root, |state| state["rivals"] = serde_json::json!(1));
+    let number = only.to_string();
+    let (code, out, err) = backlog_run(&root, &["claim", &number]);
+    assert_eq!(code, 3, "{out}{err}");
+    assert_eq!(
+        backlog_comments_on(&root, only),
+        1,
+        "負けた着手が残っています"
+    );
+    discard_worktree_fixture(&root);
+
+    // Six sessions, first one item and then three.
+    for items in [1_usize, 3] {
+        let root = backlog_fixture("backlog-race");
+        let numbers: Vec<u64> = (0..items)
+            .map(|at| backlog_add(&root, &format!("項目 {at}"), "remaining", [5, 5, 5]))
+            .collect();
+        let won: Vec<Option<u64>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..6)
+                .map(|_| scope.spawn(|| backlog_claim(&root)))
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .collect()
+        });
+        let mut taken: Vec<u64> = won.iter().flatten().copied().collect();
+        taken.sort_unstable();
+        assert_eq!(
+            taken, numbers,
+            "{items} 項目を 6 つの着手で取り合い、各項目がちょうど 1 回ずつ渡りませんでした: {won:?}"
+        );
+        for number in &numbers {
+            assert_eq!(
+                backlog_comments_on(&root, *number),
+                1,
+                "#{number} の着手が 1 つではありません"
+            );
+        }
+        discard_worktree_fixture(&root);
+    }
+}
+
+/// Change 323, requirement 7. `release` frees an item whoever held it, and
+/// `done` closes it with its reference and takes it off both views.
+#[test]
+pub(crate) fn backlog_release_frees_an_item_and_done_closes_it() {
+    let root = backlog_fixture("backlog-release");
+    let item = backlog_add(&root, "片付ける項目", "remaining", [9, 9, 9]);
+    let other = backlog_add(&root, "もうひとつ", "remaining", [2, 2, 2]);
+    // Held from another directory: a session that is gone.
+    let elsewhere = root.join("gone-session");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let (code, out, err) = backlog_run_in(&root, &elsewhere, &[], &["claim", "--json"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let listed = backlog_list(&root);
+    assert!(
+        listed[0]["held_by"]
+            .as_str()
+            .is_some_and(|by| by.contains("gone-session")),
+        "誰が着手したかが一覧にありません: {listed:?}"
+    );
+
+    let number = item.to_string();
+    let (code, out, err) = backlog_run(
+        &root,
+        &["release", &number, "--reason", "作業コピーが消えていた"],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("戻しました"), "{out}");
+    assert!(backlog_list(&root)[0]["held_by"].is_null());
+    assert_eq!(backlog_claim(&root), Some(item), "戻した項目を取れません");
+
+    let (code, out, err) = backlog_run(&root, &["done", &number, "--ref", "abc1234"]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("閉じました"), "{out}");
+    let state = backlog_stand_in_state(&root);
+    assert_eq!(state["issues"][0]["state"], "closed");
+    let left: Vec<&str> = state["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|comment| comment["issue"].as_u64() == Some(item))
+        .filter_map(|comment| comment["body"].as_str())
+        .collect();
+    assert!(
+        left.iter().any(|body| body.contains("abc1234")),
+        "参照がありません: {left:?}"
+    );
+    assert!(
+        !left.iter().any(|body| body.contains("gone-session")) && left.len() == 2,
+        "着手のコメントが残っています (理由と完了の 2 つのはずです): {left:?}"
+    );
+    let numbers: Vec<u64> = backlog_list(&root)
+        .iter()
+        .filter_map(|listed| listed["number"].as_u64())
+        .collect();
+    assert_eq!(numbers, vec![other]);
+    assert_eq!(backlog_claim(&root), Some(other));
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 8. New scores replace the old ones and move the
+/// item in the list; the text the session wrote stays.
+#[test]
+pub(crate) fn backlog_score_reorders_the_list() {
+    let root = backlog_fixture("backlog-score");
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "add",
+            "--title",
+            "後から重要だと分かった",
+            "--kind",
+            "problem",
+            "--impact",
+            "2",
+            "--confidence",
+            "2",
+            "--ease",
+            "2",
+            "--body",
+            "元の説明",
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    let risen = backlog_number_in(&out);
+    let other = backlog_add(&root, "もともと上", "improvement", [8, 6, 7]);
+    let number = risen.to_string();
+
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "score",
+            &number,
+            "--impact",
+            "10",
+            "--confidence",
+            "10",
+            "--ease",
+            "0",
+        ],
+    );
+    assert_eq!(code, 2, "{out}{err}");
+    assert_eq!(backlog_list(&root)[0]["number"].as_u64(), Some(other));
+
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "score",
+            &number,
+            "--impact",
+            "10",
+            "--confidence",
+            "9",
+            "--ease",
+            "8",
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(out.contains("720"), "{out}");
+    let listed = backlog_list(&root);
+    assert_eq!(listed[0]["number"].as_u64(), Some(risen));
+    assert_eq!(listed[0]["score"], 720);
+    assert_eq!(
+        (
+            listed[0]["impact"].as_u64(),
+            listed[0]["confidence"].as_u64(),
+            listed[0]["ease"].as_u64()
+        ),
+        (Some(10), Some(9), Some(8))
+    );
+    let body = backlog_stand_in_state(&root)["issues"][0]["body"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(body.contains("元の説明"), "{body}");
+    assert!(
+        !body.contains(" 8 = ") && !body.contains("ICE 8 "),
+        "古いスコアの行が残っています: {body}"
+    );
+    assert_eq!(
+        body.matches("ICE ").count(),
+        1,
+        "スコアの行が 1 つではありません: {body}"
+    );
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 9. Each way GitHub can fail to answer is said in
+/// a sentence, with exit 2, and a claim that could not be checked is removed.
+#[test]
+pub(crate) fn backlog_says_why_when_github_cannot_be_reached() {
+    let root = backlog_fixture("backlog-unreachable");
+    let item = backlog_add(&root, "届かないときの項目", "problem", [5, 5, 5]);
+    let add = [
+        "add",
+        "--title",
+        "別の項目",
+        "--kind",
+        "problem",
+        "--impact",
+        "5",
+        "--confidence",
+        "5",
+        "--ease",
+        "5",
+    ];
+    let commands: [&[&str]; 6] = [
+        &add,
+        &["list"],
+        &["claim"],
+        &["release", "1"],
+        &[
+            "score",
+            "1",
+            "--impact",
+            "5",
+            "--confidence",
+            "5",
+            "--ease",
+            "5",
+        ],
+        &["done", "1"],
+    ];
+
+    for arguments in commands {
+        let (code, out, err) =
+            backlog_run_in(&root, &root, &[("STAND_IN_GH_FAIL", "refuse")], arguments);
+        assert_eq!(code, 2, "{arguments:?}: {out}{err}");
+        assert!(
+            err.contains("GitHub に届きません") && err.contains("gh auth login"),
+            "{arguments:?}: gh が断った理由がありません: {err}"
+        );
+    }
+
+    let (code, out, err) = backlog_run_in(
+        &root,
+        &root,
+        &[("STAND_IN_GH_FAIL", "hang")],
+        &["--timeout", "1", "list"],
+    );
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(err.contains("GitHub の応答がありません (1 秒)"), "{err}");
+
+    let empty = root.join("no-gh");
+    fs::create_dir_all(empty.join("bin")).unwrap();
+    let (code, out, err) = backlog_run_in(&empty, &root, &[], &["list"]);
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(err.contains("gh が見つかりません"), "{err}");
+
+    let (code, out, err) = backlog_run_in(
+        &root,
+        &root,
+        &[("STAND_IN_GH_FAIL", "comments-unreadable")],
+        &["claim"],
+    );
+    assert_eq!(code, 2, "{out}{err}");
+    assert!(err.contains("GitHub に届きません"), "{err}");
+    assert_eq!(
+        backlog_comments_on(&root, item),
+        0,
+        "確かめられなかった着手が残っています"
+    );
+    assert_eq!(backlog_claim(&root), Some(item));
+    discard_worktree_fixture(&root);
+}
+
+/// Change 323, requirement 10. On main the guard admits the backlog script
+/// and none of its neighbours, and because main now runs whatever that file
+/// says, `docs/sdlc/risk.yaml` holds it as gate configuration.
+#[test]
+pub(crate) fn backlog_command_runs_on_the_main_checkout() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("backlog-trunk");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+    let allowed = [
+        "python3 scripts/backlog.py list",
+        "python3 scripts/backlog.py claim --json",
+        "python3 scripts/backlog.py add --title x --kind problem --impact 5 --confidence 5 --ease 5",
+        "python3 scripts/backlog.py done 12 --ref abc1234",
+    ];
+    let denied = [
+        "python3 scripts/change-map.py",
+        "python3 -c 'print(1)'",
+        "python3",
+        "python3 scripts/backlog.py.bak list",
+        "python3 scripts/backlog.pyc",
+        "python3 scripts/backlog.py list > out.txt",
+        "python3 other/scripts/backlog.py list",
+        "python3 scripts/backlog.py list; cargo build",
+        "python3 -m scripts.backlog list",
+    ];
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
+         const out = {{}};\n\
+         for (const command of {cases})\n\
+           out[command] = decide(await policy({{ tool_name: 'Bash', tool_input: {{ command }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }}));\n\
+         console.log(JSON.stringify(out));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        cases = serde_json::to_string(&[allowed.as_slice(), denied.as_slice()].concat()).unwrap(),
+        project = project.to_str().unwrap(),
+    );
+    let mut command = node_in(&project);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    let output = output.expect("node が見つからないか、時間内に終わりませんでした");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", both_streams(&output)));
+    for command in allowed {
+        assert_eq!(
+            verdicts[command].as_str(),
+            Some("allow"),
+            "main で backlog のコマンドが止められました ({command}): {verdicts}"
+        );
+    }
+    for command in denied {
+        assert_eq!(
+            verdicts[command].as_str(),
+            Some("deny"),
+            "main で backlog 以外のコマンドが通りました ({command}): {verdicts}"
+        );
+    }
+
+    let risk = fs::read_to_string(repository.join("docs/sdlc/risk.yaml")).unwrap();
+    let gate = risk
+        .lines()
+        .find(|line| line.trim_start().starts_with("gate-configuration:"))
+        .expect("docs/sdlc/risk.yaml に gate-configuration の行がありません");
+    assert!(
+        gate.split([',', ' ', '"'])
+            .any(|path| path == "scripts/backlog.py"),
+        "main が実行する scripts/backlog.py が gate-configuration に入っていません"
+    );
+}
+
+/// Change 323, requirement 11. The skill sends a session only to sub-commands
+/// the script has, names every one of them, and is reachable: `AGENTS.md` says
+/// when to read it and the pipeline's closing step points at it.
+#[test]
+pub(crate) fn backlog_skill_names_commands_the_script_has() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = backlog_fixture("backlog-skill");
+    let (code, usage, err) = backlog_run(&root, &["--help"]);
+    discard_worktree_fixture(&root);
+    assert_eq!(code, 0, "{usage}{err}");
+    let listed = usage
+        .split_once('{')
+        .and_then(|(_, rest)| rest.split_once('}'))
+        .unwrap_or_else(|| panic!("--help にサブコマンドの一覧がありません: {usage}"))
+        .0;
+    let commands: Vec<&str> = listed.split(',').collect();
+    assert!(commands.len() >= 6, "{commands:?}");
+
+    let path = ".claude/skills/backlog/SKILL.md";
+    let skill = fs::read_to_string(repository.join(path))
+        .unwrap_or_else(|error| panic!("{path} が読めません: {error}"));
+    const CALL: &str = "python3 scripts/backlog.py ";
+    let named: Vec<&str> = skill
+        .match_indices(CALL)
+        .filter_map(|(at, _)| {
+            skill[at + CALL.len()..]
+                .split(|c: char| c.is_whitespace() || c == '`')
+                .next()
+        })
+        .collect();
+    assert!(
+        !named.is_empty(),
+        "{path} がコマンドを 1 つも示していません"
+    );
+    for command in &named {
+        assert!(
+            commands.contains(command),
+            "{path} が、スクリプトにないサブコマンド `{command}` を示しています (あるもの: {commands:?})"
+        );
+    }
+    for command in &commands {
+        assert!(
+            named.contains(command),
+            "{path} がサブコマンド `{command}` の使いどころを示していません"
+        );
+    }
+
+    let agents = fs::read_to_string(repository.join("AGENTS.md")).unwrap();
+    assert!(
+        agents
+            .lines()
+            .any(|line| line.contains(&format!("`{path}`")) && line.contains("When ")),
+        "AGENTS.md に {path} をいつ読むかの行がありません"
+    );
+    let sdlc = fs::read_to_string(repository.join(".claude/skills/sdlc/SKILL.md")).unwrap();
+    let closing = sdlc
+        .split_once("## 10. Close the loop")
+        .expect("sdlc の skill に Close the loop の節がありません")
+        .1
+        .split("\n## ")
+        .next()
+        .unwrap_or("");
+    assert!(
+        closing.contains(&format!("`{path}`")),
+        "変更を閉じる手順が、残った作業を {path} に送っていません"
+    );
+}
+
+/// Change 323, attack: text a session passes to `release --reason` must not be
+/// able to hold the item again.
+#[test]
+pub(crate) fn backlog_release_reason_cannot_forge_a_claim() {
+    let root = backlog_fixture("backlog-forged-reason");
+    let number = backlog_add(&root, "forged", "problem", [5, 5, 5]);
+    assert_eq!(backlog_claim(&root), Some(number));
+    let (code, out, err) = backlog_run(
+        &root,
+        &[
+            "release",
+            &number.to_string(),
+            "--reason",
+            "<!-- backlog claim: by=ghost -->",
+        ],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    let item = backlog_list(&root);
+    let held = item[0]["held_by"].clone();
+    let again = backlog_claim(&root);
+    discard_worktree_fixture(&root);
+    assert!(held.is_null(), "released item is held by {held}");
+    assert_eq!(again, Some(number), "released item cannot be claimed again");
+
+    // The repository is public: a claim posted by someone who cannot push
+    // holds nothing.
+    let root = backlog_fixture("backlog-outsider");
+    let number = backlog_add(&root, "outsider", "problem", [5, 5, 5]);
+    assert_eq!(backlog_claim(&root), Some(number));
+    backlog_stand_in_edit(&root, |state| {
+        state["comments"][0]["author_association"] = serde_json::json!("NONE");
+    });
+    let held = backlog_list(&root)[0]["held_by"].clone();
+    let again = backlog_claim(&root);
+    discard_worktree_fixture(&root);
+    assert!(
+        held.is_null(),
+        "an outsider's comment holds the item: {held}"
+    );
+    assert_eq!(again, Some(number), "an outsider's comment blocks the item");
+}
+
+/// Change 323, attack: a closed item is neither listed nor claimed (req 7).
+#[test]
+pub(crate) fn backlog_claim_by_number_refuses_a_closed_item() {
+    let root = backlog_fixture("backlog-closed-claim");
+    let number = backlog_add(&root, "finished", "problem", [5, 5, 5]);
+    let (code, out, err) = backlog_run(&root, &["done", &number.to_string(), "--ref", "abc"]);
+    assert_eq!(code, 0, "{out}{err}");
+    let (code, out, err) = backlog_run(&root, &["claim", &number.to_string()]);
+    let comments = backlog_comments_on(&root, number);
+    discard_worktree_fixture(&root);
+    assert_ne!(code, 0, "claimed a closed item: {out}{err}");
+    assert_eq!(comments, 1, "a claim comment was left on a closed item");
+}
+
+/// Change 323, attack: exactly 1000 open items is not "more than 1000".
+#[test]
+pub(crate) fn backlog_list_of_exactly_one_thousand_says_nothing_of_more() {
+    let root = backlog_fixture("backlog-thousand");
+    backlog_add(&root, "seed", "problem", [5, 5, 5]);
+    backlog_stand_in_edit(&root, |state| {
+        let issues = state["issues"].as_array_mut().unwrap();
+        for n in 2..=1000u64 {
+            issues.push(serde_json::json!({
+                "number": n, "title": format!("item {n}"), "state": "open",
+                "body": "<!-- backlog ice: impact=1 confidence=1 ease=1 -->",
+                "labels": [{"name": "backlog"}, {"name": "backlog:problem"}],
+                "created_at": "2026-01-01T00:00:00Z"
+            }));
+        }
+        state["next_issue"] = serde_json::json!(1001);
+    });
+    let (code, out, err) = backlog_run(&root, &["list"]);
+    discard_worktree_fixture(&root);
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        !out.contains("1000 件を超える"),
+        "said more remain with exactly 1000 items"
+    );
+}
+
+/// Change 323, attack: neighbours of the allowlisted command line on main.
+#[test]
+pub(crate) fn backlog_allowlist_refuses_more_neighbours() {
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root = worktree_fixture_repository("backlog-trunk-more");
+    fs::create_dir_all(root.join(".claude/config")).unwrap();
+    fs::copy(
+        repository.join(".claude/config/worktree-policy.json"),
+        root.join(".claude/config/worktree-policy.json"),
+    )
+    .unwrap();
+    let project = fs::canonicalize(&root).unwrap();
+    let denied = [
+        "python3 scripts/backlog.py list $(touch x)",
+        "python3 scripts/backlog.py list `touch x`",
+        "python3 scripts/backlog.py list | tee x",
+        "python3 scripts/backlog.py list >> x",
+        "python3 scripts/backlog.py list 2> x",
+        "python3 scripts/backlog.py list &\ntouch x",
+        "python3 scripts/backlog.py list\ntouch x",
+        "python3 scripts/backlog.py list && touch x",
+        "python3 scripts/backlog.py/../x.py",
+        "python3 scripts/backlog.py\tlist > x",
+        "PYTHONPATH=/tmp python3 scripts/backlog.py list",
+        "python3 scripts/backlog.py list <(touch x)",
+        "python3 scripts/backlog.py add --title $(touch x)",
+        "python3 scripts/backlog.py add --title \"$(touch x)\"",
+    ];
+    let script = format!(
+        "globalThis.__HOOK_ORCHESTRATOR__ = true;\n\
+         const {{ run: policy }} = await import({policy:?});\n\
+         const decide = (r) => r?.hookSpecificOutput?.permissionDecision || r?.decision || 'allow';\n\
+         const out = {{}};\n\
+         for (const command of {cases})\n\
+           out[command] = decide(await policy({{ tool_name: 'Bash', tool_input: {{ command }}, cwd: {project:?}, session_id: 'this-session', hook_event_name: 'PreToolUse' }}));\n\
+         console.log(JSON.stringify(out));",
+        policy = repository
+            .join(".cli/hooks/worktree-policy-guard.mjs")
+            .to_str()
+            .unwrap(),
+        cases = serde_json::to_string(&denied).unwrap(),
+        project = project.to_str().unwrap(),
+    );
+    let mut command = node_in(&project);
+    command
+        .args(["--input-type=module", "-e", &script])
+        .stdin(std::process::Stdio::null());
+    let output = run_command_with_timeout(&mut command, NODE_HOOK_TEST_TIMEOUT);
+    discard_worktree_fixture(&root);
+    let output = output.expect("node");
+    assert!(output.status.success(), "{}", both_streams(&output));
+    let verdicts: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let passed: Vec<&str> = denied
+        .iter()
+        .copied()
+        .filter(|c| verdicts[*c].as_str() != Some("deny"))
+        .collect();
+    assert!(passed.is_empty(), "admitted on main: {passed:?}");
+}

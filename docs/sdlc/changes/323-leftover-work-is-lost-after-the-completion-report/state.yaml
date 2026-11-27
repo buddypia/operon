@@ -3,8 +3,8 @@
 
 state:
   route: "feature"
-  stage: "build"
-  status: "ready"
+  stage: "test"
+  status: "done"
   attempts: "0 3"
   questions: "1 7"
   autonomy: "paused"
@@ -13,15 +13,15 @@ state:
   screen: "n/a"
   features: "none"
 
-resume: "Intent, spec and plan are approved; write the backlog_ tests in src/tests.rs first, then scripts/backlog.py, in the order plan.md gives."
+resume: "Landed. The backlog lives on the repository's GitHub issues; scripts/backlog.py and .claude/skills/backlog/SKILL.md are the way in, and the first real items are whatever the next change leaves over."
 
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed fmt and clippy at commit; cargo test --locked backlog_ 15 passed; the tests that pin AGENTS.md and the skills passed; full suite in CI on the pushed branch"
+  bands: "machine passed bash scripts/check-bands.sh: always_loaded_bytes 7972, below the 7988 it stood at before this change and in the same diagnose tier; no metric moved to a new tier"
   release-binary: "machine waived touches scripts/, .claude/skills, .claude/config, AGENTS.md, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py"
+  guards-verified-by-mutation: "machine passed 52 of 52 caught: python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py"
   allowlist-relaxation-is-the-persons: "human passed asked on 2026-11-27 whether the main allowlist may admit the backlog command; the person chose 「追加する (Recommended)」 (approvals.log)"
-  exercised-against-github: "human pending one item added, listed, claimed, released and closed on the real repository, then the trial issue closed"
+  exercised-against-github: "human passed 2026-11-27 on issue 1 of the repository: added, listed, claimed, refused to a second claim, rescored, released, claimed again, closed; a closed item then refused (plan.md Departures)"
 
 sets:
   status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
