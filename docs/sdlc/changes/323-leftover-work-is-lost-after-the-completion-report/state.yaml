@@ -1,0 +1,33 @@
+# The state of change 323. Template and field meanings:
+# docs/sdlc/templates/state.yaml.
+
+state:
+  route: "feature"
+  stage: "build"
+  status: "ready"
+  attempts: "0 3"
+  questions: "1 7"
+  autonomy: "paused"
+  risk: "high"
+  readiness: "go"
+  screen: "n/a"
+  features: "none"
+
+resume: "Intent, spec and plan are approved; write the backlog_ tests in src/tests.rs first, then scripts/backlog.py, in the order plan.md gives."
+
+contract:
+  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
+  bands: "machine pending bash scripts/check-bands.sh"
+  release-binary: "machine waived touches scripts/, .claude/skills, .claude/config, AGENTS.md, docs/sdlc and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "machine pending python3 docs/sdlc/changes/323-leftover-work-is-lost-after-the-completion-report/mutations.py"
+  allowlist-relaxation-is-the-persons: "human passed asked on 2026-11-27 whether the main allowlist may admit the backlog command; the person chose 「追加する (Recommended)」 (approvals.log)"
+  exercised-against-github: "human pending one item added, listed, claimed, released and closed on the real repository, then the trial issue closed"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
