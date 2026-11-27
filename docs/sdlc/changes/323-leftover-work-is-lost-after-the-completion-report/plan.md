@@ -120,3 +120,8 @@ configuration is edited.
   under the byte band: the title's "Claude Code notes" and the sentence
   introducing the import in `CLAUDE.md`, and the count of ignored tests in
   `AGENTS.md`.
+- **The sweep runs as five groups.** The first CI run failed one obligation:
+  the sweep, 52 mutations each judged by all fifteen tests, took 28 minutes
+  and CI gives an obligation 900 seconds. Nothing was wrong with a guard; the
+  whole sweep had passed here. Each group now names only the tests that guard
+  it and is recorded as its own obligation. One attempt of three spent.

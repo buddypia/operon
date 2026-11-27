@@ -14,8 +14,17 @@ ROOT = Path(__file__).resolve().parents[4]
 
 RUN_SECONDS = 900
 
-TESTS = ["backlog_"]
-CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
+# One group per run: `mutations.py filing`. The whole sweep in one run took 28
+# minutes, past the 900 seconds CI gives an obligation (the first CI run of
+# this change failed on exactly that), so each group names only the tests that
+# guard it and is its own obligation in verification.yaml.
+TESTS = {
+    "filing": ["backlog_add", "backlog_list_puts", "backlog_claim_hands"],
+    "claiming": ["backlog_claim_hands", "backlog_claim_made"],
+    "closing": ["backlog_release_frees", "backlog_score", "backlog_says"],
+    "findings": ["backlog_release_reason", "backlog_claim_by_number", "backlog_list_of"],
+    "reach": ["backlog_command", "backlog_skill"],
+}
 
 SCRIPT = ROOT / "scripts/backlog.py"
 SKILL = ROOT / ".claude/skills/backlog/SKILL.md"
@@ -24,7 +33,7 @@ AGENTS = ROOT / "AGENTS.md"
 POLICY = ROOT / ".claude/config/worktree-policy.json"
 RISK = ROOT / "docs/sdlc/risk.yaml"
 
-MUTATIONS = {
+FILING = {
     # Requirement 1.
     "an item is filed without the label for its kind": (
         SCRIPT,
@@ -134,6 +143,9 @@ MUTATIONS = {
         '        text += "  着手中: %s %s" % (item["held_by"], ago(item["held_since"]))',
         "        pass",
     ),
+}
+
+CLAIMING = {
     # Requirement 5.
     "nothing left to claim is an error": (
         SCRIPT,
@@ -166,6 +178,9 @@ MUTATIONS = {
         '    claims.sort(key=lambda claim: claim["id"])',
         '    claims.sort(key=lambda claim: -claim["id"])',
     ),
+}
+
+CLOSING = {
     # Requirement 7.
     "release leaves the claim where it was": (
         SCRIPT,
@@ -229,6 +244,9 @@ MUTATIONS = {
         '            except Refused:\n                withdraw(mine["id"])\n                raise',
         "            except Refused:\n                raise",
     ),
+}
+
+FINDINGS = {
     # Findings the verifier reproduced (F1 to F3).
     "text that quotes a claim line holds the item": (
         SCRIPT,
@@ -250,6 +268,9 @@ MUTATIONS = {
         "            return rows, bool(got)",
         "            return rows, True",
     ),
+}
+
+REACH = {
     # Requirement 10.
     "main admits any python3 command": (
         POLICY,
@@ -304,4 +325,9 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "scripts"))
 import mutation_sweep  # noqa: E402
 
-mutation_sweep.main(RUN_SECONDS, CHECKS, MUTATIONS)
+GROUPS = {"filing": FILING, "claiming": CLAIMING, "closing": CLOSING, "findings": FINDINGS, "reach": REACH}
+if len(sys.argv) != 2 or sys.argv[1] not in GROUPS:
+    sys.exit("usage: mutations.py " + "|".join(GROUPS))
+GROUP = sys.argv[1]
+CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS[GROUP]]]
+mutation_sweep.main(RUN_SECONDS, CHECKS, GROUPS[GROUP])
