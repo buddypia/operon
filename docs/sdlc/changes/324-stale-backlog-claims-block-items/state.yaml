@@ -45,7 +45,7 @@
 state:
   route: "modify"
   stage: "test"
-  status: "reviewing"
+  status: "done"
   attempts: "2 3"
   questions: "0 7"
   autonomy: "paused"
@@ -56,7 +56,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Built, swept 26 of 26, the verifier's finding fixed; land it once CI passes, then close issue 2 with done."
+resume: "Landed. claim gives back an item a gone session held a day ago, moves a main-copy claim into the working copy that names it, and /backlog alone takes the next item; issue 2 is closed by done."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -75,7 +75,7 @@ resume: "Built, swept 26 of 26, the verifier's finding fixed; land it once CI pa
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine passed make q.fast clean; cargo test --locked backlog_ 20 passed; full suite in CI on the pushed branch"
+  three-gates: "machine passed make q.fast clean; cargo test --locked backlog_ 20 passed; full suite and the eight obligations passed in CI on 74a610f"
   bands: "machine passed bash scripts/check-bands.sh exits 0; no metric is moved by scripts/, a skill or src/tests.rs past its tier"
   release-binary: "machine waived touches scripts/, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
   guards-verified-by-mutation: "machine passed 26 of 26 caught, as three groups (giving, moving, reach): python3 docs/sdlc/changes/324-stale-backlog-claims-block-items/mutations.py"
