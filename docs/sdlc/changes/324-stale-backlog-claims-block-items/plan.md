@@ -44,4 +44,18 @@
 
 ## Departures from the plan
 
-None yet.
+- **A claim under this copy's own name is shown only in a linked copy.** The
+  spec's requirement 3 says `claim NUMBER` on an item held under this copy's
+  name prints it and exits 0. Every session on the main copy carries the main
+  copy's name, so on the main copy that would hand one item to two sessions —
+  change 323's `backlog_claim_hands_out_each_item_once` failed on it. On the
+  main copy such an item is refused with exit 3, as before; the sweep's
+  "the main copy hands a held item to a second session of the same name"
+  removes the limit and that test goes red.
+- **The tests pass environment variables through `/usr/bin/env`.** The
+  `GIT_DIR` case of the risk table never reached the script:
+  `run_command_with_output_limit` removes git's repository pointers from every
+  child, so the sweep's mutation that stops the script removing them survived.
+  `backlog_run_in` now puts the test's variables on `env`'s command line.
+- **The kept-item test's working copy has a space in its name**, so that
+  comparing the holder unnormalised (a row of the risk table) is caught.

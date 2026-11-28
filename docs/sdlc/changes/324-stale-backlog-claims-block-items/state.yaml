@@ -44,9 +44,9 @@
 
 state:
   route: "modify"
-  stage: "plan"
-  status: "ready"
-  attempts: "0 3"
+  stage: "test"
+  status: "reviewing"
+  attempts: "1 3"
   questions: "0 7"
   autonomy: "paused"
   risk: "high"
@@ -56,7 +56,7 @@ state:
 
 # One sentence, for a session that has just arrived and read nothing else. What
 # to do next — not what happened. If it needs a semicolon it is too long.
-resume: "Write the four tests in plan.md and watch them fail, then change scripts/backlog.py and the backlog skill."
+resume: "Built and swept 25 of 25; have empirical-verifier try to break it, then push, wait for CI, merge, and close issue 2 with done."
 
 # What "done" means for this change, and what decides it. A `machine` item names
 # a command; `.claude/hooks/gate-stop.sh` refuses a finish while one is pending.
@@ -75,10 +75,11 @@ resume: "Write the four tests in plan.md and watch them fail, then change script
 # and is not a release-binary source; `bash scripts/check-installed-build.sh`
 # is what says whether the bundle on this machine is behind.
 contract:
-  three-gates: "machine pending bash .claude/hooks/gate-commit.sh"
-  bands: "machine pending bash scripts/check-bands.sh"
+  three-gates: "machine passed make q.fast clean; cargo test --locked backlog_ 19 passed; full suite in CI on the pushed branch"
+  bands: "machine passed bash scripts/check-bands.sh exits 0; no metric is moved by scripts/, a skill or src/tests.rs past its tier"
   release-binary: "machine waived touches scripts/, .claude/skills, docs/sdlc and src/tests.rs only; none is in the bundle"
-  guards-verified-by-mutation: "human pending each new guard watched failing"
+  guards-verified-by-mutation: "machine passed 25 of 25 caught, as three groups (giving, moving, reach): python3 docs/sdlc/changes/324-stale-backlog-claims-block-items/mutations.py"
+  relaxation-is-the-persons: "human passed asked on 2026-11-27 whether claim may give back a day-old item with no working copy and no commit; the person chose 「入れる (Recommended)」 (approvals.log)"
 
 # The closed sets, written once. `every_state_file_names_a_route_and_a_stage_that_
 # exist` reads them out of this block rather than restating them, so widening a

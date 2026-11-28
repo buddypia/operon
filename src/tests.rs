@@ -101410,18 +101410,18 @@ fn backlog_run_in(
     arguments: &[&str],
 ) -> (i32, String, String) {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/backlog.py");
-    let mut command = Command::new("/usr/bin/python3");
-    command
-        .current_dir(directory)
-        .arg(script)
-        .args(arguments)
-        .env(
-            "PATH",
-            format!("{}:/usr/bin:/bin", root.join("bin").display()),
-        );
+    // The variables go on `env`'s command line: `src/exec.rs` removes git's
+    // repository pointers from every child it starts, and a test that sets
+    // `GIT_DIR` means the script to receive it, as it would from a git hook.
+    let mut command = Command::new("/usr/bin/env");
+    command.current_dir(directory).env(
+        "PATH",
+        format!("{}:/usr/bin:/bin", root.join("bin").display()),
+    );
     for (name, value) in environment {
-        command.env(name, value);
+        command.arg(format!("{name}={value}"));
     }
+    command.arg("/usr/bin/python3").arg(script).args(arguments);
     let result =
         run_command_with_output_limit(&mut command, Duration::from_secs(120), 1 << 20, 64 * 1024)
             .unwrap();
@@ -102497,4 +102497,358 @@ pub(crate) fn backlog_allowlist_refuses_more_neighbours() {
         .filter(|c| verdicts[*c].as_str() != Some("deny"))
         .collect();
     assert!(passed.is_empty(), "admitted on main: {passed:?}");
+}
+
+/// A git repository with one commit at `root/repo`: the main copy the
+/// backlog tests run `claim` in.
+fn backlog_repository(root: &Path) -> PathBuf {
+    let repository = root.join("repo");
+    fs::create_dir_all(&repository).unwrap();
+    git_in(&repository, &["init", "-q", "-b", "main"]);
+    git_in(
+        &repository,
+        &["config", "user.email", "test@example.invalid"],
+    );
+    git_in(&repository, &["config", "user.name", "test"]);
+    git_in(
+        &repository,
+        &["commit", "-q", "--allow-empty", "-m", "start"],
+    );
+    repository
+}
+
+/// A linked working copy of `repository` beside it, named `name`.
+fn backlog_working_copy(repository: &Path, name: &str) -> PathBuf {
+    let copy = repository.parent().unwrap().join(name);
+    let branch = name.replace(' ', "-");
+    git_in(
+        repository,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            &branch,
+            copy.to_str().unwrap(),
+        ],
+    );
+    copy
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ`, `hours` hours ago: the stand-in's comment time.
+fn backlog_hours_ago(hours: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    utc_timestamp_millis(now - hours * 3_600).replace(".000Z", "Z")
+}
+
+/// A claim under `by`, made `hours` hours ago, as a session elsewhere left it.
+fn backlog_hold(root: &Path, number: u64, by: &str, hours: u64) {
+    let made = backlog_hours_ago(hours);
+    backlog_stand_in_edit(root, |state| {
+        let id = state["next_comment"].as_u64().unwrap_or(1);
+        state["next_comment"] = serde_json::json!(id + 1);
+        state["comments"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": id,
+                "issue": number,
+                "body": format!("着手しました: {by}\n<!-- backlog claim: by={by} -->"),
+                "created_at": made,
+                "author_association": "OWNER",
+            }));
+    });
+}
+
+/// Moves every comment on one item `hours` hours into the past.
+fn backlog_age(root: &Path, number: u64, hours: u64) {
+    let made = backlog_hours_ago(hours);
+    backlog_stand_in_edit(root, |state| {
+        for comment in state["comments"].as_array_mut().unwrap() {
+            if comment["issue"].as_u64() == Some(number) {
+                comment["created_at"] = serde_json::json!(made);
+            }
+        }
+    });
+}
+
+/// Every comment's text on an item, in the order they were made.
+fn backlog_comment_texts(root: &Path, number: u64) -> Vec<String> {
+    backlog_stand_in_state(root)["comments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|comment| comment["issue"].as_u64() == Some(number))
+        .filter_map(|comment| comment["body"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The holders of an item's claim comments, in the order they were made.
+fn backlog_holders(root: &Path, number: u64) -> Vec<String> {
+    backlog_comment_texts(root, number)
+        .iter()
+        .filter_map(|text| {
+            text.split_once("<!-- backlog claim: by=").map(|(_, rest)| {
+                rest.trim_end()
+                    .trim_end_matches("-->")
+                    .trim_end()
+                    .to_owned()
+            })
+        })
+        .collect()
+}
+
+/// What `claim --json` handed out when run in `directory`.
+fn backlog_claim_in(
+    root: &Path,
+    directory: &Path,
+    environment: &[(&str, &str)],
+    leading: &[&str],
+) -> Option<u64> {
+    let mut arguments = leading.to_vec();
+    arguments.extend(["claim", "--json"]);
+    let (code, out, err) = backlog_run_in(root, directory, environment, &arguments);
+    assert_eq!(code, 0, "claim --json: {out}{err}");
+    let item: serde_json::Value =
+        serde_json::from_str(&out).unwrap_or_else(|_| panic!("claim --json: {out}"));
+    item["number"].as_u64()
+}
+
+/// Change 324, requirements 1 and 4. A claim a day old whose holder left no
+/// working copy and no commit is given back, said so on the item, and taken —
+/// by `claim` alone and by `claim NUMBER` — even when a git hook's `GIT_DIR`
+/// points somewhere else.
+#[test]
+pub(crate) fn backlog_claim_gives_back_an_item_a_gone_session_held() {
+    let root = backlog_fixture("backlog-give-back");
+    let repository = backlog_repository(&root);
+    let left = backlog_add(&root, "置き去り", "remaining", [5, 5, 5]);
+    backlog_hold(&root, left, "gone-session", 25);
+
+    let wrong = root.join("no-such-repository.git");
+    let taken = backlog_claim_in(
+        &root,
+        &repository,
+        &[("GIT_DIR", wrong.to_str().unwrap())],
+        &[],
+    );
+    assert_eq!(taken, Some(left), "置き去りの項目が配られていません");
+    assert_eq!(backlog_holders(&root, left), vec!["repo".to_owned()]);
+    let said = "戻しました: 着手から 1 日以上たち、作業ツリーもこの項目のコミットもありません (着手: gone-session)";
+    assert!(
+        backlog_comment_texts(&root, left)
+            .iter()
+            .any(|text| text == said),
+        "戻した理由がありません: {:?}",
+        backlog_comment_texts(&root, left)
+    );
+
+    let named = backlog_add(&root, "名指し", "problem", [2, 2, 2]);
+    backlog_hold(&root, named, "another-gone", 25);
+    let number = named.to_string();
+    let (code, out, err) = backlog_run_in(&root, &repository, &[], &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(backlog_number_in(&out), named, "{out}");
+    assert_eq!(backlog_holders(&root, named), vec!["repo".to_owned()]);
+    assert!(backlog_comment_texts(&root, named)
+        .iter()
+        .any(|text| text.starts_with("戻しました:") && text.contains("(着手: another-gone)")));
+    discard_worktree_fixture(&root);
+}
+
+/// Change 324, requirement 2. Nothing a session may still be working on is
+/// given back: a claim under a day old, one whose holder names a working
+/// copy, one a commit on a branch or a remote-tracking ref names, and none at
+/// all when git cannot tell — outside a repository, git failing, git hanging.
+#[test]
+pub(crate) fn backlog_claim_keeps_an_item_someone_may_still_work_on() {
+    let root = backlog_fixture("backlog-keep");
+    let repository = backlog_repository(&root);
+    let young = backlog_add(&root, "まだ新しい", "remaining", [9, 9, 9]);
+    backlog_hold(&root, young, "fresh-session", 23);
+    let copied = backlog_add(&root, "作業ツリーあり", "remaining", [8, 8, 8]);
+    // A space in the directory name: the claim carries it as `-`, and the
+    // comparison has to normalise the same way.
+    backlog_working_copy(&repository, "held copy");
+    backlog_hold(&root, copied, "held-copy", 25);
+    let branched = backlog_add(&root, "ブランチにコミット", "remaining", [7, 7, 7]);
+    backlog_hold(&root, branched, "branch-session", 25);
+    let pushed = backlog_add(&root, "リモートにコミット", "remaining", [6, 6, 6]);
+    backlog_hold(&root, pushed, "pushed-session", 25);
+    for (number, reference) in [
+        (branched, "refs/heads/topic"),
+        (pushed, "refs/remotes/origin/work"),
+    ] {
+        let message = format!("fix: something (#{number})");
+        let commit = git_in(
+            &repository,
+            &["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", &message],
+        );
+        git_in(&repository, &["update-ref", reference, &commit]);
+    }
+    let all = [young, copied, branched, pushed];
+    let unchanged = |root: &Path| {
+        for number in all {
+            assert_eq!(
+                backlog_holders(root, number).len(),
+                1,
+                "#{number} の着手が変わりました"
+            );
+            assert!(
+                !backlog_comment_texts(root, number)
+                    .iter()
+                    .any(|text| text.starts_with("戻しました")),
+                "#{number} が戻されました"
+            );
+        }
+    };
+
+    assert_eq!(backlog_claim_in(&root, &repository, &[], &[]), None);
+    unchanged(&root);
+    assert_eq!(
+        backlog_claim_in(&root, &root, &[], &[]),
+        None,
+        "git の外で戻しました"
+    );
+    unchanged(&root);
+
+    use std::os::unix::fs::PermissionsExt;
+    let git = root.join("bin/git");
+    for (body, leading) in [
+        ("#!/bin/sh\nexit 1\n", &[][..]),
+        ("#!/bin/sh\nexec /bin/sleep 600\n", &["--timeout", "2"][..]),
+    ] {
+        fs::write(&git, body).unwrap();
+        fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            backlog_claim_in(&root, &repository, &[], leading),
+            None,
+            "git が答えないのに戻しました: {body}"
+        );
+        unchanged(&root);
+    }
+    fs::remove_file(&git).unwrap();
+
+    // The same item, its working copy gone, is given back: the case above
+    // kept it for the copy and nothing else.
+    git_in(&repository, &["worktree", "remove", "../held copy"]);
+    assert_eq!(backlog_claim_in(&root, &repository, &[], &[]), Some(copied));
+    discard_worktree_fixture(&root);
+}
+
+/// Change 324, requirement 3. A claim made on the main copy moves into the
+/// working copy opened after it, and is then kept a day later; a copy older
+/// than the claim, or a claim another copy holds, is refused.
+#[test]
+pub(crate) fn backlog_claim_moves_to_the_working_copy_that_took_it_up() {
+    let root = backlog_fixture("backlog-move");
+    let repository = backlog_repository(&root);
+    let item = backlog_add(&root, "移す", "remaining", [5, 5, 5]);
+    let number = item.to_string();
+    let (code, out, err) = backlog_run_in(&root, &repository, &[], &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(backlog_holders(&root, item), vec!["repo".to_owned()]);
+
+    let taker = backlog_working_copy(&repository, "taker");
+    let (code, out, err) = backlog_run_in(&root, &taker, &[], &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        out.contains(&format!("#{item} の着手をこの作業ツリーに移しました")),
+        "{out}"
+    );
+    assert_eq!(backlog_holders(&root, item), vec!["taker".to_owned()]);
+
+    let (code, out, err) = backlog_run_in(&root, &taker, &[], &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    assert_eq!(backlog_number_in(&out), item, "{out}");
+    assert_eq!(backlog_holders(&root, item), vec!["taker".to_owned()]);
+
+    backlog_age(&root, item, 25);
+    assert_eq!(
+        backlog_claim_in(&root, &repository, &[], &[]),
+        None,
+        "移した着手が 1 日後に戻されました"
+    );
+    assert_eq!(backlog_holders(&root, item), vec!["taker".to_owned()]);
+
+    let older = backlog_add(&root, "古い作業ツリー", "remaining", [4, 4, 4]);
+    let early = backlog_working_copy(&repository, "early");
+    std::thread::sleep(Duration::from_millis(1_100));
+    let number = older.to_string();
+    let (code, out, err) = backlog_run_in(&root, &repository, &[], &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    let (code, out, err) = backlog_run_in(&root, &early, &[], &["claim", &number]);
+    assert_eq!(code, 3, "着手より古い作業ツリーが奪いました: {out}{err}");
+    assert_eq!(backlog_holders(&root, older), vec!["repo".to_owned()]);
+
+    let theirs = backlog_add(&root, "別の作業ツリー", "remaining", [3, 3, 3]);
+    let number = theirs.to_string();
+    let (code, out, err) = backlog_run_in(&root, &early, &[], &["claim", &number]);
+    assert_eq!(code, 0, "{out}{err}");
+    // A copy opened after that claim still does not take it: only the main
+    // copy's claim moves.
+    let late = backlog_working_copy(&repository, "late");
+    let (code, out, err) = backlog_run_in(&root, &late, &[], &["claim", &number]);
+    assert_eq!(code, 3, "別の作業ツリーの着手を奪いました: {out}{err}");
+    assert_eq!(backlog_holders(&root, theirs), vec!["early".to_owned()]);
+    discard_worktree_fixture(&root);
+}
+
+/// Change 324, requirement 5. The skill's Run use starts work when the
+/// backlog command is given alone, keeps the list for "what is left", moves
+/// the claim into the new working copy, and leaves giving back to `claim`.
+#[test]
+pub(crate) fn backlog_skill_takes_the_next_item_when_called_alone() {
+    let path = ".claude/skills/backlog/SKILL.md";
+    let skill = fs::read_to_string(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path))
+        .unwrap_or_else(|error| panic!("{path} が読めません: {error}"));
+    let section = |heading: &str| -> String {
+        skill
+            .split_once(heading)
+            .unwrap_or_else(|| panic!("{path} に {heading} がありません"))
+            .1
+            .split("\n## ")
+            .next()
+            .unwrap_or("")
+            .to_owned()
+    };
+    let opening = skill.split("\n## ").next().unwrap_or("");
+    assert!(
+        opening.contains("`/backlog`") && opening.contains("alone") && opening.contains("Run"),
+        "{path} の冒頭が、/backlog だけで Run になると言っていません"
+    );
+    let run = section("## Run");
+    let first = run
+        .find("python3 scripts/backlog.py ")
+        .expect("Run にコマンドがありません");
+    assert!(
+        run[first..].starts_with("python3 scripts/backlog.py claim"),
+        "Run の最初のコマンドが claim ではありません"
+    );
+    let listed = run
+        .find("python3 scripts/backlog.py list")
+        .expect("Run に list がありません");
+    assert!(
+        run[..listed].contains("what is left"),
+        "list が「何が残っているか」を聞かれたときのものになっていません"
+    );
+    let opened = run
+        .find("make wt.new")
+        .expect("Run に make wt.new がありません");
+    assert!(
+        run[opened..].contains("python3 scripts/backlog.py claim 12"),
+        "作業ツリーを開いた後に着手を移す手順がありません"
+    );
+    let off = section("## When something is off");
+    assert!(
+        !off.contains("`release` it"),
+        "消えたセッションの着手を手で release させています"
+    );
+    assert!(
+        off.contains("gives back"),
+        "claim が自分で戻すことを書いていません"
+    );
 }

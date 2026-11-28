@@ -1,0 +1,13 @@
+# The evidence for change 324. One test per requirement of spec.md
+# (requirement 4 is a named case inside the first test), and the sweep that
+# watched every guard go red (25 of 25), run as three groups.
+digest: "67fa1294eba9b011"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked backlog_claim_gives_back_an_item_a_gone_session_held
+  - R2 empirical-test :: cargo test --locked backlog_claim_keeps_an_item_someone_may_still_work_on
+  - R3 empirical-test :: cargo test --locked backlog_claim_moves_to_the_working_copy_that_took_it_up
+  - R4 empirical-test :: cargo test --locked backlog_claim_gives_back_an_item_a_gone_session_held
+  - R5 empirical-test :: cargo test --locked backlog_skill_takes_the_next_item_when_called_alone
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/324-stale-backlog-claims-block-items/mutations.py
+  - I2 empirical-test :: cargo test --locked backlog_claim_hands_out_each_item_once
