@@ -103,3 +103,7 @@ done when its tests pass and the earlier map tests still do.
   repeated or fractional number gave two cards one id (each issue number is
   one card, the first); and that a basket kept as `null` stopped the page
   (`MapLogic.basketOf` now shapes whatever was kept).
+- **The sweep runs test by test.** Judging all 44 mutations by every map test
+  took about 17 minutes, past the 900 seconds CI gives an obligation; the first
+  CI run failed on it. Each mutation is now judged by the one test that guards
+  it, as change 323's sweep is grouped, and the whole sweep takes two minutes.

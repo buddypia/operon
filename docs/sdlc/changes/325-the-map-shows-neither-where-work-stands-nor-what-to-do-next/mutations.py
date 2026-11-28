@@ -9,29 +9,32 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 
-RUN_SECONDS = 2400
+RUN_SECONDS = 900
 
-TESTS = [
-    "map_status_counts_features_changes_and_what_waits_for_a_person",
-    "map_features_carry_cover_rail_code_by_layer_and_evidence",
-    "map_work_board_puts_every_card_in_exactly_one_column",
-    "map_reads_the_backlog_only_when_asked_and_survives_its_failure",
-    "map_process_shows_every_route_surface_and_method_the_pipeline_defines",
-    "map_catalog_lists_every_palette_role_icon_and_key",
-    "map_page_logic_parses_lenses_and_counts_them_faceted",
-    "map_page_logic_builds_the_work_order_and_the_review_packet",
-    "map_page_logic_filters_board_and_requirements_and_knows_its_keys",
-    "map_page_has_status_tiles_work_process_and_catalog_views",
-    "map_serves_a_fresh_page_on_loopback_and_stops",
-    "map_readme_names_every_view_and_option",
-    "map_page_logic_routes_walks_searches_and_scales_areas",
-    "map_server_cuts_a_request_that_dribbles_past_five_seconds",
-    "map_backlog_survives_an_integer_too_large_for_a_float",
-    "map_backlog_deadline_holds_when_a_grandchild_keeps_stdout",
-    "map_backlog_cards_have_unique_ids_when_numbers_repeat",
-    "map_page_logic_reads_any_kept_basket",
-]
-CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", *TESTS]]
+# The sweep runs test by test, each mutation judged only by the test that
+# guards it. Judging all 44 by every map test took about 17 minutes, past the
+# 900 seconds CI gives an obligation (this change's first CI run failed on
+# exactly that). With no argument every group runs, each as its own process
+# because a sweep ends by exiting; `mutations.py <test>` runs one.
+GUARDS = {
+    "map_status_counts_features_changes_and_what_waits_for_a_person": ["a-human-check-already-passed-still-waits", "a-change-off-the-stages-is-lost", "a-landed-change-counts-as-open"],
+    "map_features_carry_cover_rail_code_by_layer_and_evidence": ["a-half-tested-feature-counts-as-tested", "a-test-file-is-drawn-code", "an-estimated-link-gives-a-next-step"],
+    "map_work_board_puts_every_card_in_exactly_one_column": ["a-held-item-stays-in-the-backlog-column", "a-backlog-link-may-go-anywhere"],
+    "map_reads_the_backlog_only_when_asked_and_survives_its_failure": ["every-landed-change-gets-a-card", "a-failing-backlog-is-not-said"],
+    "map_backlog_deadline_holds_when_a_grandchild_keeps_stdout": ["a-slow-backlog-stops-the-map", "the-pipe-is-read-to-its-end"],
+    "map_process_shows_every_route_surface_and_method_the_pipeline_defines": ["a-route-of-the-wrong-shape-is-drawn", "an-unread-table-is-not-said"],
+    "map_catalog_lists_every_palette_role_icon_and_key": ["a-shadow-colour-is-lost", "an-icon-counts-its-own-definition"],
+    "map_page_logic_parses_lenses_and_counts_them_faceted": ["a-lens-press-never-clears", "an-untested-feature-answers-nothing", "counts-ignore-the-other-lenses", "a-query-is-lost-from-the-link"],
+    "map_page_logic_builds_the_work_order_and_the_review_packet": ["a-file-is-listed-twice", "a-gone-record-stays-in-the-basket", "an-unread-backlog-drops-an-issue", "ok-verdicts-are-listed-to-fix", "a-refused-storage-throws"],
+    "map_page_logic_filters_board_and_requirements_and_knows_its_keys": ["the-board-ignores-who", "untested-requirements-pass-as-tested", "the-basket-key-is-gone", "the-theme-never-goes-back-to-auto"],
+    "map_page_has_status_tiles_work_process_and_catalog_views": ["the-bar-loses-work", "the-features-column-is-gone", "a-fourth-name-in-the-browser"],
+    "map_serves_a_fresh_page_on_loopback_and_stops": ["the-server-listens-everywhere", "every-path-gets-the-map", "a-post-gets-the-map", "a-cut-request-gets-the-map"],
+    "map_server_cuts_a_request_that_dribbles_past_five_seconds": ["a-dribbling-request-holds-the-server", "a-late-request-gets-the-map"],
+    "map_backlog_survives_an_integer_too_large_for_a_float": ["a-huge-integer-stops-the-map"],
+    "map_backlog_cards_have_unique_ids_when_numbers_repeat": ["a-repeated-number-is-a-second-card", "a-number-not-whole-is-a-card"],
+    "map_page_logic_reads_any_kept_basket": ["a-kept-null-is-taken-for-a-basket"],
+    "map_readme_names_every_view_and_option": ["the-readme-forgets-the-server", "the-readme-forgets-the-catalog"],
+}
 
 MAP = ROOT / "scripts/change-map.py"
 PAGE = ROOT / "scripts/change-map/page.js"
@@ -138,4 +141,19 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT / "scripts"))
 import mutation_sweep  # noqa: E402
 
-mutation_sweep.main(RUN_SECONDS, CHECKS, MUTATIONS)
+guarded = [name for names in GUARDS.values() for name in names]
+if sorted(guarded) != sorted(MUTATIONS) or len(set(guarded)) != len(guarded):
+    sys.exit("GUARDS must name every mutation exactly once")
+if len(sys.argv) == 1:
+    import subprocess
+
+    for _test in GUARDS:
+        print(f"== {_test}", flush=True)
+        if subprocess.run([sys.executable, __file__, _test], check=False).returncode != 0:
+            sys.exit(1)
+    sys.exit(0)
+if len(sys.argv) != 2 or sys.argv[1] not in GUARDS:
+    sys.exit("usage: mutations.py [" + "|".join(GUARDS) + "]")
+TEST = sys.argv[1]
+CHECKS = [["cargo", "test", "--locked", "--manifest-path", str(ROOT / "Cargo.toml"), "--", "--exact", "tests::" + TEST]]
+mutation_sweep.main(RUN_SECONDS, CHECKS, {name: MUTATIONS[name] for name in GUARDS[TEST]})
