@@ -294,9 +294,13 @@ def name_of(text):
 
 
 def who():
-    # The directory only: a host name is the person's, and an issue is not the
-    # place for it.
-    return name_of(os.path.basename(os.getcwd())) or "session"
+    # The working copy's directory only: a host name is the person's, and an
+    # issue is not the place for it. The copy's root, not the directory the
+    # command runs in, so a session in a subdirectory is still known by the
+    # working copy `left_behind` looks for.
+    top = git("rev-parse", "--show-toplevel")
+    here = top.strip() if top and top.strip() else os.getcwd()
+    return name_of(os.path.basename(here)) or "session"
 
 
 def moment(stamp):

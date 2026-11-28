@@ -102852,3 +102852,22 @@ pub(crate) fn backlog_skill_takes_the_next_item_when_called_alone() {
         "claim が自分で戻すことを書いていません"
     );
 }
+
+/// A session whose directory is below its working copy claims under the
+/// subdirectory's name; a day later the claim must not be given back while
+/// that working copy exists.
+#[test]
+pub(crate) fn backlog_claim_from_a_subdirectory_of_a_working_copy_is_kept() {
+    let root = backlog_fixture("backlog-subdir");
+    let repository = backlog_repository(&root);
+    let copy = backlog_working_copy(&repository, "live-copy");
+    let sub = copy.join("scripts");
+    fs::create_dir_all(&sub).unwrap();
+    let item = backlog_add(&root, "作業中", "remaining", [9, 9, 9]);
+    assert_eq!(backlog_claim_in(&root, &sub, &[], &[]), Some(item));
+    backlog_age(&root, item, 25);
+    let other = backlog_add(&root, "別", "remaining", [1, 1, 1]);
+    let taken = backlog_claim_in(&root, &repository, &[], &[]);
+    assert_eq!(taken, Some(other), "作業中の項目が戻されました");
+    discard_worktree_fixture(&root);
+}

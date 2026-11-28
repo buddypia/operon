@@ -16,7 +16,7 @@ RUN_SECONDS = 900
 # Grouped as change 323's sweep is, so each group fits the time CI gives one
 # obligation. With no argument every group runs, each as its own process.
 TESTS = {
-    "giving": ["backlog_claim_gives", "backlog_claim_keeps", "backlog_claim_hands"],
+    "giving": ["backlog_claim_gives", "backlog_claim_keeps", "backlog_claim_hands", "backlog_claim_from"],
     "moving": ["backlog_claim_moves", "backlog_claim_hands"],
     "reach": ["backlog_skill"],
 }
@@ -100,6 +100,13 @@ GIVING = {
         "    timer = threading.Timer(3600, child.kill)",
     ),
 }
+
+# The finding the empirical verifier reproduced (F1).
+GIVING["a claim made in a subdirectory is named after it"] = (
+    SCRIPT,
+    '    here = top.strip() if top and top.strip() else os.getcwd()',
+    '    here = os.getcwd()',
+)
 
 MOVING = {
     # Requirement 3.

@@ -59,3 +59,14 @@
   `backlog_run_in` now puts the test's variables on `env`'s command line.
 - **The kept-item test's working copy has a space in its name**, so that
   comparing the holder unnormalised (a row of the risk table) is caught.
+- **A claim is named after the working copy's root, not the directory the
+  command runs in** (`git rev-parse --show-toplevel`, falling back to the
+  directory outside a repository). The empirical verifier reproduced a claim
+  made from `<copy>/scripts` held as `scripts`, matching no working copy and
+  given back a day later while the copy was in use —
+  `backlog_claim_from_a_subdirectory_of_a_working_copy_is_kept`, F1.
+- Two concerns the verifier read but could not reproduce are left as limits:
+  two working copies moving the same main-copy claim at the same moment could
+  both hold it (a move does not re-check that its claim is the earliest), and a
+  failed delete during a move leaves the main copy's claim earliest, so the
+  item is given back a day later as for a claim never moved.
