@@ -1,0 +1,26 @@
+# The evidence for change 325. One test per requirement of spec.md, and the
+# sweep that watched each of them go red (44 of 44). F1 was found by the
+# empirical verifier on df05c08 and fixed in serve; F2-F5 by its second pass
+# on fe1af20, fixed in finite, read_backlog and basketOf. The digest is the whole landing
+# diff's (check-review.sh --against refs/heads/main), on 775c8b0.
+digest: "0cd6a39ec47c621e"
+
+obligations:
+  - R1 empirical-test :: cargo test --locked map_status_counts_features_changes_and_what_waits_for_a_person
+  - R2 empirical-test :: cargo test --locked map_features_carry_cover_rail_code_by_layer_and_evidence
+  - R3 empirical-test :: cargo test --locked map_work_board_puts_every_card_in_exactly_one_column
+  - R4 empirical-test :: cargo test --locked map_reads_the_backlog_only_when_asked_and_survives_its_failure
+  - R5 empirical-test :: cargo test --locked map_process_shows_every_route_surface_and_method_the_pipeline_defines
+  - R6 empirical-test :: cargo test --locked map_catalog_lists_every_palette_role_icon_and_key
+  - R7 empirical-test :: cargo test --locked map_page_logic_parses_lenses_and_counts_them_faceted
+  - R8 empirical-test :: cargo test --locked map_page_logic_builds_the_work_order_and_the_review_packet
+  - R9 empirical-test :: cargo test --locked map_page_logic_filters_board_and_requirements_and_knows_its_keys
+  - R10 empirical-test :: cargo test --locked map_page_has_status_tiles_work_process_and_catalog_views
+  - R11 empirical-test :: cargo test --locked map_serves_a_fresh_page_on_loopback_and_stops
+  - R12 empirical-test :: cargo test --locked map_readme_names_every_view_and_option
+  - F1 empirical-test :: cargo test --locked map_server_cuts_a_request_that_dribbles_past_five_seconds
+  - F2 empirical-test :: cargo test --locked map_backlog_survives_an_integer_too_large_for_a_float
+  - F3 empirical-test :: cargo test --locked map_backlog_deadline_holds_when_a_grandchild_keeps_stdout
+  - F4 empirical-test :: cargo test --locked map_backlog_cards_have_unique_ids_when_numbers_repeat
+  - F5 empirical-test :: cargo test --locked map_page_logic_reads_any_kept_basket
+  - I1 empirical-mutation :: python3 docs/sdlc/changes/325-the-map-shows-neither-where-work-stands-nor-what-to-do-next/mutations.py

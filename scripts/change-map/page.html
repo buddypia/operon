@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ja" data-theme="dark">
+<html lang="ja" data-theme="auto">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,9 +11,10 @@ __CSS__
 <body>
 <header class="top">
   <div class="bar1">
+    <button id="sd-open" class="ghost" aria-controls="side" aria-expanded="false">機能一覧</button>
     <a class="brand" href="#overview"><span class="logo" aria-hidden="true"></span><h1>Operon 製品地図</h1></a>
     <nav class="views" aria-label="表示">
-      <button data-view="overview">概要</button><button data-view="features">機能</button><button data-view="screen">画面</button><button data-view="domains">ドメイン</button><button data-view="glossary">用語集</button><button data-view="requirements">要件</button><button data-view="changes">変更</button>
+      <button data-view="overview">現況</button><button data-view="features">機能</button><button data-view="screen">画面</button><button data-view="domains">ドメイン</button><button data-view="glossary">用語集</button><button data-view="requirements">要件</button><button data-view="work">作業</button><button data-view="changes">変更</button><button data-view="process">進め方</button><button data-view="catalog">カタログ</button>
     </nav>
     <div class="searchwrap">
       <input id="q" type="search" placeholder="検索（/）" aria-label="検索" autocomplete="off">
@@ -25,12 +26,19 @@ __CSS__
   </div>
   <div class="bar2"><span class="counts">__HEADLINE__</span><span class="meta" id="meta"></span></div>
 </header>
+<div class="frame">
+<aside id="side" aria-label="機能の一覧">
+  <input id="sd-q" type="search" placeholder="機能を絞り込む" aria-label="機能を絞り込む" autocomplete="off">
+  <div class="filters" id="sd-counts"></div>
+  <nav id="sd-list" aria-label="機能"></nav>
+</aside>
 <main>
   <div id="v-overview" hidden></div>
   <div id="v-features" hidden>
-    <p class="lead">Operon を画面ごとに見渡します。機能を選ぶと、その機能のページ（画面・要件・用語・コード・変更履歴）が開きます。</p>
+    <p class="lead">Operon の機能を並べています。上の印で状態・テスト・ドメインごとに絞り込めます（⌘ か ⇧ を押しながらで複数）。機能を選ぶと、その機能のページ（画面・要件・コード・根拠・変更履歴）が開きます。</p>
     <div id="p-catalogue-error"></div>
-    <section id="p-screens"><h2>画面と機能 <small id="p-screens-n"></small></h2><div id="p-screen-list"></div></section>
+    <div id="ft-lenses"></div>
+    <section><h2>機能 <small id="ft-n"></small></h2><div class="ftiles" id="ft-tiles"></div></section>
     <section id="p-unmapped"></section>
   </div>
   <div id="v-feature" class="fview" hidden></div>
@@ -73,7 +81,13 @@ __CSS__
   </div>
   <div id="v-requirements" hidden>
     <p class="lead">すべての機能の「今の振る舞い」を 1 行ずつ並べ、どのテストがそれを確かめているかを示します。テストで守られていない行が、確かめられていない振る舞いです。</p>
-    <section><h2>振る舞い <small id="rq-n"></small></h2><div class="filters" id="rq-filters"></div><div id="rq-list"></div></section>
+    <section><h2>振る舞い <small id="rq-n"></small></h2><div id="rq-filters"></div><div id="rq-list"></div></section>
+  </div>
+  <div id="v-work" hidden>
+    <p class="lead">残っている作業、セッションが進めている作業、あなたの対応を待っている作業、最近終わった作業を 1 枚に並べています。この画面からは何も書き換えません。頼むときは「指示をコピー」か作業かごを使います。</p>
+    <div class="filters" id="wk-filters"></div>
+    <div id="wk-notice"></div>
+    <div id="wk-board"></div>
   </div>
   <div id="v-changes" hidden>
     <section id="needs"><h2>あなたの判断を待っています <small id="needs-n"></small></h2><div id="needs-list"></div></section>
@@ -82,7 +96,17 @@ __CSS__
     <section id="all"><h2>すべての変更 <small id="all-n"></small></h2>
       <div class="filters" id="filters"></div><div id="all-list"></div></section>
   </div>
+  <div id="v-process" hidden>
+    <p class="lead">依頼がどの段階を通り、何を根拠に完了とするかを、パイプラインの定義そのものから描いています。</p>
+    <div id="pr-body"></div>
+  </div>
+  <div id="v-catalog" hidden>
+    <p class="lead">アプリが定義している色の役割・アイコン・キー操作の一覧です。ソースの定義をそのまま読んでいます。</p>
+    <div id="ct-body"></div>
+  </div>
 </main>
+</div>
+<div id="toast" hidden role="status"></div>
 <div id="shade" hidden></div>
 <aside id="detail" hidden aria-label="変更の詳細">
   <div class="dhead">
