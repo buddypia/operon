@@ -15,6 +15,12 @@ score is impact x confidence x ease, each 1 to 10, held in a comment line in
 the issue body. An item is held while it carries a claim comment; of several
 claims the one GitHub numbered first wins and the others remove themselves.
 
+A claim at least STALE_HOURS old whose holder left neither a linked working
+copy of that name nor a commit naming the item as `(#N)` is given back by the
+next `claim` that reaches it (change 324). A claim made on the main copy moves
+into the working copy that names it with `claim NUMBER`, if that copy was
+created after the claim. When git cannot answer, nothing is given back.
+
 Exit 0 done (including "nothing to claim"), 2 refused or GitHub unreachable,
 3 the named item is already held.
 
@@ -47,6 +53,11 @@ PRINTED_BODY_BYTES = 16 * 1024
 TITLE_CHARACTERS = 256
 BODY_CHARACTERS = 60000
 TIMEOUT_SECONDS = 60
+STALE_HOURS = 24
+GIT_ANSWER_BYTES = 1024 * 1024
+# A git hook exports these to its children; left in, git would read the hook's
+# repository instead of the one this command runs in.
+REPOSITORY_POINTERS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR")
 
 ICE_LINE = re.compile(r"<!-- backlog ice: impact=(\d+) confidence=(\d+) ease=(\d+) -->")
 OWNED_LINES = re.compile(r"\n*^ICE \d+ = [^\n]*\n<!-- backlog ice: [^\n]*-->[ \t]*$", re.M)
@@ -122,6 +133,78 @@ def gh(method, path, payload=None):
         return json.loads(text)
     except ValueError:
         raise Refused("GitHub の応答を読めません") from None
+
+
+def git(*arguments):
+    """One git child in this directory: its output, or None on any failure."""
+    environment = {name: value for name, value in os.environ.items() if name not in REPOSITORY_POINTERS}
+    try:
+        child = subprocess.Popen(
+            ["git", *arguments],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=environment,
+        )
+    except OSError:
+        return None
+    timer = threading.Timer(timeout_seconds, child.kill)
+    timer.start()
+    try:
+        answer = child.stdout.read(GIT_ANSWER_BYTES + 1)
+        if len(answer) > GIT_ANSWER_BYTES:
+            child.kill()
+        code = child.wait()
+    finally:
+        timer.cancel()
+        child.stdout.close()
+    if code != 0 or len(answer) > GIT_ANSWER_BYTES:
+        return None
+    return answer.decode("utf-8", "replace")
+
+
+def working_copies():
+    """(the main copy's name, the names of linked copies that exist), or None."""
+    text = git("worktree", "list", "--porcelain")
+    if text is None:
+        return None
+    entries = []
+    for block in text.split("\n\n"):
+        lines = block.splitlines()
+        paths = [line[len("worktree "):] for line in lines if line.startswith("worktree ")]
+        if paths:
+            locked = any(line == "locked" or line.startswith("locked ") for line in lines)
+            entries.append((paths[0], locked))
+    if not entries:
+        return None
+    main = name_of(os.path.basename(entries[0][0]))
+    linked = {name_of(os.path.basename(path)) for path, locked in entries[1:] if locked or os.path.isdir(path)}
+    return main, linked
+
+
+def left_behind(number, held, copies):
+    """True only when the claim is old, its holder has no working copy, and
+    no commit names the item. Anything git cannot answer keeps the item."""
+    then = moment(held["since"])
+    if then is None or datetime.datetime.now(datetime.timezone.utc).timestamp() - then < STALE_HOURS * 3600:
+        return False
+    if copies is None or held["by"] in copies[1]:
+        return False
+    named = git("log", "--branches", "--remotes", "-F", "--grep", "(#%d)" % number, "-1", "--format=%H")
+    return named is not None and not named.strip()
+
+
+def born_after(stamp):
+    """Whether this working copy was created at or after the claim's time."""
+    then = moment(stamp)
+    directory = git("rev-parse", "--absolute-git-dir")
+    if then is None or directory is None:
+        return False
+    try:
+        born = os.stat(directory.strip()).st_birthtime
+    except (OSError, AttributeError):
+        return False
+    return born >= then
 
 
 def pages(path):
@@ -205,18 +288,35 @@ def claims_on(number):
     return claims
 
 
+def name_of(text):
+    """A directory name as a claim carries it; written and compared alike."""
+    return re.sub(r"\s+|--+", "-", text)
+
+
 def who():
-    # The directory only: a host name is the person's, and an issue is not the
-    # place for it.
-    return re.sub(r"\s+|--+", "-", os.path.basename(os.getcwd())) or "session"
+    # The working copy's directory only: a host name is the person's, and an
+    # issue is not the place for it. The copy's root, not the directory the
+    # command runs in, so a session in a subdirectory is still known by the
+    # working copy `left_behind` looks for.
+    top = git("rev-parse", "--show-toplevel")
+    here = top.strip() if top and top.strip() else os.getcwd()
+    return name_of(os.path.basename(here)) or "session"
 
 
-def ago(stamp):
+def moment(stamp):
+    """GitHub's UTC time as seconds since the epoch, or None."""
     try:
         then = datetime.datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
     except (TypeError, ValueError):
+        return None
+    return then.timestamp()
+
+
+def ago(stamp):
+    then = moment(stamp)
+    if then is None:
         return ""
-    minutes = int((datetime.datetime.now(datetime.timezone.utc) - then).total_seconds() // 60)
+    minutes = int((datetime.datetime.now(datetime.timezone.utc).timestamp() - then) // 60)
     if minutes < 60:
         return "%d分前" % max(minutes, 0)
     if minutes < 60 * 24:
@@ -348,6 +448,10 @@ def list_items(arguments):
     return 0
 
 
+def claim_body(by):
+    return "着手しました: %s\n<!-- backlog claim: by=%s -->" % (by, by)
+
+
 def claim(arguments):
     if arguments.number is not None:
         candidates, named = [item_of(one_item(arguments.number))], True
@@ -355,6 +459,7 @@ def claim(arguments):
         items, _ = open_items()
         candidates, named = [item for item in items if item["score"] is not None], False
     tried = 0
+    copies = False  # read once, when the first held item needs it
     for item in candidates:
         number = item["number"]
         if tried >= COMMENT_READS:
@@ -364,9 +469,26 @@ def claim(arguments):
         if item["commented"]:
             claims = claims_on(number)
             holder = claims[0]["by"] if claims else None
+        if holder is not None:
+            here = who()
+            if copies is False:
+                copies = working_copies()
+            # Every session on the main copy shares its name, so only a linked
+            # copy can tell that a claim under its name is its own.
+            linked_here = copies is not None and here in copies[1] and here != copies[0]
+            if named and linked_here and holder == here:
+                item["held_by"], item["held_since"] = holder, claims[0]["since"]
+                show_claimed(item, arguments.json)
+                return 0
+            if named and linked_here and holder == copies[0] and born_after(claims[0]["since"]):
+                move_here(item, claims, arguments.json)
+                return 0
+            if left_behind(number, claims[0], copies):
+                give_back(number, holder)
+                holder = None
         if holder is None:
             by = who()
-            mine = gh("POST", "issues/%d/comments" % number, {"body": "着手しました: %s\n<!-- backlog claim: by=%s -->" % (by, by)})
+            mine = gh("POST", "issues/%d/comments" % number, {"body": claim_body(by)})
             try:
                 claims = claims_on(number)
             except Refused:
@@ -385,6 +507,33 @@ def claim(arguments):
     else:
         print("着手できる項目はありません")
     return 0
+
+
+def give_back(number, holder):
+    """Delete every claim on an item whose holder is gone, and say why."""
+    for held in claims_on(number):
+        try:
+            gh("DELETE", "issues/comments/%d" % held["id"])
+        except Refused as failure:
+            # Another session giving it back at the same moment deleted it.
+            if "404" not in str(failure):
+                raise
+    gh(
+        "POST",
+        "issues/%d/comments" % number,
+        {"body": "戻しました: 着手から 1 日以上たち、作業ツリーもこの項目のコミットもありません (着手: %s)" % holder},
+    )
+
+
+def move_here(item, claims, as_json):
+    """Hold the item under this working copy's name instead of the main copy's."""
+    by = who()
+    mine = gh("POST", "issues/%d/comments" % item["number"], {"body": claim_body(by)})
+    for held in claims:
+        withdraw(held["id"])
+    item["held_by"], item["held_since"] = by, mine.get("created_at")
+    print("#%d の着手をこの作業ツリーに移しました" % item["number"], file=sys.stderr if as_json else sys.stdout)
+    show_claimed(item, as_json)
 
 
 def withdraw(comment_id):

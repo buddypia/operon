@@ -12,7 +12,9 @@ in the repository, main included, exactly as written below — no `cd`, no
 variables, no setup.
 
 Decide which of the two uses this is, then run it without asking: both are
-undone by one command (`release`, or closing an issue).
+undone by one command (`release`, or closing an issue). `/backlog` given alone,
+with nothing after it, is the Run use: take the next item and carry it out, do
+not stop at a list.
 
 ## Record — when a change closes
 
@@ -64,15 +66,11 @@ line `add` printed — in place of a paragraph about what remains.
 
 ## Run — when the next thing is asked for
 
-1. See what there is, when the person asked what is left rather than to start:
+`/backlog` alone, "do the next thing", or "the most valuable thing" starts at
+step 1; a person asking what is left gets the list instead (the end of this
+section).
 
-   ```sh
-   python3 scripts/backlog.py list
-   ```
-
-   Report the lines as they are, best first, and stop there.
-
-2. Take the best item nobody holds:
+1. Take the best item nobody holds:
 
    ```sh
    python3 scripts/backlog.py claim
@@ -87,11 +85,24 @@ line `add` printed — in place of a paragraph about what remains.
    ```
 
    Exit 3 means another session holds it; say who, and do not work on it.
+   A claim a day old whose holder left no working copy and no commit naming
+   the item is given back by `claim` on its own, with a comment saying so.
+
+2. Open the working copy — feature-pilot's step 0, `make wt.new` (a `problem`
+   is a `fix/` branch) — and, from inside it, move the claim there:
+
+   ```sh
+   python3 scripts/backlog.py claim 12
+   ```
+
+   It answers 「#12 の着手をこの作業ツリーに移しました」, and the item stays held
+   for as long as that working copy exists. A claim left on the main copy is
+   given back a day later.
 
 3. Do the work. The item's title and text are the request: follow
-   `.claude/skills/feature-pilot/SKILL.md` from its step 0 (a `problem` is a
-   `fix/` branch). Quote the issue and its number in `intent.md`, or in the bug
-   report for a bugfix, and put `(#12)` in the commit subject.
+   `.claude/skills/feature-pilot/SKILL.md`. Quote the issue and its number in
+   `intent.md`, or in the bug report for a bugfix, and put `(#12)` in the
+   commit subject.
 
 4. Close it once the change has landed on `main`, with the merge commit:
 
@@ -100,7 +111,7 @@ line `add` printed — in place of a paragraph about what remains.
    ```
 
    If the work stops instead — blocked, failed, or the item turned out wrong —
-   give it back with the reason, so it is not held by a session that is gone:
+   give it back with the reason:
 
    ```sh
    python3 scripts/backlog.py release 12 --reason "再現できなかった。手順が必要"
@@ -114,11 +125,21 @@ line `add` printed — in place of a paragraph about what remains.
 One request takes one item. To take the next, the person asks again or runs
 this in a loop.
 
+When the person asks what is left rather than to start, show the list, report
+its lines as they are, best first, and stop there:
+
+```sh
+python3 scripts/backlog.py list
+```
+
 ## When something is off
 
-- `list` shows 「着手中」 with a name and an age. A claim whose worktree no
-  longer exists (`git worktree list`) and whose age is past a day belongs to a
-  session that is gone: `release` it with that reason, then `claim`.
+- `list` shows 「着手中」 with a name and an age. `claim` gives back on its own
+  an item claimed a day ago or more whose holder has no working copy here and
+  no commit names it as `(#N)`; when git cannot answer, it keeps the item. A
+  working copy that still exists but was abandoned is a person's call: say so,
+  and `release` only when they agree. A session on another machine or clone
+  that holds an item a day without pushing a commit naming it loses the item.
 - 「スコアを読めません」 marks an issue labelled `backlog` by hand. `score` it
   and it joins the order.
 - 「GitHub に届きません」 carries `gh`'s own first line. An item that could not
