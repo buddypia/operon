@@ -5,6 +5,10 @@
     python3 scripts/change-map.py --find WORD   the changes of an area, or with
                                                 WORD in their name or title
     python3 scripts/change-map.py --json        the model, without documents
+    python3 scripts/change-map.py --backlog     also read the backlog (GitHub,
+                                                through scripts/backlog.py)
+    python3 scripts/change-map.py --serve       the page on 127.0.0.1, rebuilt
+                                                on every load (--port, --requests)
 
 The map is generated from the records the pipeline already keeps — each
 change's state.yaml, its documents, review.yaml, approvals.log — and from
@@ -16,20 +20,28 @@ first record is not one.
 A change under way lives in another worktree until it lands, so the other
 working copies are read too: one `git worktree list`, ten seconds, 64 KiB.
 Ceilings: 256 KiB per document, 40 records per change, 64 working copies.
+The backlog is read only when asked: one child, 30 seconds, 1 MiB, 200 items.
 
-exit 0 written or printed, 2 usage or no docs/sdlc/changes
+exit 0 written or printed, 2 usage, no docs/sdlc/changes, or a port in use
 """
 import argparse
 import base64
 import datetime
+import errno
+import http.server
 import importlib.util
 import json
 import math
 import os
 import re
+import select
+import signal
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 DOC_BYTES = 256 * 1024
@@ -273,6 +285,18 @@ def findings_of(text):
     return found
 
 
+def obligations_of(text):
+    """How many obligations a change's verification.yaml lists."""
+    count, inside = 0, False
+    for line in text.splitlines():
+        if re.match(r"^[A-Za-z_][\w-]*:", line):
+            inside = line.startswith("obligations:")
+            continue
+        if inside and line.startswith("  - "):
+            count += 1
+    return count
+
+
 def approvals_of(text):
     rows = []
     for line in text.splitlines():
@@ -342,6 +366,7 @@ def read_change(directory, where, statuses):
         "areas": areas,
         "findings": findings_of(texts.get("review.yaml", "")),
         "approvals": approvals_of(texts.get("approvals.log", "")),
+        "obligations": obligations_of(texts.get("verification.yaml", "")),
         "omitted": omitted,
         "docs": docs,
     }
@@ -820,7 +845,13 @@ ORDINAL = re.compile(r"^(.*\S)\s+#(\d+)$")
 
 def finite(value):
     """A number a page can place by: not a bool, not NaN, not infinite."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        # An integer past a float's range is no place on a page.
+        return False
 
 
 def jpeg_size(data):
@@ -1035,7 +1066,7 @@ def link_domains(domains, features):
         domain["changes"] = sorted(seen, reverse=True)
 
 
-def build(root):
+def build(root, backlog=None):
     statuses = template_statuses(root) or list(GROUPS)
     changes = {}
     for directory in change_directories(root):
@@ -1079,6 +1110,8 @@ def build(root):
                              if set(s["features"]) & set(domain["features"])]
     for change in ordered:
         del change["plan_paths"]
+    feature_depth(root, layer["features"], requirements, flow["flow"], ordered)
+    backlog = backlog or {"asked": False, "items": [], "total": 0, "error": "", "notice": ""}
     counts = {group: sum(1 for c in ordered if c["group"] == group) for group in GROUP_ORDER}
     counts["total"] = len(ordered)
     descriptions = module_descriptions(root)
@@ -1124,6 +1157,11 @@ def build(root):
         "shots_notice": shots["shots_notice"],
         "overview": overview_of(layer["features"], domains["domains"], flow["flow"],
                                 requirements, glossary["terms"], counts),
+        "status": status_of(ordered, layer["features"], domains["domains"], requirements),
+        "backlog": backlog,
+        "work": work_of(ordered, backlog),
+        "process": read_process(root, ordered),
+        "catalog": read_catalog(root),
     }
 
 
@@ -1151,6 +1189,396 @@ def overview_of(features, domains, flow, requirements, terms, counts):
         "least_pinned": [{"feature": f, "bare": n} for f, n in
                          sorted(bare.items(), key=lambda item: (-item[1], item[0]))[:5]],
     }, **share(requirements))
+
+
+# Change 325: where work stands, a feature in depth, the work board, the
+# pipeline and the catalogue. Each is derived from what `build` already holds
+# or from the one file that defines it; nothing here is a second record.
+ATTENTION_ROWS = 5
+NEXT_ROWS = 8
+LANDED_CARDS = 8
+EVIDENCE_ROWS = 3
+RAIL = ("brief", "spec", "screens", "requirements", "tests", "live")
+LAYERS = ("draw", "text", "core", "test", "script", "doc")
+TEXT_FILES = ("src/i18n.rs", "src/i18n_tables.rs", "src/theme.rs", "src/glyphs.rs")
+
+
+def layer_of(path):
+    """The first layer whose rule the path meets."""
+    if path == "src/tests.rs":
+        return "test"
+    if path == "src/app.rs" or path.startswith(("src/app/", "src/ui/")):
+        return "draw"
+    if path in TEXT_FILES:
+        return "text"
+    if path.startswith("src/"):
+        return "core"
+    if path.startswith("docs/") or path.endswith(".md"):
+        return "doc"
+    return "script"
+
+
+def is_open(change):
+    return change["group"] in ("needs", "flight")
+
+
+def status_of(changes, features, domains, requirements):
+    """現況: counts, where each open change is, what a person has to handle,
+    what is under way, each domain, each working copy."""
+    opened = [c for c in changes if is_open(c)]
+    by_badge = lambda rows: {badge: sum(1 for f in rows if f["badge"] == badge) for badge in BADGE}
+    cards = []
+
+    def card(kind, items):
+        cards.append({"kind": kind, "total": len(items), "items": items[:ATTENTION_ROWS]})
+
+    card("decide", [{"change": c["name"], "text": c["problem"] or c["resume"]}
+                    for c in changes if c["group"] == "needs"])
+    card("confirm", [{"change": c["name"], "key": k["key"], "text": k["text"]}
+                     for c in opened for k in c["contract"]
+                     if k["kind"] == "human" and k["verdict"] == "pending"])
+    card("carried", [{"change": c["name"], "text": f["person"] or f["finding"]}
+                     for c in changes if c["group"] == "done" for f in c["findings"]])
+    card("gaps", [{"feature": f["id"],
+                   "text": "、".join(f["problems"]) or "テストのある要件がありません"}
+                  for f in features if f["problems"] or not f["pinned"]])
+    flight = [c for c in changes if c["group"] == "flight"]
+    branches = {}
+    for c in opened:
+        where = c["where"]
+        key = (not where["here"], where["branch"], where["path"])
+        branches.setdefault(key, []).append(c["name"])
+    by_feature = {f["id"]: f for f in features}
+    per_domain = []
+    for domain in domains:
+        members = [by_feature[fid] for fid in domain["features"] if fid in by_feature]
+        rows = [r for r in requirements if r["domain"] == domain["id"]]
+        per_domain.append(dict(by_badge(members), id=domain["id"], features=len(members),
+                               requirements=len(rows),
+                               pinned=sum(1 for r in rows if r["pinned"])))
+    per_domain.sort(key=lambda d: -d["waiting"])
+    return {
+        "features": dict(by_badge(features), total=len(features)),
+        "phases": [{"stage": stage, "changes": [c["name"] for c in opened if c["stage"] == stage]}
+                   for stage in STAGES],
+        "off_track": [c["name"] for c in opened if c["stage"] not in STAGES],
+        "attention": cards,
+        "next": [{"name": c["name"], "stage": c["stage"], "resume": c["resume"],
+                  "passed": sum(1 for k in c["contract"] if k["verdict"] == "passed"),
+                  "waived": sum(1 for k in c["contract"] if k["verdict"] == "waived"),
+                  "total": len(c["contract"])} for c in flight[:NEXT_ROWS]],
+        "next_total": len(flight),
+        "branches": [{"here": not key[0], "branch": key[1], "path": key[2], "changes": names}
+                     for key, names in sorted(branches.items())],
+        "domains": per_domain,
+    }
+
+
+def feature_depth(root, features, requirements, flow, changes):
+    """What a feature's page shows past its documents: how much of it is
+    tested, which of its six steps exist, its code by layer, the change open
+    on it and the evidence its latest changes landed on."""
+    lines = module_lines(root)
+    shot = {s["id"]: bool(s.get("shot")) for s in flow["screens"]}
+    by_name = {c["name"]: c for c in changes}
+    for feature in features:
+        rows = [r for r in requirements if r["feature"] == feature["id"]]
+        pinned = sum(1 for r in rows if r["pinned"])
+        cover = ("empty" if not rows else "full" if pinned == len(rows)
+                 else "partial" if pinned else "none")
+        spec = feature["spec"]["text"] if feature.get("spec") else ""
+        screens = [shot.get(sid, False) for sid in feature.get("flow_screens", [])]
+        seen = [line for line in section(spec, "Seen in the running app") if line.strip()]
+        state = {
+            "brief": "done" if feature.get("brief") else "missing",
+            "spec": "done" if feature.get("spec") else "missing",
+            "screens": ("done" if screens and all(screens)
+                        else "partial" if any(screens) else "missing"),
+            "requirements": "done" if rows else "missing",
+            "tests": {"full": "done", "partial": "partial"}.get(cover, "missing"),
+            "live": "done" if seen else "missing",
+        }
+        files, symbols = [], {}
+        for path in feature["paths"] + feature["shared"]:
+            if path not in files:
+                files.append(path)
+        for line in section(spec, "Code and tests"):
+            for token in re.findall(r"`([^`]+)`", line):
+                path, _, symbol = token.partition("::")
+                path = path.strip().rstrip(".,")
+                if not looks_like_path(path) or "/" not in path:
+                    continue
+                if path not in files:
+                    files.append(path)
+                if symbol and symbol not in symbols.setdefault(path, []):
+                    symbols[path].append(symbol)
+        code = [{"layer": layer, "files": [
+            {"path": path, "about": lines.get(path, ""), "symbols": symbols.get(path, [])}
+            for path in files if layer_of(path) == layer]} for layer in LAYERS]
+        tied = [by_name[link["name"]] for link in feature["changes"] if link["link"] != "estimated"]
+        opened = [c for c in tied if is_open(c)]
+        feature.update({
+            "cover": cover,
+            "pinned": pinned,
+            "rail": [{"step": step, "state": state[step]} for step in RAIL],
+            "code": [entry for entry in code if entry["files"]],
+            "next": ({"change": opened[0]["name"], "resume": opened[0]["problem"] or opened[0]["resume"]}
+                     if opened else None),
+            "evidence": [{"change": c["name"], "obligations": c["obligations"],
+                          "findings": len(c["findings"]), "approvals": len(c["approvals"])}
+                         for c in tied if c["group"] == "done"][:EVIDENCE_ROWS],
+        })
+
+
+BACKLOG_SECONDS = 30
+BACKLOG_BYTES = 1024 * 1024
+BACKLOG_ITEMS = 200
+BACKLOG_TEXT = 4000
+BACKLOG_SCRIPT = "scripts/backlog.py"
+
+
+def read_backlog(root, seconds=BACKLOG_SECONDS):
+    """The backlog change 323 keeps on GitHub, through the mapped root's own
+    script: one child, bounded in time and bytes. Every failure is a sentence
+    for the board; none stops the map."""
+    out = {"asked": True, "items": [], "total": 0, "error": "", "notice": ""}
+
+    def failed(why):
+        return dict(out, error="バックログを読めませんでした: " + why)
+
+    script = Path(root) / BACKLOG_SCRIPT
+    if not script.is_file():
+        return failed(BACKLOG_SCRIPT + " がありません")
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    late = []
+    with tempfile.TemporaryFile() as errors:
+        try:
+            child = subprocess.Popen(
+                [sys.executable, str(script), "--timeout", str(seconds), "list", "--json"],
+                cwd=str(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=errors, env=environment, start_new_session=True)
+        except OSError:
+            return failed("起動できません")
+
+        def stop():
+            try:
+                os.killpg(child.pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+        def overdue():
+            late.append(True)
+            stop()
+
+        timer = threading.Timer(seconds, overdue)
+        timer.start()
+        try:
+            # Read against the deadline, not to the end: a grandchild in a
+            # session of its own keeps the pipe open past killpg.
+            deadline = time.monotonic() + seconds
+            chunks, size = [], 0
+            while size <= BACKLOG_BYTES:
+                left = deadline - time.monotonic()
+                if left <= 0 or not select.select([child.stdout], [], [], left)[0]:
+                    overdue()
+                    break
+                chunk = os.read(child.stdout.fileno(), 65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+            data = b"".join(chunks)
+            if len(data) > BACKLOG_BYTES:
+                stop()
+            child.stdout.close()
+            code = child.wait()
+        finally:
+            timer.cancel()
+        errors.seek(0)
+        said = errors.read(2000).decode("utf-8", errors="replace").strip().splitlines()
+    if late:
+        return failed("%d 秒以内に応答がありません" % seconds)
+    if len(data) > BACKLOG_BYTES:
+        return failed("出力が 1 MiB を超えています")
+    if code != 0:
+        return failed("終了コード %d%s" % (code, "（%s）" % said[-1][:200] if said else ""))
+    try:
+        listed = json.loads(data.decode("utf-8", errors="replace"))
+    except ValueError:
+        listed = None
+    if not isinstance(listed, list):
+        return failed("一覧として読めません")
+    listed = [item for item in listed if isinstance(item, dict)]
+    out["total"] = len(listed)
+    if len(listed) > BACKLOG_ITEMS:
+        out["notice"] = "バックログが多すぎます。%d 件のうち %d 件を表示しています" % (
+            len(listed), BACKLOG_ITEMS)
+    seen = set()
+    for item in listed[:BACKLOG_ITEMS]:
+        number = item.get("number")
+        # An issue is one card: a number repeated, or one that is not whole,
+        # names none the board can tell apart.
+        if not finite(number) or number != int(number) or int(number) in seen:
+            continue
+        seen.add(int(number))
+        url = item.get("url")
+        held = item.get("held_by")
+        out["items"].append({
+            "number": int(number),
+            "title": str(item.get("title") or ""),
+            "kind": str(item.get("kind") or ""),
+            "score": item.get("score") if finite(item.get("score")) else None,
+            "ice": [item.get(k) if finite(item.get(k)) else None
+                    for k in ("impact", "confidence", "ease")],
+            # A link is drawn only when it goes where the backlog lives.
+            "url": url if isinstance(url, str) and url.startswith("https://github.com/") else "",
+            "text": str(item.get("body") or "")[:BACKLOG_TEXT],
+            "held": (str(held) if held else "unknown" if item.get("held_known") is False else ""),
+            "held_since": str(item.get("held_since") or ""),
+        })
+    return out
+
+
+def work_of(changes, backlog):
+    """The board: every card in one column."""
+    cards = []
+    for item in backlog["items"]:
+        held = item["held"] not in ("", "unknown")
+        cards.append({"id": "issue:%d" % item["number"], "column": "held" if held else "backlog",
+                      "owner": "ai" if held else "none", "title": item["title"],
+                      "issue": item["number"], "kind": item["kind"], "score": item["score"],
+                      "url": item["url"], "held": item["held"], "text": item["text"]})
+    landed = 0
+    for change in changes:
+        if change["group"] == "done":
+            landed += 1
+            if landed > LANDED_CARDS:
+                continue
+        elif not is_open(change):
+            continue
+        column = {"needs": "you", "flight": "flight", "done": "done"}[change["group"]]
+        cards.append({"id": "change:" + change["name"], "column": column,
+                      "owner": {"you": "person", "flight": "ai"}.get(column, "none"),
+                      "title": change["title"], "change": change["name"],
+                      "stage": change["stage"],
+                      "text": change["problem"] or change["resume"]})
+    return {"columns": ["backlog", "held", "flight", "you", "done"], "cards": cards}
+
+
+def read_process(root, changes):
+    """The pipeline as its three tables define it."""
+    out = {"stages": list(STAGES), "routes": [], "surfaces": [], "methods": [], "error": ""}
+    unread = []
+
+    def table(name):
+        text, cut = read_text(Path(root) / name, FILE_BYTES)
+        if text is None or cut:
+            unread.append(name)
+            return ""
+        return text
+
+    routes = table("docs/sdlc/routes.yaml")
+    risk = table("docs/sdlc/risk.yaml")
+    methods = table("docs/sdlc/verification-methods.yaml")
+    asked_of_route = dict(block(methods, "routes"))
+    asked_of_surface = dict(block(methods, "surfaces"))
+
+    def named(value):
+        return [word for word in (value or "").split(",") if word and word != "-"]
+
+    took = {}
+    for change in changes:
+        took[change["route"]] = took.get(change["route"], 0) + 1
+    for name, value in block(routes, "routes"):
+        parts = value.split()
+        if len(parts) != 5:
+            continue
+        out["routes"].append({
+            "name": name, "stages": [s for s in parts[0].split(",") if s in STAGES],
+            "attempts": parts[1], "gate": parts[2],
+            "requires": "" if parts[3] == "-" else parts[3], "review": parts[4],
+            "methods": named(asked_of_route.get(name)), "changes": took.get(name, 0)})
+    for name, value in block(risk, "surfaces"):
+        parts = value.split()
+        if len(parts) != 4:
+            continue
+        out["surfaces"].append({
+            "name": name, "tier": parts[0], "autonomy": parts[1], "screen": parts[2] == "yes",
+            "paths": parts[3].split(","), "methods": named(asked_of_surface.get(name))})
+    for name, value in block(methods, "methods"):
+        kind, _, command = value.partition(" ")
+        out["methods"].append({"name": name, "kind": kind, "command": command.strip()})
+    if unread:
+        out["error"] = "進め方の表を読めません: " + "、".join(unread)
+    return out
+
+
+SOURCE_FILES = 400
+SOURCE_BYTES = 2 * 1024 * 1024
+PALETTE_NAMES = {"DARK": "dark", "LIGHT": "light", "HIGH_CONTRAST": "high-contrast"}
+
+
+def css_colour(call, arguments):
+    numbers = [int(n) for n in re.findall(r"\d+", arguments)]
+    if call == "from_rgb" and len(numbers) == 3:
+        return "#%02x%02x%02x" % tuple(min(255, n) for n in numbers)
+    if call == "from_black_alpha" and len(numbers) == 1:
+        return "rgba(0,0,0,%s)" % ("%.3f" % (min(255, numbers[0]) / 255)).rstrip("0").rstrip(".")
+    return ""
+
+
+def read_catalog(root):
+    """What the application defines: the colour roles of its three palettes,
+    its marks and how often each is used, its keys."""
+    out = {"palettes": [], "icons": [], "keys": [], "errors": []}
+    root = Path(root)
+
+    def source(name):
+        text, cut = read_text(root / name, SOURCE_BYTES)
+        if text is None or cut:
+            out["errors"].append("読めませんでした: " + name)
+            return ""
+        return text
+
+    theme = source("src/theme.rs")
+    for constant, body in re.findall(
+            r"const (\w+)_PALETTE: Palette = Palette \{(.*?)\n\};", theme, re.S):
+        roles = []
+        for role, value in re.findall(r"^    (\w+):\s*(.*?)(?=^    \w+:|\Z)", body, re.S | re.M):
+            calls = re.findall(r"Color32::(\w+)\(([^)]*)\)", value)
+            colours = [c for c in (css_colour(call, args) for call, args in calls) if c]
+            if value.lstrip().startswith("["):
+                roles.extend({"role": "%s.%d" % (role, at), "colour": colour}
+                             for at, colour in enumerate(colours))
+            elif colours:
+                roles.append({"role": role, "colour": colours[0]})
+        out["palettes"].append({"name": PALETTE_NAMES.get(constant, constant.lower()), "roles": roles})
+    glyphs = source("src/glyphs.rs")
+    drawn = dict(re.findall(r"const (ICON_\w+): &str = icons::(\w+);", glyphs))
+    at = glyphs.find("ICON_VOCABULARY")
+    listed = re.findall(r'\("(ICON_\w+)"', glyphs[at:]) if at >= 0 else []
+    uses = {name: 0 for name in listed}
+    files = []
+    for folder, folders, names in os.walk(str(root / "src")):
+        folders.sort()
+        for name in sorted(names):
+            path = Path(folder) / name
+            relative = path.relative_to(root).as_posix()
+            if name.endswith(".rs") and relative not in ("src/glyphs.rs", "src/tests.rs"):
+                files.append(path)
+    for path in files[:SOURCE_FILES]:
+        text, _ = read_text(path, SOURCE_BYTES)
+        for name in re.findall(r"\bICON_\w+\b", text or ""):
+            if name in uses:
+                uses[name] += 1
+    out["icons"] = [{"name": name, "glyph": drawn.get(name, ""), "uses": uses[name]} for name in listed]
+    keymap = source("src/app/keymap.rs")
+    for action, label, default in re.findall(
+            r'id:\s*"([^"]+)",\s*label:\s*"([^"]*)",\s*default:\s*"([^"]+)"', keymap):
+        for word, mark in CHORD_WORDS:
+            default = default.replace(word, mark)
+        out["keys"].append({"id": action, "label": label, "chord": default})
+    return out
 
 
 BADGE = {"steady": "安定", "changing": "変更中", "waiting": "判断待ち"}
@@ -1251,10 +1679,14 @@ def data_block(model):
     return text
 
 
+def page_of(model):
+    return page_template().replace("__HEADLINE__", headline(model)).replace("__DATA__", data_block(model))
+
+
 def write_page(model, out):
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    page = page_template().replace("__HEADLINE__", headline(model)).replace("__DATA__", data_block(model))
+    page = page_of(model)
     # Beside the target and renamed, so an interrupted run leaves the old page.
     handle, temporary = tempfile.mkstemp(dir=str(out.parent), prefix=".change-map-")
     try:
@@ -1269,18 +1701,151 @@ def write_page(model, out):
         raise
 
 
+SERVE_PORT = 8765
+REQUEST_BYTES = 8 * 1024
+REQUEST_SECONDS = 5
+LOOPBACK = "127.0.0.1"
+
+
+def serve(root, port, requests, model_of):
+    """The page on this machine only, built again for every load. Read-only:
+    one path, GET alone, and nothing a request carries is kept."""
+    class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = REQUEST_SECONDS
+        server_version = "OperonMap"
+
+        def log_message(self, *arguments):
+            pass
+
+        def answer(self, code, body, kind="text/plain; charset=utf-8"):
+            self.send_response(code)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def handle_one_request(self):
+            # The request line and the headers together are cut at 8 KiB.
+            self.rfile = Bounded(self.rfile, REQUEST_BYTES)
+            self.close_connection = True
+            # The timeout bounds each read, not the request: a client sending a
+            # byte every few seconds would hold this one-at-a-time server, so
+            # its reading side is shut when the whole request is late.
+            late = []
+
+            def cut():
+                late.append(True)
+                try:
+                    self.connection.shutdown(socket.SHUT_RD)
+                except OSError:
+                    pass
+
+            timer = threading.Timer(REQUEST_SECONDS, cut)
+            timer.start()
+            try:
+                try:
+                    self.raw_requestline = self.rfile.readline(REQUEST_BYTES + 1)
+                    whole = self.raw_requestline and self.raw_requestline.endswith(b"\n")
+                    parsed = whole and self.parse_request()
+                finally:
+                    timer.cancel()
+                if late:
+                    self.requestline, self.command = "", ""
+                    self.request_version = "HTTP/1.0"
+                    self.answer(408, "要求が時間内に届きません\n".encode("utf-8"))
+                    return
+                if not self.raw_requestline:
+                    return
+                if not whole:
+                    # Cut at the ceiling: a line with no end is not a request.
+                    self.requestline, self.command = "", ""
+                    self.request_version = "HTTP/1.0"
+                    self.answer(414, "要求が長すぎます\n".encode("utf-8"))
+                    return
+                if not parsed:
+                    return
+                if self.command != "GET":
+                    self.answer(405, "GET だけに答えます\n".encode("utf-8"))
+                elif self.path.split("?", 1)[0] != "/":
+                    self.answer(404, "地図は / にあります\n".encode("utf-8"))
+                else:
+                    self.answer(200, page_of(model_of()).encode("utf-8"), "text/html; charset=utf-8")
+                self.server.answered += 1
+            except (OSError, ValueError):
+                pass
+
+    class Bounded:
+        """A reader that stops giving bytes at the ceiling."""
+        def __init__(self, stream, limit):
+            self.stream, self.left = stream, limit
+
+        def readline(self, size=-1):
+            size = self.left if size < 0 else min(size, self.left)
+            line = self.stream.readline(size) if size > 0 else b""
+            self.left -= len(line)
+            return line
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+    try:
+        server = http.server.HTTPServer((LOOPBACK, port), Handler)
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            sys.stderr.write("ポート %d は使用中です\n" % port)
+        else:
+            sys.stderr.write("地図を配信できません: %s\n" % error)
+        return 2
+    server.answered = 0
+    server.timeout = 0.5
+
+    def stop(*_):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, stop)
+    sys.stdout.write("地図を配信しています: http://%s:%d/ （止めるには Ctrl-C）\n" % (
+        LOOPBACK, server.server_address[1]))
+    sys.stdout.flush()
+    try:
+        while not requests or server.answered < requests:
+            server.handle_request()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Every change at a glance.")
     parser.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument("--out")
     parser.add_argument("--find", metavar="WORD")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--backlog", action="store_true",
+                        help="also read the backlog through scripts/backlog.py")
+    parser.add_argument("--backlog-seconds", type=int, default=BACKLOG_SECONDS)
+    parser.add_argument("--serve", action="store_true",
+                        help="serve the page on 127.0.0.1, rebuilt on every load")
+    parser.add_argument("--port", type=int, default=SERVE_PORT)
+    parser.add_argument("--requests", type=int, default=0,
+                        help="stop after this many answers (0: until stopped)")
     arguments = parser.parse_args()
+    if not 0 <= arguments.port <= 65535 or arguments.requests < 0:
+        parser.error("--port は 0 から 65535、--requests は 0 以上です")
+    seconds = max(1, min(120, arguments.backlog_seconds))
     root = Path(arguments.root).resolve()
     if not (root / "docs/sdlc/changes").is_dir():
         sys.stderr.write("docs/sdlc/changes がありません: %s\n" % root)
         return 2
-    model = build(root)
+    def model_of():
+        return build(root, read_backlog(root, seconds) if arguments.backlog else None)
+
+    if arguments.serve:
+        return serve(root, arguments.port, arguments.requests, model_of)
+    model = model_of()
     if arguments.find is not None:
         sys.stdout.write(find(model, arguments.find))
         return 0

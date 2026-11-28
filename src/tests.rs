@@ -102499,6 +102499,1672 @@ pub(crate) fn backlog_allowlist_refuses_more_neighbours() {
     assert!(passed.is_empty(), "admitted on main: {passed:?}");
 }
 
+// ---- Change 325: the map says where work stands and what to do next --------
+
+const MAP_325_INDEX: &str = "\
+# Screens:
+#   session      セッション
+#   app          アプリ全体
+
+features:
+  - id: stopping
+    title: 停止
+    screen: session
+    domain: core
+    summary: セッションを止める。
+    paths: src/tmux.rs src/tmux/hooks.rs src/app.rs
+    shared: src/theme.rs src/tests.rs
+    keywords: nothing-matches-stopping
+
+  - id: shell
+    title: 土台
+    screen: app
+    domain: frame
+    summary: 全体の土台。
+    paths: src/app/screens.rs
+    keywords: nothing-matches-shell
+
+  - id: idle
+    title: 静かな機能
+    screen: app
+    domain: frame
+    summary: 文書がまだない。
+    paths: src/files.rs
+    keywords: lost
+";
+
+const MAP_325_DOMAINS: &str = "\
+domains:
+  - id: core
+    title: 中核
+    summary: 止める。
+    owns: 停止
+    excludes: 描画
+    modules: src/tmux.rs
+
+  - id: frame
+    title: 枠
+    summary: 枠を描く。
+    owns: 枠
+    excludes: 停止
+    modules: src/app.rs
+";
+
+fn map_325_state(status: &str, stage: &str, features: &str, contract: &str) -> String {
+    format!(
+        "state:\n  route: \"modify\"\n  stage: \"{stage}\"\n  status: \"{status}\"\n  \
+         attempts: \"0 3\"\n  questions: \"0 7\"\n  autonomy: \"full\"\n  risk: \"low\"\n  \
+         readiness: \"go\"\n  screen: \"n/a\"\n  features: \"{features}\"\n\n\
+         resume: \"Next for {status}.\"\n\ncontract:\n{contract}\n\
+         sets:\n  status: \"planning ready in-progress reviewing done awaiting-user blocked failed archived\"\n"
+    )
+}
+
+/// Three features in two domains (one fully tested, one partly, one with no
+/// document), ten landed changes, two under way (one at no known stage), one
+/// waiting for the person; the newest landed change carries a finding, two
+/// obligations and an approval.
+fn map_325_fixture(label: &str) -> PathBuf {
+    let root = feature_map_fixture(label, Some(MAP_325_INDEX));
+    let features = root.join("docs/features");
+    fs::write(features.join("domains.yaml"), MAP_325_DOMAINS).unwrap();
+    fs::create_dir_all(root.join("src")).unwrap();
+    fs::write(
+        root.join("src/tests.rs"),
+        "fn pinned_one() {}\nfn pinned_two() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("CLAUDE.md"),
+        "## Shape of this codebase\n\n  - `src/tmux.rs` — tmux session lifecycle. More.\n\n## Policies\n",
+    )
+    .unwrap();
+    fs::create_dir_all(features.join("stopping")).unwrap();
+    fs::write(features.join("stopping/brief.md"), "# 停止\n").unwrap();
+    fs::write(
+        features.join("stopping/spec.md"),
+        "# Spec\n\n## Behaviour\n\n1. Stops the pane. Pinned by `pinned_one`.\n\
+         2. Says so. Pinned by `no_such_test`.\n\n## States\n\n- Empty.\n\n\
+         ## Seen in the running app\n\npress 停止\n\n## Code and tests\n\n\
+         - `src/tmux.rs::stop_session` stops; `scripts/tool.sh` helps; `docs/MANUAL.ja.md` says.\n\
+         - `src/tmux.rs::retry` retries. Tests: `pinned_one`.\n",
+    )
+    .unwrap();
+    fs::create_dir_all(features.join("shell")).unwrap();
+    fs::write(features.join("shell/brief.md"), "# 土台\n").unwrap();
+    fs::write(
+        features.join("shell/spec.md"),
+        "# Spec\n\n## Behaviour\n\n1. Draws. Pinned by `pinned_two`.\n\n## Code and tests\n\n- none\n",
+    )
+    .unwrap();
+    let machine = "  three-gates: \"machine passed ran\"\n";
+    let human = "  seen: \"human pending a person looks\"\n";
+    let changes = root.join("docs/sdlc/changes");
+    let put = |name: &str, state: String| {
+        fs::create_dir_all(changes.join(name)).unwrap();
+        fs::write(changes.join(name).join("state.yaml"), state).unwrap();
+        fs::write(
+            changes.join(name).join("intent.md"),
+            format!("# Intent: title of {name}\n"),
+        )
+        .unwrap();
+    };
+    for number in 1..=9 {
+        put(
+            &format!("00{number}-landed"),
+            map_325_state("done", "test", "none", machine),
+        );
+    }
+    put(
+        "010-landed-with-evidence",
+        map_325_state("done", "test", "stopping", machine),
+    );
+    let landed = changes.join("010-landed-with-evidence");
+    fs::write(
+        landed.join("review.yaml"),
+        "carried:\n  - a thing left as it is\n    person: \"残した点です\"\n",
+    )
+    .unwrap();
+    fs::write(
+        landed.join("verification.yaml"),
+        "digest: \"x\"\n\nobligations:\n  - R1 empirical-test :: one\n  - R2 empirical-test :: two\n",
+    )
+    .unwrap();
+    fs::write(
+        landed.join("approvals.log"),
+        "2026-01-01T00:00:00Z auto plan plan.md abcd approve fine\n",
+    )
+    .unwrap();
+    let six: String = (1..=6)
+        .map(|n| format!("  look-{n}: \"human pending look {n}\"\n"))
+        .collect();
+    put(
+        "020-flying",
+        map_325_state(
+            "in-progress",
+            "build",
+            "stopping",
+            &format!("{machine}{six}"),
+        ),
+    );
+    put(
+        "030-waiting",
+        map_325_state(
+            "awaiting-user",
+            "design",
+            "shell",
+            &format!("{machine}{human}  looked: \"human passed a person looked\"\n"),
+        ),
+    );
+    put(
+        "040-lost",
+        map_325_state(
+            "in-progress",
+            "nowhere",
+            "nothing-known",
+            &format!("{machine}{human}"),
+        ),
+    );
+    root
+}
+
+fn map_325_names(value: &serde_json::Value) -> Vec<String> {
+    value
+        .as_array()
+        .unwrap_or_else(|| panic!("一覧ではありません: {value}"))
+        .iter()
+        .map(|item| item.as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// Requirement 1. 現況 from a fixture whose every count is known, then this
+/// repository's own map against the changes it holds.
+#[test]
+pub(crate) fn map_status_counts_features_changes_and_what_waits_for_a_person() {
+    let root = map_325_fixture("map-status");
+    let map = change_map_json(&root);
+    let status = &map["status"];
+    assert_eq!(
+        status["features"],
+        serde_json::json!({"steady": 1, "changing": 1, "waiting": 1, "total": 3})
+    );
+    let phases = status["phases"].as_array().unwrap();
+    assert_eq!(
+        phases
+            .iter()
+            .map(|p| p["stage"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["plan", "design", "build", "test", "deploy", "maintain"]
+    );
+    assert_eq!(map_325_names(&phases[1]["changes"]), ["030-waiting"]);
+    assert_eq!(map_325_names(&phases[2]["changes"]), ["020-flying"]);
+    assert!(
+        phases[3]["changes"].as_array().unwrap().is_empty(),
+        "完了した変更が段階に数えられています"
+    );
+    assert_eq!(map_325_names(&status["off_track"]), ["040-lost"]);
+    let cards = status["attention"].as_array().unwrap();
+    assert_eq!(
+        cards
+            .iter()
+            .map(|c| c["kind"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["decide", "confirm", "carried", "gaps"]
+    );
+    assert_eq!(cards[0]["total"], 1);
+    assert_eq!(cards[0]["items"][0]["change"], "030-waiting");
+    assert_eq!(cards[0]["items"][0]["text"], "Next for awaiting-user.");
+    // Six on 020, one each on 030 and 040; a machine line is not counted.
+    assert_eq!(cards[1]["total"], 8);
+    assert_eq!(cards[1]["items"].as_array().unwrap().len(), 5);
+    assert_eq!(cards[1]["items"][0]["key"], "seen");
+    assert_eq!(cards[2]["total"], 1);
+    assert_eq!(cards[2]["items"][0]["text"], "残した点です");
+    assert_eq!(cards[2]["items"][0]["change"], "010-landed-with-evidence");
+    assert_eq!(cards[3]["total"], 1);
+    assert_eq!(cards[3]["items"][0]["feature"], "idle");
+    let next = status["next"].as_array().unwrap();
+    assert_eq!(status["next_total"], 2);
+    assert_eq!(
+        next.iter()
+            .map(|n| n["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["040-lost", "020-flying"]
+    );
+    assert_eq!(next[1]["stage"], "build");
+    assert_eq!(next[1]["resume"], "Next for in-progress.");
+    assert_eq!(next[1]["passed"], 1);
+    assert_eq!(next[1]["total"], 7);
+    let branches = status["branches"].as_array().unwrap();
+    assert_eq!(branches.len(), 1);
+    assert_eq!(branches[0]["here"], true);
+    assert_eq!(branches[0]["changes"].as_array().unwrap().len(), 3);
+    let domains = status["domains"].as_array().unwrap();
+    assert_eq!(
+        domains[0],
+        serde_json::json!({"id": "frame", "features": 2, "steady": 1, "changing": 0,
+            "waiting": 1, "requirements": 1, "pinned": 1}),
+        "判断待ちのあるドメインが先頭にありません"
+    );
+    assert_eq!(domains[1]["id"], "core");
+    assert_eq!(domains[1]["requirements"], 2);
+    assert_eq!(domains[1]["pinned"], 1);
+    let _ = fs::remove_dir_all(root);
+
+    // This repository: every open change is at exactly one place, and the
+    // counts are the catalogue's.
+    let real = change_map_json(&PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let status = &real["status"];
+    let mut placed: Vec<String> = status["phases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|p| map_325_names(&p["changes"]))
+        .chain(map_325_names(&status["off_track"]))
+        .collect();
+    placed.sort();
+    let mut open: Vec<String> = real["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["group"] == "needs" || c["group"] == "flight")
+        .map(|c| c["name"].as_str().unwrap().to_string())
+        .collect();
+    open.sort();
+    assert_eq!(placed, open);
+    let features = real["features"].as_array().unwrap();
+    assert_eq!(status["features"]["total"], features.len());
+    for badge in ["steady", "changing", "waiting"] {
+        assert_eq!(
+            status["features"][badge],
+            features.iter().filter(|f| f["badge"] == badge).count(),
+            "{badge}"
+        );
+    }
+}
+
+/// Requirement 2. A feature's tested share, its six steps, its code by
+/// layer, the change open on it and the evidence behind it.
+#[test]
+pub(crate) fn map_features_carry_cover_rail_code_by_layer_and_evidence() {
+    let root = map_325_fixture("map-depth");
+    let map = change_map_json(&root);
+    let rail = |id: &str| -> Vec<(String, String)> {
+        feature_entry(&map, id)["rail"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|step| {
+                (
+                    step["step"].as_str().unwrap().to_string(),
+                    step["state"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    let pairs = |states: [&str; 6]| -> Vec<(String, String)> {
+        ["brief", "spec", "screens", "requirements", "tests", "live"]
+            .iter()
+            .zip(states)
+            .map(|(step, state)| (step.to_string(), state.to_string()))
+            .collect()
+    };
+    let stopping = feature_entry(&map, "stopping");
+    assert_eq!(stopping["cover"], "partial");
+    assert_eq!(stopping["pinned"], 1);
+    assert_eq!(
+        rail("stopping"),
+        pairs(["done", "done", "missing", "done", "partial", "done"])
+    );
+    let shell = feature_entry(&map, "shell");
+    assert_eq!(shell["cover"], "full");
+    assert_eq!(shell["pinned"], 1);
+    assert_eq!(
+        rail("shell"),
+        pairs(["done", "done", "missing", "done", "done", "missing"])
+    );
+    let idle = feature_entry(&map, "idle");
+    assert_eq!(idle["cover"], "empty");
+    assert_eq!(idle["pinned"], 0);
+    assert_eq!(
+        rail("idle"),
+        pairs(["missing", "missing", "missing", "missing", "missing", "missing"])
+    );
+    let layers: Vec<(String, Vec<String>)> = stopping["code"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|layer| {
+            (
+                layer["layer"].as_str().unwrap().to_string(),
+                layer["files"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|file| file["path"].as_str().unwrap().to_string())
+                    .collect(),
+            )
+        })
+        .collect();
+    let expected: Vec<(String, Vec<String>)> = [
+        ("draw", vec!["src/app.rs"]),
+        ("text", vec!["src/theme.rs"]),
+        ("core", vec!["src/tmux.rs", "src/tmux/hooks.rs"]),
+        ("test", vec!["src/tests.rs"]),
+        ("script", vec!["scripts/tool.sh"]),
+        ("doc", vec!["docs/MANUAL.ja.md"]),
+    ]
+    .into_iter()
+    .map(|(layer, files)| {
+        (
+            layer.to_string(),
+            files.into_iter().map(str::to_string).collect(),
+        )
+    })
+    .collect();
+    assert_eq!(layers, expected);
+    let tmux = &stopping["code"][2]["files"][0];
+    assert_eq!(tmux["about"], "tmux session lifecycle.");
+    assert_eq!(map_325_names(&tmux["symbols"]), ["stop_session", "retry"]);
+    assert_eq!(stopping["next"]["change"], "020-flying");
+    assert_eq!(stopping["next"]["resume"], "Next for in-progress.");
+    assert_eq!(
+        idle["changes"],
+        serde_json::json!([{"name": "040-lost", "link": "estimated"}])
+    );
+    assert!(idle["next"].is_null(), "推定の変更が次の一手になっています");
+    assert_eq!(
+        stopping["evidence"],
+        serde_json::json!([{"change": "010-landed-with-evidence", "obligations": 2,
+            "findings": 1, "approvals": 1}])
+    );
+    assert_eq!(shell["evidence"], serde_json::json!([]));
+    let _ = fs::remove_dir_all(root);
+
+    // This repository: the share is the board's own count, and the picture
+    // step follows the pictures.
+    let real = change_map_json(&PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let rows = real["requirements"].as_array().unwrap();
+    let shot: HashSet<&str> = real["flow"]["screens"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| !s["shot"].is_null())
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    for feature in real["features"].as_array().unwrap() {
+        let id = feature["id"].as_str().unwrap();
+        let mine: Vec<_> = rows.iter().filter(|r| r["feature"] == id).collect();
+        let pinned = mine.iter().filter(|r| r["pinned"] == true).count();
+        let cover = if mine.is_empty() {
+            "empty"
+        } else if pinned == mine.len() {
+            "full"
+        } else if pinned > 0 {
+            "partial"
+        } else {
+            "none"
+        };
+        assert_eq!(feature["cover"], cover, "{id}");
+        assert_eq!(feature["pinned"], pinned, "{id}");
+        let screens = map_325_names(&feature["flow_screens"]);
+        let taken = screens.iter().filter(|s| shot.contains(s.as_str())).count();
+        let state = if !screens.is_empty() && taken == screens.len() {
+            "done"
+        } else if taken > 0 {
+            "partial"
+        } else {
+            "missing"
+        };
+        assert_eq!(feature["rail"][2]["state"], state, "{id} の画面写真");
+        let mut seen = HashSet::new();
+        for layer in feature["code"].as_array().unwrap() {
+            for file in layer["files"].as_array().unwrap() {
+                assert!(
+                    seen.insert(file["path"].as_str().unwrap().to_string()),
+                    "{id}: {} が二度あります",
+                    file["path"]
+                );
+            }
+        }
+    }
+}
+
+const MAP_325_BACKLOG: &str = r#"#!/usr/bin/env python3
+import json, pathlib, sys, time
+here = pathlib.Path(__file__).resolve().parent
+(here / "ran").write_text(" ".join(sys.argv[1:]))
+mode = (here / "mode").read_text().strip()
+items = [
+    {"number": 7, "title": "best <b>one</b>", "kind": "problem", "impact": 9, "confidence": 8, "ease": 7,
+     "score": 504, "url": "https://github.com/o/r/issues/7", "body": "do it", "held_by": None, "held_since": None},
+    {"number": 9, "title": "held one", "kind": "remaining", "impact": 5, "confidence": 5, "ease": 5,
+     "score": 125, "url": "https://github.com.example/o/r/issues/9", "body": "", "held_by": "session-a", "held_since": "2026-01-01"},
+    {"number": 4, "title": "unknown holder", "kind": "improvement", "impact": 2, "confidence": 2, "ease": 2,
+     "score": 8, "url": "https://github.com/o/r/issues/4", "body": "", "held_by": None, "held_since": None,
+     "held_known": False},
+]
+if mode == "ok":
+    print(json.dumps(items))
+elif mode == "fail":
+    sys.stderr.write("gh: not signed in\n")
+    sys.exit(2)
+elif mode == "words":
+    print("backlog は空です")
+elif mode == "object":
+    print(json.dumps({"items": items}))
+elif mode == "big":
+    sys.stdout.write("[" + " " * (1024 * 1024 + 10) + "]")
+elif mode == "many":
+    print(json.dumps([dict(items[0], number=n) for n in range(1, 202)]))
+elif mode == "slow":
+    time.sleep(30)
+    print(json.dumps(items))
+"#;
+
+fn map_325_with_backlog(label: &str) -> PathBuf {
+    let root = map_325_fixture(label);
+    fs::create_dir_all(root.join("scripts")).unwrap();
+    fs::write(root.join("scripts/backlog.py"), MAP_325_BACKLOG).unwrap();
+    fs::write(root.join("scripts/mode"), "ok").unwrap();
+    root
+}
+
+fn map_325_asked(root: &Path, mode: &str) -> serde_json::Value {
+    fs::write(root.join("scripts/mode"), mode).unwrap();
+    let (ok, out, err) = change_map_run(root, &["--json", "--backlog", "--backlog-seconds", "2"]);
+    assert!(ok, "バックログ {mode} で地図が出ません: {err}");
+    serde_json::from_str(&out).unwrap()
+}
+
+/// Requirement 3. Every open change, the eight newest landed ones and every
+/// backlog item, each on the board once.
+#[test]
+pub(crate) fn map_work_board_puts_every_card_in_exactly_one_column() {
+    let root = map_325_with_backlog("map-board");
+    let map = map_325_asked(&root, "ok");
+    assert_eq!(
+        map_325_names(&map["work"]["columns"]),
+        ["backlog", "held", "flight", "you", "done"]
+    );
+    let cards = map["work"]["cards"].as_array().unwrap();
+    let column = |name: &str| -> Vec<String> {
+        cards
+            .iter()
+            .filter(|card| card["column"] == name)
+            .map(|card| card["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(column("backlog"), ["issue:7", "issue:4"]);
+    assert_eq!(column("held"), ["issue:9"]);
+    assert_eq!(column("flight"), ["change:040-lost", "change:020-flying"]);
+    assert_eq!(column("you"), ["change:030-waiting"]);
+    let done = column("done");
+    assert_eq!(done.len(), 8, "最近の完了は 8 件です: {done:?}");
+    assert_eq!(done[0], "change:010-landed-with-evidence");
+    assert!(!done.contains(&"change:001-landed".to_string()));
+    let ids: HashSet<&str> = cards.iter().map(|c| c["id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), cards.len(), "同じカードが二度あります");
+    assert_eq!(cards.len(), 3 + 3 + 8);
+    for card in cards {
+        let owner = match card["column"].as_str().unwrap() {
+            "you" => "person",
+            "held" | "flight" => "ai",
+            _ => "none",
+        };
+        assert_eq!(card["owner"], owner, "{}", card["id"]);
+    }
+    let by_id = |id: &str| cards.iter().find(|c| c["id"] == id).unwrap();
+    let best = by_id("issue:7");
+    assert_eq!(best["score"], 504);
+    assert_eq!(best["kind"], "problem");
+    assert_eq!(best["url"], "https://github.com/o/r/issues/7");
+    assert_eq!(best["text"], "do it");
+    assert_eq!(by_id("issue:9")["held"], "session-a");
+    assert_eq!(
+        by_id("issue:9")["url"],
+        "",
+        "GitHub でない行き先がリンクになっています"
+    );
+    assert_eq!(by_id("issue:4")["held"], "unknown");
+    assert_eq!(
+        by_id("change:030-waiting")["text"],
+        "Next for awaiting-user."
+    );
+    assert_eq!(by_id("change:020-flying")["stage"], "build");
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Requirement 4. The backlog is read only when asked, under its ceilings,
+/// and no failure of it stops the map.
+#[test]
+pub(crate) fn map_reads_the_backlog_only_when_asked_and_survives_its_failure() {
+    let root = map_325_with_backlog("map-backlog");
+    let ran = root.join("scripts/ran");
+    let map = change_map_json(&root);
+    assert!(!ran.exists(), "頼んでいないのにバックログを読みました");
+    assert_eq!(
+        map["backlog"],
+        serde_json::json!({"asked": false, "items": [], "total": 0, "error": "", "notice": ""})
+    );
+    assert_eq!(map["work"]["cards"].as_array().unwrap().len(), 3 + 8);
+
+    let map = map_325_asked(&root, "ok");
+    assert_eq!(
+        fs::read_to_string(&ran).unwrap(),
+        "--timeout 2 list --json",
+        "バックログの呼び方が違います"
+    );
+    assert_eq!(map["backlog"]["asked"], true);
+    assert_eq!(map["backlog"]["total"], 3);
+    assert_eq!(map["backlog"]["error"], "");
+    assert_eq!(map["backlog"]["items"].as_array().unwrap().len(), 3);
+
+    for (mode, said) in [
+        ("fail", "終了コード 2（gh: not signed in）"),
+        ("words", "一覧として読めません"),
+        ("object", "一覧として読めません"),
+        ("big", "出力が 1 MiB を超えています"),
+        ("slow", "2 秒以内に応答がありません"),
+    ] {
+        let started = Instant::now();
+        let map = map_325_asked(&root, mode);
+        assert!(
+            started.elapsed() < Duration::from_secs(20),
+            "{mode}: 上限を過ぎても待っています"
+        );
+        assert_eq!(
+            map["backlog"]["error"],
+            format!("バックログを読めませんでした: {said}"),
+            "{mode}"
+        );
+        assert!(map["backlog"]["items"].as_array().unwrap().is_empty());
+        assert_eq!(
+            map["work"]["cards"].as_array().unwrap().len(),
+            3 + 8,
+            "{mode}: ほかの列が消えました"
+        );
+    }
+
+    let map = map_325_asked(&root, "many");
+    assert_eq!(map["backlog"]["total"], 201);
+    assert_eq!(map["backlog"]["items"].as_array().unwrap().len(), 200);
+    assert_eq!(
+        map["backlog"]["notice"],
+        "バックログが多すぎます。201 件のうち 200 件を表示しています"
+    );
+
+    fs::remove_file(root.join("scripts/backlog.py")).unwrap();
+    let (ok, out, _) = change_map_run(&root, &["--json", "--backlog"]);
+    assert!(ok);
+    let map: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        map["backlog"]["error"],
+        "バックログを読めませんでした: scripts/backlog.py がありません"
+    );
+    // The page is still written, and says the backlog was not read.
+    let (page, data) = change_map_page(&root);
+    assert_eq!(data["backlog"]["asked"], false);
+    assert!(page.contains("バックログは読み込んでいません"));
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Requirement 5. The pipeline as its three tables define it, read here by
+/// `flat_block` rather than by the script's parser.
+#[test]
+pub(crate) fn map_process_shows_every_route_surface_and_method_the_pipeline_defines() {
+    let real = change_map_json(&PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    let process = &real["process"];
+    assert_eq!(process["error"], "");
+    assert_eq!(
+        map_325_names(&process["stages"]),
+        ["plan", "design", "build", "test", "deploy", "maintain"]
+    );
+    let asked_of_route: HashMap<String, String> =
+        flat_block("docs/sdlc/verification-methods.yaml", "routes")
+            .into_iter()
+            .collect();
+    let asked_of_surface: HashMap<String, String> =
+        flat_block("docs/sdlc/verification-methods.yaml", "surfaces")
+            .into_iter()
+            .collect();
+    let methods_of = |asked: Option<&String>| -> Vec<String> {
+        asked
+            .map(|value| {
+                value
+                    .split(',')
+                    .filter(|word| !word.is_empty() && *word != "-")
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let routes = flat_block("docs/sdlc/routes.yaml", "routes");
+    let drawn = process["routes"].as_array().unwrap();
+    assert_eq!(drawn.len(), routes.len());
+    let changes = real["changes"].as_array().unwrap();
+    for ((name, value), route) in routes.iter().zip(drawn) {
+        let parts: Vec<&str> = value.split_whitespace().collect();
+        assert_eq!(route["name"], name.as_str());
+        assert_eq!(
+            map_325_names(&route["stages"]),
+            parts[0].split(',').collect::<Vec<_>>(),
+            "{name}"
+        );
+        assert_eq!(route["attempts"], parts[1], "{name}");
+        assert_eq!(route["gate"], parts[2], "{name}");
+        assert_eq!(
+            route["requires"],
+            if parts[3] == "-" { "" } else { parts[3] },
+            "{name}"
+        );
+        assert_eq!(
+            map_325_names(&route["methods"]),
+            methods_of(asked_of_route.get(name)),
+            "{name}"
+        );
+        assert_eq!(
+            route["changes"],
+            changes
+                .iter()
+                .filter(|c| c["route"] == name.as_str())
+                .count(),
+            "{name}"
+        );
+    }
+    let surfaces = flat_block("docs/sdlc/risk.yaml", "surfaces");
+    let drawn = process["surfaces"].as_array().unwrap();
+    assert_eq!(drawn.len(), surfaces.len());
+    for ((name, value), surface) in surfaces.iter().zip(drawn) {
+        let parts: Vec<&str> = value.split_whitespace().collect();
+        assert_eq!(surface["name"], name.as_str());
+        assert_eq!(surface["tier"], parts[0], "{name}");
+        assert_eq!(surface["autonomy"], parts[1], "{name}");
+        assert_eq!(surface["screen"], parts[2] == "yes", "{name}");
+        assert_eq!(
+            map_325_names(&surface["paths"]),
+            parts[3].split(',').collect::<Vec<_>>(),
+            "{name}"
+        );
+        assert_eq!(
+            map_325_names(&surface["methods"]),
+            methods_of(asked_of_surface.get(name)),
+            "{name}"
+        );
+    }
+    let methods = flat_block("docs/sdlc/verification-methods.yaml", "methods");
+    let drawn = process["methods"].as_array().unwrap();
+    assert_eq!(drawn.len(), methods.len());
+    for ((name, value), method) in methods.iter().zip(drawn) {
+        let (kind, command) = value.split_once(' ').unwrap();
+        assert_eq!(method["name"], name.as_str());
+        assert_eq!(method["kind"], kind);
+        assert_eq!(method["command"], command.trim());
+    }
+
+    // A fixture with the route table alone: the rest is empty, and named.
+    let root = map_325_fixture("map-process");
+    let table = root.join("docs/sdlc/routes.yaml");
+    let routes = fs::read_to_string(&table).unwrap();
+    fs::write(
+        &table,
+        routes.replacen("routes:\n", "routes:\n  broken: \"plan,build 3\"\n", 1),
+    )
+    .unwrap();
+    let map = change_map_json(&root);
+    let process = &map["process"];
+    assert_eq!(
+        process["error"],
+        "進め方の表を読めません: docs/sdlc/risk.yaml、docs/sdlc/verification-methods.yaml"
+    );
+    assert!(process["surfaces"].as_array().unwrap().is_empty());
+    assert!(process["methods"].as_array().unwrap().is_empty());
+    let modify = process["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "modify")
+        .unwrap();
+    assert_eq!(modify["changes"], 13);
+    assert!(
+        !process["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["name"] == "broken"),
+        "値の数が違う道筋が描かれています"
+    );
+    assert!(modify["methods"].as_array().unwrap().is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Requirement 6. The colour roles, marks and keys the application defines,
+/// against the tables the application itself compiles.
+#[test]
+pub(crate) fn map_catalog_lists_every_palette_role_icon_and_key() {
+    let real_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let real = change_map_json(&real_root);
+    let catalog = &real["catalog"];
+    assert_eq!(catalog["errors"], serde_json::json!([]));
+    let palettes = catalog["palettes"].as_array().unwrap();
+    assert_eq!(
+        palettes
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["dark", "light", "high-contrast"]
+    );
+    let roles = |palette: &serde_json::Value| -> Vec<String> {
+        palette["roles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|role| role["role"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let theme = fs::read_to_string(real_root.join("src/theme.rs")).unwrap();
+    for (palette, constant) in
+        palettes
+            .iter()
+            .zip(["DARK_PALETTE", "LIGHT_PALETTE", "HIGH_CONTRAST_PALETTE"])
+    {
+        assert_eq!(
+            roles(palette),
+            roles(&palettes[0]),
+            "{constant} の役割が違います"
+        );
+        let start = theme
+            .find(&format!("const {constant}: Palette = Palette {{"))
+            .unwrap();
+        let table = &theme[start..start + theme[start..].find("\n};").unwrap()];
+        assert_eq!(
+            palette["roles"].as_array().unwrap().len(),
+            table.matches("Color32::").count(),
+            "{constant} の色の数が違います"
+        );
+        for role in palette["roles"].as_array().unwrap() {
+            let colour = role["colour"].as_str().unwrap();
+            assert!(
+                (colour.len() == 7 && colour.starts_with('#'))
+                    || (colour.starts_with("rgba(0,0,0,") && colour.ends_with(')')),
+                "{constant}.{}: {colour}",
+                role["role"]
+            );
+        }
+    }
+    let compiled = |theme: &Palette, role: &str| -> String {
+        let c = match role {
+            "window" => theme.window,
+            "text" => theme.text,
+            "accent" => theme.accent,
+            other => panic!("{other}"),
+        };
+        format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b())
+    };
+    for (drawn, table) in
+        palettes
+            .iter()
+            .zip([&DARK_PALETTE, &LIGHT_PALETTE, &HIGH_CONTRAST_PALETTE])
+    {
+        for role in ["window", "text", "accent"] {
+            let entry = drawn["roles"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r["role"] == role)
+                .unwrap();
+            assert_eq!(entry["colour"], compiled(table, role), "{role}");
+        }
+    }
+    let icons = catalog["icons"].as_array().unwrap();
+    assert_eq!(
+        icons
+            .iter()
+            .map(|i| i["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ICON_VOCABULARY
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>()
+    );
+    let mut sources = Vec::new();
+    let mut folders = vec![real_root.join("src")];
+    while let Some(folder) = folders.pop() {
+        for entry in fs::read_dir(&folder).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && !path.ends_with("src/glyphs.rs")
+                && !path.ends_with("src/tests.rs")
+            {
+                sources.push(fs::read_to_string(&path).unwrap());
+            }
+        }
+    }
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let uses = |name: &str| -> usize {
+        sources
+            .iter()
+            .map(|text| {
+                text.match_indices(name)
+                    .filter(|(at, _)| {
+                        !word(text[..*at].chars().next_back())
+                            && !word(text[at + name.len()..].chars().next())
+                    })
+                    .count()
+            })
+            .sum()
+    };
+    for icon in icons {
+        let name = icon["name"].as_str().unwrap();
+        assert!(
+            !icon["glyph"].as_str().unwrap().is_empty(),
+            "{name} の字形の名前がありません"
+        );
+        assert_eq!(icon["uses"], uses(name), "{name}");
+    }
+    let keys = catalog["keys"].as_array().unwrap();
+    assert_eq!(keys.len(), KEYMAP_ACTIONS.len());
+    for (key, action) in keys.iter().zip(KEYMAP_ACTIONS) {
+        assert_eq!(key["id"], action.id);
+        assert_eq!(key["label"], action.label);
+        assert_eq!(
+            key["chord"],
+            action
+                .default
+                .replace("Mod+", "⌘")
+                .replace("Shift+", "⇧")
+                .replace("Alt+", "⌥")
+                .replace("Ctrl+", "⌃")
+        );
+    }
+
+    // A fixture: the two colour constructors, an array role, a mark used
+    // twice in one file and never by a longer name, and a source that is gone.
+    let root = map_325_fixture("map-catalog");
+    fs::create_dir_all(root.join("src/app")).unwrap();
+    fs::write(
+        root.join("src/theme.rs"),
+        "pub(crate) const DARK_PALETTE: Palette = Palette {\n    dark: true,\n    \
+         window: Color32::from_rgb(10, 20, 30),\n    scrim: Color32::from_black_alpha(128),\n    \
+         ansi: [\n        Color32::from_rgb(1, 2, 3),\n        Color32::from_rgb(255, 0, 9),\n    ],\n};\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/glyphs.rs"),
+        "pub(crate) const ICON_ADD: &str = icons::PLUS;\npub(crate) const ICON_GONE: &str = icons::X;\n\
+         pub(crate) const ICON_VOCABULARY: &[(&str, &str)] = &[\n    (\"ICON_ADD\", ICON_ADD),\n    \
+         (\"ICON_GONE\", ICON_GONE),\n];\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/app/draw.rs"),
+        "fn a() { b(ICON_ADD); c(ICON_ADD, ICON_ADDED, MY_ICON_ADD); }\n",
+    )
+    .unwrap();
+    let map = change_map_json(&root);
+    let catalog = &map["catalog"];
+    assert_eq!(
+        catalog["palettes"],
+        serde_json::json!([{"name": "dark", "roles": [
+            {"role": "window", "colour": "#0a141e"},
+            {"role": "scrim", "colour": "rgba(0,0,0,0.502)"},
+            {"role": "ansi.0", "colour": "#010203"},
+            {"role": "ansi.1", "colour": "#ff0009"}]}])
+    );
+    assert_eq!(
+        catalog["icons"],
+        serde_json::json!([{"name": "ICON_ADD", "glyph": "PLUS", "uses": 2},
+            {"name": "ICON_GONE", "glyph": "X", "uses": 0}])
+    );
+    assert_eq!(
+        catalog["errors"],
+        serde_json::json!(["読めませんでした: src/app/keymap.rs"])
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+fn map_325_request(address: &str, request: &str) -> String {
+    let mut stream = std::net::TcpStream::connect(address).expect("地図に接続できません");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(120)))
+        .unwrap();
+    stream.write_all(request.as_bytes()).unwrap();
+    let mut answer = Vec::new();
+    // A refused request may be cut by the server before it is all sent.
+    let _ = stream.read_to_end(&mut answer);
+    String::from_utf8_lossy(&answer).into_owned()
+}
+
+/// The served map, started on a free port; its address once it has said it.
+fn map_325_serve(root: &Path, requests: &str) -> (std::process::Child, String) {
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/change-map.py");
+    let mut child = Command::new("python3")
+        .current_dir(root)
+        .arg(script)
+        .arg("--root")
+        .arg(root)
+        .args(["--serve", "--port", "0", "--requests", requests])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let at = line
+        .find("http://")
+        .unwrap_or_else(|| panic!("地図の場所が出ません: {line}"));
+    let address = line[at + "http://".len()..]
+        .split('/')
+        .next()
+        .unwrap()
+        .to_string();
+    (child, address)
+}
+
+fn map_325_exit(child: &mut std::process::Child) -> std::process::ExitStatus {
+    for _ in 0..600 {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    panic!("地図の配信が終わりません");
+}
+
+/// Requirement 11. The served map: this machine only, one path, GET alone,
+/// built again on every load, and stopped by a count, a signal or a busy port.
+#[test]
+pub(crate) fn map_serves_a_fresh_page_on_loopback_and_stops() {
+    let root = feature_map_fixture("map-serve", Some(FEATURE_MAP_INDEX));
+    feature_map_change(&root, "001-first-words", "done", "test", "none", "");
+    let (mut child, address) = map_325_serve(&root, "4");
+    assert!(
+        address.starts_with("127.0.0.1:"),
+        "この機械の外から届く場所です: {address}"
+    );
+    let port = address.rsplit(':').next().unwrap().to_string();
+    // The address this machine has on its network, if it has one: nothing
+    // may answer there. No packet is sent to learn it.
+    if let Ok(probe) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if probe.connect("192.0.2.1:9").is_ok() {
+            let outside = probe.local_addr().unwrap().ip();
+            if !outside.is_loopback() && !outside.is_unspecified() {
+                assert!(
+                    std::net::TcpStream::connect_timeout(
+                        &format!("{outside}:{port}").parse().unwrap(),
+                        Duration::from_secs(2)
+                    )
+                    .is_err(),
+                    "{outside} でも答えています"
+                );
+            }
+        }
+    }
+    let first = map_325_request(&address, "GET / HTTP/1.0\r\n\r\n");
+    assert!(
+        first.starts_with("HTTP/1.0 200"),
+        "{}",
+        first.chars().take(200).collect::<String>()
+    );
+    assert!(first.contains("text/html; charset=utf-8"));
+    assert!(first.contains("first words") && !first.contains("second words"));
+    fs::write(
+        root.join("docs/sdlc/changes/001-first-words/intent.md"),
+        "# Intent: second words\n",
+    )
+    .unwrap();
+    let second = map_325_request(&address, "GET /?x=1 HTTP/1.0\r\n\r\n");
+    assert!(
+        second.contains("second words"),
+        "読み込みのたびに作り直していません"
+    );
+    let elsewhere = map_325_request(&address, "GET /docs/sdlc/routes.yaml HTTP/1.0\r\n\r\n");
+    assert!(elsewhere.starts_with("HTTP/1.0 404"), "{elsewhere}");
+    assert!(!elsewhere.contains("routes:"));
+    let posted = map_325_request(&address, "POST / HTTP/1.0\r\nContent-Length: 1\r\n\r\nx");
+    assert!(posted.starts_with("HTTP/1.0 405"), "{posted}");
+    assert!(
+        map_325_exit(&mut child).success(),
+        "数えた回数で終わりません"
+    );
+
+    // Until stopped: a request line past the ceiling gets no page, and
+    // SIGTERM ends it with exit 0.
+    let (mut child, address) = map_325_serve(&root, "0");
+    let long = map_325_request(
+        &address,
+        &format!("GET /?{} HTTP/1.0\r\n\r\n", "a".repeat(16 * 1024)),
+    );
+    assert!(!long.contains("map-data"), "長すぎる要求に地図を返しました");
+    assert!(
+        long.starts_with("HTTP/1.0 414"),
+        "長すぎる要求に 414 を返しません: {long}"
+    );
+    let again = map_325_request(&address, "GET / HTTP/1.0\r\n\r\n");
+    assert!(again.starts_with("HTTP/1.0 200"));
+    assert!(Command::new("/bin/kill")
+        .args(["-TERM", &child.id().to_string()])
+        .status()
+        .unwrap()
+        .success());
+    assert!(
+        map_325_exit(&mut child).success(),
+        "SIGTERM で 0 を返しません"
+    );
+
+    // A port somebody holds.
+    let held = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = held.local_addr().unwrap().port().to_string();
+    let (ok, out, err) = change_map_run(&root, &["--serve", "--port", &port]);
+    assert!(!ok && out.is_empty());
+    assert!(
+        err.contains(&format!("ポート {port} は使用中です")),
+        "{err}"
+    );
+    drop(held);
+    let _ = fs::remove_dir_all(root);
+}
+
+/// Runs a check written for node against the page's logic, which touches no
+/// document.
+fn map_325_node(label: &str, check: &str) {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let scratch = temporary_directory(label);
+    let script = scratch.join("check.js");
+    fs::write(&script, check).unwrap();
+    let mut command = Command::new("node");
+    command
+        .arg(&script)
+        .arg(root.join("scripts/change-map/page.js"));
+    let result =
+        run_command_with_output_limit(&mut command, Duration::from_secs(60), 64 * 1024, 64 * 1024)
+            .expect("node がありません");
+    assert!(
+        result.output.status.success(),
+        "ページの論理が違います: {}",
+        String::from_utf8_lossy(&result.output.stderr)
+    );
+    let _ = fs::remove_dir_all(scratch);
+}
+
+/// Requirement 7. A link carries the choice, and each chip's count is what
+/// pressing it would leave.
+#[test]
+pub(crate) fn map_page_logic_parses_lenses_and_counts_them_faceted() {
+    map_325_node(
+        "map-lenses",
+        r##"
+const assert = require("assert");
+const L = require(process.argv[2]);
+const link = "#features?state=changing,waiting&cover=none";
+const route = L.parseRoute(link);
+assert.deepStrictEqual(route, {view: "features", query: {state: ["changing", "waiting"], cover: ["none"]}});
+assert.strictEqual(L.formatRoute(route), link);
+// A link without a choice reads as before: no `query` key at all.
+for (const plain of ["#features", "#features?", "#features?state=", "#features?=x", "#features?state"]) {
+  assert.deepStrictEqual(L.parseRoute(plain), {view: "features"}, plain);
+}
+assert.strictEqual(L.formatRoute({view: "features", query: {}}), "#features");
+assert.strictEqual(L.formatRoute({view: "features", query: {state: []}}), "#features");
+assert.deepStrictEqual(L.parseRoute("#work?who=me"), {view: "work", query: {who: ["me"]}});
+assert.deepStrictEqual(L.parseRoute("#feature/home/reqs?x=1"), {view: "feature", id: "home", tab: "reqs", query: {x: ["1"]}});
+assert.deepStrictEqual(L.parseRoute("#nothing?state=waiting"), {view: "overview"});
+const spaced = {view: "features", query: {domain: ["a b", "c&d"]}};
+assert.deepStrictEqual(L.parseRoute(L.formatRoute(spaced)), spaced);
+for (const view of ["work", "process", "catalog"]) {
+  assert.deepStrictEqual(L.parseRoute("#" + view), {view});
+  assert.strictEqual(L.formatRoute({view}), "#" + view);
+}
+
+// One press replaces; the same press again clears; with `additive` it adds and removes.
+const q0 = {state: ["changing"]};
+assert.deepStrictEqual(L.lensToggle(q0, "state", "waiting", false), {state: ["waiting"]});
+assert.deepStrictEqual(L.lensToggle(q0, "state", "changing", false), {});
+assert.deepStrictEqual(L.lensToggle(q0, "state", "waiting", true), {state: ["changing", "waiting"]});
+assert.deepStrictEqual(L.lensToggle({state: ["changing", "waiting"]}, "state", "changing", true), {state: ["waiting"]});
+assert.deepStrictEqual(L.lensToggle({state: ["changing", "waiting"]}, "state", "changing", false), {state: ["changing"]});
+assert.deepStrictEqual(L.lensToggle(q0, "state", "changing", true), {});
+assert.deepStrictEqual(L.lensToggle(q0, "cover", "none", false), {state: ["changing"], cover: ["none"]});
+assert.deepStrictEqual(q0, {state: ["changing"]}, "the choice given is not changed in place");
+
+const features = [
+  {id: "a", badge: "steady", cover: "full", domain: "one"},
+  {id: "b", badge: "changing", cover: "partial", domain: "one"},
+  {id: "c", badge: "changing", cover: "none", domain: "two"},
+  {id: "d", badge: "waiting", cover: "empty", domain: "two"},
+  {id: "e", badge: "steady", cover: "none", domain: "two"}];
+const kept = query => features.filter(f => L.featureMatches(f, query)).map(f => f.id).join("");
+assert.strictEqual(kept({}), "abcde");
+assert.strictEqual(kept({state: ["changing"]}), "bc");
+assert.strictEqual(kept({state: ["changing", "waiting"]}), "bcd", "any value within one lens");
+assert.strictEqual(kept({state: ["changing", "waiting"], cover: ["none"]}), "cd", "every lens; no line counts as no test");
+assert.strictEqual(kept({state: ["steady"], domain: ["one"]}), "a");
+assert.strictEqual(kept({unknown: ["x"]}), "abcde");
+// With 状態 = 変更中 chosen: the other rows count within it, its own row as if pressed.
+assert.deepStrictEqual(L.lensCounts(features, {state: ["changing"]}), {
+  state: {steady: 2, changing: 2, waiting: 1},
+  cover: {full: 0, partial: 1, none: 1},
+  domain: {one: 1, two: 1}});
+assert.deepStrictEqual(L.lensCounts(features, {}), {
+  state: {steady: 2, changing: 2, waiting: 1},
+  cover: {full: 1, partial: 1, none: 3},
+  domain: {one: 2, two: 3}});
+assert.deepStrictEqual(L.lensCounts(features, {state: ["changing"], domain: ["two"]}).cover, {full: 0, partial: 0, none: 1});
+assert.deepStrictEqual(L.LENSES.map(lens => lens.id), ["state", "cover", "domain"]);
+console.log("ok");
+"##,
+    );
+}
+
+/// Requirement 8. The two texts a person hands to a session, the basket's
+/// pruning, and storage that refuses.
+#[test]
+pub(crate) fn map_page_logic_builds_the_work_order_and_the_review_packet() {
+    map_325_node(
+        "map-texts",
+        r##"
+const assert = require("assert");
+const L = require(process.argv[2]);
+const M = {
+  features: [
+    {id: "stop", title: "停止", brief: {text: "b"}, spec: {text: "s"},
+      code: [{layer: "core", files: [{path: "src/tmux.rs"}, {path: "src/app.rs"}]}, {layer: "test", files: [{path: "src/tests.rs"}]}]},
+    {id: "idle", title: "静か", brief: null, spec: null, code: [{layer: "core", files: [{path: "src/app.rs"}]}]}],
+  domains: [{id: "core", title: "中核"}],
+  flow: {screens: [{id: "home", title: "ホーム", shot: {taken: "x"}}, {id: "bare", title: "素", shot: null}]},
+  terms: [{id: "pane", term: "ペイン"}],
+  requirements: [{feature: "stop", number: 2, text: "止まる"}],
+  changes: [{name: "316-map", number: "316", title: "the map"}],
+  backlog: {asked: true, items: [{number: 7, title: "seven"}]}};
+const keys = ["feature|stop", "feature|idle", "domain|core", "screen|home", "screen|bare", "term|pane",
+  "behaviour|stop#2", "change|316-map", "file|src/tmux.rs", "issue|7"];
+for (const key of keys) assert.ok(L.basketEntry(key, M), key);
+assert.deepStrictEqual(L.basketEntry("feature|stop", M).files,
+  ["docs/features/stop/brief.md", "docs/features/stop/spec.md", "src/tmux.rs", "src/app.rs", "src/tests.rs"]);
+assert.deepStrictEqual(L.basketEntry("feature|idle", M).files, ["src/app.rs"], "a document that is not there is not named");
+assert.deepStrictEqual(L.basketEntry("change|316-map", M).files, ["docs/sdlc/changes/316-map/"]);
+assert.deepStrictEqual(L.basketEntry("screen|home", M).files, ["docs/features/flow.yaml", "docs/images/screens/screens.json"]);
+assert.deepStrictEqual(L.basketEntry("screen|bare", M).files, ["docs/features/flow.yaml"]);
+const gone = ["feature|gone", "domain|gone", "screen|gone", "term|gone", "behaviour|stop#9", "behaviour|gone#2",
+  "change|999-gone", "file|src/gone.rs", "issue|8", "nothing|x", "feature"];
+for (const key of gone) assert.strictEqual(L.basketEntry(key, M), null, key);
+assert.deepStrictEqual(L.pruneBasket(keys.concat(gone), M), keys);
+// A map made without the backlog cannot say an item is gone: it is kept.
+assert.deepStrictEqual(L.pruneBasket(["issue|8"], Object.assign({}, M, {backlog: {asked: false, items: []}})), ["issue|8"]);
+
+const order = L.workOrder(["feature|stop", "feature|idle", "change|316-map", "screen|home", "feature|gone"], M, "review", "  止まらない  ");
+const lines = order.text.split("\n");
+assert.ok(lines[0].includes("feature-pilot"));
+assert.ok(lines[1].startsWith("種類: レビュー"), lines[1]);
+assert.strictEqual(lines[lines.indexOf("してほしいこと:") + 1], "止まらない");
+const targets = lines.slice(lines.indexOf("対象:") + 1, lines.indexOf("先に読むファイル:"));
+assert.strictEqual(targets.length, 4, "a key whose record is gone is not named");
+assert.ok(targets[0].includes("停止") && targets[2].includes("316") && targets[3].includes("ホーム"));
+const files = lines.slice(lines.indexOf("先に読むファイル:") + 1).filter(Boolean);
+assert.deepStrictEqual(files, ["- docs/features/stop/brief.md", "- docs/features/stop/spec.md", "- src/tmux.rs", "- src/app.rs",
+  "- src/tests.rs", "- docs/sdlc/changes/316-map/", "- docs/features/flow.yaml", "- docs/images/screens/screens.json"],
+  "each file once, in the order met");
+assert.strictEqual(order.chars, Array.from(order.text).length);
+assert.ok(order.chars < order.text.length + 1 && order.chars > 100);
+assert.deepStrictEqual(L.WORK_KINDS.map(k => k[0]), ["fix", "add", "review", "document", "test"]);
+for (const [kind, label] of L.WORK_KINDS) assert.ok(L.workOrder([], M, kind, "").text.includes("種類: " + label), kind);
+assert.ok(L.workOrder([], M, "fix", "").text.includes("（ここに書いてください）"));
+// Characters, not code units.
+assert.strictEqual(L.workOrder([], M, "fix", "😀").chars + 1, L.workOrder([], M, "fix", "😀").text.length);
+
+const features = [{id: "a", title: "い"}, {id: "b", title: "ろ"}, {id: "c", title: "は"}, {id: "d", title: "に"}, {id: "e", title: "ほ"}];
+const verdicts = {a: {verdict: "ok", note: ""}, b: {verdict: "hold", note: "待つ"}, c: {verdict: "fix", note: "直す"},
+  e: {verdict: "ok", note: "x"}, zz: {verdict: "fix", note: "載らない"}, d: {verdict: "maybe", note: "判定ではない"}};
+const packet = L.reviewPacket(verdicts, features);
+assert.deepStrictEqual(packet.counts, {ok: 2, fix: 1, hold: 1});
+const fixAt = packet.text.indexOf("要修正 (1):"), holdAt = packet.text.indexOf("保留 (1):"), okAt = packet.text.indexOf("OK: 2 件");
+assert.ok(fixAt > 0 && fixAt < holdAt && holdAt < okAt, packet.text);
+assert.ok(packet.text.includes("feature-pilot"));
+assert.ok(packet.text.includes("機能「は」(c): 直す") && packet.text.includes("機能「ろ」(b): 待つ"));
+assert.ok(packet.text.includes("docs/features/c/spec.md"));
+for (const absent of ["載らない", "判定ではない", "機能「に」", "機能「い」"]) assert.ok(!packet.text.includes(absent), absent);
+assert.strictEqual(packet.chars, Array.from(packet.text).length);
+assert.deepStrictEqual(L.reviewPacket({}, features), {text: "", chars: 0, counts: {ok: 0, fix: 0, hold: 0}});
+const onlyOk = L.reviewPacket({a: {verdict: "ok"}}, features);
+assert.ok(!onlyOk.text.includes("要修正 (") &&!onlyOk.text.includes("保留 (") && onlyOk.text.includes("OK: 1 件"));
+
+const held = new Map();
+const good = L.keep(() => ({getItem: k => held.has(k) ? held.get(k) : null, setItem: (k, v) => { held.set(k, v); }}));
+assert.strictEqual(good.read("operon-map-basket", "fallback"), "fallback");
+assert.strictEqual(good.write("operon-map-basket", ["feature|stop"]), true);
+assert.deepStrictEqual(good.read("operon-map-basket", []), ["feature|stop"]);
+assert.strictEqual(good.write("operon-map-theme", "light"), true);
+assert.strictEqual(held.get("operon-map-theme"), "light", "the theme stays the bare word change 316 wrote");
+assert.strictEqual(good.read("operon-map-theme", "auto"), "light");
+const refusing = L.keep(() => ({getItem() { throw new Error("no"); }, setItem() { throw new Error("no"); }}));
+assert.strictEqual(refusing.read("operon-map-basket", "fallback"), "fallback");
+assert.strictEqual(refusing.write("operon-map-basket", [1]), false);
+const absent = L.keep(() => { throw new Error("no storage here"); });
+assert.strictEqual(absent.read("x", 3), 3);
+assert.strictEqual(absent.write("x", 3), false);
+console.log("ok");
+"##,
+    );
+}
+
+/// Requirement 9. The board, the requirement board and the left column
+/// narrowed; a spec's section; the theme's steps; the keys.
+#[test]
+pub(crate) fn map_page_logic_filters_board_and_requirements_and_knows_its_keys() {
+    map_325_node(
+        "map-filters",
+        r##"
+const assert = require("assert");
+const L = require(process.argv[2]);
+const cards = [{id: "1", owner: "person"}, {id: "2", owner: "ai"}, {id: "3", owner: "none"}, {id: "4", owner: "ai"}];
+const ids = list => list.map(c => c.id).join("");
+assert.strictEqual(ids(L.boardFilter(cards, "me")), "1");
+assert.strictEqual(ids(L.boardFilter(cards, "ai")), "24");
+assert.strictEqual(ids(L.boardFilter(cards, "")), "1234");
+assert.strictEqual(ids(L.boardFilter(cards, "all")), "1234");
+
+const row = {feature: "stop", domain: "core", number: 1, text: "Stops the Pane", tests: ["stop_kills"], pinned: true};
+const bare = {feature: "idle", domain: "frame", number: 2, text: "waits", tests: [], pinned: false};
+const yes = (r, f, t) => assert.ok(L.requirementMatches(r, f, t), JSON.stringify(f));
+const no = (r, f, t) => assert.ok(!L.requirementMatches(r, f, t), JSON.stringify(f));
+yes(row, {}, "停止"); yes(row, undefined, "停止");
+yes(row, {domain: "core"}); no(row, {domain: "frame"});
+yes(row, {feature: "stop"}); no(row, {feature: "idle"});
+yes(row, {tests: "yes"}); no(row, {tests: "no"}); yes(bare, {tests: "no"}); no(bare, {tests: "yes"});
+yes(row, {words: "pane"}); yes(row, {words: " STOP_KILLS "}); yes(row, {words: "停止"}, "停止"); no(row, {words: "停止"}, "土台");
+no(row, {domain: "core", feature: "stop", tests: "yes", words: "absent"});
+yes(row, {domain: "core", feature: "stop", tests: "yes", words: "stops"});
+
+const features = [{id: "stop", title: "停止", summary: "止める"}, {id: "shell", title: "土台", summary: "枠"}, {id: "idle", title: "静か", summary: ""}];
+const verdicts = {stop: {verdict: "fix", note: ""}, idle: {verdict: "nonsense"}, gone: {verdict: "ok"}};
+const left = filter => features.filter(f => L.queueMatches(f, filter, verdicts)).map(f => f.id).join(",");
+assert.strictEqual(left({}), "stop,shell,idle");
+assert.strictEqual(left({verdict: "judged"}), "stop");
+assert.strictEqual(left({verdict: "unjudged"}), "shell,idle");
+assert.strictEqual(left({words: "土"}), "shell");
+assert.strictEqual(left({words: "SHELL"}), "shell");
+assert.strictEqual(left({words: "止める"}), "stop");
+assert.strictEqual(left({words: "止める", verdict: "unjudged"}), "");
+assert.deepStrictEqual(L.verdictCounts(features, verdicts), {all: 3, judged: 1, unjudged: 2});
+assert.deepStrictEqual(L.verdictCounts(features, {}), {all: 3, judged: 0, unjudged: 3});
+
+const spec = "# Spec\n\n## Behaviour\n\n1. One.\n\n## States\n\n- Empty.\n- Full.\n\n## Invariants\n\nNever both.\n### Deeper\nstill here\n";
+assert.strictEqual(L.sectionOf(spec, "States"), "- Empty.\n- Full.");
+assert.strictEqual(L.sectionOf(spec, "Invariants"), "Never both.\n### Deeper\nstill here");
+assert.strictEqual(L.sectionOf(spec, "Decisions inherited"), "");
+assert.strictEqual(L.sectionOf(spec, "State"), "", "a heading is matched whole");
+assert.strictEqual(L.sectionOf("", "States"), "");
+assert.strictEqual(L.sectionOf(undefined, "States"), "");
+
+assert.strictEqual(L.themeNext("auto"), "light");
+assert.strictEqual(L.themeNext("light"), "dark");
+assert.strictEqual(L.themeNext("dark"), "auto");
+assert.strictEqual(L.themeNext("nothing known"), "auto");
+assert.deepStrictEqual(L.THEMES.map(t => t[0]), ["auto", "light", "dark"]);
+
+const views = {s: "overview", f: "features", g: "screen", w: "work", r: "requirements", c: "changes", p: "process", d: "domains"};
+for (const [key, view] of Object.entries(views)) {
+  assert.strictEqual(L.KEYS[key], "view:" + view, key);
+  assert.deepStrictEqual(L.parseRoute(L.formatRoute({view})), {view}, view);
+}
+const actions = Object.values(L.KEYS);
+assert.strictEqual(new Set(actions).size, actions.length, "no action is on two keys");
+assert.strictEqual(L.KEYS.b, "basket");
+assert.deepStrictEqual(["1", "2", "3"].map(k => L.KEYS[k]), ["verdict:ok", "verdict:fix", "verdict:hold"]);
+assert.deepStrictEqual(L.VERDICTS.map(v => v[0]), ["ok", "fix", "hold"]);
+// The keys of change 316 are still there.
+for (const key of ["/", "j", "k", "Enter", "Escape", "?", "ArrowLeft", "ArrowRight"]) assert.ok(L.KEYS[key], key);
+console.log("ok");
+"##,
+    );
+}
+
+/// Requirement 10. The bar's ten views in order, 現況 first under change
+/// 316's link, the column of features, the names kept in the browser, and a
+/// page that still loads nothing from outside itself.
+#[test]
+pub(crate) fn map_page_has_status_tiles_work_process_and_catalog_views() {
+    let root = map_325_fixture("map-views");
+    let (page, data) = change_map_page(&root);
+    let open = "<script id=\"map-data\" type=\"application/json\">";
+    let start = page.find(open).expect("地図にデータブロックがありません") + open.len();
+    let end = start + page[start..].find("</script>").unwrap();
+    let shell = format!("{}{}", &page[..start], &page[end..]);
+    let views = [
+        ("overview", "現況"),
+        ("features", "機能"),
+        ("screen", "画面"),
+        ("domains", "ドメイン"),
+        ("glossary", "用語集"),
+        ("requirements", "要件"),
+        ("work", "作業"),
+        ("changes", "変更"),
+        ("process", "進め方"),
+        ("catalog", "カタログ"),
+    ];
+    let at: Vec<usize> = views
+        .iter()
+        .map(|(view, label)| {
+            let button = format!("<button data-view=\"{view}\">{label}</button>");
+            shell
+                .find(&button)
+                .unwrap_or_else(|| panic!("バーに {button} がありません"))
+        })
+        .collect();
+    assert!(
+        at.windows(2).all(|pair| pair[0] < pair[1]),
+        "表示の順が違います"
+    );
+    assert_eq!(shell.matches("data-view=\"").count(), views.len());
+    assert!(
+        !shell.contains(">概要</button><button data-view"),
+        "バーに概要が残っています"
+    );
+    for pane in [
+        "v-overview",
+        "v-work",
+        "v-process",
+        "v-catalog",
+        "side",
+        "sd-list",
+        "sd-q",
+    ] {
+        assert!(
+            shell.contains(&format!("id=\"{pane}\"")),
+            "ページに {pane} がありません"
+        );
+    }
+    assert!(
+        shell.find("id=\"side\"").unwrap() < shell.find("<main>").unwrap(),
+        "機能の一覧がどの表示の横にもありません"
+    );
+    for sentence in [
+        "どこまで進んだか",
+        "あなたが対応するもの",
+        "判断・再開が必要",
+        "人の確認待ち",
+        "残した指摘",
+        "文書・写真・テストの欠け",
+        "進行中と次の一手",
+        "進行中の変更はありません",
+        "条件に合う機能はありません",
+        "絞り込みを解除",
+        "バックログは読み込んでいません",
+        "レビュー結果をコピー",
+        "判定がまだありません",
+        "この判定はこのブラウザにだけ保存されます",
+        "この画面では選んだ内容を保存できません",
+        "何をしてほしいですか",
+        "描画にはアプリ内蔵のアイコンフォントが必要です",
+        "止まって確認",
+        "機能一覧",
+    ] {
+        assert!(
+            shell.contains(sentence),
+            "ページに「{sentence}」がありません"
+        );
+    }
+    for fetched in [
+        "<link",
+        "<iframe",
+        "<object",
+        "<embed",
+        "@import",
+        "url(",
+        "<!--",
+        "fetch(",
+        "XMLHttpRequest",
+    ] {
+        assert!(!shell.contains(fetched), "ページに {fetched} があります");
+    }
+    change_map_pictures_only_inlined(&shell);
+    assert_eq!(page.matches("<script").count(), 2);
+    for key in ["status", "work", "process", "catalog", "backlog"] {
+        assert!(!data[key].is_null(), "ページのデータに {key} がありません");
+    }
+    let _ = fs::remove_dir_all(root);
+
+    // Storage: three names, each beginning operon-map-, the theme's change
+    // 316's, and nothing else touches the browser's storage.
+    let script = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/change-map/page.js"),
+    )
+    .unwrap();
+    assert!(
+        !script.contains("localStorage."),
+        "ブラウザの保存領域を keep の外で読み書きしています"
+    );
+    let named: HashSet<&str> = script
+        .match_indices("\"operon-")
+        .map(|(at, _)| {
+            let rest = &script[at + 1..];
+            &rest[..rest.find('"').unwrap()]
+        })
+        .collect();
+    assert_eq!(
+        named,
+        HashSet::from([
+            "operon-map-basket",
+            "operon-map-verdicts",
+            "operon-map-theme"
+        ])
+    );
+    map_325_node(
+        "map-storage",
+        r##"
+const assert = require("assert");
+const L = require(process.argv[2]);
+assert.deepStrictEqual(L.STORE, {basket: "operon-map-basket", verdicts: "operon-map-verdicts", theme: "operon-map-theme"});
+assert.deepStrictEqual(L.parseRoute(""), {view: "overview"});
+assert.deepStrictEqual(L.parseRoute("#overview"), {view: "overview"});
+console.log("ok");
+"##,
+    );
+}
+
+/// Requirement 12. The developer document names every view and both options.
+#[test]
+pub(crate) fn map_readme_names_every_view_and_option() {
+    let readme = fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs/features/README.md"),
+    )
+    .unwrap();
+    for view in [
+        "現況",
+        "機能",
+        "画面",
+        "ドメイン",
+        "用語集",
+        "要件",
+        "作業",
+        "変更",
+        "進め方",
+        "カタログ",
+    ] {
+        assert!(
+            readme.contains(&format!("| {view} |")),
+            "docs/features/README.md に {view} の行がありません"
+        );
+    }
+    for option in [
+        "`--backlog`",
+        "`--backlog-seconds`",
+        "`--serve`",
+        "`--port`",
+        "`127.0.0.1`",
+    ] {
+        assert!(
+            readme.contains(option),
+            "docs/features/README.md に {option} がありません"
+        );
+    }
+}
+
+/// Requirement 11, found by the empirical verifier on df05c08: a client that
+/// sends one byte every 3 s stays under the per-read timeout, so only a limit
+/// on the whole request keeps it from holding the one-at-a-time server.
+#[test]
+pub(crate) fn map_server_cuts_a_request_that_dribbles_past_five_seconds() {
+    let root = feature_map_fixture("map-dribble", Some(FEATURE_MAP_INDEX));
+    feature_map_change(&root, "001-first-words", "done", "test", "none", "");
+    let (mut child, address) = map_325_serve(&root, "100");
+    let mut slow = std::net::TcpStream::connect(&address).unwrap();
+    slow.write_all(b"GET / HTTP/1.1\r\nX: ").unwrap();
+    let started = Instant::now();
+    let feeder = std::thread::spawn(move || {
+        for _ in 0..4 {
+            std::thread::sleep(Duration::from_secs(3));
+            let _ = slow.write_all(b"a");
+        }
+        slow
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    let mut other = std::net::TcpStream::connect(&address).unwrap();
+    other
+        .set_read_timeout(Some(Duration::from_secs(8)))
+        .unwrap();
+    other.write_all(b"GET / HTTP/1.0\r\n\r\n").unwrap();
+    let mut head = [0u8; 12];
+    let got = other.read(&mut head).unwrap_or(0);
+    let waited = started.elapsed();
+    let mut slow = feeder.join().unwrap();
+    // macOS refuses a timeout on a socket the server has already closed.
+    let _ = slow.set_read_timeout(Some(Duration::from_secs(2)));
+    let mut said = Vec::new();
+    let _ = slow.read_to_end(&mut said);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_dir_all(root);
+    assert!(
+        got > 0 && waited < Duration::from_secs(7),
+        "少しずつ届く要求が {waited:?} のあいだ地図を止めました（上限は 5 秒）"
+    );
+    assert_eq!(&head, b"HTTP/1.0 200", "待たされた側に地図が届きません");
+    let said = String::from_utf8_lossy(&said);
+    assert!(
+        said.is_empty() || said.starts_with("HTTP/1.0 408"),
+        "時間切れの要求への答えが違います: {said}"
+    );
+}
+
+/// F2-F5, found by the second empirical pass on fe1af20: a backlog script
+/// that prints its own list.
+fn map_325_hostile_backlog(label: &str, body: &str) -> PathBuf {
+    let root = map_325_with_backlog(label);
+    fs::write(root.join("scripts/backlog.py"), body).unwrap();
+    root
+}
+
+/// F2. An integer past a float's range is dropped, and the map still comes.
+#[test]
+pub(crate) fn map_backlog_survives_an_integer_too_large_for_a_float() {
+    let root = map_325_hostile_backlog(
+        "map-bigint",
+        "print('[{\"number\": 5, \"title\": \"t\", \"score\": 1' + '0' * 400 + '}, \
+         {\"number\": 1' + '0' * 400 + ', \"title\": \"u\"}]')\n",
+    );
+    let (ok, out, err) = change_map_run(&root, &["--json", "--backlog", "--backlog-seconds", "2"]);
+    assert!(ok, "地図が出ません: {err}");
+    let map: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(map["backlog"]["error"], "");
+    let items = map["backlog"]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "大きすぎる番号の項目が残っています");
+    assert!(items[0]["score"].is_null(), "大きすぎる点数が残っています");
+    let _ = fs::remove_dir_all(root);
+}
+
+/// F3. The deadline holds even when a grandchild in its own session keeps
+/// the pipe open.
+#[test]
+pub(crate) fn map_backlog_deadline_holds_when_a_grandchild_keeps_stdout() {
+    let root = map_325_hostile_backlog(
+        "map-grandchild",
+        "import subprocess, sys\n\
+         subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(20)'], start_new_session=True)\n\
+         print('[]')\n",
+    );
+    let started = Instant::now();
+    let (ok, out, err) = change_map_run(&root, &["--json", "--backlog", "--backlog-seconds", "2"]);
+    assert!(ok, "地図が出ません: {err}");
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "期限 2 秒のバックログに {:?} かかりました",
+        started.elapsed()
+    );
+    let map: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        map["backlog"]["error"],
+        "バックログを読めませんでした: 2 秒以内に応答がありません"
+    );
+    // A child that closes its output and stays is stopped at the deadline too.
+    fs::write(
+        root.join("scripts/backlog.py"),
+        "import os, time\nos.close(1)\ntime.sleep(20)\n",
+    )
+    .unwrap();
+    let started = Instant::now();
+    let (ok, out, err) = change_map_run(&root, &["--json", "--backlog", "--backlog-seconds", "2"]);
+    assert!(ok, "地図が出ません: {err}");
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "出力を閉じて残る子を {:?} 待ちました",
+        started.elapsed()
+    );
+    let map: serde_json::Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(
+        map["backlog"]["error"],
+        "バックログを読めませんでした: 2 秒以内に応答がありません"
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+/// F4. A number repeated, or one that is not whole, is not a second card.
+#[test]
+pub(crate) fn map_backlog_cards_have_unique_ids_when_numbers_repeat() {
+    let root = map_325_hostile_backlog(
+        "map-dup",
+        "import json\nprint(json.dumps([{'number':7,'title':'a'},{'number':7.9,'title':'b'},\
+         {'number':7,'title':'c'},{'number':8.0,'title':'d'},{'number':9.5,'title':'e'}]))\n",
+    );
+    let (ok, out, err) = change_map_run(&root, &["--json", "--backlog", "--backlog-seconds", "2"]);
+    assert!(ok, "{err}");
+    let map: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let ids: Vec<&str> = map["work"]["cards"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .filter(|id| id.starts_with("issue:"))
+        .collect();
+    assert_eq!(ids, ["issue:7", "issue:8"], "同じカードが二度あります");
+    assert_eq!(map["backlog"]["items"][0]["title"], "a");
+    let _ = fs::remove_dir_all(root);
+}
+
+/// F5. Whatever the browser kept for the basket, the page gets keys, a kind
+/// and a note it can use.
+#[test]
+pub(crate) fn map_page_logic_reads_any_kept_basket() {
+    map_325_node(
+        "map-kept-basket",
+        r##"
+const assert = require("assert");
+const L = require(process.argv[2]);
+const empty = {keys: [], kind: "fix", note: ""};
+for (const kept of [null, undefined, "null", 7, [], ["feature|a"], {keys: "x"}, {kind: "toString"}])
+  assert.deepStrictEqual(L.basketOf(kept), empty, JSON.stringify(kept));
+assert.deepStrictEqual(L.basketOf({keys: ["feature|a", 3, null], kind: "review", note: "見て"}),
+  {keys: ["feature|a"], kind: "review", note: "見て"});
+console.log("ok");
+"##,
+    );
+}
+
 /// A git repository with one commit at `root/repo`: the main copy the
 /// backlog tests run `claim` in.
 fn backlog_repository(root: &Path) -> PathBuf {

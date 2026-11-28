@@ -1,0 +1,45 @@
+# Change 325. The person, on 2026-11-28 (/goal): 「learn_korean 의 기능지도처럼
+# … 전체적인 UI프레임과 어느방식으로 진행되는지 가시화 등 … 기능지도의 기능을
+# 대부분만들어줘 … 웹과 내 프로젝트(operon)에 맞게 변형해서 최대한 기능을 알맞게
+# 이식하고 싶어」. The product map (changes 312-316) grows the views
+# learn_korean's has and Operon's lacks; nothing in the application changes.
+#
+# Decisions taken by the session (recoverable by a revert, so not put to the
+# person; listed in intent.md "Open questions"): the stage row counts changes,
+# not features; the board is read-only and ordered by score, not planned by
+# week; phone frames, component goldens and server-side sections are left out;
+# the backlog is read only when asked, through scripts/backlog.py as it is.
+#
+# Risk: scripts/change-map.py, scripts/change-map/, docs/features/README.md and
+# src/tests.rs match no surface of docs/sdlc/risk.yaml, so the tier is low and
+# autonomy full; nothing paints in the application, so screen is n/a.
+
+state:
+  route: "modify"
+  stage: "test"
+  status: "done"
+  attempts: "0 3"
+  questions: "0 7"
+  autonomy: "full"
+  risk: "low"
+  readiness: "go"
+  screen: "n/a"
+  features: "none"
+
+resume: "Done. Push, CI, merge --no-ff from main, cleanup."
+
+contract:
+  three-gates: "machine passed bash .claude/hooks/gate-commit.sh on df05c08, fe1af20, 2d3c37f and the commit rebuilt on 775c8b0"
+  bands: "machine passed bash scripts/check-bands.sh: the six breaches main has (always_loaded, steering, reference, largest_module, unsafe, approval_escapes), none moved by this diff"
+  release-binary: "machine waived touches scripts/, docs/ and src/tests.rs only; none is in the bundle"
+  guards-verified-by-mutation: "human passed mutations.py caught 44 of 44 (four survivors of the first sweep closed by tightening R1, R2, R3 and R5; one by requiring 414; two for F1; five for F2-F5, two of them closed by tightening F3 and F4)"
+  page-exercised-in-a-browser: "human passed headless Chrome at 1440 and 760 wide: all ten views drawn; #features?cover=partial&domain=sessions,agents kept across reload (7 of 21); a verdict and its note, and a basket of a feature and a file, kept across reload; the work order lists the files to read; theme auto, light, dark, auto kept; no console error on the file page (the served page logs the browser's own /favicon.ico 404)"
+
+sets:
+  status: "planning ready in-progress reviewing done awaiting-user blocked failed archived"
+  autonomy: "full supervised paused"
+  risk: "high medium low"
+  readiness: "go conditional no-go pending"
+  screen: "approved pending n/a"
+  kind: "machine human"
+  verdict: "pending passed waived"
